@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
@@ -70,8 +71,16 @@ class SaveService:
         req = self._make_save_data_request(tab_id, data_path, comment=comment)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
         self._ensure_parent_directory(data_path)
-        self._start_save(tab_id, req)
+        self._state.get_artifact_snapshots(tab_id)
+        tracker = self._state.get_tab(tab_id).artifacts
+        tracker.started(ArtifactKind.DATA)
         self._active_paths[tab_id] = data_path
+        try:
+            self._start_save(tab_id, req)
+        except Exception:
+            tracker.failed(ArtifactKind.DATA)
+            self._active_paths.pop(tab_id, None)
+            raise
         self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
         return data_path
 
@@ -83,7 +92,14 @@ class SaveService:
             raise FailedPreconditionError("No figure available to save")
         logger.info("save_image_sync: tab_id=%r path=%r", tab_id, image_path)
         self._ensure_parent_directory(image_path)
-        save_figure_to_path(tab.analysis.figure, image_path)
+        self._state.get_artifact_snapshots(tab_id)
+        tab.artifacts.started(ArtifactKind.ANALYSIS)
+        try:
+            save_figure_to_path(tab.analysis.figure, image_path)
+        except Exception:
+            tab.artifacts.failed(ArtifactKind.ANALYSIS)
+            raise
+        tab.artifacts.succeeded(ArtifactKind.ANALYSIS, image_path)
 
     def save_post_image_sync(self, permit: SavePermit, image_path: str) -> None:
         """Save the tab's *post-analysis* figure (``tab.post_analysis.figure``) — the post
@@ -97,7 +113,14 @@ class SaveService:
             raise FailedPreconditionError("No post-analysis figure available to save")
         logger.info("save_post_image_sync: tab_id=%r path=%r", tab_id, image_path)
         self._ensure_parent_directory(image_path)
-        save_figure_to_path(tab.post_analysis.figure, image_path)
+        self._state.get_artifact_snapshots(tab_id)
+        tab.artifacts.started(ArtifactKind.POST_ANALYSIS)
+        try:
+            save_figure_to_path(tab.post_analysis.figure, image_path)
+        except Exception:
+            tab.artifacts.failed(ArtifactKind.POST_ANALYSIS)
+            raise
+        tab.artifacts.succeeded(ArtifactKind.POST_ANALYSIS, image_path)
 
     def _require_tab_idle(self, tab_id: str) -> None:
         """Reject every save entry point while another tab operation owns it.
@@ -150,6 +173,7 @@ class SaveService:
     def _on_save_data_finished(self, tab_id: str) -> None:
         path = self._active_paths.pop(tab_id, "")
         logger.info("_on_save_data_finished: tab_id=%r path=%r", tab_id, path)
+        self._state.get_tab(tab_id).artifacts.succeeded(ArtifactKind.DATA, path)
         self._mark_saving(tab_id, False, TabInteractionFact.SAVE_SUCCEEDED)
         self._bus.emit(SaveDataFinishedPayload(tab_id=tab_id, data_path=path))
 
@@ -158,6 +182,7 @@ class SaveService:
         logger.warning(
             "_on_save_failed: tab_id=%r path=%r error=%r", tab_id, path, error
         )
+        self._state.get_tab(tab_id).artifacts.failed(ArtifactKind.DATA)
         self._mark_saving(tab_id, False, TabInteractionFact.SAVE_FAILED)
         self._bus.emit(
             SaveDataFinishedPayload(
