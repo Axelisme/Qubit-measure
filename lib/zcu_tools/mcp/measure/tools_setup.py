@@ -10,7 +10,26 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 def project(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read or atomically update a project through the GUI owner."""
-    raise NotImplementedError("03 project tool has no implementation yet")
+    if arguments:
+        names = {
+            "chip": "chip_name",
+            "qubit": "qub_name",
+            "resonator": "res_name",
+            "scope": "scope_id",
+        }
+        params = {
+            wire: arguments[name] for name, wire in names.items() if name in arguments
+        }
+        result = ctx.send_gui_rpc("startup.apply", params)
+    else:
+        result = ctx.session.read_internal("project.info", {})
+    return {
+        "chip": result["chip_name"],
+        "qubit": result["qub_name"],
+        "resonator": result["res_name"],
+        "result_dir": result["result_dir"],
+        "database_path": result["database_path"],
+    }
 
 
 _PROJECT_FIELD = {"type": "string", "minLength": 1}

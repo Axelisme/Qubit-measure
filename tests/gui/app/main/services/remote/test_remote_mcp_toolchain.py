@@ -858,16 +858,6 @@ def test_result_scope_list_reports_discovered_params(qapp, tmp_path):  # noqa: A
         fx.stop()
 
 
-def test_startup_apply_missing_required_rejected(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "startup.apply", {"chip_name": "C", "qub_name": "Q"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
 def test_soc_connect_remote_missing_ip_rejected(fx):
     sock = open_client(fx.service.port)
     try:

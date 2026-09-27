@@ -4,7 +4,41 @@ from pathlib import Path
 
 import pytest
 
-from ._helpers import Fixture, call, open_client
+from ._helpers import Fixture, call, mcp_client, open_client
+
+
+@pytest.mark.uses_wall_clock
+def test_project_tool_reads_gui_state_and_deactivates_on_identity_change(
+    qapp, tmp_path: Path
+) -> None:
+    fx = Fixture(project_root=str(tmp_path), empty_project=True)
+    fx.start()
+    bridge, invoke = mcp_client(fx.service.port, tmp_path)
+    sock = open_client(fx.service.port)
+    try:
+        invoke("connect", {"port": fx.service.port})
+        original = invoke(
+            "project", {"chip": "chip-a", "qubit": "q1", "resonator": "res"}
+        )
+        assert original["chip"] == "chip-a"
+        created = call(sock, "context.new", {"bind_device": None, "clone_from": None})
+        assert created["ok"] is True
+        assert (
+            call(sock, "context.active")["result"]["label"]
+            == created["result"]["label"]
+        )
+
+        changed = invoke("project", {"chip": "chip-b"})
+        assert changed["chip"] == "chip-b"
+        assert changed["qubit"] == "q1"
+        assert changed["resonator"] == "res"
+        assert changed["result_dir"] != original["result_dir"]
+        assert invoke("project", {}) == changed
+        assert call(sock, "context.active")["result"]["label"] is None
+    finally:
+        bridge.disconnect()
+        sock.close()
+        fx.stop()
 
 
 @pytest.mark.uses_wall_clock
@@ -44,6 +78,7 @@ def test_project_partial_update_and_invalid_scope_preserve_shared_state(
             {"chip_name": "chip-b", "scope_id": original_scope},
         )
         assert invalid["ok"] is False
+        assert invalid["error"]["reason"] == "scope_identity_mismatch"
         assert call(sock, "project.info")["result"]["chip_name"] == "chip-a"
         assert call(sock, "context.active")["result"]["label"] == label
 
@@ -55,6 +90,13 @@ def test_project_partial_update_and_invalid_scope_preserve_shared_state(
         assert changed["result"]["scope_id"] != original_scope
         assert call(sock, "context.active")["result"]["label"] is None
         assert call(sock, "project.info")["result"]["chip_name"] == "chip-b"
+
+        restored = call(
+            sock, "startup.apply", {"chip_name": "chip-a", "scope_id": original_scope}
+        )
+        assert restored["ok"] is True
+        assert label in call(sock, "context.labels")["result"]["labels"]
+        assert call(sock, "context.active")["result"]["label"] is None
     finally:
         sock.close()
         fx.stop()
