@@ -25,6 +25,7 @@ class ContextControlPort(Protocol):
         self,
         bind_device: str | None = None,
         clone_from: str | None = None,
+        label: str | None = None,
     ) -> None: ...
     def get_context_labels(self) -> list[str]: ...
     def get_active_context_label(self) -> str | None: ...
@@ -64,13 +65,16 @@ class ContextControlFacet:
         self,
         bind_device: str | None = None,
         clone_from: str | None = None,
+        label: str | None = None,
     ) -> None:
         if bind_device is not None:
             unit = self._device.get_device_unit_strict(bind_device)
             value = self._device.get_device_value_for_new_context(bind_device)
         else:
             unit, value = "none", None
-        self._context.new_context(value=value, unit=unit, clone_from=clone_from)
+        self._context.new_context(
+            value=value, unit=unit, clone_from=clone_from, label=label
+        )
 
     def get_context_labels(self) -> list[str]:
         return self._context.get_context_labels()

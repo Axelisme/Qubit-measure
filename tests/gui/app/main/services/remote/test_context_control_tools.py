@@ -54,7 +54,9 @@ def test_context_switch_and_create_use_context_control_facet() -> None:
         "has_active_context": True,
         "__agent_write_versions": {},
     }
-    ctx.new_context.assert_called_once_with(bind_device=None, clone_from=None)
+    ctx.new_context.assert_called_once_with(
+        label=None, bind_device=None, clone_from=None
+    )
     ctrl.new_context.assert_not_called()
 
 

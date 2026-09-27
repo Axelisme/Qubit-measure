@@ -46,11 +46,52 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
             "labels": ["base", "copy"],
         }
 
+        unsafe = call(
+            sock,
+            "context.new",
+            {"label": "../escape", "bind_device": None, "clone_from": None},
+        )
+        assert unsafe["ok"] is False
+        assert unsafe["error"]["code"] == "invalid_params"
+        assert invoke("contexts", {}) == {
+            "active": "copy",
+            "labels": ["base", "copy"],
+        }
+        assert not (tmp_path / "result" / "chip" / "q" / "escape").exists()
+
         assert invoke("context_use", {"label": "base"}) == {"label": "base"}
         unknown = call(sock, "context.use", {"label": "ghost"})
         assert unknown["ok"] is False
         assert "base" in unknown["error"]["message"]
         assert invoke("contexts", {})["active"] == "base"
+    finally:
+        bridge.disconnect()
+        sock.close()
+        fx.stop()
+
+
+@pytest.mark.uses_wall_clock
+def test_context_create_default_without_active_is_empty_and_explicit_null_skips_clone(
+    qapp, tmp_path: Path
+) -> None:
+    fx = Fixture(project_root=str(tmp_path), empty_project=True)
+    fx.start()
+    bridge, invoke = mcp_client(fx.service.port, tmp_path)
+    sock = open_client(fx.service.port)
+    try:
+        invoke("connect", {"port": fx.service.port})
+        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
+        assert invoke("context_create", {"label": "base"}) == {"label": "base"}
+        assert call(sock, "context.md_get", {})["result"] == {"keys": []}
+        assert call(sock, "context.md_set_attr", {"key": "freq", "value": 5.0})["ok"]
+        assert invoke("context_create", {"label": "empty", "clone_from": None}) == {
+            "label": "empty"
+        }
+        assert call(sock, "context.md_get", {})["result"] == {"keys": []}
+        assert invoke("contexts", {}) == {
+            "active": "empty",
+            "labels": ["base", "empty"],
+        }
     finally:
         bridge.disconnect()
         sock.close()

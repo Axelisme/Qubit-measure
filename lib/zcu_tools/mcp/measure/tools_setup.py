@@ -34,19 +34,31 @@ def project(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
 
 def contexts(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """List context labels and the current selection."""
-    raise NotImplementedError("03 contexts tool has no implementation yet")
+    del arguments
+    labels = ctx.session.read_internal("context.labels", {})["labels"]
+    active = ctx.session.read_internal("context.active", {})["label"]
+    return {"active": active, "labels": labels}
 
 
 def context_use(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Select a named GUI context."""
-    raise NotImplementedError("03 context_use tool has no implementation yet")
+    result = ctx.send_gui_rpc("context.use", {"label": arguments["label"]})
+    return {"label": result["label"]}
 
 
 def context_create(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
     """Create a named or device-derived context through the GUI."""
-    raise NotImplementedError("03 context_create tool has no implementation yet")
+    result = ctx.send_gui_rpc(
+        "context.new",
+        {
+            "label": arguments.get("label"),
+            "bind_device": arguments.get("bind_device"),
+            "clone_from": arguments.get("clone_from", "current"),
+        },
+    )
+    return {"label": result["label"]}
 
 
 _PROJECT_FIELD = {"type": "string", "minLength": 1}

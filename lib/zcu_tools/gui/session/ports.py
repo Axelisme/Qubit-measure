@@ -257,6 +257,7 @@ class ProjectIOPort(Protocol):
         value: float | None = None,
         unit: str = "none",
         clone_from: str | None = None,
+        label: str | None = None,
     ) -> ExpContext: ...
 
 
