@@ -80,7 +80,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 
 **效能（profiling，10091-entry DB、300-pt cloud）**：
 - **`load_database()` + `_load_database_cached` LRU**（keyed on path+mtime+size）：GUI 對同 DB 重複跑 search，省 cold-read ~0.13s/call。
-- **只插值 referenced levels**：`used_levels = unique(tr_pairs)`、remap pairs 到 reduced index 後才 `_apply_interp`（15→~3 level，intermediate 363→73MB，插值 35→8ms，更好並行）。plot 分支重建 best entry 的 full-level energies。
+- **只插值 referenced levels**：`used_levels = unique(tr_pairs)`、remap pairs 到 reduced index 後才 `_apply_interp`（15→~3 level，intermediate 363→73MB，插值 35→8ms，更好並行）。搜尋核心每次都重建 best entry 的 full-level energies 並算出診斷用預測頻率；只有 `plot=True` 時才建圖並顯示。
 - **exact LB-prune（演算法層）**：見上，4–15x 且精確。等價測試 `test_prune_is_identical_to_full_exact_scan`（noisy cloud 0 mismatch）+ `test_entry_lower_bound_is_a_valid_floor`。
 - `candidate_breakpoint_search` / `eval_dist_bounded` 是精確搜尋核心；近似 fuzzy screen 不屬於 public API。
 

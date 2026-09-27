@@ -450,7 +450,7 @@ class AnalyzePanelWidget(QWidget):
             self._status.setText(f"Database not found: {db_path}")
             return
         # Pre-check that needed r_f / sample_f are filled for the chosen
-        # transitions (else search_in_database would fail with a cryptic error).
+        # transitions (else search_database would fail with a cryptic error).
         missing = self._missing_freq_message(
             self._transitions_form.get_transitions(),
             _parse_freq(self._r_f),

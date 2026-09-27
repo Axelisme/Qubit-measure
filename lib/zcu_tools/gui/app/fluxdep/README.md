@@ -185,16 +185,16 @@ MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `Remote
   RemoteControlAdapter + mcp_server，不在共用 transport 裡。
 
 ### v2 database search：State 邊界 + 兩條執行路徑
-search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 唯一的長阻塞作業。
+search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 唯一的長阻塞作業。
 拆成**純計算 vs State 寫入**兩半，守住 main-thread State 不變式：
 - `FitService.compute_search`：純函式，先 snapshot State 的輸入（db 路徑/bounds/transitions/
   選中點雲），再跑 search，**不寫 State**，回 `SearchResult(params, figure)`。可在 worker 跑。
 - `FitService.record_result`：唯一寫 State 處（`set_fit_result`），只在主執行緒呼。
-- **GUI 路徑（唯一觸發路徑）**：`FitPanelWidget` 的 `_SearchWorker` 跑 compute_search（off-main，
+- **GUI 路徑（唯一觸發路徑）**：`AnalyzePanelWidget` 經 `BackgroundRunner` 跑 `Controller.compute_search`（off-main，
   GIL 釋放不卡 UI），完成 emit `SearchResult` → 主執行緒 slot `record_search_result` 寫 State +
   畫圖。**不可中斷**（單一確定性掃描，只 disable Search 鈕 + 進度條，無 Cancel）。
   - search 是 user 在 GUI 裡按的，**沒有 RPC 觸發路徑**（remote view 只讀）。`Controller.
-    search_database` 仍在（GUI worker 用），但不再有 `fit.search` handler。compute/record
+    search_database` 是主執行緒上 compute + record 的便利入口，GUI worker 不用它；沒有 `fit.search` handler。compute/record
     分拆仍是守 main-thread State 不變式的關鍵。
 - **進度注入**：`analysis.fluxdep.search` 走 `make_pbar`。GUI worker 用
   `use_pbar_factory` 裝 `GuiProgressBar`（emit Qt signal 到主執行緒進度條，節流 50ms）。
