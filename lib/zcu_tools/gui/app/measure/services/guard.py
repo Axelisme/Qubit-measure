@@ -84,14 +84,16 @@ class GuardService:
     """Single owner of domain guard logic; issues typed Permits.
 
     Pure query service over ``State`` and ``SessionEnv.readiness`` — no side
-    effects, no event emission. Both clients must acquire a Permit before
-    invoking a protected service method, so the guard logic lives in exactly
-    one place and cannot drift between the View and remote paths.
+    effects, no event emission. View and remote share the available permits
+    for protected operations, but not every capability is checked here:
+    analyze does not reject NONE and post-analyze has no capability permit yet
+    (see the GUI capability draft).
 
-    Permits cover *static* preconditions only (context readiness, committed cfg
-    validity, capability requirements). *Dynamic* resource availability (tab
-    busy, hardware exclusion) is checked at the operation boundary by the owning
-    service via OperationGate — see CONTEXT.md and docs/adr/0001.
+    Permits cover *static* preconditions per operation (context readiness,
+    committed cfg validity, run SoC requirement or load capability). *Dynamic*
+    resource availability (tab busy, hardware exclusion) is checked at the
+    operation boundary by the owning service or OperationGate — see CONTEXT.md
+    and docs/adr/0001.
     """
 
     def __init__(self, state: State) -> None:

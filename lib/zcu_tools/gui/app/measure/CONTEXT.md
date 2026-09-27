@@ -1,13 +1,13 @@
 # GUI Framework
 
-`zcu_tools/gui/` 是雙 client 的 PyQt 框架：View（Qt UI）與 RemoteControlAdapter（NDJSON RPC，給 MCP agent）。兩個 client 操作必須一對一對應、共用同一帶 guard 的邏輯路徑。
+`zcu_tools/gui/` 是雙 client 的 PyQt 框架：View（Qt UI）與 RemoteControlAdapter（NDJSON RPC，給 MCP agent）。兩者開放的操作不必一對一對應；對同一操作共用 owning command，但現行 capability guard 覆蓋範圍仍有差異（見 `docs/adr/draft/gui-adapter-capability-guards.md`）。
 
 ## Language
 
 ### 前置條件與資源
 
 **Permit**:
-證明一個受保護操作「呼叫前可靜態成立」的憑證。涵蓋**靜態前置條件**：context readiness、committed cfg validity、capability（如 SoC）需求。由 `GuardService` 統一發放；拿不到即 fail-fast。是純憑證，**無需釋放**。型別按 guard 組合分立（Run / Save / Analyze / Writeback），讓型別系統擋住「拿錯 permit」。
+證明一個受保護操作「呼叫前可靜態成立」的憑證。依操作涵蓋**靜態前置條件**：context readiness、committed cfg validity、SoC 需求或 load capability；analyze／post-analyze 尚無完整的 application capability guard。現有 permit 由 `GuardService` 發放；拿不到即 fail-fast。是純憑證，**無需釋放**。型別按 guard 組合分立（Run / Save / Load / Analyze / Writeback），讓型別系統擋住「拿錯 permit」。
 _Avoid_: guard token, ticket, voucher
 
 **Lease**（exclusion lease）:
@@ -30,7 +30,7 @@ _Avoid_: guard token, ticket, voucher
 ### Client 與守門
 
 **Client**:
-驅動 GUI 操作的入口。恰有兩個：**View**（Qt UI 點擊）與 **RemoteControlAdapter**（agent 的 RPC）。兩者地位平級，必經同一 guard 路徑。
+驅動 GUI 操作的入口。恰有兩個：**View**（Qt UI 點擊）與 **RemoteControlAdapter**（agent 的 RPC）。相同操作由 app owner 承接，但不是每種 capability 都已在 application 入口驗證；現況與補齊條件見 `docs/adr/draft/gui-adapter-capability-guards.md`。
 _Avoid_: caller, frontend
 
 **GuardService**:
@@ -153,7 +153,7 @@ _Avoid_: field schema, arg spec
 把多個已驗證的 wire 欄位**結構化組裝**成 domain request（frozen dataclass，如 `ConnectRequest`）的那一步。與 ParamSpec 互補：ParamSpec 管 per-param 型別，Coercion 管 multi-param→request。需要 Coercion 的操作 = MCP 生成的覆寫對象。
 _Avoid_: per-param validation（那是 ParamSpec 的事）
 
-### Service 依賴與角色（見 `docs/adr/0067-gui-application.md`）
+### Service 依賴與角色（依用途選 read、command、fact，見 `docs/adr/0067-gui-application.md`）
 
 不維護 service 分層表。要資料時讀 owner 公開的 State／read contract；要對方執行行為時走單向 command；已提交的變化需要下游反應時訂閱 domain fact。`build_app_services` 明確組裝 service，實際有 `workspace → tab`、`writeback → cfg_editor` 等單向合作。不把 service 互調一律視為錯誤，也不認為改用 EventBus 就自動斷環。需要隔離 shared／app 或 owner 邊界時才依賴窄 port，避免以整個 Controller 當 service 的依賴。
 
