@@ -190,7 +190,10 @@ def test_tab_get_summary_reads_explicit_tab_without_changing_focus(
     assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
 
 
-def test_screenshot_returns_png_path_without_changing_focus(tmp_path: Path) -> None:
+@pytest.mark.parametrize("arguments", [{}, {"target": "window"}])
+def test_screenshot_returns_png_path_without_changing_focus(
+    tmp_path: Path, arguments: dict[str, str]
+) -> None:
     png = b"\x89PNG\r\n\x1a\nimage"
 
     def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -200,7 +203,7 @@ def test_screenshot_returns_png_path_without_changing_focus(tmp_path: Path) -> N
         return {"saved_to": str(path), "bytes": len(png)}
 
     client = make_client(tmp_path, reply)
-    result = client.call("screenshot", {"target": "window"})
+    result = client.call("screenshot", arguments)
     path = Path(result["path"])
     assert path.is_file() and path.read_bytes() == png
     assert path.is_absolute()

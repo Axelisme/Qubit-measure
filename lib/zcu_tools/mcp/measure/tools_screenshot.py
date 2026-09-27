@@ -11,7 +11,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 def screenshot(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture an existing window/dialog into a session-owned PNG path."""
-    target = arguments["target"]
+    target = arguments.get("target", "window")
     if not isinstance(target, str) or target not in {
         "window",
         "setup",
@@ -42,6 +42,7 @@ SCREENSHOT_TOOL: dict[str, Any] = {
         "properties": {
             "target": {
                 "type": "string",
+                "default": "window",
                 "enum": [
                     "window",
                     "setup",
@@ -52,7 +53,6 @@ SCREENSHOT_TOOL: dict[str, Any] = {
                 ],
             }
         },
-        "required": ["target"],
     },
 }
 
