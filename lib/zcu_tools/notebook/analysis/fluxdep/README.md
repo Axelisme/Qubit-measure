@@ -3,7 +3,7 @@
 **Last updated:** 2026-09-27 — shared transition model ownership
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
-與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
+與互動式標註工具。搭配 [`notebook_md/analysis/fluxdep_fit.md`](../../../../../notebook_md/analysis/fluxdep_fit.md) 使用。
 
 ## 模塊結構
 
