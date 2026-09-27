@@ -6,11 +6,11 @@ from zcu_tools.analysis.fluxdep.models import (
 from zcu_tools.analysis.fluxdep.models import (
     energy2linearform,
 )
-from zcu_tools.notebook.analysis.fluxdep.models import (
+from zcu_tools.analysis.fluxdep.search_models import (
     TransitionDict,
     compile_transitions,
 )
-from zcu_tools.notebook.analysis.fluxdep.njit import energy2linearform_nb
+from zcu_tools.analysis.fluxdep.search_njit import energy2linearform_nb
 
 
 def _check_matches(transitions, energies):

@@ -33,14 +33,14 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.notebook.analysis.fluxdep.fitting import (
-    fit_spectrum,
-    search_in_database,
-)
-from zcu_tools.notebook.analysis.fluxdep.njit import (
+from zcu_tools.analysis.fluxdep.search_njit import (
     candidate_breakpoint_search,
     entry_lower_bound,
     eval_dist_bounded,
+)
+from zcu_tools.notebook.analysis.fluxdep.fitting import (
+    fit_spectrum,
+    search_in_database,
 )
 
 from tests.notebook.analysis.fluxdep._synthetic import synth_ABC

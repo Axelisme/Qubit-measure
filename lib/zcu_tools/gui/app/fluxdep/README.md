@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — shared transition ownership
+**Last updated:** 2026-09-27 — shared database search and diagnostic renderer
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -97,9 +97,10 @@ LoadService 用底層 `load_data`(datafile) + `format_rawdata`(analysis.spectrum
 measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(base) 提供 canvas +
 可覆寫的 on_press/move/release + 控制項區 + `finished` signal。
 
-**v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：notebook 的
-`search_in_database(plot=True)` 內部用 pyplot（`plt.figure()`/`plt.show()`）——要在 worker
-跑且**不改 fitting.py**，就靠攔截 pyplot 路由內嵌。共用套件:
+**v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：
+[search kernel](../../../analysis/fluxdep/README.md) 只算數值；
+[診斷圖 builder](../../../plotting/fluxdep/README.md) 使用 `plt.figure()`，service 在 worker 中呼叫 `plt.show()`。
+沿用 pyplot 路由內嵌。共用套件:
 - `plotting/backend.py`（client）：`module://zcu_tools.gui.plotting.backend`，攔 `plt.figure()` →
   attach 到當前 `FigureContainer`；`plt.show()` → activate（**未 attach 則 raise**，Fast-Fail 統一）；
   `GuiFigureCanvas.draw_idle` 吃跨線程。
@@ -139,7 +140,7 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
 ### Flux-Dependence Analysis kernel handoff
 [fluxdep kernel README](../../../analysis/fluxdep/README.md) 下，互動選點、filtering、line selection、one-tone peak detection 的共用規則住在
 `zcu_tools.analysis.fluxdep`。Qt `ui/interactive/` widget 只保留控制項、canvas、worker/debounce
-與 Qt event translation；共用躍遷換算也位於 `analysis.fluxdep.models`；database search、診斷圖與 params export 仍留在既有 pipeline。
+與 Qt event translation；共用躍遷換算與 database search 位於 `analysis.fluxdep`，診斷圖由 `plotting.fluxdep` 建立，params export 留在 app pipeline。
 
 ### flux 對齊：per-spectrum + 可繼承
 每張譜各自一份 flux_half/int/period（對齊 analysis.fluxdep.models.SpectrumResult）。新載入的譜可
@@ -195,7 +196,7 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
   - search 是 user 在 GUI 裡按的，**沒有 RPC 觸發路徑**（remote view 只讀）。`Controller.
     search_database` 仍在（GUI worker 用），但不再有 `fit.search` handler。compute/record
     分拆仍是守 main-thread State 不變式的關鍵。
-- **進度注入**：`fitting.py` 的 search 走 `make_pbar`。GUI worker 用
+- **進度注入**：`analysis.fluxdep.search` 走 `make_pbar`。GUI worker 用
   `use_pbar_factory` 裝 `GuiProgressBar`（emit Qt signal 到主執行緒進度條，節流 50ms）。
 
 ### v2 結果存放 + 視覺化
@@ -212,7 +213,7 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（預設按 `viz.derive_auto_limits` = notebook
     `auto_derive_limits`）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
   AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
-- **pyplot Gcf 累積坑**：`search_in_database` 的 `plt.figure()` 不 close 會堆進 pyplot 全域 figure 堆疊，
+- **pyplot Gcf 累積坑**：診斷圖 builder 的 `plt.figure()` 不 close 會堆進 pyplot 全域 figure 堆疊，
   第二次 search 的 `plt.show()` 會作用在已 detach 的舊 figure → backend raise「not attached」+ 圖只剩標題。
   修法：`_on_search` 每次 `plt.close("all")` 清 Gcf（只丟 pyplot 引用，已內嵌的 canvas 仍活在 container）。
 - `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
@@ -220,7 +221,7 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
   dataclass**（會更弱型）。
 - `services/viz.py`：matplotlib 重寫 notebook 的 plotly `FreqFluxDependVisualizer`，純函式畫進傳入的
   Figure（background heatmap gray_r + simulation lines + 選中點 + r_f/sample_f const-freq 線 +
-  dev_value secondary axis）。診斷圖直接用 `search_in_database(plot=True)` 的後端原生 Figure，不重畫。
+  dev_value secondary axis）。診斷圖直接用共用 builder 的後端原生 Figure，不重畫。
 - params.json 的 flux_half/int/period 取**第一張已對齊譜**（notebook 單譜語意；多譜同對齊到同 flux 座標）。
 - params.json export 透過 `resources.qubit_params.QubitParams` 寫 `project` 與 `fluxdep_fit`；重寫 fluxdep fit 會更新 `fluxdep_fit.timestamp`，但不刪除獨立的 `dispersive` section。
 
