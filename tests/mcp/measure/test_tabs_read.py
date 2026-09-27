@@ -95,6 +95,62 @@ def test_tab_open_failed_load_closes_new_tab_without_soc(
         assert methods.index("tab.close") < methods.index("tab.set_active")
 
 
+def test_tab_open_from_file_loads_before_focusing_without_soc(tmp_path: Path) -> None:
+    tab = "loaded-tab"
+    path = str(tmp_path / "saved.h5")
+    responses = {
+        "tab.list_all": {
+            "tabs": [],
+            "active_tab_id": "old-tab",
+            "running_tab_id": None,
+        },
+        "tab.new": {
+            "tab_id": tab,
+            "__agent_write_versions": {f"tab:{tab}": [0, 1]},
+        },
+        "tab.snapshot": {"tabs": [{"tab_id": tab, "adapter_name": "ramsey"}]},
+        "context.snapshot": {"label": None},
+        "tab.get_analyze_result": {"summary": None},
+    }
+
+    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method in responses:
+            return responses[method]
+        if method == "tab.load_data":
+            assert params["tab_id"] == tab
+            assert params["data_path"] == path
+            return {"loaded": True}
+        if method == "tab.set_active":
+            assert params == {"tab_id": tab}
+            return {"ok": True}
+        raise AssertionError(method)
+
+    client = make_client(tmp_path, reply)
+    client.transport.replies["resources.versions"] = {
+        "ok": True,
+        "result": {
+            "versions": {
+                f"tab:{tab}": 1,
+                f"tab:{tab}:result": 0,
+                f"tab:{tab}:analyze": 0,
+                "context": 0,
+            }
+        },
+    }
+    assert client.call("tab_open", {"experiment": "ramsey", "from_file": path}) == {
+        "tab": tab,
+        "experiment": "ramsey",
+    }
+    methods = [method for method, _ in client.transport.sent]
+    assert (
+        methods.index("tab.new")
+        < methods.index("tab.load_data")
+        < methods.index("tab.set_active")
+    )
+    assert "tab.close" not in methods
+    assert "soc.connect" not in methods
+
+
 def test_tab_get_summary_reads_explicit_tab_without_changing_focus(
     tmp_path: Path,
 ) -> None:

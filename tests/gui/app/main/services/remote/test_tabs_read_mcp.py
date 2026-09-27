@@ -43,6 +43,12 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
         assert before["active_tab_id"] == focused
         assert live_gui.state.active_tab_id == focused
 
+        with pytest.raises(GuiRpcError):
+            invoke("tab_get", {"tab": "missing", "include": ["summary"]})
+        with pytest.raises(GuiRpcError):
+            invoke("tab_live", {"tab": "missing"})
+        assert live_gui.state.active_tab_id == focused
+
         overview = invoke(
             "tab_get", {"tab": tab, "include": ["summary", "analyze_params"]}
         )
