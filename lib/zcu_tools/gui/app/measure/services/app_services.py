@@ -151,7 +151,7 @@ def build_app_services(
     arb_waveform = ArbWaveformService(state)
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
-    # direction command edge — cfg_editor never calls writeback, ADR-0004).
+    # direction command edge — cfg_editor never calls writeback, ADR-0067).
     cfg_editor = CfgEditorService(
         cfg_editor_ctrl,
         read_port=cfg_editor_ctrl,
@@ -162,7 +162,7 @@ def build_app_services(
     )
     writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
     # TabService composes the tab render model and needs the writeback query port
-    # (built above) — built after writeback (read-model dependency, ADR-0005).
+    # (built above) — built after writeback (read-model dependency, ADR-0067).
     tab = TabService(state, registry, writeback)
     workspace = WorkspaceService(state, tab, bus)
     tab_control = TabControlFacet(

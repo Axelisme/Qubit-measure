@@ -287,15 +287,13 @@ to any Node's plot at any time.
 _Avoid_: live plot (that's the rendering substrate, `zcu_tools.plotting.liveplot`);
 "per-execution plotter" (the lifetime is the sweep, not one execution).
 
-The Plotter is **never marshalled** (ADR-0017 does NOT apply): the worker NEVER
-touches matplotlib. The worker fills the Result's flux-idx row in place (numpy)
-and emits a plain notification signal (the flux index, no figure); a main-thread
-slot then calls `plotter.update(result, idx)`. All drawing — Plotter, figure,
-Result reads — stays on the main thread. (ADR-0017 marshals worker threads that
-draw directly; here the worker only notifies, so the simpler Qt
-queued-signal notification suffices. The shared numpy Result is safe because the
-worker only writes row idx and the main thread reads it only after the
-queued signal, which gives happens-before.)
+The Plotter is **never marshalled**: the worker does not call matplotlib. It
+fills a Result row in place and emits a notification carrying the flux index.
+A main-thread slot calls `plotter.update(result, idx)` and draws. ADR-0067 covers
+both this notification path and the bridge used when workers call pyplot directly.
+A queued signal does not freeze the shared numpy Result. The app owns its row
+write/read schedule; do not infer safety for concurrent writes to a row being read
+from the existence of the signal alone.
 
 The **whole sweep runs on one worker thread** — `build_node` + the Node's
 `produce` (derive-cfg → acquire → fit → fill) included. Unlike measure-gui, where

@@ -1,6 +1,6 @@
 """RemoteControlAdapter — measure-gui's second View (driving adapter).
 
-The RPC face onto the Controller, peer to the Qt ``MainWindow`` (ADR-0005 /
+The RPC face onto the Controller, peer to the Qt ``MainWindow`` (ADR-0067 /
 ADR-0013): the second user-facing client (user = an automation agent / another
 server). The shared dispatch scaffolding (the EndpointRouter seam, the
 main-thread marshal, the EventBus push fan-out) lives in

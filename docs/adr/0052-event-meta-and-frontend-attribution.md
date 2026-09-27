@@ -5,12 +5,12 @@ status: accepted
 # 0052 — Event meta 與多前端 attribution
 
 **狀態:** accepted(2026-07-11)。
-**關聯:** [[0004]]、[[0021]]、[[0047]]、[[0048]]、[[0049]]。
+**關聯:** [[0067]]（domain facts 與前端邊界）、[[0047]]（錯誤投影）、[[0049]]（subscriber-aware push）。
 
 ## 背景
 
 GUI 已同時存在兩個 peer 前端:Qt View 與 MCP agent,未來將加入 Web View(見
-`web_view_evaluation.md`)。[[0048]] 讓事件攜帶 closed domain fact、[[0049]] 讓 wire push
+`web_view_evaluation.md`)。[[0067]] 讓事件攜帶 closed domain fact、[[0049]] 讓 wire push
 subscriber-aware,但事件仍缺三個多前端必需的屬性:
 
 1. **attribution**:訂閱者無法分辨事件由誰引發(使用者操作、agent 命令、或某個
@@ -119,4 +119,4 @@ enum 不為此擴張。Web adapter 落地時若 HTTP 慣例需要 409 對映,由
 
 - 不做 bus-level 非同步/deferred publish;不做 CRDT 或 view 端樂觀更新(明文禁止,
   pending 態由 core 廣播);不實作 replay buffer;不設計 plot stream channel;
-  不動 [[0048]] 的 fact 分類與反應矩陣語意。
+  不動 [[0067]] 的 fact 分類與反應矩陣語意。

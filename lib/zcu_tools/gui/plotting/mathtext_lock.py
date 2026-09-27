@@ -8,7 +8,7 @@ worker threads, and that work parses ``$...$`` titles (e.g. ``set_title`` +
 concurrently they corrupt the shared parser's mutable state and raise a
 non-deterministic ``pyparsing.ParseException``.
 
-The contained fix (ADR-0017) is a single process-wide lock around the public
+The contained fix (ADR-0067) is a single process-wide lock around the public
 parse entry point plus a main-thread prewarm so the parser's lazy
 initialization never first happens under contention. This serializes mathtext
 parsing across every thread/path without changing any plotting code or the

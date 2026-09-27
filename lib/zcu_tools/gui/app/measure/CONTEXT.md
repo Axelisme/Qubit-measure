@@ -26,7 +26,7 @@ _Avoid_: 讓 outcome 帶 result payload、把 operation_id 暴露給 agent、把
 _Avoid_: guard, lock token
 
 **關閉協調 / `ShutdownCoordinator`**（歷史 ADR-0003；現行分界見 ADR-0066）:
-GUI 關閉（user closeEvent / agent app.shutdown）時「**中斷所有 in-flight operation → 等它們停 → 全停或超時才真關**」的編排。**Qt-free 純邏輯**：`begin()` = `gate.cancel_all()`（拿全部 token）；`tick() → state`（WAITING/SETTLED/TIMED_OUT，每 tick 對所有 token `gate.poll` + 比 deadline）。**主線不能阻塞 await，故用「週期 tick + 非阻塞 poll」取代**（項目第一個週期計時器）。分層 = Progress 重構同款（ADR-0005 Hexagonal）：coordinator 純邏輯可單測無 Qt；**QTimer 包在 driven adapter** `QtShutdownDriver`（`adapters/qt_shutdown_driver.py`）驅動 `tick()`；`Controller`（Qt-free façade）暴露 `begin_shutdown(on_closed)`（懶建 driver）+ `active_operation_count()`；`MainWindow` closeEvent/request_shutdown 調它、傳 `_perform_close` 當 on_closed（user close 保留確認框，`_closing` guard 放行 `_perform_close` 觸發的二次 closeEvent）。
+GUI 關閉（user closeEvent / agent app.shutdown）時「**中斷所有 in-flight operation → 等它們停 → 全停或超時才真關**」的編排。**Qt-free 純邏輯**：`begin()` = `gate.cancel_all()`（拿全部 token）；`tick() → state`（WAITING/SETTLED/TIMED_OUT，每 tick 對所有 token `gate.poll` + 比 deadline）。**主線不能阻塞 await，故用「週期 tick + 非阻塞 poll」取代**（項目第一個週期計時器）。分層 = Progress 重構同款（ADR-0067 Hexagonal）：coordinator 純邏輯可單測無 Qt；**QTimer 包在 driven adapter** `QtShutdownDriver`（`adapters/qt_shutdown_driver.py`）驅動 `tick()`；`Controller`（Qt-free façade）暴露 `begin_shutdown(on_closed)`（懶建 driver）+ `active_operation_count()`；`MainWindow` closeEvent/request_shutdown 調它、傳 `_perform_close` 當 on_closed（user close 保留確認框，`_closing` guard 放行 `_perform_close` 觸發的二次 closeEvent）。
 _Avoid_: 在 coordinator 裡 import qtpy / 監聽 Qt signal（破壞 Qt-free + 回到「訂閱事件」；統一用 poll）、把輪詢狀態機塞進 Controller（Qt-free façade）或 MainWindow（UI）、用屬性 flag 在 closeEvent/回調間傳「在等誰」（用 coordinator 自己的局部 token 列表 = 執行上下文，非跨對象共享）
 
 **靜態 vs 動態邊界**（Permit 與 Lease 的分工基石）:
@@ -67,7 +67,7 @@ _Avoid_: 把「強制 commit」當成第二層 committed state、讓 widget 自�
 
 - **為何有狀態（不可用瞬時取代）**：含 ref 切換（readout→pulse readout、waveform→const…），切換**動態改變後續可填欄位**（partial re-binding）。client 必須「切 ref → 看新欄位 → 再填」漸進進行。
 - **生命週期按 `gc` 分流**（取代舊的 headless/delegated 兩 kind）：`gc=True` 受 LRU + 斷線回收；`gc=False` owner 顯式 teardown。`open_seeded` 同 owner_key 再開會先 teardown 前一棵。
-- **external refresh 歸 service（ADR-0004 Reaction）**：service訂`MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到draft的`refresh_expressions()`、`refresh_references()`與`refresh_options(source_id)`；attached widget經draft/field `on_change`重畫。widget **不**碰EventBus。
+- **external refresh 歸 service（ADR-0067 Reaction）**：service訂`MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到draft的`refresh_expressions()`、`refresh_references()`與`refresh_options(source_id)`；attached widget經draft/field `on_change`重畫。widget **不**碰EventBus。
 - **變更通知**：任一 client 改動 → session `on_change` 廣播。widget 經既有 `_updating` flag 斷回授；agent 經 **editor 專屬變更流**（只推給訂閱該 editor_id 的 client，**不走全域 EventBus**）。
 - **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / teardown / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不區分原因**。
 _Avoid_: 為失效原因加 reason、讓 cfg 欄位變更走全域 EventBus、把 gc=False session 也納入 LRU/斷線回收
@@ -161,22 +161,13 @@ _Avoid_: field schema, arg spec
 把多個已驗證的 wire 欄位**結構化組裝**成 domain request（frozen dataclass，如 `ConnectRequest`）的那一步。與 ParamSpec 互補：ParamSpec 管 per-param 型別，Coercion 管 multi-param→request。需要 Coercion 的操作 = MCP 生成的覆寫對象。
 _Avoid_: per-param validation（那是 ParamSpec 的事）
 
-### Service 互依（三問規則，見 `docs/adr/0004`）
+### Service 依賴與角色（見 `docs/adr/0067-gui-application.md`）
 
-**不維護 service 分層表。** 每條「A 要用到 B」的邊落地時只問一個局部問題 —— A 需要的是 B 的**答案**、要 B**做一件事**、還是想在 B**變化後反應**：
+不維護 service 分層表。要資料時讀 owner 公開的 State／read contract；要對方執行行為時走單向 command；已提交的變化需要下游反應時訂閱 domain fact。`build_app_services` 明確組裝 service，實際有 `workspace → tab`、`writeback → cfg_editor` 等單向合作。不把 service 互調一律視為錯誤，也不認為改用 EventBus 就自動斷環。需要隔離 shared／app 或 owner 邊界時才依賴窄 port，避免以整個 Controller 當 service 的依賴。
 
-- **Query**（要 B 現在的值）→ 兩者都讀 **State**，A 不碰 B。最優先（State-as-SSOT 天生支持）。
-- **Command**（叫 B 做事，且 B 不需回頭找 A）→ A 構造注入 B、直接呼叫。天然單向。
-- **Reaction**（B 變了 A 要跟著動）→ A 訂閱 **EventBus**、不持有 B。依賴反轉，環被 bus 截斷。
+State 保存可供多方觀察的事實，service 保有自己的控制資源。是否持久化是另一個判斷：`SessionEnv.soc` 是可觀察的 live handle，重啟後不保存；driver 與 worker 的控制權仍屬各 owner。State 接受 owner 算好的結果，不承接初始化決策；Persistence 只投影要保存的欄位，不全量序列化 State。
 
-**撞到「會成環」= 幾乎一定是把 Reaction 誤當 Command。** 改走 EventBus 即解（Phase 98 `startup` 反應 `DEVICE_CHANGED` 即此）。`ControllerProtocol` / `_EditorCtrl` 等 narrow Protocol 是「需呼叫 owner（Controller/View）能力」時的 Command 受控形式（依賴介面非具體類）。
-_Avoid_: service 分層 tier、卡循環就往 ctrl 塞、把 reaction 寫成 command 互持
-
-**狀態放哪（兩軸正交，勿坍縮）**：軸 1「進不進 State」= 除 owner 外還有誰要**讀**（有 → 進 State）；軸 2「persist 投不投影」= 重啟後有無意義（有 → 投影）。**不可序列化只影響軸 2，不影響軸 1** —— State 可持有不可序列化的共享活物件（如 `SessionEnv.soc`：多 service 讀 → 進 State；重啟連線沒了 → persist 跳過）。配套：State 存**成品**、初始化邏輯留 owner service（`add_tab`/`put_device` 只收已造好對象）；persist 是**選擇性投影**非全量序列化。見 `docs/adr/0004`。
-_Avoid_: 把「不可序列化」當「不能進 State」、把初始化邏輯搬進 State、persist 全量序列化整個 State
-
-**Service 角色（DDD+Hexagonal，見 `docs/adr/0005`）**：`services/` 的東西按**角色**而非**話題**聚合，每個必須說清是哪種 —— **App Service**（被動編排、無 domain 邏輯、經 port 依賴 infra、不依賴其他 app service）、**Aggregate Root**（一等公民帶**自己的行為**，外界經 id 進出，反模式=貧血 dataclass）、**Repository**（造/查/毀 aggregate）、**Driving Adapter**（user-facing，`MainWindow`+`RemoteControlAdapter`=兩個 driving adapter，user 可以是人或 another server）、**Driven Adapter**（persistence/driver/socket，**只經 port 被呼叫**）。三大系統性違規已由 Phase 99（原 M1–M6）遷移消除：貧血 aggregate（M2/M3 升 aggregate root）、app-service 互依（M4 改窄 port / 直讀 State，AST gate `test_app_service_decoupling` 守）、infra 未經 port（M1 `services/ports.py`）。M5（目錄 vertical-slice）決定不做、M6（RemoteControlAdapter 正名）由 ADR-0013 落地。
-_Avoid_: 按話題聚合 service、entity 寫成哑 dataclass（貧血）、app service 互相依賴、直接 import 基礎設施（繞過 port）
+`MainWindow` 與 `RemoteControlAdapter` 是兩個 driving adapters；app services 與 session owners 驗證並執行操作，driven adapters 處理 Qt、device 和保存機制。`CfgEditorService` 持有編輯 session，`ContextService` 負責 md／ml 內容寫入。不要以 DDD 名詞代替實際的 owner 邊界，也不要以「app service 不得呼叫另一個 app service」否定現有的單向 command。
 
 ### 持久化（Persistence，Memento + Caretaker，見 `docs/adr/0063-persistence-ownership.md`）
 

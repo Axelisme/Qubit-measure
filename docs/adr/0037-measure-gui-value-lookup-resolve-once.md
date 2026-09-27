@@ -10,9 +10,9 @@ helpers and ports. A string-key lookup is only an escape hatch for rare,
 multi-source defaults and for writing the current value of a source into
 `MetaDict`.
 
-**Related:** ContextService is the single md/ml write authority in [[0006]];
-service role and port discipline follow [[0004]]/[[0005]]; session-core sharing
-is defined in [[0020]]; cfg editor sessions and `EvalValue` wire handling are
+**Related:** ContextService is the single md/ml write authority in [[0067]];
+service role and port discipline follow [[0067]]; session-core sharing
+is defined in [[0067]]; cfg editor sessions and `EvalValue` wire handling are
 defined in [[0008]]; role defaults and context-free cfg definitions live under
 [[0009]]/[[0012]].
 

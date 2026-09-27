@@ -5,7 +5,7 @@ status: accepted
 # 0051 — Canonical program cfg shape catalog
 
 **狀態：** accepted（2026-07-11）。
-**關聯：** [[0020]]、[[0045]]、[[0046]]、[[0050]]。
+**關聯：** [[0067]]、[[0045]]、[[0046]]、[[0050]]。
 
 > 現行定位：跨 owner 分工見 [[0065]]。本篇 `gui.measure_cfg` 路徑已過時；現行 catalog／materializer owner 是 `experiment.cfg_editing`，app normalization 尚未收斂。
 

@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — app-local remote layout
+**Last updated:** 2026-09-27 — GUI ADR 繪圖引用更新
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -24,7 +24,7 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
 
 ### 共用層（與 fluxdep / measure 三方共用）
 - `zcu_tools.gui.version_table.VersionTable`（直接依賴：`state.py`）。
-- `zcu_tools.gui.remote.{errors,framing,param_spec,wire}`（傳遞依賴——經共用 transport 層帶入，dispersive 不直接 import）。**dispersive 的 worker 不畫圖（compute/record 模式），故不依賴 `zcu_tools.gui.plotting`（ADR-0017 R4 不適用）。**
+- `zcu_tools.gui.remote.{errors,framing,param_spec,wire}`（傳遞依賴——經共用 transport 層帶入，dispersive 不直接 import）。**dispersive 的 worker 不畫圖（compute/record 模式），故不依賴 `zcu_tools.gui.plotting`（ADR-0067 的資料通知路徑）。**
 - `zcu_tools.gui.remote`：transport 機制三方共用。RPC 方法登錄 `MethodSpec/BoundMethod/build_method_registry`（`method_spec.py`）；GUI 側傳輸 `NdjsonRpcEndpoint`（`rpc_endpoint.py` —— socket 生命週期 + accept loop + NDJSON framing + per-client writer/outbound queue + 內建 `wire.version`/auth handshake + reply 編碼 + `broadcast` push fan-out + 主執行緒 marshal primitive + `ClientLink`）；MCP-server 側傳輸 `McpBridge`（住 `zcu_tools.mcp.core.bridge` —— socket 狀態為 instance attrs、send_rpc_raw/connect/disconnect/launch/stop/reader thread/RID routing + 注入 on_event hook）。
 - `zcu_tools.gui.event_bus`：`BaseEventBus`/`BasePayload` 三方共用機制。
 - wire 版本常數 `remote/wire_version.py` 留各 app（dispersive **WIRE=4/GUI=6**：EventBus push 含 seq/origin）。每 app 各自演化 wire 契約故不入共用 `remote.wire`。
@@ -35,7 +35,7 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
 - `ui/error_messages.py`：用共用 `gui/error_messages` framework（`normalize_raw`/`details_tail`/`friendly_from_rules`/`fit_io_redirect`），domain rule（`friendly_io_message` + `_FIT_RULES`）各 app。其餘領域自有。`ProjectDialog` 來自共用 `gui/widgets/project_dialog.py`（`db_label="One-tone dir"`），可用 project root 掃描到的 `result/**/params.json` result scope 選既有 chip/qubit；`ProjectInfo`/`default_*`/`nearest_existing` 在共用 `gui/project.py`（Qt-free）。本目錄不含 app-local project dialog。
 
 ## 計算全走 worker（避免 GUI 卡頓）
-**重計算都經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner.submit`（per-panel，`enter=None`——無 routing/pbar scope）** off-main：preprocess（shared edelay branch + numba local refinement）、predict（tune圖，scqubits）、auto_tune。模式統一：提交的 `work` 純呼 `compute_*`/`predict_*`（讀 State 不寫）並回**純資料 dataclass**（`_TuneData`/PreprocessResult）；`on_done`（主執行緒）唯一 `record_*`（State 寫）+ **畫圖**（worker 從不碰 Qt widget / pyplot，守 ADR-0017 + main-thread State 不變式）。一次只跑一個用按鈕 disable guard（不需 generation 戳記）。
+**重計算都經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner.submit`（per-panel，`enter=None`——無 routing/pbar scope）** off-main：preprocess（shared edelay branch + numba local refinement）、predict（tune圖，scqubits）、auto_tune。模式統一：提交的 `work` 純呼 `compute_*`/`predict_*`（讀 State 不寫）並回**純資料 dataclass**（`_TuneData`/PreprocessResult）；`on_done`（主執行緒）唯一 `record_*`（State 寫）+ **畫圖**（worker 從不碰 Qt widget / pyplot，守 ADR-0067 + main-thread State 不變式）。一次只跑一個用按鈕 disable guard（不需 generation 戳記）。
 
 - **step4 Tune 互動模型**：**g=QSlider**（固定 0..200 MHz、1 MHz/tick、預設 50，`_G_MIN/MAX/DEFAULT_MHZ`，`_g_mhz()` 讀值）、**r_f=QSlider**（MHz 整數）；兩條 slider 垂直排（`_slider_row` 名稱+slider+數值）。**res_dim/qub_dim/qub_cutoff 全寫死**（`PredictionResolution(res_dim=4, qub_dim=15, qub_cutoff=30)`）。
   - **preprocess done → `_init_tune_view`**：r_f slider 用**固定 0..300 tick**（`_RF_TICKS=300`）跨數據 sp_freqs.min~max → 精度恆 = **span/300**（不隨範圍寬窄變）；tick↔GHz 映射在 `_rf_ghz`/`_rf_tick_for`。預設 tick = 最接近 `PreprocessResult.median_rf`（每 flux norm_phases 峰值頻率的**中位數**，在 preprocess 算）。tune 圖**先畫背景熱圖 + r_f 線**（`render_tune_figure`，無色散線）。同時 `bind_drag` 把 TuneCanvas 的 sample-line 拖曳指向新 artists。

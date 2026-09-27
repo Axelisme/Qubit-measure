@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [ADR-0063](../0063-persistence-ownership.md)。以下保留歷史正文。
+
 ---
 status: accepted
 ---

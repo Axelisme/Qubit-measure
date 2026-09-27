@@ -266,7 +266,7 @@ class ContextReadPort(Protocol):
 
     A ``CfgEditorSession`` reads the current ml to seed a session opened
     ``from_name`` (load an existing entry's shape). Reading only — all ml/md
-    *content writes* go through the app's ``ContextWritePort`` (ADR-0006:
+    *content writes* go through the app's ``ContextWritePort`` (ADR-0067:
     ContextService is the single write authority). Symmetric name with
     ``ContextWritePort``.
     """

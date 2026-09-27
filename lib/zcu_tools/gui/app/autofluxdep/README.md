@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — Operation ADR 引用核對
+**Last updated:** 2026-09-27 — Operation 與 GUI ADR 引用更新
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
