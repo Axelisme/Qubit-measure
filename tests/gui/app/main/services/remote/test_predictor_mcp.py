@@ -79,6 +79,20 @@ def test_predictor_install_and_multiple_transitions_share_gui_state(
             "predictor.predict",
             {"device_value": 0.18, "from_level": 0, "to_level": 1},
         )["result"]["freq_mhz"]
+        bad_transition = call(
+            sock,
+            "predictor.calibrate",
+            {
+                "device_value": 0.15,
+                "frequency_mhz": measured,
+                "from_level": 1,
+                "to_level": 1,
+            },
+        )
+        assert bad_transition["ok"] is False
+        assert bad_transition["error"]["code"] == "invalid_params"
+        assert bad_transition["error"]["reason"] == "invalid_transition"
+        assert call(sock, "predictor.info")["result"]["flux_bias"] == 0.0
         calibrated = invoke(
             "predictor_calibrate", {"value": 0.15, "freq_mhz": measured}
         )
@@ -127,6 +141,14 @@ def test_predictor_rejects_ambiguous_load_without_replacing_gui_model(
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
+        missing = call(
+            sock,
+            "predictor.calibrate",
+            {"device_value": 0.15, "frequency_mhz": 4567.0},
+        )
+        assert missing["ok"] is False
+        assert missing["error"]["code"] == "precondition_failed"
+        assert missing["error"]["reason"] == "predictor_not_loaded"
         with pytest.raises((GuiRpcError, ValueError), match="exactly one"):
             invoke("predictor_load", {"path": "unused.json", "model": _MODEL})
         with pytest.raises((GuiRpcError, ValueError), match="exactly one"):

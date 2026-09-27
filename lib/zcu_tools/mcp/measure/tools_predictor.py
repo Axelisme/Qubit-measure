@@ -91,7 +91,16 @@ def predictor_calibrate(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
     """Calibrate the installed GUI predictor from one measured frequency."""
-    raise NotImplementedError("predictor_calibrate dispatch is not implemented")
+    transition = arguments.get("transition", [0, 1])
+    return ctx.send_gui_rpc(
+        "predictor.calibrate",
+        {
+            "device_value": arguments["value"],
+            "frequency_mhz": arguments["freq_mhz"],
+            "from_level": transition[0],
+            "to_level": transition[1],
+        },
+    )
 
 
 PREDICTOR_TOOLS: dict[str, dict[str, Any]] = {
