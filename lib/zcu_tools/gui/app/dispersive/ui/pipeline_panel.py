@@ -45,6 +45,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.services.viz import (
     SampleArtists,
@@ -56,7 +57,6 @@ from zcu_tools.gui.app.dispersive.services.viz import (
     update_bare_line,
     update_sample_dots,
 )
-from zcu_tools.gui.app.dispersive.state import PreprocessResult
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
