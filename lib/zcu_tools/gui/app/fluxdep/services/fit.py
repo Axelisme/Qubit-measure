@@ -5,8 +5,8 @@ points, search a precomputed fluxonium database for the best (EJ, EC, EL), recor
 it on State, and export it as ``params.json``.
 
 Pure, Qt-free, synchronous — like every fluxdep service. The slow ``search`` is
-wrapped in a worker thread by the GUI (``ui/analyze_panel``); the RPC path runs it on
-the main thread under a wider timeout (see gui/app/fluxdep/README.md for that trade-off).
+wrapped in a worker thread by the GUI (``ui/analyze_panel``); the remote interface
+does not trigger a search.
 ``search`` accepts an optional progress-bar factory so the GUI worker can inject
 a Qt-signalling ``BaseProgressBar`` via ``use_pbar_factory``; without one,
 ``search_database`` falls back to its tqdm default.
@@ -49,7 +49,7 @@ class SearchResult:
 
     Returned by ``compute_search`` (runnable off the main thread) and handed to
     ``record_result`` (main thread) to write onto State. The diagnostic Figure is
-    None on the RPC path (``plot=False``) and present in the GUI worker path.
+    None when ``plot=False`` and present in the GUI worker path (``plot=True``).
     """
 
     params: tuple[float, float, float]  # (EJ, EC, EL)

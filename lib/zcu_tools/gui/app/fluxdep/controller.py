@@ -155,8 +155,8 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
         Pair with ``record_search_result`` on the main thread. The GUI worker
         calls this off-main, then marshals the result to the main thread to
-        record it; the RPC convenience ``search_database`` does both in sequence
-        on the main thread.
+        record it; the synchronous convenience ``search_database`` does both in
+        sequence on the calling thread.
         """
         return self._fit.compute_search(pbar_factory=pbar_factory, plot=plot)
 
@@ -171,12 +171,12 @@ class Controller(BaseController[FluxDepState, EventBus]):
         pbar_factory: PbarFactory | None = None,
         plot: bool = False,
     ) -> SearchResult:
-        """Main-thread convenience: compute the search then record it (RPC path).
+        """Synchronous convenience: compute the search then record it.
 
-        Runs the blocking search inline on the calling (main) thread — used by the
-        RPC dispatch, where momentary GUI unresponsiveness is acceptable and the
-        State write must stay on the main thread anyway. The GUI uses the split
-        ``compute_search`` / ``record_search_result`` to keep the search off-main.
+        Runs the blocking search inline on the calling thread, which must be the
+        main thread because of the State write. No remote method triggers it; the
+        GUI worker uses the split ``compute_search`` / ``record_search_result`` to
+        keep the search off-main.
         """
         result = self._fit.compute_search(pbar_factory=pbar_factory, plot=plot)
         self.record_search_result(result)
