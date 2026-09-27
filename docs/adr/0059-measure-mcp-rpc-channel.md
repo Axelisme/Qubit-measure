@@ -1,7 +1,7 @@
 # ADR-0059：measure-gui MCP 的 RPC channel——由 live GUI 提供 method catalog
 
 **狀態：** accepted（未實作）
-**關聯：** [[0060]]（特化 tool）；[[0002]]（version guard）、[[0066]]（operation handle）、[[0013]]（remote adapter 為第二個 View）、[[0014]]（共用 transport 與 app policy 邊界）、[[0047]]（tool error 契約；arb waveform 具體錯誤見 [main app README](../../lib/zcu_tools/gui/app/main/README.md)）。
+**關聯：** [[0060]]（特化 tool）；[[0002]]（version guard）、[[0066]]（operation handle）、[[0013]]（remote adapter 為第二個 View）、[[0014]]（共用 transport 與 app policy 邊界）、[[0047]]（tool error 契約；arb waveform 具體錯誤見 [main app README](../../lib/zcu_tools/gui/app/measure/README.md)）。
 
 ## Context
 

@@ -1,7 +1,7 @@
 """Safe numeric expression evaluation for GUI scalar eval fields.
 
 Moved from gui.app.measure.expression to the session layer so that both the
-cfg-editor (app/main) and the device dialog (session/ui) can share the same
+cfg-editor (app/measure) and the device dialog (session/ui) can share the same
 evaluator without creating a session→app upward dependency.
 """
 
@@ -39,7 +39,7 @@ class EvalRef:
     [minimum, maximum] bounds the resolved value must satisfy. The device dialog
     resolves it against the current MetaDict at apply time (Design 1: resolve
     once at apply, not per-keystroke). This type must NOT leak into or depend on
-    app/main adapter machinery (EvalValue is a different, adapter-bound type).
+    app/measure adapter machinery (EvalValue is a different, adapter-bound type).
     """
 
     expr: str

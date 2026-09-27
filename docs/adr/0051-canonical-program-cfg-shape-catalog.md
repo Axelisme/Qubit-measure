@@ -18,7 +18,7 @@ shape 漂移。
 
 ## 決策
 
-`zcu_tools.gui.measure_cfg` 是跨 app、Qt-free 的 program cfg GUI projection owner：
+`zcu_tools.experiment.cfg_editing` 是跨 app、Qt-free 的 program cfg GUI projection owner：
 
 - closed catalog 固定列出七種 module 與六種 waveform discriminator、label、fresh spec factory；
 - catalog 不做 runtime registration，也不 import program/v2、app、session、experiment、Qt 或
@@ -38,7 +38,7 @@ scalar missing、missing/non-mapping section、reference selection與Sweep carri
 Literal永遠採Spec lock，extra raw key可代表domain object未公開於GUI的intentional subset，不做
 blanket rejection。
 
-`gui.measure_cfg.ProgramMaterializationPolicy`擁有program raw semantics：root `type/style`選shape、
+`experiment.cfg_editing.ProgramMaterializationPolicy`擁有program raw semantics：root `type/style`選shape、
 missing `ch/ro_ch`為0而其它scalar為None、missing/non-mapping nested section建立完整Spec default、
 required reference missing選`allowed[0]`，以及app可materialize subset。missing waveform style是Const；
 explicit unknown style/type Fast Fail。main policy支援完整七種module與六種waveform；autoflux只

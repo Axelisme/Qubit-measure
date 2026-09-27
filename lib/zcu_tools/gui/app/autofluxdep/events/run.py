@@ -1,7 +1,7 @@
 """Run-lifecycle event definitions for autofluxdep-gui.
 
 The run domain owns the ``RunEvent`` enum and all run-lifecycle payloads.
-Note: these are DIFFERENT from app/main's run payloads — autofluxdep run
+Note: these are DIFFERENT from app/measure's run payloads — autofluxdep run
 payloads carry no ``tab_id``; keep them separate.
 """
 

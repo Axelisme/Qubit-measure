@@ -1,6 +1,6 @@
 # `zcu_tools.gui.plotting` — Qt 繪圖接入
 
-**Last updated:** 2026-09-27 — worker bridge 適用範圍
+**Last updated:** 2026-09-27 — measure app 路徑修正
 
 此目錄提供共用的 matplotlib/Qt 接入機制，不決定各 app 的 figure 接受、保留或清理政策。`setup.py` 的 `configure_matplotlib_backend()` 必須在匯入 `pyplot` 前由入口程式呼叫，選擇 process-wide 的 `module://zcu_tools.gui.plotting.backend`；若 `pyplot` 已匯入會報錯。根模組透過 `__getattr__` 延遲載入 Qt／matplotlib 相關匯出，避免單純匯入 package 就觸發重型依賴。
 
@@ -8,4 +8,4 @@
 
 Host 透過 Qt signal 把 worker 發出的 attach、activate、refresh 等請求交給主線程；attach 等待主線程回傳 canvas。`GuiFigureCanvas.draw_idle()` 將 worker 的重繪請求送到主線程，主線程呼叫則直接使用 canvas 的 `draw_idle()`。Bridge 只接管已實作的 figure／draw 操作，不涵蓋 worker 執行的其他 Matplotlib 計算。`mathtext_lock.py` 另以 process-wide lock 序列化 mathtext parsing，並提供主線程 prewarm；它不取代 figure lifecycle 的主線程要求。另一種路徑是 worker 只通知更新資料，GUI slot 在主線程繪圖。Qt queued signal 本身不會凍結共用的可變 Result；app 必須依自己的寫入區域、讀取時機和生命週期界定資料所有權，不從 signal 推論通用同步保證。這兩種路徑及責任邊界見 [GUI ADR](../../../../docs/adr/0067-gui-application.md)。
 
-App 負責選定 figure 容器、設定 routing scope，以及決定 Run／Analyze figure 的生命週期。Measure app 的 `main/driven/qt_liveplot_backend.py` 仍是 app-local adapter，`main/services/scopes.py` 在 run worker 的 ambient scope 註冊它；不是此目錄的共用 backend。GUI 入口與 runtime 負責 process 啟動及 backend setup，這個目錄只提供機制，不接管 app 的啟停流程。
+App 負責選定 figure 容器、設定 routing scope，以及決定 Run／Analyze figure 的生命週期。Measure app 的 `measure/driven/qt_liveplot_backend.py` 仍是 app-local adapter，`measure/services/scopes.py` 在 run worker 的 ambient scope 註冊它；不是此目錄的共用 backend。GUI 入口與 runtime 負責 process 啟動及 backend setup，這個目錄只提供機制，不接管 app 的啟停流程。
