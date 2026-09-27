@@ -94,3 +94,56 @@ def test_md_set_reports_confirmed_prefix_when_second_socket_write_fails(
         bridge.disconnect()
         sock.close()
         fx.stop()
+
+
+@pytest.mark.uses_wall_clock
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"nested": [{"__complex__": "not-a-tag"}]},
+        {"__complex__": [1, 2]},
+        {"__metadict_string__": "literal"},
+    ],
+)
+def test_md_set_rejects_reserved_literal_tags_before_changing_context(
+    qapp, tmp_path: Path, payload: dict[str, Any]
+) -> None:
+    fx = Fixture(project_root=str(tmp_path), empty_project=True)
+    fx.start()
+    bridge, invoke = mcp_client(fx.service.port, tmp_path)
+    sock = open_client(fx.service.port)
+    try:
+        invoke("connect", {"port": fx.service.port})
+        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
+        invoke("context_create", {"label": "base"})
+        invoke("md_set", {"values": {"stable": {"note": "safe"}}})
+        meta_path = (
+            Path(invoke("project", {})["result_dir"]) / "exps/base/meta_info.json"
+        )
+        assert meta_path.is_file()
+
+        with pytest.raises(GuiRpcError) as failure:
+            invoke("md_set", {"values": {"first": 1, "payload": payload, "later": 3}})
+        message = str(failure.value)
+        assert "payload" in message
+        assert "first" in message and "before" in message and "after" in message
+        assert "reserved" in message
+        assert set(call(sock, "context.md_get", {})["result"]["keys"]) == {
+            "stable",
+            "first",
+        }
+        assert invoke("md_get", {"keys": ["stable", "first"]}) == {
+            "values": {"stable": {"note": "safe"}, "first": 1}
+        }
+        assert "payload" not in meta_path.read_text(encoding="utf-8")
+        assert invoke("context_create", {"label": "copy", "clone_from": "base"}) == {
+            "label": "copy"
+        }
+        assert invoke("context_use", {"label": "base"}) == {"label": "base"}
+        assert invoke("md_get", {"keys": ["stable", "first"]}) == {
+            "values": {"stable": {"note": "safe"}, "first": 1}
+        }
+    finally:
+        bridge.disconnect()
+        sock.close()
+        fx.stop()

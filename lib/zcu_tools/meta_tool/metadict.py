@@ -80,6 +80,18 @@ def _dump_tagged_values(obj: Any) -> Any:
     return obj
 
 
+def _reject_reserved_literal_tags(value: Any) -> None:
+    """Reject user dicts that reload would mistake for serialization markers."""
+    if isinstance(value, dict):
+        if len(value) == 1 and next(iter(value)) in (_COMPLEX_TAG, _STRING_TAG):
+            raise ValueError("reserved MetaDict tag cannot be stored as a literal dict")
+        for nested in value.values():
+            _reject_reserved_literal_tags(nested)
+    elif isinstance(value, list | tuple):
+        for nested in value:
+            _reject_reserved_literal_tags(nested)
+
+
 class MetaDict(SyncFile):
     def __init__(
         self, json_path: str | Path | None = None, readonly: bool = False
@@ -177,6 +189,7 @@ class MetaDict(SyncFile):
         if self._readonly:
             raise AttributeError("MetaDict is read-only")
 
+        _reject_reserved_literal_tags(value)
         self.sync()
         self._data[name] = value
         self._dirty = True
@@ -228,6 +241,8 @@ class MetaDict(SyncFile):
             updates.update(values)
         updates.update(kwargs)
         self._validate_data_keys(updates)
+        for value in updates.values():
+            _reject_reserved_literal_tags(value)
         if not updates:
             return
 
