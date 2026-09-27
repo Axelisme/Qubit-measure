@@ -9,9 +9,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.services.run_analyze_control import (
-        RunAnalyzeControlPort,
+        ActiveTabOperation,
     )
-    from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.operation_handles import AwaitResult, OperationOutcome
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
@@ -33,6 +32,30 @@ class OperationProgressPort(Protocol):
     def bars_for_operation(
         self, operation_id: int, /
     ) -> tuple[tuple[int, ProgressBarModel], ...]: ...
+
+
+class TabOperationOwnerPort(Protocol):
+    """Run/analyze owner whose live operations operation control lists and cancels."""
+
+    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]: ...
+    def cancel_run(self) -> bool: ...
+    def cancel_analyze(self, tab_id: str) -> bool: ...
+
+
+class DeviceOperationRef(Protocol):
+    """The fields operation control reads from one live device operation."""
+
+    @property
+    def token(self) -> int: ...
+    @property
+    def device_name(self) -> str: ...
+
+
+class DeviceOperationOwnerPort(Protocol):
+    """Device owner whose live operations operation control lists and cancels."""
+
+    def get_active_device_operations(self) -> tuple[DeviceOperationRef, ...]: ...
+    def cancel_device_operation(self, name: str) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +101,8 @@ class OperationControlFacet:
         *,
         handles: OperationAwaitPort,
         progress: OperationProgressPort,
-        run_analyze: RunAnalyzeControlPort,
-        device: DeviceControlPort,
+        run_analyze: TabOperationOwnerPort,
+        device: DeviceOperationOwnerPort,
     ) -> None:
         self._handles = handles
         self._progress = progress

@@ -28,6 +28,12 @@ from zcu_tools.gui.session.operation_handles import (
     OperationOutcome,
 )
 
+from tests.gui.app.main.services._operation_owner_fakes import (
+    DeviceOperationOwner,
+    TabOperationOwner,
+    UnusedProgress,
+)
+
 
 def _HANDLER(ctrl, params):
     # Generic operation handlers must not require the giant ctrl surface.
@@ -54,9 +60,9 @@ def test_unknown_and_evicted_handle_do_not_become_finished():
     handles = OperationHandles()
     control = OperationControlFacet(
         handles=handles,
-        progress=cast(Any, SimpleNamespace()),
-        run_analyze=cast(Any, SimpleNamespace()),
-        device=cast(Any, SimpleNamespace()),
+        progress=UnusedProgress(),
+        run_analyze=TabOperationOwner(),
+        device=DeviceOperationOwner(),
     )
     for op in (777,):
         with pytest.raises(RemoteError) as exc_info:

@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any, cast
-
 import pytest
 from zcu_tools.gui.app.main.services.operation_control import (
     ActiveOperation,
@@ -21,6 +18,11 @@ from zcu_tools.gui.session.operation_handles import (
 from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
 from tests.gui._control_fakes import CallLog, call
+from tests.gui.app.main.services._operation_owner_fakes import (
+    DeviceOperation,
+    DeviceOperationOwner,
+    TabOperationOwner,
+)
 
 
 class RecordingHandles:
@@ -61,8 +63,8 @@ def test_operation_control_routes_await_and_elapsed_to_handles() -> None:
     facet = OperationControlFacet(
         handles=handles,
         progress=RecordingProgress(log),
-        run_analyze=cast(Any, SimpleNamespace()),
-        device=cast(Any, SimpleNamespace()),
+        run_analyze=TabOperationOwner(),
+        device=DeviceOperationOwner(),
     )
 
     assert facet.await_operation(7, 0.5) is handles.result
@@ -75,17 +77,13 @@ def test_operation_control_routes_await_and_elapsed_to_handles() -> None:
 
 def test_active_operations_merge_tab_and_device_owners() -> None:
     log = CallLog()
-    run = SimpleNamespace(
-        active_tab_operations=lambda: (ActiveTabOperation(11, "gui-tab", "run"),)
-    )
-    device = SimpleNamespace(
-        get_active_device_operations=lambda: (SimpleNamespace(token=12),)
-    )
+    run = TabOperationOwner((ActiveTabOperation(11, "gui-tab", "run"),))
+    device = DeviceOperationOwner((DeviceOperation(12),))
     facet = OperationControlFacet(
         handles=RecordingHandles(log),
         progress=RecordingProgress(log),
-        run_analyze=cast(Any, run),
-        device=cast(Any, device),
+        run_analyze=run,
+        device=device,
     )
 
     assert facet.active_operations() == (
@@ -104,24 +102,27 @@ def test_cancel_by_handle_uses_owner_hook_and_preserves_other_operations() -> No
     device_token = handles.create(
         cancel_hook=lambda: stopped.append(2), origin=EventOrigin(kind="user")
     )
-    run = SimpleNamespace(
-        active_tab_operations=lambda: (
+
+    def cancel_run() -> bool:
+        handles.cancel(run_token)
+        return True
+
+    run = TabOperationOwner(
+        (
             ActiveTabOperation(run_token, "gui-run", "run"),
             ActiveTabOperation(post_token, "gui-post", "analyze"),
         ),
-        cancel_run=lambda: (handles.cancel(run_token), True)[1],
+        on_cancel_run=cancel_run,
     )
-    device = SimpleNamespace(
-        get_active_device_operations=lambda: (
-            SimpleNamespace(token=device_token, device_name="bias"),
-        ),
-        cancel_device_operation=lambda name: handles.cancel(device_token),
+    device = DeviceOperationOwner(
+        (DeviceOperation(device_token, "bias"),),
+        on_cancel=lambda _name: handles.cancel(device_token),
     )
     facet = OperationControlFacet(
         handles=handles,
         progress=RecordingProgress(CallLog()),
-        run_analyze=cast(Any, run),
-        device=cast(Any, device),
+        run_analyze=run,
+        device=device,
     )
 
     assert facet.cancel_operation(run_token) == "cancelling"
@@ -145,8 +146,8 @@ def test_cancel_does_not_report_a_failed_operation_as_finished() -> None:
     facet = OperationControlFacet(
         handles=handles,
         progress=RecordingProgress(CallLog()),
-        run_analyze=cast(Any, SimpleNamespace()),
-        device=cast(Any, SimpleNamespace()),
+        run_analyze=TabOperationOwner(),
+        device=DeviceOperationOwner(),
     )
 
     with pytest.raises(FailedPreconditionError, match="ramp failed") as exc_info:
@@ -163,8 +164,8 @@ def test_operation_control_routes_progress_to_progress_service() -> None:
     facet = OperationControlFacet(
         handles=RecordingHandles(log),
         progress=progress,
-        run_analyze=cast(Any, SimpleNamespace()),
-        device=cast(Any, SimpleNamespace()),
+        run_analyze=TabOperationOwner(),
+        device=DeviceOperationOwner(),
     )
 
     assert facet.get_operation_progress(9) is progress.bars
