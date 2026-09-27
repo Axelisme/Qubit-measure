@@ -10,6 +10,8 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_operation import wait
 
+_TERMINAL_WAIT_SECONDS = 30.0
+
 
 def devices(
     ctx: MeasureToolContext, arguments: dict[str, Any]
@@ -56,7 +58,7 @@ def _check_terminal(op: int, outcome: dict[str, Any]) -> bool:
 
 
 def _await_device(ctx: MeasureToolContext, op: int) -> None:
-    deadline = time.monotonic() + 30.0
+    deadline = time.monotonic() + _TERMINAL_WAIT_SECONDS
     while True:
         remaining = max(0.0, deadline - time.monotonic())
         outcome = wait(ctx, {"op": op, "timeout": remaining})
