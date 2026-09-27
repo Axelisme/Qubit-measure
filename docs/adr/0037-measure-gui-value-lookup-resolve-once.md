@@ -50,9 +50,11 @@ Source references use a sibling concept to `EvalValue`, not an extension of
 
 - `EvalValue` stores an md expression together with its last resolved result.
   The field resolves it when set and on expression refresh. Cfg lowering
-  outputs the stored result when one exists; with an expression resolver it
-  still re-evaluates the expression, but only to log drift. Without a stored
-  result, lowering outputs the resolver's evaluation.
+  outputs the stored result when one exists. With an expression resolver,
+  lowering first re-evaluates every expression against the current md and
+  aborts if any evaluation fails; a successful re-evaluation that differs from
+  the stored result only logs drift. Without a stored result, lowering outputs
+  the resolver's evaluation.
   The earlier wording "a live md expression resolved by cfg lowering" no longer
   describes the current semantics, which [[0065]] owns.
 - `ValueRef` means "read this registered value now and materialize the result".

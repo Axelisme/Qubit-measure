@@ -32,9 +32,10 @@ keeps the path set unchanged yields no diff, so read ``editor.get`` /
 on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}``.
 The field resolves the expression when it is set and on expression refresh and
 stores the result; lowering at ``commit`` outputs that stored ``resolved``
-number (re-evaluating against MetaDict only to log drift, and using the fresh
-evaluation only when no stored result exists), because ModuleLibrary stores
-concrete numbers, never md references. ``value_ref`` tags are different: they are
+number, because ModuleLibrary stores concrete numbers, never md references.
+Lowering still re-evaluates every expression against the current MetaDict
+first and aborts if one fails; a differing result only logs drift, and the
+fresh evaluation is output only when no stored result exists. ``value_ref`` tags are different: they are
 resolved once at ``set_field`` time and stored only as ``DirectValue`` snapshots.
 
 All methods run on the Qt main thread (the cfg draft and ModuleLibrary live

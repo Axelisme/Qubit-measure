@@ -26,7 +26,7 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 - **draft / committed**：session = draft，`State.cfg_schema` = committed（run/save/persist 讀的 SSOT）。tab session 改動經 auto-commit（widget `on_change` → `schema_changed` → `update_tab_cfg`）即時同步進 State；run/save 前一道**強制 commit = valid 驗證閘**（draft invalid → fail-fast）。
 - **commit 只交 CfgSchema 快照**：`CfgEditorSession.commit` 不 lower、不 register，只交出**未-lower 的 `CfgSchema`**；`CfgEditorService.commit(editor_id, name)` 經 write port 交給 ContextService 寫入；measure app 注入 lowering callback，ContextService 控制提交、版本與事件（見 [[0067]]）。
 - **external refresh 歸 service**（[[0067]] Reaction）：service 訂閱 `MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到每個 draft 的 `refresh_expressions()`、`refresh_references()` 與 `refresh_options(source_id)`。職責跟著 draft 所有權從 widget 移到 service。
-- **eval value** 以 tagged 形式 `{"__kind":"eval","expr":...}` 上 wire。field 在設定與 expression refresh 時保存解析結果，lowering 優先使用該結果（見 [[0065]]）。
+- **eval value** 以 tagged 形式 `{"__kind":"eval","expr":...}` 上 wire。field 在設定與 expression refresh 時保存解析結果；lowering 輸出該結果，有 expression resolver 時仍先以目前 md 重新求值並在失敗時中止（見 [[0065]]）。
 - **ref 切換漸進**：`editor.set_field` 回傳 `valid`；edit 會改變路徑形狀時，另回整個 draft 前後的 `removed`／`added` 淨路徑差異。路徑集合不變的內容變更沒有差異；agent 需要新樹時以 `editor.get` 或 `tab.get_cfg` 讀取。本篇原先承諾回傳「以被改 path 為根的子樹 paths」，此契約已由淨差異取代。commit 失敗保留 session。
 - **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不帶 reason 區分**（修復動作都是重開）。
 - **editor 專屬變更流**（`editor_changed{editor_id, paths}` / `editor_closed{editor_id, reason}`，**不走全域 EventBus**）：機制在 RPC/GUI 端完整保留（GUI 內部用）；但 **agent 不 subscribe**（[[0002]] Phase 120c）——agent 改為「下次 `editor.set_field` 撞 `unknown editor session` 才知 session 沒了」，與樂觀模型一致（撞牆→重開）。
