@@ -249,7 +249,7 @@ class ContextService:
             )
         )
         self._state.set_context(new_ctx)
-        # md/ml content is fully swapped → bump context (path 3 of 3; see the
+        # md/ml content is fully swapped → bump context (path 2 of 2; see the
         # canonical anchor on ContextService.set_md_attr). set_context itself does
         # not bump, so context-switch callers bump here explicitly.
         self._state.version.bump("context")

@@ -152,8 +152,9 @@ class SessionState:
         guarded resource. This keeps soc-connect / predictor-load from spuriously
         marking md/ml-dependent ops (run / editor.commit / writeback) stale.
 
-        The full set of "writes md/ml → bump context" paths is enumerated at the
-        canonical anchor on ``ContextService.set_md_attr``.
+        The full set of "completed md/ml write → bump context" paths is enumerated
+        at the canonical anchor on ``ContextService.set_md_attr``; a failed batch
+        write leaves an unpublished prefix without a bump.
         """
         self._assert_owner()
         self.session_env = ctx
