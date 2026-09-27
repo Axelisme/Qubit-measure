@@ -27,7 +27,12 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.main._reload_fakes import Loader, OldAdapter
-from tests.gui.app.main.services.remote._helpers import open_client, recv_response, send
+from tests.gui.app.main.services.remote._helpers import (
+    mcp_client,
+    open_client,
+    recv_response,
+    send,
+)
 
 
 class RuntimeCfg(ExpCfgModel):
@@ -153,6 +158,36 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
             else:
                 assert current == original
     finally:
+        remote.stop()
+
+
+def test_mcp_tab_open_from_file_loads_and_backfills_gui(
+    app, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
+    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
+    ctrl, window, state, previous = app
+    remote = RemoteControlAdapter(
+        controller=ctrl,
+        opts=ControlOptions(port=0),
+        owner_scheduler=QtOwnerScheduler(),
+        render_view=window,
+    )
+    port = remote.start()
+    bridge, invoke = mcp_client(port, tmp_path)
+    try:
+        invoke("connect", {"port": port})
+        tab = invoke("tab_open", {"experiment": "demo", "from_file": "result.hdf5"})[
+            "tab"
+        ]
+        assert tab != previous
+        assert state.active_tab_id == tab
+        assert state.get_tab(tab).cfg_schema.value.fields["knob"] == DirectValue(42)
+        summary = invoke("tab_get", {"tab": tab, "include": ["summary"]})["summary"]
+        assert summary["state"]["has_result"] is True
+        assert state.active_tab_id == tab
+    finally:
+        bridge.disconnect()
         remote.stop()
 
 
