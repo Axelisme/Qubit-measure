@@ -147,7 +147,7 @@ class RunService:
             self._teardown_retired(retired)
             self._state.set_tab_running(tab_id, False)
             self._active_token = None
-            # STATE is observable before settle (ADR-0067 / stage2c invariant 1).
+            # State is observable before settle (ADR-0066 / stage2c invariant 1).
             settle(OperationOutcome("finished"))
             self._bus.emit(RunFinishedPayload(tab_id=tab_id, outcome="finished"))
 

@@ -1,17 +1,9 @@
-"""Ports — interfaces that application services depend on instead of concrete
-infrastructure (driven/secondary adapters).
+"""Narrow ports for boundaries that need isolation (ADR-0067).
 
-DDD/Hexagonal: an application service must not depend on a concrete external
-system (persistence, project file I/O, hardware driver); it depends on a *port*
-(an interface) which a driven adapter implements. See ``docs/adr/0008`` §
-"Driven Adapter" and the M1 milestone.
-
-These ports are ``Protocol``s (structural), so the existing concrete services
-(``StartupPersistenceService`` / ``SessionPersistenceService`` / ``IOManager``)
-satisfy them without any inheritance change — M1 only narrows what each consumer
-*sees* and lets tests inject in-memory fakes. Each port declares exactly the
-methods its consumer calls (interface segregation), so a consumer cannot reach
-infrastructure capability it has no business using.
+Application services can collaborate through directional commands. At shared/app
+or owner boundaries, a consumer may use a port instead of taking a concrete
+service or infrastructure dependency. These structural ``Protocol``s declare
+only what the consumer uses; an existing implementer need not inherit the port.
 """
 
 from __future__ import annotations
@@ -211,7 +203,9 @@ class TabLifecyclePort(Protocol):
     """Tab create/restore/close + cfg as commanded by ``WorkspaceService``.
 
     ``WorkspaceService`` orchestrates the tab lifecycle (one-way command); it
-    depends on this port, not the concrete ``TabService`` (ADR-0067 violation 2).
+    depends on this narrow port to isolate the tab lifecycle command surface
+    across the workspace/tab owner boundary (ADR-0067). This is a directional
+    service command, not a ban on service collaboration.
     """
 
     def new_tab(

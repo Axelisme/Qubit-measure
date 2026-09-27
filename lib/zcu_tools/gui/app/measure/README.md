@@ -604,16 +604,24 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   交給共用 service 在寫入時呼叫；`CfgEditorService` 只交未 lower 的 schema。
   Writeback 選出的 md／ml entries 交給一次 `apply_ml_writes()`，每批至多
   bump 一次、每種變更事件至多送一次。這不是失敗時整批 rollback 的保證：
-  lower 與 register 依序執行，後項失敗時前項可能已改動 live content。
+  lower 與 register 依序執行，dump 也先於 version bump 與事件；後項 lower、
+  register 或 dump 失敗時，前項可能已改動 live md／ml，卻沒有這次 batch 的
+  `context` version bump 或變更事件。成功完成後才發布版本及事件；失敗前綴
+  不是已發布的完整提交。尚待實作的無失敗前綴 Apply 見
+  [Cfg 編輯 draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md#observationrun-與-apply)。
   寫入與 crash durability 是不同責任，磁碟保存見 ADR-0063。
-- `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。Framework 讀同一份
-  `AdapterCapabilities` 宣告來判斷 SoC 需求、analysis、post-analysis、load 的支援範圍；
-  `requires_soc` 不代表 SoC 已連線。`GuardService` 檢查當次
-  context、cfg、SoC；operation owner 另檢查動態 gate。`LoadService` 也檢查 `load_data`，
-  不因 UI 控制項已停用就略過 application guard。`BaseAdapter` 的 import-time
-  條件 hook 驗證與 concrete adapter 義務見
+- `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
+  宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表
+  SoC 已連線。Run guard 檢查 context、cfg、SoC 與 preflight；operation owner 另
+  檢查動態 gate。Load permit 和 `LoadService` 檢查 `load_data`，Qt tab 依 analysis／
+  post-analysis 宣告建立控制項，remote writeback subtab params 也檢查對應宣告。
+  但 analyze permit 未查 analysis，非 interactive 的分析會進 FIT 路徑；
+  post-analyze 入口未查 post-analysis。不可將 UI／remote 的局部檢查視為
+  所有 application 入口的保證；補齊目標見
+  [GUI capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
+  `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
   [experiment adapter README](../../../experiment/v2_gui/adapters/README.md)；
-  framework 不從 `getattr` 探測是否支援某個操作。
+  capability 判斷不用 method presence 推測。
 - Adapter `cfg_definition()` is context-free authoring; only fresh
   `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.
 - `validate_run_request(req, raw_cfg)` is a mandatory framework member that

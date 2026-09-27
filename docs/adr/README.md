@@ -68,6 +68,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
 - [外部 agent launch 責任](draft/external-agent-launch-ownership.md)：已核准方向待 Remote／Transport ADR 核實轉正。
 - [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：editing port、refresh／override、revision 與 atomic batch／Apply 尚待實作。
+- [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
