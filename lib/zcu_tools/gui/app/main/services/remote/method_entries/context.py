@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     _json,
@@ -29,9 +30,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_new",
         MethodSpec(
             10.0,
-            "Create a new context and make it active. Echoes {label, has_active_context} "
-            "— the auto-derived label (the agent cannot name it directly).",
+            "Create a new context and make it active. Optional label names it; "
+            "otherwise the GUI derives a label from bind_device value/unit. "
+            "clone_from='current' copies the active context (or starts empty when "
+            "none is active); null starts empty. An unknown clone source fails "
+            "without changing active/labels. Echoes {label, has_active_context}.",
             (
+                _str_opt("label", "Optional explicit context label"),
                 _str_opt(
                     "bind_device",
                     "Connected flux device to bind: its current value/unit name the "
@@ -81,7 +86,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_md_get",
         MethodSpec(
             5.0,
-            "List MetaDict keys",
+            "List MetaDict keys; summaries=true also returns {values} with scalars "
+            "and descriptions, never full non-scalar contents.",
+            (
+                ParamSpec(
+                    "summaries",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Include compact value summaries",
+                ),
+            ),
         ),
     ),
     method_entry(
@@ -136,8 +151,19 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_md_set_attr",
         MethodSpec(
             5.0,
-            "Set one MetaDict attribute",
-            (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
+            "Set one MetaDict attribute; receipt=true returns its actual "
+            "{before, after} from the owner turn.",
+            (
+                _str("key", "MetaDict key"),
+                _json("value", "JSON-safe value"),
+                ParamSpec(
+                    "receipt",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Return actual before/after values",
+                ),
+            ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),

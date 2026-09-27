@@ -17,8 +17,6 @@ from zcu_tools.gui.session.value_lookup import ValueInfo
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._wire_values import _json_safe
-
 
 def _h_context_use(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
@@ -41,6 +39,7 @@ def _h_context_use(
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"unknown context label: {label!r}; available: {available}",
+            reason="unknown_context",
         )
     ctx.use_context(label)
     active = ctx.get_active_context_label()
@@ -64,12 +63,22 @@ def _h_context_new(
             "No project applied yet; use rpc_call(method='startup.apply', params=...) first.",
             reason="no_project",
         )
+    label = params.get("label")
     bind_device = params["bind_device"]
     clone_from = params["clone_from"]
-    ctx.new_context(
-        bind_device=str(bind_device) if bind_device is not None else None,
-        clone_from=str(clone_from) if clone_from is not None else None,
-    )
+    source = ctx.get_active_context_label() if clone_from == "current" else clone_from
+    try:
+        ctx.new_context(
+            label=str(label) if label is not None else None,
+            bind_device=str(bind_device) if bind_device is not None else None,
+            clone_from=str(source) if source is not None else None,
+        )
+    except FileExistsError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"context label {label!r} already exists; use context_use or provide a different label",
+            reason="context_exists",
+        ) from exc
     # new_context makes the new context active — return its label so the agent
     # knows what was created without a follow-up read.
     label = ctx.get_active_context_label()
@@ -143,12 +152,32 @@ def _h_context_snapshot(
         ) from exc
 
 
+def _md_summary(value: object) -> object:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, np.ndarray):
+        return f"{' × '.join(str(size) for size in value.shape)} array"
+    if isinstance(value, (list, tuple)):
+        if value and all(isinstance(row, (list, tuple)) for row in value):
+            widths = {len(row) for row in value}
+            if len(widths) == 1:
+                return f"{len(value)} × {widths.pop()} matrix"
+        return f"{len(value)} items"
+    if isinstance(value, dict):
+        return f"{len(value)} keys"
+    return type(value).__name__
+
+
 def _h_context_md_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    del params
     md = adapter.context_control.get_current_md()
-    return {"keys": sorted(str(k) for k in md.keys())}
+    keys = sorted(str(k) for k in md.keys())
+    if not params.get("summaries", False):
+        return {"keys": keys}
+    return {"keys": keys, "values": {key: _md_summary(md.get(key)) for key in keys}}
 
 
 def _h_context_md_get_attr(
@@ -159,8 +188,19 @@ def _h_context_md_get_attr(
     sentinel = object()
     value = md.get(key, sentinel)
     if value is sentinel:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown md key: {key!r}")
-    return {"key": key, "value": _json_safe(value)}
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"unknown md key: {key!r}; available: {sorted(map(str, md.keys()))}",
+            reason="unknown_md_key",
+        )
+    try:
+        return {"key": key, "value": _context_wire_value(value)}
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"cannot fully read MetaDict key {key!r}: {exc}",
+            reason="unserializable_context",
+        ) from exc
 
 
 def _value_info_to_wire(info: ValueInfo) -> dict[str, object]:
@@ -259,8 +299,18 @@ def _h_context_md_set_attr(
 ) -> Mapping[str, object]:
     key = str(params["key"])
     value = params["value"]
-    adapter.context_control.set_md_attr(key, value)
-    return {}
+    ctx = adapter.context_control
+    receipt = params.get("receipt", False)
+    sentinel = object()
+    previous = ctx.get_current_md().get(key, sentinel) if receipt else sentinel
+    ctx.set_md_attr(key, value)
+    if not receipt:
+        return {}
+    current = ctx.get_current_md().get(key, sentinel)
+    return {
+        "before": None if previous is sentinel else _context_wire_value(previous),
+        "after": _context_wire_value(current),
+    }
 
 
 def _h_context_md_del_attr(

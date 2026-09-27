@@ -79,18 +79,36 @@ def _h_startup_apply(
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.startup import StartupProjectRequest
 
-    chip = str(params["chip_name"])
-    qub = str(params["qub_name"])
-    scope_id_raw = params.get("scope_id")
+    # The handler runs on the GUI owner thread: read current identity, resolve
+    # omitted fields and apply the result in this single RPC, never from MCP.
+    has_project = adapter.ctrl.has_project()
+    current = adapter.ctrl.get_exp_context() if has_project else None
+    chip_raw = params.get("chip_name")
+    qub_raw = params.get("qub_name")
+    res_raw = params.get("res_name")
+    if current is None and (chip_raw is None or qub_raw is None or res_raw is None):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "chip_name, qub_name and res_name are required for a first project",
+            reason="missing_project_fields",
+        )
+    if current is None:
+        chip, qub, res = str(chip_raw), str(qub_raw), str(res_raw)
+    else:
+        chip = str(chip_raw) if chip_raw is not None else current.chip_name
+        qub = str(qub_raw) if qub_raw is not None else current.qub_name
+        res = str(res_raw) if res_raw is not None else current.res_name
 
+    scope_id_raw = params.get("scope_id")
+    if scope_id_raw is not None:
+        scope_id = str(scope_id_raw)
+    elif current is not None and (chip, qub) == (current.chip_name, current.qub_name):
+        scope_id = adapter.ctrl.get_persisted_startup().scope_id or None
+    else:
+        scope_id = None
     req = StartupProjectRequest(
-        chip_name=chip,
-        qub_name=qub,
-        res_name=str(params["res_name"]),
-        scope_id=str(scope_id_raw) if scope_id_raw else None,
+        chip_name=chip, qub_name=qub, res_name=res, scope_id=scope_id
     )
-    # Echo the resolved project (apply always mutates and either succeeds or
-    # raises — there is no no-op outcome, so no {applied:false} branch).
     return adapter.ctrl.apply_startup_project(req)
 
 

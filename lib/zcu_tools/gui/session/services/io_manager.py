@@ -44,6 +44,7 @@ class IOManager:
         value: float | None = None,
         unit: str = "none",
         clone_from: str | None = None,
+        label: str | None = None,
     ) -> ExpContext:
         """Create a new context; return updated ExpContext to Controller.
 
@@ -53,10 +54,11 @@ class IOManager:
         """
         if self._em is None:
             raise RuntimeError("IOManager not set up. Call setup() first.")
-        ml, md = self._em.new_flux(value=value, clone_from=clone_from, unit=unit)  # type: ignore[arg-type]
-        # Flush files so list_contexts() and use_context() can find them immediately.
-        md.dump()
-        ml.dump()
+        if unit not in ("A", "V", "K", "none"):
+            raise ValueError(f"unsupported context unit: {unit!r}")
+        ml, md = self._em.new_flux(
+            value=value, clone_from=clone_from, label=label, unit=unit
+        )
         return dataclasses.replace(base_ctx, md=md, ml=ml)
 
     @property

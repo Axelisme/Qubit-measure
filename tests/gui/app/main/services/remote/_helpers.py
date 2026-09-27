@@ -36,6 +36,7 @@ from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
 def make_ctx() -> ExpContext:
@@ -104,18 +105,25 @@ class Fixture:
         project_root: str | None = None,
         *,
         active_label: str | None = None,
+        empty_project: bool = False,
     ) -> None:
-        self.state = State(make_ctx())
+        initial = (
+            ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+            if empty_project
+            else make_ctx()
+        )
+        self.state = State(initial)
         self.registry = Registry()
         register_all(self.registry)
         if not self.registry.has("fake"):
             self.registry.register("fake", FakeAdapter)
         self.view = make_view()
         io_manager = IOManager()
-        exp_manager = MagicMock()
-        if active_label is not None:
-            exp_manager.current_label = active_label
-        io_manager._em = exp_manager
+        if not empty_project:
+            exp_manager = MagicMock()
+            if active_label is not None:
+                exp_manager.current_label = active_label
+            io_manager._em = exp_manager
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,
