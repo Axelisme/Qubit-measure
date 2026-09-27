@@ -79,10 +79,26 @@ def test_context_md_ml_and_value_handlers_use_context_control_facet() -> None:
         "key": "r_f",
         "value": 6000.0,
     }
-    assert _dispatch(ctrl, "context.ml_get", {}) == {
-        "modules": [{"name": "readout", "kind": "pulse"}],
-        "waveforms": [{"name": "drive", "style": "const"}],
+    library_index = _dispatch(ctrl, "context.ml_get", {})
+    assert set(library_index) == {"modules", "waveforms"}
+    modules = library_index["modules"]
+    waveforms = library_index["waveforms"]
+    assert isinstance(modules, list) and len(modules) == 1
+    assert isinstance(waveforms, list) and len(waveforms) == 1
+    module, waveform = modules[0], waveforms[0]
+    assert isinstance(module, dict) and isinstance(waveform, dict)
+    assert {key: module[key] for key in ("name", "kind")} == {
+        "name": "readout",
+        "kind": "pulse",
     }
+    assert {key: waveform[key] for key in ("name", "style")} == {
+        "name": "drive",
+        "style": "const",
+    }
+    assert all(
+        isinstance(item["description"], str) and item["description"]
+        for item in (module, waveform)
+    )
     assert _dispatch(ctrl, "value.list", {}) == {
         "values": [
             {
