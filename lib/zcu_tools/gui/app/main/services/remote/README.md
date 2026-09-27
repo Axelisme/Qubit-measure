@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26，bounded RPC backlog，GUI 95 / WIRE 63
+**Last updated:** 2026-09-27，MCP 85 / GUI 95 / WIRE 63
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -126,7 +126,7 @@ The launch/connect note reports three numbers:
   owned here.
 
 Current measure-gui values are `WIRE_VERSION = 63`, `GUI_VERSION = 95`, and
-`MCP_VERSION = 84` (defined in `zcu_tools.mcp.measure.server`). GUI 93 removes
+`MCP_VERSION = 85` (defined in `zcu_tools.mcp.measure.server`). GUI 93 removes
 Run's context-content dependency after freezing cfg and device inputs; tab cfg,
 tab existence, SoC, devices and hardware exclusion remain protected. WIRE 63
 carries complete cached cfg observations; GUI 92 bounds response encoding failures.
