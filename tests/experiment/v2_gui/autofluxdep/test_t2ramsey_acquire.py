@@ -13,13 +13,13 @@ second pulse makes the fringe resolvable (lower-layer behaviour).
 from __future__ import annotations
 
 import numpy as np
+from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from .._helpers import (
+from tests.gui.app.autofluxdep._helpers import (
     ACQUIRE_READOUT,
     connect_mock,
     high_snr_simparams,

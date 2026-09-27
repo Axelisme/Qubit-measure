@@ -17,9 +17,9 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
-from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result

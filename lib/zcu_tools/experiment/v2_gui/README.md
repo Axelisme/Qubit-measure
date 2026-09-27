@@ -1,6 +1,8 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-27 — cfg editing relocation; session environment naming
+**Last updated:** 2026-09-27 — autofluxdep branch entry
+
+[Autofluxdep 實驗接入](autofluxdep/README.md) 提供 app workflow 的 concrete Builder／Node；其 catalog 與 `_support` 不依賴 measure adapters。
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/` →

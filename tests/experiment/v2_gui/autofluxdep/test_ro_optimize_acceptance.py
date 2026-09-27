@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import _accepted_ro_optimum
+from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import _accepted_ro_optimum
 
 
 def _axes() -> tuple[np.ndarray, np.ndarray]:

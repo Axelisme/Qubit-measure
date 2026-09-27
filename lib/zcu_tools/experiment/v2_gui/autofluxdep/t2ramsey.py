@@ -1,32 +1,8 @@
-"""t2echo — Hahn-echo decay/fringe acquire and fit.
+"""t2ramsey — Ramsey fringe acquire and fit.
 
-The Builder lowers resolved pi/pi2/readout modules plus timing knobs into the
-run cfg. The short-lived Node applies flux, sweeps echo delay, dispatches the
-configured fit, fills the Result row, and emits trusted raw ``t2e`` /
-``t2e_err``.
-
-Unlike t2ramsey, the echo sequence refocuses static dephasing and typically
-yields a longer coherence time; the difference is purely in the pulse sequence.
-The default ``auto_by_detune`` fit method uses a pure decay fit when
-``detune_ratio == 0`` and a fringe fit otherwise.
-
-- needs the ``pi_pulse`` and ``pi2_pulse`` modules (lenrabi produces both) — the
-  Hahn echo needs both a pi refocusing pulse and two pi/2 pulses. The resolver
-  skips the node until concrete drive modules are available.
-- reads ``t1`` (smooth="ewma") and ``t2e`` (smooth="ewma") as optional deps:
-  ``t2e`` seeds the planted t2 so the sweep tracks a plausible echo time;
-  ``t1`` is available for cfg sanity checks (not used directly in the prototype).
-- the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
-  default).
-
-``produce`` lowers the active context (a populated ``ml`` + the upstream
-``pi_pulse`` / ``pi2_pulse`` / ``opt_readout`` modules on the snapshot, real
-``PulseCfg`` / ``ReadoutCfg`` lenrabi/ro_optimize output) into a runnable
-``T2EchoCfgTemplate`` via ``ml.make_cfg`` (mirroring the notebook's T2EchoTask
-cfg_maker), takes the delay-time window (``sweep_range``) from the built cfg, and
-acquires against a flux-aware MockSoc (offline) or real hardware. The cfg is the
-source of the measurement window; ``make_cfg`` Fast Fails when the context is
-unconfigured.
+The Builder resolves the required ``pi2_pulse``, optional readout, and smoothed
+timing feedback into a typed cfg. The Node sweeps Ramsey delay, applies the
+configured phase ramp, and emits trusted ``t2r``, ``t2r_err``, and detune values.
 """
 
 from __future__ import annotations
@@ -36,13 +12,11 @@ from typing import Any
 
 import numpy as np
 
-from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
+from zcu_tools.analysis.fitting import fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
-from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
-from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
     DEFAULT_ACQUIRE_RETRY,
     SnrProbe,
     acquire_retry,
@@ -55,19 +29,17 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     setup_flux_point,
     signal2real_flip,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
-    is_lowerable_pulse_module,
+from zcu_tools.experiment.v2_gui.autofluxdep._support.dependency_defaults import (
     missing_info_value,
     missing_module_value,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.module_aliases import (
     PI2_PULSE_LIBRARY_ALIASES,
-    PI_PULSE_LIBRARY_ALIASES,
     READOUT_LIBRARY_ALIASES,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import Decay1DPlotter
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.plotters import Decay1DPlotter
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import Sweep1DResult
+from zcu_tools.experiment.v2_gui.autofluxdep._support.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
     auto_sweep_stop,
@@ -75,17 +47,19 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
     seed_md_float,
     snapshot_float,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.override_plan import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.override_plan import (
     pulse_module_patches,
     readout_module_patches,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.timing import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.timing import (
     pop_sweep_range,
 )
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -103,44 +77,41 @@ from zcu_tools.program.v2.modules import PulseCfg, ReadoutCfg
 logger = logging.getLogger(__name__)
 
 
-class T2EchoModuleCfg(ConfigBase):
-    """The module bundle a t2echo run cfg carries.
+class T2RamseyModuleCfg(ConfigBase):
+    """The module bundle a t2ramsey run cfg carries."""
 
-    Mirrors the lower-layer ``experiment/v2/autofluxdep`` ``T2EchoModuleCfg``
-    without the unused reset: the pi refocusing pulse, the pi/2 pulse (used
-    twice in the Hahn-echo sequence), and the readout. ``pi_pulse`` / ``pi2_pulse`` are the
-    lenrabi-produced drive pulses; ``readout`` is the (optionally optimised)
-    readout module.
-    """
-
-    pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2EchoCfgTemplate(ProgramV2Cfg, ExpCfgModel):
-    """The base Hahn-echo cfg t2echo lowers a context into.
+class T2RamseyCfgTemplate(ProgramV2Cfg, ExpCfgModel):
+    """The base Ramsey cfg t2ramsey lowers a context into.
 
-    ``ProgramV2Cfg`` (reps/rounds/relax) + the ``ExpCfgModel`` device/save fields
-    + the t2echo modules and the ``sweep_range`` delay window — same bases as the
-    lower-layer ``experiment/v2/autofluxdep`` ``T2EchoCfgTemplate``. The flux
-    ``dev`` entry and the concrete ``length`` sweep are merged in by ``produce``;
-    here ``produce`` reads the ``sweep_range`` window to parameterise the acquire.
+    ``ProgramV2Cfg`` (reps/rounds/relax) + the ``ExpCfgModel`` device/save fields,
+    plus the Ramsey ``modules`` (``pi2_pulse`` + ``readout``) and a free
+    ``sweep_range`` (the delay-time span) — mirroring the lower-layer
+    ``experiment/v2/autofluxdep`` ``T2RamseyCfgTemplate`` without the unused reset.
+    The flux ``dev`` entry,
+    the concrete ``length`` sweep, and ``activate_detune`` are merged in by the
+    lower-layer ``run()`` (not here): this template is the cfg-maker output, and
+    ``produce`` reads the planted-t2 baseline from ``sweep_range``.
     """
 
-    modules: T2EchoModuleCfg
+    modules: T2RamseyModuleCfg
     sweep_range: tuple[float, float]
 
 
-class T2EchoNode(Node):
-    """One flux point's t2echo: set flux → real acquire → configured fit → Patch.
+class T2RamseyNode(Node):
+    """One flux point's t2ramsey: set flux → real acquire → fit_decay_fringe → Patch.
 
-    Mirrors the lower-layer T2Echo Schedule acquire + ``run``: a
-    Hahn-echo sequence (pi/2 → τ/2 → pi → τ/2 → optional detuned pi/2) sweeps the
-    total delay τ, and the configured fit method recovers T2Echo.
+    Mirrors the lower-layer T2Ramsey Schedule acquire + ``run``: two
+    pi/2 pulses bracket a swept delay, the second carries an activate-detune phase
+    ramp (``360·detune·length``) so the fringe is resolvable, and
+    ``fit_decay_fringe`` recovers T2Ramsey + the measured detune (the activate
+    detune is subtracted back out, as the lower layer does).
     """
 
-    def __init__(self, env: RunEnv, builder: T2EchoBuilder) -> None:
+    def __init__(self, env: RunEnv, builder: T2RamseyBuilder) -> None:
         self._env = env
         self._builder = builder
 
@@ -151,22 +122,20 @@ class T2EchoNode(Node):
         idx = env.flux_idx
 
         # Lower the active context into the run cfg (Fast Fail if unconfigured: a
-        # real acquire needs concrete pi / pi2 drive pulses + a readout). The cfg's
-        # sweep_range = (0, 2.5 × smoothed_t2e) sets the total-delay axis.
+        # real acquire needs a concrete pi/2 pulse + readout). sweep_range encodes
+        # 2.5 × smoothed_t2r; rebuild the delay axis over it.
         cfg = self._builder.make_cfg(env, snapshot)
-        lo, hi = float(cfg.sweep_range[0]), float(cfg.sweep_range[1])
-        times = np.linspace(lo, hi, result.n_x)
+        lo, hi = cfg.sweep_range
+        times = np.linspace(float(lo), float(hi), result.n_x)
         result.x[:] = times
 
-        setup_flux_point(cfg, env, "t2echo")
+        setup_flux_point(cfg, env, "t2ramsey")
 
-        # The total-delay sweep, split across the two echo halves (Delay 0.5·τ each),
-        # + the activate-detune phase ramp on the 2nd pi/2 (lower layer:
-        # activate_detune = detune_ratio / len_sweep.step).
+        # The Ramsey delay sweep + the activate-detune phase ramp on the 2nd pi/2
+        # (lower layer: activate_detune = detune_ratio / len_sweep.step).
         length_sweep = axis_to_sweep(times)
         length_param = sweep2param("length", length_sweep)
-        knobs = env.knobs_view()
-        detune_ratio = float(knobs["detune_ratio"])
+        detune_ratio = float(env.knob("detune_ratio"))
         activate_detune = detune_ratio / length_sweep.step
         pi2_pulse = cfg.modules.pi2_pulse
 
@@ -195,9 +164,7 @@ class T2EchoNode(Node):
             builder.add(
                 [
                     Pulse("pi2_pulse1", pi2_pulse),
-                    Delay("t2e_delay1", delay=0.5 * length_param),
-                    Pulse("pi_pulse", cfg.modules.pi_pulse),
-                    Delay("t2e_delay2", delay=0.5 * length_param),
+                    Delay("t2r_delay", delay=length_param),
                     Pulse(
                         "pi2_pulse2",
                         pi2_pulse.with_updates(
@@ -211,26 +178,19 @@ class T2EchoNode(Node):
                 raw2signal_fn=acquire_to_complex,
                 retry=acquire_retry(env),
                 progress=False,
-                progress_label=f"{env.node_name or 't2echo'} flux {idx + 1} rounds",
+                progress_label=f"{env.node_name or 't2ramsey'} flux {idx + 1} rounds",
                 progress_leave=False,
                 stop_condition=build_stop_condition(env, probe),
             )
             outcome = sched.outcome
 
-        if not schedule_completed(outcome, "t2echo"):
+        if not schedule_completed(outcome, "t2ramsey"):
             return Patch()
 
         real = signal2real_flip(np.asarray(signal, dtype=np.complex128))
 
-        fit_method = str(knobs["fit_method"])
-        if fit_method == "auto_by_detune":
-            fit_method = "decay" if detune_ratio == 0.0 else "fringe"
-        if fit_method == "decay":
-            t2f, t2f_err, fit_curve, _ = fit_decay(times, real)
-        elif fit_method == "fringe":
-            t2f, t2f_err, _, _, fit_curve, _ = fit_decay_fringe(times, real)
-        else:
-            raise RuntimeError(f"unsupported t2echo fit_method: {fit_method!r}")
+        t2f, t2f_err, detune, _, fit_curve, _ = fit_decay_fringe(times, real)
+        detune = detune - activate_detune  # back out the applied activate-detune
 
         if not fill_decay_fit_or_skip(
             result,
@@ -241,32 +201,36 @@ class T2EchoNode(Node):
             fit_curve,
             env.round_hook,
             logger,
-            "t2echo",
+            "t2ramsey",
         ):
-            return Patch()  # partial: omit t2e → downstream fallback
+            return Patch()  # partial: omit t2r/t2r_detune → downstream fallback
 
-        logger.debug("t2echo fit @flux%d: t2e=%.3f us", idx, float(t2f))
+        logger.debug(
+            "t2ramsey fit @flux%d: t2r=%.3f us detune=%.4f",
+            idx,
+            float(t2f),
+            float(detune),
+        )
 
         patch = Patch()
-        patch.set("t2e", float(t2f))
-        patch.set("t2e_err", float(t2f_err))
+        patch.set("t2r", float(t2f))
+        patch.set("t2r_err", float(t2f_err))
+        patch.set("t2r_detune", float(detune))
         return patch
 
 
-class T2EchoBuilder(Builder):
-    """The t2echo provider — acquire echo decay/fringe traces and fit T2Echo.
-
-    Reports only the raw echo t2e (detune is refocused and not reported).
+class T2RamseyBuilder(Builder):
+    """The t2ramsey provider — acquire decay cosine, real fit_decay_fringe, accumulating
+    colormap.  Reports the raw Ramsey t2r and the measured detuning detune.
     """
 
-    name = "t2echo"
-    provides = ("t2e", "t2e_err")
+    name = "t2ramsey"
+    provides = ("t2r", "t2r_err", "t2r_detune")
     optional = (
         Dependency("t1", smooth="ewma", default=missing_info_value),
-        Dependency("t2e", smooth="ewma", default=missing_info_value),
+        Dependency("t2r", smooth="ewma", default=missing_info_value),
     )
     requires_modules = (
-        ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),
         ModuleDep(
             "pi2_pulse",
             aliases=PI2_PULSE_LIBRARY_ALIASES,
@@ -281,20 +245,14 @@ class T2EchoBuilder(Builder):
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Default cfg plus autofluxdep generation controls."""
         t1_seed = seed_md_float(ctx, "t1", 10.0)
-        t2e_seed = seed_md_float(ctx, "t2e", 5.0)
-        sweep_stop_factor = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2e)
+        t2r_seed = seed_md_float(ctx, "t2r", 5.0)
+        sweep_stop_factor = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2r)
         relax_factor = 3.0
         relax_min_us = 1.0
-        max_length_default = t2e_seed * sweep_stop_factor
+        max_length_default = t2r_seed * sweep_stop_factor
 
         return (
-            NodeSchemaBuilder(ctx, label="T2 Echo")
-            .pulse(
-                "pi_pulse",
-                "modules.pi_pulse",
-                label="Pi Pulse",
-                library_keys=PI_PULSE_LIBRARY_ALIASES,
-            )
+            NodeSchemaBuilder(ctx, label="T2 Ramsey")
             .pulse(
                 "pi2_pulse",
                 "modules.pi2_pulse",
@@ -322,16 +280,16 @@ class T2EchoBuilder(Builder):
                 "detune_ratio",
                 "detune_ratio",
                 label="Detune ratio (fringes/step)",
-                default=0.1,
+                default=0.05,
                 decimals=3,
             )
             .sweep(
                 "sweep_range",
                 "sweep.length",
-                label="Total delay (us)",
+                label="Delay (us)",
                 default=SweepValue(
                     *auto_stop_sweep_range(
-                        t2e_seed,
+                        t2r_seed,
                         start=0.0,
                         stop_factor=sweep_stop_factor,
                         stop_min=None,
@@ -355,53 +313,45 @@ class T2EchoBuilder(Builder):
                 "sweep_range_mode",
                 "generation.sweep.sweep_range_mode",
                 label="range_mode",
-                choices=("auto_t2e", "fixed"),
-                default="auto_t2e",
+                choices=("auto_t2r", "fixed"),
+                default="auto_t2r",
                 tooltip=(
-                    "Auto derives the echo sweep stop from latest trusted "
-                    "T2E; start/expts stay in Default cfg."
+                    "Auto derives the Ramsey sweep stop from latest trusted "
+                    "T2R; start/expts stay in Default cfg."
                 ),
             )
             .float(
-                "t2e_seed_us",
-                "generation.sweep.t2e_seed_us",
-                label="initial_t2e_us",
-                default=t2e_seed,
-                tooltip="Initial T2E before measured feedback exists.",
+                "t2r_seed_us",
+                "generation.sweep.t2r_seed_us",
+                label="initial_t2r_us",
+                default=t2r_seed,
+                tooltip="Initial T2R before measured feedback exists.",
             )
             .float(
                 "sweep_stop_factor",
                 "generation.sweep.sweep_stop_factor",
                 label="stop_factor",
                 default=sweep_stop_factor,
-                tooltip="T2E multiplier for the auto sweep stop.",
+                tooltip="T2R multiplier for the auto sweep stop.",
             )
             .float(
                 "max_length",
                 "generation.sweep.max_length",
                 label="max_length",
                 default=max_length_default,
-                tooltip="Maximum stop value for the auto echo sweep.",
+                tooltip="Maximum stop value for the auto Ramsey sweep.",
             )
             .choice_fields(
                 "generation.sweep",
                 "sweep_range_mode",
                 {
                     "fixed": (),
-                    "auto_t2e": (
-                        "t2e_seed_us",
+                    "auto_t2r": (
+                        "t2r_seed_us",
                         "sweep_stop_factor",
                         "max_length",
                     ),
                 },
-            )
-            .choice(
-                "fit_method",
-                "generation.fit.fit_method",
-                label="method",
-                choices=("auto_by_detune", "fringe", "decay"),
-                default="auto_by_detune",
-                tooltip="Choose echo fit model; auto follows detune ratio.",
             )
             .build()
         )
@@ -415,16 +365,15 @@ class T2EchoBuilder(Builder):
 
     def make_plotter(self, figure: Any) -> Decay1DPlotter:
         return Decay1DPlotter(
-            figure, title="t2echo", value_label="T2 Echo (us)", x_label="Time (us)"
+            figure, title="t2ramsey", value_label="T2Ramsey (us)", x_label="Time (us)"
         )
 
-    def build_node(self, env: RunEnv) -> T2EchoNode:
-        return T2EchoNode(env, self)
+    def build_node(self, env: RunEnv) -> T2RamseyNode:
+        return T2RamseyNode(env, self)
 
     def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
         knobs = schema.read_knobs()
         plan = NodeOverridePlan()
-        plan.pulse_module_dependency("pi_pulse")
         plan.pulse_module_dependency(
             "pi2_pulse",
             reason="pi/2 pulse is resolved from workflow/module-library dependency",
@@ -437,52 +386,49 @@ class T2EchoBuilder(Builder):
             reason="relax delay is generated from T1 feedback",
         )
         plan.generated_if(
-            knobs.get("sweep_range_mode") == "auto_t2e",
+            knobs.get("sweep_range_mode") == "auto_t2r",
             "sweep.length.stop",
             source="generation.sweep.sweep_range_mode",
-            reason="T2Echo sweep stop is generated from T2Echo feedback",
+            reason="T2Ramsey sweep stop is generated from T2Ramsey feedback",
         )
         return plan.build()
 
-    def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> T2EchoCfgTemplate:
+    def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> T2RamseyCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
 
-        Mirrors the notebook's t2echo ``cfg_maker``: the pi / pi2 drive pulses are
-        the latest-available lenrabi-produced ``pi_pulse`` / ``pi2_pulse`` modules
-        on the snapshot, the readout is the latest-available ``opt_readout``
-        module, the relax delay is ``max(1.0, 3 * smoothed_t1)``, and the
-        ``sweep_range`` delay window is ``(0, 2.5 * smoothed_t2e)``. The flux
-        ``dev`` entry and the concrete ``length`` sweep are NOT here — the
-        lower-layer ``run`` merges them.
+        Mirrors the notebook's t2ramsey ``cfg_maker`` (runs in ``produce``, where
+        the snapshot is available): the ``pi2_pulse`` drive module and the
+        ``readout`` module come from the snapshot (lenrabi / ro_optimize produce
+        them, ml-preset / default otherwise), ``relax_delay`` is ``3 * t1`` (the
+        smoothed t1 from the snapshot, floored at 1 us), the ``sweep_range`` spans
+        ``2.5 * t2r`` (the smoothed t2r), and ``reps`` / ``rounds`` come from the
+        node's params. The flux ``dev`` entry, the concrete ``length`` sweep, and
+        ``activate_detune`` are NOT here — the lower-layer ``run()`` merges them.
 
-        Raises if the ml / drive pulses / readout are unavailable — a real run
-        needs concrete drive pulses (Fast Fail).
+        Raises if the ml / drive / readout modules are unavailable — a real run
+        needs a concrete Ramsey sequence (Fast Fail).
         """
         ml = env.ml
         if ml is None:
-            raise RuntimeError("t2echo.make_cfg needs an active ModuleLibrary")
-        pi_pulse = snapshot.module("pi_pulse")
+            raise RuntimeError("t2ramsey.make_cfg needs an active ModuleLibrary")
         pi2_pulse = snapshot.module("pi2_pulse")
-        readout = snapshot.module("opt_readout")
-        if not is_lowerable_pulse_module(pi_pulse) or not is_lowerable_pulse_module(
-            pi2_pulse
-        ):
+        if pi2_pulse is None:
             raise RuntimeError(
-                "t2echo.make_cfg needs concrete pi_pulse / pi2_pulse drive modules "
-                "(lenrabi output)"
+                "t2ramsey.make_cfg needs a pi2_pulse module (none produced or preset)"
             )
+        readout = snapshot.module("opt_readout")
         if readout is None:
             raise RuntimeError(
-                "t2echo.make_cfg needs a readout module (none produced or preset)"
+                "t2ramsey.make_cfg needs a readout module (none produced or preset)"
             )
         knobs = env.knobs_view()
-        cur_t1 = snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
-        prev_t2e = snapshot_float(snapshot, "t2e", float(knobs["t2e_seed_us"]))
+        t1 = snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
+        t2r = snapshot_float(snapshot, "t2r", float(knobs["t2r_seed_us"]))
 
         relax_delay_mode = str(knobs["relax_delay_mode"])
         if relax_delay_mode == "auto_t1":
             relax_delay = auto_relax_delay_from_t1(
-                cur_t1,
+                t1,
                 factor=float(knobs["relax_factor"]),
                 minimum=float(knobs["relax_min_us"]),
             )
@@ -490,16 +436,16 @@ class T2EchoBuilder(Builder):
             relax_delay = float(knobs["relax_delay"])
         else:
             raise RuntimeError(
-                f"unsupported t2echo relax_delay_mode: {relax_delay_mode!r}"
+                f"unsupported t2ramsey relax_delay_mode: {relax_delay_mode!r}"
             )
 
         sweep_range_mode = str(knobs["sweep_range_mode"])
-        if sweep_range_mode == "auto_t2e":
+        if sweep_range_mode == "auto_t2r":
             fixed_sweep = knobs["sweep_range"]
             sweep_range = (
                 float(fixed_sweep.start),
                 auto_sweep_stop(
-                    prev_t2e,
+                    t2r,
                     stop_factor=float(knobs["sweep_stop_factor"]),
                     stop_min=None,
                     stop_max=float(knobs["max_length"]),
@@ -509,21 +455,20 @@ class T2EchoBuilder(Builder):
             sweep_range = fixed_sweep_range(knobs["sweep_range"])
         else:
             raise RuntimeError(
-                f"unsupported t2echo sweep_range_mode: {sweep_range_mode!r}"
+                f"unsupported t2ramsey sweep_range_mode: {sweep_range_mode!r}"
             )
 
         patches: dict[str, object] = {}
-        patches.update(pulse_module_patches("pi_pulse", pi_pulse))
         patches.update(pulse_module_patches("pi2_pulse", pi2_pulse))
         patches.update(readout_module_patches(readout))
         if relax_delay_mode == "auto_t1":
             patches["relax_delay"] = relax_delay
-        if sweep_range_mode == "auto_t2e":
+        if sweep_range_mode == "auto_t2r":
             patches["sweep.length.stop"] = sweep_range[1]
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("detune_ratio", None)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
-        return ml.make_cfg(raw_cfg, T2EchoCfgTemplate)
+        return ml.make_cfg(raw_cfg, T2RamseyCfgTemplate)
 
 
-EXPERIMENT = T2EchoBuilder()
+EXPERIMENT = T2RamseyBuilder()

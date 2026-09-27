@@ -10,12 +10,12 @@ filled (not all-nan). No fit -- the argmax of the SNR map is the result.
 from __future__ import annotations
 
 import numpy as np
+from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import RoOptimizeBuilder
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import CenteredSweepValue
 
-from .._helpers import (
+from tests.gui.app.autofluxdep._helpers import (
     calibrated_drive_pulse,
     connect_mock,
     high_snr_simparams,
@@ -126,7 +126,7 @@ def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
         values[0, 0] = 1.0
         return values
 
-    import zcu_tools.gui.app.autofluxdep.experiments.ro_optimize as ro_mod
+    import zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize as ro_mod
 
     monkeypatch.setattr(ro_mod, "ModularProgramV2", FakeProgram)
     monkeypatch.setattr(ro_mod, "_ro_landscape", fake_landscape)

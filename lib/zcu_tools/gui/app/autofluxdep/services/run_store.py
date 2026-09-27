@@ -21,7 +21,7 @@ from zcu_tools.datafile import (
     StreamingGroupedLabberWriter,
     open_streaming_grouped_labber_data,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason

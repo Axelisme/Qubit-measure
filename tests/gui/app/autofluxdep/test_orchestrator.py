@@ -12,17 +12,17 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from zcu_tools.experiment.v2_gui.autofluxdep.lenrabi import LenRabiBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.mist import MistBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import RoOptimizeBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
+from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import T2EchoBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
     RunCfgSnapshot,
 )
-from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.mist import MistBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
-from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import (
     Dependency,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.module_values import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.module_values import (
     ctx_md_float,
 )
 

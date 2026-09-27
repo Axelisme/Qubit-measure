@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.datafile import save_labber_data
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
 
 
 def export_qubit_freq_fluxdep_spectrum(

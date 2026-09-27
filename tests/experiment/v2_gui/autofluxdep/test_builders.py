@@ -17,7 +17,7 @@ import pytest
 
 
 def test_catalog_exposes_all_experiments():
-    from zcu_tools.gui.app.autofluxdep.experiments.catalog import names
+    from zcu_tools.experiment.v2_gui.autofluxdep.catalog import names
 
     types = set(names())
     assert types == {
@@ -50,7 +50,7 @@ def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
     # each experiment's Plotter embeds the same LivePlot panels the runner module
     # draws, so the figure has the matching number of axes.
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.experiments.catalog import create_placement
+    from zcu_tools.experiment.v2_gui.autofluxdep.catalog import create_placement
 
     builder = create_placement(type_name).builder
     figure = Figure()
@@ -61,10 +61,10 @@ def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
 
 def test_ro_optimize_plotter_marks_latest_best_point():
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.plotters import (
         Landscape2DPlotter,
     )
-    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
         Sweep2DResult,
     )
 
@@ -97,10 +97,10 @@ def test_ro_optimize_plotter_marks_latest_best_point():
 
 def test_qubit_freq_plotter_title_shows_current_snr():
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
         QubitFreqResult,
     )
-    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqPlotter
+    from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqPlotter
 
     result = QubitFreqResult.allocate(
         np.array([0.0, 0.1]),
@@ -118,10 +118,10 @@ def test_qubit_freq_plotter_title_shows_current_snr():
 
 def test_sweep1d_plotter_title_shows_current_snr():
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.plotters import (
         ColormapLinePlotter,
     )
-    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
         Sweep1DResult,
     )
 

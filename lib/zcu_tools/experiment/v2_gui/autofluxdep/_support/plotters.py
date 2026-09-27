@@ -31,7 +31,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
     Sweep1DResult,
     Sweep2DResult,
 )
