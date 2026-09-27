@@ -23,6 +23,6 @@
 
 **獨立 section 與 timestamp**：`fluxdep_fit`、`dispersive` 與 `t1_curve_fit` 是獨立 module section；寫入其中一個不會刪除另一個。每次 typed 寫入會更新該 section 的 `timestamp`，供 caller 判斷最後修改時間。`t1_curve_fit` 只保存後續模擬需要的 fit params 與 metadata；sample arrays 和 dense model curves 不放進 `params.json`。`t1_curve_fit.params` 中 `Temp` 必填，`Q_cap` / `x_qp` / `Q_ind` 只保存 active noise channel；省略某個 noise key 表示該 channel 未納入 all-in-one fit。
 
-**未知 section preservation**：typed 寫入只更新自己的 section，其它未知 section 會保留。`to_raw()` / `replace_raw()` / `update_raw()` 只供 `notebook.persistance` 舊 helper 過渡使用；新 caller 應使用 typed 方法。
+**未知 section preservation**：typed 寫入只更新自己的 section，其它未知 section 會保留。`to_raw()` / `replace_raw()` / `update_raw()` 保留為低階原始資料操作；caller 應使用 typed 方法。
 
 **Active noise params**：`t1_curve_fit` 的 `fixed`、`free`、`bounds`、`init` 與 `stderr` 只能提到 active params。
