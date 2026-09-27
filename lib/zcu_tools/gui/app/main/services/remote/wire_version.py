@@ -104,7 +104,9 @@ from __future__ import annotations
 # full reads and newly created resources certified by owner-thread write receipts.
 # v63: cfg reads return complete typed model observations, including locked
 # fields and cached raw/resolved/error state, instead of settable-only values.
-WIRE_VERSION = 63
+# v64: predictor.calibrate exposes the shared single-point bias correction.
+# v65: device.snapshot includes State-cached field specifications during setup.
+WIRE_VERSION = 65
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -146,4 +148,6 @@ WIRE_VERSION = 63
 # v91: cfg reads project CfgDraft observations without resolving live sources.
 # v92: return bounded errors for unencodable replies; disconnect on failed delivery.
 # v95: bound per-client outbound bytes, including the in-flight frame.
-GUI_VERSION = 95
+# v96: predictor.calibrate routes through the shared PredictorControlPort.
+# v97: project cached device fields without driver reads during setup.
+GUI_VERSION = 97

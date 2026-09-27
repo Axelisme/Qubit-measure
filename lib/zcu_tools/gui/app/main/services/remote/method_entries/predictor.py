@@ -84,6 +84,24 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "predictor.calibrate",
+        "predictor:_h_predictor_calibrate",
+        MethodSpec(
+            30.0,
+            "Calibrate the installed predictor flux_bias from one measured transition "
+            "frequency in MHz at a device-value setpoint in native instrument units. "
+            "Uses the shared PredictorService and returns {flux_bias_before, "
+            "flux_bias_after}; no hardware read or write is performed.",
+            (
+                _num("device_value", "Measured setpoint in native instrument units"),
+                _num("frequency_mhz", "Measured transition frequency in MHz"),
+                _int_default("from_level", 0, "Transition from level"),
+                _int_default("to_level", 1, "Transition to level"),
+            ),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
         "predictor.info",
         "predictor:_h_predictor_info",
         MethodSpec(

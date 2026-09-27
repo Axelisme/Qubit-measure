@@ -3,8 +3,10 @@
 from zcu_tools.mcp.core.bridge import ToolTable
 from zcu_tools.mcp.core.call_log import wrap_handler
 from zcu_tools.mcp.measure import (
+    tools_device,
     tools_lifecycle,
     tools_operation,
+    tools_predictor,
     tools_rpc,
     tools_screenshot,
     tools_setup,
@@ -19,6 +21,8 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
     for source in (
         tools_lifecycle.build_override_tools(context),
         tools_operation.build_operation_tools(context),
+        tools_device.build_device_tools(context),
+        tools_predictor.build_predictor_tools(context),
         tools_rpc.build_rpc_tools(context),
         tools_tab.build_tab_read_tools(context),
         tools_screenshot.build_screenshot_tools(context),

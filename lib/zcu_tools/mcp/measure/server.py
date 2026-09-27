@@ -44,7 +44,7 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
 from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
-MCP_VERSION = 84
+MCP_VERSION = 88
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by

@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+# The method-entry registry imports this callable by name at runtime.
+__all__ = ["_h_predictor_calibrate"]
 
 
 def _h_predictor_load(
@@ -72,6 +73,34 @@ def _h_predictor_predict(
         PredictFreqRequest(value=device_value, transition=(from_level, to_level))
     )
     return {"freq_mhz": freq}
+
+
+def _h_predictor_calibrate(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
+
+    value = params["device_value"]
+    frequency = params["frequency_mhz"]
+    frm, to = params["from_level"], params["to_level"]
+    # MethodSpec already validates the wire types before reaching this handler.
+    assert isinstance(value, (int, float)) and not isinstance(value, bool)
+    assert isinstance(frequency, (int, float)) and not isinstance(frequency, bool)
+    assert type(frm) is int and type(to) is int
+    before = adapter.predictor_control.get_predictor_info()
+    result = adapter.predictor_control.calibrate_flux_bias(
+        CalibrateFluxBiasRequest(
+            value=float(value),
+            frequency_mhz=float(frequency),
+            transition=(frm, to),
+        )
+    )
+    if before is None:
+        raise RuntimeError("calibration succeeded without a previous predictor")
+    return {
+        "flux_bias_before": before["flux_bias"],
+        "flux_bias_after": result.flux_bias,
+    }
 
 
 def _h_predictor_info(

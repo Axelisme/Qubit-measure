@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
 from zcu_tools.gui.session.services.connection import (
@@ -204,17 +205,8 @@ def _field_type_and_choices(annotation: object) -> tuple[str, list | None]:
     return _SCALAR.get(annotation, "str"), None  # type: ignore[arg-type]
 
 
-def _h_device_setup_spec(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    dev = adapter.device_control
-    info = dev.get_device_info(name)
-    if info is None:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"Device {name!r} has no live info (connect it first)",
-        )
+def _device_fields(info: BaseDeviceInfo) -> list[dict[str, object]]:
+    """Project either live or State-cached device info with one field grammar."""
     fields: list[dict[str, object]] = []
     for fname, finfo in type(info).model_fields.items():
         ftype, choices = _field_type_and_choices(finfo.annotation)
@@ -227,7 +219,20 @@ def _h_device_setup_spec(
         if choices is not None:
             entry["choices"] = choices
         fields.append(entry)
-    return {"fields": fields}
+    return fields
+
+
+def _h_device_setup_spec(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = str(params["name"])
+    info = adapter.device_control.get_device_info(name)
+    if info is None:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"Device {name!r} has no live info (connect it first)",
+        )
+    return {"fields": _device_fields(info)}
 
 
 def _h_device_cancel_operation(
@@ -303,5 +308,6 @@ def _h_device_snapshot(
             "status": snap.status.value,
             "error": snap.error,
             "info": snap.info.to_dict() if snap.info is not None else None,
+            "fields": _device_fields(snap.info) if snap.info is not None else [],
         }
     }

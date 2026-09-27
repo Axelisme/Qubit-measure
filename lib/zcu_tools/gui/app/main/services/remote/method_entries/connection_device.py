@@ -211,8 +211,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Read one device's full cached snapshot — the richest single-device read: "
-            "{snapshot: {name, type_name, address, status, error, info}} where 'info' "
-            "is the live device parameter dict (or null when not connected) and "
+            "{snapshot: {name, type_name, address, status, error, info, fields}} "
+            "where 'info' is the State-cached device parameter dict (or null "
+            "without info) and 'fields' is its cached field/choice projection. "
+            "During setting_up these remain readable without driver I/O. "
             "'status' uses the same vocabulary as device.list. An unknown device "
             "name raises INVALID_PARAMS.",
             (_str("name", "Device name"),),
