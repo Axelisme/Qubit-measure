@@ -63,12 +63,13 @@ from zcu_tools.gui.cfg import (
     decode_eval_wire,
 )
 from zcu_tools.gui.cfg.binding import (
+    AgentSweepTarget,
     CfgDraft,
     SettablePathError,
     SettableTarget,
     SettableTargetKind,
 )
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
@@ -229,8 +230,60 @@ class CfgEditorSession:
         )
 
     def set_agent_fields(self, edits: Sequence[CfgEdit]) -> CfgEditResult:
-        """Apply agent whole-sweep/scalar/reference grammar to the shared draft."""
-        raise NotImplementedError("agent whole-sweep edit is not implemented")
+        """Apply ordered agent edits, keeping every successful prefix on failure."""
+        before: set[str] | None = None
+        actual: dict[str, object] = {}
+        for applied, edit in enumerate(edits):
+            try:
+                target = self.draft.resolve_agent_target(edit.path)
+                if target.affects_path_shape and before is None:
+                    before = {item.path for item in self.draft.iter_settable_targets()}
+                if isinstance(target, AgentSweepTarget):
+                    if not isinstance(edit.value, dict):
+                        raise SettablePathError(
+                            f"whole sweep at {edit.path!r} expects an object"
+                        )
+                    payload = {
+                        key: _decode_value(value) for key, value in edit.value.items()
+                    }
+                    actual[edit.path] = _agent_sweep_actual(target.set_value(payload))
+                else:
+                    value = _decode_value(edit.value)
+                    if (
+                        isinstance(value, EvalValue)
+                        and target.kind is not SettableTargetKind.SCALAR
+                    ):
+                        raise SettablePathError(
+                            f"eval value is only valid for scalar target {edit.path!r}"
+                        )
+                    if isinstance(value, ValueRef):
+                        if target.kind is not SettableTargetKind.SCALAR:
+                            raise SettablePathError(
+                                f"value_ref is only valid for scalar target {edit.path!r}"
+                            )
+                        value = self.resolve_value_ref(value, target.value_type)
+                    target.set_value(value)
+            except ExpectedError as exc:
+                raise SettablePathError(
+                    f"agent edit at {edit.path!r} failed after {applied} applied: {exc}",
+                    reason_code=exc.reason_code,
+                ) from exc
+        after = (
+            {item.path for item in self.draft.iter_settable_targets()}
+            if before is not None
+            else None
+        )
+        return CfgEditResult(
+            valid=bool(self.draft.is_valid()),
+            removed=tuple(sorted(before - after))
+            if before is not None and after is not None
+            else (),
+            added=tuple(sorted(after - before))
+            if before is not None and after is not None
+            else (),
+            applied=len(edits),
+            actual=actual,
+        )
 
     def commit_schema(self) -> CfgSchema:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
@@ -777,6 +830,32 @@ class CfgEditorService:
         if from_name not in ml.waveforms:
             raise CfgEditorError(f"unknown waveform: {from_name!r}")
         return waveform_cfg_to_value(ml.waveforms[from_name])
+
+
+def _agent_sweep_actual(value: object) -> dict[str, object]:
+    """Project a cached sweep value without evaluating an expression again."""
+    from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
+
+    if isinstance(value, SweepValue):
+        parts = ("start", "stop", "expts", "step")
+    elif isinstance(value, CenteredSweepValue):
+        parts = ("center", "span", "expts", "step")
+    else:
+        raise TypeError(f"Unexpected agent sweep value: {type(value).__name__}")
+    result: dict[str, object] = {}
+    for part in parts:
+        item = getattr(value, part)
+        if isinstance(item, EvalValue):
+            result[part] = {
+                "__kind": "eval",
+                "expr": item.expr,
+                "resolved": item.resolved,
+            }
+        elif isinstance(item, DirectValue):
+            result[part] = item.value
+        else:
+            result[part] = item
+    return result
 
 
 def _decode_value(value: object) -> object:

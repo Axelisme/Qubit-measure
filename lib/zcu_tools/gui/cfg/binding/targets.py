@@ -169,7 +169,58 @@ def resolve_agent_target(
     root: SectionField, path: str
 ) -> SettableTarget | AgentSweepTarget:
     """Resolve agent grammar: scalars/reference keys or a whole sweep, no edges."""
-    raise NotImplementedError("whole-sweep agent target is not implemented")
+    if path and all(path.split(".")):
+        index = _build_target_index(root)
+        if path in index.container_paths:
+            field = _field_at_path(root, path)
+            if isinstance(field, SweepField):
+                return _agent_sweep_target(path, field)
+            if isinstance(field, CenteredSweepField):
+                return _agent_centered_target(path, field)
+    target = resolve_settable_target(root, path)
+    if target.kind is SettableTargetKind.SWEEP_EDGE:
+        raise SettablePathError(f"agent edits require a whole sweep at {path!r}")
+    return target
+
+
+def _field_at_path(root: SectionField, path: str) -> CfgField | None:
+    field: CfgField = root
+    for part in path.split("."):
+        if isinstance(field, ReferenceField):
+            if field.sub_field is None:
+                return None
+            field = field.sub_field
+        if not isinstance(field, SectionField):
+            return None
+        child = field.fields.get(part)
+        if child is None:
+            return None
+        field = child
+    return field
+
+
+def _agent_sweep_target(path: str, field: SweepField) -> AgentSweepTarget:
+    def set_value(payload: Mapping[str, object]) -> SweepValue:
+        try:
+            return field.set_agent_value(payload)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SettablePathError(f"invalid whole sweep at {path!r}: {exc}") from exc
+
+    return AgentSweepTarget(
+        path, AgentSweepKind.SWEEP, False, field.get_value, set_value
+    )
+
+
+def _agent_centered_target(path: str, field: CenteredSweepField) -> AgentSweepTarget:
+    def set_value(payload: Mapping[str, object]) -> CenteredSweepValue:
+        try:
+            return field.set_agent_value(payload)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SettablePathError(f"invalid whole sweep at {path!r}: {exc}") from exc
+
+    return AgentSweepTarget(
+        path, AgentSweepKind.CENTERED_SWEEP, False, field.get_value, set_value
+    )
 
 
 def _build_target_index(root: SectionField) -> _TargetIndex:
