@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
@@ -63,12 +64,38 @@ def context_create(
 
 def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read selected values or the GUI's safe index of MetaDict values."""
-    raise NotImplementedError("03 md_get tool has no implementation yet")
+    if "keys" not in arguments:
+        result = ctx.session.read_internal("context.md_get", {"summaries": True})
+        return {"values": result["values"]}
+    return {
+        "values": {
+            key: ctx.session.read_internal("context.md_get_attr", {"key": key})["value"]
+            for key in arguments["keys"]
+        }
+    }
 
 
 def md_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Write MetaDict keys in order without rolling back prior successful writes."""
-    raise NotImplementedError("03 md_set tool has no implementation yet")
+    applied: dict[str, dict[str, Any]] = {}
+    for key, value in arguments["values"].items():
+        try:
+            reply = ctx.send_gui_rpc(
+                "context.md_set_attr", {"key": key, "value": value, "receipt": True}
+            )
+            if "before" not in reply or "after" not in reply:
+                raise GuiRpcError(
+                    "missing GUI MetaDict write receipt", reason="incompatible_wire"
+                )
+        except GuiRpcError as exc:
+            raise GuiRpcError(
+                f"md_set failed at {key!r}; confirmed prefix: {applied!r}; {exc}. "
+                "The failing key may also have applied; read md_get before retrying.",
+                reason=exc.reason,
+                code=exc.code,
+            ) from exc
+        applied[key] = {"before": reply["before"], "after": reply["after"]}
+    return applied
 
 
 _PROJECT_FIELD = {"type": "string", "minLength": 1}

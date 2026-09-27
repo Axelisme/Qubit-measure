@@ -360,6 +360,10 @@ class ContextService:
     def set_md_attr(self, key: str, value: Any) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
+        try:
+            _validate_md_key(key)
+        except FailedPreconditionError as exc:
+            raise InvalidInputError(str(exc), reason_code="invalid_md_key") from exc
         md = self._state.exp_context.md
         setattr(md, key, value)
         # Semantic context content change: bump so concurrency guards on
