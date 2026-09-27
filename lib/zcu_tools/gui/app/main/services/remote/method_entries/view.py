@@ -46,8 +46,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "view:_h_dialog_screenshot",
         MethodSpec(
             10.0,
-            "Capture a named dialog as base64 PNG",
-            (_str("name", "Dialog name"),),
+            "Capture a named dialog as base64 PNG, or write PNG to out_path and return its path/byte count.",
+            (
+                _str("name", "Dialog name"),
+                _str_opt("out_path", "Write PNG here instead of returning base64"),
+            ),
         ),
     ),
     method_entry(
@@ -66,7 +69,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             10.0,
             "Capture the WHOLE main window (client area + floating widgets) as base64 "
             "PNG. Runs MainWindow.grab() on the main thread (auto-marshalled, like "
-            "dialog.screenshot).",
+            "dialog.screenshot). Optional out_path writes a PNG file instead of "
+            "returning base64 bytes.",
+            (_str_opt("out_path", "Write PNG here instead of returning base64"),),
         ),
     ),
     method_entry(

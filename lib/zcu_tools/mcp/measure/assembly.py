@@ -1,8 +1,14 @@
-"""Assemble only the fixed measure tools owned by completed tickets."""
+"""Assemble only the fixed measure tools owned by delivered tickets."""
 
 from zcu_tools.mcp.core.bridge import ToolTable
 from zcu_tools.mcp.core.call_log import wrap_handler
-from zcu_tools.mcp.measure import tools_lifecycle, tools_operation, tools_rpc
+from zcu_tools.mcp.measure import (
+    tools_lifecycle,
+    tools_operation,
+    tools_rpc,
+    tools_screenshot,
+    tools_tab,
+)
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
@@ -13,6 +19,8 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
         tools_lifecycle.build_override_tools(context),
         tools_operation.build_operation_tools(context),
         tools_rpc.build_rpc_tools(context),
+        tools_tab.build_tab_read_tools(context),
+        tools_screenshot.build_screenshot_tools(context),
     ):
         for name, entry in source.items():
             if name in tools:
