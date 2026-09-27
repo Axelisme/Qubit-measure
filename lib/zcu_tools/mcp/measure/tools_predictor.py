@@ -43,13 +43,48 @@ def predictor_info(
 def predictor_load(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    del ctx, arguments
-    raise NotImplementedError("04 predictor_load dispatch is not implemented")
+    has_path = "path" in arguments
+    has_model = "model" in arguments
+    if has_path == has_model:
+        raise ValueError("provide exactly one of path or model")
+
+    flux_bias = arguments.get("flux_bias", 0.0)
+    if has_path:
+        installed = ctx.send_gui_rpc(
+            "predictor.load", {"path": arguments["path"], "flux_bias": flux_bias}
+        )
+    else:
+        installed = ctx.send_gui_rpc(
+            "predictor.set_model_params",
+            {**arguments["model"], "flux_bias": flux_bias},
+        )
+    return {
+        "loaded": True,
+        "source": installed["path"] if installed["path"] is not None else "model",
+        **{
+            key: installed[key]
+            for key in ("EJ", "EC", "EL", "flux_half", "flux_period", "flux_bias")
+        },
+    }
 
 
 def predict(ctx: MeasureToolContext, arguments: dict[str, Any]) -> list[dict[str, Any]]:
-    del ctx, arguments
-    raise NotImplementedError("04 predict dispatch is not implemented")
+    value = arguments["value"]
+    transitions = arguments.get("transitions", [[0, 1]])
+    return [
+        {
+            "transition": transition,
+            "freq_mhz": ctx.send_gui_rpc(
+                "predictor.predict",
+                {
+                    "device_value": value,
+                    "from_level": transition[0],
+                    "to_level": transition[1],
+                },
+            )["freq_mhz"],
+        }
+        for transition in transitions
+    ]
 
 
 PREDICTOR_TOOLS: dict[str, dict[str, Any]] = {
