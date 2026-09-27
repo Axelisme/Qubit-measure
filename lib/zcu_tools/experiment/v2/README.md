@@ -1,26 +1,10 @@
-# `zcu_tools.experiment.v2` — experiment runtime
+# `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-09-27 — liveplot import path; executor workflow ADR 分流與 flux tracker 契約
+**Last updated:** 2026-09-27 — 父層實驗契約移至 experiment README
 
-這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runtime/` 的細節另見 `runtime/README.md`。
+本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
----
-
-## 兩層架構
-
-`experiment/v2/` 有兩層抽象，分別解決不同問題：
-
-- `Experiment` 層（`experiment/base.py`）
-  - `AbsExperiment[T_Result, T_Config]`：最小基底，只提供 `last_result` 快取（不保留 `last_cfg`），`run` / `analyze` 由各子類別自行實作。
-  - `PersistableExperiment[T_Result, T_Config]`：opt-in 持久化基底，宣告 class-level `AXES_SPEC`（`AxesSpec`）後即繼承共用的 `save()` / `load()`（見「持久化」一節）。
-  - `ExperimentProtocol`：結構性合約（runtime_checkable），描述所有實驗共有的 `last_result` / `run` / `analyze` / `save` / `load` 表面，刻意開放讓實驗自行擴充方法。
-- runtime 層（`runtime/`）
-  - 一般 Experiment：`SignalBuffer` / `Schedule` / `ProgramBuilder` 表達 Python-like acquire、host loop、batch、ProgramBuilder retry 與 stop。
-  - executor workflow：`ResultTree` 實作 executor-owned `BufferProtocol`，持有 outer loop result tree、per-measurement subscription 與 stacked result cache；`Schedule` 編排 outer loop；`MultiMeasurementExecutor` 提供 combined liveplot、recording、retry、measurement init/cleanup、partial-result outcome、figure/writer cleanup 與 `last_cfg` / `last_result` lifecycle。
-
-Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `with Schedule(cfg, signals_buffer) as sched` 做單次 run orchestration，把 scan / buffer targeting 留在 Python control flow 中。`Schedule` 負責 cfg deepcopy、typed env 與 `StopSignal`；`SignalBuffer` 負責 update throttling 與 live update callback；`ProgramBuilder.build_and_acquire(...)` 直接建立 program、執行 acquire 並更新 buffer。
-
-`SignalBuffer` + `Schedule` + `ProgramBuilder` 支援一般 program acquire、decimated trace、program-side sweep、host-side scan、repeat、replayable batch、single acquire retry、caller-owned program reuse、SNR early stop 與 custom raw conversion。需要取得 raw shots 的 singleshot `GE` / `Check` path 使用同一個 `Schedule` scope 做 cfg/stop/buffer orchestration，但 leaf 端改由 `ProgramBuilder.build()` 取得 program 後直接呼叫 `program.acquire(...)`，再把 `program.get_raw()` 轉入 `SignalBuffer`。`autofluxdep` / `overnight` 這類 executor-owned 多任務流程也使用同一個 `Schedule` runtime：外層用 executor-owned buffer 保存 result tree，再用 `scan` / `repeat` / `batch` 編排，leaf 用 `ScheduleStep.child(...).buffer(...)` 把 program acquire 寫回 result tree。
+一般實驗以 [runtime](runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。`autofluxdep`、`overnight` 的 executor 使用同一 runtime 的 `ResultTree` 與 `MultiMeasurementExecutor`；runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
 
 ---
 
@@ -44,21 +28,9 @@ experiment/v2/
 
 ---
 
-## AbsExperiment 與 Result 合約
+## 實驗特有的分析與保存
 
-```python
-class AbsExperiment(Generic[T_Result, T_Config]):
-    def __init__(self) -> None:
-        self.last_result: Optional[T_Result] = None
-    # 最小基底：只有 last_result 快取；run / analyze 由各子類別實作。
-    # 持久化（save / load）改由 PersistableExperiment 提供（見「持久化」一節）。
-```
-
-- **`T_Result`**：每個實驗各自定義的結果型別，為 `@dataclass(frozen=True)`。必須宣告 `cfg_snapshot: Optional[T_Config] = None` 欄位。
-- **`run()`** 的呼叫慣例：`exp.run(soc, soccfg, cfg)`，回傳 `T_Result` 實例。
-- **`last_result`**：`run()` 結束後寫入；`analyze` / `save` 可以省略 `result` 參數直接吃最後一次結果。`last_result` 內部攜帶 `cfg_snapshot` 屬性。不另外提供 `last_cfg` 屬性。
-- **`last_result` 記帳由 decorator DRY**：`record_result`（套在 `run` / `load`）把回傳值寫入 `self.last_result`；`retrieve_result`（套在 `analyze` / `save`）在 `result` 參數為 `None` 時回退到 `self.last_result`（依參數名定位，與其在簽名中的位置無關）。
-- **解包與存取**：所有對 Result 物件的存取均採用屬性存取（Property access，例如 `result.freqs`、`result.signals`），不可直接解包為 tuple。
+實驗基底、`last_result` 與 Result 契約見[父層實驗介面](../README.md#實驗介面與資料)。以下記錄 v2 實驗特有的分析與資料形狀。
 
 CKP numeric analysis先從ground/excited maps抽取resonance trace，再透過
 `analysis.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance
@@ -69,19 +41,10 @@ blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
 
 ---
 
-## 持久化：PersistableExperiment + AxesSpec（[ADR-0063](../../../../docs/adr/0063-persistence-ownership.md)）
+### 版本實驗的資料形狀
 
-實驗量測資料的存取走 **labber_io 原生 axes-list**，而非舊版的 dict 殼。
+`PersistableExperiment`、`AxesSpec`、inner-first 軸序及 grouped roles 的共同映射見[父層 README](../README.md#實驗介面與資料)。以下保留 v2 實驗的具體資料形狀。
 
-- **opt-in 基底**：要有持久化的實驗繼承 `PersistableExperiment[T_Result, T_Config]`（而非 `AbsExperiment`），並在類別層宣告 `AXES_SPEC`，即繼承共用的 `save()` / `load()`。未遷移的實驗留在最小的 `AbsExperiment` 上、各自保留不相容的 save/load 簽名。
-- **宣告式 spec**（`experiment/axes_spec.py`）：
-  - `AxesSpec(axes, z, result_type, cfg_type, tag)` — `axes` 是 `tuple[Axis, ...]`、`z` 是 `ZSpec`、`result_type` 是 frozen Result dataclass、`cfg_type` 是該實驗 Cfg、`tag` 是有層次的 on-disk tag（如 `"onetone/freq"`）。建構時 Fast-Fail：spec 引用的 `field_name` 必須是 Result 真實欄位，且 Result 必須有 `cfg_snapshot` 欄位。
-  - `Axis(field_name, label, unit, scale=IDENTITY, dtype=np.float64)` — 把 Result 的某個軸欄位映到 on-disk channel；`scale` 帶 SI 單位轉換（`disk = memory * scale`），常數 `IDENTITY` / `MHZ_TO_HZ` / `US_TO_S`（頻率存 Hz、時間存 s，記憶體內仍是 MHz / us）。
-  - `ZSpec(field_name, label, unit, dtype=np.complex128)` — log（z）channel。
-- **inner-first 軸序慣例**：`axes` 以 inner-first 排列，`z.shape == tuple(len(ax) for ax in reversed(axes))`（inner 軸恆為 z 的最後一維）。**`load` 是 `save` 的恒等逆，兩邊都不做 caller-side transpose**。`load()` 只接受 canonical 檔案：axis count/name/unit、z channel name/unit 與 z shape 都必須符合 `AXES_SPEC`。legacy 單檔案的 label/unit 差異不放寬 runtime loader；GUI adapter 也只接受 canonical result，不提供 converter fallback。
-- **單位反轉與 cfg**：`save()` 對每個 axis 乘 `scale` 後寫盤；`load()` 除回 `scale` 並 cast 回 `dtype`，是 `save()` 的逐欄逆運算。cfg snapshot 透過 comment channel 走 `make_comment` / `parse_comment`（`load()` 以 `cfg_type.validate_or_warn` 還原），不佔 axes / z。`save()` 在 `cfg_snapshot` 為 `None` 時拋 `ValueError`。
-- **save path ownership**：`PersistableExperiment.save()` 寫入 caller 傳入的 final path；既有 path 由 datafile writer fast-fail，不自動 suffix、不提供 overwrite 參數。GUI / runner / notebook 若需要 unique filename，必須在呼叫 `save()` 前用 `reserve_labber_filepath` 或自己的 orchestration policy 決定 final path。
-- **grouped experiment dataset**：單一 Experiment Result 若含多個 peer Dataset Role，仍只產生一個 grouped `.hdf5` Experiment Data File。canonical one-shot grouped v2 要求所有 roles 共享完全相同的 inner-first axes、shape 與 timestamps，並在 root Labber log 內以平行 scalar channels 表達。`GroupedAxesSpec` / `RoleSpec` 是 experiment 層的 semantic schema：每個 role 宣告 role name、inner-first axes、z/data field mapping、dtype、unit 與 scale；common helper 依 spec 組 `GroupedLabberData` payload、驗證 required roles / axis metadata / z shape、重建 comment/cfg snapshot，再交 typed builder 還原 Result。`RoleSpec` 只描述 mechanical mapping，不攜帶 arbitrary transform callback；需要把多個 role array 合成既有 Result 欄位（例如 auto-optimize 的 `params`）時，在 `GroupedAxesSpec` 的 typed builder 邊界完成。異質 autofluxdep workflow 使用 marker-qualified streaming grouped v1，不進 one-shot v2 saver。
 - **grouped experiment roles**：`CPMG_Exp` 使用 roles `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 roles `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 roles `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` role unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 都只接受 complete grouped HDF5；legacy `.npz` 或 sidecar 不是 runtime 可載入格式；repo 不再提供轉換腳本。
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
 - **single-role 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡的zero-phase Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
@@ -142,7 +105,7 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 
 關鍵元素：
 
-1. **`orig_cfg = deepcopy(cfg)`**：在方法最開頭就拍下執行前快照，最後以 `cfg_snapshot=orig_cfg` 寫進 Result。不另存 `last_cfg`，cfg 一律由 Result 攜帶（見「AbsExperiment 與 Result 合約」）。`run()` 的輸入 `cfg` 是 `CfgModel` 型別（型別即驗證），不在方法內重做 `model_validate`。
+1. **`orig_cfg = deepcopy(cfg)`**：在方法最開頭就拍下執行前快照，最後以 `cfg_snapshot=orig_cfg` 寫進 Result。不另存 `last_cfg`，cfg 一律由 Result 攜帶（見[父層實驗介面](../README.md#實驗介面與資料)）。`run()` 的輸入 `cfg` 是 `CfgModel` 型別（型別即驗證），不在方法內重做 `model_validate`。
 2. **`sweep2array`**（`utils/round_zcu.py`）把 `SweepCfg` 展成實際會量到的點（已套 ZCU 的 freq/time/gain 量化），用來畫圖 / 存檔。
 3. **`with Schedule(cfg, signals_buffer) as sched`** 是一般單次 run scope；`sched.cfg` 是 runner-owned deepcopy，mutation 不會汙染 `orig_cfg` 或 caller 傳入的 cfg。`Schedule` 可用 `env=RunEnv(...)` 接 typed dataclass 依賴；env 只放穩定 run context，不放 scan/repeat 動態 value/index，loop state 由 `ScheduleStep.value` / `index` / `path` 表示。`ProgramBuilder.build()` 回傳 program；`run_program(program)` 執行既有 integrated-acquire program；`build_and_acquire()` 直接建立 isolated cfg / program、執行 acquire 並寫回 buffer。`reps` / `rounds` 由 builder 建出的 `program.cfg_model` 讀取；builder owner cfg 可以是 experiment cfg，`ProgramBuilder` 只抽取 `ProgramV2Cfg` runtime 欄位，也可用 `prog_builder(..., cfg=program_cfg)` 明確覆寫；已是 `ProgramV2Cfg` 的 instance/subclass 會保留原型別，沒有任何 runtime 欄位的 cfg 會 fast-fail。Decimated trace 走 `run_program_decimated(...)` / `build_and_acquire_decimated(...)`，不用參數切換 acquire mode；若需先 build program 才能知道 buffer shape，使用 `sched.register_buffer(signals_buffer)` 註冊 caller 建好的 buffer。round-level `update_hook`、`cancel_flag`、pbar 與 raw2signal 由 Schedule runtime 持有，不再透過 `Task` 包裝。
 4. **LivePlot**：從 `zcu_tools.plotting.liveplot` 匯入 `LivePlot1D` / `LivePlot2D`；兩者是 context manager。常規寫法是在 `SignalBuffer(on_update=...)` 裡每次以當前完整 buffer ndarray 重畫；`SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 update，`trigger_update()` 可手動刷新。
@@ -182,30 +145,9 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ---
 
-## Config 組合慣例
+## v2 cfg 組合慣例
 
-每個 Exp 使用 `ConfigBase`（`zcu_tools.cfg_model.ConfigBase`）定義設定，通常由三層組成：
-
-```python
-class FreqModuleCfg(ConfigBase):                   # 該實驗用到的 modules
-    reset: Optional[ResetCfg] = None
-    readout: PulseReadoutCfg
-
-class FreqSweepCfg(ConfigBase):
-    freq: SweepCfg
-
-class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + exp cfg base
-    modules: FreqModuleCfg
-    sweep: FreqSweepCfg
-```
-
-- `ConfigBase`（`zcu_tools/cfg_model.py`）是 `BaseModel` 的子類別，預設 `extra="forbid"`, `validate_assignment=True`，並提供 `with_updates()` 與 `to_dict()` 工具。所有模組/實驗 cfg 都應繼承 `ConfigBase` 而不是直接用 `BaseModel`。
-- `ProgramV2Cfg`（來自 `program/v2`）定義 QICK 程式需要的欄位（`reps`、`rounds`、...）。
-- 每個 concrete experiment 直接宣告自己的 local module cfg，並組合
-  `ProgramV2Cfg` / `ExpCfgModel`；不透過 one-tone/two-tone cfg base 隱藏欄位。
-- `ExpCfgModel`（`experiment/cfg_model.py`）提供共用欄位（目前含 `dev`）與統一驗證行為。
-- `SweepCfg` 已移至 `program/v2/sweep.py`（從 `zcu_tools.program.v2` import），繼承 `ConfigBase`，並帶有 `@model_validator` 驗證 `start/stop/step/expts` 一致性。
-- **run-time cfg materialization** 由 `zcu_tools.experiment.cfg_assembler` 擁有，而不是 `ModuleLibrary` store 擁有。核心 `assemble_experiment_cfg(raw_cfg, cfg_model, *, ml, device_snapshot, overrides=None)` 是 stateless function：caller 每次傳入 current `ml` 與當下 device snapshot；它負責套 overrides、注入 `dev` snapshot、lower `modules`、format single sweep、最後 `cfg_model.model_validate()`。`make_cfg(...)` 是薄 wrapper，預設在呼叫當下讀 `GlobalDeviceManager.get_all_info()`；`ModuleLibrary.make_cfg(...)` 只作過渡 forwarding wrapper，caller migration 後刪除。
+具體實驗使用自己的 module／sweep cfg，並視需要組合 program/v2 的 `ProgramV2Cfg` 與父層 `ExpCfgModel`。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../README.md#cfg-與父層支援)。
 
 ---
 
@@ -239,16 +181,9 @@ executor leaf contract 由 `runtime/task.py` 擁有：`Acquirer`、`TaskPlotter`
 
 ---
 
-## `experiment/utils/` 子模組重點
+父層 `experiment/utils/` 的 comment、device 與 sweep helper 見[父層 README](../README.md#cfg-與父層支援)。
 
-`comment.py` 提供兩個函式：
-
-- **`make_comment(cfg, comment=None)`** — 把 `ConfigBase` 轉成 JSON 字串（含 cfg dump、可選文字說明、timestamp），用於實驗存檔時的 comment 欄位。
-- **`parse_comment(comment)`** — 解析 `make_comment` 產生的 JSON，回傳 `(cfg_dict, comment_str, timestamp_str)`；若 JSON 解析失敗則全部回傳 `None`。
-
-這兩個函式透過 `experiment/utils/__init__.py` 直接 export。
-
-## `utils/` 子模組重點
+## v2 工具與實驗輔助
 
 - **`sweep2array(sweep_cfg, name, {"soccfg", "gen_ch", "ro_ch"})`** — 展開 `SweepCfg` 為 numpy array，已套 ZCU 量化（`round_zcu_freq/time/gain/phase`）。Exp 幾乎都靠這個產生 x 軸。
 - **`round_zcu_*`** — 單點版本的量化函式；`round_sweep_dict` 同時處理整個 sweep dict。時間的量化有特殊處理：預先減去 `0.5 * one_cycle` 以匹配 QICK sweep 用 `np.trunc` 的行為。多點 sweep 的 step 若在量化後變成 0，會 fast-fail 並要求放大 span 或減少 expts，避免 GUI/agent 看到低階 `SweepCfg` 一致性錯誤。
