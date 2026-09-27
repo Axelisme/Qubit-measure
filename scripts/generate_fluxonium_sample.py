@@ -3,7 +3,7 @@
 For each sampled ``(EJ, EC, EL)`` point this computes the lowest ``evals_count``
 energy levels versus external flux (0 → 0.5, then mirrored to 0 → 1 since the
 fluxonium spectrum is symmetric about half-flux) and stores them. The result
-feeds ``zcu_tools.notebook.analysis.fluxdep.search_in_database`` (and the
+feeds ``zcu_tools.analysis.fluxdep.search.search_database`` (and the
 fluxdep-gui v2 search): each row is a candidate, and the search scales it to
 cover a continuous neighbourhood of parameter space.
 

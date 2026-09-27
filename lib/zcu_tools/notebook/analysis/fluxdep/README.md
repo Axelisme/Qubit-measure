@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-09-27 — shared transition model ownership
+**Last updated:** 2026-09-27 — database search wrapper
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 [`notebook_md/analysis/fluxdep_fit.md`](../../../../../notebook_md/analysis/fluxdep_fit.md) 使用。
@@ -10,9 +10,7 @@
 ```
 fluxdep/
 ├── __init__.py        # 對外 API 匯出
-├── models.py          # search 專用的 count_max_evals / compile_transitions
-├── fitting.py         # 資料庫搜索 + least-squares 微調
-├── njit.py            # numba JIT 核心：energy2linearform_nb、eval_dist_bounded、candidate_breakpoint_search、entry_lower_bound、_lower_bound_kernel、search_one_entry 等
+├── fitting.py         # 共用搜尋 + 診斷圖的 Notebook wrapper；least-squares 微調
 ├── processing.py      # re-export zcu_tools.analysis.fluxdep processing kernel
 ├── onetone.py         # InteractiveOneTone：onetone 峰值挑點 notebook adapter
 ├── utils.py           # 繪圖工具（plotly 可視化）
@@ -26,7 +24,7 @@ fluxdep/
 共用的 Flux-Dependence Analysis 選點/filtering/line selection/one-tone peak detection
 規則位於 `zcu_tools.analysis.fluxdep`（[fluxdep kernel README](../../../analysis/fluxdep/README.md)）。
 共用的能譜到躍遷轉換由 [analysis fluxdep models](../../../analysis/fluxdep/README.md) 擁有。
-Notebook 這層保留 database search、專用 kernel、visualizer 與 ipywidgets shell；
+[資料庫搜尋 kernel](../../../analysis/fluxdep/README.md) 與 [診斷圖 builder](../../../plotting/fluxdep/README.md) 供 GUI 和 Notebook 共用。Notebook 這層保留組合入口、fit_spectrum、visualizer 與 ipywidgets shell；
 被抽出的互動與 processing API 透過既有 adapter 呼叫 kernel。
 measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建立 measure 的 service session；
 `InteractiveLines` 保留既有即時拖曳行為。
@@ -35,7 +33,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 
 ### `TransitionDict`
 
-`TransitionDict` 由 [`analysis.fluxdep.models`](../../../analysis/fluxdep/README.md) 擁有，Notebook 的 `models.py` 引用同一型別供 search 專用模型使用。它描述要擬合的躍遷類型，允許 key：
+`TransitionDict` 由 [`analysis.fluxdep.models`](../../../analysis/fluxdep/README.md) 擁有，`analysis.fluxdep.search_models` 的 transition compilation 使用同一型別。它描述要擬合的躍遷類型，允許 key：
 
 - `transitions`：`E_ji` 直接躍遷
 - `blue side` / `red side`：`E_ji ± r_f` 色散旁帶（需 `r_f`）
@@ -58,7 +56,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 直接計算躍遷頻率與人類可讀標籤，用於繪圖疊加。
 
 `energy2linearform` 與 `energy2transition` 位於 [`analysis.fluxdep.models`](../../../analysis/fluxdep/README.md)。
-Notebook 的 search 匯入前者，Plotly visualizer 匯入後者，不在此保留轉接。
+共用 search kernel 匯入前者，Plotly visualizer 匯入後者，不在此保留轉接。
 
 ## 擬合流程（`fitting.py`）
 
@@ -66,7 +64,7 @@ Notebook 的 search 匯入前者，Plotly visualizer 匯入後者，不在此保
 
 ### 1. `search_in_database(fluxs, freqs, datapath, transitions, EJb, ECb, ELb)`
 
-在預先生成的 Fluxonium 資料庫中做精確搜尋：
+呼叫共用 [`analysis.fluxdep.search_database`](../../../analysis/fluxdep/README.md) 後，以共用 [診斷圖 builder](../../../plotting/fluxdep/README.md) 建圖並 `plt.show()`；原 `(params, fig)` 回傳與 `plot=False` 行為維持不變。數值搜尋由 kernel 在預先生成的 Fluxonium 資料庫中執行：
 
 - **資料庫結構**（由 `scripts/generate_fluxonium_sample.py` 產生）：
   - `fluxs`：(N_flux,) 通量點
@@ -147,4 +145,4 @@ Figure builder 內部把 `self.fig` 視為 concrete `go.Figure`。建構時若 c
 
 - 新增躍遷類型：同時更新 `energy2linearform` 與 `energy2transition`，
   並確保 `count_max_evals` 能正確從新 key 推出需要的能級數。
-- 自訂擬合度量：改 `fitting.py` 裡 `eval_dist`（`@njit` 簽章固定，改時要同步改 decorator）。
+- 自訂擬合度量：搜尋的 njit 核心位於 `analysis/fluxdep/search_njit.py`；修改前先檢查 exact lower-bound pruning 的正確性。

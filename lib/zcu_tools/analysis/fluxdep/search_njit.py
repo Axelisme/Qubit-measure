@@ -299,3 +299,15 @@ def search_one_entry(
     """
     Bs, Cs = energy2linearform_nb(sf_energies_i, pairs, coeffs, offsets)
     return candidate_breakpoint_search(freqs, Bs, Cs, a_min, a_max)
+
+
+__all__ = [
+    "_apply_interp",
+    "_interp_weights",
+    "_lower_bound_kernel",
+    "energy2linearform_nb",
+    "eval_dist_bounded",
+    "candidate_breakpoint_search",
+    "entry_lower_bound",
+    "search_one_entry",
+]

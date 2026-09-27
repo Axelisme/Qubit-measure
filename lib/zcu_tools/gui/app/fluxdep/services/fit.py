@@ -9,10 +9,10 @@ wrapped in a worker thread by the GUI (``ui/analyze_panel``); the RPC path runs 
 the main thread under a wider timeout (see gui/app/fluxdep/README.md for that trade-off).
 ``search`` accepts an optional progress-bar factory so the GUI worker can inject
 a Qt-signalling ``BaseProgressBar`` via ``use_pbar_factory``; without one,
-``search_in_database`` falls back to its tqdm default.
+``search_database`` falls back to its tqdm default.
 
-The numerical cores are reused verbatim from the notebook:
-``search_in_database`` (database search).
+The search kernel is shared with the Notebook wrapper; the diagnostic builder
+returns a pyplot-managed figure under the GUI worker's routing scope.
 """
 
 from __future__ import annotations
@@ -21,13 +21,15 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.search import ParamBounds, search_database
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
-from zcu_tools.notebook.analysis.fluxdep.fitting import search_in_database
+from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
     FluxDepFit,
@@ -129,7 +131,7 @@ class FitService:
 
         This is the pure, runnable-anywhere core: it snapshots the inputs and the
         selected point cloud off State *before* doing any work (a fast read on the
-        caller's thread), then calls ``search_in_database``. It performs NO State
+        caller's thread), then calls ``search_database``. It performs NO State
         write, so it is safe to run on a worker thread — the result is recorded
         separately on the main thread via ``record_result``.
 
@@ -154,16 +156,17 @@ class FitService:
         EJb, ECb, ELb = fit.EJb, fit.ECb, fit.ELb
 
         def _run() -> tuple[tuple[float, float, float], Figure | None]:
-            return search_in_database(
+            result = search_database(
                 s_fluxs,
                 s_freqs,
                 database_path,
                 transitions,
-                EJb,
-                ECb,
-                ELb,
-                plot=plot,
+                ParamBounds(EJ=EJb, EC=ECb, EL=ELb),
             )
+            figure = make_search_diagnostic_figure(result) if plot else None
+            if plot:
+                plt.show()
+            return result.params, figure
 
         if pbar_factory is not None:
             with use_pbar_factory(pbar_factory):
@@ -179,7 +182,7 @@ class FitService:
 
         Separated from ``compute_search`` so the heavy search can run on a worker
         thread while this single State write happens on the Qt main thread, per
-        the main-thread State invariant. ``search_in_database`` raises if no
+        the main-thread State invariant. ``search_database`` raises if no
         candidate is feasible, so a ``SearchResult`` here always carries a real
         result.
         """
