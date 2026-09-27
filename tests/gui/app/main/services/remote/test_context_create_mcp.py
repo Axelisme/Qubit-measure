@@ -82,8 +82,15 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
 
 
 @pytest.mark.uses_wall_clock
+@pytest.mark.parametrize(
+    ("source_file", "invalid_content"),
+    [
+        ("module_cfg.yaml", "modules: [\n"),
+        ("meta_info.json", "{broken"),
+    ],
+)
 def test_corrupt_context_source_and_occupied_directory_preserve_selection(
-    qapp, tmp_path: Path
+    qapp, tmp_path: Path, source_file: str, invalid_content: str
 ) -> None:
     fx = Fixture(project_root=str(tmp_path), empty_project=True)
     fx.start()
@@ -109,9 +116,9 @@ def test_corrupt_context_source_and_occupied_directory_preserve_selection(
         assert user_file.read_text(encoding="utf-8") == "keep me"
         assert call(sock, "context.active", {})["result"]["label"] == "active"
 
-        source = exp_dir / "source" / "module_cfg.yaml"
+        source = exp_dir / "source" / source_file
         assert source.is_file()
-        source.write_text("modules: [\n", encoding="utf-8")
+        source.write_text(invalid_content, encoding="utf-8")
 
         with pytest.raises(GuiRpcError):
             invoke("context_create", {"label": "failed", "clone_from": "source"})
@@ -129,6 +136,8 @@ def test_corrupt_context_source_and_occupied_directory_preserve_selection(
             "active": "active",
             "labels": ["active", "source"],
         }
+        assert source.read_text(encoding="utf-8") == invalid_content
+        assert user_file.read_text(encoding="utf-8") == "keep me"
     finally:
         bridge.disconnect()
         sock.close()

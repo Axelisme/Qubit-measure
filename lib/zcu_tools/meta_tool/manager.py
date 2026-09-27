@@ -67,7 +67,7 @@ class ExperimentManager:
         source: tuple[ModuleLibrary, MetaDict] | None
         if isinstance(clone_from, str):
             src_folder = self.exp_dir / clone_from
-            if not src_folder.is_dir():
+            if not (src_folder / "meta_info.json").is_file():
                 raise FileNotFoundError(
                     f"Source context '{clone_from}' not found. Available: {self.list_contexts()}"
                 )

@@ -105,7 +105,7 @@ class MetaDict(SyncFile):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 file_data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except FileNotFoundError:
             warnings.warn(f"Failed to load {self._path}, ignoring...")
 
         if file_data is not None:
