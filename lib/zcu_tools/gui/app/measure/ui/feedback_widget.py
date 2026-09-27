@@ -6,7 +6,7 @@ Analysis/Writeback sections) that holds a one-line message input plus
 below the figure of the target tab (running tab if any, else the active tab)
 and unmounts it again, so it docks under the plot rather than floating over it.
 
-Visibility (the C3 gate, ADR-0025) is owned by FeedbackDockController: the
+Visibility (the C3 gate, ADR-0066) is owned by FeedbackDockController: the
 panel is mounted only while at least one live operation is in progress AND at
 least one MCP control client is connected. MainWindow keeps the public
 refresh_feedback_widget() facade for bus handlers and
@@ -15,10 +15,10 @@ the same idempotent decision.
 
 The panel is app-level (single foreground operation => single feedback) and
 lives on the Qt main thread; send_feedback -> operation channel path is
-unchanged (ADR-0025).
+unchanged (ADR-0066).
 
 Stop-gating: 'Send & Stop' is enabled only when the active operation has a
-cancel hook registered (ADR-0025 §Stop-gating). Gating is refreshed by
+cancel hook registered (ADR-0066). Gating is refreshed by
 FeedbackDockController each time the op count or op type changes.
 """
 

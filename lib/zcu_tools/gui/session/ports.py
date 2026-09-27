@@ -10,7 +10,7 @@ vocabulary (``OperationKind``), the conflict error, and the ``ExclusionGate``
 port. Each app keeps its own concrete ``OperationGate`` (the conflict *policy*)
 and adds its own app-specific kinds (measure: ``run``; autofluxdep: a sweep kind);
 the port is keyed by the kind's wire string so a session service can name a
-session kind without the gate's full vocabulary leaking here (ADR-0019, decision
+session kind without the gate's full vocabulary leaking here (ADR-0066, decision
 3 of the session-core extraction).
 
 More driven-adapter ports (driver factory / project IO / progress transport) join
@@ -127,7 +127,7 @@ class BackgroundExecutor(Protocol):
     ``submit`` runs ``work`` off-main, delivering its result to ``on_done`` or
     its exception to ``on_error`` on the owner thread. ``run_in_pool`` picks the
     shared pool vs a dedicated thread.  All ambient scopes must be built into
-    ``work`` by the caller before this call (ADR-0026 §2).
+    ``work`` by the caller before this call (ADR-0066).
     """
 
     def submit(
@@ -301,7 +301,7 @@ class DeviceRegistryPort(Protocol):
 
     The five methods mirror ``GlobalDeviceManager``'s classmethod surface, but
     expressed as instance methods so ``DeviceService`` can swap the concrete
-    singleton for an in-memory fake in tests (ADR-0026 §D).
+    singleton for an in-memory fake in tests (ADR-0066).
     """
 
     def register_device(self, name: str, device: Any) -> None: ...

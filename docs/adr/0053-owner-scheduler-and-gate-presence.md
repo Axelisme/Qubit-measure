@@ -5,14 +5,14 @@ status: accepted
 # 0053 — Owner scheduler seam 與 hardware gate presence
 
 **狀態:** accepted（2026-07-12 contract freeze）。
-**關聯:** [[0019]]、[[0021]]、[[0026]]、[[0064]]、[[0052]]。
+**關聯:** [[0066]]、[[0021]]、[[0064]]、[[0052]]。
 
 ## 背景
 
 application core 對「Qt main thread」的殘餘依賴已收斂到少數機制點(`tests/gui/test_qt_import_boundary.py` 的 KNOWN_QT_DEBT 清單):core 真正需要的不是 Qt main thread,而是**「所有 State mutation 由單一 owner loop 序列執行」**這個不變式。具體殘餘:
 
 - `gui/remote/rpc_endpoint.py` 的 `MainThreadDispatcher(QObject)`:IO thread → main thread 的 marshal 用 Qt queued Signal 實作。
-- `gui/session/adapters/qt_background.py`:`BackgroundExecutor` port([[0026]])的 Qt 實作以 QThread/QThreadPool 執行,「完成後回 owner thread」靠 Qt 事件圈。
+- `gui/session/adapters/qt_background.py`:`BackgroundExecutor` port([[0066]])的 Qt 實作以 QThread/QThreadPool 執行,「完成後回 owner thread」靠 Qt 事件圈。
 - 7 個 service 檔(session {connection,device} + app/main {run,save,analyze,post_analyze,staged_analyze})繼承 QObject 僅為了 completion Signal——它們的 async 執行早已走 `OperationRunner`。
 
 另外,多前端 presence(「另一方正在跑 T1」)的資料基礎缺失:`RunBlocksHardwareGate` 的 `_ActiveLease` 只有互斥所需的 kind/owner_id/resource_id,不知道「被誰、為何、從何時」佔用。先例:Bluesky queueserver 的 lock 附 owner name + note,read-only API 永不受鎖。

@@ -233,7 +233,7 @@ class Controller(SessionControllerMixin):
         # --- session-core infrastructure (this app owns its gate + executor) ---
         # autofluxdep composes the shared session services (connection / context /
         # device / startup) by injecting its own concrete infra through the session
-        # ports (ADR-0019, session-core extraction decision 3): an app-local
+        # ports (ADR-0066, session-core extraction decision 3): an app-local
         # OperationGate (conflict policy) + the shared BackgroundRunner (no figure
         # routing) alongside the shared OperationHandles / ProgressService /
         # IOManager. The progress transport defaults to the Qt marshal so a GUI /

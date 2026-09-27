@@ -303,7 +303,7 @@ class Controller(SessionControllerMixin):
         self._operation_gate = services.operation_gate
         self._operation_control = services.operation_control
         self._operation_handles = services.handles
-        # ADR-0025: cross-thread interaction now uses per-op OperationChannel;
+        # ADR-0066: cross-thread interaction now uses per-op OperationChannel;
         # FeedbackInbox and set_feedback_inbox are removed.
         self._background_svc = services.background
         self._progress_svc = services.progress
@@ -333,7 +333,7 @@ class Controller(SessionControllerMixin):
         self._cfg_editor_svc = services.cfg_editor
         self._arb_waveform_svc = services.arb_waveform
         # Notify prompt registry (Stage 4b): independent of OperationHandles;
-        # tokens minted on the main thread, consumed off-main (ADR-0025).
+        # tokens minted on the main thread, consumed off-main (ADR-0066).
         self._notify_handles: NotifyHandles = NotifyHandles()
         # App-level PersistenceCaretaker, injected by runtime behavior via
         # attach_caretaker (None in bare-Controller tests that don't exercise
@@ -346,7 +346,7 @@ class Controller(SessionControllerMixin):
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
         # Injected by RemoteControlAdapter on start()/stop() so the View can
-        # gate widgets on whether an MCP control client is connected (ADR-0025).
+        # gate widgets on whether an MCP control client is connected (ADR-0066).
         # None means no control socket is running → treat as no client connected.
         self._agent_connected_query: Callable[[], bool] | None = None
 
@@ -736,7 +736,7 @@ class Controller(SessionControllerMixin):
 
         Used by FeedbackPanel to gate the 'Send & Stop' button: ops
         without a cancel hook (connect / FIT-analyze / device connect-
-        disconnect) should not show Stop (ADR-0025 §Stop-gating, ADR-0019).
+        disconnect) should not show Stop (ADR-0066).
         Returns False when no operation is active.
         """
         operation = self._active_operation()
@@ -745,7 +745,7 @@ class Controller(SessionControllerMixin):
         return self._operation_handles.has_cancel_hook(operation.token)
 
     def send_feedback(self, message: str, *, stop: bool = False) -> str | None:
-        """User->agent feedback from the GUI (ADR-0025).
+        """User->agent feedback from the GUI (ADR-0066).
 
         Routes the message to the active operation's OperationChannel using
         the taxonomy from _active_operation() (run > interactive > device):
@@ -753,7 +753,7 @@ class Controller(SessionControllerMixin):
           continues running; agent receives user_feedback (non-terminal).
         - ``stop=True``: UI teardown first (unmount view for interactive), then
           ``handles.stop(token, reason=text)`` — enqueues Stop BEFORE triggering
-          the cancel hook (ADR-0025 ordering invariant preserved).
+          the cancel hook (ADR-0066 ordering invariant preserved).
 
         Returns the taxonomy tag of what was cancelled (stop=True only), or None.
         """
@@ -780,7 +780,7 @@ class Controller(SessionControllerMixin):
             return None
 
     # ------------------------------------------------------------------
-    # Shutdown coordination (cancel-all + wait, ADR-0003)
+    # Shutdown coordination (cancel-all + wait, ADR-0066)
     # ------------------------------------------------------------------
 
     def prepare_experiment_reload(self) -> ReloadPreview:
@@ -807,14 +807,14 @@ class Controller(SessionControllerMixin):
         The View reads this before closing to decide whether to confirm with the
         user (a non-zero count means closing will cancel work in progress).
         Counts all live operations (run / device / connect AND analyze /
-        interactive) — Handles owns the lifecycle (ADR-0019)."""
+        interactive) — Handles owns the lifecycle (ADR-0066)."""
         return self._operation_handles.live_count()
 
     def set_agent_connected_query(self, query: Callable[[], bool] | None) -> None:
         """Inject or clear the has-live-control-client predicate.
 
         Called by RemoteControlAdapter.start() / stop() so the View can gate
-        the feedback widget on agent presence (ADR-0025 C3). None means the
+        the feedback widget on agent presence (ADR-0066). None means the
         control socket is not running; the predicate then returns False.
         """
         self._agent_connected_query = query
@@ -823,7 +823,7 @@ class Controller(SessionControllerMixin):
         """Return True if at least one MCP control client is connected.
 
         The View calls this inside refresh_feedback_widget() to gate display
-        (ADR-0025 C3: show only when op live AND agent connected). Always
+        (ADR-0066: show only when op live AND agent connected). Always
         returns False when no RemoteControlAdapter has been started.
         """
         q = self._agent_connected_query
@@ -1218,7 +1218,7 @@ class Controller(SessionControllerMixin):
         return self._operation_control.await_operation(operation_id, timeout)
 
     # ------------------------------------------------------------------
-    # Notify-user prompt (Stage 4b, ADR-0025 two-RPC design)
+    # Notify-user prompt (Stage 4b, ADR-0066 two-RPC design)
     #
     # Producer side (main thread): open_notify_prompt / reply_notify /
     #   dismiss_notify / timeout_notify
@@ -1254,7 +1254,7 @@ class Controller(SessionControllerMixin):
 
         timeout is the backstop: longer than the dialog's QTimer so the dialog
         fires first. Returns NotifyResult with reason in {'reply', 'dismiss',
-        'timeout'} — never raises on timeout/dismiss (ADR-0025 §6).
+        'timeout'} — never raises on timeout/dismiss (ADR-0066).
         """
         return self._notify_handles.await_result(token, timeout)
 

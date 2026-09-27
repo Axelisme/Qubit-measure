@@ -67,7 +67,7 @@ class AnalyzeService(_StagedAnalyzeService):
     ) -> None:
         # FIT analyze is the OffMain-thread strategy with only the figure-routing
         # scope (no progress, no cancel). It takes **only a Handle, no exclusion**
-        # (ADR-0019): analyze never conflicts with hardware, so it no longer fakes
+        # (ADR-0066): analyze never conflicts with hardware, so it no longer fakes
         # an exclusion lease just to obtain the async handle (operation_id + await).
         # The handle is settled exactly once on the terminal slot (_finish /
         # _fail), the per-tab token map of which lives in the base.
@@ -121,7 +121,7 @@ class AnalyzeService(_StagedAnalyzeService):
         self._captured_inputs[tab_id] = captured_inputs
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
-            # Analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0026 §2).
+            # Analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0066).
             with figure_ambient(figure_container):
                 return adapter.analyze(req)
 

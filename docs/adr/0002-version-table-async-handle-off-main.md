@@ -5,7 +5,7 @@ status: accepted
 # 並發感知 = 資源版本表 + RPC-as-proxy async handle + off-main blocking handler
 
 **狀態：** accepted（已實作；版本表 guard + 三層分工 + operation handle 全在線）。
-**關聯：** 承 [[0001]]（Permit/Lease；async handle 是 lease 的延伸）；off-main 契約被 [[0003]]（shutdown）、[[0014]]（shared transport）援用；external-refresh Reaction 模式見 [[0004]]。
+**關聯：** 承 [[0001]]（Permit/Lease；async handle 是 lease 的延伸）；off-main 契約被 [[0066]]（shutdown）、[[0014]]（shared transport）援用；external-refresh Reaction 模式見 [[0004]]。
 
 ## 脈絡
 

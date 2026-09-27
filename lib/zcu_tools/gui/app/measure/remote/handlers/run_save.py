@@ -53,7 +53,7 @@ def _h_tab_run_cancel(
 ) -> Mapping[str, object]:
     del params
     # cancelled is best-effort: True when a live run was signalled, False on a
-    # no-op. The worker's true terminal is observed via the run handle (ADR-0026
+    # no-op. The worker's true terminal is observed via the run handle (ADR-0066
     # §8) — cancel only requests, it does not wait for the stop.
     cancelled = adapter.run_analyze_control.cancel_run()
     return {"ok": True, "cancelled": cancelled}

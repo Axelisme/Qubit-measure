@@ -25,7 +25,7 @@ def tool_gui_prompt_user(
 
     Returns {reason: 'reply'|'dismiss'|'timeout', reply?}: 'reply' carries the
     user's answer (a possibly-empty string); 'dismiss'/'timeout' carry no reply.
-    Never raises on timeout or dismiss — those are expected outcomes (ADR-0025 §6).
+    Never raises on timeout or dismiss — those are expected outcomes (ADR-0066).
     """
     message = str(arguments["message"])
     # Clamp to a sane minimum so the dialog always arms its QTimer (timeout<=0
@@ -33,7 +33,7 @@ def tool_gui_prompt_user(
     # lost-reply window).
     timeout = max(float(arguments.get("timeout", 600.0)), 1.0)
     # Step 1: main-thread open — mints token + opens dialog (QTimer fires at
-    # `timeout`; the dialog is the timeout SSOT, ADR-0025).
+    # `timeout`; the dialog is the timeout SSOT, ADR-0066).
     open_result = ctx.send_gui_rpc(
         "notify.open", {"message": message, "timeout": timeout}, 30.0
     )

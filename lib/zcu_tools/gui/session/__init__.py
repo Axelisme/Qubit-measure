@@ -14,7 +14,7 @@ apps without a back-edge. Submodules are imported on demand:
   ``SocCfgHandle`` structural surfaces). No experiment cfg-tree coupling.
 - ``events`` — the session event vocabulary: ``SessionEvent`` + the data/SoC/
   device/predictor payloads, on the shared ``BaseEventBus`` (payload-type keyed).
-- ``operation_handles`` — the async-operation Handle/Cancel facet (ADR-0019),
+- ``operation_handles`` — the async-operation Handle/Cancel facet (ADR-0066),
   pure token mint/settle/await/poll/cancel with zero operation-kind knowledge.
 
 Each app keeps its own experiment surface (tabs/run for measure, node-sweep for

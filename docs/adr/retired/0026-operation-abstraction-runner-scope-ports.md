@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替; 局部 port／事件契約見 [`gui/session/README.md`](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
+
 # ADR-0026 — operation abstraction：統一 OperationRunner + scope-as-adapter-input + State write ports
 
 關聯 [[0019]]（operation = token + facets）、[[0025]]（跨線程 channel）、[[0004]]/[[0005]]（service 角色 / port）、[[0017]]（worker plotting）、[[0007]]（device state→State）。

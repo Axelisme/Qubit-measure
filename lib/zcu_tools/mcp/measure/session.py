@@ -1,7 +1,7 @@
 """Measure-gui MCP app session.
 
 ``McpBridge`` owns transport state only.  ``MeasureMcpSession`` owns the
-measure-gui MCP policy state described by ADR-0014/ADR-0026: diagnostics,
+measure-gui MCP policy state described by ADR-0014/ADR-0066: diagnostics,
 optimistic-concurrency baselines, guarded send flow, and the debug-only latest
 operation handle projection.
 """

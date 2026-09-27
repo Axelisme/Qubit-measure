@@ -231,7 +231,7 @@ class GlobalDeviceRegistryAdapter:
     ``GlobalDeviceManager`` is a classmethod-only singleton; this adapter wraps
     its five registry methods as instance methods so ``DeviceService`` can satisfy
     the instance-method ``DeviceRegistryPort`` Protocol without touching the
-    singleton directly (ADR-0026 §D.2).  The wrapper adds no logic of its own.
+    singleton directly (ADR-0066).  The wrapper adds no logic of its own.
     """
 
     def register_device(self, name: str, device: object) -> None:
@@ -293,9 +293,9 @@ class DeviceService:
     ) -> None:
         self._bus = bus
         self._state = state
-        # Device composes both leaves (ADR-0019): Exclusion (device mutation vs
+        # Device composes both leaves (ADR-0066): Exclusion (device mutation vs
         # run / another mutation of the same device) + a Handle (operation_id +
-        # await + cancel for setup). OperationRunner owns the mechanism (ADR-0026 §1);
+        # await + cancel for setup). OperationRunner owns the mechanism (ADR-0066);
         # gate is kept directly for is_device_mutating / _reject_mutating_read;
         # bg is kept directly for poll_device_info (best-effort read, not a runner op).
         self._gate = gate
@@ -307,7 +307,7 @@ class DeviceService:
         self._driver_factory = driver_factory or _default_driver_factory
         # Registry port: hides the GlobalDeviceManager singleton behind an
         # instance-method interface so tests can inject an in-memory fake without
-        # touching the real singleton (ADR-0026 §D).
+        # touching the real singleton (ADR-0066).
         self._registry: DeviceRegistryPort = (
             device_registry
             if device_registry is not None
@@ -548,14 +548,14 @@ class DeviceService:
             # Setup is the OffMain-thread strategy with the progress scope only (no
             # figure routing; the driver's setup() polls stop_event
             # directly). progress_ambient is session-layer (no Qt) so device.py
-            # can import it without crossing the session→app boundary (ADR-0026 §2).
+            # can import it without crossing the session→app boundary (ADR-0066).
             with progress_ambient(factory):
                 driver.setup(info, stop_event=stop_event)
                 return driver.get_info()
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # bg reports outcome; we own stop_event, so we interpret cancellation
-            # (ADR-0019): normal return + stop_event set = cancelled.
+            # (ADR-0066): normal return + stop_event set = cancelled.
             if bg.ok:
                 if stop_event.is_set():
                     _on_setup_cancelled(settle)

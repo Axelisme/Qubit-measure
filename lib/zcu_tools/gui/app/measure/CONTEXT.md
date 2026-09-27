@@ -25,7 +25,7 @@ _Avoid_: guard token, ticket, voucher
 _Avoid_: 讓 outcome 帶 result payload、把 operation_id 暴露給 agent、把**互斥邏輯**混進 Registry（cancel 是 handle 能力、不是互斥；_Avoid_ 防的是把 exclusion 塞進 Registry）、期望 await 真協程讓出（是 off-main thread 模擬，見 qasync spike 備案）、期望 cancel 同步等待（會死鎖主線 / 卡死在不可中斷的 connect）
 _Avoid_: guard, lock token
 
-**關閉協調 / `ShutdownCoordinator`**（ADR-0003）:
+**關閉協調 / `ShutdownCoordinator`**（歷史 ADR-0003；現行分界見 ADR-0066）:
 GUI 關閉（user closeEvent / agent app.shutdown）時「**中斷所有 in-flight operation → 等它們停 → 全停或超時才真關**」的編排。**Qt-free 純邏輯**：`begin()` = `gate.cancel_all()`（拿全部 token）；`tick() → state`（WAITING/SETTLED/TIMED_OUT，每 tick 對所有 token `gate.poll` + 比 deadline）。**主線不能阻塞 await，故用「週期 tick + 非阻塞 poll」取代**（項目第一個週期計時器）。分層 = Progress 重構同款（ADR-0005 Hexagonal）：coordinator 純邏輯可單測無 Qt；**QTimer 包在 driven adapter** `QtShutdownDriver`（`adapters/qt_shutdown_driver.py`）驅動 `tick()`；`Controller`（Qt-free façade）暴露 `begin_shutdown(on_closed)`（懶建 driver）+ `active_operation_count()`；`MainWindow` closeEvent/request_shutdown 調它、傳 `_perform_close` 當 on_closed（user close 保留確認框，`_closing` guard 放行 `_perform_close` 觸發的二次 closeEvent）。
 _Avoid_: 在 coordinator 裡 import qtpy / 監聽 Qt signal（破壞 Qt-free + 回到「訂閱事件」；統一用 poll）、把輪詢狀態機塞進 Controller（Qt-free façade）或 MainWindow（UI）、用屬性 flag 在 closeEvent/回調間傳「在等誰」（用 coordinator 自己的局部 token 列表 = 執行上下文，非跨對象共享）
 

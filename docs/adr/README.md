@@ -6,13 +6,10 @@
 
 ## Concurrency / Lifecycle
 
-- [0001 — Permit / Lease typed guard](0001-permit-lease-typed-guard.md)：靜態前置憑證與動態硬體互斥分離。
-- [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：GUI resource version guard、operation handle、off-main wait 三層分工。
-- [0003 — ShutdownCoordinator and registry cancel](0003-shutdown-coordinator-and-registry-cancel.md)：統一 cancel/poll/await 詞彙與 Qt-free shutdown loop。
-- [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合。
-- [0025 — Cross-thread interaction channel](0025-cross-thread-interaction-channel.md)：operation/user prompt 使用單一有序 channel 傳遞 settle、message、stop。
-- [0026 — OperationRunner + scope ports](0026-operation-abstraction-runner-scope-ports.md)：OperationRunner 擁有通用生命週期；各 operation 只提供 policy 與窄 write port。
-- [0058 — Registry-owned VISA session disconnect](0058-registry-owned-visa-session-disconnect.md)：device 局部契約見 [device README](../../lib/zcu_tools/device/README.md)；跨 owner teardown 歸 Operation，故本篇尚未退役。
+- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任；尚未落實的核准目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
+- [0001 — Permit / Lease typed guard](0001-permit-lease-typed-guard.md)：measure typed Permit 的局部 guard 契約仍有效；跨 owner 分界由 0066 承接。
+- [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：資源版本 guard 與 RPC off-main handler 的局部／Remote 契約仍有效；operation handle 分界由 0066 承接。
+- [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。
 
 ## GUI Service Architecture
 
@@ -77,21 +74,26 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 協作流程歸外部 dev-flow／collab skills，repo 的 live resource 限制見 [CLAUDE.md](../../CLAUDE.md)。
 
 - [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；§3 的 predictor 校正與載入敘述已被取代（現行 overlay 見 0062，按需載入的目標見 draft）。
-- [0023 — Cooperative interrupt feedback](0023-cooperative-interrupt-feedback-wakeup.md)：由 [[0025]] 取代；保留為被取代設計的定位點。
 
 ## Draft
 
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
 - [外部 agent launch 責任](draft/external-agent-launch-ownership.md)：已核准方向待 Remote／Transport ADR 核實轉正。
 - [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：editing port、refresh／override、revision 與 atomic batch／Apply 尚待實作。
-- [Agent operation feedback](draft/agent-operation-feedback.md)：已核准方向待 Operation ADR 核實轉正。
+- [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
 
-以下舊篇保留原號與正文；現行 Persistence 決策見 0063，workflow 決策見 0062，process startup 決策見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役。
+以下舊篇保留原號與正文；現行 Operation 決策見 0066，Persistence 決策見 0063，workflow 決策見 0062，process startup 決策見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役。
 
+- [0003 — Shutdown coordinator](retired/0003-shutdown-coordinator-and-registry-cancel.md)：取消與 shutdown 跨 owner 分界由 0066 承接；自動逾時關窗敘述不再是核准的共用預設。
+- [0019 — Operation facets](retired/0019-operation-facets-and-execution-strategy.md)：facets 與 execution 分界由 0066 承接，局部策略見 session／app README。
+- [0023 — Cooperative interrupt feedback](retired/0023-cooperative-interrupt-feedback-wakeup.md)：舊 FeedbackInbox 由 0066 的有序 channel 取代。
+- [0025 — Cross-thread interaction channel](retired/0025-cross-thread-interaction-channel.md)：互動分界由 0066 承接；局部事件契約見 session／app README。
+- [0026 — OperationRunner and ports](retired/0026-operation-abstraction-runner-scope-ports.md)：runner 分界由 0066 承接；局部 port 與 scope 見 session／app README。
+- [0058 — Registry-owned disconnect](retired/0058-registry-owned-visa-session-disconnect.md)：跨 owner teardown 由 0066 承接，registry 局部契約見 device README。
 - [0044 — GUI process runtime](retired/0044-gui-process-runtime.md)：跨模組啟動邊界由 0064 接替，局部契約見 gui README。
-- [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：有效的 launch／feedback 邊界暫見 Remote／Operation draft。
+- [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：launch 邊界暫見 Remote draft；已核實的 operation feedback 見 0066。
 - [0015 — GUI memento caretaker](retired/0015-persistence-caretaker-memento-single-file.md)：app 與 shared caretaker 的責任由 0063 接替。
 - [0027 — Experiment data persistence](retired/0027-experiment-data-persistence-native-labber-axes-list.md)：資料責任由 0063 接替，細節在 datafile 與 experiment owner 文件。
 - [0032 — Waveform reference time axis](retired/0032-arbitrary-waveform-reference-time-axis.md)：時間權威由 0063 接替。

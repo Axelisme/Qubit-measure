@@ -93,7 +93,7 @@ def build_session_services(
     executor (injected via their session ports); ``progress`` is the shared
     ProgressService used by operation clients and the device-control facet;
     ``io_manager`` is the project-IO adapter; ``runner`` is the shared
-    OperationRunner (ADR-0026 §1) used by DeviceService for operation lifecycle;
+    OperationRunner (ADR-0066) used by DeviceService for operation lifecycle;
     ``project_root`` anchors generated result/database paths and result-scope
     discovery;
     ``driver_factory`` defaults to the device service's built-in hardware factory

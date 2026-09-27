@@ -86,7 +86,7 @@ class SoCConnectionService:
     ) -> None:
         self._state = state
         self._bus = bus
-        # Connect composes both leaves (ADR-0019): an Exclusion lease
+        # Connect composes both leaves (ADR-0066): an Exclusion lease
         # (SOC_CONNECT vs run / another connect) + a Handle. A connect has no
         # cancellation point, so cancel_hook=None (§B.3 equivalence).
         self._gate = gate

@@ -2,7 +2,7 @@
 
 ``AnalyzeService`` (primary FIT/INTERACTIVE) and ``PostAnalyzeService`` (second
 layer) run the identical operation lifecycle: a per-tab async handle (no exclusion,
-ADR-0019), ``set_tab_analyzing`` for the duration, a single failure terminal path,
+ADR-0066), ``set_tab_analyzing`` for the duration, a single failure terminal path,
 and a finished path that records into State before settling the handle. Only three
 things differ between them — the gate + request assembly that starts the work, what
 ``record`` does with the worker's result, and which completion stage identifies a
@@ -10,7 +10,7 @@ failure. This base owns the lifecycle skeleton; each subclass fills the three
 seams.
 
 Stage 2c: FIT/post analyze changed from inline bg.submit to OperationRunner
-(ADR-0026 §1). Interactive analyze (no worker, user-paced main-thread strategy)
+(ADR-0066). Interactive analyze (no worker, user-paced main-thread strategy)
 still uses the direct _open_token path — it is explicitly excluded from runner
 (stage2c_spec.md).
 
@@ -78,7 +78,7 @@ class _StagedAnalyzeService:
         self._runner = runner
         self._bus = bus
         self._handles = handles
-        # Per-tab token map: analyze has NO exclusion gate (ADR-0019), so two
+        # Per-tab token map: analyze has NO exclusion gate (ADR-0066), so two
         # different tabs can run concurrently. A single token would let the second
         # start clobber the first, leaking the first's handle. Keyed by tab_id,
         # every terminal path settles exactly the token its own start created.
@@ -132,7 +132,7 @@ class _StagedAnalyzeService:
     ) -> int:
         """Submit ``work`` via OperationRunner (FIT/post analyze path).
 
-        No exclusion (analyze never conflicts with hardware — ADR-0019), no
+        No exclusion (analyze never conflicts with hardware — ADR-0066), no
         progress, no cancel hook. begin() registers the token in _active_tokens
         so the interactive accessor (cancel_interactive, active_interactive_token)
         cannot see it (it is not in _interactive_tabs). Marks the tab analyzing
@@ -192,7 +192,7 @@ class _StagedAnalyzeService:
             )
 
         spec = OperationSpec(
-            exclusion=None,  # analyze has no exclusion facet (ADR-0019)
+            exclusion=None,  # analyze has no exclusion facet (ADR-0066)
             owner_id=tab_id,
             wants_progress=False,
             cancel_hook=None,
