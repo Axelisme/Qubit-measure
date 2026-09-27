@@ -1,7 +1,7 @@
 """Assemble only the fixed measure tools owned by delivered tickets."""
 
-from zcu_tools.mcp.core.bridge import ToolTable
 from zcu_tools.mcp.core.call_log import wrap_handler
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure import (
     tools_device,
     tools_lifecycle,

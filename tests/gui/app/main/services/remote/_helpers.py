@@ -32,7 +32,8 @@ from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import remote_error_from_expected
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext

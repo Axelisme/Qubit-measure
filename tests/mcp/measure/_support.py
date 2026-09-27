@@ -10,7 +10,8 @@ from zcu_tools.gui.app.main.services.remote.method_entries._registry import (
     build_agent_catalog,
 )
 from zcu_tools.gui.app.main.services.remote.wire_version import WIRE_VERSION
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import (
     MeasureMcpSession,
