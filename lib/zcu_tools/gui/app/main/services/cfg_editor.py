@@ -228,6 +228,10 @@ class CfgEditorSession:
             added=tuple(sorted(after - before)),
         )
 
+    def set_agent_fields(self, edits: Sequence[CfgEdit]) -> CfgEditResult:
+        """Apply agent whole-sweep/scalar/reference grammar to the shared draft."""
+        raise NotImplementedError("agent whole-sweep edit is not implemented")
+
     def commit_schema(self) -> CfgSchema:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
@@ -549,8 +553,13 @@ class CfgEditorService:
     def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult:
         return self._require(editor_id).set_field(path, value)
 
-    def set_fields(self, editor_id: str, edits: Sequence[CfgEdit]) -> CfgEditResult:
-        return self._require(editor_id).set_fields(edits)
+    def set_fields(
+        self, editor_id: str, edits: Sequence[CfgEdit], *, agent_edit: bool = False
+    ) -> CfgEditResult:
+        session = self._require(editor_id)
+        return (
+            session.set_agent_fields(edits) if agent_edit else session.set_fields(edits)
+        )
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService

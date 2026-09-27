@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
@@ -110,6 +111,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 _json("edits", "Ordered list of {path, value} edits"),
+                ParamSpec(
+                    "agent_edit",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Agent whole-sweep grammar; GUI leaf edits remain unchanged",
+                ),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),

@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
-from ..model import CfgSectionSpec, DirectValue, EvalValue, ReferenceSpec
+from ..model import (
+    CenteredSweepValue,
+    CfgSectionSpec,
+    DirectValue,
+    EvalValue,
+    ReferenceSpec,
+    SweepValue,
+)
 from ..reference_key import make_custom_reference_key, parse_custom_reference_key
 from .fields import (
     CenteredSweepField,
@@ -58,6 +65,11 @@ class SettableTargetKind(StrEnum):
     REFERENCE_KEY = "reference_key"
 
 
+class AgentSweepKind(StrEnum):
+    SWEEP = "sweep"
+    CENTERED_SWEEP = "centered_sweep"
+
+
 @dataclass(frozen=True, slots=True)
 class SettableTarget:
     """One nominal, live mutation target in the canonical dotted-path grammar."""
@@ -78,6 +90,28 @@ class SettableTarget:
 
     def set_value(self, value: object) -> None:
         self._set(value)
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSweepTarget:
+    """One whole-sweep edit; GUI leaf targets remain separate."""
+
+    path: str
+    kind: AgentSweepKind
+    affects_path_shape: bool
+    _get: Callable[[], SweepValue | CenteredSweepValue] = field(
+        repr=False, compare=False
+    )
+    _set: Callable[[Mapping[str, object]], SweepValue | CenteredSweepValue] = field(
+        repr=False, compare=False
+    )
+
+    def get_value(self) -> SweepValue | CenteredSweepValue:
+        return self._get()
+
+    def set_value(self, value: Mapping[str, object]) -> SweepValue | CenteredSweepValue:
+        """Validate the complete input, commit once, and return the actual sweep."""
+        return self._set(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +163,13 @@ def resolve_settable_target(root: SectionField, path: str) -> SettableTarget:
             "; did you mean " + ", ".join(repr(item) for item in suggestions) + "?"
         )
     raise SettablePathError(message)
+
+
+def resolve_agent_target(
+    root: SectionField, path: str
+) -> SettableTarget | AgentSweepTarget:
+    """Resolve agent grammar: scalars/reference keys or a whole sweep, no edges."""
+    raise NotImplementedError("whole-sweep agent target is not implemented")
 
 
 def _build_target_index(root: SectionField) -> _TargetIndex:
@@ -380,6 +421,8 @@ def _join(path: str, segment: str) -> str:
 
 
 __all__ = [
+    "AgentSweepKind",
+    "AgentSweepTarget",
     "LegacySettablePathError",
     "SettablePathError",
     "SettableTarget",

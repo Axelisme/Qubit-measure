@@ -179,4 +179,6 @@ def _h_tab_set_cfg(
                 f"edits[{i}] must be an object with 'path' and 'value'",
             )
         edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-    return adapter.ctrl.cfg_editor_set_fields(editor_id, edits).to_wire()
+    return adapter.ctrl.cfg_editor_set_fields(
+        editor_id, edits, agent_edit=params.get("agent_edit") is True
+    ).to_wire()

@@ -19,6 +19,8 @@ from .ports import (
 from .range import CenteredSweepEditor, SweepEditor
 from .reference import LibraryBindingState, ReferenceField
 from .targets import (
+    AgentSweepKind,
+    AgentSweepTarget,
     LegacySettablePathError,
     SettablePathError,
     SettableTarget,
@@ -27,6 +29,8 @@ from .targets import (
 )
 
 __all__ = [
+    "AgentSweepKind",
+    "AgentSweepTarget",
     "CenteredSweepEditor",
     "CenteredSweepField",
     "CfgDraft",

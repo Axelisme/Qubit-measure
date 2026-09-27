@@ -14,6 +14,8 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.gui.cfg.binding import (
+    AgentSweepKind,
+    AgentSweepTarget,
     CfgDraft,
     LegacySettablePathError,
     SettablePathError,
@@ -108,6 +110,28 @@ def test_sweep_edges_use_canonical_rules() -> None:
     assert draft.resolve_target("sweep.step").get_value() == pytest.approx(2.0)
     with pytest.raises(SettablePathError, match="integer"):
         draft.set_target("sweep.expts", 2.0)
+
+
+def test_agent_whole_sweep_is_normalized_without_changing_gui_leaf_grammar() -> None:
+    draft = _mixed_draft()
+    changes: list[object] = []
+    draft.on_change.connect(lambda: changes.append(draft.snapshot().value))
+    target = draft.resolve_agent_target("sweep")
+    assert isinstance(target, AgentSweepTarget)
+    assert target.path == "sweep" and target.kind is AgentSweepKind.SWEEP
+    actual = target.set_value({"start": 2.0, "stop": 8.0, "step": 2.2})
+    assert actual.expts == 4
+    assert actual.step == pytest.approx(2.0)
+    assert len(changes) == 1
+    assert draft.resolve_target("sweep.step").get_value() == pytest.approx(2.0)
+    assert "sweep" not in [item.path for item in draft.iter_settable_targets()]
+    before = draft.snapshot().value
+    with pytest.raises(SettablePathError, match="conflict"):
+        target.set_value({"start": 2.0, "stop": 8.0, "step": 1.0, "expts": 7})
+    assert draft.snapshot().value == before
+    with pytest.raises(SettablePathError, match="whole sweep"):
+        draft.resolve_agent_target("sweep.start")
+    draft.close()
 
 
 def test_sweep_target_observes_unfinished_text_and_typed_edit_recovers() -> None:

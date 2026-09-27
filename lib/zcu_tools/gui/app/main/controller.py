@@ -1154,12 +1154,7 @@ class Controller(SessionControllerMixin):
         self._cfg_editor_svc.set_change_listener(listener)
 
     def bump_editor_version(self, editor_id: str) -> None:
-        """Bump an editor session's draft version (editor.commit guard input).
-
-        Symmetric teardown is ``drop_editor_version`` (called from
-        ``CfgEditorService._remove``): a session that ends must drop its key, or
-        a stale dependency would spuriously match a retained version.
-        """
+        """Bump draft version; teardown drops the key to invalidate stale guards."""
         self._state.version.bump(f"editor:{editor_id}")
 
     def drop_editor_version(self, editor_id: str) -> None:
@@ -1174,9 +1169,9 @@ class Controller(SessionControllerMixin):
         return self._cfg_editor_svc.set_field(editor_id, path, value)
 
     def cfg_editor_set_fields(
-        self, editor_id: str, edits: list[CfgEdit]
+        self, editor_id: str, edits: list[CfgEdit], *, agent_edit: bool = False
     ) -> CfgEditResult:
-        return self._cfg_editor_svc.set_fields(editor_id, edits)
+        return self._cfg_editor_svc.set_fields(editor_id, edits, agent_edit=agent_edit)
 
     def owner_of_editor(self, editor_id: str) -> str | None:
         """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
