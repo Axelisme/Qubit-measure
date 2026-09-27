@@ -28,13 +28,14 @@ from zcu_tools.gui.session.state import (
 from zcu_tools.gui.session.types import ExpContext
 
 from .adapter import (
+    AnalysisMode,
     AnalyzeResultWithFigure,
     ExpAdapterProtocol,
     SavePaths,
     T_AnalyzeParams,
     T_Cfg,
 )
-from .artifact_tracker import ArtifactSnapshot, ArtifactTracker
+from .artifact_tracker import ArtifactKind, ArtifactSnapshot, ArtifactTracker
 
 logger = logging.getLogger(__name__)
 
@@ -413,9 +414,11 @@ class State(SessionState):
             source_path,
             type(result).__name__,
         )
-        return self._replace_run_pane(
+        retired = self._replace_run_pane(
             tab_id, RunPaneState(result=result, source_path=source_path)
         )
+        self.tabs[tab_id].artifacts.reset_for_load()
+        return retired
 
     def swap_analysis_pane(
         self,
@@ -598,8 +601,37 @@ class State(SessionState):
         This is the single read model for Qt and the remote tab projection.
         """
         self._assert_owner()
-        _ = self.get_tab(tab_id)
-        raise NotImplementedError
+        tab = self.get_tab(tab_id)
+        tracker = tab.artifacts
+        snapshots = [
+            tracker.observe(
+                ArtifactKind.DATA,
+                result=tab.run.result,
+                has_figure=False,
+                path=tab.effective_data_path(self.exp_context),
+                comment=tab.save.comment,
+            )
+        ]
+        capabilities = tab.adapter.capabilities
+        if capabilities.analysis is not AnalysisMode.NONE:
+            snapshots.append(
+                tracker.observe(
+                    ArtifactKind.ANALYSIS,
+                    result=tab.analysis.result,
+                    has_figure=tab.analysis.figure is not None,
+                    path=tab.effective_analysis_image_path(self.exp_context),
+                )
+            )
+        if capabilities.post_analysis:
+            snapshots.append(
+                tracker.observe(
+                    ArtifactKind.POST_ANALYSIS,
+                    result=tab.post_analysis.result,
+                    has_figure=tab.post_analysis.figure is not None,
+                    path=tab.effective_post_analysis_image_path(self.exp_context),
+                )
+            )
+        return tuple(snapshots)
 
     def update_tab_comment(self, tab_id: str, comment: str) -> None:
         """Publish the Data comment draft shared by GUI and remote saves."""
