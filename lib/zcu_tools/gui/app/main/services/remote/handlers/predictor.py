@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
+# The method-entry registry imports this callable by name at runtime.
+__all__ = ["_h_predictor_calibrate"]
+
 
 def _h_predictor_load(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
@@ -72,7 +75,7 @@ def _h_predictor_predict(
     return {"freq_mhz": freq}
 
 
-def handle_predictor_calibrate(
+def _h_predictor_calibrate(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest

@@ -85,7 +85,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.calibrate",
-        "predictor:handle_predictor_calibrate",
+        "predictor:_h_predictor_calibrate",
         MethodSpec(
             30.0,
             "Calibrate the installed predictor flux_bias from one measured transition "
