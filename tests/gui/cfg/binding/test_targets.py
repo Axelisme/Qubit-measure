@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     DirectValue,
@@ -156,6 +157,28 @@ def test_agent_expression_endpoint_and_step_use_resolved_bounds_before_commit() 
     before = draft.snapshot().value
     with pytest.raises((SettablePathError, TypeError, ValueError)):
         sweep.set_agent_value({"start": EvalValue("missing"), "stop": 8.0, "step": 2.0})
+    assert draft.snapshot().value == before
+    draft.close()
+
+
+def test_agent_centered_sweep_accepts_locked_span_but_rejects_center() -> None:
+    draft = _draft(
+        CfgSectionSpec(fields={"centered": CenteredSweepSpec(locked_center=0.5)})
+    )
+    target = draft.resolve_agent_target("centered")
+    assert isinstance(target, AgentSweepTarget)
+    assert target.kind is AgentSweepKind.CENTERED_SWEEP
+    actual = target.set_value({"span": 4.0, "step": 2.0})
+    assert isinstance(actual, CenteredSweepValue)
+    assert actual.center == 0.5
+    assert actual.span == 4.0
+    assert actual.expts == 3 and actual.step == pytest.approx(2.0)
+    before = draft.snapshot().value
+    with pytest.raises(SettablePathError, match="center is locked"):
+        target.set_value({"center": 0.5, "span": 8.0, "expts": 5})
+    assert draft.snapshot().value == before
+    with pytest.raises(SettablePathError, match="missing expts or step"):
+        target.set_value({"span": 4.0})
     assert draft.snapshot().value == before
     draft.close()
 
