@@ -34,6 +34,7 @@ from .adapter import (
     T_AnalyzeParams,
     T_Cfg,
 )
+from .artifact_tracker import ArtifactSnapshot, ArtifactTracker
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,10 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
 
 @dataclass
 class SavePaneState:
-    """Save owns only the data-path override; image paths belong to image panes."""
+    """Save owns the data path and comment drafts; image paths belong to image panes."""
 
     data_path_override: str | None = None
+    comment: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +157,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         default_factory=PostAnalysisPaneState
     )
     save: SavePaneState = field(default_factory=SavePaneState)
+    artifacts: ArtifactTracker = field(default_factory=ArtifactTracker)
 
     # State flags are tab interaction resources, not result ownership.
     is_analyzing: bool = False
@@ -587,6 +590,22 @@ class State(SessionState):
             type(instance).__name__,
         )
         self.tabs[tab_id].post_analysis.params = instance
+
+    def get_artifact_snapshots(self, tab_id: str) -> tuple[ArtifactSnapshot, ...]:
+        """Observe current panes and shared path/comment drafts on the owner thread.
+
+        Include only capability-declared artifacts, in Data/Analysis/Post order.
+        This is the single read model for Qt and the remote tab projection.
+        """
+        self._assert_owner()
+        _ = self.get_tab(tab_id)
+        raise NotImplementedError
+
+    def update_tab_comment(self, tab_id: str, comment: str) -> None:
+        """Publish the Data comment draft shared by GUI and remote saves."""
+        self._assert_owner()
+        self.tabs[tab_id].save.comment = comment
+        self.version.bump(f"tab:{tab_id}:save")
 
     def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
         self._assert_owner()

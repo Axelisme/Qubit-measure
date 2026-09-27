@@ -53,6 +53,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
+    from zcu_tools.gui.app.main.artifact_tracker import ArtifactSnapshot
     from zcu_tools.gui.app.main.state import (
         RetiredPaneResources,
         Session,
@@ -133,6 +134,7 @@ class TabSnapshot:
     post_analysis: PostAnalysisPaneSnapshot | None = None
     save: SavePaneSnapshot | None = None
     paths: TabPathsSnapshot | None = None
+    artifacts: tuple[ArtifactSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -137,6 +137,7 @@ class TabService:
                 analysis_image=analysis_image_path,
                 post_analysis_image=post_image_path,
             ),
+            artifacts=self._state.get_artifact_snapshots(tab_id),
         )
 
     def new_tab(self, adapter_name: str, from_dict: TabSnapshot | None = None) -> str:
