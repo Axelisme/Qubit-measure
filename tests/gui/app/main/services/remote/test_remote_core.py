@@ -577,6 +577,27 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
         bridge.disconnect()
 
 
+def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
+    fx, tmp_path: Path
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "context.snapshot"})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+
+        started = call("tab_run", {"tab": tab_id})
+        assert set(started) == {"op"}
+        assert isinstance(started["op"], int) and started["op"] > 0
+        _await_completed_run(call, started["op"])
+        assert fx.state.get_tab(tab_id).run.result is not None
+    finally:
+        bridge.disconnect()
+
+
 def test_restarted_gui_requires_new_full_reads_before_running(
     qapp, tmp_path: Path
 ) -> None:
