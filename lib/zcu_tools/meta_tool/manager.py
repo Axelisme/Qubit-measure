@@ -71,6 +71,10 @@ class ExperimentManager:
                 raise FileNotFoundError(
                     f"Source context '{clone_from}' not found. Available: {self.list_contexts()}"
                 )
+            if not (src_folder / "module_cfg.yaml").is_file():
+                raise FileNotFoundError(
+                    f"Source context '{clone_from}' has no module_cfg.yaml"
+                )
             source = (
                 ModuleLibrary(src_folder / "module_cfg.yaml", readonly=True),
                 MetaDict(src_folder / "meta_info.json", readonly=True),
@@ -108,6 +112,8 @@ class ExperimentManager:
             raise FileNotFoundError(
                 f"Folder '{label}' not found. Available: {self.list_contexts()}"
             )
+        if not (flux_dir / "module_cfg.yaml").is_file():
+            raise FileNotFoundError(f"Context '{label}' has no module_cfg.yaml")
 
         ml = ModuleLibrary(flux_dir / "module_cfg.yaml", readonly=readonly)
         md = MetaDict(flux_dir / "meta_info.json", readonly=readonly)

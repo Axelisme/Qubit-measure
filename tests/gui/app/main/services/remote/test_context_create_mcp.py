@@ -86,11 +86,13 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
     ("source_file", "invalid_content"),
     [
         ("module_cfg.yaml", "modules: [\n"),
+        ("module_cfg.yaml", None),
         ("meta_info.json", "{broken"),
+        ("meta_info.json", "null"),
     ],
 )
-def test_corrupt_context_source_and_occupied_directory_preserve_selection(
-    qapp, tmp_path: Path, source_file: str, invalid_content: str
+def test_invalid_context_source_and_occupied_directory_preserve_selection(
+    qapp, tmp_path: Path, source_file: str, invalid_content: str | None
 ) -> None:
     fx = Fixture(project_root=str(tmp_path), empty_project=True)
     fx.start()
@@ -118,7 +120,20 @@ def test_corrupt_context_source_and_occupied_directory_preserve_selection(
 
         source = exp_dir / "source" / source_file
         assert source.is_file()
-        source.write_text(invalid_content, encoding="utf-8")
+        other_file = (
+            exp_dir
+            / "source"
+            / (
+                "meta_info.json"
+                if source_file == "module_cfg.yaml"
+                else "module_cfg.yaml"
+            )
+        )
+        other_content = other_file.read_bytes()
+        if invalid_content is None:
+            source.unlink()
+        else:
+            source.write_text(invalid_content, encoding="utf-8")
 
         with pytest.raises(GuiRpcError):
             invoke("context_create", {"label": "failed", "clone_from": "source"})
@@ -136,7 +151,11 @@ def test_corrupt_context_source_and_occupied_directory_preserve_selection(
             "active": "active",
             "labels": ["active", "source"],
         }
-        assert source.read_text(encoding="utf-8") == invalid_content
+        if invalid_content is None:
+            assert not source.exists()
+        else:
+            assert source.read_text(encoding="utf-8") == invalid_content
+        assert other_file.read_bytes() == other_content
         assert user_file.read_text(encoding="utf-8") == "keep me"
     finally:
         bridge.disconnect()
