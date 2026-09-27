@@ -5,12 +5,33 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 def screenshot(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture an existing window/dialog into a session-owned PNG path."""
-    raise NotImplementedError("05 screenshot implementation pending")
+    target = arguments["target"]
+    if target not in {
+        "window",
+        "setup",
+        "device",
+        "predictor",
+        "inspect",
+        "arb_waveform",
+    }:
+        raise ValueError(f"unknown screenshot target: {target!r}")
+    path = ctx.session._new_png_path()  # pyright: ignore[reportPrivateUsage]
+    method = "view.screenshot" if target == "window" else "dialog.screenshot"
+    params = {"out_path": str(path)}
+    if target != "window":
+        params["name"] = target
+    reply = ctx.send_gui_rpc(method, params)
+    if reply.get("saved_to") != str(path) or not path.is_file():
+        raise GuiRpcError(
+            "GUI did not write the requested screenshot", reason="missing"
+        )
+    return {"path": str(path)}
 
 
 SCREENSHOT_TOOL: dict[str, Any] = {

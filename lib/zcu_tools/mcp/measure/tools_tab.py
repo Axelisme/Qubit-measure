@@ -2,35 +2,207 @@
 
 from __future__ import annotations
 
+import re
 from functools import partial
 from typing import Any
 
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+
+
+def _tab_snapshot(ctx: MeasureToolContext, tab: str) -> dict[str, Any]:
+    tabs = ctx.session.read_internal("tab.snapshot", {"tab_id": tab})["tabs"]
+    if len(tabs) != 1 or tabs[0].get("tab_id") != tab:
+        raise GuiRpcError(f"unknown tab {tab!r}", reason="unknown_tab")
+    return tabs[0]
+
+
+def _figure(ctx: MeasureToolContext, tab: str, pane: str) -> str | None:
+    path = ctx.session._new_png_path()  # pyright: ignore[reportPrivateUsage]
+    try:
+        reply = ctx.send_gui_rpc(
+            "tab.get_figure",
+            {"tab_id": tab, "subtab_id": pane, "out_path": str(path)},
+        )
+    except GuiRpcError as exc:
+        # The pane can exist without a figure, especially before the first
+        # progress update. Other errors (including transport errors) must surface.
+        if exc.code == "precondition_failed":
+            return None
+        raise
+    if reply.get("saved_to") != str(path) or not path.is_file():
+        raise GuiRpcError("GUI did not write the requested figure", reason="missing")
+    return str(path)
 
 
 def experiments(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Index live GUI adapters; derive each summary from its guide behavior."""
-    raise NotImplementedError("05 experiments implementation pending")
+    prefix = arguments.get("prefix", "")
+    if not isinstance(prefix, str):
+        raise ValueError("prefix must be a string")
+    names = ctx.session.read_internal("adapter.list", {})["adapters"]
+    result = []
+    for name in names:
+        if not name.startswith(prefix):
+            continue
+        current = ctx.session.read_internal("adapter.guide", {"adapter_name": name})[
+            "guide"
+        ]
+        behavior = current["behavior"].strip()
+        first = re.search(r"[^.!?。！？]*[.!?。！？]", behavior)
+        result.append(
+            {"name": name, "summary": first.group().strip() if first else behavior}
+        )
+    return {"experiments": result}
 
 
 def guide(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Return the named live GUI adapter's guide."""
-    raise NotImplementedError("05 guide implementation pending")
+    return ctx.session.read_internal(
+        "adapter.guide", {"adapter_name": arguments["experiment"]}
+    )["guide"]
 
 
 def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create/activate a tab; a failed from_file load must close that new tab."""
-    raise NotImplementedError("05 tab_open implementation pending")
+    experiment = arguments["experiment"]
+    created = ctx.send_gui_rpc("tab.new", {"adapter_name": experiment})
+    tab = created["tab_id"]
+    if "from_file" in arguments:
+        try:
+            # tab.load_data guards the tab's existence, result, analysis and
+            # context; establish a full baseline without demanding a SoC.
+            _tab_snapshot(ctx, tab)
+            ctx.session.read_internal("context.snapshot", {})
+            ctx.session.read_internal("tab.get_analyze_result", {"tab_id": tab})
+            ctx.send_gui_rpc(
+                "tab.load_data",
+                {"tab_id": tab, "data_path": arguments["from_file"]},
+            )
+        except Exception as load_error:
+            try:
+                ctx.send_gui_rpc("tab.close", {"tab_id": tab})
+            except Exception as cleanup_error:
+                raise GuiRpcError(
+                    f"load failed for tab {tab!r}: {load_error}; "
+                    f"cleanup also failed: {cleanup_error}; tab may remain open",
+                    reason="cleanup_failed",
+                ) from cleanup_error
+            raise
+    return {"tab": tab, "experiment": experiment}
 
 
 def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Project requested sections of one explicit tab without changing focus."""
-    raise NotImplementedError("05 tab_get implementation pending")
+    tab = arguments["tab"]
+    include = arguments.get("include", ["summary"])
+    valid = {"summary", "cfg", "analyze_params", "analysis", "post", "artifacts"}
+    if not isinstance(include, list) or any(item not in valid for item in include):
+        raise ValueError(f"include must be a list of {sorted(valid)}")
+    snap = _tab_snapshot(ctx, tab)
+    interaction = snap["interaction"]
+    result: dict[str, Any] = {}
+    if "summary" in include:
+        state = {
+            "running": bool(interaction["is_running"]),
+            "analyzing": bool(interaction["is_analyzing"]),
+            "has_result": bool(interaction["has_run_result"]),
+            "has_analysis": bool(interaction["has_analyze_result"]),
+            "has_post": False,
+        }
+        if interaction["has_analyze_result"]:
+            state["has_post"] = (
+                ctx.session.read_internal(
+                    "tab.get_post_analyze_result", {"tab_id": tab}
+                )["summary"]
+                is not None
+            )
+        result["summary"] = {
+            "experiment": snap["adapter_name"],
+            "state": state,
+            "source_file": snap.get("result_source_path"),
+        }
+    if "cfg" in include:
+        result["cfg"] = ctx.session.read_internal("tab.get_cfg", {"tab_id": tab})[
+            "tree"
+        ]
+        result.setdefault("partial", {})["cfg"] = (
+            "06-tabs-cfg owns aggregate type/choice/lock projection"
+        )
+    if "analyze_params" in include:
+        result["analyze_params"] = {
+            "primary": ctx.session.read_internal(
+                "tab.get_analyze_params", {"tab_id": tab}
+            )["analyze_params"],
+            "post": ctx.session.read_internal(
+                "tab.get_post_analyze_params", {"tab_id": tab}
+            )["post_analyze_params"],
+        }
+    for key, method, pane in (
+        ("analysis", "tab.get_analyze_result", "analysis"),
+        ("post", "tab.get_post_analyze_result", "post_analysis"),
+    ):
+        if key in include:
+            summary = ctx.session.read_internal(method, {"tab_id": tab})["summary"]
+            result[key] = (
+                {"reason": "no_result"}
+                if summary is None
+                else {"summary": summary, "figure": _figure(ctx, tab, pane)}
+            )
+    if "artifacts" in include:
+        paths = snap.get("save_paths") or {}
+        result["artifacts"] = [
+            {"key": key, "kind": kind, "default_path": paths.get(path_key)}
+            for key, kind, path_key in (
+                ("data", "data", "data_path"),
+                ("analysis", "image", "analysis_image_path"),
+                ("post", "image", "post_analysis_image_path"),
+            )
+        ]
+        result.setdefault("partial", {})["artifacts"] = (
+            "09-tabs-save owns status/last_saved_path"
+        )
+    return result
 
 
 def tab_live(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read live run progress/figure without changing the focused tab."""
-    raise NotImplementedError("05 tab_live implementation pending")
+    tab = arguments["tab"]
+    snap = _tab_snapshot(ctx, tab)
+    has_result = bool(snap["interaction"]["has_run_result"])
+    running = bool(snap["interaction"]["is_running"])
+    if not running and not has_result:
+        return {"running": False, "reason": "no_run"}
+    progress: list[dict[str, Any]] = []
+    eta: float | None = None
+    elapsed: float | None = None
+    if running:
+        operations = ctx.session.read_internal("operation.active", {})["operations"]
+        for operation in operations:
+            if operation.get("tab") == tab and operation.get("kind") == "run":
+                handle = ctx.session.expose_operation(operation["op"])
+                update = ctx.session.read_internal(
+                    "operation.progress", {}, operation_handle=handle
+                )
+                bars = update["bars"]
+                elapsed = update.get("elapsed_s")
+                progress = [
+                    {"label": bar["format"], "percent": bar["percent"]} for bar in bars
+                ]
+                estimates = [
+                    bar["eta_s"] for bar in bars if bar.get("eta_s") is not None
+                ]
+                if estimates:
+                    eta = max(estimates)
+                break
+    return {
+        "running": running,
+        "progress": progress,
+        # Old GUI versions have no operation-wide start time on the wire.
+        "elapsed_s": elapsed,
+        "eta_s": eta,
+        "figure": _figure(ctx, tab, "run"),
+    }
 
 
 _TAB = {"type": "string", "minLength": 1, "description": "Explicit GUI tab id"}
