@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — app-local remote layout
+**Last updated:** 2026-09-27 — shared spectrum ownership
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -54,11 +54,11 @@ view 只暴露查詢，不暴露 mutation。
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。
   `SpectrumEntry` 持 raw(SpectrumData)/points(PointsData)/per-spectrum flux 對齊/
   aligned/points_selected/alignment_seeded。raw/points 直接複用
-  `notebook.persistance` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
+  `analysis.spectrum` 與 `analysis.fluxdep.models` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
 - **`services/`** — 薄包裝純運算，mutate State：`load`(LoadService)、
   `alignment`(Alignment/Points)、`store`(SpectrumStore/Selection)、`export`。
   全部 Qt-free、同步、可獨立測。純運算核心複用
-  `zcu_tools.analysis.fluxdep` + `notebook.persistance`。
+  `zcu_tools.analysis.fluxdep` + `zcu_tools.analysis.spectrum`。
 - **`controller.py`** — 命令 façade：持 State + EventBus + service，每動作 mutate
   State 後 emit 對應事件。service 保持純（不碰 bus），Controller 是協調層。
   **繼承共用 `BaseController`**（`gui/controller_base`，generic over State+Bus）取得
@@ -83,7 +83,7 @@ view 只暴露查詢，不暴露 mutation。
 ## Key Design Decisions
 
 ### 領域邊界：不碰 experiment.v2
-LoadService 用底層 `load_data`(datafile) + `format_rawdata`(persistance)，
+LoadService 用底層 `load_data`(datafile) + `format_rawdata`(analysis.spectrum)，
 **不 import `experiment.v2`**（避免把 measure 實驗層拖進來）。OneTone/TwoTone
 載入完全相同；`spec_type` 只是 metadata，下游選點工具才分支。
 
@@ -142,7 +142,7 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
 與 Qt event translation；database search、診斷圖與 params export 仍留在 GUI 既有 pipeline。
 
 ### flux 對齊：per-spectrum + 可繼承
-每張譜各自一份 flux_half/int/period（對齊 persistance.SpectrumResult）。新載入的譜可
+每張譜各自一份 flux_half/int/period（對齊 analysis.fluxdep.models.SpectrumResult）。新載入的譜可
 `inherit_from` 既有譜的對齊當初值（`alignment_seeded` 標記），LinePicker 才會 seed；
 fresh load 用 picker 預設。OneTone 譜的 LinePicker 鎖 magnitude-only（相位無資訊）。
 
@@ -215,7 +215,7 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
 - **pyplot Gcf 累積坑**：`search_in_database` 的 `plt.figure()` 不 close 會堆進 pyplot 全域 figure 堆疊，
   第二次 search 的 `plt.show()` 會作用在已 detach 的舊 figure → backend raise「not attached」+ 圖只剩標題。
   修法：`_on_search` 每次 `plt.close("all")` 清 Gcf（只丟 pyplot 引用，已內嵌的 canvas 仍活在 container）。
-- `transitions` 沿用 `persistance.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
+- `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
   與任意 `transitions{n}`/`mirror{n}` 動態 list 群）——這正是 extra_items 的設計用途，**不改 pydantic/
   dataclass**（會更弱型）。
 - `services/viz.py`：matplotlib 重寫 notebook 的 plotly `FreqFluxDependVisualizer`，純函式畫進傳入的

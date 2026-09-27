@@ -13,8 +13,8 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fluxdep.models import PointsData
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
-from zcu_tools.notebook.persistance import PointsData
 from zcu_tools.simulate import value2flux
 
 logger = logging.getLogger(__name__)

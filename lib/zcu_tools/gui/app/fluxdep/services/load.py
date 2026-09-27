@@ -18,17 +18,14 @@ import os
 
 import numpy as np
 
+from zcu_tools.analysis.fluxdep.io import load_spectrums
+from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.analysis.spectrum import SpectrumData, format_rawdata
 from zcu_tools.datafile import load_labber_data
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     SpectrumEntry,
     SpecType,
-)
-from zcu_tools.notebook.persistance import (
-    PointsData,
-    SpectrumData,
-    format_rawdata,
-    load_spectrums,
 )
 from zcu_tools.simulate import value2flux
 

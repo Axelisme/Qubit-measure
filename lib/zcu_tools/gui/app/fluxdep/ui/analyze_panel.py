@@ -166,8 +166,8 @@ class AnalyzePanelWidget(QWidget):
 
     def _refresh_filter_tab(self) -> None:
         """(Re)build the cross-spectrum selector for the current spectra."""
+        from zcu_tools.analysis.fluxdep.models import SpectrumResult
         from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
-        from zcu_tools.notebook.persistance import SpectrumResult
 
         if self._filter_widget is not None:
             # Quiesce before deleteLater: the SelectorWidget may have a pooled

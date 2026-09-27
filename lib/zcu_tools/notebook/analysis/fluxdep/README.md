@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-09-27 — notebook line picker remains independent
+**Last updated:** 2026-09-27 — shared spectrum ownership
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -10,7 +10,7 @@
 ```
 fluxdep/
 ├── __init__.py        # 對外 API 匯出
-├── models.py          # TransitionDict re-export；能量 → 躍遷頻率的線性形式轉換
+├── models.py          # TransitionDict from analysis.fluxdep.models；能量 → 躍遷頻率的線性形式轉換
 ├── fitting.py         # 資料庫搜索 + least-squares 微調
 ├── njit.py            # numba JIT 核心：energy2linearform_nb、eval_dist_bounded、candidate_breakpoint_search、entry_lower_bound、_lower_bound_kernel、search_one_entry 等
 ├── processing.py      # re-export zcu_tools.analysis.fluxdep processing kernel
@@ -33,7 +33,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 
 ### `TransitionDict`
 
-`TransitionDict` 是 `notebook.persistance` 定義的共用資料契約，`models.py` re-export 供模型與 fitting code 使用。它描述要擬合的躍遷類型，允許 key：
+`TransitionDict` 由 [`analysis.fluxdep.models`](../../../analysis/fluxdep/README.md) 擁有，Notebook 的 `models.py` 引用同一型別供模型與 fitting code 使用。它描述要擬合的躍遷類型，允許 key：
 
 - `transitions`：`E_ji` 直接躍遷
 - `blue side` / `red side`：`E_ji ± r_f` 色散旁帶（需 `r_f`）

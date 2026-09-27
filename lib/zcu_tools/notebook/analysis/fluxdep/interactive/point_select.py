@@ -14,7 +14,7 @@ from zcu_tools.analysis.fluxdep import (
     downsample_points,
     points_in_normalized_brush,
 )
-from zcu_tools.notebook.persistance import SpectrumResult
+from zcu_tools.analysis.fluxdep.models import SpectrumResult
 
 
 def _canvas_widget(canvas) -> widgets.Widget:

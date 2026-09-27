@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from plotly.graph_objects import Scatter
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
-from zcu_tools.notebook.persistance import TransitionDict
 from zcu_tools.resources.sample_table import SampleFluxFrame, SampleTableV2Error
 
 

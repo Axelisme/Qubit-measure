@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 
 import numpy as np
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.remote.dispatch import (
     _HANDLERS,
@@ -25,7 +26,6 @@ from zcu_tools.gui.app.fluxdep.remote.method_specs import METHOD_SPECS
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.remote.param_spec import validate_params
-from zcu_tools.notebook.persistance import TransitionDict
 
 
 class _StubAdapter:

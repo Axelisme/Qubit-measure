@@ -22,9 +22,9 @@ from dataclasses import dataclass, replace
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import SpectrumData
 
 logger = logging.getLogger(__name__)
 

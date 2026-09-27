@@ -25,9 +25,9 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
 from zcu_tools.notebook.analysis.fluxdep.fitting import search_in_database
-from zcu_tools.notebook.persistance import TransitionDict
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
     FluxDepFit,

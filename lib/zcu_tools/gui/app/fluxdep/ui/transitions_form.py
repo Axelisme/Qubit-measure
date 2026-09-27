@@ -21,7 +21,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 
 # The editable categories (wire-name → label). r_f/sample_f are scalars handled
 # elsewhere, so they are not in this list.

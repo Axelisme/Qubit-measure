@@ -17,6 +17,7 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -35,7 +36,6 @@ from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumS
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
 from zcu_tools.gui.controller_base import BaseController
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import TransitionDict
 
 logger = logging.getLogger(__name__)
 
