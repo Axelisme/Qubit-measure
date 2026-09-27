@@ -315,7 +315,7 @@ class TestSimParamsPollLatency:
 class TestSimParamsParamsJsonRoundTrip:
     """Verify that a params.json-shaped dict can be unpacked into SimParams.
 
-    The dict structure mirrors what persistance.py produces:
+    The dict structure follows the params.json fluxdep and dispersive sections:
         {
             "fluxdep_fit": {
                 "params": {"EJ": ..., "EC": ..., "EL": ...},
