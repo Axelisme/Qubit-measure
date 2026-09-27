@@ -32,6 +32,10 @@ class RecordingHandles:
         self._log.add("handles", "await_known_outcome", operation_id, timeout)
         return self.result
 
+    def elapsed_seconds(self, operation_id: int) -> float:
+        self._log.add("handles", "elapsed_seconds", operation_id)
+        return 0.5
+
     def known_outcome(self, operation_id: int) -> OperationOutcome | None:
         raise AssertionError(f"unexpected cancel lookup: {operation_id}")
 
@@ -64,6 +68,19 @@ def test_operation_control_routes_await_to_handles() -> None:
     assert facet.await_operation(7, 0.5) is handles.result
 
     assert log.calls == [call("handles", "await_known_outcome", 7, 0.5)]
+
+
+def test_operation_control_routes_elapsed_to_handles() -> None:
+    log = CallLog()
+    facet = OperationControlFacet(
+        handles=RecordingHandles(log),
+        progress=RecordingProgress(log),
+        run_analyze=cast(Any, SimpleNamespace()),
+        device=cast(Any, SimpleNamespace()),
+    )
+
+    assert facet.elapsed_seconds(7) == 0.5
+    assert log.calls == [call("handles", "elapsed_seconds", 7)]
 
 
 def test_active_operations_merge_tab_and_device_owners() -> None:

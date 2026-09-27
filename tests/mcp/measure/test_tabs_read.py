@@ -54,10 +54,9 @@ def test_tab_open_failed_load_closes_new_tab_without_soc(
             return {"label": None}
         if method == "tab.get_analyze_result":
             return {"summary": None}
-        if method == "tab.close":
-            return {"ok": True}
-        if method == "tab.set_active":
-            assert params == {"tab_id": prior_focus}
+        if method in ("tab.close", "tab.set_active"):
+            if method == "tab.set_active":
+                assert params == {"tab_id": prior_focus}
             return {"ok": True}
         raise AssertionError(method)
 

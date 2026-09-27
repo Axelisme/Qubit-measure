@@ -275,7 +275,9 @@ def test_operation_progress_idle_returns_empty(fx):
         sock.close()
 
 
-def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(fx):
+def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(
+    fx, monkeypatch: pytest.MonkeyPatch
+):
     import time
 
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
@@ -285,8 +287,10 @@ def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(fx):
     bar = ProgressBarModel(
         label="late progress", total=2, start_time=time.monotonic() - 3600
     )
-    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
-        return_value=((1, bar),)
+    monkeypatch.setattr(
+        fx.service.operation_control,
+        "get_operation_progress",
+        MagicMock(return_value=((1, bar),)),
     )
     sock = open_client(fx.service.port)
     try:
