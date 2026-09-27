@@ -14,9 +14,7 @@
 ## GUI Service Architecture
 
 - [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與繪圖責任。
-- [0037 — Value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session value source 提供少量 default / md-write escape hatch；`ValueRef` 立即 materialize。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、plotting 與 remote 的責任分界。
-- [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：core 以 `OwnerScheduler` port 取代 Qt main-thread 隱含假設，service completion 全走 EventBus；hardware gate lease 附 origin_kind/note/since 供多前端 presence。
 
 ## Cfg / Value Model
 
