@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-27 — adapter capability 與 GUI ADR 引用
+**Last updated:** 2026-09-27 — 局部術語與文件 owner 分流
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -9,6 +9,50 @@ framework 只看 `ExpAdapterProtocol`。
 
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
+
+## 局部設計與閱讀入口
+
+此 app 的 View（Qt UI）與 `RemoteControlAdapter`（`remote/`）共用可用的
+application commands，但 capability 驗證尚未覆蓋全部入口。`GuardService` 對
+run、load、save、analyze、writeback 的既有檢查發放不同型別的 Permit；
+analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬體互斥
+由 owning service 或 app-local `OperationGate` 處理。Permit、lease、handle
+各有不同的生命週期，不以 handle 推斷取得硬體 lease。詳見
+[Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md) 與
+[capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
+
+`CfgEditorService` 按 `editor_id` 保存 cfg draft。可回收的 library-entry
+session 受 LRU／disconnect 回收；由 UI owner 建立的 seeded session 由 owner
+顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。Tab session
+的編輯會嘗試 auto-commit 至 `State.cfg_schema`；使用前仍經成品 cfg
+驗證。`WritebackService` 以 opaque draft 保存候選項及 item-local editor
+session，不能把 preview 當成再次計算候選項的指令。`CfgDraft` 的共用
+Spec／Value、`None`、locked literal、reference binding 與 lowering 契約見
+[Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md)、
+[GUI cfg README](../../cfg/README.md) 與
+[experiment cfg editing README](../../../experiment/cfg_editing/README.md)。
+目前 edit batch 及 context Apply 可能留下成功前綴，不能宣稱原子提交；
+refresh／override／revision 的未落實條件見
+[cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
+
+`State` 保存可觀察的 app 資料，`ContextService` 寫入 md／ml；services
+依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
+版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
+`SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
+不同時 bump device version，caller 再發布變更。Remote 的
+`expected_versions` 是受護 RPC 的 optional stale guard；哪些 key 重要由
+MCP 的 last-seen／dependency policy 決定，不讓 agent 直接組版本。
+GUI 事件與 service 協作見 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)，
+wire guard 與 off-owner await 見 [Remote README](remote/README.md)。
+
+`AppPersistedState` 是 startup preference 與 session 的選擇性投影，
+不是整個 State 的序列化。`startup_prefs` 保存下次預填值；restore
+不自動連接 SoC 或套用 active context。`WorkspaceService` 處理 session
+capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
+處理單檔 I/O，不認識 State／cfg。關閉等待的 timeout 並不證明 cleanup
+完成。保存邊界見 [Persistence ADR](../../../../../docs/adr/0063-persistence-ownership.md)，
+關閉與取消見 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md)
+及 [operation draft](../../../../../docs/adr/draft/operation-lifecycle-boundaries.md)。
 
 ## Package Boundaries
 

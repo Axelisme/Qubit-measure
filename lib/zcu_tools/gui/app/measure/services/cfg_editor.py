@@ -7,7 +7,7 @@ without tearing it down — so an agent edit and a user view converge on the sam
 service-owned model (WYSIWYG), and a model can outlive any widget (the agent can
 edit before/without a widget being open). See ADR-0008 (which records how the
 headless-only and delegated-model designs were superseded) and the CfgEditor
-session glossary in ``gui/CONTEXT.md``.
+session lifecycle in the measure app README and ADR-0065.
 
 Lifetime is governed by ``gc`` (not two session kinds):
 

@@ -715,7 +715,7 @@ class MainWindow(QMainWindow):
     def _build_plots(self) -> None:
         """Allocate Results + build each provider's Figure / Plotter / canvas.
 
-        Main-thread, Run start. Mirrors CONTEXT.md's Ownership: the main thread
+        Main-thread, Run start. As described in the autofluxdep app README: the main thread
         builds the empty Result containers (via the controller) and the
         UI-owned Plotters/canvases bound to them; the worker then fills rows.
         """

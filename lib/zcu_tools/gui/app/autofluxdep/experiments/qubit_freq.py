@@ -2,7 +2,7 @@
 
 The Builder owns cfg lowering and feedback policy; the short-lived Node performs
 one flux point's real acquire, fit, Result fill, and Patch emission. See
-``CONTEXT.md`` for the Builder/Node/orchestrator boundary.
+the autofluxdep app README for the Builder/Node/orchestrator boundary.
 
 - ``predict_freq`` — required; provided by the predictor Service (a Builder
   whose Node computes it), resolved latest-available like any dependency.

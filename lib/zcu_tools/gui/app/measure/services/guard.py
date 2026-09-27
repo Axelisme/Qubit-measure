@@ -92,8 +92,7 @@ class GuardService:
     Permits cover *static* preconditions per operation (context readiness,
     committed cfg validity, run SoC requirement or load capability). *Dynamic*
     resource availability (tab busy, hardware exclusion) is checked at the
-    operation boundary by the owning service or OperationGate — see CONTEXT.md
-    and docs/adr/0001.
+    operation boundary by the owning service or OperationGate — see ADR-0066.
     """
 
     def __init__(self, state: State) -> None:

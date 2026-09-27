@@ -49,7 +49,7 @@ GUI 有兩個平級 client（Qt View、remote RPC agent）並發驅動同一批�
 - **per-connection 計數抵銷**（begin +1 / terminal −1）：依賴「一次操作恰 1 begin + 1 terminal」的脆性前提，與另一機制並存邏輯雜。版本表一套機制治兩種窗，更收斂。
 - **agent 拿裸版本號自己 diff**：違三層分工，版本號是 mcp 簿記非 agent 關注。
 - **兩套並存（版本表 + origin/change-buffer）**：兩套通知會漂移，全面取代。
-- **`processEvents` 轉 event loop 解死鎖**：重入反模式，CONTEXT.md 明文 avoid。
+- **`processEvents` 轉 event loop 解死鎖**：重入反模式，[Operation ADR](0066-operation-lifecycle.md) 說明 owner-loop 不能阻塞等待完成。
 
 ## 範圍
 

@@ -1,7 +1,7 @@
 # 0018 — autofluxdep 的 orchestrator 是純需求解析器；三介面（requires/provides/produce）+ Builder 柯里化統一 Node 與 Service
 
 **狀態：** accepted（2026-06-05）。部分取代（2026-09-27）：§3 中 predictor 的校正方式與「不需要就不載入」兩項敘述已不是現行設計，見該節的取代說明；Builder／Node 與 requires／provides／produce 介面仍有效。
-**關聯：** autofluxdep-gui 的 grilling 設計（見 `lib/zcu_tools/gui/app/autofluxdep/CONTEXT.md`）。承 autofluxdep 的「Node 不是 Task、用宣告式依賴取代 cfg_maker walrus 鏈」基調。
+**關聯：** autofluxdep-gui 的 grilling 設計（見 `lib/zcu_tools/gui/app/autofluxdep/README.md`）。承 autofluxdep 的「Node 不是 Task、用宣告式依賴取代 cfg_maker walrus 鏈」基調。
 
 ## 背景
 

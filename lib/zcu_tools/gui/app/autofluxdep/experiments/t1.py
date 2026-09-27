@@ -2,7 +2,7 @@
 
 The Builder lowers the active context plus resolved modules into a T1 run cfg.
 The short-lived Node applies flux, sweeps relax time, fills the Result row, and
-emits trusted raw ``t1`` plus ``t1err``. See ``CONTEXT.md`` for the Builder/Node
+emits trusted raw ``t1`` plus ``t1err``. See the autofluxdep app README for the Builder/Node
 boundary.
 
 - needs this flux point's ``pi_pulse`` module from lenrabi — without a fresh
