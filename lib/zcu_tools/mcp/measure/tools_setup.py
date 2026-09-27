@@ -75,6 +75,16 @@ def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def soc_info(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Read the GUI's connection and hardware projection."""
+    raise NotImplementedError("03 soc_info tool has no implementation yet")
+
+
+def soc_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Synchronously connect the GUI to a remote board and read its info."""
+    raise NotImplementedError("03 soc_connect tool has no implementation yet")
+
+
 def md_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Write MetaDict keys in order without rolling back prior successful writes."""
     applied: dict[str, dict[str, Any]] = {}
@@ -101,6 +111,34 @@ def md_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
 _PROJECT_FIELD = {"type": "string", "minLength": 1}
 
 PROJECT_TOOLS: dict[str, dict[str, Any]] = {
+    "soc_connect": {
+        "handler": soc_connect,
+        "description": (
+            "Synchronously connect the GUI to a remote SoC at address/port. "
+            "Replacing a connection uses the same GUI owner; no operation handle or "
+            "automatic retry. Returns soc_info(include_cfg=false) after success."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": _PROJECT_FIELD,
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            },
+            "required": ["address", "port"],
+        },
+    },
+    "soc_info": {
+        "handler": soc_info,
+        "description": (
+            "Read SoC connection state and the GUI's per-channel description. "
+            "Disconnected state has connected=false and null address/port; "
+            "include_cfg=true adds the complete QICK cfg when connected."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"include_cfg": {"type": "boolean", "default": False}},
+        },
+    },
     "project": {
         "handler": project,
         "description": (

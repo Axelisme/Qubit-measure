@@ -62,7 +62,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Read the connected SoC's hardware summary (QICK soccfg): a compact "
             "human-readable 'description' table (per-channel generator/readout type, "
-            "converter port, sample rate, max pulse/buffer length) plus 'is_mock'. "
+            "converter port, sample rate, max pulse/buffer length), 'is_mock', "
+            "and the successful GUI connection's address/port (null for mock). "
             "The structured 'cfg' (the full ~2 KB QICK config) is included only when "
             "include_cfg=true (default false), so the common case pays nothing for it. "
             "Requires a connected SoC. Only include_cfg=true fully reveals the SoC "
