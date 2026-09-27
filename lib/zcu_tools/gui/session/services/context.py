@@ -342,10 +342,10 @@ class ContextService:
         # ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detect this edit.
         #
         # CANONICAL ANCHOR — "writing md/ml must bump context" has TWO physical
-        # paths (ADR-0006 collapsed writeback's direct write into path 1):
+        # paths (ADR-0067 collapsed writeback's direct write into path 1):
         #   1. ContextService writes: create_md_attr / rename_md_attr / set_md_attr /
-        #      del_md_attr / set_ml_*_from_schema / del_ml_* (field-level, each
-        #      bumps+emits) and apply_writes (batch:
+        #      del_md_attr / replace_ml_*_from_schema / del_ml_* (field-level, each
+        #      bumps+emits) and apply_ml_writes (batch:
         #      one bump + one emit per kind). Writeback / editor commit / inspect /
         #      create_from_role all route here — the single write authority.
         #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
@@ -365,7 +365,7 @@ class ContextService:
         self._bus.emit(MdChangedPayload(md=md))
 
     # ------------------------------------------------------------------
-    # ml/md content writes — the single write authority (ADR-0006).
+    # ml/md content writes — the single write authority (ADR-0067).
     #
     # ``apply_ml_writes`` owns the *write transaction*: it sets md attrs +
     # registers the (lowered) ml entries, then bumps the ``context`` version +
@@ -386,7 +386,10 @@ class ContextService:
         lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
         dump: bool,
     ) -> None:
-        """Apply a batch of md/ml content writes atomically (ADR-0006).
+        """Apply md/ml content writes as one batch (ADR-0067).
+
+        This groups version/event publication, not rollback: a later lowering or
+        registration failure may leave an earlier entry changed.
 
         ``md`` maps attr → value; ``modules`` / ``waveforms`` map entry name → an
         opaque un-lowered entry (a ``CfgSchema``), lowered here via the injected

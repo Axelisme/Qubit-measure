@@ -18,7 +18,7 @@
 
 ## 分層（依 ADR-0002 三層）
 
-- **mechanism（RPC/gui）**：`await_outcome` 第二喚醒源 + thread-safe inbox + dispatch payload 加 `reason/feedback`。inbox 寫入來自 `mcp/measure` 的 feedback passthrough（server 端；GUI feedback widget 已隨內嵌 agent 移除，見 ADR-0024）、讀取在 IO worker；**不放 State**（State 主執行緒寫入不變式，見 ADR-0007），由 Controller 持有 thread-safe inbox。
+- **mechanism（RPC/gui）**：`await_outcome` 第二喚醒源 + thread-safe inbox + dispatch payload 加 `reason/feedback`。inbox 寫入來自 `mcp/measure` 的 feedback passthrough（server 端；GUI feedback widget 已隨內嵌 agent 移除，見 ADR-0024）、讀取在 IO worker；**不放 State**（State 主執行緒寫入不變式，見 ADR-0067），由 Controller 持有 thread-safe inbox。
 - **簿記（mcp）**：`mcp/measure` 把判別 payload 原樣透傳。
 - **語義（agent）**：`*_wait` 工具 description / SKILL 明示「`reason=user_feedback` → 重規劃、持 operation_id 可 cancel/續跑」。
 

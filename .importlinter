@@ -27,7 +27,7 @@ ignore_imports =
 # D1: cfg_editing is experiment-side editing support; gui.cfg is a Qt-free
 # generic framework. The endpoint is the gui.cfg package facade only.
 
-# ADR-0020: shared session primitives cannot import app policy.
+# ADR-0067: shared session primitives cannot import app policy.
 [importlinter:contract:session-no-app]
 name = C2: shared session does not depend on apps
 type = forbidden

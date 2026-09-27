@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [adapter README](../../../lib/zcu_tools/experiment/v2_gui/adapters/README.md)。以下保留歷史正文。
+
 ---
 status: accepted
 ---

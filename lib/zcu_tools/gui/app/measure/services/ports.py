@@ -168,7 +168,7 @@ class PersistOriginatorPort(Protocol):
 
 @runtime_checkable
 class ContextWritePort(Protocol):
-    """The single authority for ml/md content writes (ADR-0006).
+    """The single authority for ml/md content writes (ADR-0067).
 
     Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
     inspect save, create_from_role) write through this port; ContextService
@@ -211,7 +211,7 @@ class TabLifecyclePort(Protocol):
     """Tab create/restore/close + cfg as commanded by ``WorkspaceService``.
 
     ``WorkspaceService`` orchestrates the tab lifecycle (one-way command); it
-    depends on this port, not the concrete ``TabService`` (ADR-0005 violation 2).
+    depends on this port, not the concrete ``TabService`` (ADR-0067 violation 2).
     """
 
     def new_tab(
@@ -271,7 +271,7 @@ class CfgEditorPort(Protocol):
     module/waveform writeback item (seeded from its ``edit_schema``), tears it
     down on reanalyze/rerun, and snapshots the live draft at apply time.
     Depending on this port instead of the concrete ``CfgEditorService`` keeps
-    the coupling at the interface level (ADR-0005).
+    the coupling at the interface level (ADR-0067).
     """
 
     def open_seeded(
@@ -301,7 +301,7 @@ class TabResultWritePort(Protocol):
 
     Run's lifecycle writes only these three tab-result mutations; depending on
     this port instead of the concrete ``State`` keeps the policy bound to a
-    contract, not behaviour (ADR-0005). ``State`` is the only implementer and
+    contract, not behaviour (ADR-0067). ``State`` is the only implementer and
     satisfies it structurally (no inheritance change)."""
 
     def clear_tab_results(self, tab_id: str) -> RetiredPaneResources: ...

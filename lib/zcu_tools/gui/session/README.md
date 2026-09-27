@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — session environment naming
+**Last updated:** 2026-09-27 — GUI ADR 引用更新
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -97,4 +97,4 @@ introduced.
 - **wire name 來源**：`SessionEvent.X` 的字串值即 wire event name；measure-gui 的 wire-name lock 測試（`test_remote_event_dialog_view.py`）鎖全集，搬移/改名 payload 不得動字串值。
 - **`SessionEnv.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；`ContextService.list_value_sources/read_value_source` 是 GUI/remote 共用查詢面，mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ValueSourceBinder` 以 owner-scoped replace/unregister 維護 `context.*` / `project.*` / `predictor.*` / `device.<name>.*`；named device source 包含 `device.<name>.name` 與 cached info（如 `value`/`status`），device provider 只讀 cached `DeviceState.info`、不 poll hardware，也不推導 active/flux 語義。`value_source_input.py` 把此查詢面包成可注入的 GUI token helper；它只替換輸入文字，不寫 cfg/md。`SessionEnv` 仍是 live environment facade，不是 snapshot。
 
-跨模組設計見 ADR-0002/0004/0005/0006/0019/0020/0021/0025/0026（0021：event ownership——domain module 擁有 enum+payload、app 組裝；0025：跨線程互動 channel——OperationChannel/NotifyChannel；0026：operation abstraction——OperationRunner + scope-as-adapter-input + State write port + ConnectionService 拆 SoC/Predictor + DeviceRegistryPort）。autofluxdep 走同一組 session services、`SetupControlPort`、`ContextControlPort`、`DeviceControlPort`、`PredictorControlPort`、`ProgressControlPort`、`session_env` 與共用 setup/device/predictor/inspect dialog；見 ADR-0020 + autofluxdep/README。
+跨模組設計見 ADR-0067（shared session、event ownership、frontend 邊界）、ADR-0067（尚存的 cfg 局部契約）、ADR-0002／0019／0025／0026（operation 與跨線程互動）。autofluxdep 走同一組 session services、`SetupControlPort`、`ContextControlPort`、`DeviceControlPort`、`PredictorControlPort`、`ProgressControlPort`、`session_env` 與共用 setup/device/predictor/inspect dialog；見 autofluxdep/README。

@@ -1,4 +1,4 @@
-"""CfgSchema lowering — the experiment-coupled half of context ml writes (ADR-0006).
+"""CfgSchema lowering — the experiment-coupled half of context ml writes (ADR-0067).
 
 The session ``ContextService`` owns the ml/md write *transaction* (register +
 bump + emit + persistence) but is free of the experiment cfg-tree. Lowering a

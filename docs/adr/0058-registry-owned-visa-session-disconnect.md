@@ -11,7 +11,7 @@ notebook 層的 session factory。關閉流程若散落 caller，會造成同一
 close、stale aliases 殘留、registry lock 內執行長時間 I/O 阻塞其他 lookup、以及
 device session 未斷前 ResourceManager 就被關閉。disconnect 需要單一 registry-owned
 contract，且 connection lifecycle 與 hardware-state policy 必須分離（device live
-state 由 State 擁有，見 [[0007]]）。
+state 由 State 擁有，見 [[0067]]）。
 
 ## Decision
 

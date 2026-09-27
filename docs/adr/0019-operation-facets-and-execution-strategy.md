@@ -5,7 +5,7 @@ status: accepted
 # Operation = token + opt-in facets + 可插 execution strategy（拆 Handle 出 gate、抽 BackgroundRunner）
 
 **狀態：** accepted（facet 拆分仍生效；OffMain 細節已演進為 `BackgroundRunner` + caller-owned ambient thunk，`OperationRunner` policy/spec 見 [[0026]]）。
-**關聯：** 重構 [[0002]]（gate = `_OperationExclusion` + `_OperationRegistry` facade、共用 token、analyze handle-only）——本檔把 registry 從 facade 拆成正交 sibling。**取代** [[0003]] §一「生命週期綁死、不拆可選疊加」的決定（其「無不互斥長任務場景」前提已失效）；cancel 三動詞承 [[0003]]。strategy 選擇留 domain service，依 [[0004]]/[[0005]]（orchestrator 組合 leaf）。OffMain 畫圖 marshal 依 [[0017]]；guard 用 Permit 依 [[0001]]；`BackgroundExecutor` scope wiring 依 [[0026]]。
+**關聯：** 重構 [[0002]]（gate = `_OperationExclusion` + `_OperationRegistry` facade、共用 token、analyze handle-only）——本檔把 registry 從 facade 拆成正交 sibling。**取代** [[0003]] §一「生命週期綁死、不拆可選疊加」的決定（其「無不互斥長任務場景」前提已失效）；cancel 三動詞承 [[0003]]。strategy 選擇留 domain service，依 [[0067]]（orchestrator 組合 leaf）。OffMain 畫圖 marshal 依 [[0067]]；guard 用 Permit 依 [[0001]]；`BackgroundExecutor` scope wiring 依 [[0026]]。
 
 ## 脈絡
 

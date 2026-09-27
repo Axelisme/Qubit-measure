@@ -1,6 +1,6 @@
 # ADR-0025 — 跨線程互動 channel（單一有序事件流取代多-channel combine）
 
-取代 [[0023]]。關聯 [[0019]]（operation handles / facets）、[[0026]]（operation abstraction：runner 消費本 channel 作 await/cancel 核心）、[[0017]]（worker-thread plotting）、[[0002]]。
+取代 [[0023]]。關聯 [[0019]]（operation handles / facets）、[[0026]]（operation abstraction：runner 消費本 channel 作 await/cancel 核心）、[[0067]]（worker-thread plotting）、[[0002]]。
 
 ## 脈絡
 

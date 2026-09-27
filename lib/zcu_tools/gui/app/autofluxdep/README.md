@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — cfg editing relocation; session environment naming
+**Last updated:** 2026-09-27 — GUI ADR 引用更新
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 

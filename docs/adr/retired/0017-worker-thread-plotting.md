@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [`gui/plotting` README](../../../lib/zcu_tools/gui/plotting/README.md)。以下保留歷史正文。
+
 # 0017 — worker 線程畫圖：依「畫圖在哪呼叫」分流 marshal vs 純通知
 
 **狀態：** accepted（探索後定性）。

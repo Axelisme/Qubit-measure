@@ -121,7 +121,7 @@ class DiagnosticSink(Protocol):
 
 
 class RenderHost(Protocol):
-    """Canvas-bearing View for run/analyze figure routing (ADR-0017).
+    """Canvas-bearing View for run/analyze figure routing (ADR-0067).
 
     Each (tab_id, subtab) pane owns a stable FigureContainer for its lifetime (S2).
     The worker captures the pane's container at start; switching the visible pane
@@ -834,7 +834,7 @@ class Controller(SessionControllerMixin):
         then run ``on_closed`` — the View's actual teardown.
 
         Qt-free façade: the QTimer-driven coordinator lives in a driving adapter
-        (ADR-0005), built lazily here so the Controller stays importable without
+        (ADR-0067), built lazily here so the Controller stays importable without
         a Qt loop. ``on_closed`` always runs on the main thread."""
         access = self._services.experiment_access
         was_shutting_down = access.shutting_down
@@ -1092,7 +1092,7 @@ class Controller(SessionControllerMixin):
         ctx = self.get_session_env()
         ref = entry.make_value(ctx)
         spec = entry.shape()
-        # ADR-0006: hand the un-lowered CfgSchema to the single write authority;
+        # ADR-0067: hand the un-lowered CfgSchema to the single write authority;
         # ContextService lowers (against live md) + registers. No UI-side lowering.
         schema = CfgSchema(spec=spec, value=ref.value)
         if item_kind == "module":

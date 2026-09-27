@@ -1,7 +1,7 @@
 # 0003 — 統一 async-task cancel（Registry 持 stop_event）+ Qt-free ShutdownCoordinator 輪詢關閉
 
 **狀態：** accepted（119a gui2:5ed92fd2 / 119b gui2:3df4890a，live-verified）。
-**關聯：** 擴充 [[0002]]（operation handle / `_OperationRegistry`）；承 [[0002]]（off-main blocking handler / 主線不能阻塞）；分層採 [[0005]]（Hexagonal，Qt 經 driven adapter）；起因於 Phase 118 的 `app.shutdown`（用戶質疑「為何用 kill / 為何用屬性 flag」）。**§一「生命週期綁死」被 [[0019]] 取代**（exclusion/handle 改 opt-in facets；cancel 三動詞與 ShutdownCoordinator 不變，token 的 handle 來源改 Handle leaf）。
+**關聯：** 擴充 [[0002]]（operation handle / `_OperationRegistry`）；承 [[0002]]（off-main blocking handler / 主線不能阻塞）；分層採 [[0067]]（Hexagonal，Qt 經 driven adapter）；起因於 Phase 118 的 `app.shutdown`（用戶質疑「為何用 kill / 為何用屬性 flag」）。**§一「生命週期綁死」被 [[0019]] 取代**（exclusion/handle 改 opt-in facets；cancel 三動詞與 ShutdownCoordinator 不變，token 的 handle 來源改 Handle leaf）。
 
 ## 背景
 

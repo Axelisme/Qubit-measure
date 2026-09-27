@@ -1,6 +1,6 @@
 # ADR-0026 — operation abstraction：統一 OperationRunner + scope-as-adapter-input + State write ports
 
-關聯 [[0019]]（operation = token + facets）、[[0025]]（跨線程 channel）、[[0004]]/[[0005]]（service 角色 / port）、[[0017]]（worker plotting）、[[0007]]（device state→State）。
+關聯 [[0019]]（operation = token + facets）、[[0025]]（跨線程 channel）、[[0067]]（service 角色、state 與 worker plotting）。
 
 ## 脈絡
 
@@ -52,7 +52,7 @@ OperationSpec(
 ```
 # run policy 建構的 work thunk（runner 注入 pbar_factory；figure/stop 由 closure 捕獲）
 def work(pbar_factory):
-    with figure_ambient(live_container):       # app 層 helper：routing + liveplot（[[0017]]）
+    with figure_ambient(live_container):       # app 層 helper：routing + liveplot（[[0067]]）
         with progress_ambient(pbar_factory):   # session 層 helper：pbar ContextVar
             with schedule_stop_scope(StopSignal(stop_event)):  # op 專屬：run policy 自己接 experiment stop scope
                 return adapter.run(request, schema)  # experiment adapter 簽名不動
@@ -64,12 +64,12 @@ def work(pbar_factory):
 
 ### 3. State → 窄 write port
 
-run/analyze 對 State 的寫入收斂成窄契約（比照 [[0005]]/0021 既有 `ports.py` 的 `ContextWritePort` / `WritebackQueryPort`）：
+run/analyze 對 State 的寫入收斂成窄契約（比照 [[0067]] 既有 `ports.py` 的 `ContextWritePort` / `WritebackQueryPort`）：
 
 - `TabResultWritePort`：`set_tab_running` / `update_tab_result` / `clear_tab_results`（run policy 消費）。
 - `TabAnalyzeWritePort`：`set_tab_analyzing` / `update_tab_analyze` / `update_tab_post_analyze`（analyze policy 消費）。
 
-runner 與 policy 只認 port，不認具體 `State`；`State` 是唯一 implementer（仍守主線程寫入不變式 [[0007]]）。
+runner 與 policy 只認 port，不認具體 `State`；`State` 是唯一 implementer（仍守主線程寫入不變式 [[0067]]）。
 
 ### 4. gate / progress 維持 port 兄弟（不併入 runner）
 
@@ -108,7 +108,7 @@ wire `operation.await` / `operation.progress` / `operation.cancel` 契約**不�
 - Experiment runner stop scope 不再外洩執行器層；bg 變成 app 無關的純執行器（更易測）。
 - runner / policy 對 State / gate / progress / bg 全部依 port——可注入 fake 單元測試，無需 Qt / 真硬體。
 - **concurrency-critical**：runner 是所有 op 共用的生命週期核心，動它必經 sub-agent review；與 [[0025]] channel 落地一併驗證。
-- `OffMainScopes` 退場（其 figure/pbar/stop 三欄位分別化為 work thunk 的 closure / runner 注入參數 / closure）；`BackgroundExecutor.submit` 的 `scopes` 參數移除。此型別是 session-core 共用（[[0020]]），故 autofluxdep 等共用 app 的呼叫點一併遷移。
+- `OffMainScopes` 退場（其 figure/pbar/stop 三欄位分別化為 work thunk 的 closure / runner 注入參數 / closure）；`BackgroundExecutor.submit` 的 `scopes` 參數移除。此型別是 session-core 共用（[[0067]]），故 autofluxdep 等共用 app 的呼叫點一併遷移。
 - **分子階段落地**：2a State write ports（純加 Protocol，zero behaviour change）→ 2b bg 退化純執行器＋`progress_ambient`/`figure_ambient` helper（concurrency-adjacent）→ 2c `OperationRunner` 抽取＋run/analyze/post/device-setup 改 client（concurrency-critical）。connect 改 `bg.submit` 留 §5 的 ConnectionService 拆分階段。
 
 ## 拒絕的替代方案

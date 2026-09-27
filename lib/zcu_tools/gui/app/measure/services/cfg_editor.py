@@ -220,9 +220,9 @@ class CfgEditorSession:
     def commit_schema(self) -> CfgSchema:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
-        ADR-0006: the session's job ends at the CfgSchema snapshot; lowering
-        (EvalValue → concrete, against the live md) + register belong to
-        ContextService (the single write authority). ``commit`` applies only to
+        ADR-0067: the session's job ends at the CfgSchema snapshot. The app
+        supplies lowering against the live md; ContextService owns registration,
+        versioning, and event publication. ``commit`` applies only to
         ml-entry sessions (those carrying an ``item_kind``); a seeded session
         (tab cfg / writeback draft) is teardown-only and rejects commit.
         """
@@ -268,7 +268,7 @@ class CfgEditorService:
     Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
     (narrow port); ``read_port`` (ContextReadPort) reads the current ml to seed
     ``from_name`` sessions; ``write_port`` (ContextWritePort) is the single ml/md
-    write authority used at commit (ADR-0006 — the session no longer lowers /
+    write authority used at commit (ADR-0067 — the session no longer lowers /
     registers itself); ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a
@@ -295,7 +295,7 @@ class CfgEditorService:
         self._editors: dict[str, CfgEditorSession] = {}
         self._seq = itertools.count()
         self._listener: ChangeListener | None = None
-        # ADR-0008/0004 Reaction: the service owns every cfg draft, so refresh
+        # ADR-0008 and ADR-0067: the service owns every cfg draft, so refresh
         # payloads map explicitly to the three narrow binding refresh operations.
         from zcu_tools.gui.session.events import (
             ContextSwitchedPayload,
@@ -534,8 +534,8 @@ class CfgEditorService:
         return self._require(editor_id).set_fields(edits)
 
     def commit(self, editor_id: str, name: str) -> None:
-        # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService
-        # (the single write authority) lowers + registers. The Repository owns
+        # ADR-0067: the aggregate yields its un-lowered CfgSchema; the app
+        # supplies lowering and ContextService owns registration. The Repository owns
         # teardown only — after a successful write, so a validation failure
         # (raised by the write port) leaves the draft intact for the agent to fix.
         session = self._require(editor_id)

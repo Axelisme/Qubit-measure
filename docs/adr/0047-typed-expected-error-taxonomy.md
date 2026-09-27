@@ -4,7 +4,7 @@ status: accepted
 
 # 0047 — Typed expected-error taxonomy
 
-**狀態：** accepted。關聯：[[0005]] 的 application/domain ownership、[[0014]] 的 app-local dispatch policy。
+**狀態：** accepted。關聯：[[0067]] 的 application/domain ownership、[[0014]] 的 app-local dispatch policy。
 
 ## 背景
 
@@ -52,7 +52,7 @@ state。wire envelope、code、reason、data與版本皆不改變。
 - **Transport-side type registry：** 新增 domain exception時必須同步 producer與adapter，分類
   locality錯位且容易漂移。
 - **讓 lower owner import remote code：** 會讓 domain/service層反向依賴 driving adapter與 wire
-  vocabulary，違反 [[0005]]、[[0014]]。
+  vocabulary，違反 [[0067]]、[[0014]]。
 
 ## 後果
 

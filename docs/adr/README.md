@@ -16,13 +16,7 @@
 
 ## GUI Service Architecture
 
-- [0004 — Service dependency three questions](0004-service-dependency-three-questions.md)：用 Query / Command / Reaction 判斷 service 依賴方向。
-- [0005 — Service roles](0005-service-roles-ddd-hexagonal.md)：Driving adapter、app service、aggregate root、repository、driven adapter 的角色邊界。
-- [0006 — Single ml/md write authority](0006-single-ml-md-write-authority.md)：`ContextService` 是 ModuleLibrary / MetaDict 內容寫入權威。
-- [0007 — Device state lives in State](0007-device-state-to-state-ssot.md)：Device live state 由 State 擁有，DeviceService 保持 driver/worker 邊界。
-- [0020 — Shared session core](0020-session-core-shared-layer.md)：measure 與 autofluxdep 共用 context、SoC、device、dialog、operation/session primitive。
-- [0021 — Event ownership domain modules](0021-event-ownership-domain-modules.md)：事件 enum 與 payload 由 domain module 擁有，app 只組裝 bus 與 serializer。
-- [0048 — Domain event facts and View reactions](0048-domain-event-facts-and-view-reactions.md)：producer發布closed domain fact；pane-owned State先commit完整resource並於commit後回收retired draft，coordinator擁有lazy-snapshot reaction matrix與figure restore政策。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與繪圖責任。
 - [0037 — Value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session value source 提供少量 default / md-write escape hatch；`ValueRef` 立即 materialize。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、plotting 與 remote 的責任分界。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：core 以 `OwnerScheduler` port 取代 Qt main-thread 隱含假設，service completion 全走 EventBus；hardware gate lease 附 origin_kind/note/since 供多前端 presence。
@@ -36,7 +30,6 @@
 - [0011 — Finished-cfg validation](0011-cfgschema-validate-boundary.md)：成品驗證的局部條件；舊篇所述 app-local lowering 位置已更新。
 - [0012 — Context-free measure definition](0012-cfgbuilder-value-layer-fluent-assembly.md)：實驗 adapter 的 definition／seed 及 assembler 契約。
 - [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：lookup 與 resolve-once 輸入的 measure 局部契約。
-- [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter 宣告／hooks 的局部契約，非 cfg editing owner。
 - [0045 — Shared GUI cfg core](0045-shared-gui-cfg-core-ownership.md)：renderer registry／import surface 的局部細節仍有效；舊 program owner 路徑已過時。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：generic lowering 操作與 ports；live-key 說明不得推定為核准的 refresh／override 目標。
 - [0050 — Canonical cfg binding paths](0050-canonical-cfg-binding-paths.md)：target grammar／diff 的局部契約；成功前綴是現況而非核准的 atomic batch 目標。
@@ -51,7 +44,6 @@
 - [0052 — Event meta 與多前端 attribution](0052-event-meta-and-frontend-attribution.md)：bus 為事件蓋章 `EventMeta(seq, origin)`，origin 由 dispatch 邊界宣告、operation 記錄顯式攜帶；coalescing 屬 subscriber-side；wire 封套 additive 加 seq/origin。
 - [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 隨 method 宣告於 `RemoteMethodEntry`。
 - [0060 — Agent interface as second view](0060-measure-agent-interface-shared-gui-view.md)：量測 agent 以 40 個特化 tool 操作與 GUI 共用的狀態；一個判斷點一個 tool，寫入類 tool 使 GUI 跟隨到對應子 tab。
-- [0061 — Measure interactive plugin session](0061-measure-interactive-plugin-session.md)：plugin 局部契約見 [main app README](../../lib/zcu_tools/gui/app/main/README.md)；跨 owner session ownership 歸 GUI，故本篇尚未退役。
 
 ## Persistence
 
@@ -68,9 +60,7 @@
 
 ## Plotting
 
-Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_tools/plotting/liveplot/README.md)。
-
-- [0017 — Worker-thread plotting](0017-worker-thread-plotting.md)：worker 直接畫圖時 marshal；只通知時走 queued signal。
+Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_tools/plotting/liveplot/README.md)；GUI 的 worker／Qt 繪圖責任見 0067。
 
 ## Agents
 
@@ -88,7 +78,18 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Retired
 
-以下舊篇保留原號與正文；現行 Persistence 決策見 0063，workflow 決策見 0062，process startup 決策見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役。
+以下舊篇保留原號與正文；現行 GUI 決策見 0067，Persistence 見 0063，workflow 見 0062，process startup 見 0064。0013 的 transport 內容留待 Remote／Transport 核實。
+
+- [0004 — Service dependency three questions](retired/0004-service-dependency-three-questions.md)：依賴語意與方向由 0067 接替。
+- [0005 — Service roles](retired/0005-service-roles-ddd-hexagonal.md)：前端與 owner 角色由 0067 接替。
+- [0006 — Single ml/md write authority](retired/0006-single-ml-md-write-authority.md)：寫入權威由 0067 接替；cfg lowering 見 0065 與 measure README。
+- [0007 — Device state lives in State](retired/0007-device-state-to-state-ssot.md)：device 與 persistence 分工由 0067、0063 接替。
+- [0017 — Worker-thread plotting](retired/0017-worker-thread-plotting.md)：前端繪圖邊界由 0067 接替，機制見 gui plotting README。
+- [0020 — Shared session core](retired/0020-session-core-shared-layer.md)：共用／app-local 邊界由 0067 接替，局部契約見 session README。
+- [0021 — Event ownership domain modules](retired/0021-event-ownership-domain-modules.md)：domain 事件與前端投影由 0067 接替。
+- [0036 — Adapter capability contract](retired/0036-adapter-capability-contract-validated-at-import.md)：跨 owner 規則由 0067 接替，精確 hook 見 experiment adapter README。
+- [0048 — Domain event facts and View reactions](retired/0048-domain-event-facts-and-view-reactions.md)：事件與反應由 0067 接替，pane matrix 見 measure README。
+- [0061 — Measure interactive plugin session](retired/0061-measure-interactive-plugin-session.md)：session ownership 由 0067 接替，互動細節見 measure README。
 
 - [0044 — GUI process runtime](retired/0044-gui-process-runtime.md)：跨模組啟動邊界由 0064 接替，局部契約見 gui README。
 - [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：有效的 launch／feedback 邊界暫見 Remote／Operation draft。

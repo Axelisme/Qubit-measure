@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-27 — app-local remote layout
+**Last updated:** 2026-09-27 — adapter capability 與 GUI ADR 引用
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -71,7 +71,7 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   scroll/cap lifecycle.
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
-  retargets the worker (ADR-0017). Run terminal reactions refresh canonical
+  retargets the worker (ADR-0067). Run terminal reactions refresh canonical
   presentation without selecting a subtab; Analysis remains an explicit user
   selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
@@ -176,7 +176,7 @@ writeback forwards are pane-qualified; no flat writeback forward remains.
 
 Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
 while `MainWindowEventCoordinator` owns EventBus subscription and pane-specific
-payload routing (ADR-0048). The coordinator speaks to `MainWindow` through a narrow
+payload routing (ADR-0067). The coordinator speaks to `MainWindow` through a narrow
 host protocol: it decides which refresh sequence a closed domain fact requires,
 but the window keeps widget ownership and concrete rendering methods. Producers
 emit only closed facts (run/analysis/post lifecycle or committed resources) — no
@@ -319,7 +319,7 @@ Save，restores the live size，holds only the raster cache (original pixmap) an
 aspect-fit scaling (`KeepAspectRatio`) that never exceeds the image viewport.
 Viewport-driven mosaic reflow (gallery's own width vs two-minimum-width-cards
 threshold) is presentation-only and never moves figure ownership, adds a second
-canvas, or changes ADR-0048 reactions. No competing state owner is introduced.
+canvas, or changes ADR-0067 reactions. No competing state owner is introduced.
 
 ## Tab Lifecycle And Ordering
 
@@ -500,7 +500,10 @@ commit explicitly clears canvases when the new State has no figure.
 application service. It owns app-specific request coercion and wire projection:
 method registry, event serialization, main-thread dispatch, resource-version
 guard, editor lifecycle, and diagnostics.
-It exposes the same behavior as the Qt UI. Context/value/md/ml RPC handlers use
+It projects internal tab interaction/content facts to the coarse
+`{tab_id, requery:["tab.snapshot"]}` event envelope; GUI refresh masks and
+pane figure details stay internal to `MainWindowEventCoordinator`. The wire event
+name and payload are not the internal fact enum. Context/value/md/ml RPC handlers use
 the controller-exposed `ContextControlPort` facet; device RPC handlers use
 `DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers
 use `PredictorControlPort` for predictor load/query/compute. SoC/startup
@@ -596,6 +599,21 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 
 ## Adapter-Facing Rules
 
+- `ContextService` 擁有 md／ml 內容提交、`context` version bump 與變更事件。
+  Measure 的 `ContextWritePort` 從 cfg schema 產生 app-side lowering callbacks，
+  交給共用 service 在寫入時呼叫；`CfgEditorService` 只交未 lower 的 schema。
+  Writeback 選出的 md／ml entries 交給一次 `apply_ml_writes()`，每批至多
+  bump 一次、每種變更事件至多送一次。這不是失敗時整批 rollback 的保證：
+  lower 與 register 依序執行，後項失敗時前項可能已改動 live content。
+  寫入與 crash durability 是不同責任，磁碟保存見 ADR-0063。
+- `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。Framework 讀同一份
+  `AdapterCapabilities` 宣告來判斷 SoC 需求、analysis、post-analysis、load 的支援範圍；
+  `requires_soc` 不代表 SoC 已連線。`GuardService` 檢查當次
+  context、cfg、SoC；operation owner 另檢查動態 gate。`LoadService` 也檢查 `load_data`，
+  不因 UI 控制項已停用就略過 application guard。`BaseAdapter` 的 import-time
+  條件 hook 驗證與 concrete adapter 義務見
+  [experiment adapter README](../../../experiment/v2_gui/adapters/README.md)；
+  framework 不從 `getattr` 探測是否支援某個操作。
 - Adapter `cfg_definition()` is context-free authoring; only fresh
   `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.
 - `validate_run_request(req, raw_cfg)` is a mandatory framework member that

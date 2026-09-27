@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-22 — reloadable adapters and fixed role composition
+**Last updated:** 2026-09-27 — adapter capability 驗證契約
 
 # measure experiment adapters
 
@@ -30,6 +30,14 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 `cfg_definition()` 使用 `_support` 提供的 measure-domain builder vocabulary，但結構與預設
 policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_value` 兩個方法理解同一
 份設定。generic Spec/Value assembly 由 `zcu_tools.gui.cfg` 擁有，不能搬回本 package。
+
+## Capability 宣告與實作
+
+每個 concrete `BaseAdapter` 以一個 `AdapterCapabilities` 宣告 `analysis`（NONE／FIT／INTERACTIVE）、`requires_soc`、`post_analysis`、`load_data`。宣告的是支援範圍，不是目前是否連線、檔案是否可讀或是否已取得 operation lease。實驗側提供符合宣告的 hooks；framework 的 interface 與呼叫端規則見 [measure app](../../../gui/app/measure/README.md) 和 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)。具體實驗的 capability 值以其 adapter class 為準。
+
+`BaseAdapter.__init_subclass__` 在定義 subclass 時檢查宣告與條件式 hooks，不延後到 UI 或 worker 第一次使用。FIT 要有 `analyze()`，INTERACTIVE 要有 `make_interactive_plugin()` 與 `make_interactive_frontend()`，NONE 不接受分析 hooks；非 INTERACTIVE 不接受這兩個 interactive factories。Post-analysis 只配 FIT，並要求其 params 與 analyze hooks。需要值才能建立的 analyze params 必須提供 `get_analyze_params()`，全有預設值則可繼承 base 實作。檢查 method override 時比較沿 MRO 解析後的實作與 `BaseAdapter`，所以中間 base 提供的 override 有效，不維護子類白名單。
+
+`load_data=True` 須有 concrete `load()`，或有可無參數建立且提供 callable `load()` 的 `exp_cls`；`load_data=False` 不接受 concrete load override。這是 import-time 宣告一致性檢查，不證明某個檔案能載入、hook 語意正確或操作安全。`validate_run_request()` 是 framework 必呼的 preflight；base 提供 no-op default，不因繼承 no-op 而新增 capability flag。Subclass 拼錯預期要 override 的 no-op hook 名稱，驗證無法辨識其意圖。精確錯誤與預設值以 `base.py` 為準。
 
 ## 修改原則
 
