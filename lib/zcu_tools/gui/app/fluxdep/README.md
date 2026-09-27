@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — shared spectrum ownership
+**Last updated:** 2026-09-27 — shared transition ownership
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -139,7 +139,7 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
 ### Flux-Dependence Analysis kernel handoff
 [fluxdep kernel README](../../../analysis/fluxdep/README.md) 下，互動選點、filtering、line selection、one-tone peak detection 的共用規則住在
 `zcu_tools.analysis.fluxdep`。Qt `ui/interactive/` widget 只保留控制項、canvas、worker/debounce
-與 Qt event translation；database search、診斷圖與 params export 仍留在 GUI 既有 pipeline。
+與 Qt event translation；共用躍遷換算也位於 `analysis.fluxdep.models`；database search、診斷圖與 params export 仍留在既有 pipeline。
 
 ### flux 對齊：per-spectrum + 可繼承
 每張譜各自一份 flux_half/int/period（對齊 analysis.fluxdep.models.SpectrumResult）。新載入的譜可

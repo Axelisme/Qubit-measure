@@ -123,7 +123,7 @@ def _synth_observation(db_path: str, idx: int, n_fluxs: int, transitions):
     for m in range(f_energies.shape[2]):
         energies[:, m] = np.interp(fluxs, f_fluxs, f_energies[idx, :, m])
 
-    from zcu_tools.notebook.analysis.fluxdep.models import energy2transition
+    from zcu_tools.analysis.fluxdep.models import energy2transition
 
     fs, _ = energy2transition(energies, transitions)
     # Pick one observed transition per flux (column 0) — clean data.

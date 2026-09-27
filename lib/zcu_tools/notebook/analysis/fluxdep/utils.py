@@ -8,7 +8,11 @@ import pandas as pd
 import plotly.graph_objects as go
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fluxdep.models import SpectrumResult, TransitionDict
+from zcu_tools.analysis.fluxdep.models import (
+    SpectrumResult,
+    TransitionDict,
+    energy2transition,
+)
 from zcu_tools.resources.sample_table.schema import (
     SAMPLE_COORDINATE_COLUMNS,
     SampleFluxFrame,
@@ -16,7 +20,6 @@ from zcu_tools.resources.sample_table.schema import (
     validate_sample_table_v2,
 )
 
-from .models import energy2transition
 from .processing import cast2real_and_norm
 
 # Coordinate and measurement columns never shown in sample-point hover labels.
