@@ -31,6 +31,9 @@ def test_md_tools_share_gui_values_and_stop_after_a_failed_key(
             "values": {"freq": 5.0, "matrix": "2 × 2 matrix"}
         }
         assert invoke("md_get", {"keys": ["matrix"]}) == {"values": {"matrix": matrix}}
+        assert invoke("context_create", {"label": "clone"}) == {"label": "clone"}
+        assert invoke("context_use", {"label": "base"}) == {"label": "base"}
+        assert invoke("md_get", {"keys": ["matrix"]}) == {"values": {"matrix": matrix}}
         assert (
             call(sock, "context.md_get_attr", {"key": "freq"})["result"]["value"] == 5.0
         )
