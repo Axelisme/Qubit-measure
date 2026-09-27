@@ -21,8 +21,9 @@ shape 漂移。
 `zcu_tools.experiment.cfg_editing` 是跨 app、Qt-free 的 program cfg GUI projection owner：
 
 - closed catalog 固定列出七種 module 與六種 waveform discriminator、label、fresh spec factory；
-- catalog 不做 runtime registration，也不 import program/v2、app、session、experiment、Qt 或
-  `meta_tool`；test 以顯式 runtime cfg class 集合驗 closed discriminator parity；
+- catalog 不做 runtime registration；模組本身只 import `zcu_tools.gui.cfg` 與同 package 的 specs，
+  不 import program/v2、app、session、Qt 或 `resources`（原 `meta_tool`）。package 位於
+  `experiment` 之下，import 時會載入 `experiment` package 的 base 依賴（見 [[0065]]）；test 以顯式 runtime cfg class 集合驗 closed discriminator parity；
 - 每次 factory call 建立 deep-fresh Spec tree，包括 nested section、scalar choices 與
   `ReferenceSpec.allowed` mutable containers；
 - `ProgramSpecPolicy` 只有 `arb_data_choices_source` 與
