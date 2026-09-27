@@ -438,7 +438,7 @@ class ReferenceValue:
         Adapter-side default override sugar (replaces long factory params). The
         value tree is mutable by contract; this mutates and returns self for
         chaining — deliberately asymmetric with spec-side fluent (which returns
-        new frozen specs). See CONTEXT.md "Value OO 覆寫".
+        new frozen specs). See the gui/cfg README for Spec/Value ownership.
         """
         self.value.with_field(path, value)
         return self

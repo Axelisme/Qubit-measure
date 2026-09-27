@@ -16,5 +16,5 @@ sweeps flux × the user-ordered providers, replacing the old ``cfg_maker`` lambd
 - ``state`` / ``event_bus`` / ``controller`` / ``app`` — composition root + façade
 
 See ``.agent_state/plans/tool_gui/autofluxdep_gui_assessment.md`` for the full plan and
-``CONTEXT.md`` for the Builder/Node/Service/Result/Plotter glossary.
+``README.md`` for the local Builder/Node/Result/Plotter design.
 """

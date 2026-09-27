@@ -1,9 +1,9 @@
-"""Result — a Node's sweep-lived, flux-aware domain output (see CONTEXT.md).
+"""Result — a Node's sweep-lived, flux-aware domain output (see the autofluxdep app README).
 
 A Result is distinct from a Patch. The **Patch** is the provides scalars other
 Nodes consume; the **Result** is *this Node's own complete output* — the raw 2D
 signals, per-point frequency axes, fit curves — used by the Plotter and (later)
-for saving. Both come from the same per-point fit, so they cannot disagree.
+for saving. They serve different readers: a raw row may remain even when no trusted Patch key is emitted.
 
 A Result is **sweep-lived and flux-aware**: the flux axis is always the first
 dimension, pre-allocated nan-filled at Run start (``Builder.make_init_result``)

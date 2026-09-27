@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — adapter capability 引用更新
+**Last updated:** 2026-09-27 — workflow 語言入口更新
 
 # autofluxdep experiments
 
@@ -39,4 +39,4 @@ experiments/
 6. 在 `tests/gui/app/autofluxdep/experiments/` 增加該實驗的 cfg/acquire/fit/Result/Patch 測試，並讓 production-wide contract tests 明確從 `experiments.catalog` 的 `builders()` 取得 Builder。
 7. 執行 catalog/import architecture tests、該實驗 targeted tests，以及相關 cfg/persistence/workflow tests。
 
-跨模組 runtime contract 見 ADR-0062、ADR-0067；本 package 的高層執行語言見 `../CONTEXT.md`。
+跨模組 runtime contract 見 ADR-0062、ADR-0067；本 package 的局部 workflow 語言見 [app README](../README.md#workflow-語言)。

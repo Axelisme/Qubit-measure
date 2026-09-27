@@ -1,4 +1,4 @@
-"""Workflow orchestrator — the pure requirement resolver (see CONTEXT.md).
+"""Workflow orchestrator — the pure requirement resolver (see the autofluxdep app README).
 
 Sweeps flux × the user-ordered providers. It is a **requirement resolver**, NOT
 an ordering / topological resolver: execution order is whatever sequence it is

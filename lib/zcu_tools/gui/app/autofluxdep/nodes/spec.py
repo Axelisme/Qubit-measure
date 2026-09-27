@@ -3,7 +3,7 @@
 This is the *declaration vocabulary* shared by every provider (a measurement
 ``Builder`` or a ``Service`` — see ``nodes/builder.py``). It replaces the
 runner-based ``autofluxdep`` module's ``cfg_maker`` lambda + ``ctx.env["info"]``
-walrus chains with an explicit, declarative dependency model. See ``CONTEXT.md``
+walrus chains with an explicit, declarative dependency model. See the autofluxdep app README
 and ADR-0062 for the workflow boundary.
 
 A provider declares:

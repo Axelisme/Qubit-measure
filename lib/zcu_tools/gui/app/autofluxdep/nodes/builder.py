@@ -1,4 +1,4 @@
-"""Builder / Node / placement — the execution abstraction (see CONTEXT.md).
+"""Builder / Node / placement — the execution abstraction (see the autofluxdep app README).
 
 The orchestrator sees only three things on a provider: ``provides``,
 ``requires``, and (per flux point) a ``Node`` with ``produce``. It is a pure
