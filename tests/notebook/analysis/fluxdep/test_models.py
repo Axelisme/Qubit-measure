@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import (
-    TransitionDict as PersistenceTransitionDict,
+    TransitionDict as AnalysisTransitionDict,
 )
 from zcu_tools.notebook.analysis.fluxdep.models import (
     TransitionDict,
@@ -84,7 +84,7 @@ def test_energy2linearform_mirror_accepts_sample_f_without_r_f():
 
 def test_mirror_without_sample_f_or_r_f_raises_consistently():
     energies = np.zeros((4, 4), dtype=np.float64)
-    transitions: TransitionDict = {"mirror": [(0, 1)]}
+    transitions: AnalysisTransitionDict = {"mirror": [(0, 1)]}
     with pytest.raises(ValueError, match="sample_f"):
         energy2linearform(energies, transitions)
     with pytest.raises(ValueError, match="sample_f"):
@@ -101,4 +101,4 @@ def test_nb_empty_transitions_k_zero():
 
 
 def test_transition_dict_has_single_runtime_owner():
-    assert TransitionDict is PersistenceTransitionDict
+    assert TransitionDict is AnalysisTransitionDict
