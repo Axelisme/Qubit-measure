@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-26 — Explicit homophasal calibration cfg
+**Last updated:** 2026-09-27 — Frozen Run and GUI load cfg ownership
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -54,12 +54,13 @@ Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 imp
 （例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
 `gui/app/main/README.md`。
 
-`BaseAdapter.build_exp_cfg` 是 GUI run path 的 cfg materialization seam：adapter 先用
-`gui.app.main.adapter.lowering.schema_to_raw_dict(schema, req.md, req.ml)` 在 GUI adapter
-層完成 EvalValue / md lowering，再把
-concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
-assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active
-`ml/md` 綁進長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
+GUI 的 `GuardService.acquire_run_permit` 在接受 Run 時凍結 tab 已呈現的 resolved cfg，
+不重新從 live md/ml 解析 expression 或 reference。`BaseAdapter.build_exp_cfg` 接收這份
+raw cfg；預設以 `ml=None` 和 `RunRequest.device_snapshot` 呼叫
+`assemble_experiment_cfg`。不要把 active `ml/md` 綁進長壽 service object，也不要讓
+`ModuleLibrary` store 擁有 live device snapshot。Analyze 與 load 有各自的 context 契約，
+不能據此推論 Run 會重讀 md/ml。
+
 generic model/default/inheritance與validation/lowering直接從`zcu_tools.gui.cfg`匯入；measure
 entry point只組current md expression、measure module shape與`SweepCfg` ports。measure adapter
 facade只提供framework contract、request/result/writeback/analyze params與session signature
@@ -134,9 +135,10 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。legacy
 單檔案資料相容只在 adapter migration 邊界提供，adapter 只能透過 `legacy_migration_experiment` 指向白名單 converter；
 流程是 canonical load 先失敗，才把原檔 read-only 轉成 `/tmp` canonical HDF5 後再呼同一個
-`exp.load()`。這是 adapter 邊界，不是 experiment runtime compatibility。load
-不把 `result.cfg_snapshot` 反填回 Config tab；`cfg_snapshot is None` 時 module writeback 維持
-graceful skip。
+`exp.load()`。這是 adapter 邊界，不是 experiment runtime compatibility。`BaseAdapter.load`
+本身只讀取結果，不修改 tab cfg。GUI 的 `LoadService.load_result` 在取得結果後，會嘗試將
+相容的 `result.cfg_snapshot` 投影並反填到 tab 與 Config editor；缺少或不相容快照時，
+tab cfg 維持原值。`cfg_snapshot is None` 時 module writeback 維持 graceful skip。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive setup；`analysis=INTERACTIVE`
