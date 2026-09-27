@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,7 +41,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             cfg_schema=MagicMock(),
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=MagicMock(), params=analyze_params),
-            save=SavePaneState(data_path_override="data.h5"),
+            save=SavePaneState(data_path_override="data.h5", comment="draft note"),
         ),
     )
     writeback = MagicMock()
@@ -59,6 +60,8 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert snapshot.analysis is not None
     assert snapshot.analysis.params is analyze_params
     assert snapshot.paths is not None and snapshot.paths.data.path == "data.h5"
+    assert snapshot.save is not None
+    assert asdict(snapshot.save)["comment"] == "draft note"
     assert state.get_tab("tab").analysis.params is analyze_params
 
 

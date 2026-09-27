@@ -1030,40 +1030,29 @@ def test_unmatched_remote_save_completion_does_not_mark_gui_sig_as_saved(
     assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
 
 
-def test_comment_edit_does_not_trigger_data_path_update(exp_tab_factory, qapp):
+def test_comment_edit_updates_shared_draft_without_touching_paths(
+    exp_tab_factory, qapp
+):
     ctrl = _mock_ctrl()
-    # Make update_tab_data_path observable
+    ctrl.update_tab_comment = MagicMock()
     ctrl.update_tab_data_path = MagicMock()
     ctrl.update_tab_analysis_image_path = MagicMock()
     ctrl.update_tab_post_analysis_image_path = MagicMock()
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
     )
-    snap = _snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-        has_active_context=True,
-    )
     tab = exp_tab_factory("tab-1", ctrl, caps)
-    tab.attach(snap, MagicMock())
-    # Clear any calls from attach (path sync)
+    tab.attach(_snapshot("tab-1", has_run=True), MagicMock())
     ctrl.update_tab_data_path.reset_mock()
     center = tab._save_center
-    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
-    center.set_comment_text("new comment")
-    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    center.set_comment_text("programmatic")
+    ctrl.update_tab_comment.assert_not_called()
+    center._comment_edit.setPlainText("typed by user")
+    _require_qapp().processEvents()
+    ctrl.update_tab_comment.assert_called_once_with("tab-1", "typed by user")
     ctrl.update_tab_data_path.assert_not_called()
     ctrl.update_tab_analysis_image_path.assert_not_called()
     ctrl.update_tab_post_analysis_image_path.assert_not_called()
-    ctrl.update_tab_data_path.reset_mock()
-    center._comment_edit.setPlainText("another")
-    _require_qapp().processEvents()
-    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
-    ctrl.update_tab_data_path.assert_not_called()
     tab.deleteLater()
     _require_qapp().processEvents()
 
