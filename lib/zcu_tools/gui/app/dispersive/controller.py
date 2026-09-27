@@ -20,6 +20,7 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
     EventBus,
@@ -35,7 +36,6 @@ from zcu_tools.gui.app.dispersive.services.preprocess import PreprocessService
 from zcu_tools.gui.app.dispersive.services.project import ProjectService
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
-    PreprocessResult,
 )
 from zcu_tools.gui.controller_base import BaseController
 from zcu_tools.gui.project import ProjectInfo
@@ -127,7 +127,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
         The live single-point path for the draggable sample-flux lines (read-only,
         synchronous, cheap). Fast-fails if no fit inputs are loaded.
         """
-        from zcu_tools.gui.app.dispersive.services.predict import predict_dispersive_at
+        from zcu_tools.analysis.dispersive.predict import predict_dispersive_at
 
         inputs = self._state.fit_inputs
         if inputs is None:
@@ -150,7 +150,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
         worker thread; the caller records the result on the main thread. Fast-fails
         if inputs / preprocessing are missing or there are no sample fluxes.
         """
-        from zcu_tools.gui.app.dispersive.services.autotune import auto_tune
+        from zcu_tools.analysis.dispersive.autotune import auto_tune
 
         inputs = self._state.fit_inputs
         pp = self._state.preprocess

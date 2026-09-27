@@ -1,6 +1,6 @@
-"""Fast per-flux electronic-delay fit (numba), dispersive-gui-local.
+"""Fast per-flux electronic-delay fit (numba), dispersive analysis.
 
-A GUI-local, ~14x-faster replacement for looping ``zcu_tools.analysis.fitting.resonance.fit_edelay``
+A dispersive-specific, ~14x-faster replacement for looping ``zcu_tools.analysis.fitting.resonance.fit_edelay``
 over every flux row: the whole (n_flux × grid) double loop is JIT-compiled into one
 ``@njit(parallel=True)`` kernel with the per-flux outer loop in ``prange``. Two
 optimizations vs the utility path:
@@ -11,7 +11,7 @@ optimizations vs the utility path:
 - numba releases the GIL, so the parallelism is real and needs no process fork (so a
   Qt ``GuiProgressBar`` is never pickled across a worker boundary).
 
-This is intentionally NOT in ``zcu_tools.utils`` — it specializes the local circle
+This is intentionally separate from ``zcu_tools.analysis.fitting`` — it specializes the local circle
 refinement for the dispersive preprocessing hot path. Global branch discovery reuses
 the shared utility once across all flux rows; the physical cable delay is common, while
 the numba kernel retains per-row local refinement.

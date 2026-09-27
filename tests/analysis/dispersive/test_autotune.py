@@ -8,8 +8,8 @@ prediction is stubbed so the test is fast and the optimum is known.
 from __future__ import annotations
 
 import numpy as np
-import zcu_tools.gui.app.dispersive.services.autotune as autotune_mod
-from zcu_tools.gui.app.dispersive.services.autotune import (
+import zcu_tools.analysis.dispersive.autotune as autotune_mod
+from zcu_tools.analysis.dispersive.autotune import (
     _interp_norm_phase,
     auto_tune,
     sample_score,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 import numpy as np
+from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.dispersive.state import (
     DEFAULT_BARE_RF,
@@ -15,7 +16,6 @@ from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     FluxoniumInputs,
     OnetoneEntry,
-    PreprocessResult,
     VersionTable,
 )
 from zcu_tools.gui.project import ProjectInfo

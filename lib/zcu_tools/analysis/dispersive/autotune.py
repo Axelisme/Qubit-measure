@@ -26,7 +26,7 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
-from .predict import predict_dispersive_at
+from zcu_tools.analysis.dispersive.predict import predict_dispersive_at
 
 logger = logging.getLogger(__name__)
 
