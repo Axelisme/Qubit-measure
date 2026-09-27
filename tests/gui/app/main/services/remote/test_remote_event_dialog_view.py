@@ -515,8 +515,7 @@ def test_view_snapshot_roundtrip(fx):
 
 
 def test_view_screenshot_roundtrip(fx):
-    """view.screenshot grabs the whole window and returns base64 PNG + bytes (the
-    raw consumer shape; the mcp gui_screenshot tool decodes + writes the file)."""
+    """The existing no-path consumer still receives base64 PNG + byte count."""
     import base64
 
     sock = open_client(fx.service.port)
@@ -527,6 +526,23 @@ def test_view_screenshot_roundtrip(fx):
         png = base64.b64decode(result["png_b64"])
         assert png.startswith(b"\x89PNG")
         assert result["bytes"] == len(png)
+    finally:
+        sock.close()
+
+
+def test_view_screenshot_out_path_writes_png_without_switching_tabs(fx, tmp_path):
+    sock = open_client(fx.service.port)
+    try:
+        before = call(sock, "tab.list_all")["result"]["active_tab_id"]
+        path = tmp_path / "window.png"
+        response = call(sock, "view.screenshot", {"out_path": str(path)})
+        assert response["ok"] is True
+        assert response["result"] == {
+            "saved_to": str(path),
+            "bytes": path.stat().st_size,
+        }
+        assert path.read_bytes().startswith(b"\x89PNG")
+        assert call(sock, "tab.list_all")["result"]["active_tab_id"] == before
     finally:
         sock.close()
 

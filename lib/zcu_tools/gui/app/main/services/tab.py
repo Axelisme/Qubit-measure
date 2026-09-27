@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from zcu_tools.gui.app.main.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.main.state import (
     AnalysisPaneState,
     PostAnalysisPaneState,
@@ -183,6 +184,18 @@ class TabService:
         import dataclasses
 
         return dataclasses.asdict(self._registry.create(adapter_name).guide())
+
+    def analyze_param_definitions(
+        self, adapter_name: str, *, stage: Literal["primary", "post"]
+    ) -> list[dict[str, Any]]:
+        """Describe canonical adapter parameters before or after a result exists."""
+        adapter = self._registry.create(adapter_name)
+        params_cls = (
+            adapter.analyze_params_cls()
+            if stage == "primary"
+            else adapter.post_analyze_params_cls()
+        )
+        return describe_analyze_params(params_cls)
 
     def close_tab(self, tab_id: str) -> None:
         logger.info("close_tab: tab_id=%r", tab_id)

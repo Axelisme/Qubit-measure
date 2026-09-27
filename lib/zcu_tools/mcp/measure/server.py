@@ -117,7 +117,7 @@ def main() -> None:
         try:
             bridge.disconnect()
         finally:
-            session._cleanup_pngs()  # pyright: ignore[reportPrivateUsage]
+            session.cleanup_pngs()
 
     run_stdio_loop(
         _CONFIG,

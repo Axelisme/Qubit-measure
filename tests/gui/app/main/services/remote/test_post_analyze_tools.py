@@ -98,12 +98,6 @@ def test_get_params_serializes_dataclass():
     assert res["post_analyze_params"] == asdict(GEPostAnalyzeParams())
 
 
-def test_get_params_none_when_absent():
-    ctrl = _ctrl(post_params=None)
-    res = _dispatch(ctrl, "tab.get_post_analyze_params", {"tab_id": "t"})
-    assert res == {"post_analyze_params": None}
-
-
 # ---------------------------------------------------------------------------
 # tab.get_post_analyze_result
 # ---------------------------------------------------------------------------

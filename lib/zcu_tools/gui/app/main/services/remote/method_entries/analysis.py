@@ -34,7 +34,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.get_analyze_params",
         "analysis:_h_tab_get_analyze_params",
-        MethodSpec(5.0, "Read current analyze params", (_str("tab_id"),)),
+        MethodSpec(
+            5.0,
+            "Read primary analyze params as {analyze_params, definitions}. Values "
+            "are null before a result exists; definitions come from the live adapter.",
+            (_str("tab_id"),),
+        ),
     ),
     method_entry(
         "tab.analyze",
@@ -65,7 +70,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.get_post_analyze_params",
         "analysis:_h_tab_get_post_analyze_params",
-        MethodSpec(5.0, "Read current post-analysis params", (_str("tab_id"),)),
+        MethodSpec(
+            5.0,
+            "Read post-analysis params as {post_analyze_params, definitions}. Values "
+            "are null before post analysis; definitions come from the live adapter.",
+            (_str("tab_id"),),
+        ),
     ),
     method_entry(
         "tab.post_analyze",

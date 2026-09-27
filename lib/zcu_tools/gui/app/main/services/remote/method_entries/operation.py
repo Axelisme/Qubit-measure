@@ -55,7 +55,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "setup alike). active=false/bars=[] when idle; each bar has token, format "
             "(human-readable e.g. 'Rounds 23/100 [0:25<1:15]'), maximum/value "
             "(Qt-scaled), percent (0-100, null when total unknown), eta_s "
-            "(null when unknown), raw n/total. Agents read progress through wait.",
+            "(null when unknown), raw n/total. Top-level elapsed_s is the "
+            "operation-wide lifetime from the GUI handle registry, or null for "
+            "unknown/evicted ids; it is not derived from individual bars. "
+            "Agents read progress through wait.",
             (_int("operation_id", "Known GUI-local operation id"),),
         ),
         agent=AgentMethodPolicy(exposure="internal"),

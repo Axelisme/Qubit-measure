@@ -34,10 +34,15 @@ def test_experiments_and_guide_read_live_adapter_descriptions(tmp_path: Path) ->
     assert [method for method, _ in client.transport.sent].count("adapter.guide") == 2
 
 
-def test_tab_open_failed_load_closes_new_tab_without_soc(tmp_path: Path) -> None:
+@pytest.mark.parametrize("prior_focus", [None, "old-tab"])
+def test_tab_open_failed_load_closes_new_tab_without_soc(
+    tmp_path: Path, prior_focus: str | None
+) -> None:
     tab = "new-tab"
 
     def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "tab.list_all":
+            return {"tabs": [], "active_tab_id": prior_focus, "running_tab_id": None}
         if method == "tab.new":
             return {
                 "tab_id": tab,
@@ -50,6 +55,9 @@ def test_tab_open_failed_load_closes_new_tab_without_soc(tmp_path: Path) -> None
         if method == "tab.get_analyze_result":
             return {"summary": None}
         if method == "tab.close":
+            return {"ok": True}
+        if method == "tab.set_active":
+            assert params == {"tab_id": prior_focus}
             return {"ok": True}
         raise AssertionError(method)
 
@@ -83,6 +91,9 @@ def test_tab_open_failed_load_closes_new_tab_without_soc(tmp_path: Path) -> None
         < methods.index("tab.close")
     )
     assert "soc.connect" not in methods
+    assert ("tab.set_active" in methods) is (prior_focus is not None)
+    if prior_focus is not None:
+        assert methods.index("tab.close") < methods.index("tab.set_active")
 
 
 def test_tab_get_summary_reads_explicit_tab_without_changing_focus(
@@ -139,3 +150,174 @@ def test_screenshot_returns_png_path_without_changing_focus(tmp_path: Path) -> N
     assert path.is_file() and path.read_bytes() == png
     assert path.is_absolute()
     assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
+    client.context.session.cleanup_pngs()
+    assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "target", ["setup", "device", "predictor", "inspect", "arb_waveform"]
+)
+def test_screenshot_dialog_targets_use_gui_path_without_inline_png(
+    tmp_path: Path, target: str
+) -> None:
+    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        assert method == "dialog.screenshot" and params["name"] == target
+        path = Path(params["out_path"])
+        path.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return {"saved_to": str(path), "bytes": path.stat().st_size}
+
+    client = make_client(tmp_path, reply)
+    path = Path(client.call("screenshot", {"target": target})["path"])
+    assert path.is_file() and path.read_bytes().startswith(b"\x89PNG")
+    client.context.session.cleanup_pngs()
+    assert not path.exists()
+
+
+def test_tab_get_analyze_params_includes_definitions_and_current_values(
+    tmp_path: Path,
+) -> None:
+    definitions = [{"name": "gain", "type": "float", "label": "Gain"}]
+
+    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        assert params == {"tab_id": "old-tab"}
+        if method == "tab.snapshot":
+            return {
+                "tabs": [
+                    {
+                        "tab_id": "old-tab",
+                        "adapter_name": "ramsey",
+                        "interaction": {"has_run_result": True},
+                    }
+                ]
+            }
+        if method == "tab.get_analyze_params":
+            return {"analyze_params": {"gain": 1.25}, "definitions": definitions}
+        if method == "tab.get_post_analyze_params":
+            return {"post_analyze_params": None, "definitions": []}
+        raise AssertionError(method)
+
+    client = make_client(tmp_path, reply)
+    assert client.call(
+        "tab_get", {"tab": "old-tab", "include": ["analyze_params"]}
+    ) == {
+        "analyze_params": {
+            "primary": {"definitions": definitions, "values": {"gain": 1.25}},
+            "post": {"definitions": [], "values": None},
+        }
+    }
+    assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
+
+
+def test_tab_get_marks_only_unfinished_cfg_and_artifact_owners(tmp_path: Path) -> None:
+    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        assert params == {"tab_id": "old-tab"}
+        if method == "tab.snapshot":
+            return {
+                "tabs": [
+                    {
+                        "tab_id": "old-tab",
+                        "adapter_name": "ramsey",
+                        "interaction": {"has_run_result": True},
+                        "save_paths": {
+                            "data_path": "data.h5",
+                            "analysis_image_path": "analysis.png",
+                            "post_analysis_image_path": "post.png",
+                        },
+                    }
+                ]
+            }
+        if method == "tab.get_cfg":
+            return {"tree": {"frequency": {"raw": "5", "resolved": 5}}}
+        raise AssertionError(method)
+
+    client = make_client(tmp_path, reply)
+    result = client.call("tab_get", {"tab": "old-tab", "include": ["cfg", "artifacts"]})
+    assert result["cfg"] == {"frequency": {"raw": "5", "resolved": 5}}
+    assert result["artifacts"][0] == {
+        "key": "data",
+        "kind": "data",
+        "default_path": "data.h5",
+    }
+    assert result["partial"] == {
+        "cfg": "06-cfg-library owns aggregate type/choice/lock projection",
+        "artifacts": "09-save-lifecycle owns status/last_saved_path",
+    }
+
+
+def test_tab_live_without_run_does_not_capture_figure(tmp_path: Path) -> None:
+    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        assert method == "tab.snapshot" and params == {"tab_id": "old-tab"}
+        return {
+            "tabs": [
+                {
+                    "tab_id": "old-tab",
+                    "adapter_name": "ramsey",
+                    "interaction": {"is_running": False, "has_run_result": False},
+                }
+            ]
+        }
+
+    client = make_client(tmp_path, reply)
+    assert client.call("tab_live", {"tab": "old-tab"}) == {
+        "running": False,
+        "reason": "no_run",
+    }
+    assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
+
+
+def test_tab_live_uses_gui_run_operation_elapsed_and_figure_path(
+    tmp_path: Path,
+) -> None:
+    png = b"\x89PNG\r\n\x1a\nfigure"
+
+    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "tab.snapshot":
+            assert params == {"tab_id": "live-tab"}
+            return {
+                "tabs": [
+                    {
+                        "tab_id": "live-tab",
+                        "adapter_name": "ramsey",
+                        "interaction": {"is_running": True, "has_run_result": False},
+                    }
+                ]
+            }
+        if method == "operation.active":
+            return {"operations": [{"op": 7, "tab": "live-tab", "kind": "run"}]}
+        if method == "operation.progress":
+            assert params == {"operation_id": 7}
+            return {
+                "active": True,
+                "elapsed_s": 3.25,
+                "bars": [{"format": "Run 1/10", "percent": 10.0, "eta_s": 4.5}],
+            }
+        if method == "tab.get_figure":
+            assert params["tab_id"] == "live-tab" and params["subtab_id"] == "run"
+            path = Path(params["out_path"])
+            path.write_bytes(png)
+            return {"saved_to": str(path), "bytes": len(png)}
+        raise AssertionError(method)
+
+    client = make_client(tmp_path, reply)
+    result = client.call("tab_live", {"tab": "live-tab"})
+    assert result["running"] is True
+    assert result["progress"] == [{"label": "Run 1/10", "percent": 10.0}]
+    assert result["elapsed_s"] == 3.25 and result["eta_s"] == 4.5
+    assert Path(result["figure"]).read_bytes() == png
+    assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
+    client.context.session.cleanup_pngs()
+    assert not Path(result["figure"]).exists()
+
+
+def test_tab_get_rejects_invalid_include_items_before_read(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    with pytest.raises(ValueError, match="include must be"):
+        client.call("tab_get", {"tab": "old-tab", "include": [{}]})
+    assert not client.transport.sent
+
+
+def test_screenshot_rejects_invalid_target_type_before_read(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    with pytest.raises(ValueError, match="screenshot target"):
+        client.call("screenshot", {"target": []})
+    assert not client.transport.sent

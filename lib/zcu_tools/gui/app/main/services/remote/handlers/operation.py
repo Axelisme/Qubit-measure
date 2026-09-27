@@ -125,6 +125,10 @@ def _h_operation_progress(
     # setup alike, keyed by operation_id — the SSOT); _progress_bars_wire reads
     # their methods at this point. The mcp poll folds this into its reply.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
-    return _progress_bars_wire(
-        adapter.operation_control.get_operation_progress(operation_id)
+    result = dict(
+        _progress_bars_wire(
+            adapter.operation_control.get_operation_progress(operation_id)
+        )
     )
+    result["elapsed_s"] = adapter.operation_control.elapsed_seconds(operation_id)
+    return result

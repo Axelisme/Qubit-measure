@@ -312,6 +312,8 @@ class OperationChannel:
 class _OperationRecord:
     channel: OperationChannel
     origin: EventOrigin
+    started_at: float
+    finished_at: float | None = None
 
 
 class OperationHandles:
@@ -343,7 +345,9 @@ class OperationHandles:
         token = self._next_token
         self._next_token += 1
         self._live[token] = _OperationRecord(
-            channel=OperationChannel(cancel_hook), origin=origin
+            channel=OperationChannel(cancel_hook),
+            origin=origin,
+            started_at=time.monotonic(),
         )
         logger.debug("operation create: token=%d", token)
         return token
@@ -358,6 +362,14 @@ class OperationHandles:
         if record is None:
             raise KeyError(f"unknown or evicted operation token: {token}")
         return replace(record.origin, operation_id=str(token))
+
+    def elapsed_seconds(self, token: int) -> float | None:
+        """Elapsed lifetime of one known operation, independent of its bars."""
+        record = self._record(token)
+        if record is None:
+            return None
+        end = record.finished_at if record.finished_at is not None else time.monotonic()
+        return max(0.0, end - record.started_at)
 
     def settle(self, token: int, outcome: OperationOutcome) -> None:
         """Mark the operation terminal: settle its channel and retain (LRU).
@@ -387,7 +399,7 @@ class OperationHandles:
             )
         record.channel.settle(outcome)
         # Publish to _done first, then retract from _live (never "neither").
-        self._done[token] = record
+        self._done[token] = replace(record, finished_at=time.monotonic())
         self._live.pop(token, None)
         # The just-settled token is most-recent, so LRU eviction never drops it.
         while len(self._done) > _DONE_EVENT_LIMIT:

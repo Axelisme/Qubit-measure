@@ -35,6 +35,30 @@ def fx(qapp):  # noqa: ARG001
     f.stop()
 
 
+def test_analyze_params_wire_describes_live_adapter_before_run(fx):
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    try:
+        primary = call(sock, "tab.get_analyze_params", {"tab_id": tab_id})
+        assert primary["ok"] is True
+        assert primary["result"]["analyze_params"] is None
+        assert primary["result"]["definitions"] == [
+            {
+                "name": "threshold",
+                "type": "float",
+                "label": "Threshold",
+                "decimals": 2,
+                "default": 0.5,
+            }
+        ]
+        post = call(sock, "tab.get_post_analyze_params", {"tab_id": tab_id})
+        assert post["ok"] is True
+        assert post["result"]["post_analyze_params"] is None
+        assert isinstance(post["result"]["definitions"], list)
+    finally:
+        sock.close()
+
+
 def test_event_requery_hints_point_to_registered_methods():
     assert "device.active_operations" in METHOD_REGISTRY
     assert "context.md_get_attr" in METHOD_REGISTRY
@@ -246,7 +270,36 @@ def test_operation_progress_idle_returns_empty(fx):
     try:
         resp = call(sock, "operation.progress", {"operation_id": 7})
         assert resp["ok"] is True
-        assert resp["result"] == {"active": False, "bars": []}
+        assert resp["result"] == {"active": False, "bars": [], "elapsed_s": None}
+    finally:
+        sock.close()
+
+
+def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(fx):
+    import time
+
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
+
+    tab_id = fx.ctrl.new_tab("fake")
+    operation_id = fx.ctrl.start_run(tab_id)
+    bar = ProgressBarModel(
+        label="late progress", total=2, start_time=time.monotonic() - 3600
+    )
+    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+        return_value=((1, bar),)
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "operation.progress", {"operation_id": operation_id})
+        assert resp["ok"] is True
+        assert resp["result"]["active"] is True
+        assert 0 <= resp["result"]["elapsed_s"] < 3600
+        assert bar.elapsed() >= 3600
+        # Do not leave the fake run's worker/diagnostic queued for the next test.
+        settled = call(
+            sock, "operation.await", {"operation_id": operation_id, "timeout": 3}
+        )
+        assert settled["ok"] and settled["result"]["reason"] == "completed"
     finally:
         sock.close()
 

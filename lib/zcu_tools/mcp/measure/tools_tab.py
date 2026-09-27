@@ -18,7 +18,7 @@ def _tab_snapshot(ctx: MeasureToolContext, tab: str) -> dict[str, Any]:
 
 
 def _figure(ctx: MeasureToolContext, tab: str, pane: str) -> str | None:
-    path = ctx.session._new_png_path()  # pyright: ignore[reportPrivateUsage]
+    path = ctx.session.new_png_path()
     try:
         reply = ctx.send_gui_rpc(
             "tab.get_figure",
@@ -66,10 +66,11 @@ def guide(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
 def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create/activate a tab; a failed from_file load must close that new tab."""
     experiment = arguments["experiment"]
+    previous_focus = ctx.session.read_internal("tab.list_all", {})["active_tab_id"]
     created = ctx.send_gui_rpc("tab.new", {"adapter_name": experiment})
     tab = created["tab_id"]
-    if "from_file" in arguments:
-        try:
+    try:
+        if "from_file" in arguments:
             # tab.load_data guards the tab's existence, result, analysis and
             # context; establish a full baseline without demanding a SoC.
             _tab_snapshot(ctx, tab)
@@ -79,16 +80,27 @@ def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
                 "tab.load_data",
                 {"tab_id": tab, "data_path": arguments["from_file"]},
             )
-        except Exception as load_error:
+        ctx.send_gui_rpc("tab.set_active", {"tab_id": tab})
+    except Exception as open_error:
+        try:
+            ctx.send_gui_rpc("tab.close", {"tab_id": tab})
+        except Exception as cleanup_error:
+            raise GuiRpcError(
+                f"opening tab {tab!r} failed: {open_error}; "
+                f"cleanup also failed: {cleanup_error}; tab may remain open",
+                reason="cleanup_failed",
+            ) from cleanup_error
+        if previous_focus is not None:
             try:
-                ctx.send_gui_rpc("tab.close", {"tab_id": tab})
-            except Exception as cleanup_error:
+                ctx.send_gui_rpc("tab.set_active", {"tab_id": previous_focus})
+            except Exception as restore_error:
                 raise GuiRpcError(
-                    f"load failed for tab {tab!r}: {load_error}; "
-                    f"cleanup also failed: {cleanup_error}; tab may remain open",
+                    f"opening tab {tab!r} failed: {open_error}; "
+                    f"restoring focus to {previous_focus!r} also failed: "
+                    f"{restore_error}; previous focus may not be restored",
                     reason="cleanup_failed",
-                ) from cleanup_error
-            raise
+                ) from restore_error
+        raise
     return {"tab": tab, "experiment": experiment}
 
 
@@ -97,7 +109,9 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
     tab = arguments["tab"]
     include = arguments.get("include", ["summary"])
     valid = {"summary", "cfg", "analyze_params", "analysis", "post", "artifacts"}
-    if not isinstance(include, list) or any(item not in valid for item in include):
+    if not isinstance(include, list) or any(
+        not isinstance(item, str) or item not in valid for item in include
+    ):
         raise ValueError(f"include must be a list of {sorted(valid)}")
     snap = _tab_snapshot(ctx, tab)
     interaction = snap["interaction"]
@@ -127,16 +141,20 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
             "tree"
         ]
         result.setdefault("partial", {})["cfg"] = (
-            "06-tabs-cfg owns aggregate type/choice/lock projection"
+            "06-cfg-library owns aggregate type/choice/lock projection"
         )
     if "analyze_params" in include:
+        primary = ctx.session.read_internal("tab.get_analyze_params", {"tab_id": tab})
+        post = ctx.session.read_internal("tab.get_post_analyze_params", {"tab_id": tab})
         result["analyze_params"] = {
-            "primary": ctx.session.read_internal(
-                "tab.get_analyze_params", {"tab_id": tab}
-            )["analyze_params"],
-            "post": ctx.session.read_internal(
-                "tab.get_post_analyze_params", {"tab_id": tab}
-            )["post_analyze_params"],
+            "primary": {
+                "definitions": primary["definitions"],
+                "values": primary["analyze_params"],
+            },
+            "post": {
+                "definitions": post["definitions"],
+                "values": post["post_analyze_params"],
+            },
         }
     for key, method, pane in (
         ("analysis", "tab.get_analyze_result", "analysis"),
@@ -160,7 +178,7 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
             )
         ]
         result.setdefault("partial", {})["artifacts"] = (
-            "09-tabs-save owns status/last_saved_path"
+            "09-save-lifecycle owns status/last_saved_path"
         )
     return result
 
@@ -185,7 +203,7 @@ def tab_live(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
                     "operation.progress", {}, operation_handle=handle
                 )
                 bars = update["bars"]
-                elapsed = update.get("elapsed_s")
+                elapsed = update["elapsed_s"]
                 progress = [
                     {"label": bar["format"], "percent": bar["percent"]} for bar in bars
                 ]
@@ -198,7 +216,6 @@ def tab_live(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
     return {
         "running": running,
         "progress": progress,
-        # Old GUI versions have no operation-wide start time on the wire.
         "elapsed_s": elapsed,
         "eta_s": eta,
         "figure": _figure(ctx, tab, "run"),

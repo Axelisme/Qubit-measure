@@ -311,7 +311,10 @@ def recv_push(sock: socket.socket, event: str, timeout_s: float = 3.0) -> dict:
 
 
 def open_client(port: int) -> socket.socket:
-    return socket.create_connection(("127.0.0.1", port), timeout=1.0)
+    sock = socket.create_connection(("127.0.0.1", port), timeout=1.0)
+    # The OS may recycle a closed socket's fileno from an earlier test.
+    reset_inbox(sock)
+    return sock
 
 
 def call(

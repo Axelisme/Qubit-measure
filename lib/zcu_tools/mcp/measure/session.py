@@ -191,13 +191,13 @@ class MeasureMcpSession:
         self._launched = False
         self._png_directory: tempfile.TemporaryDirectory[str] | None = None
 
-    def _new_png_path(self) -> Path:
+    def new_png_path(self) -> Path:
         """Reserve a fresh session-owned path; the GUI writes the image."""
         if self._png_directory is None:
             self._png_directory = tempfile.TemporaryDirectory(prefix="measure-mcp-png-")
         return Path(self._png_directory.name) / f"{uuid.uuid4().hex}.png"
 
-    def _cleanup_pngs(self) -> None:
+    def cleanup_pngs(self) -> None:
         if self._png_directory is not None:
             self._png_directory.cleanup()
             self._png_directory = None

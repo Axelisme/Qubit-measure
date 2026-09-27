@@ -12,7 +12,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 def screenshot(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Capture an existing window/dialog into a session-owned PNG path."""
     target = arguments["target"]
-    if target not in {
+    if not isinstance(target, str) or target not in {
         "window",
         "setup",
         "device",
@@ -21,7 +21,7 @@ def screenshot(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, 
         "arb_waveform",
     }:
         raise ValueError(f"unknown screenshot target: {target!r}")
-    path = ctx.session._new_png_path()  # pyright: ignore[reportPrivateUsage]
+    path = ctx.session.new_png_path()
     method = "view.screenshot" if target == "window" else "dialog.screenshot"
     params = {"out_path": str(path)}
     if target != "window":

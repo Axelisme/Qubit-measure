@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.main.catalog import ExperimentAccess
 
@@ -30,6 +30,9 @@ class TabControlPort(Protocol):
     def has_tab(self, tab_id: str) -> bool: ...
     def list_tab_ids(self) -> list[str]: ...
     def get_tab_adapter_name(self, tab_id: str) -> str: ...
+    def analyze_param_definitions(
+        self, adapter_name: str, *, stage: Literal["primary", "post"]
+    ) -> list[dict[str, Any]]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None: ...
@@ -83,6 +86,11 @@ class TabControlFacet:
 
     def get_tab_adapter_name(self, tab_id: str) -> str:
         return self._tab.get_tab_adapter_name(tab_id)
+
+    def analyze_param_definitions(
+        self, adapter_name: str, *, stage: Literal["primary", "post"]
+    ) -> list[dict[str, Any]]:
+        return self._tab.analyze_param_definitions(adapter_name, stage=stage)
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)

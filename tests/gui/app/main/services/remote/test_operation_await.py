@@ -20,10 +20,6 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.main.services.operation_control import OperationControlFacet
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.main.services.remote.handlers.operation import (
-    _h_operation_progress,
-)
-from zcu_tools.gui.app.main.services.remote.service import RemoteControlAdapter
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.operation_handles import (
@@ -47,17 +43,6 @@ def _ctrl(result: AwaitResult | None) -> MagicMock:
 
 def test_off_main_thread_flag_set():
     assert METHOD_REGISTRY["operation.await"].off_main_thread is True
-
-
-def test_progress_uses_operation_control_without_ctrl():
-    ctrl = MagicMock()
-    ctrl.get_operation_progress.return_value = ()
-    adapter = cast(RemoteControlAdapter, SimpleNamespace(operation_control=ctrl))
-
-    out = _h_operation_progress(adapter, {"operation_id": 7})
-
-    assert out == {"active": False, "bars": []}
-    ctrl.get_operation_progress.assert_called_once_with(7)
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ class OperationAwaitPort(Protocol):
     ) -> AwaitResult: ...
     def known_outcome(self, operation_id: int, /) -> OperationOutcome | None: ...
     def has_cancel_hook(self, operation_id: int, /) -> bool: ...
+    def elapsed_seconds(self, operation_id: int, /) -> float | None: ...
 
 
 class OperationProgressPort(Protocol):
@@ -52,6 +53,10 @@ class OperationControlPort(Protocol):
         self, operation_id: int
     ) -> tuple[tuple[int, ProgressBarModel], ...]:
         """Return live progress bars for any operation id."""
+        ...
+
+    def elapsed_seconds(self, operation_id: int) -> float | None:
+        """Read the operation lifetime from the existing handle registry."""
         ...
 
     def active_operations(self) -> tuple[ActiveOperation, ...]:
@@ -88,6 +93,9 @@ class OperationControlFacet:
         self, operation_id: int
     ) -> tuple[tuple[int, ProgressBarModel], ...]:
         return self._progress.bars_for_operation(operation_id)
+
+    def elapsed_seconds(self, operation_id: int) -> float | None:
+        return self._handles.elapsed_seconds(operation_id)
 
     def cancel_operation(
         self, operation_id: int
