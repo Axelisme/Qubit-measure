@@ -189,9 +189,13 @@ class ContextWritePort(Protocol):
 
 @dataclass(frozen=True)
 class ContextWrites:
-    """A batch of ml/md content writes applied atomically (one bump + one emit
-    per kind). ``md`` maps attr name → value; ``ml_modules`` / ``ml_waveforms``
-    map entry name → its un-lowered ``CfgSchema``. Insertion order preserved."""
+    """A batch of ml/md content writes applied in insertion order.
+
+    On success the owner bumps the context version once and emits one event per
+    touched kind. The batch is not all-or-nothing: a later lower, register or
+    dump failure leaves the earlier live md/ml changes in place without a bump
+    or event. ``md`` maps attr name → value; ``ml_modules`` / ``ml_waveforms``
+    map entry name → its un-lowered ``CfgSchema``."""
 
     md: dict[str, Any]
     ml_modules: dict[str, CfgSchema]

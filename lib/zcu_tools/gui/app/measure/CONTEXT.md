@@ -34,7 +34,7 @@ _Avoid_: guard token, ticket, voucher
 _Avoid_: caller, frontend
 
 **GuardService**:
-集中所有 domain guard 邏輯、統一發放 Permit 的 query service。讀 `State` 與 `SessionEnv.readiness`，無副作用。是 guard 邏輯的單一所有者（避免散在各 client 漂移）。
+集中已實作的 domain guard 邏輯、統一發放 Permit 的 query service。讀 `State` 與 `SessionEnv.readiness`，無副作用。目前只集中 run／load 等已實作的檢查；analyze permit 不檢查 adapter capability，不支援操作的拒絕仍分散在 UI（如 `ui/main_window.py` 的 figure 匯出）與 remote handler（如 `remote/handlers/writeback.py`）。未落實的集中目標見 [GUI capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
 
 **Controller**:
 View 專用的便利 façade —— 事件回調、error dialog 呈現。**不再是 guard 的擁有者**（guard 下放至受保護 service 方法，憑 Permit 型別強制）。

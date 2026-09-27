@@ -388,15 +388,16 @@ class ContextService:
     ) -> None:
         """Apply md/ml content writes as one batch (ADR-0067).
 
-        This groups version/event publication, not rollback: a later lowering or
-        registration failure may leave an earlier entry changed.
+        This groups version/event publication, not rollback: a later lowering,
+        registration or dump failure leaves earlier live changes in place with
+        no version bump and no event.
 
         ``md`` maps attr → value; ``modules`` / ``waveforms`` map entry name → an
         opaque un-lowered entry (a ``CfgSchema``), lowered here via the injected
         ``lower_module`` / ``lower_waveform`` (app-side; the cfg-tree never enters
         this module). Lowering is interleaved with registration so a later entry
-        sees an earlier one. One ``version.bump("context")`` and at most one
-        MD_CHANGED + one ML_CHANGED (a batch avoids N redundant full-refreshes).
+        sees an earlier one. On success: one ``version.bump("context")`` and at most
+        one MD_CHANGED + one ML_CHANGED (a batch avoids N redundant full-refreshes).
         ``dump`` persists the ml when it has persistence (writeback batch persists;
         a single editor commit does not). Raises MlEntryValidationError (from the
         lowering callback) on a bad entry."""
