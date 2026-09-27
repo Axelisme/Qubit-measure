@@ -14,7 +14,7 @@ from zcu_tools.datafile import (
     StreamingLabberRoleSpec,
     open_streaming_grouped_labber_data,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
     QubitFreqResult,
     Sweep1DResult,
     Sweep2DResult,

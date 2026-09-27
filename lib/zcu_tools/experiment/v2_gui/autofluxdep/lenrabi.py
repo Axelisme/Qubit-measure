@@ -35,9 +35,7 @@ from zcu_tools.analysis.fitting import fit_rabi
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
-from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
-from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
     DEFAULT_ACQUIRE_RETRY,
     SnrProbe,
     acquire_retry,
@@ -50,25 +48,25 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     setup_flux_point,
     signal2real_flip,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.dependency_defaults import (
     missing_info_value,
     missing_module_value,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.module_aliases import (
     READOUT_LIBRARY_ALIASES,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.plotters import (
     ColormapLinePlotter,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import Sweep1DResult
+from zcu_tools.experiment.v2_gui.autofluxdep._support.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
     auto_sweep_stop,
     fixed_sweep_range,
     seed_md_float,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
     ctx_md_float,
@@ -76,12 +74,14 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.utils import (
     pulse_length,
     pulse_product,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.override_plan import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.override_plan import (
     readout_module_patches,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.timing import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.timing import (
     pop_sweep_range,
 )
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot

@@ -7,7 +7,8 @@
 
 - [measure](measure/README.md) 實作 measure-gui 的 `ExpAdapterProtocol`，擁有 concrete
   adapters、role 與 adapter registry，以及 catalog reload policy。
-- `autofluxdep/` 預留給實作 Autofluxdep Builder／Node／RunEnv workflow 契約的實驗節點。
+- [autofluxdep](autofluxdep/README.md) 實作 Autofluxdep app 的 Builder／Node／RunEnv
+  workflow 契約，擁有 concrete 節點、catalog 與 `_support`；不依賴 measure adapters。
   具體節點的 authoring 說明留在該分支，不放入 measure adapter 文件。
 
 兩個分支不共用 private adapter base，也不共用 reload catalog。GUI apps 擁有各自的

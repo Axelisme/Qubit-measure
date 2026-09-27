@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
-from zcu_tools.gui.app.autofluxdep.experiments.catalog import (
+from zcu_tools.experiment.v2_gui.autofluxdep.catalog import (
     CATALOG,
     ExperimentCatalog,
     builders,
     create_placement,
     names,
 )
+from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.orchestrator import Orchestrator
 
@@ -31,7 +31,7 @@ _EXPECTED_NAMES = (
     "t2echo",
     "mist",
 )
-_EXPERIMENT_PREFIX = "zcu_tools.gui.app.autofluxdep.experiments."
+_EXPERIMENT_PREFIX = "zcu_tools.experiment.v2_gui.autofluxdep."
 
 
 def _catalog_builder(
@@ -59,7 +59,7 @@ def _catalog_builder(
 
 def _imports(path: Path) -> tuple[str, ...]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    source_root = Path(__file__).parents[5] / "lib"
+    source_root = Path(__file__).parents[4] / "lib"
     module_parts = path.relative_to(source_root).with_suffix("").parts
     if module_parts[-1] == "__init__":
         module_parts = module_parts[:-1]
@@ -96,17 +96,17 @@ def test_import_analyzer_canonicalizes_relative_imports() -> None:
     tree = ast.parse(
         "from . import qubit_freq\n"
         "from .t2echo import EXPERIMENT\n"
-        "from ..experiments import t1\n"
+        "from ..autofluxdep import t1\n"
     )
 
     imported = _canonical_imports(
         tree,
-        package="zcu_tools.gui.app.autofluxdep.experiments",
+        package="zcu_tools.experiment.v2_gui.autofluxdep",
     )
 
-    assert "zcu_tools.gui.app.autofluxdep.experiments.qubit_freq" in imported
-    assert "zcu_tools.gui.app.autofluxdep.experiments.t2echo" in imported
-    assert "zcu_tools.gui.app.autofluxdep.experiments.t1" in imported
+    assert "zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq" in imported
+    assert "zcu_tools.experiment.v2_gui.autofluxdep.t2echo" in imported
+    assert "zcu_tools.experiment.v2_gui.autofluxdep.t1" in imported
 
 
 def test_catalog_is_explicit_ordered_and_immutable() -> None:
@@ -145,7 +145,7 @@ def test_unknown_placement_preserves_key_error() -> None:
 
 def test_each_concrete_experiment_file_is_registered_exactly_once() -> None:
     package_dir = (
-        Path(__file__).parents[5] / "lib/zcu_tools/gui/app/autofluxdep/experiments"
+        Path(__file__).parents[4] / "lib/zcu_tools/experiment/v2_gui/autofluxdep"
     )
     concrete = {
         path.stem
@@ -161,10 +161,13 @@ def test_each_concrete_experiment_file_is_registered_exactly_once() -> None:
 
 
 def test_support_and_nodes_do_not_import_concrete_experiments() -> None:
-    package_dir = Path(__file__).parents[5] / "lib/zcu_tools/gui/app/autofluxdep"
+    package_dir = Path(__file__).parents[4] / "lib/zcu_tools/gui/app/autofluxdep"
     concrete_modules = {_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES}
+    experiment_dir = (
+        Path(__file__).parents[4] / "lib/zcu_tools/experiment/v2_gui/autofluxdep"
+    )
     guarded_files = (
-        *package_dir.joinpath("experiments/_support").rglob("*.py"),
+        *experiment_dir.joinpath("_support").rglob("*.py"),
         *package_dir.joinpath("nodes").rglob("*.py"),
     )
 
@@ -174,7 +177,7 @@ def test_support_and_nodes_do_not_import_concrete_experiments() -> None:
 
 def test_concrete_experiments_do_not_import_one_another() -> None:
     package_dir = (
-        Path(__file__).parents[5] / "lib/zcu_tools/gui/app/autofluxdep/experiments"
+        Path(__file__).parents[4] / "lib/zcu_tools/experiment/v2_gui/autofluxdep"
     )
     concrete_modules = {_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES}
     for name in _EXPECTED_NAMES:
@@ -184,12 +187,12 @@ def test_concrete_experiments_do_not_import_one_another() -> None:
 
 def test_support_import_does_not_load_catalog_or_concrete_experiments() -> None:
     forbidden = (
-        "zcu_tools.gui.app.autofluxdep.experiments.catalog",
+        "zcu_tools.experiment.v2_gui.autofluxdep.catalog",
         *(_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES),
     )
     probe = f"""
 import sys
-import zcu_tools.gui.app.autofluxdep.experiments._support.result
+import zcu_tools.experiment.v2_gui.autofluxdep._support.result
 
 forbidden = {forbidden!r}
 loaded = tuple(name for name in forbidden if name in sys.modules)

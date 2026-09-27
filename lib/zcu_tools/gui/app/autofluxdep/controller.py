@@ -32,6 +32,7 @@ from qtpy.QtCore import (
     Signal,  # type: ignore[attr-defined]
 )
 
+from zcu_tools.experiment.v2_gui.autofluxdep.catalog import create_placement
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -48,7 +49,6 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
-from zcu_tools.gui.app.autofluxdep.experiments.catalog import create_placement
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.autofluxdep.orchestrator import (

@@ -64,7 +64,10 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
         app_slug="autofluxdep",
         plot_policy=PlotPolicy.AGG_ONLY,
         default_control_port=8768,
-        logging_extra_namespaces=("zcu_tools.program.v2",),
+        logging_extra_namespaces=(
+            "zcu_tools.program.v2",
+            "zcu_tools.experiment.v2_gui.autofluxdep",
+        ),
     )
 
     def __init__(

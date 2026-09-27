@@ -398,7 +398,10 @@ def test_autofluxdep_launcher_main_delegates_to_gui_runtime(
     assert behavior_cls.__name__ == "AutoFluxDepGuiBehavior"
     assert behavior_cls.spec.app_slug == "autofluxdep"
     assert behavior_cls.spec.default_control_port == 8768
-    assert behavior_cls.spec.logging_extra_namespaces == ("zcu_tools.program.v2",)
+    assert behavior_cls.spec.logging_extra_namespaces == (
+        "zcu_tools.program.v2",
+        "zcu_tools.experiment.v2_gui.autofluxdep",
+    )
 
     assert options.log_root == project_root
     assert options.to_file is False

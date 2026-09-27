@@ -9,11 +9,11 @@ import numpy as np
 import pandas as pd
 import pytest
 from qtpy.QtCore import QCoreApplication, QThread  # type: ignore[attr-defined]
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
+from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
+from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import T2EchoBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
-from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
-from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
 from zcu_tools.gui.app.autofluxdep.services import (

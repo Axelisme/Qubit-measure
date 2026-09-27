@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.module_aliases import (
     READOUT_LIBRARY_ALIASES,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.module_values import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.module_values import (
     ctx_md_float,
     ctx_module,
     nested_get,

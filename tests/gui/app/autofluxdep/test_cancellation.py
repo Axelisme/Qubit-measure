@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.events.run import (
     PointDonePayload,
@@ -30,7 +31,6 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStartedPayload,
     RunStoppedPayload,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency

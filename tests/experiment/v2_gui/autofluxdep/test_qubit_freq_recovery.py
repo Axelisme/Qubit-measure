@@ -5,8 +5,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-import zcu_tools.gui.app.autofluxdep.experiments.qubit_freq as recovery_mod
-from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
+import zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq as recovery_mod
+from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import (
     DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
     DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
     DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
