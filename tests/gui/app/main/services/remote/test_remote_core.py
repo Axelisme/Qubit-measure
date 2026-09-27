@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -595,6 +596,64 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
         _await_completed_run(call, started["op"])
         assert fx.state.get_tab(tab_id).run.result is not None
     finally:
+        bridge.disconnect()
+
+
+def test_tab_run_rejects_missing_active_context_without_starting(
+    fx, tmp_path: Path
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    fx.state.set_context(
+        replace(fx.state.exp_context, readiness=ContextReadiness.DRAFT)
+    )
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        with pytest.raises(RuntimeError) as exc:
+            call("tab_run", {"tab": tab_id})
+        assert getattr(exc.value, "reason", None) == "no_active_context"
+        assert fx.state.get_tab(tab_id).run.result is None
+    finally:
+        bridge.disconnect()
+
+
+def test_tab_run_busy_and_cancel_keep_the_gui_partial_result(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    entered = threading.Event()
+    release = threading.Event()
+    original_run = FakeAdapter.run
+
+    def held_run(self, request, schema):
+        result = original_run(self, request, schema)
+        entered.set()
+        if not release.wait(4):
+            raise TimeoutError("fake run release was not signalled")
+        return result
+
+    monkeypatch.setattr(FakeAdapter, "run", held_run)
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "context.snapshot"})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        op = call("tab_run", {"tab": tab_id})["op"]
+        assert entered.wait(1)
+        with pytest.raises(RuntimeError, match="busy"):
+            call("tab_run", {"tab": tab_id})
+        assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
+        release.set()
+        assert call("wait", {"op": op, "timeout": 3})["status"] == "cancelled"
+        assert fx.state.get_tab(tab_id).run.result is not None
+    finally:
+        release.set()
+        fx.ctrl._background_svc.quiesce()
         bridge.disconnect()
 
 
