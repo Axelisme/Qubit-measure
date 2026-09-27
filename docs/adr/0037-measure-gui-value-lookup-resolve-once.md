@@ -48,8 +48,11 @@ and direct `ctx.md`/`ctx.ml` reads remain the preferred path.
 Source references use a sibling concept to `EvalValue`, not an extension of
 `EvalValue`.
 
-- `EvalValue` remains a live md expression stored in cfg value trees and resolved
-  by cfg lowering.
+- `EvalValue` stores an md expression together with its last resolved result.
+  The field resolves it when set and on expression refresh; cfg lowering uses
+  the stored result and evaluates the expression only when no result exists.
+  The earlier wording "a live md expression resolved by cfg lowering" no longer
+  describes the current semantics, which [[0065]] owns.
 - `ValueRef` means "read this registered value now and materialize the result".
   It is never persisted as a lazy reference.
 - Agent wire uses explicit tagged objects, for example

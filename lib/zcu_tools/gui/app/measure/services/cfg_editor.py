@@ -23,15 +23,17 @@ Lifetime is governed by ``gc`` (not two session kinds):
 The incremental shape is *required*, not a convenience: ModuleRef/WaveformRef
 key switches rebuild the field sub-tree, so a client cannot send one complete
 raw payload up-front — it must switch the ref, observe the freshly-bound paths,
-then fill them. ``set_field`` returns the sub-tree rooted at the changed path
-for exactly this reason.
+then fill them. ``set_field`` returns the net ``removed`` / ``added`` settable
+paths across the whole draft for exactly this reason; a content change that
+keeps the path set unchanged yields no diff, so read ``editor.get`` /
+``tab.get_cfg`` when the new tree is needed.
 
 ``EvalValue`` fields (md-reference expressions, e.g. ``r_f - 0.1``) are carried
-on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}`` and
-resolved against the live MetaDict at ``commit`` time (the app-local
-``schema_to_raw_dict`` seam lowers
-``EvalValue`` to its concrete ``resolved`` number), because ModuleLibrary stores
-concrete numbers, never md references. ``value_ref`` tags are different: they are
+on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}``.
+The field resolves the expression when it is set and on expression refresh and
+stores the result; lowering at ``commit`` uses that stored ``resolved`` number
+(evaluating only when none exists), because ModuleLibrary stores concrete
+numbers, never md references. ``value_ref`` tags are different: they are
 resolved once at ``set_field`` time and stored only as ``DirectValue`` snapshots.
 
 All methods run on the Qt main thread (the cfg draft and ModuleLibrary live

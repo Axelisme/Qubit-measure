@@ -15,7 +15,7 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 
 - **(a) agent 改 cfg 必對 user 即時可見（WYSIWYG）**——不能背著 user 改。
 - **(b) widget 未開時 agent 也要能編輯**——writeback 草稿 / 未開的 tab，沒有 widget 但 agent 要能調。
-- **(c) 表達 EvalValue 與 ref 切換**：欄位值可引用 MetaDict（`freq = r_f − 0.1`，commit 才 eval）；module/waveform 含 ModuleRef/WaveformRef，切換會**動態改變後續可填欄位**，agent 必須「切 ref → 看新欄位 → 再填」漸進進行（無法一次送整份 raw）——這是引入**有狀態 session** 的不可替代理由。
+- **(c) 表達 EvalValue 與 ref 切換**：欄位值可引用 MetaDict（`freq = r_f − 0.1`；本篇原設計在 commit 時才求值，此語意已失效，現行求值時點見 [[0065]]）；module/waveform 含 ModuleRef/WaveformRef，切換會**動態改變後續可填欄位**，agent 必須「切 ref → 看新欄位 → 再填」漸進進行（無法一次送整份 raw）——這是引入**有狀態 session** 的不可替代理由。
 
 ## 決策
 
@@ -26,7 +26,8 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 - **draft / committed**：session = draft，`State.cfg_schema` = committed（run/save/persist 讀的 SSOT）。tab session 改動經 auto-commit（widget `on_change` → `schema_changed` → `update_tab_cfg`）即時同步進 State；run/save 前一道**強制 commit = valid 驗證閘**（draft invalid → fail-fast）。
 - **commit 只交 CfgSchema 快照**：`CfgEditorSession.commit` 不 lower、不 register，只交出**未-lower 的 `CfgSchema`**；`CfgEditorService.commit(editor_id, name)` 把它交給 ContextService 經 write port 落地（lowering + register 歸 ContextService，見 [[0006]]）。
 - **external refresh 歸 service**（[[0004]] Reaction）：service 訂閱 `MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到每個 draft 的 `refresh_expressions()`、`refresh_references()` 與 `refresh_options(source_id)`。職責跟著 draft 所有權從 widget 移到 service。
-- **eval value** 以 tagged 形式 `{"__kind":"eval","expr":...}` 上 wire；**ref 切換漸進**：`editor.set_field` 回「以被改 path 為根的子樹 paths」+ valid，讓 agent 探索切換後新浮現的結構；commit 失敗保留 session。
+- **eval value** 以 tagged 形式 `{"__kind":"eval","expr":...}` 上 wire。field 在設定與 expression refresh 時保存解析結果，lowering 優先使用該結果（見 [[0065]]）。
+- **ref 切換漸進**：`editor.set_field` 回傳 `valid`；edit 會改變路徑形狀時，另回整個 draft 前後的 `removed`／`added` 淨路徑差異。路徑集合不變的內容變更沒有差異；agent 需要新樹時以 `editor.get` 或 `tab.get_cfg` 讀取。本篇原先承諾回傳「以被改 path 為根的子樹 paths」，此契約已由淨差異取代。commit 失敗保留 session。
 - **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不帶 reason 區分**（修復動作都是重開）。
 - **editor 專屬變更流**（`editor_changed{editor_id, paths}` / `editor_closed{editor_id, reason}`，**不走全域 EventBus**）：機制在 RPC/GUI 端完整保留（GUI 內部用）；但 **agent 不 subscribe**（[[0002]] Phase 120c）——agent 改為「下次 `editor.set_field` 撞 `unknown editor session` 才知 session 沒了」，與樂觀模型一致（撞牆→重開）。
 - **tab cfg 讀/寫/發現全收斂到 session model**（[[0013]] F11）：`tab.list_paths`（讀）、`editor.set_field`（寫）、tab snapshot 暴露的 `editor_id`（發現）三者都對該 tab 的 editor session model，**agent 與人同一棵**。原 `cfg.set_field` RPC / `get_tab_live_model_root`（戳 View 的另一棵 model）已刪。
