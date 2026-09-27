@@ -1,5 +1,7 @@
 # `zcu_tools.notebook`
 
+**Last updated:** 2026-09-27 — Notebook 家族入口
+
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
 ## 工作家族
