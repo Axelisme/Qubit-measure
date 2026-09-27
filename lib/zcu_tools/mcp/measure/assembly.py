@@ -7,6 +7,7 @@ from zcu_tools.mcp.measure import (
     tools_operation,
     tools_rpc,
     tools_screenshot,
+    tools_setup,
     tools_tab,
 )
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -21,6 +22,7 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
         tools_rpc.build_rpc_tools(context),
         tools_tab.build_tab_read_tools(context),
         tools_screenshot.build_screenshot_tools(context),
+        tools_setup.build_setup_tools(context),
     ):
         for name, entry in source.items():
             if name in tools:

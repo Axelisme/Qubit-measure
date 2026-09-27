@@ -41,16 +41,19 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:_h_startup_apply",
         MethodSpec(
             30.0,
-            "Set the project: chip / qubit / resonator names, plus an optional "
-            "scope_id returned by result_scope.list. Omitting scope_id uses or creates "
-            "the generated result scope at <project-root>/result/<chip>/<qub>; explicit "
+            "Atomically update project chip / qubit / resonator names; omitted names "
+            "inherit an already applied project. Without a project all three names "
+            "are required. scope_id selects a discovered result scope; when omitted "
+            "after a chip/qubit change, the GUI uses the new identity's generated "
+            "scope; otherwise it retains the old scope. Effective changes deactivate "
+            "the selected context; no-op/failed updates leave it selected. Explicit "
             "result_dir/database_path overrides are not accepted. Echoes the resolved "
             "project: {chip_name, qub_name, res_name, result_dir, database_path, "
             "params_path, scope_id}.",
             (
-                _str("chip_name"),
-                _str("qub_name"),
-                _str("res_name"),
+                _str_opt("chip_name", "Chip identity; required for first project"),
+                _str_opt("qub_name", "Qubit identity; required for first project"),
+                _str_opt("res_name", "Resonator identity; required for first project"),
                 _str_opt(
                     "scope_id",
                     "Optional scope_id returned by result_scope.list",
