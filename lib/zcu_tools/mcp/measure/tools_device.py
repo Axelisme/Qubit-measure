@@ -2,32 +2,134 @@
 
 from __future__ import annotations
 
+import time
 from functools import partial
 from typing import Any
 
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.tools_operation import wait
 
 
 def devices(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> list[dict[str, Any]] | dict[str, Any]:
-    raise NotImplementedError("device listing and projection")
+    name = arguments.get("name")
+    if name is None:
+        return [
+            {
+                "name": item["name"],
+                "type": item["type_name"],
+                "connected": item["status"] == "connected",
+            }
+            for item in ctx.session.read_internal("device.list", {})["devices"]
+        ]
+
+    snapshot = ctx.session.read_internal("device.snapshot", {"name": name})["snapshot"]
+    connected = snapshot["status"] == "connected"
+    return {
+        "name": snapshot["name"],
+        "type": snapshot["type_name"],
+        "address": snapshot["address"],
+        "connected": connected,
+        "error": snapshot["error"],
+        "fields": _live_fields(ctx, name) if connected else [],
+    }
+
+
+def _live_fields(ctx: MeasureToolContext, name: str) -> list[dict[str, Any]]:
+    return ctx.session.read_internal("device.setup_spec", {"name": name})["fields"]
+
+
+def _check_terminal(op: int, outcome: dict[str, Any]) -> bool:
+    status = outcome["status"]
+    if status == "finished":
+        return True
+    if status == "running":
+        return False
+    error = outcome.get("error", {})
+    raise GuiRpcError(
+        f"device operation {op} {status}: {error.get('message', status)}",
+        reason=f"operation_{status}",
+        code="precondition_failed",
+    )
+
+
+def _await_device(ctx: MeasureToolContext, op: int) -> None:
+    deadline = time.monotonic() + 30.0
+    while True:
+        remaining = max(0.0, deadline - time.monotonic())
+        outcome = wait(ctx, {"op": op, "timeout": remaining})
+        if _check_terminal(op, outcome):
+            return
+        if time.monotonic() >= deadline:
+            raise GuiRpcError(
+                f"device operation pending; use wait(op={op}) to recover",
+                reason="device_pending",
+                code="timeout",
+            )
 
 
 def device_connect(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    raise NotImplementedError("synchronous device connect")
+    name = arguments["name"]
+    has_type = "type" in arguments
+    has_address = "address" in arguments
+    if has_type != has_address:
+        raise ValueError("provide both type and address, or name only to reconnect")
+    if has_type:
+        started = ctx.send_gui_rpc(
+            "device.connect",
+            {
+                "name": name,
+                "type_name": arguments["type"],
+                "address": arguments["address"],
+            },
+        )
+    else:
+        started = ctx.send_gui_rpc("device.reconnect", {"name": name})
+    _await_device(ctx, started["handle"])
+    result = devices(ctx, {"name": name})
+    if not isinstance(result, dict):
+        raise GuiRpcError("invalid device detail", reason="incompatible_wire")
+    return result
 
 
 def device_disconnect(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    raise NotImplementedError("synchronous device disconnect")
+    name = arguments["name"]
+    forget = arguments.get("forget", False)
+    started = ctx.send_gui_rpc(
+        "device.disconnect", {"name": name, "remember": not forget}
+    )
+    _await_device(ctx, started["handle"])
+    return {"name": name, "connected": False, "forgotten": forget}
 
 
 def device_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    raise NotImplementedError("validated device setup with short wait")
+    name = arguments["name"]
+    values = arguments["values"]
+    fields = _live_fields(ctx, name)
+    by_name = {field["name"]: field for field in fields}
+    legal = sorted(key for key, field in by_name.items() if field["settable"])
+    for key, value in values.items():
+        field = by_name.get(key)
+        if field is None or not field["settable"]:
+            raise ValueError(f"invalid device field {key!r}; legal fields: {legal}")
+        if "choices" in field and value not in field["choices"]:
+            raise ValueError(
+                f"invalid choice for device field {key!r}; "
+                f"choices: {field['choices']}; legal fields: {legal}"
+            )
+
+    started = ctx.send_gui_rpc("device.setup", {"name": name, "updates": values})
+    op = started["handle"]
+    outcome = wait(ctx, {"op": op, "timeout": 0.25})
+    if not _check_terminal(op, outcome):
+        return {"status": "running", "op": op}
+    return {"fields": _live_fields(ctx, name)}
 
 
 DEVICE_TOOLS: dict[str, dict[str, Any]] = {
