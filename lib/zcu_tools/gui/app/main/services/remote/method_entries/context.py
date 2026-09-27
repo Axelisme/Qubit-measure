@@ -29,9 +29,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_new",
         MethodSpec(
             10.0,
-            "Create a new context and make it active. Echoes {label, has_active_context} "
-            "— the auto-derived label (the agent cannot name it directly).",
+            "Create a new context and make it active. Optional label names it; "
+            "otherwise the GUI derives a label from bind_device value/unit. "
+            "clone_from='current' copies the active context (or starts empty when "
+            "none is active); null starts empty. An unknown clone source fails "
+            "without changing active/labels. Echoes {label, has_active_context}.",
             (
+                _str_opt("label", "Optional explicit context label"),
                 _str_opt(
                     "bind_device",
                     "Connected flux device to bind: its current value/unit name the "
