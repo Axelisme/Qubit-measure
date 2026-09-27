@@ -604,6 +604,10 @@ class ArtifactSaveCenter(QWidget):
     def bind_data_path_changed(self, handler: Callable[[str], None]) -> None:
         self._path_edits[ArtifactKind.DATA].textChanged.connect(handler)
 
+    def bind_comment_changed(self, handler: Callable[[str], None]) -> None:
+        """Bind user edits of the data comment to the shared Save draft."""
+        self._comment_edit.textChanged.connect(lambda: handler(self.get_comment()))
+
     def bind_analysis_path_changed(self, handler: Callable[[str], None]) -> None:
         if ArtifactKind.ANALYSIS in self._path_edits:
             self._path_edits[ArtifactKind.ANALYSIS].textChanged.connect(handler)

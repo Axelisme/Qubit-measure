@@ -1034,7 +1034,7 @@ def test_comment_edit_updates_shared_draft_without_touching_paths(
     exp_tab_factory, qapp
 ):
     ctrl = _mock_ctrl()
-    ctrl.update_tab_comment = MagicMock()
+    ctrl.save_control.set_comment = MagicMock()
     ctrl.update_tab_data_path = MagicMock()
     ctrl.update_tab_analysis_image_path = MagicMock()
     ctrl.update_tab_post_analysis_image_path = MagicMock()
@@ -1046,10 +1046,10 @@ def test_comment_edit_updates_shared_draft_without_touching_paths(
     ctrl.update_tab_data_path.reset_mock()
     center = tab._save_center
     center.set_comment_text("programmatic")
-    ctrl.update_tab_comment.assert_not_called()
+    ctrl.save_control.set_comment.assert_not_called()
     center._comment_edit.setPlainText("typed by user")
     _require_qapp().processEvents()
-    ctrl.update_tab_comment.assert_called_once_with("tab-1", "typed by user")
+    ctrl.save_control.set_comment.assert_called_once_with("tab-1", "typed by user")
     ctrl.update_tab_data_path.assert_not_called()
     ctrl.update_tab_analysis_image_path.assert_not_called()
     ctrl.update_tab_post_analysis_image_path.assert_not_called()

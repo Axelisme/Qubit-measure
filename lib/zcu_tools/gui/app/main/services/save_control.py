@@ -22,6 +22,8 @@ class SaveControlPort(Protocol):
 
     def has_tab(self, tab_id: str) -> bool: ...
 
+    def set_comment(self, tab_id: str, comment: str) -> None: ...
+
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str | None = None
     ) -> str: ...
@@ -55,6 +57,9 @@ class SaveControlFacet:
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
+
+    def set_comment(self, tab_id: str, comment: str) -> None:
+        self._state.update_tab_comment(tab_id, comment)
 
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str | None = None

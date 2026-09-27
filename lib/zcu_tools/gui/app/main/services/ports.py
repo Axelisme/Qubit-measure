@@ -103,6 +103,7 @@ class PostAnalysisPaneSnapshot:
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
     data_path: PathResourceSnapshot
+    comment: str = ""
 
 
 @dataclass(frozen=True, slots=True)
