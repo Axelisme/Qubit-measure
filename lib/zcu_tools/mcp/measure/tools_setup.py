@@ -61,6 +61,16 @@ def context_create(
     return {"label": result["label"]}
 
 
+def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Read selected values or the GUI's safe index of MetaDict values."""
+    raise NotImplementedError("03 md_get tool has no implementation yet")
+
+
+def md_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Write MetaDict keys in order without rolling back prior successful writes."""
+    raise NotImplementedError("03 md_set tool has no implementation yet")
+
+
 _PROJECT_FIELD = {"type": "string", "minLength": 1}
 
 PROJECT_TOOLS: dict[str, dict[str, Any]] = {
@@ -117,6 +127,38 @@ PROJECT_TOOLS: dict[str, dict[str, Any]] = {
                     "default": "current",
                 },
             },
+        },
+    },
+    "md_get": {
+        "handler": md_get,
+        "description": (
+            "Read MetaDict as {values: {key: value}}. With no keys, GUI returns "
+            "scalars and summaries of non-scalars, not their content. Supplying "
+            "keys returns full values; missing keys fail rather than being skipped."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "array",
+                    "items": _PROJECT_FIELD,
+                    "uniqueItems": True,
+                }
+            },
+        },
+    },
+    "md_set": {
+        "handler": md_set,
+        "description": (
+            "Write values to GUI MetaDict in the order supplied. Returns "
+            "{key: {before, after}} on success. On failure, earlier writes remain; "
+            "the error includes the confirmed prefix and failing key. An ambiguous "
+            "transport failure may also have applied the failing key; read before retrying."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"values": {"type": "object"}},
+            "required": ["values"],
         },
     },
 }
