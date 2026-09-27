@@ -18,7 +18,7 @@ from ._helpers import Fixture, mcp_client
 def library_client(qapp, tmp_path, monkeypatch):
     catalog = RoleCatalog()
     register_all_roles(catalog)
-    fx = Fixture(role_catalog=catalog)
+    fx = Fixture(active_label="ctx001", role_catalog=catalog)
     library = ModuleLibrary()
     library.waveforms["seed"] = WaveformCfgFactory.from_raw(
         {"style": "const", "length": 0.1}
@@ -100,3 +100,28 @@ def test_ml_edit_commits_only_full_draft_and_save_as_preserves_source(library_cl
         )
     assert library.waveforms["seed"].to_dict() == before
     assert library.waveforms["copy"].to_dict() == saved["cfg"]
+
+
+@pytest.mark.parametrize("destination", ["seed", "occupied"])
+def test_ml_edit_save_as_rejects_existing_name_without_overwriting(
+    library_client, destination
+):
+    invoke, library = library_client
+    original = library.waveforms["seed"].to_dict()
+    library.waveforms["occupied"] = WaveformCfgFactory.from_raw(
+        {"style": "const", "length": 0.3}
+    )
+    occupied = library.waveforms["occupied"].to_dict()
+
+    with pytest.raises(ValueError, match="already exists"):
+        invoke(
+            "ml_edit",
+            {
+                "name": "seed",
+                "edits": [{"path": "length", "value": 0.5}],
+                "save_as": destination,
+            },
+        )
+
+    assert library.waveforms["seed"].to_dict() == original
+    assert library.waveforms["occupied"].to_dict() == occupied
