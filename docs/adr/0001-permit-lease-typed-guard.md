@@ -6,7 +6,7 @@ GUI 有兩個 client（Qt View 與 remote RPC）驅動同一批受保護操作�
 
 ## 決策
 
-受保護 service 方法不接受裸 `tab_id`，而是接受一個 **Permit** 憑證；Permit 只能向統一的 `GuardService` 取得，取得時做完整 domain guard（context readiness、committed cfg validity、capability 需求）。拿不到 permit 即無法呼叫 —— guard 失敗在 acquire 階段 fast-fail，且 pyright 在編譯期擋住「忘記檢查」。兩個 client 都必經 GuardService，邏輯天然一致。
+受保護 service 方法不接受裸 `tab_id`，而是接受一個 **Permit** 憑證；Permit 只能向統一的 `GuardService` 取得，取得時做該操作已實作的 domain guard（context readiness、committed cfg validity、run 的 SoC 需求與 load capability）。analyze 與 post-analyze 的 capability 檢查尚未集中在 GuardService，Qt 與 remote 入口另有各自的檢查；未落實的集中目標見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。拿不到 permit 即無法呼叫 —— guard 失敗在 acquire 階段 fast-fail，且 pyright 在編譯期擋住「忘記檢查」。兩個 client 都必經 GuardService，邏輯天然一致。
 
 Permit 與既有 `OperationLease`（`OperationGate`）**分離為兩個物件**：
 - **Permit** = 呼叫前可靜態證明的前置條件，純憑證、無需釋放。

@@ -166,13 +166,14 @@ class ContextWritePort(Protocol):
     inspect save, create_from_role) write through this port; ContextService
     lowers (app-local ``schema_to_raw_dict`` with the live md, so callers cannot
     forget md)
-    + registers + bumps the ``context`` version + emits ML/MD_CHANGED. The only
-    implementer is ContextService.
+    + registers, and on success bumps the ``context`` version + emits
+    ML/MD_CHANGED. The only implementer is ContextService.
 
-    ``apply_writes`` is the batch entry: a single apply (writeback) of md attrs +
-    multiple ml entries lands as **one** version bump and **at most one**
+    ``apply_writes`` is the batch entry: a successful apply (writeback) of md
+    attrs + multiple ml entries lands as **one** version bump and **at most one**
     ML_CHANGED + one MD_CHANGED (the per-write methods each bump/emit on their
-    own; batching avoids N redundant full-refreshes).
+    own; batching avoids N redundant full-refreshes). A failed batch is not
+    rolled back and publishes nothing; see ``ContextWrites``.
     """
 
     def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None: ...

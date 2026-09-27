@@ -81,7 +81,7 @@ class WritebackPermit:
 
 
 class GuardService:
-    """Single owner of domain guard logic; issues typed Permits.
+    """Central issuer of typed Permits for the implemented domain guards.
 
     Pure query service over ``State`` and ``SessionEnv.readiness`` — no side
     effects, no event emission. View and remote share the available permits

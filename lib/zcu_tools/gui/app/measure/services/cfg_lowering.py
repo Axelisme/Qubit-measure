@@ -1,7 +1,7 @@
 """CfgSchema lowering — the experiment-coupled half of context ml writes (ADR-0067).
 
-The session ``ContextService`` owns the ml/md write *transaction* (register +
-bump + emit + persistence) but is free of the experiment cfg-tree. Lowering a
+The session ``ContextService`` owns the ml/md write *sequence* (register +
+persistence, then bump + emit on success; no rollback on partial failure) but is free of the experiment cfg-tree. Lowering a
 ``CfgSchema`` into a concrete module/waveform cfg is experiment-coupled, so it
 lives here, measure-side, and is handed to ``ContextService.apply_ml_writes`` as
 the ``lower_module`` / ``lower_waveform`` callbacks. The Controller (the

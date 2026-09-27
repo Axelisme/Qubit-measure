@@ -341,12 +341,12 @@ class ContextService:
         # Semantic context content change: bump so concurrency guards on
         # ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detect this edit.
         #
-        # CANONICAL ANCHOR — "writing md/ml must bump context" has TWO physical
+        # CANONICAL ANCHOR — "a completed md/ml write bumps context" has TWO physical
         # paths (ADR-0067 collapsed writeback's direct write into path 1):
         #   1. ContextService writes: create_md_attr / rename_md_attr / set_md_attr /
         #      del_md_attr / replace_ml_*_from_schema / del_ml_* (field-level, each
-        #      bumps+emits) and apply_ml_writes (batch:
-        #      one bump + one emit per kind). Writeback / editor commit / inspect /
+        #      bumps+emits) and apply_ml_writes (batch: on success one bump +
+        #      one emit per kind; a failed batch leaves an unpublished prefix). Writeback / editor commit / inspect /
         #      create_from_role all route here — the single write authority.
         #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
         # Both bump "context"; only set_context() itself does NOT (pure swap).
@@ -367,9 +367,10 @@ class ContextService:
     # ------------------------------------------------------------------
     # ml/md content writes — the single write authority (ADR-0067).
     #
-    # ``apply_ml_writes`` owns the *write transaction*: it sets md attrs +
-    # registers the (lowered) ml entries, then bumps the ``context`` version +
-    # emits at most one MD_CHANGED + one ML_CHANGED. The CfgSchema *lowering* is
+    # ``apply_ml_writes`` owns the *write sequence*: it sets md attrs +
+    # registers the (lowered) ml entries and, once every step succeeds, bumps the
+    # ``context`` version + emits at most one MD_CHANGED + one ML_CHANGED. It does
+    # not roll back a partial failure. The CfgSchema *lowering* is
     # experiment-coupled, so it stays app-side and is injected as the
     # ``lower_module`` / ``lower_waveform`` callbacks (the app's ContextWritePort
     # façade builds them); this keeps ContextService free of the cfg-tree while

@@ -208,8 +208,10 @@ Key ownership rules:
   once; failures leave the live entry untouched.
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
-- `GuardService` owns static preconditions and returns typed permits for
-  run/save/analyze/writeback.
+- `GuardService` checks the static preconditions it implements and returns typed
+  permits for run/save/analyze/writeback. The analyze permit does not check adapter
+  capability, and post-analyze has no capability permit; Qt and remote entry points
+  keep their own checks (see the GUI capability draft).
 - `OperationGate` is the app-local thin wrapper over the shared
   `RunBlocksHardwareGate` hardware exclusion policy。active lease另投影captured
   origin、domain note與duration；`state.hardware_gate`是read-only internal RPC，
