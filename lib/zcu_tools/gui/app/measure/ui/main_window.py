@@ -17,6 +17,8 @@ from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 
+from .main_window_activity import activity_marker_presentation
+
 _SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
     ArtifactKind.DATA: "Save data failed",
     ArtifactKind.ANALYSIS: "Save image failed",
@@ -28,13 +30,8 @@ from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPrese
 
 logger = logging.getLogger(__name__)
 
-_ACTIVITY_MARKER_PREFIX = "● "
-_ACTIVITY_MARKER_COLOR = "#286ac7"
-_ACTIVITY_MARKER_TOOLTIP = "Run in progress"
-
-
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
-from qtpy.QtGui import QCloseEvent, QColor  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFileDialog,
     QHBoxLayout,
@@ -404,16 +401,12 @@ class MainWindow(QMainWindow):
 
         tab_bar = self._tabs.tabBar()
         assert tab_bar is not None
-        label = self._tabs.tabText(index)
-        if label.startswith(_ACTIVITY_MARKER_PREFIX):
-            label = label[len(_ACTIVITY_MARKER_PREFIX) :]
-        self._tabs.setTabText(
-            index, f"{_ACTIVITY_MARKER_PREFIX}{label}" if active else label
+        label, color, tooltip = activity_marker_presentation(
+            self._tabs.tabText(index), active=active
         )
-        tab_bar.setTabTextColor(
-            index, QColor(_ACTIVITY_MARKER_COLOR) if active else QColor()
-        )
-        tab_bar.setTabToolTip(index, _ACTIVITY_MARKER_TOOLTIP if active else "")
+        self._tabs.setTabText(index, label)
+        tab_bar.setTabTextColor(index, color)
+        tab_bar.setTabToolTip(index, tooltip)
 
     def _refresh_tab_activity_markers(self, running_tab_id: str | None) -> None:
         """Derive every tab marker from the current State running identity."""
