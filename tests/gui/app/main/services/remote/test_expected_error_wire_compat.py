@@ -124,7 +124,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     run_control.start_run.side_effect = GuardError(
         "No run result", reason_code="no_run_result"
     )
-    run_adapter = SimpleNamespace(run_analyze_control=run_control)
+    run_adapter = SimpleNamespace(run_analyze_control=run_control, render_view=None)
 
     load_control = MagicMock()
     load_control.has_tab.return_value = True

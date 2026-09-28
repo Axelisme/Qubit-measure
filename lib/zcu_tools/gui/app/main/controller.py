@@ -172,8 +172,15 @@ class RenderHost(Protocol):
 
 
 class RenderView(Protocol):
-    """Pure-read View surface the RemoteControlAdapter pulls from (snapshot /
-    screenshot / dialog management). Held by the adapter, not the Controller."""
+    """View reads and explicit presentation commands for RemoteControlAdapter.
+
+    Held by the adapter, not the Controller. Domain completion events do not
+    select panes; agent follow uses the explicit selection command.
+    """
+
+    def select_tab_pane(
+        self, tab_id: str, pane: Literal["run", "analysis", "post_analysis", "data"]
+    ) -> None: ...
 
     def get_view_snapshot(self) -> dict[str, object]: ...
     def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
