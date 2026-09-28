@@ -135,7 +135,35 @@ def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
     }
 
 
+def ml_rename(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Rename only the library entry; leave linked reference names unchanged."""
+    raise NotImplementedError("ml_rename implementation pending")
+
+
+def ml_delete(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Delete only the library entry; preserve modified inline reference values."""
+    raise NotImplementedError("ml_delete implementation pending")
+
+
 ML_TOOLS: dict[str, dict[str, Any]] = {
+    "ml_rename": {
+        "handler": ml_rename,
+        "description": "Rename a library entry and return {renamed, warning}. kind disambiguates module/waveform names. Name clashes fail. LINKED references keep the old name, are not converted to inline, and may become invalid; MODIFIED inline values are preserved. Read context.snapshot explicitly before mutation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": _NAME, "new_name": _NAME, "kind": _KIND},
+            "required": ["name", "new_name"],
+        },
+    },
+    "ml_delete": {
+        "handler": ml_delete,
+        "description": "Delete a library entry and return {deleted, warning}. kind disambiguates module/waveform names. LINKED references keep the deleted name, are not converted to inline, and may become invalid; MODIFIED inline values are preserved. Read context.snapshot explicitly before mutation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": _NAME, "kind": _KIND},
+            "required": ["name"],
+        },
+    },
     "ml_get": {
         "handler": ml_get,
         "description": "Without name list modules/waveforms by name, kind/style and description. With name return {name, kind, cfg}; provide kind=module|waveform if both collections contain the name. A read does not open an editing draft.",

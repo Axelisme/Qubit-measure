@@ -35,6 +35,61 @@ def library_client(qapp, tmp_path, monkeypatch):
         fx.stop()
 
 
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+def test_ml_rename_then_delete_updates_only_the_selected_collection(
+    library_client, kind
+):
+    invoke, library = library_client
+    invoke("ml_create", {"role_id": "none_reset", "name": "seed"})
+    invoke("rpc_call", {"method": "context.snapshot"})
+    selected = library.modules if kind == "module" else library.waveforms
+    other = library.waveforms if kind == "module" else library.modules
+    before = selected["seed"].to_dict()
+    other_before = other["seed"].to_dict()
+
+    renamed = invoke("ml_rename", {"name": "seed", "new_name": "moved", "kind": kind})
+    assert renamed["renamed"] == "moved"
+    assert "seed" not in selected
+    assert selected["moved"].to_dict() == before
+    assert other["seed"].to_dict() == other_before
+
+    deleted = invoke("ml_delete", {"name": "moved"})
+    assert deleted["deleted"] == "moved"
+    assert "moved" not in selected
+    assert other["seed"].to_dict() == other_before
+
+
+@pytest.mark.parametrize("tool", ["ml_rename", "ml_delete"])
+def test_ml_mutation_rejects_ambiguous_names_without_changing_library(
+    library_client, tool
+):
+    invoke, library = library_client
+    invoke("ml_create", {"role_id": "none_reset", "name": "seed"})
+    invoke("rpc_call", {"method": "context.snapshot"})
+    before = (library.modules["seed"].to_dict(), library.waveforms["seed"].to_dict())
+    arguments = {"name": "seed"}
+    if tool == "ml_rename":
+        arguments["new_name"] = "moved"
+    with pytest.raises(ValueError, match="ambiguous"):
+        invoke(tool, arguments)
+    assert (
+        library.modules["seed"].to_dict(),
+        library.waveforms["seed"].to_dict(),
+    ) == before
+
+
+def test_ml_rename_rejects_collision_without_overwriting(library_client):
+    invoke, library = library_client
+    library.waveforms["occupied"] = WaveformCfgFactory.from_raw(
+        {"style": "const", "length": 0.3}
+    )
+    invoke("rpc_call", {"method": "context.snapshot"})
+    before = {name: cfg.to_dict() for name, cfg in library.waveforms.items()}
+    with pytest.raises((ValueError, GuiRpcError), match="exists|collision|already"):
+        invoke("ml_rename", {"name": "seed", "new_name": "occupied"})
+    assert {name: cfg.to_dict() for name, cfg in library.waveforms.items()} == before
+
+
 def test_ml_get_index_and_named_cfg_are_read_only(library_client):
     invoke, library = library_client
     listed = invoke("ml_get", {})
