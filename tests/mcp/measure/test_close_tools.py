@@ -1,8 +1,10 @@
 """Close tools delegate admission and never force the responding GUI to exit."""
 
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from zcu_tools.mcp.core import bridge as bridge_module
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
@@ -66,6 +68,32 @@ def test_shutdown_reply_timeout_returns_unconfirmed_without_retry(
     assert client.call("shutdown", {}) == {"stopped": False}
     wait.assert_not_called()
     assert [name for name, _ in client.transport.sent].count("app.shutdown") == 1
+
+
+def test_shutdown_transport_timeout_does_not_stop_or_retry(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+    client.context.session.ensure_connected()
+    sent = []
+
+    def drop_reply(payload):
+        sent.append(payload)
+
+    monkeypatch.setattr(client.transport, "send_line", drop_reply)
+    clock = iter([0.0, 100.0])
+    monkeypatch.setattr(
+        bridge_module, "time", SimpleNamespace(monotonic=lambda: next(clock))
+    )
+    stop = Mock(side_effect=AssertionError("must not force shutdown"))
+    wait = Mock(side_effect=AssertionError("no confirmed process identity"))
+    monkeypatch.setattr(client.context.bridge, "stop", stop)
+    monkeypatch.setattr(client.context.bridge, "wait_for_gui_exit", wait)
+
+    assert client.call("shutdown", {}) == {"stopped": False}
+
+    assert [payload["method"] for payload in sent] == ["app.shutdown"]
+    assert not client.transport.is_open
+    stop.assert_not_called()
+    wait.assert_not_called()
 
 
 def test_tab_close_is_one_explicit_command(tmp_path):

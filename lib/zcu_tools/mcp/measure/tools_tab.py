@@ -279,7 +279,7 @@ TAB_READ_TOOLS: dict[str, dict[str, Any]] = {
     },
     "tab_get": {
         "handler": tab_get,
-        "description": "Read explicit tab sections without changing GUI focus. cfg is the complete GUI-owned cached observation (kind, type, current input, choices and locks); agent edits whole sweeps through tab_edit, not the GUI's leaf control paths. Artifact status/last saved paths remain partial until 09; missing fields are marked partial, not fabricated.",
+        "description": "Read explicit tab sections without changing GUI focus. cfg is the complete GUI-owned cached observation (kind, type, current input, choices and locks); agent edits whole sweeps through tab_edit, not the GUI's leaf control paths. Artifacts project the GUI-owned status, default_path, last_saved_path and is_saveable for data, analysis and post images.",
         "inputSchema": {
             "type": "object",
             "properties": {
