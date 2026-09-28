@@ -111,7 +111,8 @@ from __future__ import annotations
 # v67: shared cfg aggregate edits and application-owned sequential library edits.
 # v68: analysis starts expose effective params, interactive mode and invalidation facts.
 # v69: writeback exposes complete previews and identity-preserving batch results.
-WIRE_VERSION = 69
+# v70: artifact snapshots, batch save operations and guarded close/shutdown replies.
+WIRE_VERSION = 70
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -159,4 +160,5 @@ WIRE_VERSION = 69
 # v99: own ordered library commits and preserve cfg batch failure categories.
 # v100: validate analysis params and follow run/edit/analyze through explicit view commands.
 # v101: apply explicit writeback items through shared drafts and follow their pane.
-GUI_VERSION = 101
+# v102: shared artifact tracking, ordered saves and actual output path reporting.
+GUI_VERSION = 102
