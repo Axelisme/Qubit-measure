@@ -13,6 +13,36 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "tab.writeback_write",
+        "writeback:h_tab_writeback_write",
+        MethodSpec(
+            10.0,
+            "Edit write=[{id,target?,value?,edits?}] sequentially in the shared draft. "
+            "An edit failure preserves the draft prefix and starts no context write. "
+            "After all edits succeed, apply only the listed IDs once without changing "
+            "GUI selection. Returns {written:[{id,kind,target,before,after}]} with "
+            "complete actual destination values. Kinds are md|module|waveform; "
+            "cross-kind names may coincide. Empty write is a no-op. Explicit null "
+            "value sets an md value to null; omission keeps its proposal. "
+            "Context apply retains existing failure semantics, not cross-file atomicity.",
+            (
+                _str("tab_id"),
+                _str("subtab_id", "Pane: analysis|post_analysis"),
+                ParamSpec("write", JsonType.JSON, required=True),
+            ),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool",
+            tool_names=("writeback",),
+            guard_deps=(
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:{writeback_resource}",
+                "context",
+            ),
+            refresh_after_write=True,
+        ),
+    ),
+    method_entry(
         "tab.writeback_preview",
         "writeback:h_tab_writeback_preview",
         MethodSpec(

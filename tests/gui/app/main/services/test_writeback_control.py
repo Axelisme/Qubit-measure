@@ -7,13 +7,18 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.adapter import ExpContext, MetaDictWriteback
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.main.services.writeback import WritebackEdit, WritebackService
 from zcu_tools.gui.app.main.services.writeback_control import WritebackControlFacet
+from zcu_tools.gui.app.main.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from tests.gui._control_fakes import CallLog, call
 
@@ -198,6 +203,83 @@ def test_pane_writeback_rejects_edit_while_tab_is_busy() -> None:
 
     with pytest.raises(FailedPreconditionError, match="busy"):
         facet.set_writeback_item_for_pane("tab-1", "analysis", "md-1", selected=False)
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("fails", [False, True])
+def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fails):
+    context = ExpContext(
+        md=MetaDict(),
+        ml=ModuleLibrary(),
+        soc=None,
+        soccfg=None,
+        readiness=ContextReadiness.ACTIVE,
+    )
+    state = State(context)
+    state.add_tab(
+        "tab-1",
+        Session(
+            adapter_name="fake",
+            adapter=MagicMock(),
+            cfg_schema=MagicMock(),
+        ),
+    )
+    port = MagicMock()
+    service = WritebackService(MagicMock(), port)
+    draft = service.create_draft(
+        [
+            MetaDictWriteback(target_name="a", description="d", proposed_value=1),
+        ]
+    )
+    tab = state.get_tab("tab-1")
+    getattr(tab, pane).writeback_draft = draft
+    bus = BaseEventBus()
+    observed = []
+    bus.subscribe(
+        TabInteractionChangedPayload,
+        lambda event: observed.append(
+            (
+                event.tab_id,
+                event.fact,
+                service.preview_values(draft, context)["md-1"].proposed,
+            )
+        ),
+    )
+    guard = MagicMock()
+    facet = WritebackControlFacet(
+        state=state,
+        guard=guard,
+        writeback=service,
+        resource_versions=lambda: {},
+        bus=bus,
+    )
+    changes = (WritebackEdit("md-1", proposed_value=11),)
+    if fails:
+        with pytest.raises(InvalidInputError):
+            facet.write_writeback_for_pane(
+                "tab-1",
+                pane,
+                (*changes, WritebackEdit("missing")),
+            )
+        port.apply_writes.assert_not_called()
+    else:
+        result = facet.write_writeback_for_pane("tab-1", pane, changes)
+        assert [item.id for item in result] == ["md-1"]
+        port.apply_writes.assert_called_once()
+    guard.acquire_writeback_permit.assert_called_once_with("tab-1")
+    assert observed == [
+        ("tab-1", TabInteractionFact.WRITEBACK_DRAFT_CHANGED, 11),
+    ]
+
+
+def test_batch_write_rejects_busy_before_changing_draft():
+    facet, _log, state, _writeback, _versions, bus = _facet()
+    state.busy = True
+    events = []
+    bus.subscribe(TabInteractionChangedPayload, events.append)
+    with pytest.raises(FailedPreconditionError, match="busy"):
+        facet.write_writeback_for_pane("tab-1", "analysis", ())
+    assert events == []
 
 
 def test_get_context_version_reads_resource_versions() -> None:

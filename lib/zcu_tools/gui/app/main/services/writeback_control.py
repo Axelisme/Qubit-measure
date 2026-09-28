@@ -22,7 +22,12 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .guard import GuardService
-    from .writeback import WritebackService, WritebackValues
+    from .writeback import (
+        WritebackEdit,
+        WritebackService,
+        WritebackValues,
+        WritebackWritten,
+    )
 
 
 class WritebackControlPort(Protocol):
@@ -57,6 +62,10 @@ class WritebackControlPort(Protocol):
     def get_writeback_values_for_pane(
         self, tab_id: str, pane: WritebackPane
     ) -> dict[str, WritebackValues]: ...
+
+    def write_writeback_for_pane(
+        self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
+    ) -> list[WritebackWritten]: ...
 
     def get_context_version(self) -> int: ...
 
@@ -133,6 +142,20 @@ class WritebackControlFacet:
         result = self._writeback.apply_draft(draft, item_ids=item_ids)  # type: ignore[arg-type]
         self._emit_draft_changed(tab_id)
         return result
+
+    def write_writeback_for_pane(
+        self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
+    ) -> list[WritebackWritten]:
+        self._guard.acquire_writeback_permit(tab_id)
+        self._require_tab_idle(tab_id)
+        draft = self._draft_for_pane(tab_id, pane)
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        try:
+            return self._writeback.write_draft(draft, changes, self._state.exp_context)
+        finally:
+            # Failed batches may have changed the shared draft's prefix.
+            self._emit_draft_changed(tab_id)
 
     def get_writeback_values_for_pane(
         self, tab_id: str, pane: WritebackPane
