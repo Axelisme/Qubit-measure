@@ -865,6 +865,12 @@ def test_artifact_save_projects_primary_and_post_keys_through_one_command(fx, tm
     [
         {"artifacts": "other"},
         {"artifacts": ["post_analysis"]},
+        {"artifacts": []},
+        {"artifacts": ["data", "data"]},
+        {"artifacts": ["analysis", "post", "analysis"]},
+        {"paths": {"data": ""}},
+        {"paths": {"analysis": ""}},
+        {"paths": {"post": ""}},
         {"paths": {"post": 2}},
         {"paths": {"other": "image.png"}},
     ],

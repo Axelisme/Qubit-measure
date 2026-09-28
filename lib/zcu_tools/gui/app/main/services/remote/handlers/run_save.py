@@ -104,6 +104,11 @@ def h_tab_save_artifacts(
         artifacts = None
     elif isinstance(raw_artifacts, list):
         artifacts = tuple(_artifact_kind(key) for key in raw_artifacts)
+        if not artifacts or len(set(artifacts)) != len(artifacts):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "artifacts must be a nonempty list of unique keys",
+            )
     else:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, "artifacts must be 'all' or a list of keys"
@@ -114,9 +119,9 @@ def h_tab_save_artifacts(
     paths: dict[ArtifactKind, str] = {}
     for key, path in raw_paths.items():
         kind = _artifact_kind(key)
-        if not isinstance(path, str):
+        if not isinstance(path, str) or not path:
             raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "artifact paths must be strings"
+                ErrorCode.INVALID_PARAMS, "artifact paths must be nonempty strings"
             )
         paths[kind] = path
     comment = params["comment"]
