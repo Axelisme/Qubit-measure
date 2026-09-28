@@ -37,7 +37,7 @@ Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，M
 
 ## Writeback
 
-`writeback` 的 preview 直接投影 GUI 共享草稿與目前 context，不在 MCP materialize cfg。寫入只送一次 `tab.writeback_write`；GUI 依序修改指定草稿，首錯保留已改前綴且不開始 context apply。全部成功後一次 apply 指定 IDs，不改 GUI 勾選；結果以含 id、kind、target、before、after 的列表保留跨 kind 同名目的地。MCP 不隱藏預讀、不重試；GUI follow 仍待共用 view 接縫接入。
+`writeback` 的 preview 直接投影 GUI 共享草稿與目前 context，不在 MCP materialize cfg。寫入只送一次 `tab.writeback_write`；GUI 依序修改指定草稿，首錯保留已改前綴且不開始 context apply。全部成功後一次 apply 指定 IDs，不改 GUI 勾選；結果以含 id、kind、target、before、after 的列表保留跨 kind 同名目的地。MCP 不隱藏預讀、不重試。GUI 在改草稿前透過明確 view 命令切到目標 analysis/post pane；preview 與非同步完成不切頁。
 
 ## 驗證
 

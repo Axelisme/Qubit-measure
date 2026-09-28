@@ -18,6 +18,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
+from ._common import follow_tab
 from ._wire_values import _coerce_wire_value, context_wire_value
 
 _VALID_WRITEBACK_SUBTABS = frozenset({"analysis", "post_analysis"})
@@ -266,9 +267,9 @@ def h_tab_writeback_write(
     if not isinstance(raw, list):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "write must be a list")
     changes = tuple(_batch_change(item) for item in raw)
-    result = adapter.writeback_control.write_writeback_for_pane(
-        tab_id, "analysis" if subtab == "analysis" else "post_analysis", changes
-    )
+    pane = "analysis" if subtab == "analysis" else "post_analysis"
+    follow_tab(adapter, tab_id, pane)
+    result = adapter.writeback_control.write_writeback_for_pane(tab_id, pane, changes)
     return {"written": [_writeback_wire_value(asdict(item)) for item in result]}
 
 
