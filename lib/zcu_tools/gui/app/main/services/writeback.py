@@ -108,11 +108,26 @@ class WritebackDraft:
             edits=edits,
         )
 
-    def apply(self) -> dict[str, Any]:
-        return self._service.apply_draft(self)
+    def apply(self, *, item_ids: tuple[str, ...] | None = None) -> dict[str, Any]:
+        return self._service.apply_draft(self, item_ids=item_ids)
 
     def teardown(self) -> None:
         self._service.teardown_draft(self)
+
+
+def _entries_to_apply(
+    entries: list[_DraftEntry], item_ids: tuple[str, ...] | None
+) -> list[_DraftEntry]:
+    """Resolve explicit IDs independently of the GUI checkbox selection."""
+    if item_ids is None:
+        return [entry for entry in entries if entry.item.selected]
+    requested = set(item_ids)
+    if len(requested) != len(item_ids):
+        raise InvalidInputError("duplicate writeback item IDs")
+    unknown = requested - {entry.item.session_id for entry in entries}
+    if unknown:
+        raise InvalidInputError(f"unknown writeback item IDs: {sorted(unknown)}")
+    return [entry for entry in entries if entry.item.session_id in requested]
 
 
 class WritebackService:
@@ -266,15 +281,21 @@ class WritebackService:
             )
         return self._cfg_editor.get_draft(entry.editor_id)
 
-    def apply_draft(self, draft: WritebackDraft) -> dict[str, Any]:
-        """Apply selected entries through exactly one ``ContextWritePort`` call."""
+    def apply_draft(
+        self, draft: WritebackDraft, *, item_ids: tuple[str, ...] | None = None
+    ) -> dict[str, Any]:
+        """Apply explicit IDs, or GUI selection, through one context write.
+
+        Explicit IDs never change selection. Unknown or repeated IDs fail before
+        writing; an empty tuple is a no-op. Writes retain draft order.
+        """
         self._require_draft(draft)
         applied_ids: list[str] = []
         md: dict[str, Any] = {}
         ml_modules: dict[str, CfgSchema] = {}
         ml_waveforms: dict[str, CfgSchema] = {}
 
-        selected_entries = [entry for entry in draft._entries if entry.item.selected]
+        selected_entries = _entries_to_apply(draft._entries, item_ids)
         destinations: set[tuple[str, str]] = set()
         for entry in selected_entries:
             item = entry.item

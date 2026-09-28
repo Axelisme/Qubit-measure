@@ -297,6 +297,54 @@ def test_failed_and_empty_apply_do_not_mark_items_applied():
     assert svc.get_all_applied(draft) == {"md-1": False}
 
 
+def test_explicit_apply_ignores_selection_without_changing_checkboxes():
+    write_port = MagicMock()
+    svc = WritebackService(MagicMock(), write_port)
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(target_name="a", description="d", proposed_value=1.0),
+            MetaDictWriteback(target_name="b", description="d", proposed_value=2.0),
+        ]
+    )
+    draft.edit("md-1", selected=False)
+    selection = [item.selected for item in draft.items]
+
+    result = draft.apply(item_ids=("md-1",))
+
+    assert result["applied_ids"] == ["md-1"]
+    write_port.apply_writes.assert_called_once()
+    assert write_port.apply_writes.call_args.args[0].md == {"a": 1.0}
+    assert [item.selected for item in draft.items] == selection
+    assert svc.get_all_applied(draft) == {"md-1": True, "md-2": False}
+
+
+@pytest.mark.parametrize("item_ids", [("md-1", "missing"), ("md-1", "md-1")])
+def test_explicit_apply_rejects_invalid_ids_before_any_write(item_ids):
+    write_port = MagicMock()
+    svc = WritebackService(MagicMock(), write_port)
+    draft = svc.create_draft(
+        [MetaDictWriteback(target_name="a", description="d", proposed_value=1.0)]
+    )
+
+    with pytest.raises(InvalidInputError):
+        draft.apply(item_ids=item_ids)
+
+    write_port.apply_writes.assert_not_called()
+    assert svc.get_all_applied(draft) == {"md-1": False}
+
+
+def test_explicit_empty_apply_does_not_fall_back_to_selected_items():
+    write_port = MagicMock()
+    svc = WritebackService(MagicMock(), write_port)
+    draft = svc.create_draft(
+        [MetaDictWriteback(target_name="a", description="d", proposed_value=1.0)]
+    )
+
+    assert draft.apply(item_ids=())["applied_ids"] == []
+    write_port.apply_writes.assert_not_called()
+    assert svc.get_all_applied(draft) == {"md-1": False}
+
+
 def test_apply_draft_sends_one_context_batch_for_selected_items():
     cfg_editor = MagicMock()
     write_port = MagicMock()
