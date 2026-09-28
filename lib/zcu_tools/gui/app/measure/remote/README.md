@@ -53,7 +53,7 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
   Each client has a 16 MiB encoded-byte budget including its in-flight frame;
   exceeding it closes that client and releases its backlog. MCP rejects oversized
   requests before sending and closes on oversized incoming frames with an explicit error.
-- A failed full read does not advance the MCP observation baseline. Large context
+- A failed full read does not advance the GUI connection's seen map. Large context
   export is not a framing exception or an implicit partial read.
 - Error codes are closed and typed in `gui.remote.errors`.
 - `wire.version` is available before auth; all other methods require auth when a
@@ -234,7 +234,7 @@ The wire surface is grouped by ownership:
   `PredictorControlPort`.
 - `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save (data via `tab_id` only; image via `(tab_id, subtab_id)` with `analysis|post_analysis`) and figures via `(tab_id, subtab_id)` (`run` reads live FigureContainer, `analysis`/`post_analysis` read canonical State figures). `tab.snapshot.save_paths` projects independent `data_path`、`analysis_image_path`與`post_analysis_image_path`; explicit save destinations update the shared GUI drafts. `tab.save_artifacts` submits one application-owned operation for data/analysis/post keys, returns reserved destinations plus an operation id, and guards the observed result, analysis and path resources. Reserved paths are not completion evidence; terminal success and artifact snapshots establish saved results.
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
-- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；取消沿用 `analyze.cancel`。figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。`expected_versions` 沿用 owner-loop guard。此 GUI-side method 不生成 MCP tool。
+- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time).
 - `editor.*`：headless cfg-editor session lifecycle.
 - `operation.*` / `notify.*`：live operation indexing, bounded wait, domain-owned cancellation, progress and prompt replies.

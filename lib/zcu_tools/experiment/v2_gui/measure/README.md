@@ -54,12 +54,11 @@ Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 imp
 （例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
 `gui/app/measure/README.md`。
 
-`BaseAdapter.build_exp_cfg` 是 GUI run path 的 cfg materialization seam：adapter 先用
-`gui.app.measure.adapter.lowering.schema_to_raw_dict(schema, req.md, req.ml)` 在 GUI adapter
-層完成 EvalValue / md lowering，再把
-concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
-assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active
-`ml/md` 綁進長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
+`GuardService.acquire_run_permit` 在 Run 接受時凍結已呈現的 resolved cfg；
+`run(req, raw_cfg)` 不重新讀取 live md/ml 或 lower schema。`BaseAdapter.build_exp_cfg`
+把這份 raw cfg 交給 `zcu_tools.experiment.cfg_assembler.assemble_experiment_cfg`，
+使用 `ml=None` 與 `RunRequest.device_snapshot`。不要把 active `ml/md` 綁進
+長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
 generic model/default/inheritance與validation/lowering直接從`zcu_tools.gui.cfg`匯入；measure
 entry point只組current md expression、measure module shape與`SweepCfg` ports。measure adapter
 facade只提供framework contract、request/result/writeback/analyze params與session signature
@@ -111,7 +110,10 @@ adapter-defined top-level knobs以generic scalar/`field` verb按GUI顯示順序�
 ExpCfg欄位，也可以是run-only adapter欄位。正式欄位正常lower到
 ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內讀取後 pop 掉。
 `onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
-結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
+結構。`homophasal.r_f` / `rf_w` / `theta0` 是正式校正 cfg 欄位，預設為
+合法空值；可輸入 direct value 或 expression。linear 模式忽略合法校正值，
+但兩種模式都不忽略 expression 解析錯誤。homophasal 模式在 device I/O 前
+驗證必要欄位及正值條件，不從 live md 隱藏注入。
 `twotone/time_domain/t1` 的 `uniform` 是 run-only 欄位：預設 `True` 使用線性 delay
 sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
 沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
@@ -133,7 +135,9 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
 adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
 adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
-直接回報原始錯誤。load 不把 `result.cfg_snapshot` 反填回 Config tab；
+直接回報原始錯誤。`BaseAdapter.load` 只讀取結果，不修改 tab cfg；GUI
+`LoadService.load_result` 會嘗試把相容的 `result.cfg_snapshot` 反填到 tab
+及 Config editor。缺少或不相容的快照不影響已載入的結果，tab cfg 保持不變；
 `cfg_snapshot is None` 時 module writeback 維持 graceful skip。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
@@ -164,6 +168,12 @@ opaque draft，adapter不接觸Writeback implementation。
 `g_center`、`e_center`、`ge_radius`、`confusion_matrix`四項全部finite時，adapter才同時提出四個
 獨立`MetaDictWriteback` items；任一項無效就全數略過。Adapter只投影同一次domain analysis結果，
 不重跑fit、不重算stability，也不直接apply proposal。
+
+`singleshot/amp_rabi` 的 `g_center`、`e_center`、`radius` 是正式 experiment cfg
+欄位，預設 expression 指向 md 的 `g_center`、`e_center`、`ge_radius`。
+缺值保持 invalid；operator 可改用 direct complex／float 值。Run 凍結已解析的
+cfg 校正值，沿用 BaseAdapter.run；結果的 cfg_snapshot 保留本次使用的值。
+其他 singleshot adapter 不因此套用同一遷移。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 `singleshot/amp_rabi`沒有此選項，固定用無衰減joint fit。此選擇不屬於量測cfg，
