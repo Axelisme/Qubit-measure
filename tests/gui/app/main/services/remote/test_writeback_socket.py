@@ -4,10 +4,112 @@ from dataclasses import replace
 
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.adapters.fake.stub import FakeAnalyzeParams
-from zcu_tools.gui.app.main.adapter import MetaDictWriteback
+from zcu_tools.gui.app.main.adapter import (
+    MetaDictWriteback,
+    ModuleWriteback,
+    WaveformWriteback,
+)
+from zcu_tools.gui.app.main.cfg_schemas import (
+    module_cfg_to_value,
+    waveform_cfg_to_value,
+)
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 from ._helpers import Fixture, call, open_client
+
+
+def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypatch):
+    module = ModuleCfgFactory.from_raw(
+        {
+            "type": "pulse",
+            "ch": 0,
+            "nqz": 1,
+            "freq": 100.0,
+            "gain": 0.5,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "waveform": {"style": "const", "length": 0.1},
+        }
+    )
+    waveform = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
+    module_schema = CfgSchema(*module_cfg_to_value(module))
+    waveform_schema = CfgSchema(*waveform_cfg_to_value(waveform))
+    monkeypatch.setattr(
+        FakeAdapter,
+        "get_writeback_items",
+        lambda self, request: [
+            ModuleWriteback(
+                target_name="same", description="M", edit_schema=module_schema
+            ),
+            WaveformWriteback(
+                target_name="same", description="W", edit_schema=waveform_schema
+            ),
+        ],
+    )
+    fx = Fixture(active_label="ctx001")
+    ml = ModuleLibrary()
+    ml.modules["same"] = module
+    ml.waveforms["same"] = waveform
+    fx.state.set_context(replace(fx.state.exp_context, md=MetaDict(), ml=ml))
+    before_module, before_waveform = module.to_dict(), waveform.to_dict()
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        tab = fx.ctrl.new_tab("fake")
+        for operation in (
+            lambda: fx.ctrl.start_run(tab),
+            lambda: fx.ctrl.analyze(tab, FakeAnalyzeParams()),
+        ):
+            assert (
+                call(
+                    sock,
+                    "operation.await",
+                    {
+                        "operation_id": operation(),
+                        "timeout": 2,
+                    },
+                )["result"]["status"]
+                == "finished"
+            )
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+        assert call(sock, "context.snapshot", {})["ok"]
+        result = call(
+            sock,
+            "tab.writeback_write",
+            {
+                "tab_id": tab,
+                "subtab_id": "analysis",
+                "write": [
+                    {"id": "ml-1", "edits": [{"path": "gain", "value": 0.8}]},
+                    {"id": "wf-1", "edits": [{"path": "length", "value": 0.2}]},
+                ],
+            },
+        )
+        assert result["ok"], result
+        assert ml.modules["same"].to_dict()["gain"] == 0.8
+        assert ml.waveforms["same"].to_dict()["length"] == 0.2
+        assert result["result"]["written"] == [
+            {
+                "id": "ml-1",
+                "kind": "module",
+                "target": "same",
+                "before": before_module,
+                "after": ml.modules["same"].to_dict(),
+            },
+            {
+                "id": "wf-1",
+                "kind": "waveform",
+                "target": "same",
+                "before": before_waveform,
+                "after": ml.waveforms["same"].to_dict(),
+            },
+        ]
+    finally:
+        sock.close()
+        fx.stop()
 
 
 def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
