@@ -10,7 +10,10 @@ from zcu_tools.gui.app.main.services.remote.handlers.analysis import (
     h_tab_analyze,
     h_tab_post_analyze,
 )
-from zcu_tools.gui.app.main.services.remote.handlers.run_save import h_tab_run_start
+from zcu_tools.gui.app.main.services.remote.handlers.run_save import (
+    h_tab_run_start,
+    h_tab_save_artifacts,
+)
 from zcu_tools.gui.app.main.services.remote.handlers.tab import h_tab_set_cfg
 
 
@@ -56,6 +59,51 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
     )
     handler(adapter, {"tab_id": "t", "updates": {}, "edits": [], "agent_edit": True})
     assert order == (["mutation"] if headless else [("t", pane), "mutation"])
+
+
+@pytest.mark.parametrize("headless", [False, True])
+def test_save_selects_data_before_start_and_supports_headless(headless):
+    adapter = MagicMock()
+    order = []
+    if headless:
+        adapter.render_view = None
+    else:
+        adapter.render_view.select_tab_pane.side_effect = lambda tab, pane: (
+            order.append((tab, pane))
+        )
+
+    def save(*args, **kwargs):
+        order.append("save")
+        return SimpleNamespace(operation_id=7, destinations=())
+
+    adapter.save_control.save_artifacts.side_effect = save
+    result = h_tab_save_artifacts(
+        adapter,
+        {
+            "tab_id": "t",
+            "artifacts": "all",
+            "paths": {},
+            "comment": None,
+        },
+    )
+    assert result == {"operation_id": 7, "destinations": {}}
+    assert order == (["save"] if headless else [("t", "data"), "save"])
+
+
+def test_failed_save_view_selection_does_not_start_save():
+    adapter = MagicMock()
+    adapter.render_view.select_tab_pane.side_effect = ValueError("unavailable pane")
+    with pytest.raises(ValueError, match="unavailable pane"):
+        h_tab_save_artifacts(
+            adapter,
+            {
+                "tab_id": "t",
+                "artifacts": "all",
+                "paths": {},
+                "comment": None,
+            },
+        )
+    adapter.save_control.save_artifacts.assert_not_called()
 
 
 def test_failed_view_selection_does_not_start_an_operation():

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-28 — Application-owned artifact save operations
+**Last updated:** 2026-09-28 — Application-owned save operations and explicit view follow
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -73,8 +73,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
   retargets the worker (ADR-0017). Run terminal reactions refresh canonical
-  presentation without selecting a subtab; Analysis remains an explicit user
-  selection. `ExpTabWidget` delegates the Data pane to an
+  presentation without selecting a subtab. User actions and explicit agent view
+  commands select panes; run/edit/analyze/save handlers follow before mutation,
+  never on asynchronous completion. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
   action row放在`Measurement data`card之前，並從`TabSnapshot`呈現各artifact的
   status、saveability與草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；

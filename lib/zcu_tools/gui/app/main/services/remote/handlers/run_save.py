@@ -128,8 +128,12 @@ def h_tab_save_artifacts(
             )
         paths[kind] = path
     comment = params["comment"]
+    tab_id = str(params["tab_id"])
+    if not adapter.save_control.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    follow_tab(adapter, tab_id, "data")
     written = adapter.save_control.save_artifacts(
-        str(params["tab_id"]),
+        tab_id,
         artifacts=artifacts,
         paths=paths,
         comment=str(comment) if comment is not None else None,
