@@ -35,6 +35,20 @@ class SaveDataSubmission:
 
 
 @dataclass(frozen=True, slots=True)
+class SaveDestination:
+    kind: ArtifactKind
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class SaveArtifactsSubmission:
+    """Reserved destinations; only a finished outcome establishes successful I/O."""
+
+    operation_id: int
+    destinations: tuple[SaveDestination, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ActiveSaveOperation:
     operation_id: int
     tab_id: str
@@ -67,7 +81,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
-    from zcu_tools.gui.app.main.artifact_tracker import ArtifactSnapshot
+    from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, ArtifactSnapshot
     from zcu_tools.gui.app.main.state import (
         RetiredPaneResources,
         Session,

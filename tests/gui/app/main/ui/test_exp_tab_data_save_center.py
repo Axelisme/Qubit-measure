@@ -501,85 +501,6 @@ def test_status_text_renders_shared_snapshot(exp_tab_factory):
     _require_qapp().processEvents()
 
 
-def test_save_all_dispatch_only_result_present_and_order(qapp, monkeypatch):
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
-
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
-    ctrl.save_data = MagicMock(return_value="/tmp/data.h5")
-    ctrl.save_image = MagicMock(return_value="/tmp/a.png")
-    ctrl.save_post_image = MagicMock(return_value="/tmp/p.png")
-    window = MainWindow(ctrl)
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
-    )
-    snap = _snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        has_post=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-        has_active_context=True,
-    )
-    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
-
-    tab_ctrl = _mock_ctrl()
-    tab = ExpTabWidget("tab-1", tab_ctrl, caps)
-    tab.attach(snap, MagicMock())
-    ctrl.get_tab_snapshot.return_value = snap
-    ctrl.has_tab.return_value = True
-    window._tab_widgets["tab-1"] = tab
-
-    snap_data_only = _snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=False,
-        has_post=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-        has_active_context=True,
-    )
-    ctrl.get_tab_snapshot.return_value = snap_data_only
-    tab.update_interaction_state(snap_data_only)
-    window._on_save_all_clicked("tab-1")
-    ctrl.save_image.assert_not_called()
-    ctrl.save_post_image.assert_not_called()
-    assert ctrl.save_data.call_count == 1
-    ctrl.save_data.reset_mock()
-    ctrl.save_image.reset_mock()
-    ctrl.save_post_image.reset_mock()
-
-    ctrl.get_tab_snapshot.return_value = snap
-    tab.update_interaction_state(snap)
-    call_order: list[str] = []
-
-    def fake_save_image(tab_id, path):
-        call_order.append("analysis")
-        return "/tmp/a.png"
-
-    def fake_save_post(tab_id, path):
-        call_order.append("post")
-        return "/tmp/p.png"
-
-    def fake_save_data(tab_id, path, comment=""):
-        call_order.append("data")
-        return "/tmp/data.h5"
-
-    ctrl.save_image.side_effect = fake_save_image
-    ctrl.save_post_image.side_effect = fake_save_post
-    ctrl.save_data.side_effect = fake_save_data
-    window._on_save_all_clicked("tab-1")
-    assert call_order == ["analysis", "post", "data"]
-    window.deleteLater()
-    tab.deleteLater()
-    qapp.processEvents()
-
-
 def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
     from qtpy.QtCore import Qt
     from qtpy.QtTest import QTest
@@ -711,65 +632,6 @@ def test_changed_path_refresh_preserves_reverse_data_editor_state(
     assert data_edit.selectionStart() == 1
     assert data_edit.selectionLength() == 3
     assert data_edit.selectedText() == "tmp"
-    tab.deleteLater()
-    qapp.processEvents()
-
-
-def test_save_all_fast_fail_stops_dispatch(qapp, monkeypatch):
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
-
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
-    window = MainWindow(ctrl)
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
-    )
-    snap = _snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        has_post=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-        has_active_context=True,
-    )
-    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
-
-    tab_ctrl = _mock_ctrl()
-    tab = ExpTabWidget("tab-1", tab_ctrl, caps)
-    tab.attach(snap, MagicMock())
-    ctrl.get_tab_snapshot.return_value = snap
-    ctrl.has_tab.return_value = True
-    window._tab_widgets["tab-1"] = tab
-    ctrl.save_image = MagicMock(return_value="/tmp/a.png")
-    ctrl.save_post_image = MagicMock(side_effect=OSError("disk full"))
-    ctrl.save_data = MagicMock(return_value="/tmp/d.h5")
-    assert tab._save_center.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
-    window._on_save_all_clicked("tab-1")
-    assert ctrl.save_image.call_count == 1
-    assert ctrl.save_post_image.call_count == 1
-    ctrl.save_data.assert_not_called()
-
-    ctrl.save_post_image.side_effect = None
-    ctrl.save_post_image.return_value = "/tmp/p.png"
-    ctrl.save_data.return_value = "/tmp/d.h5"
-    window._on_save_all_clicked("tab-1")
-    assert tab._save_center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
-    payload_fail = SaveDataFinishedPayload(
-        tab_id="tab-1", data_path="/tmp/d.h5", error="fail"
-    )
-    window.handle_save_data_finished(payload_fail)
-    assert ctrl.save_image.call_count == 2
-    assert ctrl.save_post_image.call_count == 2
-    assert ctrl.save_data.call_count == 1
-    assert all(
-        tab._save_center.status_text(kind) == "○ NOT SAVED"
-        for kind in tab._save_center.artifact_kinds
-    )
-    window.deleteLater()
     tab.deleteLater()
     qapp.processEvents()
 
@@ -974,6 +836,7 @@ def _live_save_ui(tmp_path: Path):
         notify_info=MagicMock(),
     )
     ctrl.save_data.side_effect = ctrl.save_control.save_data
+    ctrl.save_artifacts.side_effect = ctrl.save_control.save_artifacts
     ctrl.save_image.side_effect = ctrl.save_control.save_image
     ctrl.save_post_image.side_effect = ctrl.save_control.save_post_image
     window = MainWindow(ctrl)
@@ -1119,7 +982,10 @@ def test_cleared_gui_data_path_saves_to_state_default(
         )
         assert target.isEnabled()
         target.click()
-        assert save.start_save_data.call_args.args[1] == default
+        if button == "single":
+            assert save.start_save_data.call_args.args[1] == default
+        else:
+            assert save.start_save_artifacts.call_args.args[1][0].path == default
         assert state.get_tab(tab_id).save.data_path_override is None
         state.get_tab(tab_id).artifacts.started(ArtifactKind.DATA)
         state.get_tab(tab_id).artifacts.succeeded(ArtifactKind.DATA, default)
@@ -1186,50 +1052,6 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     assert center.is_save_all_enabled() is True
     tab.deleteLater()
     _require_qapp().processEvents()
-
-
-def test_save_all_skips_analysis_without_figure(qapp, monkeypatch):
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
-
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
-    ctrl.save_data = MagicMock(return_value="/tmp/d.h5")
-    ctrl.save_image = MagicMock(return_value="/tmp/a.png")
-    ctrl.save_post_image = MagicMock(return_value="/tmp/p.png")
-    window = MainWindow(ctrl)
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
-    )
-    # Snapshot: analysis result true but figure None -> not saveable
-    snap = _snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        has_post=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-        has_active_context=True,
-        analysis_has_figure=False,
-    )
-    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
-
-    tab_ctrl = _mock_ctrl()
-    tab = ExpTabWidget("tab-1", tab_ctrl, caps)
-    tab.attach(snap, MagicMock())
-    ctrl.get_tab_snapshot.return_value = snap
-    ctrl.has_tab.return_value = True
-    window._tab_widgets["tab-1"] = tab
-    tab.update_interaction_state(snap)
-    window._on_save_all_clicked("tab-1")
-    # Analysis should be skipped (no figure), only data dispatched
-    ctrl.save_image.assert_not_called()
-    assert ctrl.save_data.call_count == 1
-    window.deleteLater()
-    tab.deleteLater()
-    qapp.processEvents()
 
 
 def test_individual_image_save_dispatch_requires_figure(qapp):

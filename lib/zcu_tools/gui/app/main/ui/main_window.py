@@ -894,39 +894,11 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "_on_save_all_clicked")
         if tab_w is None:
             return
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        if snapshot.capabilities is None:
-            raise RuntimeError(
-                f"render snapshot for tab {tab_id!r} has no capabilities"
-            )
-        artifacts = tab_w.ordered_saveable_kinds(snapshot)
-        if not artifacts:
-            return
-        for kind in artifacts:
-            if kind == ArtifactKind.DATA:
-                path = tab_w.get_data_path() or None
-                comment = tab_w.get_comment()
-                ok = self._dispatch_artifact_save(
-                    tab_w,
-                    kind,
-                    lambda p=path, c=comment: self._ctrl.save_data(
-                        tab_id, p, comment=c
-                    ),
-                )
-            elif kind == ArtifactKind.ANALYSIS:
-                path = tab_w.get_image_path()
-                ok = self._dispatch_artifact_save(
-                    tab_w, kind, lambda p=path: self._ctrl.save_image(tab_id, p)
-                )
-            elif kind == ArtifactKind.POST_ANALYSIS:
-                path = tab_w.get_post_image_path()
-                ok = self._dispatch_artifact_save(
-                    tab_w, kind, lambda p=path: self._ctrl.save_post_image(tab_id, p)
-                )
-            else:
-                raise RuntimeError(f"unknown artifact {kind!r}")
-            if not ok:
-                break
+        try:
+            self._ctrl.save_artifacts(tab_id)
+        except (ExpectedError, OSError, ValueError) as exc:
+            self.show_error_dialog("Save failed", str(exc))
+        self.refresh_tab_interaction(tab_id)
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         tab_id = payload.tab_id

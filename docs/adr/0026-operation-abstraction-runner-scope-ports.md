@@ -86,9 +86,9 @@ runner 與 policy 只認 port，不認具體 `State`；`State` 是唯一 impleme
 
 device 連線/斷線/設定的領域邏輯（rollback、`ActiveDeviceOperation` 簿記、snapshot）夠豐富，**保留** `DeviceService`；其生命週期段走 `OperationRunner`。`GlobalDeviceManager` 抽 `DeviceRegistryPort`，讓 DeviceService 依契約而非 singleton。
 
-### 7. `SaveService` 使用非取消的 data save handle
+### 7. `SaveService` 使用非取消的 save handle
 
-Data save 透過同一個 OperationRunner 與 OperationHandles 執行。OperationSpec 不要求硬體 lease、progress 或 cancel hook；operation.await 等待真實 terminal。SaveService 在 owner thread 更新 artifact tracker、清除 busy 與 live operation，再 settle。OperationControl 合併其 live handles，GUI 與 MCP 發起的存檔走相同路徑。保留路徑不代表存檔成功；只有成功 terminal 更新 last_saved_path，不新增 operation payload store。
+Data save 與 artifact batch 透過同一個 OperationRunner 與 OperationHandles 執行。OperationSpec 不要求硬體 lease、progress 或 cancel hook；operation.await 等待真實 terminal。Batch 的 image export 經 OwnerScheduler.call 在 owner thread 執行，data I/O 留在 worker；不擴充 runner 的 domain knowledge。每個成功 artifact 更新唯一 tracker 的 last_saved_path，後續失敗不回滾。整個 batch terminal 清除 busy/live operation，settle 後才發布完成事件。OperationControl 合併其 live handles。Application composition 不依賴 remote adapter；GUI Save All 使用同一 application command。保留路徑不代表存檔成功，不新增 operation payload store。
 
 ### 8. agent-facing handle 外露 + 泛型 op wait/poll
 

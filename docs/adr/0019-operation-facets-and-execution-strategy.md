@@ -28,7 +28,7 @@ status: accepted
 | facet | 語義 | 用者 |
 | --- | --- | --- |
 | **Exclusion** | 硬體互斥,能不能現在起（conflict matrix） | run / device |
-| **Handle** | poll / await / terminal outcome（= operation_id 本體） | run / analyze / interactive / device / data save |
+| **Handle** | poll / await / terminal outcome（= operation_id 本體） | run / analyze / interactive / device / data・artifact save |
 | **Progress** | 可觀測進度（token-keyed `ProgressService`,既有） | run / device-setup |
 | **Cancel** | 中斷+取消（request → 驅動者自行 interrupt,持 stop_event） | run / device /（interactive 可選） |
 
@@ -47,10 +47,10 @@ status: accepted
 | FIT analyze | — | ✅ | — | — | OffMain-thread |
 | INTERACTIVE analyze | — | ✅ | — | (可) | **Main-thread-user-paced** |
 | device setup | ✅ | ✅ | ✅ | (可) | Blocking / OffMain |
-| data save | — | ✅ | — | — | OffMain-thread |
+| data / artifact save | — | ✅ | — | — | OffMain-thread（image export marshal 回 owner） |
 | auto-align | — | — | — | — | OffMain-pool（fire-forget） |
 
-Data save 使用 Handle 等待真實存檔完成，不使用 Exclusion、Progress 或 Cancel。成功後才更新 artifact 的 last_saved_path；失敗保留先前成功紀錄。OperationOutcome 不保存檔案 payload，路徑由 artifact 查詢。Auto-align 仍只有 strategy。Facet opt-in 表示每種 operation 只選需要的能力，不要求全部綁定。
+Data save 與 artifact batch save 使用 Handle 等待真實存檔完成，不使用 Exclusion、Progress 或 Cancel。Batch 依 analysis→post→data 執行；影像匯出經既有 OwnerScheduler 回 owner thread，data adapter I/O 留在 worker。成功後才更新 artifact 的 last_saved_path；失敗保留先前成功紀錄。OperationOutcome 不保存檔案 payload，路徑由 artifact 查詢。Auto-align 仍只有 strategy。Facet opt-in 表示每種 operation 只選需要的能力，不要求全部綁定。
 
 ### 二、Handle / lifecycle 從 gate 拆成正交 sibling（取代 [[0003]] §一綁死）
 
@@ -72,7 +72,7 @@ Data save 使用 Handle 等待真實存檔完成，不使用 Exclusion、Progres
 
 - **不建正式 `ExecutionStrategy` class 階層**:strategy 選擇留 domain service(本就是知情 orchestrator),抽 Strategy 物件對 ~5 個 call site 是 over-abstraction(同 [[0003]] 防過度設計精神)。
 - **gate 不 wrap bg**:Exclusion / Handle / Execution 三正交,service 組合,互不巢狀。
-- **不強制所有工作有 Handle**：data save 使用 Handle 等待背景 I/O；auto-align 只有 OffMain-pool strategy，同步 image export 不建立 operation handle。
+- **不強制所有工作有 Handle**：data save 與 artifact batch 使用 Handle 等待完整工作；auto-align 只有 OffMain-pool strategy。既有單項同步 image export 入口不建立 handle，不等同可含 image 的 batch operation。
 
 ## 替代方案與否決理由
 

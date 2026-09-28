@@ -795,10 +795,6 @@ class ExpTabWidget(QWidget):
         """Return True if this tab contains unsaved measurement data."""
         return self._save_center.has_unsaved_data()
 
-    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
-        """Ordered saveable artifacts for Save All (snapshot single-fetch)."""
-        return self._save_center.ordered_saveable_kinds(snapshot)
-
     def focus_result_panel(self) -> None:
         """Focus Analysis when supported, otherwise focus Save."""
         if self._has_analysis:

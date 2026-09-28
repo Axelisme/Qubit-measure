@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.app.main.services.ports import SaveDataSubmission
+from zcu_tools.gui.app.main.artifact_tracker import (
+    ArtifactKind,
+    ArtifactSnapshot,
+    SaveStatus,
+)
+from zcu_tools.gui.app.main.services.ports import (
+    SaveArtifactsSubmission,
+    SaveDataSubmission,
+    SaveDestination,
+)
 from zcu_tools.gui.app.main.services.save_control import SaveControlFacet
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
@@ -17,6 +27,15 @@ class RecordingState:
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.comment = "existing draft"
+        self.artifacts = tuple(
+            ArtifactSnapshot(
+                kind, SaveStatus.NOT_SAVED, f"{kind.value}.out", None, True
+            )
+            for kind in ArtifactKind
+        )
+
+    def get_artifact_snapshots(self, tab_id: str) -> tuple[ArtifactSnapshot, ...]:
+        return self.artifacts
 
     def get_tab(self, tab_id: str) -> SimpleNamespace:
         self._log.add("state", "get_tab", tab_id)
@@ -90,6 +109,12 @@ class RecordingSave:
         self._log.add("save", "start_save_data", permit, data_path, comment=comment)
         return SaveDataSubmission(7, f"written:{data_path}")
 
+    def start_save_artifacts(
+        self, permit: object, destinations: tuple[SaveDestination, ...], comment: str
+    ) -> SaveArtifactsSubmission:
+        self._log.add("save", "start_save_artifacts", permit, destinations, comment)
+        return SaveArtifactsSubmission(8, destinations)
+
     def save_image_sync(self, permit: object, image_path: str) -> None:
         self._log.add("save", "save_image_sync", permit, image_path)
 
@@ -105,6 +130,58 @@ class RecordingBus:
     def emit(self, payload: object) -> None:
         self._log.add("bus", "emit", type(payload).__name__)
         self.payloads.append(payload)
+
+
+@pytest.mark.parametrize("analysis_saveable", [False, True])
+def test_save_all_selects_only_saveable_artifacts(analysis_saveable: bool) -> None:
+    facet, log, state, _tab, _save, _bus, _notices = _facet()
+    state.artifacts = tuple(
+        replace(a, is_saveable=analysis_saveable)
+        if a.kind is ArtifactKind.ANALYSIS
+        else a
+        for a in state.artifacts
+    )
+    submission = facet.save_artifacts("tab-1")
+    assert {d.kind for d in submission.destinations} == {
+        a.kind for a in state.artifacts if a.is_saveable
+    }
+    assert log.calls[-1].args[-1] == "existing draft"
+
+
+def test_explicit_save_subset_commits_paths_and_comment_before_submission() -> None:
+    facet, log, state, tab, _save, bus, _notices = _facet()
+    submission = facet.save_artifacts(
+        "tab-1",
+        artifacts=(ArtifactKind.ANALYSIS,),
+        paths={ArtifactKind.ANALYSIS: "chosen.png"},
+        comment="shared draft",
+    )
+    assert submission.destinations == (
+        SaveDestination(ArtifactKind.ANALYSIS, "chosen.png"),
+    )
+    assert tab.analysis_image_path == "chosen.png"
+    assert state.comment == "shared draft"
+    assert bus.payloads
+    assert log.calls[-1].method == "start_save_artifacts"
+
+
+@pytest.mark.parametrize(
+    "artifacts,paths",
+    [
+        ((), {}),
+        ((ArtifactKind.DATA, ArtifactKind.DATA), {}),
+        ((ArtifactKind.DATA,), {ArtifactKind.DATA: "  "}),
+        ((ArtifactKind.DATA,), {ArtifactKind.ANALYSIS: "other.png"}),
+    ],
+)
+def test_save_artifact_selection_errors_do_not_mutate_drafts(artifacts, paths) -> None:
+    facet, log, state, tab, _save, bus, _notices = _facet()
+    with pytest.raises(FailedPreconditionError):
+        facet.save_artifacts("tab-1", artifacts=artifacts, paths=paths, comment="new")
+    assert state.comment == "existing draft"
+    assert tab.data_path == "default.h5"
+    assert not bus.payloads
+    assert not any(entry.target == "save" for entry in log.calls)
 
 
 def _facet() -> tuple[

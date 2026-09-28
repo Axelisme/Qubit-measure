@@ -38,7 +38,11 @@ from .adapter import (
     InteractiveHost,
     InteractiveSession,
 )
-from .events.completion import AnalyzeFailedPayload, SaveDataFinishedPayload
+from .events.completion import (
+    AnalyzeFailedPayload,
+    SaveArtifactsFinishedPayload,
+    SaveDataFinishedPayload,
+)
 from .events.run import RunFinishedPayload
 from .events.tab import (
     TabContentChangedPayload,
@@ -76,7 +80,7 @@ if TYPE_CHECKING:
 
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
-    from .services.ports import SaveDataSubmission
+    from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
@@ -347,6 +351,7 @@ class Controller(SessionControllerMixin):
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
         bus.subscribe(SaveDataFinishedPayload, self._on_save_data_finished)
+        bus.subscribe(SaveArtifactsFinishedPayload, self._on_save_artifacts_finished)
         bus.subscribe(DeviceSetupFinishedPayload, self._on_device_setup_finished)
         bus.subscribe(
             DeviceOperationFinishedPayload, self._on_device_operation_finished
@@ -451,6 +456,14 @@ class Controller(SessionControllerMixin):
             "Analyze failed" if payload.stage == "primary" else "Post-analysis failed"
         )
         self._notify("error", title, payload.error_message)
+
+    def _on_save_artifacts_finished(
+        self, outcome: SaveArtifactsFinishedPayload
+    ) -> None:
+        if outcome.error is None:
+            self._info("Artifacts saved")
+        else:
+            self._notify("error", "Save failed", outcome.error)
 
     def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
         if outcome.error is None:
@@ -929,6 +942,9 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
     # Save (TabService)
     # ------------------------------------------------------------------
+
+    def save_artifacts(self, tab_id: str) -> SaveArtifactsSubmission:
+        return self._save_control.save_artifacts(tab_id)
 
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str | None = None

@@ -515,19 +515,6 @@ class ArtifactSaveCenter(QWidget):
             SaveStatus.UNSAVED_CHANGES,
         )
 
-    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
-        """Ordered saveable artifacts for Save All (analysis→post→data)."""
-        by_kind = {artifact.kind: artifact for artifact in snapshot.artifacts}
-        return [
-            kind
-            for kind in (
-                ArtifactKind.ANALYSIS,
-                ArtifactKind.POST_ANALYSIS,
-                ArtifactKind.DATA,
-            )
-            if kind in self._artifacts and by_kind[kind].is_saveable
-        ]
-
     # -- snapshot-driven updates --------------------------------------
 
     def update_from_snapshot(self, snapshot: TabSnapshot) -> None:

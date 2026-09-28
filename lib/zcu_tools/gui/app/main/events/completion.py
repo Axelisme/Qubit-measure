@@ -12,6 +12,7 @@ from zcu_tools.gui.event_bus import BasePayload
 class CompletionEvent(str, Enum):
     ANALYZE_FAILED = "analyze_failed_detail"
     SAVE_DATA_FINISHED = "save_data_finished_detail"
+    SAVE_ARTIFACTS_FINISHED = "save_artifacts_finished_detail"
 
 
 @dataclass(frozen=True)
@@ -30,4 +31,16 @@ class SaveDataFinishedPayload(BasePayload):
     error: str | None = None
 
 
-__all__ = ["AnalyzeFailedPayload", "CompletionEvent", "SaveDataFinishedPayload"]
+@dataclass(frozen=True)
+class SaveArtifactsFinishedPayload(BasePayload):
+    EVENT: ClassVar[CompletionEvent] = CompletionEvent.SAVE_ARTIFACTS_FINISHED
+    tab_id: str
+    error: str | None = None
+
+
+__all__ = [
+    "AnalyzeFailedPayload",
+    "CompletionEvent",
+    "SaveDataFinishedPayload",
+    "SaveArtifactsFinishedPayload",
+]

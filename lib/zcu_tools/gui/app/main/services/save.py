@@ -6,7 +6,10 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
 from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
-from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.events.completion import (
+    SaveArtifactsFinishedPayload,
+    SaveDataFinishedPayload,
+)
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -23,13 +26,19 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.utils.datasaver import reserve_labber_filepath
 
 from .guard import SavePermit
-from .ports import ActiveSaveOperation, SaveDataSubmission
+from .ports import (
+    ActiveSaveOperation,
+    SaveArtifactsSubmission,
+    SaveDataSubmission,
+    SaveDestination,
+)
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.ports import OwnerScheduler
 
 
 class SaveService:
@@ -38,10 +47,13 @@ class SaveService:
         state: State,
         runner: OperationRunner,
         bus: EventBus,
+        *,
+        owner_scheduler: OwnerScheduler,
     ) -> None:
         self._state = state
         self._runner = runner
         self._bus = bus
+        self._owner_scheduler = owner_scheduler
         self._active_paths: dict[str, str] = {}
         self._active_operations: dict[str, int] = {}
 
@@ -108,43 +120,160 @@ class SaveService:
             self._active_operations[tab_id] = token
         return SaveDataSubmission(token, data_path)
 
+    def start_save_artifacts(
+        self,
+        permit: SavePermit,
+        destinations: tuple[SaveDestination, ...],
+        comment: str = "",
+    ) -> SaveArtifactsSubmission:
+        """Save an ordered subset under one non-cancellable, lease-free handle."""
+        tab_id = permit.tab_id
+        self._require_tab_idle(tab_id)
+        destinations = self._prepare_destinations(tab_id, destinations)
+        tab = self._state.get_tab(tab_id)
+        data_path = next(
+            (d.path for d in destinations if d.kind is ArtifactKind.DATA), None
+        )
+        req = (
+            self._make_save_data_request(tab_id, data_path, comment)
+            if data_path is not None
+            else None
+        )
+        adapter = tab.adapter
+        tracker = tab.artifacts
+        owner = self._owner_scheduler
+
+        def work(_factory: object) -> None:
+            for destination in destinations:
+                if destination.kind is ArtifactKind.DATA:
+                    if req is None:
+                        raise RuntimeError("Data save has no prepared request")
+                    owner.call(lambda: tracker.started(ArtifactKind.DATA))
+                    adapter.save(req)
+                    owner.call(lambda d=destination: tracker.succeeded(d.kind, d.path))
+                else:
+                    owner.call(lambda d=destination: self._export_image(tab_id, d))
+
+        def on_terminal(result: BgResult, settle: SettleFn) -> None:
+            error = None if result.ok else str(result.error or "save failed")
+            self._finish_artifact_save(tab_id, destinations)
+            settle(OperationOutcome("finished" if result.ok else "failed", error))
+            self._emit_artifact_save_finished(tab_id, error)
+
+        self._active_paths[tab_id] = data_path or ""
+        self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
+        try:
+            token = self._runner.begin(
+                OperationSpec(
+                    exclusion=None,
+                    owner_id=tab_id,
+                    wants_progress=False,
+                    cancel_hook=None,
+                    work=work,
+                    run_in_pool=False,
+                    on_terminal=on_terminal,
+                )
+            )
+        except Exception as error:
+            self._finish_artifact_save(tab_id, destinations)
+            self._emit_artifact_save_finished(tab_id, str(error))
+            raise
+        if tab_id in self._active_paths:
+            self._active_operations[tab_id] = token
+        return SaveArtifactsSubmission(token, destinations)
+
+    def _finish_artifact_save(
+        self, tab_id: str, destinations: tuple[SaveDestination, ...]
+    ) -> None:
+        tracker = self._state.get_tab(tab_id).artifacts
+        for destination in destinations:
+            tracker.failed(destination.kind)
+        self._active_paths.pop(tab_id, None)
+        self._active_operations.pop(tab_id, None)
+        self._state.set_tab_saving_data(tab_id, False)
+
+    def _emit_artifact_save_finished(self, tab_id: str, error: str | None) -> None:
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id,
+                TabInteractionFact.SAVE_SUCCEEDED
+                if error is None
+                else TabInteractionFact.SAVE_FAILED,
+            )
+        )
+        self._bus.emit(SaveArtifactsFinishedPayload(tab_id, error))
+
+    def _prepare_destinations(
+        self, tab_id: str, destinations: tuple[SaveDestination, ...]
+    ) -> tuple[SaveDestination, ...]:
+        selected = {d.kind: d.path for d in destinations}
+        if not selected or len(selected) != len(destinations):
+            raise FailedPreconditionError(
+                "Save requires a nonempty unique artifact set"
+            )
+        available = {a.kind: a for a in self._state.get_artifact_snapshots(tab_id)}
+        for kind, path in selected.items():
+            if kind not in available or not available[kind].is_saveable:
+                raise FailedPreconditionError(f"Artifact {kind.value} is not saveable")
+            if not path.strip():
+                raise FailedPreconditionError(
+                    f"Artifact {kind.value} has an empty path"
+                )
+        if ArtifactKind.DATA in selected:
+            selected[ArtifactKind.DATA] = reserve_labber_filepath(
+                selected[ArtifactKind.DATA]
+            )
+        ordered = tuple(
+            SaveDestination(kind, selected[kind])
+            for kind in (
+                ArtifactKind.ANALYSIS,
+                ArtifactKind.POST_ANALYSIS,
+                ArtifactKind.DATA,
+            )
+            if kind in selected
+        )
+        for destination in ordered:
+            self._ensure_parent_directory(destination.path)
+        return ordered
+
+    def _export_image(self, tab_id: str, destination: SaveDestination) -> None:
+        tab = self._state.get_tab(tab_id)
+        figure = (
+            tab.analysis.figure
+            if destination.kind is ArtifactKind.ANALYSIS
+            else tab.post_analysis.figure
+        )
+        if figure is None:
+            label = (
+                "post-analysis figure"
+                if destination.kind is ArtifactKind.POST_ANALYSIS
+                else "figure"
+            )
+            raise FailedPreconditionError(f"No {label} available to save")
+        self._ensure_parent_directory(destination.path)
+        tracker = tab.artifacts
+        tracker.started(destination.kind)
+        try:
+            save_figure_to_path(figure, destination.path)
+        except Exception:
+            tracker.failed(destination.kind)
+            raise
+        tracker.succeeded(destination.kind, destination.path)
+
     def save_image_sync(self, permit: SavePermit, image_path: str) -> None:
         tab_id = permit.tab_id
         self._require_tab_idle(tab_id)
-        tab = self._state.get_tab(tab_id)
-        if tab.analysis.figure is None:
-            raise FailedPreconditionError("No figure available to save")
-        logger.info("save_image_sync: tab_id=%r path=%r", tab_id, image_path)
-        self._ensure_parent_directory(image_path)
         self._state.get_artifact_snapshots(tab_id)
-        tab.artifacts.started(ArtifactKind.ANALYSIS)
-        try:
-            save_figure_to_path(tab.analysis.figure, image_path)
-        except Exception:
-            tab.artifacts.failed(ArtifactKind.ANALYSIS)
-            raise
-        tab.artifacts.succeeded(ArtifactKind.ANALYSIS, image_path)
+        self._export_image(tab_id, SaveDestination(ArtifactKind.ANALYSIS, image_path))
 
     def save_post_image_sync(self, permit: SavePermit, image_path: str) -> None:
-        """Save the tab's *post-analysis* figure (``tab.post_analysis.figure``) — the post
-        sub-tab's own Save Image. Mirrors ``save_image_sync`` but targets the
-        post layer's figure, which is distinct from the primary ``tab.analysis.figure``
-        (the two are separate pane fields though they share container routing)."""
+        """Synchronously export the independently owned post-analysis figure."""
         tab_id = permit.tab_id
         self._require_tab_idle(tab_id)
-        tab = self._state.get_tab(tab_id)
-        if tab.post_analysis.figure is None:
-            raise FailedPreconditionError("No post-analysis figure available to save")
-        logger.info("save_post_image_sync: tab_id=%r path=%r", tab_id, image_path)
-        self._ensure_parent_directory(image_path)
         self._state.get_artifact_snapshots(tab_id)
-        tab.artifacts.started(ArtifactKind.POST_ANALYSIS)
-        try:
-            save_figure_to_path(tab.post_analysis.figure, image_path)
-        except Exception:
-            tab.artifacts.failed(ArtifactKind.POST_ANALYSIS)
-            raise
-        tab.artifacts.succeeded(ArtifactKind.POST_ANALYSIS, image_path)
+        self._export_image(
+            tab_id, SaveDestination(ArtifactKind.POST_ANALYSIS, image_path)
+        )
 
     def _require_tab_idle(self, tab_id: str) -> None:
         """Reject every save entry point while another tab operation owns it.

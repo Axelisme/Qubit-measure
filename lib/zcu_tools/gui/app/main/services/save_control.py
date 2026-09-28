@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol
 
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
 from zcu_tools.gui.app.main.catalog import ExperimentAccess
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
@@ -12,12 +13,14 @@ from zcu_tools.gui.app.main.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
+from .ports import SaveDestination
+
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .guard import GuardService
-    from .ports import SaveDataSubmission
+    from .ports import SaveArtifactsSubmission, SaveDataSubmission
     from .save import SaveService
     from .tab import TabService
 
@@ -32,6 +35,15 @@ class SaveControlPort(Protocol):
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str | None = None
     ) -> SaveDataSubmission: ...
+
+    def save_artifacts(
+        self,
+        tab_id: str,
+        *,
+        artifacts: tuple[ArtifactKind, ...] | None = None,
+        paths: Mapping[ArtifactKind, str] | None = None,
+        comment: str | None = None,
+    ) -> SaveArtifactsSubmission: ...
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str: ...
 
@@ -82,6 +94,58 @@ class SaveControlFacet:
             raise FailedPreconditionError(f"Tab {tab_id!r} has no data path configured")
         draft_comment = self._state.get_tab(tab_id).save.comment
         return self._save.start_save_data(permit, resolved, comment=draft_comment)
+
+    def save_artifacts(
+        self,
+        tab_id: str,
+        *,
+        artifacts: tuple[ArtifactKind, ...] | None = None,
+        paths: Mapping[ArtifactKind, str] | None = None,
+        comment: str | None = None,
+    ) -> SaveArtifactsSubmission:
+        permit = self._guard.acquire_save_permit(tab_id)
+        self._require_tab_idle(tab_id)
+        available = {a.kind: a for a in self._state.get_artifact_snapshots(tab_id)}
+        selected = (
+            tuple(kind for kind, a in available.items() if a.is_saveable)
+            if artifacts is None
+            else artifacts
+        )
+        if not selected or len(set(selected)) != len(selected):
+            raise FailedPreconditionError(
+                "Save requires a nonempty unique artifact set"
+            )
+        overrides = paths if paths is not None else {}
+        if set(overrides) - set(selected):
+            raise FailedPreconditionError("Save paths must name selected artifacts")
+        destinations = []
+        for kind in selected:
+            if kind not in available or not available[kind].is_saveable:
+                raise FailedPreconditionError(f"Artifact {kind.value} is not saveable")
+            path = overrides.get(kind, available[kind].default_path)
+            if path is None or not path.strip():
+                raise FailedPreconditionError(
+                    f"Artifact {kind.value} has an empty path"
+                )
+            destinations.append(SaveDestination(kind, path))
+        setters = {
+            ArtifactKind.DATA: self._tab.update_tab_data_path_override,
+            ArtifactKind.ANALYSIS: self._tab.update_tab_analysis_image_path_override,
+            ArtifactKind.POST_ANALYSIS: self._tab.update_tab_post_analysis_image_path_override,
+        }
+        for kind, path in overrides.items():
+            setters[kind](tab_id, path)
+        if comment is not None:
+            self._state.update_tab_comment(tab_id, comment)
+        if overrides or comment is not None:
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id, TabInteractionFact.SAVE_DRAFT_COMMITTED
+                )
+            )
+        return self._save.start_save_artifacts(
+            permit, tuple(destinations), self._state.get_tab(tab_id).save.comment
+        )
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str:
         if image_path is not None and not image_path.strip():

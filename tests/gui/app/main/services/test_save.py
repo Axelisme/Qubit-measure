@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QEventLoop, QTimer
 from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
-from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.events.completion import (
+    SaveArtifactsFinishedPayload,
+    SaveDataFinishedPayload,
+)
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
 from zcu_tools.gui.app.main.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.app.main.services.guard import SavePermit
+from zcu_tools.gui.app.main.services.ports import SaveDestination
 from zcu_tools.gui.app.main.services.save import SaveService
 from zcu_tools.gui.app.main.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -21,6 +27,8 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 
@@ -62,7 +70,7 @@ def _make_service(
         bg,
         bus,
     )
-    svc = SaveService(state, runner, bus)
+    svc = SaveService(state, runner, bus, owner_scheduler=MagicMock())
     return svc, state, bg
 
 
@@ -81,6 +89,150 @@ def _record_outcomes(svc: SaveService) -> list[SaveDataFinishedPayload]:
         SaveDataFinishedPayload, outcomes.append
     )
     return outcomes
+
+
+def _await_artifact_completion(bus, handles, token):
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+    observed = []
+
+    def completed(_payload) -> None:
+        observed.append(handles.known_outcome(token))
+        loop.quit()
+
+    subscription = bus.subscribe(SaveArtifactsFinishedPayload, completed)
+    try:
+        timer.start(5000)
+        loop.exec()
+    finally:
+        timer.stop()
+        subscription.unsubscribe()
+    assert len(observed) == 1 and observed[0] is not None
+    return observed[0]
+
+
+@pytest.fixture
+def batch_save_service(qapp):
+    state = State(MagicMock())
+    adapter = MagicMock()
+    state.add_tab(
+        "tab", Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock())
+    )
+    state.update_tab_result("tab", object())
+    primary, post = _make_figure(), _make_figure()
+    state.update_tab_analyze("tab", object(), primary)
+    state.update_tab_post_analyze("tab", object(), post)
+    handles, bus, gate = OperationHandles(), EventBus(), MagicMock()
+    background = BackgroundRunner()
+    service = SaveService(
+        state,
+        OperationRunner(gate, handles, MagicMock(), background, bus),
+        bus,
+        owner_scheduler=QtOwnerScheduler(),
+    )
+    try:
+        yield service, state, adapter, primary, post, handles, bus, gate
+    finally:
+        background.quiesce()
+        background.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "requested",
+    [
+        (ArtifactKind.POST_ANALYSIS, ArtifactKind.ANALYSIS),
+        (ArtifactKind.DATA, ArtifactKind.POST_ANALYSIS, ArtifactKind.ANALYSIS),
+    ],
+)
+@pytest.mark.parametrize("fails", [False, True])
+def test_save_artifacts_runs_in_order_and_preserves_partial_success(
+    batch_save_service, tmp_path: Path, requested: tuple[ArtifactKind, ...], fails: bool
+) -> None:
+    service, state, adapter, primary, post, handles, bus, gate = batch_save_service
+    owner_id = threading.get_ident()
+    calls: list[ArtifactKind] = []
+
+    def image_export(kind: ArtifactKind, path: str) -> None:
+        assert threading.get_ident() == owner_id
+        calls.append(kind)
+        if fails and kind is ArtifactKind.POST_ANALYSIS:
+            raise OSError("post export failed")
+        Path(path).write_bytes(b"image")
+
+    primary.savefig.side_effect = lambda path, **kw: image_export(
+        ArtifactKind.ANALYSIS, path
+    )
+    post.savefig.side_effect = lambda path, **kw: image_export(
+        ArtifactKind.POST_ANALYSIS, path
+    )
+
+    def data_export(req) -> None:
+        assert threading.get_ident() != owner_id
+        calls.append(ArtifactKind.DATA)
+        Path(req.data_path).write_bytes(b"data")
+
+    adapter.save.side_effect = data_export
+    destinations = tuple(
+        SaveDestination(kind, str(tmp_path / f"{kind.value}.dat")) for kind in requested
+    )
+    observed = []
+    submission = service.start_save_artifacts(SavePermit("tab"), destinations)
+
+    def observe(payload) -> None:
+        if payload.fact in (
+            TabInteractionFact.SAVE_SUCCEEDED,
+            TabInteractionFact.SAVE_FAILED,
+        ):
+            observed.append(handles.known_outcome(submission.operation_id))
+
+    bus.subscribe(TabInteractionChangedPayload, observe)
+    assert state.is_tab_busy("tab")
+    with pytest.raises(FailedPreconditionError, match="busy"):
+        service.start_save_artifacts(SavePermit("tab"), destinations)
+    outcome = _await_artifact_completion(bus, handles, submission.operation_id)
+    assert outcome.status == ("failed" if fails else "finished")
+    assert observed == [outcome]
+    assert not state.is_tab_busy("tab")
+    assert service.active_save_operations() == ()
+    assert not gate.register.called
+    expected = [ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS]
+    if ArtifactKind.DATA in requested and not fails:
+        expected.append(ArtifactKind.DATA)
+    assert calls == expected
+    artifacts = {a.kind: a for a in state.get_artifact_snapshots("tab")}
+    assert artifacts[ArtifactKind.ANALYSIS].last_saved_path == str(
+        tmp_path / "analysis.dat"
+    )
+    assert artifacts[ArtifactKind.POST_ANALYSIS].last_saved_path == (
+        None if fails else str(tmp_path / "post_analysis.dat")
+    )
+    assert (artifacts[ArtifactKind.DATA].last_saved_path is not None) == (
+        ArtifactKind.DATA in requested and not fails
+    )
+
+
+def test_artifact_save_submit_failure_settles_before_completion(tmp_path: Path) -> None:
+    handles, bus = OperationHandles(), EventBus()
+    service, state, background = _make_service(handles=handles, bus=bus)
+    background.submit.side_effect = RuntimeError("cannot submit")
+    observed = []
+    bus.subscribe(
+        SaveArtifactsFinishedPayload,
+        lambda payload: observed.append(
+            (payload.error, handles.live_count(), state.is_tab_busy("tab"))
+        ),
+    )
+    with pytest.raises(RuntimeError, match="cannot submit"):
+        service.start_save_artifacts(
+            SavePermit("tab"),
+            (SaveDestination(ArtifactKind.DATA, str(tmp_path / "data")),),
+        )
+    assert observed == [("cannot submit", 0, False)]
+    assert service.active_save_operations() == ()
+    assert state.get_artifact_snapshots("tab")[0].last_saved_path is None
 
 
 def test_start_save_data_creates_parent_at_command_boundary(

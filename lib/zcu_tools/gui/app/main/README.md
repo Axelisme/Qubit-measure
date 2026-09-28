@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-28 — State-owned artifacts and awaitable data save
+**Last updated:** 2026-09-28 — Application-owned artifact save operations
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -81,7 +81,10 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
   Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
   都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
-  Save All依analysis→post→data順序執行並Fast Fail，不回滾已完成的存檔。
+  Save All由SaveControl/SaveService選擇可存項目，依analysis→post→data順序執行，
+  使用單一operation並Fast Fail，不回滾已完成的存檔。Qt按鈕不再編排各項存檔。
+  AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
+  Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
   GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前
   查詢其投影，並將app關閉的資料流失與active-operation風險合併確認。
   Programmatic RPC shutdown不彈互動式確認。
@@ -234,7 +237,7 @@ Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消
 catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
 
 Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
-共同阻止 reload，包含 handle-backed data save。共用 `ExperimentAccess` 阻止 local/remote
+共同阻止 reload，包含 handle-backed data及artifact batch save。共用 `ExperimentAccess` 阻止 local/remote
 experiment driving facets 在切換時重入。確認等待期間 tab identity、resource versions 或 run
 result 改變會使確認失效。重新建立的 tabs 使用新 id，舊 RPC locator 不可沿用。
 
