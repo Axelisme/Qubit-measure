@@ -285,6 +285,30 @@ def test_batch_extensionless_image_reports_existing_output(
     assert not Path(draft_path).exists()
 
 
+@pytest.mark.parametrize("kind", [ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS])
+def test_sync_image_service_records_actual_extensionless_path(
+    batch_save_service, tmp_path: Path, kind: ArtifactKind
+) -> None:
+    service, state, _adapter, _primary, _post, _handles, _bus, _gate = (
+        batch_save_service
+    )
+    figure = Figure()
+    figure.subplots().plot([0, 1], [1, 0])
+    if kind is ArtifactKind.ANALYSIS:
+        state.update_tab_analyze("tab", object(), figure)
+        save = service.save_image_sync
+    else:
+        state.update_tab_post_analyze("tab", object(), figure)
+        save = service.save_post_image_sync
+    with rc_context({"savefig.format": "png"}):
+        save(SavePermit("tab"), str(tmp_path / "figure"))
+    artifact = next(a for a in state.get_artifact_snapshots("tab") if a.kind is kind)
+    expected = tmp_path / "figure.png"
+    assert artifact.last_saved_path == str(expected)
+    assert artifact.status is SaveStatus.SAVED
+    assert expected.stat().st_size > 0
+
+
 def test_batch_save_keeps_submission_signature_when_later_drafts_change(
     batch_save_service, tmp_path: Path
 ) -> None:

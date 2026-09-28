@@ -11,6 +11,7 @@ from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.main.figure_export import resolve_figure_path
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .ports import SaveDestination
@@ -166,6 +167,7 @@ class SaveControlFacet:
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no analysis image path configured"
             )
+        resolved = resolve_figure_path(resolved)
         self._save.save_image_sync(permit, resolved)
         self._notify_info(f"Image saved to {resolved}")
         return resolved
@@ -189,6 +191,7 @@ class SaveControlFacet:
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no post-analysis image path configured"
             )
+        resolved = resolve_figure_path(resolved)
         self._save.save_post_image_sync(permit, resolved)
         self._notify_info(f"Post-analysis image saved to {resolved}")
         return resolved

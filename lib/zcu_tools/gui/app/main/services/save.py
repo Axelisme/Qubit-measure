@@ -300,7 +300,10 @@ class SaveService:
         tab_id = permit.tab_id
         self._require_tab_idle(tab_id)
         self._state.get_artifact_snapshots(tab_id)
-        self._export_image(tab_id, SaveDestination(ArtifactKind.ANALYSIS, image_path))
+        self._export_image(
+            tab_id,
+            SaveDestination(ArtifactKind.ANALYSIS, resolve_figure_path(image_path)),
+        )
 
     def save_post_image_sync(self, permit: SavePermit, image_path: str) -> None:
         """Synchronously export the independently owned post-analysis figure."""
@@ -308,7 +311,10 @@ class SaveService:
         self._require_tab_idle(tab_id)
         self._state.get_artifact_snapshots(tab_id)
         self._export_image(
-            tab_id, SaveDestination(ArtifactKind.POST_ANALYSIS, image_path)
+            tab_id,
+            SaveDestination(
+                ArtifactKind.POST_ANALYSIS, resolve_figure_path(image_path)
+            ),
         )
 
     def _require_tab_idle(self, tab_id: str) -> None:

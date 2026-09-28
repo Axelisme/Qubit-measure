@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from matplotlib import rc_context
+from matplotlib.figure import Figure
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
@@ -115,6 +118,45 @@ def test_artifact_snapshot_keeps_saved_path_after_draft_edit_and_failed_save(
         )
     finally:
         sock.close()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("image_format", ["png", "svg"])
+def test_sync_image_reply_and_artifact_name_actual_extensionless_output(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pane: str, image_format: str
+):
+    tab = fx.ctrl.new_tab("fake")
+    adapter = fx.state.get_tab(tab).adapter
+    monkeypatch.setattr(
+        adapter, "capabilities", replace(adapter.capabilities, post_analysis=True)
+    )
+    fx.state.update_tab_result(tab, object())
+    figure = Figure()
+    figure.subplots().plot([0, 1], [1, 0])
+    fx.state.update_tab_analyze(tab, object(), figure)
+    if pane == "post_analysis":
+        fx.state.update_tab_post_analyze(tab, object(), figure)
+    draft = str(tmp_path / "figure")
+    expected = tmp_path / f"figure.{image_format}"
+    with (
+        rc_context({"savefig.format": image_format}),
+        open_client(fx.service.port) as sock,
+    ):
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"] is True
+        reply = call(
+            sock,
+            "tab.save_image",
+            {"tab_id": tab, "subtab_id": pane, "image_path": draft},
+        )
+        assert reply["ok"] is True
+        assert reply["result"]["image_path"] == str(expected)
+        artifacts = _assert_artifacts_match_state(fx, sock, tab)
+    artifact = next(a for a in artifacts if a.kind.value == pane)
+    assert artifact.status is SaveStatus.SAVED
+    assert artifact.last_saved_path == str(expected)
+    assert artifact.default_path == draft
+    assert expected.stat().st_size > 0
+    assert not Path(draft).exists()
 
 
 def test_analyze_params_wire_describes_live_adapter_before_run(fx):
