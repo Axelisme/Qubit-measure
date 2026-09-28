@@ -14,6 +14,7 @@ from typing import (
 
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceOperationFinishedPayload,
@@ -181,10 +182,6 @@ class _InflightOp:
     token: int
     kind: OperationKind
     prior: DeviceState | None
-
-
-class DeviceRegistrationError(RuntimeError):
-    """Expected driver construction or registration failure."""
 
 
 _DEVICE_TYPE_REGISTRY: dict[str, tuple[str, bool]] = {

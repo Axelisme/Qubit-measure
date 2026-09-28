@@ -8,8 +8,8 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
     OneToneFreqAnalyzeParams,
 )
 from zcu_tools.gui.app.main.services.remote.handlers.analysis import (
-    _h_tab_analyze,
-    _h_tab_get_analyze_params,
+    h_tab_analyze,
+    h_tab_get_analyze_params,
 )
 from zcu_tools.gui.remote.errors import RemoteError
 
@@ -30,7 +30,7 @@ def _adapter_with_params(params: OneToneFreqAnalyzeParams) -> MagicMock:
 def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None:
     adapter = _adapter_with_params(OneToneFreqAnalyzeParams())
 
-    reply = _h_tab_get_analyze_params(adapter, {"tab_id": "t"})
+    reply = h_tab_get_analyze_params(adapter, {"tab_id": "t"})
     assert reply["analyze_params"] == {
         "model_type": "hm",
         "fit_bg_amp_slope": True,
@@ -40,7 +40,7 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
         "max_edelay_search_radius": 100.0,
     }
 
-    started = _h_tab_analyze(
+    started = h_tab_analyze(
         adapter,
         {
             "tab_id": "t",
@@ -69,7 +69,7 @@ def test_remote_analyze_params_rejects_removed_key() -> None:
     removed_key = "_".join(("fit", "bg", "slope"))
 
     with pytest.raises(RemoteError):
-        _h_tab_analyze(
+        h_tab_analyze(
             adapter,
             {"tab_id": "t", "updates": {removed_key: True}},
         )

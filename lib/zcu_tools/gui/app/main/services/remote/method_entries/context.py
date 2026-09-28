@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     _json,
@@ -14,7 +15,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "context.use",
-        "context:_h_context_use",
+        "context:h_context_use",
         MethodSpec(
             5.0,
             "Switch the active context to 'label'. Echoes {label, has_active_context}. "
@@ -26,12 +27,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.new",
-        "context:_h_context_new",
+        "context:h_context_new",
         MethodSpec(
             10.0,
-            "Create a new context and make it active. Echoes {label, has_active_context} "
-            "— the auto-derived label (the agent cannot name it directly).",
+            "Create a new context and make it active. Optional label names it; "
+            "otherwise the GUI derives a label from bind_device value/unit. "
+            "clone_from='current' copies the active context (or starts empty when "
+            "none is active); null starts empty. An unknown clone source fails "
+            "without changing active/labels. Echoes {label, has_active_context}.",
             (
+                _str_opt("label", "Optional explicit context label"),
                 _str_opt(
                     "bind_device",
                     "Connected flux device to bind: its current value/unit name the "
@@ -47,7 +52,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.labels",
-        "context:_h_context_labels",
+        "context:h_context_labels",
         MethodSpec(
             5.0,
             "List context labels",
@@ -56,7 +61,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.active",
-        "context:_h_context_active",
+        "context:h_context_active",
         MethodSpec(
             5.0,
             "Active context label",
@@ -65,7 +70,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.snapshot",
-        "context:_h_context_snapshot",
+        "context:h_context_snapshot",
         MethodSpec(
             15.0,
             "Explicit full read of the active context: {label, md, ml: {modules, "
@@ -78,15 +83,25 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.md_get",
-        "context:_h_context_md_get",
+        "context:h_context_md_get",
         MethodSpec(
             5.0,
-            "List MetaDict keys",
+            "List MetaDict keys; summaries=true also returns {values} with scalars "
+            "and descriptions, never full non-scalar contents.",
+            (
+                ParamSpec(
+                    "summaries",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Include compact value summaries",
+                ),
+            ),
         ),
     ),
     method_entry(
         "context.md_get_attr",
-        "context:_h_context_md_get_attr",
+        "context:h_context_md_get_attr",
         MethodSpec(
             5.0,
             "Read one MetaDict attribute",
@@ -95,7 +110,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "value.list",
-        "context:_h_value_list",
+        "context:h_value_list",
         MethodSpec(
             5.0,
             "List registered read-only value sources. Returns "
@@ -106,7 +121,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "value.read",
-        "context:_h_value_read",
+        "context:h_value_read",
         MethodSpec(
             5.0,
             "Resolve one registered value source immediately. Returns "
@@ -120,7 +135,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_get",
-        "context:_h_context_ml_get",
+        "context:h_context_ml_get",
         MethodSpec(
             5.0,
             "List ModuleLibrary modules/waveforms as {modules, waveforms}, each "
@@ -137,17 +152,28 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.md_set_attr",
-        "context:_h_context_md_set_attr",
+        "context:h_context_md_set_attr",
         MethodSpec(
             5.0,
-            "Set one MetaDict attribute",
-            (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
+            "Set one MetaDict attribute; receipt=true returns its actual "
+            "{before, after} from the owner turn.",
+            (
+                _str("key", "MetaDict key"),
+                _json("value", "JSON-safe value"),
+                ParamSpec(
+                    "receipt",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Return actual before/after values",
+                ),
+            ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.md_del_attr",
-        "context:_h_context_md_del_attr",
+        "context:h_context_md_del_attr",
         MethodSpec(
             5.0,
             "Delete one MetaDict attribute",
@@ -157,7 +183,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_del_module",
-        "context:_h_context_ml_del_module",
+        "context:h_context_ml_del_module",
         MethodSpec(
             5.0,
             "Delete one ModuleLibrary module. Echoes {deleted: name}. LINKED cfg refs "
@@ -169,7 +195,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_del_waveform",
-        "context:_h_context_ml_del_waveform",
+        "context:h_context_ml_del_waveform",
         MethodSpec(
             5.0,
             "Delete one ModuleLibrary waveform. Echoes {deleted: name}. LINKED cfg refs "
@@ -181,7 +207,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_rename_module",
-        "context:_h_context_ml_rename_module",
+        "context:h_context_ml_rename_module",
         MethodSpec(
             5.0,
             "Rename a ModuleLibrary module old→new (clash fails fast). Echoes "
@@ -193,7 +219,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_rename_waveform",
-        "context:_h_context_ml_rename_waveform",
+        "context:h_context_ml_rename_waveform",
         MethodSpec(
             5.0,
             "Rename a ModuleLibrary waveform old→new (clash fails fast). Echoes "
@@ -205,7 +231,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_list_roles",
-        "context:_h_context_ml_list_roles",
+        "context:h_context_ml_list_roles",
         MethodSpec(
             5.0,
             "List experiment-role templates for context.ml_create_from_role. Returns "
@@ -216,7 +242,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_create_from_role",
-        "context:_h_context_ml_create_from_role",
+        "context:h_context_ml_create_from_role",
         MethodSpec(
             10.0,
             "Create a blank ModuleLibrary module/waveform from a named role "

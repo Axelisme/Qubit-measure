@@ -104,9 +104,11 @@ from __future__ import annotations
 # full reads and newly created resources certified by owner-thread write receipts.
 # v63: cfg reads return complete typed model observations, including locked
 # fields and cached raw/resolved/error state, instead of settable-only values.
-# v64: editor.set_fields adds ordered agent whole-sweep draft edits.
-# v65: context.ml_get accepts optional named/kind cfg reads and index descriptions.
-WIRE_VERSION = 65
+# v64: predictor.calibrate exposes the shared single-point bias correction.
+# v65: device.snapshot includes State-cached field specifications during setup.
+# v66: GUI-owned seen guards replace wire expectations/receipts; snapshots expose
+# operation state and tab.open_file owns new-tab loading with cfg backfill.
+WIRE_VERSION = 66
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -148,6 +150,7 @@ WIRE_VERSION = 65
 # v91: cfg reads project CfgDraft observations without resolving live sources.
 # v92: return bounded errors for unencodable replies; disconnect on failed delivery.
 # v95: bound per-client outbound bytes, including the in-flight frame.
-# v96: editor.set_fields delegates to the shared cfg editor aggregate.
-# v97: project one stored ModuleLibrary entry without an editor session.
-GUI_VERSION = 97
+# v96: predictor.calibrate routes through the shared PredictorControlPort.
+# v97: project cached device fields without driver reads during setup.
+# v98: own per-connection observations and new-tab load/failure cleanup in GUI.
+GUI_VERSION = 98

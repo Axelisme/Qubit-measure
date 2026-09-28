@@ -51,6 +51,8 @@ marshal 的「機制」抽出去，marshal 的「policy」留下來——同 [[0
 
 > **後續（2026-06-08，mcp/ 整併, c8eb1a03）**：`McpBridge` 與各 app 的 MCP server entry 已搬到 `zcu_tools/mcp/`（`McpBridge`→`mcp/core/bridge`、entry→`mcp/<app>/server.py`），`mcp` 成為 `gui.remote` 的**使用方**（wire primitives framing/errors/wire/param_spec/method_spec + rpc_endpoint 留 `gui/remote`）。`MCPBridgeConfig` 再拆出基底 `McpServerConfig`（無 launch 欄位，給 agent-memory 這類無子進程 server；GUI bridge 仍用 `MCPBridgeConfig`）。**本 ADR 的決策不變**（傳輸機制抽共用、policy 留各 app），僅位置/打包調整。
 
+> **後續（2026-09-28，stdio server 拆分）**：`McpServerConfig`、`Tool`／`ToolTable`／`SendFn` 與 module helper（`coerce_arg`／`make_forwarder`／`generate_tools`／`assemble_tools`／`build_initialize_result`／`run_stdio_loop`）搬到 `mcp/core/stdio_server`；`mcp/core/bridge` 只保留 GUI socket 連線、launch 與 `MCPBridgeConfig`。agent-memory 因此不再依賴 GUI bridge。決策不變，僅模組責任拆分。
+
 MCP 側對稱地抽成 **`McpBridge` class**——一個進程的 socket 狀態全是 instance attr（socket / reader thread / RID cond + pending map / 子進程 + pid 檔），**不是 module global**。它暴露 `send_rpc_raw`（低階收發，無 policy）+ `connect`/`disconnect`/`launch`/`stop` + `wire_version_note`。三個注入點讓 app 不必碰傳輸：
 
 - `MCPBridgeConfig`：per-app 常數（name/prefix/port/版本/instructions/pid+log 檔/run-script）。

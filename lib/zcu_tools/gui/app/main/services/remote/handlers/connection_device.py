@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
 from zcu_tools.gui.session.services.connection import (
@@ -55,7 +56,7 @@ def coerce_disconnect_device_request(
     )
 
 
-def _h_soc_connect(
+def h_soc_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Synchronous connect: runs on the Qt main thread (the IO worker blocks on the
@@ -74,27 +75,45 @@ def _h_soc_connect(
     return {"soc": {"description": info["description"], "is_mock": info["is_mock"]}}
 
 
-def _h_startup_apply(
+def h_startup_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.startup import StartupProjectRequest
 
-    chip = str(params["chip_name"])
-    qub = str(params["qub_name"])
-    scope_id_raw = params.get("scope_id")
+    # The handler runs on the GUI owner thread: read current identity, resolve
+    # omitted fields and apply the result in this single RPC, never from MCP.
+    has_project = adapter.ctrl.has_project()
+    current = adapter.ctrl.get_exp_context() if has_project else None
+    chip_raw = params.get("chip_name")
+    qub_raw = params.get("qub_name")
+    res_raw = params.get("res_name")
+    if current is None and (chip_raw is None or qub_raw is None or res_raw is None):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "chip_name, qub_name and res_name are required for a first project",
+            reason="missing_project_fields",
+        )
+    if current is None:
+        chip, qub, res = str(chip_raw), str(qub_raw), str(res_raw)
+    else:
+        chip = str(chip_raw) if chip_raw is not None else current.chip_name
+        qub = str(qub_raw) if qub_raw is not None else current.qub_name
+        res = str(res_raw) if res_raw is not None else current.res_name
 
+    scope_id_raw = params.get("scope_id")
+    if scope_id_raw is not None:
+        scope_id = str(scope_id_raw)
+    elif current is not None and (chip, qub) == (current.chip_name, current.qub_name):
+        scope_id = adapter.ctrl.get_persisted_startup().scope_id or None
+    else:
+        scope_id = None
     req = StartupProjectRequest(
-        chip_name=chip,
-        qub_name=qub,
-        res_name=str(params["res_name"]),
-        scope_id=str(scope_id_raw) if scope_id_raw else None,
+        chip_name=chip, qub_name=qub, res_name=res, scope_id=scope_id
     )
-    # Echo the resolved project (apply always mutates and either succeeds or
-    # raises — there is no no-op outcome, so no {applied:false} branch).
     return adapter.ctrl.apply_startup_project(req)
 
 
-def _h_device_connect(
+def h_device_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
@@ -103,7 +122,7 @@ def _h_device_connect(
     return {"operation_id": operation_id}
 
 
-def _h_device_disconnect(
+def h_device_disconnect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_disconnect_device_request(params)
@@ -112,7 +131,7 @@ def _h_device_disconnect(
     return {"operation_id": operation_id}
 
 
-def _h_device_reconnect(
+def h_device_reconnect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -123,7 +142,7 @@ def _h_device_reconnect(
     return {"operation_id": operation_id}
 
 
-def _h_device_forget(
+def h_device_forget(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -134,7 +153,7 @@ def _h_device_forget(
     return {"forgotten": name}
 
 
-def _h_device_setup(
+def h_device_setup(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -186,17 +205,8 @@ def _field_type_and_choices(annotation: object) -> tuple[str, list | None]:
     return _SCALAR.get(annotation, "str"), None  # type: ignore[arg-type]
 
 
-def _h_device_setup_spec(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    dev = adapter.device_control
-    info = dev.get_device_info(name)
-    if info is None:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"Device {name!r} has no live info (connect it first)",
-        )
+def _device_fields(info: BaseDeviceInfo) -> list[dict[str, object]]:
+    """Project either live or State-cached device info with one field grammar."""
     fields: list[dict[str, object]] = []
     for fname, finfo in type(info).model_fields.items():
         ftype, choices = _field_type_and_choices(finfo.annotation)
@@ -209,10 +219,23 @@ def _h_device_setup_spec(
         if choices is not None:
             entry["choices"] = choices
         fields.append(entry)
-    return {"fields": fields}
+    return fields
 
 
-def _h_device_cancel_operation(
+def h_device_setup_spec(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = str(params["name"])
+    info = adapter.device_control.get_device_info(name)
+    if info is None:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"Device {name!r} has no live info (connect it first)",
+        )
+    return {"fields": _device_fields(info)}
+
+
+def h_device_cancel_operation(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -223,7 +246,7 @@ def _h_device_cancel_operation(
     return {"ok": True, "cancelled": True}
 
 
-def _h_device_active_operations(
+def h_device_active_operations(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -248,7 +271,7 @@ def _h_device_active_operations(
     }
 
 
-def _h_device_list(
+def h_device_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -266,7 +289,7 @@ def _h_device_list(
     return {"devices": devices}
 
 
-def _h_device_snapshot(
+def h_device_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -285,5 +308,6 @@ def _h_device_snapshot(
             "status": snap.status.value,
             "error": snap.error,
             "info": snap.info.to_dict() if snap.info is not None else None,
+            "fields": _device_fields(snap.info) if snap.info is not None else [],
         }
     }

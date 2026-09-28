@@ -1,34 +1,8 @@
-"""Pure helpers for GUI-owned version-key patterns and stale descriptions."""
+"""Human-readable descriptions of stale GUI resource keys."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
-
-
-def expand_pattern_keys(
-    patterns: tuple[str, ...], params: dict[str, Any], source_table: Mapping[str, int]
-) -> dict[str, int]:
-    """Expand the catalog's resource patterns against observed versions."""
-    out: dict[str, int] = {}
-    for pattern in patterns:
-        if pattern == "device:*":
-            for key, version in source_table.items():
-                if key.startswith("device:"):
-                    out[key] = version
-            continue
-        writeback_resource = {
-            "analysis": "analyze",
-            "post_analysis": "post_analyze",
-        }.get(str(params.get("subtab_id", "")), "invalid_writeback_subtab")
-        key = pattern.format(
-            tab_id=params.get("tab_id", ""),
-            editor_id=params.get("editor_id", ""),
-            name=params.get("name", ""),
-            writeback_resource=writeback_resource,
-        )
-        out[key] = source_table.get(key, 0)
-    return out
 
 
 def describe_stale_keys(keys: list[Any]) -> list[str]:

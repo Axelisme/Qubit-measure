@@ -45,8 +45,10 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import WaveformCfgFactory
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
+from ._helpers import call as _raw_call
 from ._helpers import call_mcp_with_qt as _call_mcp_with_qt
 from ._helpers import mcp_client as _mcp_client
+from ._helpers import observe_run_inputs
 
 # Poll real socket workers while delivering owner-thread Qt events.
 pytestmark = pytest.mark.uses_wall_clock
@@ -61,7 +63,7 @@ def _make_ctx() -> ExpContext:
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),
-        soccfg=MagicMock(),
+        soccfg=make_mock_soccfg(),
         res_name="fake_res",
         result_dir="/tmp/zcu_result",
         database_path="/tmp/zcu_db/fake_chip/fake_qubit",
@@ -210,18 +212,9 @@ def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
         assert methods["adapter.guide"]["params"]["required"] == ["adapter_name"]
         assert methods["soc.info"]["exposure"] == "rpc"
         assert methods["soc.info"]["timeout_seconds"] == 5.0
-        assert methods["soc.info"]["refresh_after_write"] is False
-        assert methods["tab.run_start"]["refresh_after_write"] is True
         assert methods["tab.run_start"]["exposure"] == "rpc"
         assert methods["tab.run_start"]["tool_names"] == []
-        assert "tab:{tab_id}:cfg" in methods["tab.run_start"]["guard_deps"]
         assert methods["tab.run_start"]["operation_key"] == "tab:{tab_id}"
-        assert methods["tab.get_cfg"]["reveals"] == ["tab:{tab_id}:cfg"]
-        assert methods["tab.get_cfg"]["reveals_without"] == ["prefix"]
-        assert methods["editor.get"]["reveals_without"] == ["prefix"]
-        assert (
-            "expected_versions" not in methods["tab.run_start"]["params"]["properties"]
-        )
 
         _send(sock, {"id": "bad", "method": "adapter.guide", "params": {}})
         assert _recv_response(sock)["error"]["code"] == "invalid_params"
@@ -289,30 +282,6 @@ def test_tab_new_list_close_roundtrip(fx):
         _send(sock, {"id": "4", "method": "tab.list_all", "params": {}})
         resp = _recv_response(sock)
         assert resp["result"]["tabs"] == []  # no tabs open
-    finally:
-        sock.close()
-
-
-def test_tab_creation_receipt_reports_only_owner_thread_changes(fx):
-    sock = _open_client(fx.service.port)
-    try:
-        _send(sock, {"id": "before", "method": "resources.versions", "params": {}})
-        before = _recv_response(sock)["result"]["versions"]
-        _send(
-            sock, {"id": "new", "method": "tab.new", "params": {"adapter_name": "fake"}}
-        )
-        reply = _recv_response(sock)
-        assert reply["ok"] is True
-        tab_id = reply["result"]["tab_id"]
-        changed = reply["result"]["__agent_write_versions"]
-        _send(sock, {"id": "after", "method": "resources.versions", "params": {}})
-        after = _recv_response(sock)["result"]["versions"]
-        assert f"tab:{tab_id}" in changed
-        assert "soc" not in changed
-        for resource, (old, new) in changed.items():
-            assert old == before.get(resource, 0)
-            assert new == after[resource]
-            assert new > old
     finally:
         sock.close()
 
@@ -528,14 +497,249 @@ def _edit_context_as_gui(fx: _Fixture, key: str, value: object) -> None:
         sock.close()
 
 
+def test_socket_write_requires_a_full_read_on_that_connection(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = _open_client(fx.service.port)
+    try:
+        args = {"tab_id": tab_id, "data_path": "missing.h5"}
+        _send(sock, {"id": "unread", "method": "tab.load_data", "params": args})
+        unread = _recv_response(sock)
+        assert unread["error"]["reason"] == "stale_version"
+        assert "context" in unread["error"]["data"]["stale"]
+        assert f"tab:{tab_id}:result" in unread["error"]["data"]["stale"]
+        assert f"tab:{tab_id}:analyze" in unread["error"]["data"]["stale"]
+
+        for method, params in (
+            ("tab.snapshot", {"tab_id": tab_id}),
+            ("context.snapshot", {}),
+        ):
+            _send(sock, {"id": method, "method": method, "params": params})
+            assert _recv_response(sock)["ok"] is True
+        _send(sock, {"id": "read", "method": "tab.load_data", "params": args})
+        after_read = _recv_response(sock)
+        assert after_read["ok"] is False
+        assert after_read["error"].get("reason") != "stale_version"
+    finally:
+        sock.close()
+
+
+def test_socket_snapshot_exposes_result_replacement_and_restores_guard(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = _open_client(fx.service.port)
+    try:
+
+        def rpc(method: str, params: dict[str, Any]) -> dict[str, Any]:
+            _send(sock, {"id": method, "method": method, "params": params})
+            return _recv_response(sock)
+
+        assert rpc("context.snapshot", {})["ok"] is True
+        initial = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert initial["result_state"] == {
+            "revision": 0,
+            "available": False,
+            "source_path": None,
+        }
+        assert initial["analysis_state"]["available"] is False
+        assert initial["post_analysis_state"]["available"] is False
+        # A non-serializable result stays in State; the operational projection
+        # identifies replacements without requiring its payload on the wire.
+        fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
+        args = {"tab_id": tab_id, "data_path": "missing.h5"}
+        assert rpc("tab.load_data", args)["error"]["reason"] == "stale_version"
+        observed = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert observed["result_state"] == {
+            "revision": 1,
+            "available": True,
+            "source_path": "loaded.h5",
+        }
+        assert rpc("tab.load_data", args)["error"].get("reason") != "stale_version"
+        fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
+        assert rpc("tab.load_data", args)["error"]["reason"] == "stale_version"
+        replacement = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert replacement["result_state"]["revision"] == 2
+        assert replacement["result_state"]["source_path"] == "loaded.h5"
+        assert rpc("tab.load_data", args)["error"].get("reason") != "stale_version"
+    finally:
+        sock.close()
+
+
+def test_socket_self_write_advances_only_its_prior_seen_context(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    first = _open_client(fx.service.port)
+    second = _open_client(fx.service.port)
+    try:
+        for sock in (first, second):
+            for method, params in (
+                ("tab.snapshot", {"tab_id": tab_id}),
+                ("context.snapshot", {}),
+            ):
+                _send(sock, {"id": method, "method": method, "params": params})
+                assert _recv_response(sock)["ok"] is True
+
+        _send(
+            first,
+            {
+                "id": "write",
+                "method": "context.md_set_attr",
+                "params": {"key": "r_f", "value": 6000.0},
+            },
+        )
+        assert _recv_response(first)["ok"] is True
+        args = {"tab_id": tab_id, "data_path": "missing.h5"}
+        _send(first, {"id": "self", "method": "tab.load_data", "params": args})
+        assert _recv_response(first)["error"].get("reason") != "stale_version"
+        _send(second, {"id": "other", "method": "tab.load_data", "params": args})
+        assert _recv_response(second)["error"]["reason"] == "stale_version"
+
+        _send(second, {"id": "refresh", "method": "context.snapshot", "params": {}})
+        assert _recv_response(second)["result"]["md"]["r_f"] == 6000.0
+        _send(second, {"id": "retry", "method": "tab.load_data", "params": args})
+        assert _recv_response(second)["error"].get("reason") != "stale_version"
+    finally:
+        first.close()
+        second.close()
+
+
+@pytest.mark.parametrize("observe_cfg", [False, True])
+def test_context_self_write_advances_only_observed_dependent_cfg(
+    fx, observe_cfg
+) -> None:
+    _prepare_guarded_context(fx)
+    fx.ctrl.context_control.create_md_attr("count", 4)
+    tab_id = fx.ctrl.new_tab("fake")
+    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(
+        fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
+    )
+    fx.ctrl.cfg_editor_set_field(editor_id, "reps", {"__kind": "eval", "expr": "count"})
+    sock = _open_client(fx.service.port)
+    try:
+        for method, params in (
+            ("tab.snapshot", {"tab_id": tab_id}),
+            ("context.snapshot", {}),
+            ("soc.info", {"include_cfg": True}),
+            ("device.list", {}),
+        ):
+            assert _raw_call(sock, method, params)["ok"] is True
+        if observe_cfg:
+            assert _raw_call(sock, "tab.get_cfg", {"tab_id": tab_id})["ok"] is True
+        before = fx.state.version.get(f"tab:{tab_id}:cfg")
+        assert (
+            _raw_call(sock, "context.md_set_attr", {"key": "count", "value": 7})["ok"]
+            is True
+        )
+        assert fx.state.version.get(f"tab:{tab_id}:cfg") > before
+        started = _raw_call(sock, "tab.run_start", {"tab_id": tab_id})
+        if observe_cfg:
+            assert started["ok"] is True
+        else:
+            assert started["error"]["reason"] == "stale_version"
+            assert f"tab:{tab_id}:cfg" in started["error"]["data"]["stale"]
+    finally:
+        sock.close()
+
+
+def test_editor_consecutive_self_writes_preserve_commit_observation(fx) -> None:
+    ml = ModuleLibrary()
+    ml.waveforms["seed"] = WaveformCfgFactory.from_raw(
+        {"style": "const", "length": 0.1}
+    )
+    _prepare_guarded_context(fx, ml)
+    first = _open_client(fx.service.port)
+    second = _open_client(fx.service.port)
+    try:
+        editor_id = _raw_call(
+            first, "editor.new", {"item_kind": "waveform", "from_name": "seed"}
+        )["result"]["editor_id"]
+        for sock in (first, second):
+            assert _raw_call(sock, "editor.get", {"editor_id": editor_id})["ok"] is True
+            assert _raw_call(sock, "context.snapshot", {})["ok"] is True
+        for length in (0.2, 0.3):
+            assert (
+                _raw_call(
+                    first,
+                    "editor.set_field",
+                    {"editor_id": editor_id, "path": "length", "value": length},
+                )["ok"]
+                is True
+            )
+        stale = _raw_call(
+            second, "editor.commit", {"editor_id": editor_id, "name": "other"}
+        )
+        assert stale["error"]["reason"] == "stale_version"
+        assert (
+            _raw_call(first, "editor.commit", {"editor_id": editor_id, "name": "copy"})[
+                "ok"
+            ]
+            is True
+        )
+        assert ml.waveforms["copy"].to_dict()["length"] == 0.3
+        assert "other" not in ml.waveforms
+    finally:
+        first.close()
+        second.close()
+
+
+def test_timed_out_socket_read_does_not_establish_guard_baseline(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    original = fx.service._method_registry["context.snapshot"]
+
+    def slow_snapshot(adapter, params):
+        time.sleep(0.15)
+        return original.handler(adapter, params)
+
+    fx.service._method_registry = {
+        **fx.service._method_registry,
+        "context.snapshot": replace(
+            original,
+            handler=slow_snapshot,
+            spec=replace(original.spec, timeout_seconds=0.01),
+        ),
+    }
+    sock = _open_client(fx.service.port)
+    try:
+        _send(
+            sock,
+            {"id": "tab", "method": "tab.snapshot", "params": {"tab_id": tab_id}},
+        )
+        assert _recv_response(sock)["ok"] is True
+        _send(sock, {"id": "slow", "method": "context.snapshot", "params": {}})
+        timed_out = _recv_response(sock)
+        assert timed_out["ok"] is False
+        assert timed_out["error"]["code"] == "timeout"
+        _send(
+            sock,
+            {
+                "id": "write",
+                "method": "tab.load_data",
+                "params": {"tab_id": tab_id, "data_path": "missing.h5"},
+            },
+        )
+        assert _recv_response(sock)["error"]["reason"] == "stale_version"
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("with_device", [False, True])
 def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
-    fx, tmp_path: Path
+    fx, tmp_path: Path, with_device: bool
 ) -> None:
     _prepare_guarded_context(fx)
     port = fx.service.port
     bridge, call = _mcp_client(port, tmp_path)
     try:
         assert call("connect", {"port": port})["port"] == port
+        if with_device:
+            call(
+                "device_connect",
+                {"name": "bias", "type": "FakeDevice", "address": "none"},
+            )
+            # A fresh connection must observe the already registered device itself.
+            bridge.disconnect()
+            call("connect", {"port": port})
         tab_id = call(
             "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
         )["tab_id"]
@@ -543,14 +747,21 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
         assert "cfg" in call(
             "rpc_call", {"method": "soc.info", "params": {"include_cfg": True}}
         )
-        # The creation receipt establishes tab existence; no tab.snapshot
-        # round-trip is needed before an agent-started run on the new tab.
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         started = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
         )
         assert started["handle"] > 0
         _await_completed_run(call, started["handle"])
     finally:
+        if with_device:
+            call("device_disconnect", {"name": "bias", "forget": True})
         bridge.disconnect()
 
 
@@ -568,6 +779,13 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
         )
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         handle = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
         )["handle"]
@@ -591,6 +809,13 @@ def test_restarted_gui_requires_new_full_reads_before_running(
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": first_tab}})
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            first,
+            first_tab,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         old_handle = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": first_tab}}
         )["handle"]
@@ -620,6 +845,13 @@ def test_restarted_gui_requires_new_full_reads_before_running(
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": second_tab}})
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            second,
+            second_tab,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         new_handle = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": second_tab}}
         )["handle"]
@@ -882,6 +1114,9 @@ def test_run_start_then_running_tab_then_finishes(fx):
             sock, {"id": "1", "method": "tab.new", "params": {"adapter_name": "fake"}}
         )
         tab_id = _recv_response(sock)["result"]["tab_id"]
+        observe_run_inputs(
+            fx, tab_id, lambda method, params: _raw_call(sock, method, params)["result"]
+        )
 
         _send(
             sock, {"id": "2", "method": "tab.run_start", "params": {"tab_id": tab_id}}

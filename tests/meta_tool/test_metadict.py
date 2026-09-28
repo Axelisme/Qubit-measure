@@ -96,6 +96,21 @@ def test_metadict_update_batches_persisted_write(tmp_path) -> None:
     assert reloaded.beta == 2
 
 
+def test_metadict_update_rejects_reserved_literal_without_partial_write(
+    tmp_path,
+) -> None:
+    path = tmp_path / "meta.json"
+    md = MetaDict(path)
+    md.update({"stable": 1})
+    original = path.read_bytes()
+
+    with pytest.raises(ValueError, match="reserved MetaDict tag"):
+        md.update({"first": 2, "bad": [{"__complex__": [1, 2]}]})
+
+    assert dict(md.items()) == {"stable": 1}
+    assert path.read_bytes() == original
+
+
 def test_experiment_manager_str_without_active_context(tmp_path) -> None:
     em = ExperimentManager(tmp_path)
 

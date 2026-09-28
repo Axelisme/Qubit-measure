@@ -59,7 +59,7 @@ def _writeback_item_wire(item) -> dict[str, object]:
     return base
 
 
-def _h_tab_writeback_preview(
+def h_tab_writeback_preview(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Pure read of a pane's persistent writeback draft (not a dry-run).
@@ -102,7 +102,7 @@ def _h_tab_writeback_preview(
     }
 
 
-def _h_tab_writeback_set(
+def h_tab_writeback_set(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Edit a pane's persistent writeback item by id — the single writeback editing
@@ -189,7 +189,7 @@ def _find_writeback_item_for_pane(
     )
 
 
-def _h_tab_writeback_apply(
+def h_tab_writeback_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Apply a pane's persistent draft after rpc_call on tab.writeback_set.

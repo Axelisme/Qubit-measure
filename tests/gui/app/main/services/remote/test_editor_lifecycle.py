@@ -213,6 +213,8 @@ def test_successful_terminal_is_not_reclaimed_again(
     finished, unfinished = a.open_editor(), a.open_editor()
     params: dict[str, object] = {"editor_id": finished}
     if terminal == "editor.commit":
+        a.result("editor.get", editor_id=finished)
+        a.result("context.snapshot")
         params["name"] = "saved"
     a.result(terminal, **params)
     observer.assert_missing(finished)
@@ -233,6 +235,8 @@ def test_failed_commit_still_belongs_to_connection(
 ) -> None:
     a, observer = connections.connect(), connections.connect()
     editor_id = a.open_editor()
+    a.result("editor.get", editor_id=editor_id)
+    a.result("context.snapshot")
 
     def reject_commit(editor_id: str, name: str) -> None:
         raise InvalidInputError(f"cannot commit {editor_id} as {name}")

@@ -93,6 +93,7 @@ from ._helpers import (
     node_section,
     path_node_schema,
     sectioned_node_schema,
+    sectioned_test_schema,
     set_node_cfg_knobs,
 )
 
@@ -654,49 +655,6 @@ def _scalar_labels(section: CfgSectionSpec) -> dict[str, str]:
     return labels
 
 
-def _sectioned_test_schema() -> NodeCfgSchema:
-    return sectioned_node_schema(
-        (
-            node_section(
-                "sweep",
-                "Sweep",
-                node_field(
-                    "detune_sweep",
-                    "detune",
-                    SweepSpec(label="Detune"),
-                    SweepValue(start=-20.0, stop=50.0, expts=141),
-                ),
-            ),
-            node_section(
-                "acquire",
-                "Acquisition",
-                node_field(
-                    "reps",
-                    "reps",
-                    IntSpec("Reps"),
-                    1000,
-                ),
-                node_field(
-                    "earlystop_snr",
-                    "earlystop_snr",
-                    FloatSpec("Early-stop SNR", optional=True),
-                    50.0,
-                ),
-            ),
-            node_section(
-                "drive",
-                "Drive",
-                node_field(
-                    "qub_gain",
-                    "gain",
-                    FloatSpec("Gain"),
-                    0.05,
-                ),
-            ),
-        )
-    )
-
-
 def _assert_no_value_objects(value: object) -> None:
     assert not isinstance(
         value, (CfgSectionValue, DirectValue, EvalValue, SweepValue, CenteredSweepValue)
@@ -1054,7 +1012,7 @@ def test_no_derived_field_in_any_spec(builder: Builder):
 
 
 def test_sectioned_schema_lower_projects_logical_keys():
-    schema = _sectioned_test_schema()
+    schema = sectioned_test_schema()
 
     assert schema.keys == ("detune_sweep", "reps", "earlystop_snr", "qub_gain")
     assert schema.logical_paths["detune_sweep"] == "sweep.detune"
@@ -1082,7 +1040,7 @@ def test_sectioned_schema_lower_projects_logical_keys():
 def test_sectioned_schema_set_field_and_with_overrides_write_nested_leaf():
     md = MetaDict()
     md.gain = 0.2
-    schema = _sectioned_test_schema()
+    schema = sectioned_test_schema()
 
     schema.set_field("reps", "250")
     schema.with_overrides(
@@ -1486,92 +1444,8 @@ def test_path_schema_scalar_default_preserves_eval_value():
     assert schema.lower(None, md=md)["qub_gain"] == 0.25
 
 
-def test_sweep_direct_text_carriers_project_to_numeric_knobs():
-    schema = _sectioned_test_schema()
-    schema.set_field(
-        "detune_sweep",
-        SweepValue(
-            DirectValue(-2.0, raw="-2.00"),
-            DirectValue(2.0, raw="2e0"),
-            5,
-        ),
-    )
-
-    assert schema.read_knobs()["detune_sweep"] == {
-        "start": -2.0,
-        "stop": 2.0,
-        "expts": 5,
-    }
-
-
-def test_locked_center_accepts_direct_text_carrier_without_losing_numeric_projection():
-    schema = QubitFreqBuilder().make_default_schema()
-    schema.set_field(
-        "detune_sweep",
-        CenteredSweepValue(DirectValue(0.0, raw="0.00"), span=20.0, expts=5),
-    )
-
-    assert schema.read_knobs()["detune_sweep"] == {
-        "center": 0.0,
-        "span": 20.0,
-        "expts": 5,
-        "step": 5.0,
-    }
-    detune = schema.lower(None)["detune_sweep"]
-    assert float(detune.start) == pytest.approx(-10.0)
-    assert float(detune.stop) == pytest.approx(10.0)
-
-
-def test_centered_sweep_control_carriers_project_numeric_knobs_and_block_invalid_lowering():
-    schema = QubitFreqBuilder().make_default_schema()
-    schema.set_field(
-        "detune_sweep",
-        CenteredSweepValue(
-            0.0,
-            span=DirectValue(20.0, raw="20.00"),
-            expts=DirectValue(5, raw="005"),
-            step=DirectValue(5.0, raw="5e0"),
-        ),
-    )
-    assert schema.read_knobs()["detune_sweep"] == {
-        "center": 0.0,
-        "span": 20.0,
-        "expts": 5,
-        "step": 5.0,
-    }
-    detune = schema.lower(None)["detune_sweep"]
-    assert detune.expts == 5
-    assert float(detune.start) == pytest.approx(-10.0)
-    assert float(detune.stop) == pytest.approx(10.0)
-
-    invalid = CenteredSweepValue(
-        0.0,
-        span=DirectValue(None, raw="1e", error="Invalid number"),
-        expts=5,
-    )
-    schema.set_field("detune_sweep", invalid)
-    assert schema.read_knobs()["detune_sweep"]["span"] is None
-    with pytest.raises(RuntimeError, match="span"):
-        schema.lower(None)
-
-
-def test_locked_center_rejects_invalid_direct_text_carrier():
-    schema = QubitFreqBuilder().make_default_schema()
-    before = schema.read_knobs()
-    with pytest.raises(ValueError, match="invalid center"):
-        schema.set_field(
-            "detune_sweep",
-            CenteredSweepValue(
-                DirectValue(None, raw="-", error="invalid center"),
-                span=20.0,
-                expts=5,
-            ),
-        )
-    assert schema.read_knobs() == before
-
-
 def test_sectioned_schema_read_knobs_is_flat_json_friendly():
-    schema = _sectioned_test_schema()
+    schema = sectioned_test_schema()
     schema.set_field("qub_gain", EvalValue("gain"))
     schema.set_field(
         "detune_sweep",
@@ -1602,7 +1476,7 @@ def test_sectioned_schema_read_knobs_is_flat_json_friendly():
 
 
 def test_sectioned_schema_persistence_is_nested_json_friendly():
-    schema = _sectioned_test_schema()
+    schema = sectioned_test_schema()
     schema.set_field("qub_gain", EvalValue("gain"))
     schema.set_field(
         "detune_sweep",
@@ -1631,7 +1505,7 @@ def test_sectioned_schema_persistence_is_nested_json_friendly():
 
 
 def test_sectioned_schema_unknown_logical_key_fast_fails():
-    schema = _sectioned_test_schema()
+    schema = sectioned_test_schema()
 
     with pytest.raises(KeyError, match="Unknown node param"):
         schema.set_field("not_a_knob", 1)

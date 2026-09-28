@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _expected_versions,
     _str,
     _str_opt,
 )
@@ -15,7 +14,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.writeback_preview",
-        "writeback:_h_tab_writeback_preview",
+        "writeback:h_tab_writeback_preview",
         MethodSpec(
             5.0,
             "List a pane's persistent writeback draft (pure read — not a dry-run; the "
@@ -37,7 +36,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.writeback_set",
-        "writeback:_h_tab_writeback_set",
+        "writeback:h_tab_writeback_set",
         MethodSpec(
             5.0,
             "Edit a pane's persistent writeback item by id — the single writeback "
@@ -79,7 +78,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     description="Ordered list of {path, value} cfg edits "
                     "(module/waveform items only)",
                 ),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -93,7 +91,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.writeback_apply",
-        "writeback:_h_tab_writeback_apply",
+        "writeback:h_tab_writeback_apply",
         MethodSpec(
             10.0,
             "Apply a pane's persistent writeback draft as-is (edit it first via "
@@ -102,12 +100,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{applied_ids, written, context_version, destination_context}: written lists the destination "
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "
             "context_version is the bumped 'context' resource version after apply (use "
-            "it as an expected_versions guard on a follow-up write); "
+            "re-read the context before a dependent follow-up write); "
             "destination_context is the active ExpContext projection at reply time.",
             (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(

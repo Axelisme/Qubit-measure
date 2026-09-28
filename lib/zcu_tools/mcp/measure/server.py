@@ -38,13 +38,13 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     MCPBridgeConfig,
     port_is_open,
     resolve_connect_port,
-    run_stdio_loop,
 )
 from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
 from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
-MCP_VERSION = 85
+# v89: forward GUI-owned guard requests once and expose observed operation state.
+MCP_VERSION = 89
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
@@ -100,6 +100,8 @@ def _setup_logging() -> None:
 
 
 def main() -> None:
+    from zcu_tools.mcp.core.stdio_server import StdioLoopHooks, run_stdio_loop
+
     session = MeasureMcpSession(
         _CONFIG,
         resolve_connect_port=resolve_connect_port,
@@ -122,9 +124,9 @@ def main() -> None:
     run_stdio_loop(
         _CONFIG,
         build_measure_tools(context),
-        on_cleanup=cleanup,
-        on_start=_setup_logging,
-        on_error=logger.exception,
+        hooks=StdioLoopHooks(
+            on_start=_setup_logging, on_cleanup=cleanup, on_error=logger.exception
+        ),
         server_version="1.1.0",
     )
 

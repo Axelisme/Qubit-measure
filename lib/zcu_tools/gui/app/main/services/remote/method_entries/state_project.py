@@ -12,7 +12,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "state.has_project",
-        "state_project:_h_state_has_project",
+        "state_project:h_state_has_project",
         MethodSpec(
             5.0,
             "",
@@ -21,7 +21,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "state.has_context",
-        "state_project:_h_state_has_context",
+        "state_project:h_state_has_context",
         MethodSpec(
             5.0,
             "",
@@ -30,7 +30,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "state.has_active_context",
-        "state_project:_h_state_has_active_context",
+        "state_project:h_state_has_active_context",
         MethodSpec(
             5.0,
             "",
@@ -39,7 +39,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "state.has_soc",
-        "state_project:_h_state_has_soc",
+        "state_project:h_state_has_soc",
         MethodSpec(
             5.0,
             "",
@@ -48,7 +48,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "state.hardware_gate",
-        "state_project:_h_state_hardware_gate",
+        "state_project:h_state_hardware_gate",
         MethodSpec(
             5.0,
             "Read active hardware exclusion leases with kind, origin, note, and age.",
@@ -57,12 +57,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "soc.info",
-        "state_project:_h_soc_info",
+        "state_project:h_soc_info",
         MethodSpec(
             5.0,
             "Read the connected SoC's hardware summary (QICK soccfg): a compact "
             "human-readable 'description' table (per-channel generator/readout type, "
-            "converter port, sample rate, max pulse/buffer length) plus 'is_mock'. "
+            "converter port, sample rate, max pulse/buffer length), 'is_mock', "
+            "and the successful GUI connection's address/port (null for mock). "
             "The structured 'cfg' (the full ~2 KB QICK config) is included only when "
             "include_cfg=true (default false), so the common case pays nothing for it. "
             "Requires a connected SoC. Only include_cfg=true fully reveals the SoC "
@@ -77,7 +78,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "project.info",
-        "state_project:_h_project_info",
+        "state_project:h_project_info",
         MethodSpec(
             5.0,
             "Read the applied project identity: chip_name / qub_name / res_name plus "
@@ -88,7 +89,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "result_scope.list",
-        "state_project:_h_result_scope_list",
+        "state_project:h_result_scope_list",
         MethodSpec(
             10.0,
             "List discovered result scopes from result/**/params.json. Each scope "
@@ -100,7 +101,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "resources.versions",
-        "state_project:_h_resources_versions",
+        "state_project:h_resources_versions",
         MethodSpec(
             5.0,
             "Snapshot of all resource versions",

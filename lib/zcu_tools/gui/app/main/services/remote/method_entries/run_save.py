@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _comment,
-    _expected_versions,
     _str,
     _str_opt,
 )
@@ -15,7 +14,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.run_start",
-        "run_save:_h_tab_run_start",
+        "run_save:h_tab_run_start",
         MethodSpec(
             5.0,
             "Start a tab run via rpc_call; use wait(op=handle) for terminal "
@@ -24,7 +23,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "is not completion. After completion, read result state with "
             "rpc_call on tab.snapshot, or the run figure with rpc_call on "
             "tab.get_figure using subtab_id=run.",
-            (_str("tab_id"), _expected_versions()),
+            (_str("tab_id"),),
         ),
         agent=AgentMethodPolicy(
             guard_deps=(
@@ -40,7 +39,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.load_data",
-        "run_save:_h_tab_load_data",
+        "run_save:h_tab_load_data",
         MethodSpec(
             30.0,
             "Load a canonical result file into an already-open adapter tab. The tab "
@@ -51,7 +50,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 _str("data_path", "Canonical HDF5 result file to load"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -66,7 +64,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.run_cancel",
-        "run_save:_h_tab_run_cancel",
+        "run_save:h_tab_run_cancel",
         MethodSpec(
             5.0,
             "Request cancellation of the current run. Returns {ok, cancelled}: ok is always "
@@ -79,7 +77,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "run.running_tab",
-        "run_save:_h_run_running_tab",
+        "run_save:h_run_running_tab",
         MethodSpec(
             5.0,
             "Current running tab",
@@ -88,7 +86,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.save_data",
-        "run_save:_h_tab_save_data",
+        "run_save:h_tab_save_data",
         MethodSpec(
             30.0,
             "Save data file (tab-only).",
@@ -96,7 +94,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("tab_id"),
                 _str_opt("data_path", "Override data path"),
                 _comment(),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -109,7 +106,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.save_image",
-        "run_save:_h_tab_save_image",
+        "run_save:h_tab_save_image",
         MethodSpec(
             30.0,
             "Save a pane's canonical image file (analysis|post_analysis only; run "
@@ -119,7 +116,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),
                 _str_opt("image_path", "Override image path"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(

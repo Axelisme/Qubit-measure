@@ -1,7 +1,6 @@
 """Operation remote handlers."""
 
 # Method entries resolve these handlers by string reference at runtime.
-# pyright: reportUnusedFunction=false
 
 from __future__ import annotations
 
@@ -41,7 +40,7 @@ def _progress_bars_wire(bars) -> Mapping[str, object]:
     }
 
 
-def _h_operation_active(
+def h_operation_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -53,7 +52,7 @@ def _h_operation_active(
     }
 
 
-def _h_operation_cancel(
+def h_operation_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     operation_id = params["operation_id"]
@@ -68,7 +67,7 @@ def _h_operation_cancel(
     return {"status": status}
 
 
-def _h_operation_await(
+def h_operation_await(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Off-main: only the thread-safe handle channel, never owner-thread state.
@@ -118,7 +117,7 @@ def _h_operation_await(
     return {"reason": "completed", "status": outcome.status}
 
 
-def _h_operation_progress(
+def h_operation_progress(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Live (token, ProgressBarModel) pairs for one operation (run or device

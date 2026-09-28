@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from importlib import import_module
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, cast
 
 from zcu_tools.gui.remote.method_spec import (
     BoundMethod,
@@ -13,9 +13,6 @@ from zcu_tools.gui.remote.method_spec import (
     build_method_registry,
 )
 from zcu_tools.gui.remote.param_spec import build_input_schema
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.services.remote.service import RemoteControlAdapter
 
 AgentExposure = Literal["rpc", "tool", "internal"]
 
@@ -32,9 +29,9 @@ class AgentMethodPolicy:
     reveals_without: tuple[str, ...] = ()
     # Optional full reads reveal only when these named inputs are truthy.
     reveals_when_nonempty: tuple[str, ...] = ()
-    # A successful write reports the versions it changed on the owner thread.
+    # A successful write advances only versions previously seen by this connection.
     refresh_after_write: bool = False
-    # A returned identity plus an owner-thread 0→1 receipt certifies creation.
+    # A returned identity and owner-thread 0→1 change certify creation.
     created_resource: str | None = None
     operation_key: str | None = None
 
@@ -50,7 +47,7 @@ class AgentMethodPolicy:
         if self.created_resource is not None and (
             not self.created_resource or not self.refresh_after_write
         ):
-            raise ValueError("created_resource requires a write-version receipt")
+            raise ValueError("created_resource requires owner-thread write tracking")
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,12 +83,6 @@ def build_agent_catalog(
             "timeout_seconds": entry.spec.timeout_seconds,
             "exposure": entry.agent.exposure,
             "tool_names": list(entry.agent.tool_names),
-            "guard_deps": list(entry.agent.guard_deps),
-            "reveals": list(entry.agent.reveals),
-            "reveals_without": list(entry.agent.reveals_without),
-            "reveals_when_nonempty": list(entry.agent.reveals_when_nonempty),
-            "refresh_after_write": entry.agent.refresh_after_write,
-            "created_resource": entry.agent.created_resource,
             "operation_key": entry.agent.operation_key,
         }
         for entry in entries
@@ -120,34 +111,15 @@ def build_dispatch_registry(
     specs = build_method_specs(entries)
     handlers: dict[str, Handler] = {}
     for entry in entries:
-        handler = _resolve_handler_ref(entry.handler_ref)
-        if entry.agent.refresh_after_write:
-            if entry.spec.off_main_thread:
-                raise ValueError("write-version receipts require the owner thread")
-            handler = _with_write_versions(handler)
-        handlers[entry.method] = handler
+        policy = entry.agent
+        if entry.spec.off_main_thread and (
+            policy.guard_deps or policy.reveals or policy.refresh_after_write
+        ):
+            raise ValueError(
+                "guard, reveal and write tracking require the owner thread"
+            )
+        handlers[entry.method] = _resolve_handler_ref(entry.handler_ref)
     return build_method_registry(handlers, specs)
-
-
-def _with_write_versions(handler: Handler) -> Handler:
-    def wrapped(
-        adapter: RemoteControlAdapter, params: dict[str, object]
-    ) -> dict[str, object]:
-        # The handler and both samples share one owner-thread dispatch. Versions
-        # obtained by a separate RPC after the reply may include unseen GUI edits.
-        before = adapter.ctrl.resources_versions()
-        result = handler(adapter, params)
-        after = adapter.ctrl.resources_versions()
-        return {
-            **result,
-            "__agent_write_versions": {
-                key: [before.get(key, 0), version]
-                for key, version in after.items()
-                if version != before.get(key, 0)
-            },
-        }
-
-    return wrapped
 
 
 def _resolve_handler_ref(handler_ref: str) -> Handler:

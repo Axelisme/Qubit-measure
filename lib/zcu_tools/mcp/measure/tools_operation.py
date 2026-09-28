@@ -53,7 +53,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "soc": soc,
         "context": {"active": session.read_internal("context.active", {})["label"]},
         "devices": [
-            {"name": device["name"], "connected": device["status"] == "connected"}
+            {**device, "connected": device["status"] == "connected"}
             for device in session.read_internal("device.list", {})["devices"]
         ],
         "predictor": {"loaded": session.read_internal("predictor.info", {})["loaded"]},

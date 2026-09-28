@@ -14,7 +14,7 @@ from ._registry import RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "notify.open",
-        "notify:_h_notify_open",
+        "notify:h_notify_open",
         MethodSpec(
             30.0,
             "Open a non-modal agent-prompt dialog on the main thread. Returns {token}.",
@@ -26,7 +26,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "notify.await",
-        "notify:_h_notify_await",
+        "notify:h_notify_await",
         MethodSpec(
             # Off-main handlers bypass the owner-thread watchdog. The handler
             # caps the caller's wait at 600 seconds; MCP adds transport slack
