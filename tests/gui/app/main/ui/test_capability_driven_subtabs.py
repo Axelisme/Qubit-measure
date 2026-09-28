@@ -176,6 +176,62 @@ def exp_tab_widget(qapp, monkeypatch):
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
+@pytest.mark.parametrize("post", [False, True])
+def test_explicit_pane_selection_and_unavailable_pane(qapp, exp_tab_widget, post):
+    from qtpy.QtWidgets import QTabWidget
+
+    snapshot = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=post)
+    tab = exp_tab_widget("tab-1", make_ctrl(), snapshot.capabilities)
+    tabs = next(
+        widget for widget in tab.findChildren(QTabWidget) if widget.tabText(0) == "Run"
+    )
+    for pane, label in [("data", "Data"), ("analysis", "Analysis"), ("run", "Run")]:
+        tab.select_pane(pane)
+        assert tabs.tabText(tabs.currentIndex()) == label
+    if post:
+        tab.select_pane("post_analysis")
+        assert tabs.tabText(tabs.currentIndex()) == "Post-Analysis"
+    else:
+        with pytest.raises(ValueError, match="Unavailable"):
+            tab.select_pane("post_analysis")
+        assert tabs.tabText(tabs.currentIndex()) == "Run"
+    tab.deleteLater()
+
+
+def test_main_window_follow_selects_subpane_on_already_selected_tab(
+    qapp, exp_tab_widget
+):
+    from qtpy.QtWidgets import QTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = make_ctrl()
+    ctrl.list_tab_ids.return_value = ["tab-1", "tab-2"]
+    ctrl.get_tab_snapshot.side_effect = lambda tab_id: make_snapshot(
+        tab_id,
+        analysis=AnalysisMode.FIT,
+        post=True,
+    )
+    window = MainWindow(ctrl)
+    window.add_tab_widget("tab-1", "fake")
+    window.add_tab_widget("tab-2", "fake")
+    window.select_tab_pane("tab-1", "data")
+    assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
+    window.select_tab_pane("tab-1", "analysis")
+    assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
+    pages = [
+        widget
+        for widget in window.findChildren(QTabWidget)
+        if widget.tabText(0) == "Run"
+    ]
+    assert sorted(widget.tabText(widget.currentIndex()) for widget in pages) == [
+        "Analysis",
+        "Run",
+    ]
+    window.remove_tab_widget("tab-1")
+    window.remove_tab_widget("tab-2")
+    window.deleteLater()
+
+
 def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
     from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 

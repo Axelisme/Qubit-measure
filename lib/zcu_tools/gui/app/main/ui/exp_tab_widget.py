@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
@@ -811,6 +811,22 @@ class ExpTabWidget(QWidget):
     def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
         """Ordered saveable artifacts for Save All (snapshot single-fetch)."""
         return self._save_center.ordered_saveable_kinds(snapshot)
+
+    def select_pane(
+        self, pane: Literal["run", "analysis", "post_analysis", "data"]
+    ) -> None:
+        """Select an explicit available pane without changing domain state."""
+        if pane == "run":
+            panel = self._run_panel
+        elif pane == "data":
+            panel = self._save_panel
+        elif pane == "analysis" and self._has_analysis:
+            panel = self._analysis_panel
+        elif pane == "post_analysis" and self._has_post:
+            panel = self._post_panel
+        else:
+            raise ValueError(f"Unavailable tab pane: {pane!r}")
+        self._left_tabs.setCurrentWidget(panel)
 
     def focus_result_panel(self) -> None:
         """Focus Analysis when supported, otherwise focus Save."""
