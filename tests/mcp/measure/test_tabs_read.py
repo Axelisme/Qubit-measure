@@ -225,9 +225,31 @@ def test_tab_get_analyze_params_includes_definitions_and_current_values(
     assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
 
 
-def test_tab_get_keeps_complete_cfg_and_marks_unfinished_artifact_owner(
-    tmp_path: Path,
-) -> None:
+def test_tab_get_projects_complete_gui_artifacts_with_cfg(tmp_path: Path) -> None:
+    artifacts = [
+        {
+            "kind": "data",
+            "status": "unsaved_changes",
+            "default_path": "next.h5",
+            "last_saved_path": "previous_1.hdf5",
+            "is_saveable": True,
+        },
+        {
+            "kind": "analysis",
+            "status": "saved",
+            "default_path": "analysis.png",
+            "last_saved_path": "analysis.png",
+            "is_saveable": True,
+        },
+        {
+            "kind": "post_analysis",
+            "status": "not_saved",
+            "default_path": None,
+            "last_saved_path": None,
+            "is_saveable": False,
+        },
+    ]
+
     def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
         assert params == {"tab_id": "old-tab"}
         if method == "tab.snapshot":
@@ -237,11 +259,7 @@ def test_tab_get_keeps_complete_cfg_and_marks_unfinished_artifact_owner(
                         "tab_id": "old-tab",
                         "adapter_name": "ramsey",
                         "interaction": {"has_run_result": True},
-                        "save_paths": {
-                            "data_path": "data.h5",
-                            "analysis_image_path": "analysis.png",
-                            "post_analysis_image_path": "post.png",
-                        },
+                        "artifacts": artifacts,
                     }
                 ]
             }
@@ -256,14 +274,16 @@ def test_tab_get_keeps_complete_cfg_and_marks_unfinished_artifact_owner(
         == reply("tab.snapshot", {"tab_id": "old-tab"})["tabs"][0]
     )
     assert result["cfg"] == {"frequency": {"raw": "5", "resolved": 5}}
-    assert result["artifacts"][0] == {
-        "key": "data",
-        "kind": "data",
-        "default_path": "data.h5",
-    }
-    assert result["partial"] == {
-        "artifacts": "09-save-lifecycle owns status/last_saved_path",
-    }
+    assert result["artifacts"] == [
+        {**artifacts[0], "key": "data", "kind": "data"},
+        {**artifacts[1], "key": "analysis", "kind": "image"},
+        {**artifacts[2], "key": "post", "kind": "image"},
+    ]
+    assert [
+        method
+        for method, _ in client.transport.sent
+        if method not in ("wire.version", "rpc.catalog")
+    ] == ["tab.snapshot", "tab.get_cfg"]
 
 
 def test_tab_live_without_run_does_not_capture_figure(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -70,6 +71,56 @@ class _SilentTransport:
 
     def close(self) -> None:
         self.closed = True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-liveness seam")
+@pytest.mark.parametrize("alive", [False, True])
+@pytest.mark.parametrize("stale_owned_process", [False, True])
+def test_wait_for_gui_exit_observes_reply_pid_without_termination(
+    tmp_path, monkeypatch, alive, stale_owned_process
+):
+    config = _config(tmp_path)
+    config.pid_file.write_text("9999")
+    bridge = McpBridge(config)
+    if stale_owned_process:
+        exited = Mock(pid=1234)
+        exited.poll.return_value = 0
+        exited.wait.side_effect = AssertionError("old process handle is not this GUI")
+        monkeypatch.setattr(bridge, "_proc", exited)
+    clock = [0.0]
+    probes = []
+
+    def probe(pid, signal):
+        probes.append((pid, signal))
+        assert signal == 0
+        if not alive:
+            raise ProcessLookupError
+
+    def sleep(delay):
+        clock[0] += delay
+
+    monkeypatch.setattr("zcu_tools.mcp.core.bridge.os.kill", probe)
+    monkeypatch.setattr("zcu_tools.mcp.core.bridge.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("zcu_tools.mcp.core.bridge.time.sleep", sleep)
+    assert bridge.wait_for_gui_exit(1234, timeout=0.4) is (not alive)
+    assert probes and all(pid == 1234 for pid, _ in probes)
+
+
+@pytest.mark.parametrize("times_out", [False, True])
+def test_wait_for_owned_gui_uses_process_wait_without_termination(
+    tmp_path, monkeypatch, times_out
+):
+    from subprocess import TimeoutExpired
+
+    bridge = McpBridge(_config(tmp_path))
+    process = Mock(pid=1234)
+    process.poll.return_value = None
+    process.wait.side_effect = TimeoutExpired("gui", 2.0) if times_out else None
+    monkeypatch.setattr(bridge, "_proc", process)
+    assert bridge.wait_for_gui_exit(1234, timeout=2.0) is (not times_out)
+    process.wait.assert_called_once_with(timeout=2.0)
+    process.terminate.assert_not_called()
+    process.kill.assert_not_called()
 
 
 def test_launched_gui_false_when_attached_only(tmp_path: Path) -> None:

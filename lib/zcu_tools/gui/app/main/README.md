@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-28 — frozen Run and interactive plugin integration
+**Last updated:** 2026-09-28 — frozen Run, interactive plugins, and application-owned artifact saves
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -73,20 +73,22 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
   retargets the worker (ADR-0017). Run terminal reactions refresh canonical
-  presentation without selecting a subtab; Analysis remains an explicit user
-  selection. `ExpTabWidget` delegates the Data pane to an
+  presentation without selecting a subtab. User actions and explicit agent view
+  commands select panes; run/edit/analyze/save handlers follow before mutation,
+  never on asynchronous completion. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
-  action row放在`Measurement data`card之前，同時擁有capability-driven artifact rows、
-  high-contrast status rendering and the tab-local status lifecycle derived from
-  result availability, path/comment edits and true terminal save outcomes (not
-  persisted across process), with figure-gated save enablement while status still
-  tracks result lifecycle. The center owns the saveability decision and the ordered
-  Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
-  successes); tracker/invariant failures Fast Fail and operational failures are
-  presented centrally, and async data completion is routed to the center. The center
-  also owns the tab-local unsaved-data decision; `MainWindow` consults it before
-  user-triggered tab/app closes, combines app-close data-loss and active-operation
-  risks into one confirmation, and keeps programmatic RPC shutdown non-interactive.
+  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現各artifact的
+  status、saveability與草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
+  `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
+  Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
+  都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
+  Save All由SaveControl/SaveService選擇可存項目，依analysis→post→data順序執行，
+  使用單一operation並Fast Fail，不回滾已完成的存檔。Qt按鈕不再編排各項存檔。
+  AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
+  Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
+  GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前
+  查詢其投影，並將app關閉的資料流失與active-operation風險合併確認。
+  Programmatic RPC shutdown不彈互動式確認。
   Save All updates that center in place: terminal status updates do not replace the Data
   pane or its widgets, and the data-path editor retains focus, cursor and selection.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
@@ -186,7 +188,9 @@ previous canonical pane for failure recovery; success shows the new pane's figur
 and draft, failure/cancel restores the retained pane (primary failure restores
 primary then post). Save/Guide show a placeholder and never borrow another pane's
 figure. Local analyze/post/save-path edits keep synchronous State commit timing
-but have no Qt reaction.
+but have no Qt reaction. Explicit image destinations committed by a save command
+publish a separate save-draft fact. The coordinator projects those State paths
+into open editors before export, including when export subsequently fails.
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
@@ -234,7 +238,7 @@ Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消
 catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
 
 Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
-共同阻止 reload，包含非 handle-backed data save。共用 `ExperimentAccess` 阻止 local/remote
+共同阻止 reload，包含 handle-backed data及artifact batch save。共用 `ExperimentAccess` 阻止 local/remote
 experiment driving facets 在切換時重入。確認等待期間 tab identity、resource versions 或 run
 result 改變會使確認失效。重新建立的 tabs 使用新 id，舊 RPC locator 不可沿用。
 

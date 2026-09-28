@@ -47,8 +47,20 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.close",
         "tab:h_tab_close",
-        MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),
-        agent=AgentMethodPolicy(refresh_after_write=True),
+        MethodSpec(
+            5.0,
+            "Close an idle tab. All unsaved artifacts require discard_unsaved=true; "
+            "busy operations cannot be discarded. Returns {ok: true}.",
+            (
+                _str("tab_id"),
+                ParamSpec(
+                    "discard_unsaved", JsonType.BOOLEAN, required=False, default=False
+                ),
+            ),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool", tool_names=("tab_close",), refresh_after_write=True
+        ),
     ),
     method_entry(
         "tab.set_active",

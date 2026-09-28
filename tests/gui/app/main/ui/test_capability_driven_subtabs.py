@@ -12,6 +12,8 @@ from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 
+from tests.gui.app.main.ui._artifact_snapshots import with_artifacts
+
 
 @dataclass
 class DummyParams:
@@ -117,7 +119,7 @@ def make_snapshot(
         analysis_image=analysis_image_snap,
         post_analysis_image=post_image_snap,
     )
-    return TabSnapshot(
+    snapshot = TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
         tab_id=tab_id,
@@ -143,6 +145,7 @@ def make_snapshot(
         save=save_snap,
         paths=paths_snap,
     )
+    return with_artifacts(snapshot)
 
 
 @pytest.fixture

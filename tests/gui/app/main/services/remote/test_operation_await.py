@@ -35,6 +35,7 @@ from zcu_tools.gui.session.operation_handles import (
 
 from tests.gui.app.main.services._operation_owner_fakes import (
     DeviceOperationOwner,
+    SaveOperationOwner,
     TabOperationOwner,
     UnusedProgress,
 )
@@ -78,6 +79,7 @@ def test_remote_registry_rejects_off_main_reveal_or_guard(method: str) -> None:
 def test_unknown_and_evicted_handle_do_not_become_finished():
     handles = OperationHandles()
     control = OperationControlFacet(
+        save=SaveOperationOwner(),
         handles=handles,
         progress=UnusedProgress(),
         run_analyze=TabOperationOwner(),

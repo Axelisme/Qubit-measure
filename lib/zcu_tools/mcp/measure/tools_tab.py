@@ -104,6 +104,18 @@ def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
     return {"tab": tab, "experiment": experiment}
 
 
+def tab_close(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    tab = arguments["tab"]
+    ctx.send_gui_rpc(
+        "tab.close",
+        {
+            "tab_id": tab,
+            "discard_unsaved": arguments.get("discard_unsaved", False),
+        },
+    )
+    return {"closed": tab}
+
+
 def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Project requested sections of one explicit tab without changing focus."""
     tab = arguments["tab"]
@@ -163,18 +175,18 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
             )
     if "artifacts" in include:
         assert snap is not None
-        paths = snap.get("save_paths") or {}
+        keys = {"data": "data", "analysis": "analysis", "post_analysis": "post"}
         result["artifacts"] = [
-            {"key": key, "kind": kind, "default_path": paths.get(path_key)}
-            for key, kind, path_key in (
-                ("data", "data", "data_path"),
-                ("analysis", "image", "analysis_image_path"),
-                ("post", "image", "post_analysis_image_path"),
-            )
+            {
+                "key": keys[artifact["kind"]],
+                "kind": "data" if artifact["kind"] == "data" else "image",
+                "status": artifact["status"],
+                "default_path": artifact["default_path"],
+                "last_saved_path": artifact["last_saved_path"],
+                "is_saveable": artifact["is_saveable"],
+            }
+            for artifact in snap["artifacts"]
         ]
-        result.setdefault("partial", {})["artifacts"] = (
-            "09-save-lifecycle owns status/last_saved_path"
-        )
     return result
 
 
@@ -252,9 +264,22 @@ TAB_READ_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["experiment"],
         },
     },
+    "tab_close": {
+        "handler": tab_close,
+        "description": "Close the specified idle tab. All unsaved artifacts require "
+        "discard_unsaved=true. Active operations cannot be discarded. No hidden reads or retry.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab": _TAB,
+                "discard_unsaved": {"type": "boolean", "default": False},
+            },
+            "required": ["tab"],
+        },
+    },
     "tab_get": {
         "handler": tab_get,
-        "description": "Read explicit tab sections without changing GUI focus. cfg is the complete GUI-owned cached observation (kind, type, current input, choices and locks); agent edits whole sweeps through tab_edit, not the GUI's leaf control paths. Artifact status/last saved paths remain partial until 09; missing fields are marked partial, not fabricated.",
+        "description": "Read explicit tab sections without changing GUI focus. cfg is the complete GUI-owned cached observation (kind, type, current input, choices and locks); agent edits whole sweeps through tab_edit, not the GUI's leaf control paths. Artifacts project the GUI-owned status, default_path, last_saved_path and is_saveable for data, analysis and post images.",
         "inputSchema": {
             "type": "object",
             "properties": {

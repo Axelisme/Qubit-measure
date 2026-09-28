@@ -686,6 +686,19 @@ class McpBridge:
         proc = self._proc
         return proc is not None and proc.poll() is None
 
+    def wait_for_gui_exit(self, pid: int, timeout: float = 5.0) -> bool:
+        """Wait for the responding GUI process without terminating it.
+
+        The PID comes from that GUI's shutdown reply, never a shared PID file.
+        A timeout leaves the process and connection alone.
+        """
+        if isinstance(pid, bool) or pid <= 0 or timeout < 0:
+            raise ValueError("expected a positive GUI PID and nonnegative timeout")
+        proc = self._proc
+        if proc is not None and (proc.pid != pid or proc.poll() is not None):
+            proc = None
+        return self._await_exit(pid, proc, timeout)
+
     def _pid_for_stop(self) -> tuple[int | None, subprocess.Popen[bytes] | None]:
         proc = self._proc
         if proc is not None and proc.poll() is None:

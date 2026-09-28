@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ._common import follow_tab
@@ -74,14 +75,74 @@ def h_tab_save_data(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     data_path = params["data_path"]
-    comment = str(params["comment"])
+    comment = params["comment"]
     written = adapter.save_control.save_data(
-        tab_id, str(data_path) if data_path is not None else None, comment=comment
+        tab_id,
+        str(data_path) if data_path is not None else None,
+        comment=str(comment) if comment is not None else None,
     )
-    # The save runs async, but the resolved path (.hdf5 + uniqueness suffix) is
-    # known synchronously — return it so the caller need not recover it from a
-    # later diagnostic / snapshot.
-    return {"data_path": written}
+    return {"data_path": written.data_path, "operation_id": written.operation_id}
+
+
+_ARTIFACT_KINDS = {
+    "data": ArtifactKind.DATA,
+    "analysis": ArtifactKind.ANALYSIS,
+    "post": ArtifactKind.POST_ANALYSIS,
+}
+
+
+def _artifact_kind(key: object) -> ArtifactKind:
+    if not isinstance(key, str) or key not in _ARTIFACT_KINDS:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "artifact keys must be data, analysis or post"
+        )
+    return _ARTIFACT_KINDS[key]
+
+
+def h_tab_save_artifacts(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    raw_artifacts = params["artifacts"]
+    if raw_artifacts == "all":
+        artifacts = None
+    elif isinstance(raw_artifacts, list):
+        artifacts = tuple(_artifact_kind(key) for key in raw_artifacts)
+        if not artifacts or len(set(artifacts)) != len(artifacts):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "artifacts must be a nonempty list of unique keys",
+            )
+    else:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "artifacts must be 'all' or a list of keys"
+        )
+    raw_paths = params["paths"]
+    if not isinstance(raw_paths, dict):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "paths must be an object")
+    paths: dict[ArtifactKind, str] = {}
+    for key, path in raw_paths.items():
+        kind = _artifact_kind(key)
+        if not isinstance(path, str) or not path:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "artifact paths must be nonempty strings"
+            )
+        paths[kind] = path
+    comment = params["comment"]
+    tab_id = str(params["tab_id"])
+    if not adapter.save_control.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    follow_tab(adapter, tab_id, "data")
+    written = adapter.save_control.save_artifacts(
+        tab_id,
+        artifacts=artifacts,
+        paths=paths,
+        comment=str(comment) if comment is not None else None,
+    )
+    keys = {kind: key for key, kind in _ARTIFACT_KINDS.items()}
+    return {
+        "operation_id": written.operation_id,
+        "destinations": {keys[item.kind]: item.path for item in written.destinations},
+    }
 
 
 def h_tab_save_image(

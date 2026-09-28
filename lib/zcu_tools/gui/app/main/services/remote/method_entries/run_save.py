@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     _comment,
@@ -89,7 +90,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_data",
         MethodSpec(
             30.0,
-            "Save data file (tab-only).",
+            "Start non-cancellable data saving without a hardware lease. Explicit "
+            "data_path/comment update the GUI draft; omitted values keep it. "
+            "Returns an operation handle and reserved path, not proof of success. "
+            "Wait for completion and read artifacts for the last successful path.",
             (
                 _str("tab_id"),
                 _str_opt("data_path", "Override data path"),
@@ -101,6 +105,46 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:path:data",
             ),
+            operation_key="tab:{tab_id}",
+            refresh_after_write=True,
+        ),
+    ),
+    method_entry(
+        "tab.save_artifacts",
+        "run_save:h_tab_save_artifacts",
+        MethodSpec(
+            30.0,
+            "Start one non-cancellable save operation over selected artifacts. "
+            "Keys are data, analysis and post; all selects saveable artifacts. "
+            "Explicit paths/comment update the shared drafts. Returns operation_id "
+            "and reserved destinations, not proof of completion. Read artifacts "
+            "after terminal failure for partial successes.",
+            (
+                _str("tab_id"),
+                ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
+                ParamSpec(
+                    "paths",
+                    JsonType.OBJECT,
+                    required=False,
+                    default={},
+                    description="Artifact key to destination path",
+                ),
+                _comment(),
+            ),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool",
+            tool_names=("tab_save",),
+            guard_deps=(
+                "tab:{tab_id}",
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:analyze",
+                "tab:{tab_id}:post_analyze",
+                "tab:{tab_id}:path:data",
+                "tab:{tab_id}:path:analysis_image",
+                "tab:{tab_id}:path:post_analysis_image",
+            ),
+            operation_key="tab:{tab_id}",
             refresh_after_write=True,
         ),
     ),
@@ -111,7 +155,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             30.0,
             "Save a pane's canonical image file (analysis|post_analysis only; run "
             "has no canonical image). Requires (tab_id, subtab_id) with closed "
-            "values analysis|post_analysis.",
+            "values analysis|post_analysis. Explicit image_path updates the GUI "
+            "draft before saving; omission keeps the draft, and an empty path is rejected.",
             (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),

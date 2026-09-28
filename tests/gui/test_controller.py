@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -46,6 +47,7 @@ from zcu_tools.gui.cfg import (
     DirectValue,
 )
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
@@ -466,6 +468,37 @@ def test_run_finished_emits_run_finished(cf):
     cf.bus.emit.assert_any_call(
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
     )
+
+
+def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
+    cf, tmp_path, monkeypatch
+):
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.ctrl.start_run(tab_id)
+    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    cf.state.update_tab_analyze(tab_id, object(), Figure())
+
+    def write_data(req) -> None:
+        Path(req.data_path).write_bytes(b"offline adapter output")
+
+    # FakeAdapter's default save is a no-op; exercise real filesystem I/O here.
+    monkeypatch.setattr(cf.state.get_tab(tab_id).adapter, "save", write_data)
+    cf.ctrl.update_tab_data_path(tab_id, str(tmp_path / "data"))
+    cf.ctrl.update_tab_analysis_image_path(tab_id, str(tmp_path / "analysis.png"))
+    submission = cf.ctrl.save_artifacts(tab_id)
+    with pytest.raises(FailedPreconditionError, match="no cancellation point"):
+        cf.ctrl.operation_control.cancel_operation(submission.operation_id)
+    assert _wait_for(lambda: not cf.state.is_tab_busy(tab_id))
+    artifacts = cf.ctrl.get_tab_snapshot(tab_id).artifacts
+    assert {a.kind for a in artifacts} == {ArtifactKind.DATA, ArtifactKind.ANALYSIS}
+    assert all(a.status is SaveStatus.SAVED for a in artifacts)
+    assert all(a.last_saved_path is not None for a in artifacts)
+    assert all(Path(d.path).is_file() for d in submission.destinations)
+    assert cf.ctrl.operation_control.active_operations() == ()
+    cf.view.show_status_message.assert_called_with("Artifacts saved")
 
 
 def test_save_data_completion_reports_only_data_artifact(cf):

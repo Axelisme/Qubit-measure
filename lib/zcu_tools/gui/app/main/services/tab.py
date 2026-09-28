@@ -131,12 +131,13 @@ class TabService:
                 image_path=post_image_path,
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
             ),
-            save=SavePaneSnapshot(data_path=data_path),
+            save=SavePaneSnapshot(data_path=data_path, comment=tab.save.comment),
             paths=TabPathsSnapshot(
                 data=data_path,
                 analysis_image=analysis_image_path,
                 post_analysis_image=post_image_path,
             ),
+            artifacts=self._state.get_artifact_snapshots(tab_id),
         )
 
     def new_tab(self, adapter_name: str, from_dict: TabSnapshot | None = None) -> str:

@@ -10,11 +10,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
-from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 
 _SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
@@ -865,24 +865,15 @@ class MainWindow(QMainWindow):
     def _dispatch_artifact_save(
         self, tab_w: ExpTabWidget, kind: ArtifactKind, save_call: Callable[[], object]
     ) -> bool:
-        """One artifact's lifecycle: notify start, controller call, sync success/failure.
-
-        Tracker/invariant failures propagate (Fast Fail). Operational/file failures
-        are presented via dialog and return False for Fast Fail; no silent suppression.
-        For image artifacts, sync success is promoted immediately; data async
-        success arrives via :meth:`handle_save_data_finished`.
-        """
-        tab_w.notify_save_started(kind)
+        """Present operational errors; render the State-owned terminal outcome."""
         try:
             save_call()
         except (ExpectedError, OSError, ValueError) as exc:
-            tab_w.notify_save_failed(kind)
+            self.refresh_tab_interaction(tab_w.tab_id)
             self._present_save_error(kind, exc)
             return False
-        else:
-            if kind in (ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS):
-                tab_w.notify_save_succeeded(kind)
-            return True
+        self.refresh_tab_interaction(tab_w.tab_id)
+        return True
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
@@ -890,7 +881,7 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         # Path/comment read is invariant; let exception propagate (Fast Fail)
-        path = tab_w.get_data_path()
+        path = tab_w.get_data_path() or None
         comment = tab_w.get_comment()
         self._dispatch_artifact_save(
             tab_w,
@@ -925,46 +916,15 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "_on_save_all_clicked")
         if tab_w is None:
             return
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        if snapshot.capabilities is None:
-            raise RuntimeError(
-                f"render snapshot for tab {tab_id!r} has no capabilities"
-            )
-        artifacts = tab_w.ordered_saveable_kinds(snapshot)
-        if not artifacts:
-            return
-        for kind in artifacts:
-            if kind == ArtifactKind.DATA:
-                path = tab_w.get_data_path()
-                comment = tab_w.get_comment()
-                ok = self._dispatch_artifact_save(
-                    tab_w,
-                    kind,
-                    lambda p=path, c=comment: self._ctrl.save_data(
-                        tab_id, p, comment=c
-                    ),
-                )
-            elif kind == ArtifactKind.ANALYSIS:
-                path = tab_w.get_image_path()
-                ok = self._dispatch_artifact_save(
-                    tab_w, kind, lambda p=path: self._ctrl.save_image(tab_id, p)
-                )
-            elif kind == ArtifactKind.POST_ANALYSIS:
-                path = tab_w.get_post_image_path()
-                ok = self._dispatch_artifact_save(
-                    tab_w, kind, lambda p=path: self._ctrl.save_post_image(tab_id, p)
-                )
-            else:
-                raise RuntimeError(f"unknown artifact {kind!r}")
-            if not ok:
-                break
+        try:
+            self._ctrl.save_artifacts(tab_id)
+        except (ExpectedError, OSError, ValueError) as exc:
+            self.show_error_dialog("Save failed", str(exc))
+        self.refresh_tab_interaction(tab_id)
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         tab_id = payload.tab_id
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        tab_w.handle_save_data_finished(payload)
+        self.refresh_tab_interaction(tab_id)
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control
