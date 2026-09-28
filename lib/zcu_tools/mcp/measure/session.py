@@ -1,4 +1,4 @@
-"""Measure MCP connection, live GUI catalog and guarded request state."""
+"""Measure MCP connection, live GUI catalog and operation handles."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import tempfile
 import uuid
 from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
-from string import Formatter
 from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.bridge import (
@@ -16,10 +15,7 @@ from zcu_tools.mcp.core.bridge import (
     McpBridge,
     MCPBridgeConfig,
 )
-from zcu_tools.mcp.measure.session_policy import (
-    describe_stale_keys,
-    expand_pattern_keys,
-)
+from zcu_tools.mcp.measure.session_policy import describe_stale_keys
 
 
 class GuiRpcError(RuntimeError):
@@ -47,30 +43,8 @@ ResolveConnectPortFn = Callable[[MCPBridgeConfig, int | None], int]
 PortIsOpenFn = Callable[[int], bool]
 
 
-def _created_resource_fields(pattern: str) -> tuple[str, ...]:
-    """Only plain returned identifiers can certify an unseen new resource."""
-    try:
-        parts = tuple(Formatter().parse(pattern))
-    except ValueError as exc:
-        raise GuiRpcError(
-            "invalid GUI rpc.catalog created-resource policy",
-            reason="incompatible_wire",
-        ) from exc
-    fields = tuple(field for _, field, _, _ in parts if field is not None)
-    if not fields or any(
-        not field.isidentifier() or spec or conversion
-        for _, field, spec, conversion in parts
-        if field is not None
-    ):
-        raise GuiRpcError(
-            "invalid GUI rpc.catalog created-resource policy",
-            reason="incompatible_wire",
-        )
-    return fields
-
-
 def _catalog_strings(raw: object) -> list[str]:
-    """Validate catalog names and policy patterns before storing typed lists."""
+    """Validate catalog names before storing typed lists."""
     if not isinstance(raw, list):
         raise GuiRpcError("invalid GUI rpc.catalog list", reason="incompatible_wire")
     strings: list[str] = []
@@ -84,7 +58,7 @@ def _catalog_strings(raw: object) -> list[str]:
 
 
 def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
-    """Validate the untrusted GUI reply before installing any policy state."""
+    """Validate the untrusted GUI reply before installing the live catalog."""
     if not isinstance(raw, dict) or not isinstance(raw.get("methods"), list):
         raise GuiRpcError("invalid GUI rpc.catalog reply", reason="incompatible_wire")
     methods: dict[str, CatalogEntry] = {}
@@ -99,8 +73,6 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
         tools = _catalog_strings(value.get("tool_names"))
         schema = value.get("params")
         operation_key = value.get("operation_key")
-        refresh_after_write = value.get("refresh_after_write")
-        created_resource = value.get("created_resource")
         if (
             not isinstance(method, str)
             or not method
@@ -115,29 +87,9 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             or timeout <= 0
             or (exposure == "tool") != bool(tools)
             or (operation_key is not None and not isinstance(operation_key, str))
-            or not isinstance(refresh_after_write, bool)
-            or "created_resource" not in value
-            or (
-                created_resource is not None
-                and (
-                    not isinstance(created_resource, str)
-                    or not created_resource
-                    or not refresh_after_write
-                )
-            )
         ):
             raise GuiRpcError(
                 "invalid or duplicate GUI rpc.catalog entry", reason="incompatible_wire"
-            )
-        if created_resource is not None:
-            _created_resource_fields(created_resource)
-        deps = _catalog_strings(value.get("guard_deps"))
-        reveals = _catalog_strings(value.get("reveals"))
-        reveals_without = _catalog_strings(value.get("reveals_without"))
-        reveals_when_nonempty = _catalog_strings(value.get("reveals_when_nonempty"))
-        if (reveals_without or reveals_when_nonempty) and not reveals:
-            raise GuiRpcError(
-                "invalid GUI rpc.catalog policy", reason="incompatible_wire"
             )
         methods[method] = CatalogEntry(
             method=method,
@@ -146,12 +98,6 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             timeout_seconds=float(timeout),
             exposure=exposure,
             tool_names=tools,
-            guard_deps=tuple(deps),
-            reveals=tuple(reveals),
-            reveals_without=tuple(reveals_without),
-            reveals_when_nonempty=tuple(reveals_when_nonempty),
-            refresh_after_write=refresh_after_write,
-            created_resource=created_resource,
             operation_key=operation_key,
         )
     return methods
@@ -172,7 +118,6 @@ class MeasureMcpSession:
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
         self._port_is_open = port_is_open
-        self._last_seen: dict[str, int] = {}
         self._operation_handles: dict[str, int] = {}
         # GUI IDs restart at 1. Agent handles stay unique within this MCP session.
         self._gui_operations: dict[int, int] = {}
@@ -218,7 +163,6 @@ class MeasureMcpSession:
 
     def _clear_connection(self) -> None:
         self._catalog = {}
-        self._last_seen.clear()
         self._operation_handles.clear()
         self._gui_operations.clear()
         self._connected_port = None
@@ -351,7 +295,7 @@ class MeasureMcpSession:
         return connection
 
     def ensure_connected(self) -> None:
-        """A lazy attach always reloads catalog/observations after GUI restart."""
+        """A lazy attach always reloads the catalog after GUI restart."""
         if self.bridge.is_connected and self._catalog:
             return
         if self.bridge.is_connected:
@@ -382,8 +326,6 @@ class MeasureMcpSession:
         self.ensure_connected()
         if operation_handle is not None:
             params = self._params_for_operation(params, operation_handle)
-        entry = self._catalog.get(method)
-        observed = self._read_revealed_versions(entry, params)
         reply = self.bridge.send_rpc_raw(method, params, 6.0)
         if not reply.get("ok"):
             error = reply.get("error", {})
@@ -397,99 +339,7 @@ class MeasureMcpSession:
             raise GuiRpcError(
                 f"invalid GUI reply for {method}", reason="incompatible_wire"
             )
-        # The catalog is the sole owner of read-reveal policy, including reads
-        # used internally by status (such as device membership).
-        if observed is not None:
-            self._last_seen.update(observed)
         return result
-
-    def read_version_table(self) -> dict[str, int] | None:
-        """Sample versions before a full read; this never re-snapshots resources."""
-        try:
-            resp = self.bridge.send_rpc_raw("resources.versions", {}, 5.0)
-        except (OSError, RuntimeError):
-            return None
-        if not resp.get("ok", False):
-            return None
-        versions = resp.get("result", {}).get("versions")
-        if not isinstance(versions, dict) or not all(
-            isinstance(key, str)
-            and isinstance(version, int)
-            and not isinstance(version, bool)
-            for key, version in versions.items()
-        ):
-            return None
-        return versions
-
-    def build_expected_versions(
-        self, method: str, params: dict[str, Any]
-    ) -> dict[str, int]:
-        return expand_pattern_keys(
-            self._catalog[method]["guard_deps"], params, self._last_seen
-        )
-
-    def _read_revealed_versions(
-        self, entry: CatalogEntry | None, params: dict[str, Any]
-    ) -> dict[str, int] | None:
-        """Sample before the read; a later version may describe data not in its reply."""
-        if (
-            entry is None
-            or not entry["reveals"]
-            or any(name in params for name in entry["reveals_without"])
-            or any(not params.get(name) for name in entry["reveals_when_nonempty"])
-        ):
-            return None
-        versions = self.read_version_table()
-        if versions is None:
-            return None
-        return expand_pattern_keys(entry["reveals"], params, versions)
-
-    def _record_successful_versions(
-        self,
-        entry: CatalogEntry,
-        observed: dict[str, int] | None,
-        result: dict[str, Any],
-    ) -> None:
-        if observed is not None:
-            self._last_seen.update(observed)
-        if not entry["refresh_after_write"]:
-            return
-        changes = result.pop("__agent_write_versions", None)
-        if not isinstance(changes, dict) or any(
-            not isinstance(key, str)
-            or not key
-            or not isinstance(pair, list)
-            or len(pair) != 2
-            or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in pair)
-            or pair[1] <= pair[0]
-            for key, pair in changes.items()
-        ):
-            raise GuiRpcError(
-                "invalid GUI write-version receipt", reason="incompatible_wire"
-            )
-        created_resource = entry["created_resource"]
-        if created_resource is not None:
-            fields = _created_resource_fields(created_resource)
-            if any(
-                not isinstance(result.get(field), str) or not result[field]
-                for field in fields
-            ):
-                raise GuiRpcError(
-                    "invalid GUI created-resource identity", reason="incompatible_wire"
-                )
-            created_key = created_resource.format(**result)
-            # A new, never-reused resource is the sole exception to requiring a
-            # prior read: its owner-thread receipt certifies both existence and
-            # identity. It does not reveal any of the tab's other resources.
-            if changes.get(created_key) != [0, 1] or created_key in self._last_seen:
-                raise GuiRpcError(
-                    "invalid GUI created-resource receipt", reason="incompatible_wire"
-                )
-            self._last_seen[created_key] = 1
-        for key, (before, after) in changes.items():
-            # An unguarded write cannot certify an unseen edit made before it.
-            if self._last_seen.get(key) == before:
-                self._last_seen[key] = after
 
     def send_gui_rpc(
         self,
@@ -500,7 +350,7 @@ class MeasureMcpSession:
         rpc_only: bool = False,
         operation_handle: int | None = None,
     ) -> dict[str, Any]:
-        """One guarded send; transport failure never retries an ambiguous mutation."""
+        """One GUI send; transport failure never retries an ambiguous mutation."""
         self.ensure_connected()
         if operation_handle is not None:
             params = self._params_for_operation(params, operation_handle)
@@ -512,15 +362,8 @@ class MeasureMcpSession:
             raise GuiRpcError(f"use {tools} for {method}", reason="use_tool")
         if timeout_seconds is None:
             timeout_seconds = entry["timeout_seconds"] + 1.0
-        send_params = params
-        if entry["guard_deps"]:
-            send_params = {
-                **params,
-                "expected_versions": self.build_expected_versions(method, params),
-            }
-        observed = self._read_revealed_versions(entry, params)
         try:
-            resp = self.bridge.send_rpc_raw(method, send_params, timeout_seconds)
+            resp = self.bridge.send_rpc_raw(method, params, timeout_seconds)
         except GuiTransportTimeoutError as exc:
             raise GuiRpcError(
                 f"GUI Transport Timeout: {exc}. Reconnect on the next call; review before retrying.",
@@ -550,13 +393,13 @@ class MeasureMcpSession:
             raise GuiRpcError(
                 f"invalid GUI reply for {method}", reason="incompatible_wire"
             )
-        result = dict(result)
-        self._record_successful_versions(entry, observed, result)
         pattern = entry["operation_key"]
         if pattern is not None and "operation_id" in result:
+            result = dict(result)
             handle = self.expose_operation(result.pop("operation_id"))
-            keys = expand_pattern_keys((pattern,), params, {})
-            key = next(iter(keys))
+            key = pattern.format(
+                tab_id=params.get("tab_id", ""), name=params.get("name", "")
+            )
             self._operation_handles[key] = handle
             result["handle"] = handle
         return result
