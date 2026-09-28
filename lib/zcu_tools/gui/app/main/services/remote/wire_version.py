@@ -108,7 +108,8 @@ from __future__ import annotations
 # v65: device.snapshot includes State-cached field specifications during setup.
 # v66: GUI-owned seen guards replace wire expectations/receipts; snapshots expose
 # operation state and tab.open_file owns new-tab loading with cfg backfill.
-WIRE_VERSION = 66
+# v67: shared cfg aggregate edits and application-owned sequential library edits.
+WIRE_VERSION = 67
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -153,4 +154,5 @@ WIRE_VERSION = 66
 # v96: predictor.calibrate routes through the shared PredictorControlPort.
 # v97: project cached device fields without driver reads during setup.
 # v98: own per-connection observations and new-tab load/failure cleanup in GUI.
-GUI_VERSION = 98
+# v99: own ordered library commits and preserve cfg batch failure categories.
+GUI_VERSION = 99
