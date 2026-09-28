@@ -52,6 +52,7 @@ class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
     exp_cls = FreqFluxExp
+    ExpCfg_cls = FreqFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True
     )

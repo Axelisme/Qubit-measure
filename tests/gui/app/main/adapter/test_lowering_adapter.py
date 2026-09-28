@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import OneToneFluxDepAdapter
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import OneToneFreqAdapter
+from zcu_tools.experiment.v2_gui.adapters.twotone.flux_dep import FluxDepAdapter
 from zcu_tools.gui.app.main.adapter import ExpContext, RunRequest
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
@@ -88,6 +90,34 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
     ml.register_module(drive={**_PULSE, "gain": 0.9})
     raw = schema_to_raw_dict(schema, None, ml)
     assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
+
+
+@pytest.mark.parametrize("adapter_type", [OneToneFluxDepAdapter, FluxDepAdapter])
+def test_flux_run_assembles_lowered_cfg_with_frozen_device_snapshot(
+    adapter_type: type[OneToneFluxDepAdapter] | type[FluxDepAdapter],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = adapter_type()
+    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    schema = adapter.make_default_cfg(ctx)
+    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    device = FakeDeviceInfo(address="frozen", value=0.125)
+    request = RunRequest(soc=None, soccfg=None, device_snapshot={"flux_yoko": device})
+
+    def unexpected_device_read():
+        pytest.fail("Frozen Run must not read live devices")
+
+    monkeypatch.setattr(GlobalDeviceManager, "get_all_info", unexpected_device_read)
+    cfg = adapter.build_exp_cfg(raw, request)
+
+    assert cfg.dev["flux_yoko"].label == "flux_dev"
+    assert isinstance(cfg.dev["flux_yoko"], FakeDeviceInfo)
+    assert cfg.dev["flux_yoko"].value == 0.125
+    assert cfg.dev["flux_yoko"].address == "frozen"
+    assert device.label != "flux_dev"
+    assert raw["dev"] == {"flux_dev": "flux_yoko"}
+    assert cfg.sweep.flux.expts > 0
+    assert cfg.sweep.freq.expts > 0
 
 
 def _frequency_schema(mode: str) -> tuple[OneToneFreqAdapter, ExpContext, CfgSchema]:
