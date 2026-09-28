@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-28，GUI-owned seen and new-tab file loading
+**Last updated:** 2026-09-28，guarded artifact save operation
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -217,7 +217,7 @@ The wire surface is grouped by ownership:
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
   `PredictorControlPort`.
-- `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save (data via `tab_id` only; image via `(tab_id, subtab_id)` with `analysis|post_analysis`) and figures via `(tab_id, subtab_id)` (`run` reads live FigureContainer, `analysis`/`post_analysis` read canonical State figures). `tab.snapshot.save_paths` projects independent `data_path`、`analysis_image_path`與`post_analysis_image_path`; save calls accept optional one-shot destinations, and there is no combined remote path setter.
+- `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save (data via `tab_id` only; image via `(tab_id, subtab_id)` with `analysis|post_analysis`) and figures via `(tab_id, subtab_id)` (`run` reads live FigureContainer, `analysis`/`post_analysis` read canonical State figures). `tab.snapshot.save_paths` projects independent `data_path`、`analysis_image_path`與`post_analysis_image_path`; explicit save destinations update the shared GUI drafts. `tab.save_artifacts` submits one application-owned operation for data/analysis/post keys, returns reserved destinations plus an operation id, and guards the observed result, analysis and path resources. Reserved paths are not completion evidence; terminal success and artifact snapshots establish saved results.
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active ExpContext projection at reply time).
 - `editor.*`：headless cfg-editor session lifecycle.

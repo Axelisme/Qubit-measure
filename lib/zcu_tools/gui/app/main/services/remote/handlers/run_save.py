@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -78,6 +79,58 @@ def h_tab_save_data(
         comment=str(comment) if comment is not None else None,
     )
     return {"data_path": written.data_path, "operation_id": written.operation_id}
+
+
+_ARTIFACT_KINDS = {
+    "data": ArtifactKind.DATA,
+    "analysis": ArtifactKind.ANALYSIS,
+    "post": ArtifactKind.POST_ANALYSIS,
+}
+
+
+def _artifact_kind(key: object) -> ArtifactKind:
+    if not isinstance(key, str) or key not in _ARTIFACT_KINDS:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "artifact keys must be data, analysis or post"
+        )
+    return _ARTIFACT_KINDS[key]
+
+
+def h_tab_save_artifacts(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    raw_artifacts = params["artifacts"]
+    if raw_artifacts == "all":
+        artifacts = None
+    elif isinstance(raw_artifacts, list):
+        artifacts = tuple(_artifact_kind(key) for key in raw_artifacts)
+    else:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "artifacts must be 'all' or a list of keys"
+        )
+    raw_paths = params["paths"]
+    if not isinstance(raw_paths, dict):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "paths must be an object")
+    paths: dict[ArtifactKind, str] = {}
+    for key, path in raw_paths.items():
+        kind = _artifact_kind(key)
+        if not isinstance(path, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "artifact paths must be strings"
+            )
+        paths[kind] = path
+    comment = params["comment"]
+    written = adapter.save_control.save_artifacts(
+        str(params["tab_id"]),
+        artifacts=artifacts,
+        paths=paths,
+        comment=str(comment) if comment is not None else None,
+    )
+    keys = {kind: key for key, kind in _ARTIFACT_KINDS.items()}
+    return {
+        "operation_id": written.operation_id,
+        "destinations": {keys[item.kind]: item.path for item in written.destinations},
+    }
 
 
 def h_tab_save_image(

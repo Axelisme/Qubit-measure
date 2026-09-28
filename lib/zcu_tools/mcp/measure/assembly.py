@@ -8,6 +8,7 @@ from zcu_tools.mcp.measure import (
     tools_operation,
     tools_predictor,
     tools_rpc,
+    tools_save,
     tools_screenshot,
     tools_setup,
     tools_tab,
@@ -25,6 +26,7 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
         tools_predictor.build_predictor_tools(context),
         tools_rpc.build_rpc_tools(context),
         tools_tab.build_tab_read_tools(context),
+        tools_save.build_save_tools(context),
         tools_screenshot.build_screenshot_tools(context),
         tools_setup.build_setup_tools(context),
     ):

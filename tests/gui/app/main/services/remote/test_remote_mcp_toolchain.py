@@ -11,8 +11,12 @@ import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.gui.app.main.artifact_tracker import SaveStatus
-from zcu_tools.gui.app.main.services.ports import SaveDataSubmission
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.main.services.ports import (
+    SaveArtifactsSubmission,
+    SaveDataSubmission,
+    SaveDestination,
+)
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
@@ -809,6 +813,145 @@ def test_context_ml_delete_delegates(fx):
         assert call(sock, "context.ml_del_waveform", {"name": "w"}, rid="2")["ok"]
         fx.service.context_control.del_ml_waveform.assert_called_once_with("w")
     finally:
+        sock.close()
+
+
+def test_artifact_save_projects_primary_and_post_keys_through_one_command(fx, tmp_path):
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    primary = str(tmp_path / "primary.png")
+    post = str(tmp_path / "post.png")
+    submission = SaveArtifactsSubmission(
+        71,
+        (
+            SaveDestination(ArtifactKind.ANALYSIS, primary),
+            SaveDestination(ArtifactKind.POST_ANALYSIS, post),
+        ),
+    )
+    try:
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+        with patch.object(
+            fx.service.save_control, "save_artifacts", return_value=submission
+        ) as save:
+            reply = call(
+                sock,
+                "tab.save_artifacts",
+                {
+                    "tab_id": tab_id,
+                    "artifacts": ["analysis", "post"],
+                    "paths": {"analysis": primary, "post": post},
+                },
+            )
+            assert reply["ok"] is True
+            assert reply["result"] == {
+                "operation_id": 71,
+                "destinations": {"analysis": primary, "post": post},
+            }
+            save.assert_called_once_with(
+                tab_id,
+                artifacts=(ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS),
+                paths={
+                    ArtifactKind.ANALYSIS: primary,
+                    ArtifactKind.POST_ANALYSIS: post,
+                },
+                comment=None,
+            )
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"artifacts": "other"},
+        {"artifacts": ["post_analysis"]},
+        {"paths": {"post": 2}},
+        {"paths": {"other": "image.png"}},
+    ],
+)
+def test_artifact_save_rejects_invalid_wire_values_before_application(fx, overrides):
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    try:
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+        with patch.object(fx.service.save_control, "save_artifacts") as save:
+            reply = call(sock, "tab.save_artifacts", {"tab_id": tab_id, **overrides})
+            assert reply["error"]["code"] == "invalid_params"
+            save.assert_not_called()
+    finally:
+        sock.close()
+
+
+def test_artifact_save_requires_snapshot_and_keeps_self_written_path_observed(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+
+    def save_bytes(self, request):
+        Path(request.data_path).write_bytes(b"offline save")
+
+    monkeypatch.setattr(FakeAdapter, "save", save_bytes)
+    try:
+        run_id = fx.ctrl.start_run(tab_id)
+        assert (
+            call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        assert fx.state.version.get(f"tab:{tab_id}:path:data") == 0
+        params = {
+            "tab_id": tab_id,
+            "artifacts": ["data"],
+            "paths": {"data": str(tmp_path / "saved")},
+            "comment": "shared comment",
+        }
+        unseen = call(sock, "tab.save_artifacts", params)
+        assert unseen["error"]["reason"] == "stale_version"
+        assert f"tab:{tab_id}:path:data" in unseen["error"]["data"]["stale"]
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+        first = call(sock, "tab.save_artifacts", params)
+        assert first["ok"] is True
+        first = first["result"]
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": first["operation_id"], "timeout": 2},
+            )["result"]["status"]
+            == "finished"
+        )
+        # No snapshot between writes: the command's own path update remains observed.
+        second = call(
+            sock, "tab.save_artifacts", {"tab_id": tab_id, "artifacts": ["data"]}
+        )
+        assert second["ok"] is True
+        second = second["result"]
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": second["operation_id"], "timeout": 2},
+            )["result"]["status"]
+            == "finished"
+        )
+        first_path = first["destinations"]["data"]
+        second_path = second["destinations"]["data"]
+        assert first_path != second_path
+        assert (
+            Path(first_path).read_bytes()
+            == Path(second_path).read_bytes()
+            == b"offline save"
+        )
+        artifact = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0][
+            "artifacts"
+        ][0]
+        assert artifact["last_saved_path"] == second_path
+        assert artifact["status"] == "saved"
+        assert fx.state.get_tab(tab_id).save.comment == "shared comment"
+    finally:
+        fx.ctrl._background_svc.quiesce()
         sock.close()
 
 
