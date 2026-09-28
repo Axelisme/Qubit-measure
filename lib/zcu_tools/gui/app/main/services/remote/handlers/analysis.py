@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
-from zcu_tools.gui.app.main.adapter.analyze_params import reconstruct_params
+from zcu_tools.gui.app.main.adapter.analyze_params import (
+    describe_analyze_params,
+    reconstruct_params,
+)
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -100,7 +103,11 @@ def h_tab_analyze(
             type(ap), {**dataclasses.asdict(ap), **raw_updates}
         )
     except (RuntimeError, ValueError) as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            data={"definitions": describe_analyze_params(type(ap))},
+        ) from exc
     operation_id = control.analyze(tab_id, updated)
     return {"operation_id": operation_id}
 
@@ -181,6 +188,10 @@ def h_tab_post_analyze(
             type(pp), {**dataclasses.asdict(pp), **raw_updates}
         )
     except (RuntimeError, ValueError) as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            data={"definitions": describe_analyze_params(type(pp))},
+        ) from exc
     operation_id = control.start_post_analyze(tab_id, updated)
     return {"operation_id": operation_id}

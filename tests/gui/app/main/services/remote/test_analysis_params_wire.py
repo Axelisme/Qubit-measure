@@ -84,6 +84,11 @@ def test_analysis_parameter_errors_do_not_start_operation(handler, updates) -> N
     with pytest.raises(RemoteError) as caught:
         handler(adapter, {"tab_id": "t", "updates": updates})
     assert caught.value.code.value == "invalid_params"
+    assert caught.value.data is not None
+    definitions = {item["name"]: item for item in caught.value.data["definitions"]}
+    assert definitions["fit_bg_amp_slope"]["type"] == "bool"
+    assert definitions["model_type"]["choices"] == ["hm", "t", "auto"]
+    assert definitions["manual_edelay"]["optional"] is True
     adapter.run_analyze_control.analyze.assert_not_called()
     adapter.run_analyze_control.start_post_analyze.assert_not_called()
     assert original == OneToneFreqAnalyzeParams()
