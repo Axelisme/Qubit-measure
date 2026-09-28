@@ -1,7 +1,7 @@
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
 
-**狀態：** accepted（未實作）
-**關聯：** [[0059]]（RPC channel）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（Stop feedback）、[[0033]]（刪改名不掃描參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
+**狀態：** accepted
+**關聯：** [[0059]]（RPC channel）、[[0061]]（interactive plugin session）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（Stop feedback）、[[0033]]（刪改名不掃描參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context
 
@@ -10,7 +10,7 @@
 ## 前提
 
 - agent 操作的是 GUI 正在顯示的同一份狀態（[[0013]]）。agent 的改動即時出現在 GUI；使用者的改動 agent 以讀取得知。介面不推送變更通知，也不區分改動者。
-- GUI 的畫面與既有行為不變。
+- GUI 的既有畫面與非互動分析行為不變；measure flux picker 的拖曳改為本地 preview、有效 release 才 commit（[[0061]]）。
 - 人機對話在 agent 所在的 session（例如 Claude Code）進行，不經 MCP。
 - 介面只組合 GUI 既有能力，所需補充列於「實作依據」。
 
@@ -214,10 +214,10 @@ GUI application服務以共用CfgDraft模型依序修改並逐項寫入library�
 - post 需要先有 primary 結果；分析失敗時報錯。
 
 **`tab_interact(tab, payload?)`**
-操作互動式分析。介面不解讀子命令，只轉送給互動分析外掛註冊的方法。
+操作互動式分析。介面不解讀子命令，只轉送給互動分析外掛註冊的方法。此介面採 best-effort guard，不檢查 per-connection seen；保留 active session、命令驗證與 lifecycle 保護。GUI 與 agent 後提交者為準，不追蹤上一位操作者或 plugin revision。此例外不改變其他 method 的 guard。
 
-- 不帶 `payload`：回傳 `{plugin, info, state, commands, figure}`。`commands` 為外掛註冊的子命令與參數定義（`ParamSpec`）；`state` 為外掛目前的結構化選取狀態。
-- `payload = {command, args}`：參數依外掛宣告驗證後執行一個子命令，回傳 `{info, state, figure}`。
+- 不帶 `payload`：回傳 `{plugin, info, state, commands, figure, preview_active}`。`commands` 為外掛註冊的子命令與參數定義（`ParamSpec`）；`state` 為外掛的 committed state。`preview_active` 表示 GUI 正顯示本地 preview，不改變回傳的 committed state。
+- `payload = {command, args}`：參數依外掛宣告驗證後執行一個子命令，回傳相同欄位。`figure` 是 MCP session 暫存 PNG 的絕對路徑，無圖時為 `null`。
 - `done` 為所有外掛共有的子命令，完成分析，結果經原本的 `op` 送出；取消用 `cancel(op)`。
 
 **`writeback(tab, stage = "primary" | "post", write?)`**
@@ -344,7 +344,7 @@ tab_close("t1")
 - `tab.snapshot` 補上 artifact 存檔狀態。
 - `tab.writeback_preview` 補上 md 項目的 current 與 module／waveform 項目的 current／proposed cfg。
 - `predictor_calibrate` 的 wire method。
-- `tab_interact` 的 wire method，以及互動分析外掛的子命令註冊：`InteractiveSession` 宣告 `{name, description, args, handler}` 子命令與結構化 `state`，GUI host 只轉送子命令，GUI 自身的互動元件也經同一組子命令操作。
+- `tab_interact` 所需 GUI-side `tab.interact` wire method 已提供：service-owned session 保存 committed `state` 與 operation（[[0061]]）；plugin 宣告子命令與 `ParamSpec`，wire 驗證後執行共用 action，GUI frontend 直接呼叫相同 typed action，不經 JSON。GUI-local preview 只以 `preview_active` presentation metadata 回報，不取代 committed state。固定 MCP `tab_interact` 工具轉送一次讀取或命令，不解讀 plugin 子命令，也不另存 state。工具將 wire PNG 解碼到 session 暫存檔。
 
 ## 範圍外
 
@@ -354,4 +354,4 @@ tab_close("t1")
 
 - agent 的每個判斷點對應一個 tool，使用者在 GUI 上看到與 agent 相同的狀態與畫面。
 - 同一個操作只有一個入口；低頻操作經 RPC channel，不增加特化 tool。
-- `tab_interact` 依賴互動分析外掛的子命令重構，須在該重構完成後實作；其餘 tool 可先行實作。
+- `tab_interact` 使用外掛的共用 command 與 service-owned session。讀取不切換畫面，命令在執行前跟隨 Analysis pane；`done` 與 `cancel(op)` 結束原本的 analysis operation。

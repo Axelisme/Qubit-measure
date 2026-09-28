@@ -1,8 +1,70 @@
 """Public analyze tool contracts over the recording GUI transport."""
 
+import base64
+from pathlib import Path
+
 import pytest
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
+
+
+@pytest.mark.parametrize(
+    "payload", [None, {"command": "set_value", "args": {"x": 2}}, {"command": "done"}]
+)
+def test_interact_forwards_once_and_materializes_session_image(tmp_path, payload):
+    png = b"\x89PNG\r\n\x1a\nfixture"
+    state = {"value": 2}
+
+    def respond(method, params):
+        assert method == "tab.interact"
+        expected = {"tab_id": "t"}
+        if payload is not None:
+            expected["payload"] = payload
+        assert params == expected
+        return {
+            "plugin": "generic-test",
+            "state": state,
+            "info": {"label": "picker"},
+            "commands": [{"name": "set_value"}, {"name": "done"}],
+            "preview_active": True,
+            "figure": {"png_b64": base64.b64encode(png).decode(), "bytes": len(png)},
+        }
+
+    client = make_client(tmp_path, respond)
+    arguments = {"tab": "t"}
+    if payload is not None:
+        arguments["payload"] = payload
+    result = client.call("tab_interact", arguments)
+    assert result["state"] == state
+    assert result["info"] == {"label": "picker"}
+    assert result["commands"] == [{"name": "set_value"}, {"name": "done"}]
+    assert result["plugin"] == "generic-test"
+    assert result["preview_active"] is True
+    path = Path(result["figure"])
+    assert path.is_absolute() and path.read_bytes() == png
+    assert [
+        name
+        for name, _ in client.transport.sent
+        if name not in ("wire.version", "rpc.catalog")
+    ] == ["tab.interact"]
+    client.context.session.cleanup_pngs()
+    assert not path.exists()
+
+
+def test_interact_headless_and_wire_failure_do_not_retry(tmp_path):
+    client = make_client(tmp_path, lambda method, params: {"state": {}, "figure": None})
+    assert client.call("tab_interact", {"tab": "t"}) == {"state": {}, "figure": None}
+    client.transport.sent.clear()
+    client.transport.replies["tab.interact"] = {
+        "ok": False,
+        "error": {"code": "precondition_failed", "message": "no active session"},
+    }
+    with pytest.raises(GuiRpcError, match="no active session"):
+        client.call("tab_interact", {"tab": "t", "payload": {"command": "done"}})
+    assert client.transport.sent == [
+        ("tab.interact", {"tab_id": "t", "payload": {"command": "done"}})
+    ]
 
 
 @pytest.mark.parametrize(

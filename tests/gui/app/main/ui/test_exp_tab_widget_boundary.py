@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 from qtpy.QtWidgets import QWidget
 from zcu_tools.gui.app.main.services import PersistedStartup
 from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
+from zcu_tools.gui.app.main.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 
@@ -69,71 +70,103 @@ def test_interactive_widget_lifecycle_is_owned_by_tab(qapp) -> None:
     assert tab.get_current_figure_for_pane("analysis") is None
 
 
-@pytest.mark.parametrize("failure_stage", ["session_factory", "bind"])
-def test_interactive_setup_failure_clears_stale_figure_before_setup(
+class _Interactive(InteractiveFrontend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stopped = False
+        self._preview_active = True
+        self._figure = Figure()
+
+    @property
+    def figure(self) -> Figure:
+        return self._figure
+
+    @property
+    def preview_active(self) -> bool:
+        return self._preview_active
+
+    def cancel_preview(self) -> None:
+        self._preview_active = False
+
+    def teardown(self) -> None:
+        self.stopped = True
+
+
+def _window_with_tab():
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    window = MainWindow(ctrl)
+    tab = _tab()
+    window._tab_widgets["tab-1"] = tab  # type: ignore[reportPrivateUsage] - fixture injection
+    return window, tab, ctrl
+
+
+@pytest.mark.parametrize("failure_stage", ["factory", "mount"])
+def test_interactive_setup_failure_clears_stale_figure_and_cleans_widget(
     qapp, monkeypatch, failure_stage: str
 ) -> None:
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
-
-    class _Interactive(QWidget):
-        def bind(self, session: object, *, on_done: object) -> None:
-            del session, on_done
-            if failure_stage == "bind":
-                raise RuntimeError("bind failed")
-
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
-    window = MainWindow(ctrl)
-    tab = _tab()
+    window, tab, _ctrl = _window_with_tab()
     tab.show_analysis_figure(Figure())
-    # Capture analysis container for S2 stability check
-    captured = tab.get_analysis_container()  # type: ignore[attr-defined]
-    window._tab_widgets["tab-1"] = tab
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.main.ui.interactive_analysis.InteractiveAnalysisWidget",
-        lambda _ctrl: _Interactive(),
-    )
+    captured = tab.get_analysis_container()
+    widget = _Interactive()
+    if failure_stage == "mount":
 
-    def session_factory(_widget: QWidget) -> object:
-        if failure_stage == "session_factory":
-            raise RuntimeError("session factory failed")
-        return object()
+        def fail_mount(_widget: QWidget) -> None:
+            raise RuntimeError("mount failed")
 
-    with pytest.raises(RuntimeError, match=failure_stage.replace("_", " ")):
-        window.mount_interactive_analysis(
-            "tab-1", session_factory, lambda _session: None
-        )
+        monkeypatch.setattr(tab, "mount_interactive_widget", fail_mount)
 
-    # Failure should have cleared analysis presentation but retained container identity
-    assert tab.get_current_figure_for_pane("analysis") is None  # type: ignore[attr-defined]
-    assert tab.get_analysis_container() is captured  # type: ignore[attr-defined]
+    def frontend_factory(_env):
+        if failure_stage == "factory":
+            raise RuntimeError("factory failed")
+        return widget
+
+    with pytest.raises(RuntimeError, match=failure_stage):
+        window.mount_interactive_analysis("tab-1", frontend_factory)
+
+    assert tab.get_current_figure_for_pane("analysis") is None
+    assert tab.get_analysis_container() is captured
+    if failure_stage == "mount":
+        assert widget.stopped is True
 
 
-def test_interactive_mount_resets_plot_exactly_once(qapp, monkeypatch) -> None:
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+def test_interactive_mount_and_unmount_quiesce_frontend(qapp) -> None:
+    window, tab, _ctrl = _window_with_tab()
+    captured = tab.get_analysis_container()
+    widget = _Interactive()
 
-    class _Interactive(QWidget):
-        def bind(self, session: object, *, on_done: object) -> None:
-            del session, on_done
+    window.mount_interactive_analysis("tab-1", lambda _env: widget)
+    assert tab.get_analysis_container() is captured
+    assert widget in tab.findChildren(_Interactive)
+    window.unmount_interactive_analysis("tab-1")
+    assert widget.stopped is True
+    assert tab.get_current_figure_for_pane("analysis") is None
 
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
-    window = MainWindow(ctrl)
-    tab = _tab()
-    # Capture analysis container identity before mount
-    captured = tab.get_analysis_container()  # type: ignore[attr-defined]
-    window._tab_widgets["tab-1"] = tab
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.main.ui.interactive_analysis.InteractiveAnalysisWidget",
-        lambda _ctrl: _Interactive(),
-    )
 
-    window.mount_interactive_analysis("tab-1", lambda _widget: object(), lambda _: None)
+def test_mounted_interactive_view_exposes_figure_and_discardable_preview(qapp) -> None:
+    window, _tab, _ctrl = _window_with_tab()
+    widget = _Interactive()
+    window.mount_interactive_analysis("tab-1", lambda _env: widget)
 
-    # Mount should have cleared analysis pane but kept container identity
-    assert tab.get_analysis_container() is captured  # type: ignore[attr-defined]
-    assert tab._analysis_stack.count() >= 2  # type: ignore[attr-defined] # placeholder + interactive widget
+    assert window.interactive_presentation("tab-1") == (widget.figure, True)
+    window.discard_interactive_preview("tab-1")
+    assert window.interactive_presentation("tab-1") == (widget.figure, False)
+    window.unmount_interactive_analysis("tab-1")
+    assert window.interactive_presentation("tab-1") is None
+
+
+def test_interactive_success_restores_committed_figure_in_analysis_pane(qapp) -> None:
+    window, tab, ctrl = _window_with_tab()
+    widget = _Interactive()
+    committed_figure = widget.figure
+    ctrl.get_tab_analyze_result.return_value = MagicMock(figure=committed_figure)
+
+    window.mount_interactive_analysis("tab-1", lambda _env: widget)
+    window.unmount_interactive_analysis("tab-1", restore_result=True)
+
+    assert widget.stopped is True
+    assert tab.get_current_figure_for_pane("analysis") is committed_figure

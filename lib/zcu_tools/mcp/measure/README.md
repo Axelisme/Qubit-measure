@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-28，shared writeback、artifacts與graceful shutdown
+**Last updated:** 2026-09-28，shared interactive、writeback、artifacts與graceful shutdown
 
 # `zcu_tools/mcp/measure/`
 
@@ -41,6 +41,10 @@ validity 與 cached choices；GUI model 是來源，讀取不重新解析 md/ml�
 `ml_edit`只送一次GUI application命令。CfgEditorService使用共用CfgDraft，經ContextWritePort逐項提交；首錯即停，保留已提交前綴並清理內部草稿。回覆區分applied、failed、skipped與實際cfg。save_as不修改來源，首次成功才建立目的地。Agent須明確觀察context，沒有editor/context隱藏預讀或自動重試。
 
 Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，MODIFIED參照保留inline修改。既有draft由service反應library變更並發布，同一份狀態供widget與MCP觀察。
+
+## Interactive
+
+`tab_interact` 原樣轉送一次 active plugin command，不解讀實驗專屬命令。省略 payload 時回 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 先驗證 session 與命令，再跟隨 Analysis pane 並執行；done 結束原 analysis operation，取消沿用 cancel(op)。此介面採 best-effort，不加 seen guard，後提交者為準；沒有來源鎖、隱藏預讀或重試。GUI 傳回的 PNG 在 MCP 邊界解碼到 session-owned 暫存檔，工具回絕對路徑而非 inline 圖片。
 
 ## Writeback
 
