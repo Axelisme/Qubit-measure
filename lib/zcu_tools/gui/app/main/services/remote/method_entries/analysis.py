@@ -46,7 +46,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "analysis:h_tab_analyze",
         MethodSpec(
             30.0,
-            "Start analyzing the tab's run result via rpc_call. Runs on a worker "
+            "Start analyzing the tab's run result via tab_analyze. Returns "
+            "operation_id, interactive, complete params and invalidated_on_success "
+            "(analysis.writeback/post.result/post.writeback when previously present). "
+            "Invalidation applies only on successful completion. Runs on a worker "
             "thread; the GUI returns a raw operation_id, which MCP exposes as a "
             "handle, not a completed result. Call wait(op=handle) for the terminal "
             "status, error and Stop feedback. 'updates' optionally overrides "
@@ -57,7 +60,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
         ),
         agent=AgentMethodPolicy(
-            operation_key="analyze:{tab_id}", refresh_after_write=True
+            exposure="tool",
+            tool_names=("tab_analyze",),
+            operation_key="analyze:{tab_id}",
+            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -82,8 +88,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "analysis:h_tab_post_analyze",
         MethodSpec(
             30.0,
-            "Start post analysis on the tab's PRIMARY analyze result via "
-            "rpc_call. Runs on a worker thread; MCP maps the GUI operation_id "
+            "Start post analysis on the tab's PRIMARY analyze result via tab_analyze. "
+            "Returns operation_id, interactive=false, complete params and "
+            "invalidated_on_success (post.writeback when previously present). "
+            "Invalidation applies only on successful completion. "
+            "Runs on a worker thread; MCP maps the GUI operation_id "
             "to a handle. Call wait(op=handle) for the terminal status, error and "
             "Stop feedback; start alone does not mean completion. Fast-fails "
             "with precondition_failed when no primary result exists. 'updates' "
@@ -93,7 +102,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
         ),
         agent=AgentMethodPolicy(
-            operation_key="post_analyze:{tab_id}", refresh_after_write=True
+            exposure="tool",
+            tool_names=("tab_analyze",),
+            operation_key="post_analyze:{tab_id}",
+            refresh_after_write=True,
         ),
     ),
 )
