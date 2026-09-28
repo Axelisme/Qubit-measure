@@ -137,12 +137,28 @@ def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
 
 def ml_rename(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Rename only the library entry; leave linked reference names unchanged."""
-    raise NotImplementedError("ml_rename implementation pending")
+    name = arguments["name"]
+    kind = _entry_kind(ml_get(ctx, {}), name, arguments.get("kind"))
+    result = ctx.send_gui_rpc(
+        f"context.ml_rename_{kind}", {"old": name, "new": arguments["new_name"]}
+    )
+    return {
+        **result,
+        "warning": "LINKED references still store the old name, are not converted "
+        "to inline values, and may become invalid; MODIFIED inline values are preserved.",
+    }
 
 
 def ml_delete(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete only the library entry; preserve modified inline reference values."""
-    raise NotImplementedError("ml_delete implementation pending")
+    name = arguments["name"]
+    kind = _entry_kind(ml_get(ctx, {}), name, arguments.get("kind"))
+    result = ctx.send_gui_rpc(f"context.ml_del_{kind}", {"name": name})
+    return {
+        **result,
+        "warning": "LINKED references still store the deleted name, are not converted "
+        "to inline values, and may become invalid; MODIFIED inline values are preserved.",
+    }
 
 
 ML_TOOLS: dict[str, dict[str, Any]] = {
