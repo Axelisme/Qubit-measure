@@ -176,7 +176,7 @@ def build_app_services(
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
-    save = SaveService(state, background, bus)
+    save = SaveService(state, runner, bus)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -198,6 +198,7 @@ def build_app_services(
         access=access,
     )
     operation_control = OperationControlFacet(
+        save=save,
         handles=handles,
         progress=progress,
         run_analyze=run_analyze_control,

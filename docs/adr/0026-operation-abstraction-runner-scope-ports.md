@@ -41,7 +41,7 @@ OperationSpec(
 `work` 只收 runner 唯一擁有、且必須在 token mint 之後才能 mint 的 **progress factory**；`figure_container` 與 `stop_event` 是 op policy 的 **closure 細節**（policy 建 work thunk 時就知道），**不**放進 spec——這讓 runner 真正 figure/stop-agnostic（不再像舊 `_entered` 那樣認得 figure facet）。`on_terminal` 在主線程收到 `BgResult` 後執行領域判讀、State 寫入與 signal/event，再以 runner 注入的 `SettleFn` 恰好 settle 一次。`OffMainScopes` 隨之退場（三欄位分別化為 closure / 注入參數 / closure）。
 
 - runner 透過 **port** 使用協作者（`ExclusionGate` / `ProgressHub` / `BackgroundExecutor` / handle+channel），**只認契約不認行為**。
-- run / analyze / device / soc-connect 退化成**極薄的 policy 物件**：組 `OperationSpec`、在 `work` closure 與 `on_terminal` 內保留領域政策、宣告要哪些 facet。這就是「每個 service 封裝一種邏輯」——領域政策留在各 op，機制收斂到 runner 一處。
+- run / analyze / device / soc-connect / data save 退化成**極薄的 policy 物件**：組 `OperationSpec`、在 `work` closure 與 `on_terminal` 內保留領域政策、宣告要哪些 facet。這就是「每個 service 封裝一種邏輯」——領域政策留在各 op，機制收斂到 runner 一處。
 - autofluxdep RUN 同樣是 `OperationRunner` client：flux-sweep domain loop 保留在 autofluxdep，但 QThread、running/stop flags、progress、cancel 與 terminal outcome 不另寫平行 lifecycle。RUN 使用 app-local operation kind（例如 autofluxdep run kind），透過同一 `ExclusionGate` / `ProgressHub` / handle channel interface 組合 facet；cancel 是協作停止，攜帶 `Stop(reason)` 意圖並保留已完成的 partial results，terminal outcome 可為 `cancelled` 而非 failure rollback。per-node fit/result summary 仍是 autofluxdep domain state/query，不塞進 generic progress。
 - **不可化約的領域邏輯**（run 的 cancel 帶 partial result 判讀、writeback compute、device rollback）以 `work` closure / `on_terminal` callback 留在各 op，**不**塞進 runner（避免 god-object）。
 
@@ -86,9 +86,9 @@ runner 與 policy 只認 port，不認具體 `State`；`State` 是唯一 impleme
 
 device 連線/斷線/設定的領域邏輯（rollback、`ActiveDeviceOperation` 簿記、snapshot）夠豐富，**保留** `DeviceService`；其生命週期段走 `OperationRunner`。`GlobalDeviceManager` 抽 `DeviceRegistryPort`，讓 DeviceService 依契約而非 singleton。
 
-### 7. `SaveService` 留在抽象外
+### 7. `SaveService` 使用非取消的 data save handle
 
-save 同步、無 handle、不經 `operation.await`（[[0019]] 明示）、無「中途停 save」需求——**不**納入 operation abstraction。未來 save 若改 async/cancellable 再採用。
+Data save 透過同一個 OperationRunner 與 OperationHandles 執行。OperationSpec 不要求硬體 lease、progress 或 cancel hook；operation.await 等待真實 terminal。SaveService 在 owner thread 更新 artifact tracker、清除 busy 與 live operation，再 settle。OperationControl 合併其 live handles，GUI 與 MCP 發起的存檔走相同路徑。保留路徑不代表存檔成功；只有成功 terminal 更新 last_saved_path，不新增 operation payload store。
 
 ### 8. agent-facing handle 外露 + 泛型 op wait/poll
 

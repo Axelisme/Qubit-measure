@@ -28,7 +28,7 @@ status: accepted
 | facet | 語義 | 用者 |
 | --- | --- | --- |
 | **Exclusion** | 硬體互斥,能不能現在起（conflict matrix） | run / device |
-| **Handle** | poll / await / terminal outcome（= operation_id 本體） | run / analyze / interactive / device |
+| **Handle** | poll / await / terminal outcome（= operation_id 本體） | run / analyze / interactive / device / data save |
 | **Progress** | 可觀測進度（token-keyed `ProgressService`,既有） | run / device-setup |
 | **Cancel** | 中斷+取消（request → 驅動者自行 interrupt,持 stop_event） | run / device /（interactive 可選） |
 
@@ -47,10 +47,10 @@ status: accepted
 | FIT analyze | — | ✅ | — | — | OffMain-thread |
 | INTERACTIVE analyze | — | ✅ | — | (可) | **Main-thread-user-paced** |
 | device setup | ✅ | ✅ | ✅ | (可) | Blocking / OffMain |
-| save | — | — | — | — | OffMain（fire-forget） |
+| data save | — | ✅ | — | — | OffMain-thread |
 | auto-align | — | — | — | — | OffMain-pool（fire-forget） |
 
-**facet opt-in 是防 god-object 的關鍵**:save / auto-align 只有 strategy、沒 Handle/Progress/Cancel,不被逼長出用不到的東西。「每個 op 都一樣」指**同一組 facet 可任意組合**,不是「每個都有全部」。
+Data save 使用 Handle 等待真實存檔完成，不使用 Exclusion、Progress 或 Cancel。成功後才更新 artifact 的 last_saved_path；失敗保留先前成功紀錄。OperationOutcome 不保存檔案 payload，路徑由 artifact 查詢。Auto-align 仍只有 strategy。Facet opt-in 表示每種 operation 只選需要的能力，不要求全部綁定。
 
 ### 二、Handle / lifecycle 從 gate 拆成正交 sibling（取代 [[0003]] §一綁死）
 

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .guard import GuardService
+    from .ports import SaveDataSubmission
     from .save import SaveService
     from .tab import TabService
 
@@ -26,7 +27,7 @@ class SaveControlPort(Protocol):
 
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str | None = None
-    ) -> str: ...
+    ) -> SaveDataSubmission: ...
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str: ...
 
@@ -63,7 +64,7 @@ class SaveControlFacet:
 
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str | None = None
-    ) -> str:
+    ) -> SaveDataSubmission:
         if data_path is not None and not data_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")
         permit = self._guard.acquire_save_permit(tab_id)

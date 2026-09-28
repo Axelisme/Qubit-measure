@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from zcu_tools.gui.app.main.services.ports import SaveDataSubmission
 from zcu_tools.gui.app.main.services.save_control import SaveControlFacet
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
@@ -71,9 +72,11 @@ class RecordingSave:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def start_save_data(self, permit: object, data_path: str, comment: str = "") -> str:
+    def start_save_data(
+        self, permit: object, data_path: str, comment: str = ""
+    ) -> SaveDataSubmission:
         self._log.add("save", "start_save_data", permit, data_path, comment=comment)
-        return f"written:{data_path}"
+        return SaveDataSubmission(7, f"written:{data_path}")
 
     def save_image_sync(self, permit: object, image_path: str) -> None:
         self._log.add("save", "save_image_sync", permit, image_path)
@@ -136,9 +139,9 @@ def test_has_tab_reads_state() -> None:
 def test_save_data_applies_explicit_path_and_comment_to_shared_draft() -> None:
     facet, log, state, tab, _save, _bus, _notifications = _facet()
 
-    assert facet.save_data("tab-1", "explicit.h5", comment="note") == (
-        "written:explicit.h5"
-    )
+    assert facet.save_data(
+        "tab-1", "explicit.h5", comment="note"
+    ) == SaveDataSubmission(7, "written:explicit.h5")
     assert tab.data_path == "explicit.h5"
     assert state.comment == "note"
     assert (
@@ -164,7 +167,7 @@ def test_save_data_omissions_inherit_draft_but_explicit_empty_comment_clears_it(
 ):
     facet, log, state, tab, _save, _bus, _notifications = _facet()
 
-    assert facet.save_data("tab-1") == "written:default.h5"
+    assert facet.save_data("tab-1") == SaveDataSubmission(7, "written:default.h5")
     assert log.calls[-1] == call(
         "save",
         "start_save_data",
@@ -176,7 +179,9 @@ def test_save_data_omissions_inherit_draft_but_explicit_empty_comment_clears_it(
     assert tab.data_path == "default.h5"
     assert not any(entry.method == "update_tab_comment" for entry in log.calls)
 
-    assert facet.save_data("tab-1", comment="") == "written:default.h5"
+    assert facet.save_data("tab-1", comment="") == SaveDataSubmission(
+        7, "written:default.h5"
+    )
     assert state.comment == ""
     assert log.calls[-1] == call(
         "save", "start_save_data", "permit:tab-1", "default.h5", comment=""

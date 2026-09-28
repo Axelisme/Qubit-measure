@@ -89,8 +89,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_data",
         MethodSpec(
             30.0,
-            "Save data file (tab-only). Explicit data_path/comment update the GUI Save "
-            "draft before saving; omitted values keep the existing draft.",
+            "Start non-cancellable data saving without a hardware lease. Explicit "
+            "data_path/comment update the GUI draft; omitted values keep it. "
+            "Returns an operation handle and reserved path, not proof of success. "
+            "Wait for completion and read artifacts for the last successful path.",
             (
                 _str("tab_id"),
                 _str_opt("data_path", "Override data path"),
@@ -102,6 +104,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:path:data",
             ),
+            operation_key="tab:{tab_id}",
             refresh_after_write=True,
         ),
     ),

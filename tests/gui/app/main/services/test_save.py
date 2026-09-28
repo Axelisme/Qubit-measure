@@ -20,6 +20,8 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
 
 
 def _make_figure() -> MagicMock:
@@ -37,7 +39,9 @@ def _assert_saved_fixed_size(figure: MagicMock, image_path: str) -> None:
     figure.set_size_inches.assert_called_with(6.0, 4.0)  # restored last
 
 
-def _make_service() -> tuple[SaveService, State, MagicMock]:
+def _make_service(
+    *, handles: OperationHandles | None = None, gate: MagicMock | None = None
+) -> tuple[SaveService, State, MagicMock]:
     state = State(MagicMock())
     adapter = MagicMock()
     state.add_tab(
@@ -46,7 +50,15 @@ def _make_service() -> tuple[SaveService, State, MagicMock]:
     )
     state.update_tab_result("tab", object())
     bg = MagicMock()  # BackgroundRunner stand-in; submit() is inspected per-test
-    svc = SaveService(state, bg, EventBus())
+    bus = EventBus()
+    runner = OperationRunner(
+        gate if gate is not None else MagicMock(),
+        handles if handles is not None else OperationHandles(),
+        MagicMock(),
+        bg,
+        bus,
+    )
+    svc = SaveService(state, runner, bus)
     return svc, state, bg
 
 
@@ -94,15 +106,11 @@ def test_start_save_data_resolves_path_to_actual_hdf5(
 
     returned = svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
 
-    # The path the saver actually writes (.hdf5 + uniqueness suffix) is resolved
-    # up front. The returned path and the reported _active_paths both reflect it
-    # (start_save_data returns it synchronously, so the RPC/agent gets it back
-    # immediately, not via a later diagnostic).
-    assert returned.endswith("meas_1.hdf5")
-    assert svc._active_paths["tab"] == returned
+    assert returned.data_path.endswith("meas_1.hdf5")
+    assert returned.operation_id > 0
 
 
-def test_save_terminal_restores_agent_origin_without_operation_id(
+def test_save_terminal_restores_agent_origin_with_operation_id(
     qapp, tmp_path: Path
 ) -> None:  # noqa: ARG001
     svc, _state, bg = _make_service()
@@ -117,16 +125,56 @@ def test_save_terminal_restores_agent_origin_without_operation_id(
     )
 
     with svc._bus.origin(EventOrigin(kind="agent", client_id="client-a")):  # type: ignore[attr-defined]
-        svc.start_save_data(SavePermit(tab_id="tab"), str(tmp_path / "save"))
+        started = svc.start_save_data(SavePermit(tab_id="tab"), str(tmp_path / "save"))
     on_done = bg.submit.call_args.kwargs["on_done"]
     on_done(None)
 
     assert observed == [
         EventMeta(
             seq=observed[0].seq,
-            origin=EventOrigin(kind="agent", client_id="client-a"),
+            origin=EventOrigin(
+                kind="agent",
+                client_id="client-a",
+                operation_id=str(started.operation_id),
+            ),
         )
     ]
+
+
+def test_save_submit_failure_leaves_no_busy_tab_or_live_handle(tmp_path: Path) -> None:
+    handles = OperationHandles()
+    gate = MagicMock()
+    svc, state, bg = _make_service(handles=handles, gate=gate)
+    bg.submit.side_effect = RuntimeError("executor unavailable")
+    with pytest.raises(RuntimeError, match="executor unavailable"):
+        svc.start_save_data(SavePermit(tab_id="tab"), str(tmp_path / "save"))
+    assert handles.live_count() == 0
+    assert svc.active_save_operations() == ()
+    assert not state.is_tab_busy("tab")
+    assert state.get_artifact_snapshots("tab")[0].last_saved_path is None
+    gate.ensure_can_start.assert_not_called()
+    gate.register.assert_not_called()
+
+
+def test_inline_save_terminal_does_not_leave_live_operation(tmp_path: Path) -> None:
+    handles = OperationHandles()
+    gate = MagicMock()
+    svc, state, bg = _make_service(handles=handles, gate=gate)
+
+    def inline(work, *, run_in_pool, on_done, on_error):
+        on_done(work())
+
+    bg.submit.side_effect = inline
+    started = svc.start_save_data(SavePermit(tab_id="tab"), str(tmp_path / "save"))
+    outcome = handles.known_outcome(started.operation_id)
+    assert outcome is not None and outcome.status == "finished"
+    assert handles.live_count() == 0
+    assert not handles.has_cancel_hook(started.operation_id)
+    assert svc.active_save_operations() == ()
+    assert not state.is_tab_busy("tab")
+    assert state.get_artifact_snapshots("tab")[0].last_saved_path == started.data_path
+    gate.ensure_can_start.assert_not_called()
+    gate.register.assert_not_called()
 
 
 def test_save_image_creates_parent_at_command_boundary(
@@ -236,7 +284,7 @@ def test_data_save_terminal_reports_actual_path_without_rewriting_draft(
 
     actual_path = svc.start_save_data(
         SavePermit(tab_id="tab"), draft_path, comment="first"
-    )
+    ).data_path
     assert state.get_artifact_snapshots("tab")[0].status is SaveStatus.NOT_SAVED
     bg.submit.call_args.kwargs["on_done"](None)
 
@@ -256,7 +304,7 @@ def test_failed_data_save_does_not_erase_prior_success(qapp, tmp_path: Path) -> 
     svc, state, bg = _make_service()
     first = str(tmp_path / "first")
     state.update_tab_data_path_override("tab", first)
-    previous_path = svc.start_save_data(SavePermit(tab_id="tab"), first)
+    previous_path = svc.start_save_data(SavePermit(tab_id="tab"), first).data_path
     bg.submit.call_args.kwargs["on_done"](None)
     assert state.get_artifact_snapshots("tab")[0].status is SaveStatus.SAVED
 

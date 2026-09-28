@@ -9,7 +9,7 @@
 - [0001 — Permit / Lease typed guard](0001-permit-lease-typed-guard.md)：靜態前置憑證與動態硬體互斥分離。
 - [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：GUI per-connection seen guard、operation handle、off-main wait 三層分工。
 - [0003 — ShutdownCoordinator and registry cancel](0003-shutdown-coordinator-and-registry-cancel.md)：統一 cancel/poll/await 詞彙與 Qt-free shutdown loop。
-- [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合。
+- [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合；data save 只取 Handle，不持硬體 lease。
 - [0025 — Cross-thread interaction channel](0025-cross-thread-interaction-channel.md)：operation/user prompt 使用單一有序 channel 傳遞 settle、message、stop。
 - [0026 — OperationRunner + scope ports](0026-operation-abstraction-runner-scope-ports.md)：OperationRunner 擁有通用生命週期；各 operation 只提供 policy 與窄 write port。
 - [0058 — Registry-owned VISA session disconnect](0058-registry-owned-visa-session-disconnect.md)：GlobalDeviceManager 以 identity claims 統一擁有 disconnect；close I/O 在 registry lock 外、失敗聚合且保留重試。

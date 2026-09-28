@@ -13,10 +13,17 @@ from zcu_tools.gui.app.main.events.tab import (
 )
 from zcu_tools.gui.app.main.figure_export import save_figure_to_path
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.ports import BackgroundExecutor
+from zcu_tools.gui.session.operation_handles import OperationOutcome
+from zcu_tools.gui.session.operation_runner import (
+    BgResult,
+    OperationRunner,
+    OperationSpec,
+    SettleFn,
+)
 from zcu_tools.utils.datasaver import reserve_labber_filepath
 
 from .guard import SavePermit
+from .ports import ActiveSaveOperation, SaveDataSubmission
 
 logger = logging.getLogger(__name__)
 
@@ -29,40 +36,50 @@ class SaveService:
     def __init__(
         self,
         state: State,
-        bg: BackgroundExecutor,
+        runner: OperationRunner,
         bus: EventBus,
     ) -> None:
         self._state = state
-        self._bg = bg
+        self._runner = runner
         self._bus = bus
         self._active_paths: dict[str, str] = {}
+        self._active_operations: dict[str, int] = {}
 
-    def _start_save(self, tab_id: str, req: SaveDataRequest) -> None:
-        """Save the data file off-main (OffMain fire-forget strategy, no scopes,
-        no handle — ADR-0019): adapter.save returns None, so on_done just flips
-        the saving flag. The data path is already known synchronously by the
-        caller; the worker only writes."""
+    def active_save_operations(self) -> tuple[ActiveSaveOperation, ...]:
+        return tuple(
+            ActiveSaveOperation(token, tab_id)
+            for tab_id, token in self._active_operations.items()
+        )
+
+    def _start_save(self, tab_id: str, req: SaveDataRequest) -> int:
+        """Submit non-cancellable I/O to the shared handle lifecycle, without a lease."""
         adapter = self._state.get_tab(tab_id).adapter
-        origin = self._bus.current_origin
 
-        def on_done(_result: object) -> None:
-            with self._bus.origin(origin):
+        def on_terminal(result: BgResult, settle: SettleFn) -> None:
+            self._active_operations.pop(tab_id, None)
+            if result.ok:
                 self._on_save_data_finished(tab_id)
-
-        def on_error(error: Exception) -> None:
-            with self._bus.origin(origin):
+                settle(OperationOutcome("finished"))
+            else:
+                error = result.error or RuntimeError("save failed without an error")
                 self._on_save_failed(tab_id, error)
+                settle(OperationOutcome("failed", str(error)))
 
-        self._bg.submit(
-            lambda: adapter.save(req),
-            run_in_pool=False,
-            on_done=on_done,
-            on_error=on_error,
+        return self._runner.begin(
+            OperationSpec(
+                exclusion=None,
+                owner_id=tab_id,
+                wants_progress=False,
+                cancel_hook=None,
+                work=lambda _factory: adapter.save(req),
+                run_in_pool=False,
+                on_terminal=on_terminal,
+            )
         )
 
     def start_save_data(
         self, permit: SavePermit, data_path: str, comment: str = ""
-    ) -> str:
+    ) -> SaveDataSubmission:
         tab_id = permit.tab_id
         self._require_tab_idle(tab_id)
         # Reserve the final data path in the GUI orchestration layer so the
@@ -75,14 +92,16 @@ class SaveService:
         tracker = self._state.get_tab(tab_id).artifacts
         tracker.started(ArtifactKind.DATA)
         self._active_paths[tab_id] = data_path
-        try:
-            self._start_save(tab_id, req)
-        except Exception:
-            tracker.failed(ArtifactKind.DATA)
-            self._active_paths.pop(tab_id, None)
-            raise
         self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
-        return data_path
+        try:
+            token = self._start_save(tab_id, req)
+        except Exception as error:
+            self._on_save_failed(tab_id, error)
+            raise
+        # Inline executors may have delivered terminal before begin returns.
+        if tab_id in self._active_paths:
+            self._active_operations[tab_id] = token
+        return SaveDataSubmission(token, data_path)
 
     def save_image_sync(self, permit: SavePermit, image_path: str) -> None:
         tab_id = permit.tab_id

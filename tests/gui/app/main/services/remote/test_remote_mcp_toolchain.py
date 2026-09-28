@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import threading
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
+from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+from zcu_tools.gui.app.main.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.main.services.ports import SaveDataSubmission
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
@@ -170,6 +175,82 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
         }
     finally:
         release.set()
+        sock.close()
+
+
+@pytest.mark.parametrize("origin", ["gui", "remote"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_data_save_is_awaitable_and_non_cancellable_until_terminal(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin: str, fail: bool
+) -> None:
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    release = threading.Event()
+    operation_id = None
+
+    def held_save(self, request):
+        if not release.wait(4):
+            raise TimeoutError("fake save release was not signalled")
+        if fail:
+            raise OSError("disk full")
+        # The fake adapter's save is a no-op; this driven stub performs offline I/O.
+        Path(request.data_path).write_bytes(b"fake saved result")
+
+    try:
+        run_id = fx.ctrl.start_run(tab_id)
+        assert (
+            call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        monkeypatch.setattr(FakeAdapter, "save", held_save)
+        path = str(tmp_path / "measurement")
+        if origin == "gui":
+            submitted = fx.ctrl.save_data(tab_id, path, comment="note")
+            operation_id, actual_path = submitted.operation_id, submitted.data_path
+        else:
+            assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+            submitted_wire = call(
+                sock,
+                "tab.save_data",
+                {"tab_id": tab_id, "data_path": path, "comment": "note"},
+            )["result"]
+            operation_id, actual_path = (
+                submitted_wire["operation_id"],
+                submitted_wire["data_path"],
+            )
+        assert call(sock, "operation.active")["result"]["operations"] == [
+            {"op": operation_id, "tab": tab_id, "kind": "save"}
+        ]
+        assert call(
+            sock, "operation.await", {"operation_id": operation_id, "timeout": 0}
+        )["result"] == {"reason": "timeout"}
+        cancelled = call(sock, "operation.cancel", {"operation_id": operation_id})
+        assert cancelled["error"]["reason"] == "not_cancellable"
+        assert fx.state.is_tab_busy(tab_id)
+        assert fx.state.get_artifact_snapshots(tab_id)[0].last_saved_path is None
+        release.set()
+        completed = call(
+            sock, "operation.await", {"operation_id": operation_id, "timeout": 2}
+        )["result"]
+        assert completed["status"] == ("failed" if fail else "finished")
+        assert call(sock, "operation.active")["result"]["operations"] == []
+        assert not fx.state.is_tab_busy(tab_id)
+        artifact = fx.state.get_artifact_snapshots(tab_id)[0]
+        if fail:
+            assert "disk full" in completed["error"]["message"]
+            assert artifact.last_saved_path is None
+            assert artifact.status is not SaveStatus.SAVED
+        else:
+            assert artifact.status is SaveStatus.SAVED
+            assert artifact.last_saved_path == actual_path
+            assert Path(actual_path).is_file()
+            assert actual_path.endswith("_1.hdf5")
+    finally:
+        release.set()
+        if operation_id is not None:
+            call(sock, "operation.await", {"operation_id": operation_id, "timeout": 3})
         sock.close()
 
 
@@ -662,7 +743,7 @@ def test_save_data_delegates_to_save_control(fx):
         side_effect=AssertionError("tab.save_data must use save_control")
     )
     fx.service.save_control.save_data = MagicMock(  # type: ignore[method-assign]
-        return_value="/tmp/data.hdf5"
+        return_value=SaveDataSubmission(7, "/tmp/data.hdf5")
     )
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
@@ -683,6 +764,7 @@ def test_save_data_delegates_to_save_control(fx):
         assert resp["ok"] is True
         assert resp["result"] == {
             "data_path": "/tmp/data.hdf5",
+            "operation_id": 7,
         }
         fx.service.save_control.save_data.assert_called_once_with(
             tab_id, "/tmp/data.h5", comment="note"

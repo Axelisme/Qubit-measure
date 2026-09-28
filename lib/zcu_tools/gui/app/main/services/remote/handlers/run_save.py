@@ -77,10 +77,7 @@ def h_tab_save_data(
         str(data_path) if data_path is not None else None,
         comment=str(comment) if comment is not None else None,
     )
-    # The save runs async, but the resolved path (.hdf5 + uniqueness suffix) is
-    # known synchronously — return it so the caller need not recover it from a
-    # later diagnostic / snapshot.
-    return {"data_path": written}
+    return {"data_path": written.data_path, "operation_id": written.operation_id}
 
 
 def h_tab_save_image(

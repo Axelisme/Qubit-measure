@@ -27,6 +27,20 @@ from typing import (
 
 
 @dataclass(frozen=True, slots=True)
+class SaveDataSubmission:
+    """Accepted save work; the reserved path is not proof of successful I/O."""
+
+    operation_id: int
+    data_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveSaveOperation:
+    operation_id: int
+    tab_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class CfgEdit:
     path: str
     value: object
