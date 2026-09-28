@@ -14,6 +14,24 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "context.ml_edit",
+        "context:h_context_ml_edit",
+        MethodSpec(
+            10.0,
+            "Apply nonempty ordered library edits through the shared draft model. "
+            "Commit each successful edit, stop at the first failure without rollback. "
+            "save_as creates a new entry after the first successful edit; source stays unchanged. "
+            "Returns valid/applied/errors. Read context.snapshot explicitly first.",
+            (_str("kind"), _str("name"), _json("edits"), _str_opt("save_as")),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool",
+            tool_names=("ml_edit",),
+            guard_deps=("context",),
+            refresh_after_write=True,
+        ),
+    ),
+    method_entry(
         "context.use",
         "context:h_context_use",
         MethodSpec(

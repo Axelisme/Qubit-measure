@@ -9,7 +9,7 @@ from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
 from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.program.v2 import WaveformCfgFactory
+from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 from ._helpers import Fixture, mcp_client
 
@@ -123,7 +123,7 @@ def test_ml_roles_and_create_use_gui_role_defaults(library_client):
         invoke("ml_create", {"role_id": "const:blank"})
 
 
-def test_ml_edit_commits_only_full_draft_and_save_as_preserves_source(library_client):
+def test_ml_edit_commits_prefix_and_save_as_preserves_source(library_client):
     invoke, library = library_client
     before = library.waveforms["seed"].to_dict()
     invoke("rpc_call", {"method": "context.snapshot"})
@@ -138,24 +138,88 @@ def test_ml_edit_commits_only_full_draft_and_save_as_preserves_source(library_cl
     assert saved == {
         "name": "copy",
         "cfg": library.waveforms["copy"].to_dict(),
+        "applied": 1,
+        "failed": None,
+        "skipped": [],
     }
     assert saved["cfg"]["length"] == pytest.approx(0.25)
     assert library.waveforms["seed"].to_dict() == before
-    with pytest.raises(
-        GuiRpcError, match="unknown.*after 1 applied|after 1 applied.*unknown"
-    ):
-        invoke(
-            "ml_edit",
-            {
-                "name": "seed",
-                "edits": [
-                    {"path": "length", "value": 0.5},
-                    {"path": "missing", "value": 1.0},
-                ],
-            },
-        )
-    assert library.waveforms["seed"].to_dict() == before
+    partial = invoke(
+        "ml_edit",
+        {
+            "name": "seed",
+            "edits": [
+                {"path": "length", "value": 0.5},
+                {"path": "missing", "value": 1.0},
+                {"path": "length", "value": 0.9},
+            ],
+        },
+    )
+    assert partial["applied"] == 1
+    assert partial["failed"]["index"] == 1
+    assert partial["failed"]["path"] == "missing"
+    assert partial["skipped"] == [2]
+    assert partial["cfg"]["length"] == 0.5
+    assert library.waveforms["seed"].to_dict()["length"] == 0.5
     assert library.waveforms["copy"].to_dict() == saved["cfg"]
+    continued = invoke(
+        "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.75}]}
+    )
+    assert continued["cfg"]["length"] == 0.75
+
+
+def test_ml_edit_first_failure_leaves_save_as_uncreated(library_client):
+    invoke, library = library_client
+    invoke("rpc_call", {"method": "context.snapshot"})
+    result = invoke(
+        "ml_edit",
+        {
+            "name": "seed",
+            "save_as": "copy",
+            "edits": [
+                {"path": "missing", "value": 1.0},
+                {"path": "length", "value": 0.9},
+            ],
+        },
+    )
+    assert result["applied"] == 0
+    assert result["failed"]["index"] == 0
+    assert result["skipped"] == [1]
+    assert result["cfg"] is None
+    assert "copy" not in library.waveforms
+    assert library.waveforms["seed"].to_dict()["length"] == 0.1
+
+
+def test_ml_edit_module_and_eval_use_shared_lowering(library_client):
+    invoke, library = library_client
+    library.modules["pulse"] = ModuleCfgFactory.from_raw(
+        {
+            "type": "pulse",
+            "ch": 0,
+            "nqz": 1,
+            "freq": 100.0,
+            "gain": 0.5,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "waveform": {"style": "const", "length": 0.1},
+        }
+    )
+    invoke("rpc_call", {"method": "context.snapshot"})
+    result = invoke(
+        "ml_edit",
+        {
+            "name": "pulse",
+            "kind": "module",
+            "edits": [
+                {"path": "gain", "value": {"__kind": "eval", "expr": "0.25 + 0.5"}}
+            ],
+        },
+    )
+    assert result["applied"] == 1
+    assert result["failed"] is None
+    assert result["cfg"]["gain"] == 0.75
+    assert library.modules["pulse"].to_dict()["gain"] == 0.75
 
 
 def test_ml_edit_requires_explicit_context_observation(library_client):
@@ -170,6 +234,38 @@ def test_ml_edit_requires_explicit_context_observation(library_client):
         "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.5}]}
     )
     assert saved["cfg"]["length"] == pytest.approx(0.5)
+
+
+def test_ml_edit_rejects_context_changed_by_another_connection(
+    qapp, tmp_path, monkeypatch
+):
+    fx = Fixture(active_label="ctx001")
+    library = ModuleLibrary()
+    library.waveforms["seed"] = WaveformCfgFactory.from_raw(
+        {"style": "const", "length": 0.1}
+    )
+    fx.state.set_context(replace(fx.state.exp_context, md=MetaDict(), ml=library))
+    fx.start()
+    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
+    first_bridge, first = mcp_client(fx.service.port, tmp_path / "first")
+    second_bridge, second = mcp_client(fx.service.port, tmp_path / "second")
+    try:
+        for invoke in (first, second):
+            invoke("connect", {"port": fx.service.port})
+            invoke("rpc_call", {"method": "context.snapshot"})
+        second(
+            "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.25}]}
+        )
+        with pytest.raises(GuiRpcError) as error:
+            first(
+                "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.9}]}
+            )
+        assert error.value.reason == "stale_version"
+        assert library.waveforms["seed"].to_dict()["length"] == 0.25
+    finally:
+        first_bridge.disconnect()
+        second_bridge.disconnect()
+        fx.stop()
 
 
 @pytest.mark.parametrize("destination", ["seed", "occupied"])

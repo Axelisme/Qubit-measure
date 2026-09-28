@@ -5,7 +5,6 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
-from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 _NAME = {"type": "string", "minLength": 1}
@@ -81,7 +80,7 @@ def _entry_kind(index: dict[str, Any], name: str, requested: Any) -> str:
 
 
 def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Edit a disposable draft; commit only after every edit succeeds."""
+    """Delegate sequential library commits to the shared GUI application."""
     name = arguments["name"]
     index = ml_get(ctx, {})
     kind = _entry_kind(index, name, arguments.get("kind"))
@@ -93,39 +92,23 @@ def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
                 f"save_as name {destination!r} already exists as {kind}; "
                 "choose a new name"
             )
-    editor_id = ctx.send_gui_rpc("editor.new", {"item_kind": kind, "from_name": name})[
-        "editor_id"
-    ]
-    commit_attempted = False
-    try:
-        result = ctx.send_gui_rpc(
-            "editor.set_fields", {"editor_id": editor_id, "edits": arguments["edits"]}
-        )
-        if not result["valid"]:
-            raise ValueError("edited library draft is invalid; no changes committed")
-        commit_attempted = True
-        ctx.send_gui_rpc("editor.commit", {"editor_id": editor_id, "name": destination})
-    except Exception as error:
-        # A transport failure at commit is ambiguous: it may have written the
-        # entry. Do not issue another mutating RPC in that state.
-        if (
-            commit_attempted
-            and isinstance(error, GuiRpcError)
-            and error.reason in ("gui_transport_timeout", "gui_handler_timeout")
-        ):
-            raise
-        try:
-            ctx.send_gui_rpc("editor.discard", {"editor_id": editor_id})
-        except Exception as cleanup_error:
-            raise GuiRpcError(
-                f"library edit failed: {error}; discarding draft "
-                f"{editor_id!r} also failed: {cleanup_error}",
-                reason="cleanup_failed",
-            ) from cleanup_error
-        raise
+    params = {"kind": kind, "name": name, "edits": arguments["edits"]}
+    if "save_as" in arguments:
+        params["save_as"] = destination
+    result = ctx.send_gui_rpc("context.ml_edit", params)
+    applied = result["applied"]
+    failed = None if result["valid"] else {"index": applied, **result["errors"][0]}
+    cfg = (
+        ml_get(ctx, {"name": destination, "kind": kind})["cfg"]
+        if applied or "save_as" not in arguments
+        else None
+    )
     return {
         "name": destination,
-        "cfg": ml_get(ctx, {"name": destination, "kind": kind})["cfg"],
+        "cfg": cfg,
+        "applied": applied,
+        "failed": failed,
+        "skipped": list(range(applied + 1, len(arguments["edits"]))) if failed else [],
     }
 
 
@@ -198,7 +181,7 @@ ML_TOOLS: dict[str, dict[str, Any]] = {
     },
     "ml_edit": {
         "handler": ml_edit,
-        "description": "Edit an existing named ModuleLibrary item using ordered canonical {path,value} agent edits, then commit only on full success. save_as writes a new item and leaves the source unchanged; an error discards the draft without writing to the library. Eval inputs lower to numeric values at commit. Read context.snapshot explicitly before editing; no hidden read refreshes the guard. Return {name,cfg}; kind disambiguates shared names.",
+        "description": "Edit an existing ModuleLibrary item through the GUI shared draft model. Commit canonical {path,value} edits in order; stop at the first failure and keep earlier commits. Return {name,cfg,applied,failed,skipped}; failed and skipped use zero-based input indices. save_as preserves the source and creates the destination on the first successful edit; cfg is null if it was not created. Eval inputs lower to numeric values at commit. Read context.snapshot explicitly first; no hidden read or retry repairs stale observations. kind disambiguates shared names.",
         "inputSchema": {
             "type": "object",
             "properties": {

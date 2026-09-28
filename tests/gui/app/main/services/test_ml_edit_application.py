@@ -60,6 +60,24 @@ def test_library_edit_success_can_be_followed_by_another_edit(library_app):
     assert library.waveforms["seed"].to_dict()["length"] == 0.5
 
 
+@pytest.mark.parametrize("path", ["length", "unknown_field"])
+def test_library_edit_releases_internal_draft_on_success_and_failure(library_app, path):
+    from zcu_tools.gui.expected_error import ExpectedError
+
+    ctrl, _ = library_app
+    closed = []
+    ctrl.set_cfg_editor_change_listener(
+        lambda editor_id, event, payload: (
+            closed.append(editor_id) if event == "editor_closed" else None
+        )
+    )
+    result = ctrl.edit_library("waveform", "seed", [CfgEdit(path, 0.25)])
+    assert result.valid is (path == "length")
+    assert len(closed) == 1
+    with pytest.raises(ExpectedError):
+        ctrl.get_cfg_editor_draft(closed[0])
+
+
 def test_library_edit_save_as_collision_rejects_before_mutation(library_app):
     from zcu_tools.gui.expected_error import ExpectedError
 

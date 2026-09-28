@@ -8,12 +8,41 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from zcu_tools.gui.app.main.services.ports import CfgEdit
 from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+
+def h_context_ml_edit(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    raw = params["edits"]
+    if not isinstance(raw, list) or not raw:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "edits must be a nonempty list")
+    edits: list[CfgEdit] = []
+    for index, item in enumerate(raw):
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("path"), str)
+            or not item["path"]
+            or "value" not in item
+        ):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"edits[{index}] requires a nonempty string path and value",
+            )
+        edits.append(CfgEdit(item["path"], item["value"]))
+    save_as = params["save_as"]
+    return adapter.ctrl.edit_library(
+        str(params["kind"]),
+        str(params["name"]),
+        edits,
+        save_as=str(save_as) if save_as is not None else None,
+    ).to_wire()
 
 
 def h_context_use(
