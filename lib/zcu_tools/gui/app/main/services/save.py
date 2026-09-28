@@ -148,11 +148,15 @@ class SaveService:
                 if destination.kind is ArtifactKind.DATA:
                     if req is None:
                         raise RuntimeError("Data save has no prepared request")
-                    owner.call(lambda: tracker.started(ArtifactKind.DATA))
+                    self._ensure_parent_directory(destination.path)
                     adapter.save(req)
                     owner.call(lambda d=destination: tracker.succeeded(d.kind, d.path))
                 else:
-                    owner.call(lambda d=destination: self._export_image(tab_id, d))
+                    owner.call(
+                        lambda d=destination: self._export_image(
+                            tab_id, d, capture_signature=False
+                        )
+                    )
 
         def on_terminal(result: BgResult, settle: SettleFn) -> None:
             error = None if result.ok else str(result.error or "save failed")
@@ -160,6 +164,10 @@ class SaveService:
             settle(OperationOutcome("finished" if result.ok else "failed", error))
             self._emit_artifact_save_finished(tab_id, error)
 
+        # Freeze every signature alongside the prepared payload and destinations.
+        # Later GUI draft edits must not be promoted by this batch's success.
+        for destination in destinations:
+            tracker.started(destination.kind)
         self._active_paths[tab_id] = data_path or ""
         self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
         try:
@@ -223,7 +231,7 @@ class SaveService:
             selected[ArtifactKind.DATA] = reserve_labber_filepath(
                 selected[ArtifactKind.DATA]
             )
-        ordered = tuple(
+        return tuple(
             SaveDestination(kind, selected[kind])
             for kind in (
                 ArtifactKind.ANALYSIS,
@@ -232,11 +240,14 @@ class SaveService:
             )
             if kind in selected
         )
-        for destination in ordered:
-            self._ensure_parent_directory(destination.path)
-        return ordered
 
-    def _export_image(self, tab_id: str, destination: SaveDestination) -> None:
+    def _export_image(
+        self,
+        tab_id: str,
+        destination: SaveDestination,
+        *,
+        capture_signature: bool = True,
+    ) -> None:
         tab = self._state.get_tab(tab_id)
         figure = (
             tab.analysis.figure
@@ -252,7 +263,8 @@ class SaveService:
             raise FailedPreconditionError(f"No {label} available to save")
         self._ensure_parent_directory(destination.path)
         tracker = tab.artifacts
-        tracker.started(destination.kind)
+        if capture_signature:
+            tracker.started(destination.kind)
         try:
             save_figure_to_path(figure, destination.path)
         except Exception:

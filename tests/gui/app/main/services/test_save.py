@@ -214,6 +214,78 @@ def test_save_artifacts_runs_in_order_and_preserves_partial_success(
     )
 
 
+def test_batch_save_keeps_submission_signature_when_later_drafts_change(
+    batch_save_service, tmp_path: Path
+) -> None:
+    service, state, adapter, primary, post, handles, bus, _gate = batch_save_service
+    data_path = str(tmp_path / "data.hdf5")
+    post_path = str(tmp_path / "post.png")
+    state.update_tab_data_path_override("tab", data_path)
+    state.update_tab_post_analysis_image_path_override("tab", post_path)
+    state.update_tab_comment("tab", "submitted")
+
+    def export_primary(path, **_kwargs) -> None:
+        Path(path).write_bytes(b"primary")
+        state.update_tab_data_path_override("tab", str(tmp_path / "new-data.hdf5"))
+        state.update_tab_post_analysis_image_path_override(
+            "tab", str(tmp_path / "new-post.png")
+        )
+        state.update_tab_comment("tab", "edited during export")
+        state.get_artifact_snapshots("tab")
+
+    primary.savefig.side_effect = export_primary
+    post.savefig.side_effect = lambda path, **kw: Path(path).write_bytes(b"post")
+    adapter.save.side_effect = lambda req: Path(req.data_path).write_text(req.comment)
+    submission = service.start_save_artifacts(
+        SavePermit("tab"),
+        (
+            SaveDestination(ArtifactKind.ANALYSIS, str(tmp_path / "primary.png")),
+            SaveDestination(ArtifactKind.POST_ANALYSIS, post_path),
+            SaveDestination(ArtifactKind.DATA, data_path),
+        ),
+        comment="submitted",
+    )
+    outcome = _await_artifact_completion(bus, handles, submission.operation_id)
+    assert outcome.status == "finished"
+    artifacts = {a.kind: a for a in state.get_artifact_snapshots("tab")}
+    for kind in (ArtifactKind.DATA, ArtifactKind.POST_ANALYSIS):
+        assert artifacts[kind].status is SaveStatus.UNSAVED_CHANGES
+    actual_data = artifacts[ArtifactKind.DATA].last_saved_path
+    assert actual_data is not None
+    assert Path(actual_data).read_text() == "submitted"
+    assert artifacts[ArtifactKind.POST_ANALYSIS].last_saved_path == post_path
+    assert Path(post_path).read_bytes() == b"post"
+    assert not (tmp_path / "new-post.png").exists()
+    assert not (tmp_path / "new-data.hdf5").exists()
+
+
+def test_batch_later_parent_failure_preserves_earlier_saved_image(
+    batch_save_service, tmp_path: Path
+) -> None:
+    service, state, adapter, primary, _post, handles, bus, _gate = batch_save_service
+    parent_file = tmp_path / "not-a-directory"
+    parent_file.write_text("keep")
+    image_path = str(tmp_path / "images" / "primary.png")
+    primary.savefig.side_effect = lambda path, **kw: Path(path).write_bytes(b"primary")
+    submission = service.start_save_artifacts(
+        SavePermit("tab"),
+        (
+            SaveDestination(ArtifactKind.ANALYSIS, image_path),
+            SaveDestination(ArtifactKind.DATA, str(parent_file / "data.hdf5")),
+        ),
+    )
+    outcome = _await_artifact_completion(bus, handles, submission.operation_id)
+    assert outcome.status == "failed"
+    artifacts = {a.kind: a for a in state.get_artifact_snapshots("tab")}
+    assert artifacts[ArtifactKind.ANALYSIS].status is SaveStatus.SAVED
+    assert artifacts[ArtifactKind.ANALYSIS].last_saved_path == image_path
+    assert Path(image_path).read_bytes() == b"primary"
+    assert artifacts[ArtifactKind.DATA].last_saved_path is None
+    assert not state.is_tab_busy("tab")
+    adapter.save.assert_not_called()
+    assert parent_file.read_text() == "keep"
+
+
 def test_artifact_save_submit_failure_settles_before_completion(tmp_path: Path) -> None:
     handles, bus = OperationHandles(), EventBus()
     service, state, background = _make_service(handles=handles, bus=bus)
