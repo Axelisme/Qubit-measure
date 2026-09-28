@@ -405,16 +405,7 @@ class RemoteControlServiceBase:
         if spec.off_main_thread:
             # Blocking handlers wait on this IO worker, never on the State owner.
             # Registry validation rejects guard/reveal declarations for these.
-            try:
-                with bus.origin(request_origin):
-                    holder["result"] = spec.handler(self, params)
-            except RemoteError as exc:
-                holder["remote_error"] = exc
-            except ExpectedError as exc:
-                _store_expected_error(holder, exc, origin="off-main handler")
-            except Exception as exc:  # noqa: BLE001 — Controller error envelope
-                logger.exception("off-main handler raised: %s", exc)
-                holder["controller_error"] = exc
+            self._run_off_main(spec, params, bus, request_origin, holder)
         else:
             done = threading.Event()
             handshake = threading.Lock()
@@ -424,6 +415,7 @@ class RemoteControlServiceBase:
             def _run() -> None:
                 nonlocal completed
                 # Guard, handler and successful observation share one owner turn.
+                before: dict[str, int] | None = None
                 with bus.origin(request_origin):
                     try:
                         self._guard(ctx, method, params)
@@ -434,11 +426,6 @@ class RemoteControlServiceBase:
                                 f"handler {method!r} returned non-dict result"
                             )
                         holder["result"] = result
-                        with handshake:
-                            if not abandoned:
-                                holder["rollback"] = self._owner_success(
-                                    ctx, method, params, result, before
-                                )
                     except RemoteError as exc:
                         holder["remote_error"] = exc
                     except ExpectedError as exc:
@@ -447,7 +434,20 @@ class RemoteControlServiceBase:
                         logger.exception("handler raised: %s", exc)
                         holder["controller_error"] = exc
                     finally:
+                        # Observation and completion are one handshake decision:
+                        # timeout cannot abandon a request after it records seen.
                         with handshake:
+                            observed = holder.get("result")
+                            if isinstance(observed, dict) and not abandoned:
+                                try:
+                                    holder["rollback"] = self._owner_success(
+                                        ctx, method, params, observed, before
+                                    )
+                                except Exception as exc:  # dispatch boundary
+                                    logger.exception(
+                                        "owner observation raised: %s", exc
+                                    )
+                                    holder["controller_error"] = exc
                             completed = True
                         done.set()
 
@@ -455,8 +455,7 @@ class RemoteControlServiceBase:
             if not done.wait(timeout=spec.timeout_seconds):
                 with handshake:
                     timed_out = not completed
-                    if timed_out:
-                        abandoned = True
+                    abandoned = timed_out
                 if timed_out:
                     self._endpoint.reply_error(
                         link,
@@ -465,6 +464,22 @@ class RemoteControlServiceBase:
                         message=f"handler did not complete within {spec.timeout_seconds}s",
                     )
                     return
+        self._reply_dispatch(link, rid, (method, params), ctx, holder)
+
+    def _run_off_main(self, spec, params, bus, request_origin, holder) -> None:
+        try:
+            with bus.origin(request_origin):
+                holder["result"] = spec.handler(self, params)
+        except RemoteError as exc:
+            holder["remote_error"] = exc
+        except ExpectedError as exc:
+            _store_expected_error(holder, exc, origin="off-main handler")
+        except Exception as exc:  # noqa: BLE001 — Controller error envelope
+            logger.exception("off-main handler raised: %s", exc)
+            holder["controller_error"] = exc
+
+    def _reply_dispatch(self, link, rid, request, ctx, holder) -> None:
+        method, params = request
         if "remote_error" in holder:
             exc = holder["remote_error"]
             assert isinstance(exc, RemoteError)
@@ -494,7 +509,10 @@ class RemoteControlServiceBase:
             if not delivered and callable(rollback):
                 # The link's IO worker routes requests sequentially. Queue undo
                 # before it can marshal the next request onto the owner thread.
-                self._owner_scheduler.post(rollback)
+                def _undo() -> None:
+                    rollback()
+
+                self._owner_scheduler.post(_undo)
 
     # ------------------------------------------------------------------
     # EventBus integration (subscribe on owner thread; push via broadcast)

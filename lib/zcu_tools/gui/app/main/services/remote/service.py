@@ -66,6 +66,8 @@ if TYPE_CHECKING:
 
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
+from .method_entries import METHOD_ENTRIES
+from .method_entries._registry import AgentMethodPolicy
 from .wire_version import GUI_VERSION, WIRE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -78,7 +80,7 @@ class _ClientCtx(SubscriptionCtx):
     owns (reclaimed on drop) and subscribed to (for the per-editor change stream).
     """
 
-    __slots__ = ("editor_ids", "subscribed_editors")
+    __slots__ = ("editor_ids", "subscribed_editors", "seen")
 
     def __init__(self) -> None:
         super().__init__()
@@ -86,6 +88,8 @@ class _ClientCtx(SubscriptionCtx):
         self.editor_ids: set[str] = set()
         # CfgEditor session ids this connection subscribed to for change push.
         self.subscribed_editors: set[str] = set()
+        # Only accessed by the owner-thread guard and observation hooks.
+        self.seen: dict[str, int] = {}
 
 
 def _ctx(link: ClientLink) -> _ClientCtx:
@@ -149,6 +153,9 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self.context_control = controller.context_control
         self.device_control = controller.device_control
         self.predictor_control = controller.predictor_control
+        self._agent_policies: dict[str, AgentMethodPolicy] = {
+            entry.method: entry.agent for entry in METHOD_ENTRIES
+        }
 
     # ------------------------------------------------------------------
     # Base seams
@@ -197,6 +204,8 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     def _on_client_close_extra(
         self, ctx: SubscriptionCtx, *, on_owner_thread: bool
     ) -> None:
+        # No further owner request may use this ctx after the link closes.
+        # The per-connection seen map is released with the ctx, not copied elsewhere.
         # Reclaim this connection's CfgEditor sessions. On a drop (IO thread) the
         # LiveModel teardown must be marshalled onto the State owner thread; during
         # stop() the endpoint already calls us there, so reclaim directly.
@@ -238,68 +247,117 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     # Dispatch policy seams: version guard + editor lifecycle
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _resource_key(template: str, values: Mapping[str, object]) -> str:
+        if "{writeback_resource}" in template:
+            pane = values.get("subtab_id")
+            if pane not in ("analysis", "post_analysis"):
+                raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid writeback pane")
+            values = dict(
+                values,
+                writeback_resource=(
+                    "analyze" if pane == "analysis" else "post_analyze"
+                ),
+            )
+        return template.format_map(values)
+
     def _guard(
         self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
     ) -> None:
-        # The owner-thread seam supplies connection and method identity.
-        del ctx, method
-        self._guard_versions(params)
-
-    def _guard_versions(self, params: Mapping[str, object]) -> None:
-        """Atomically reject an op whose declared resource versions are stale.
-
-        Optimistic concurrency, If-Match style: the mcp layer (which owns the
-        dependency policy) attaches an ``expected_versions`` dict mapping the
-        resource keys this op depends on to the versions it last saw. The server
-        is pure mechanism — it compares each given key against the current
-        ``VersionTable`` and does not care *why* those keys matter. A mismatch
-        (someone, possibly a human, mutated a dependency since the caller read
-        it; or the resource was dropped and now reads 0) raises
-        ``PRECONDITION_FAILED`` with ``data={"stale": [...]}``, containing only
-        the sorted identities of the resources that moved, never their current
-        versions. Client recovery follows the re-snapshot-then-retry contract in
-        the ``Resource-Version Guard`` section of this package's README.
-
-        Absent/empty ``expected_versions`` means no check (same as a plain RPC).
-
-        Runs on the Qt main thread inside the handler's synchronous ``_run()``
-        sequence, so the compare-and-act is atomic against any other GUI write
-        (real-user actions also marshal onto the main thread) — no TOCTOU.
-        """
-        expected = params.get("expected_versions")
-        if not expected:
+        assert isinstance(ctx, _ClientCtx)
+        deps = self._agent_policies[method].guard_deps
+        if not deps:
             return
-        if not isinstance(expected, dict):
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                "'expected_versions' must be an object of resource->version",
-            )
         current = self._ctrl_resource_versions()
-        mismatched = {
-            key: current.get(key, 0)
-            for key, want in expected.items()
-            if current.get(key, 0) != want
-        }
-        if mismatched:
-            # MCP must fully re-snapshot every identity in data.stale before
-            # retrying; a resources.versions read alone cannot establish what
-            # the caller has seen. Version numbers remain RPC bookkeeping, not
-            # part of the agent-facing error.
-            logger.debug(
-                "version guard BLOCK: expected=%s mismatched(current)=%s",
-                expected,
-                mismatched,
-            )
+        required: set[str] = set()
+        for template in deps:
+            if template == "device:*":
+                required.update(key for key in current if key.startswith("device:"))
+                required.update(key for key in ctx.seen if key.startswith("device:"))
+            else:
+                required.add(self._resource_key(template, params))
+        stale = sorted(
+            key
+            for key in required
+            if key not in ctx.seen or ctx.seen[key] != current.get(key, 0)
+        )
+        if stale:
             raise RemoteError(
                 ErrorCode.PRECONDITION_FAILED,
                 "a resource you depend on was changed in the GUI since you last "
                 "saw it; review then retry",
                 reason="stale_version",
-                data={"stale": sorted(mismatched.keys())},
+                data={"stale": stale},
             )
 
     def _ctrl_resource_versions(self) -> dict[str, int]:
         return dict(self.ctrl.resources_versions())
+
+    def _before_handler(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> dict[str, int] | None:
+        del ctx, params
+        if self._agent_policies[method].refresh_after_write:
+            return self._ctrl_resource_versions()
+        return None
+
+    @staticmethod
+    def _self_write_updates(
+        seen: Mapping[str, int], before: Mapping[str, int], current: Mapping[str, int]
+    ) -> dict[str, int]:
+        updates: dict[str, int] = {}
+        for key in before.keys() | current.keys():
+            old, new = before.get(key, 0), current.get(key, 0)
+            if old != new and key in seen and seen[key] == old:
+                updates[key] = new
+        return updates
+
+    def _owner_success(
+        self,
+        ctx: SubscriptionCtx,
+        method: str,
+        params: Mapping[str, object],
+        result: Mapping[str, object],
+        before: dict[str, int] | None,
+    ) -> Callable[[], None] | None:
+        assert isinstance(ctx, _ClientCtx)
+        policy = self._agent_policies[method]
+        current = self._ctrl_resource_versions()
+        updates = (
+            self._self_write_updates(ctx.seen, before, current)
+            if before is not None
+            else {}
+        )
+        if before is not None and policy.created_resource is not None:
+            identity = result.get("tab_id")
+            if isinstance(identity, str) and identity:
+                key = self._resource_key(policy.created_resource, result)
+                if before.get(key, 0) == 0 and current.get(key, 0) == 1:
+                    updates[key] = 1
+        if (
+            policy.reveals
+            and all(name not in params for name in policy.reveals_without)
+            and all(params.get(name) for name in policy.reveals_when_nonempty)
+        ):
+            for template in policy.reveals:
+                key = self._resource_key(template, params)
+                updates[key] = current.get(key, 0)
+        if not updates:
+            return None
+        previous = {key: ctx.seen.get(key) for key in updates}
+        ctx.seen.update(updates)
+
+        def _rollback() -> None:
+            for key, version in updates.items():
+                if ctx.seen.get(key) != version:
+                    continue
+                old = previous[key]
+                if old is None:
+                    ctx.seen.pop(key, None)
+                else:
+                    ctx.seen[key] = old
+
+        return _rollback
 
     def _after_success(
         self,
