@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 
+import numpy as np
+import pytest
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.adapters.fake.stub import FakeAnalyzeParams
 from zcu_tools.gui.app.main.adapter import (
@@ -18,6 +20,93 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 from ._helpers import Fixture, call, open_client
+
+
+@pytest.mark.parametrize(
+    "before,after,wire_before,wire_after",
+    [
+        (np.array([[1, 2], [3, 4]]), np.array([[5, 6]]), [[1, 2], [3, 4]], [[5, 6]]),
+        (1 + 2j, 3 + 4j, {"__complex__": [1.0, 2.0]}, {"__complex__": [3.0, 4.0]}),
+        (
+            {"nested": np.array([1 + 2j])},
+            {"nested": [3 + 4j]},
+            {"nested": [{"__complex__": [1.0, 2.0]}]},
+            {"nested": [{"__complex__": [3.0, 4.0]}]},
+        ),
+    ],
+)
+def test_complete_md_values_survive_preview_and_write_socket(
+    qapp,
+    monkeypatch,
+    before,
+    after,
+    wire_before,
+    wire_after,
+):
+    monkeypatch.setattr(
+        FakeAdapter,
+        "get_writeback_items",
+        lambda self, request: [
+            MetaDictWriteback(
+                target_name="value", description="V", proposed_value=after
+            ),
+        ],
+    )
+    fx = Fixture(active_label="ctx001")
+    md = MetaDict()
+    md.value = before
+    fx.state.set_context(replace(fx.state.exp_context, md=md, ml=ModuleLibrary()))
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        tab = fx.ctrl.new_tab("fake")
+        for operation in (
+            lambda: fx.ctrl.start_run(tab),
+            lambda: fx.ctrl.analyze(tab, FakeAnalyzeParams()),
+        ):
+            assert (
+                call(
+                    sock,
+                    "operation.await",
+                    {
+                        "operation_id": operation(),
+                        "timeout": 2,
+                    },
+                )["result"]["status"]
+                == "finished"
+            )
+        params = {"tab_id": tab, "subtab_id": "analysis"}
+        preview = call(sock, "tab.writeback_preview", params)
+        assert preview["ok"], preview
+        item = preview["result"]["items"][0]
+        assert item["current"] == wire_before
+        assert item["proposed"] == wire_after
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+        assert call(sock, "context.snapshot", {})["ok"]
+        written = call(
+            sock, "tab.writeback_write", {**params, "write": [{"id": "md-1"}]}
+        )
+        assert written["ok"], written
+        assert written["result"] == {
+            "written": [
+                {
+                    "id": "md-1",
+                    "kind": "md",
+                    "target": "value",
+                    "before": wire_before,
+                    "after": wire_after,
+                }
+            ]
+        }
+        # Unsupported live context values must fail rather than claim a full preview.
+        md.value = object()
+        rejected = call(sock, "tab.writeback_preview", params)
+        assert not rejected["ok"]
+        assert rejected["error"]["code"] == "precondition_failed"
+        assert rejected["error"]["reason"] == "unserializable_context"
+    finally:
+        sock.close()
+        fx.stop()
 
 
 def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypatch):

@@ -18,7 +18,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._wire_values import _coerce_wire_value, _json_safe
+from ._wire_values import _coerce_wire_value, context_wire_value
 
 _VALID_WRITEBACK_SUBTABS = frozenset({"analysis", "post_analysis"})
 
@@ -40,6 +40,17 @@ def _destination_context(adapter: RemoteControlAdapter) -> dict[str, object]:
     }
 
 
+def _writeback_wire_value(value: object) -> object:
+    try:
+        return context_wire_value(value)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"cannot fully project writeback value: {exc}",
+            reason="unserializable_context",
+        ) from exc
+
+
 def _writeback_item_wire(item) -> dict[str, object]:
     base: dict[str, object] = {
         "id": item.session_id,
@@ -49,7 +60,7 @@ def _writeback_item_wire(item) -> dict[str, object]:
     }
     if isinstance(item, MetaDictWriteback):
         base["kind"] = "metadict"
-        base["proposed_value"] = _json_safe(item.proposed_value)
+        base["proposed_value"] = _writeback_wire_value(item.proposed_value)
     elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
         is_module = isinstance(item, ModuleWriteback)
         base["kind"] = "module" if is_module else "waveform"
@@ -109,8 +120,8 @@ def h_tab_writeback_preview(
         "items": [
             {
                 **_writeback_item_wire(item),
-                "current": _json_safe(values[item.session_id].current),
-                "proposed": _json_safe(values[item.session_id].proposed),
+                "current": _writeback_wire_value(values[item.session_id].current),
+                "proposed": _writeback_wire_value(values[item.session_id].proposed),
             }
             for item in pane.writeback_items
         ],
@@ -258,7 +269,7 @@ def h_tab_writeback_write(
     result = adapter.writeback_control.write_writeback_for_pane(
         tab_id, "analysis" if subtab == "analysis" else "post_analysis", changes
     )
-    return {"written": [_json_safe(asdict(item)) for item in result]}
+    return {"written": [_writeback_wire_value(asdict(item)) for item in result]}
 
 
 def h_tab_writeback_apply(
