@@ -19,7 +19,11 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
 from zcu_tools.gui.app.main.services.guard import WritebackPermit
 from zcu_tools.gui.app.main.services.ports import CfgEdit, CfgEditResult
-from zcu_tools.gui.app.main.services.writeback import WritebackService
+from zcu_tools.gui.app.main.services.writeback import (
+    WritebackEdit,
+    WritebackService,
+    WritebackWritten,
+)
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import (
@@ -184,7 +188,29 @@ def test_draft_cfg_edits_use_private_editor_session():
     result = draft.edit("ml-1", edits=[{"path": "freq", "value": 5000.0}])
 
     assert result == {"valid": True, "removed": [], "added": []}
-    cfg_editor.set_fields.assert_called_once_with("editor-1", [CfgEdit("freq", 5000.0)])
+    cfg_editor.set_fields.assert_called_once_with(
+        "editor-1", [CfgEdit("freq", 5000.0)], agent_edit=True
+    )
+
+
+def test_agent_writeback_edits_delegate_to_shared_aggregate_grammar():
+    editor = MagicMock()
+    editor.open_seeded.return_value = ("editor-1", ())
+    editor.set_fields.return_value = CfgEditResult(valid=True)
+    service = WritebackService(editor, MagicMock())
+    draft = service.create_draft(
+        [
+            ModuleWriteback(target_name="a", description="d", edit_schema=MagicMock()),
+        ]
+    )
+    sweep = {"start": 1.0, "stop": 2.0, "expts": 3}
+
+    result = service.edit_draft(draft, "ml-1", edits=[{"path": "freq", "value": sweep}])
+
+    assert result["valid"] is True
+    editor.set_fields.assert_called_once_with(
+        "editor-1", [CfgEdit("freq", sweep)], agent_edit=True
+    )
 
 
 def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape():
@@ -295,6 +321,128 @@ def test_failed_and_empty_apply_do_not_mark_items_applied():
     result = draft.apply()
     assert result["applied_ids"] == []
     assert svc.get_all_applied(draft) == {"md-1": False}
+
+
+def test_explicit_apply_ignores_selection_without_changing_checkboxes():
+    write_port = MagicMock()
+    svc = WritebackService(MagicMock(), write_port)
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(target_name="a", description="d", proposed_value=1.0),
+            MetaDictWriteback(target_name="b", description="d", proposed_value=2.0),
+        ]
+    )
+    draft.edit("md-1", selected=False)
+    selection = [item.selected for item in draft.items]
+
+    result = draft.apply(item_ids=("md-1",))
+
+    assert result["applied_ids"] == ["md-1"]
+    write_port.apply_writes.assert_called_once()
+    assert write_port.apply_writes.call_args.args[0].md == {"a": 1.0}
+    assert [item.selected for item in draft.items] == selection
+    assert svc.get_all_applied(draft) == {"md-1": True, "md-2": False}
+
+
+@pytest.mark.parametrize("item_ids", [("md-1", "missing"), ("md-1", "md-1")])
+def test_explicit_apply_rejects_invalid_ids_before_any_write(item_ids):
+    write_port = MagicMock()
+    svc = WritebackService(MagicMock(), write_port)
+    draft = svc.create_draft(
+        [MetaDictWriteback(target_name="a", description="d", proposed_value=1.0)]
+    )
+
+    with pytest.raises(InvalidInputError):
+        draft.apply(item_ids=item_ids)
+
+    write_port.apply_writes.assert_not_called()
+    assert svc.get_all_applied(draft) == {"md-1": False}
+
+
+def test_explicit_empty_apply_does_not_fall_back_to_selected_items():
+    write_port = MagicMock()
+    svc = WritebackService(MagicMock(), write_port)
+    draft = svc.create_draft(
+        [MetaDictWriteback(target_name="a", description="d", proposed_value=1.0)]
+    )
+
+    assert draft.apply(item_ids=())["applied_ids"] == []
+    write_port.apply_writes.assert_not_called()
+    assert svc.get_all_applied(draft) == {"md-1": False}
+
+
+def test_ordered_write_returns_actual_values_and_leaves_selection_alone():
+    state = _make_state_with_tab()
+    state.exp_context.md.dest = [1]
+    port = _make_write_port(state, EventBus())
+    svc = WritebackService(MagicMock(), port)
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(target_name="a", description="d", proposed_value=2),
+            MetaDictWriteback(target_name="b", description="d", proposed_value=3),
+        ]
+    )
+    draft.edit("md-1", selected=False)
+    result = svc.write_draft(
+        draft,
+        (WritebackEdit("md-1", target_name="dest", proposed_value=None),),
+        state.exp_context,
+    )
+    assert result == [WritebackWritten("md-1", "md", "dest", [1], None)]
+    assert state.exp_context.md.dest is None
+    assert state.exp_context.md.get("b", "missing") == "missing"
+    assert [item.selected for item in draft.items] == [False, True]
+    assert svc.get_all_applied(draft) == {"md-1": True, "md-2": False}
+    port.apply_writes.assert_called_once()
+
+
+def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix():
+    state = _make_state_with_tab()
+    port = MagicMock()
+    svc = WritebackService(MagicMock(), port)
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(target_name="a", description="d", proposed_value=1),
+            MetaDictWriteback(target_name="b", description="d", proposed_value=2),
+        ]
+    )
+    with pytest.raises(InvalidInputError):
+        svc.write_draft(
+            draft,
+            (
+                WritebackEdit("md-1", proposed_value=11),
+                WritebackEdit("missing"),
+                WritebackEdit("md-2", proposed_value=22),
+            ),
+            state.exp_context,
+        )
+    values = []
+    for item in draft.items:
+        assert isinstance(item, MetaDictWriteback)
+        values.append(item.proposed_value)
+    assert values == [11, 2]
+    port.apply_writes.assert_not_called()
+    assert svc.get_all_applied(draft) == {"md-1": False, "md-2": False}
+
+
+def test_ordered_write_rejects_invalid_cfg_before_context_apply():
+    editor = MagicMock()
+    editor.open_seeded.return_value = ("editor", ())
+    editor.set_fields.return_value = CfgEditResult(valid=False)
+    port = MagicMock()
+    svc = WritebackService(editor, port)
+    draft = svc.create_draft(
+        [
+            ModuleWriteback(target_name="a", description="d", edit_schema=MagicMock()),
+        ]
+    )
+    with pytest.raises(FailedPreconditionError, match="ml-1"):
+        svc.write_draft(
+            draft,
+            (WritebackEdit("ml-1", edits=[{"path": "gain", "value": "invalid"}]),),
+            _make_state_with_tab().exp_context,
+        )
+    port.apply_writes.assert_not_called()
 
 
 def test_apply_draft_sends_one_context_batch_for_selected_items():

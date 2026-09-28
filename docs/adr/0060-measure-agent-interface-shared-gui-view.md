@@ -221,7 +221,8 @@ GUI application服務以共用CfgDraft模型依序修改並逐項寫入library�
 **`writeback(tab, stage = "primary" | "post", write?)`**
 
 - 不帶 `write`：回傳 `{destination, items: [{id, kind: "md" | "module" | "waveform", target, description, current, proposed}]}`。md 項目為值；module／waveform 項目為 cfg，目標不存在時 `current` 為 `null`。
-- `write = [{id, target?, value?, edits?}]`：只寫入列出的項目。`target` 改寫入名稱，`value` 改 md 值，`edits` 以 cfg 編輯語法修改 module／waveform。依序處理、遇錯即停，寫入目前的 active context（`destination`），回傳 `{written: {target: {before, after}}}`。
+- `write = [{id, target?, value?, edits?}]`：只寫入列出的項目。`target` 改寫入名稱，`value` 改 md 值，`edits` 以 cfg 編輯語法修改 module／waveform。先依序修改草稿，遇錯即停並保留已完成的草稿修改，不開始 context apply。全部成功後，以既有 ContextWritePort 一次提交指定 IDs 到目前的 active context，不暫改 GUI 勾選，也不承諾跨檔 atomic。
+- 寫入成功回傳 `{written: [{id, kind, target, before, after}]}`。每項包含完整的實際寫入前後值；`kind` 為 `md`、`module` 或 `waveform`。不同 kind 可使用同名 target，因此結果以項目列表表示，不以 target 作為唯一 key。
 
 **`tab_save(tab, artifacts = "all" | [key, ...], paths?, comment?)`**
 以 artifact 為單位存檔。`"all"` 依 GUI Save All 的順序存下所有可存項目。`paths` 覆寫個別路徑，其餘用預設路徑；`comment` 寫入 data。回傳 `{saved: {key: path}}`，為實際寫入的路徑（資料檔重名時自動加後綴）。
