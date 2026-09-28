@@ -52,6 +52,7 @@ class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
     exp_cls = FreqFluxExp
+    ExpCfg_cls = FreqFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True
     )
@@ -202,7 +203,7 @@ class FluxDepAdapter(
                 )
             dev_patch[device_name] = {"label": label_key}
         cfg_raw["dev"] = dev_patch
-        return req.ml.make_cfg(cfg_raw, FreqFluxCfg)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_qubit_flux"

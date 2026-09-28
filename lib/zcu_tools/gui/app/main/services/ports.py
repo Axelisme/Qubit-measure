@@ -27,6 +27,34 @@ from typing import (
 
 
 @dataclass(frozen=True, slots=True)
+class SaveDataSubmission:
+    """Accepted save work; the reserved path is not proof of successful I/O."""
+
+    operation_id: int
+    data_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class SaveDestination:
+    kind: ArtifactKind
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class SaveArtifactsSubmission:
+    """Reserved destinations; only a finished outcome establishes successful I/O."""
+
+    operation_id: int
+    destinations: tuple[SaveDestination, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveSaveOperation:
+    operation_id: int
+    tab_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class CfgEdit:
     path: str
     value: object
@@ -37,13 +65,23 @@ class CfgEditResult:
     valid: bool
     removed: tuple[str, ...] = ()
     added: tuple[str, ...] = ()
+    applied: int | None = None
+    actual: dict[str, object] | None = None
+    errors: tuple[dict[str, str], ...] | None = None
 
     def to_wire(self) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "valid": self.valid,
             "removed": list(self.removed),
             "added": list(self.added),
         }
+        if self.applied is not None:
+            result["applied"] = self.applied
+        if self.actual is not None:
+            result["actual"] = self.actual
+        if self.errors is not None:
+            result["errors"] = list(self.errors)
+        return result
 
 
 if TYPE_CHECKING:
@@ -53,6 +91,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
+    from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, ArtifactSnapshot
     from zcu_tools.gui.app.main.state import (
         RetiredPaneResources,
         Session,
@@ -102,6 +141,7 @@ class PostAnalysisPaneSnapshot:
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
     data_path: PathResourceSnapshot
+    comment: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +173,7 @@ class TabSnapshot:
     post_analysis: PostAnalysisPaneSnapshot | None = None
     save: SavePaneSnapshot | None = None
     paths: TabPathsSnapshot | None = None
+    artifacts: tuple[ArtifactSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -292,7 +333,9 @@ class CfgEditorPort(Protocol):
     # than re-exposing the handle. Signature mirrors CfgEditorService.set_field.
     def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult: ...
 
-    def set_fields(self, editor_id: str, edits: Sequence[CfgEdit]) -> CfgEditResult: ...
+    def set_fields(
+        self, editor_id: str, edits: Sequence[CfgEdit], *, agent_edit: bool = False
+    ) -> CfgEditResult: ...
 
 
 @runtime_checkable

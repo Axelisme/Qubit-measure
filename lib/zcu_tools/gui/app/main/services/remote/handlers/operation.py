@@ -1,5 +1,7 @@
 """Operation remote handlers."""
 
+# Method entries resolve these handlers by string reference at runtime.
+
 from __future__ import annotations
 
 import logging
@@ -29,6 +31,7 @@ def _progress_bars_wire(bars) -> Mapping[str, object]:
                 "maximum": m.qt_maximum(),
                 "value": m.qt_value(),
                 "percent": m.percent(),
+                "eta_s": m.remaining(),
                 "n": m.n,
                 "total": m.total,
             }
@@ -37,38 +40,62 @@ def _progress_bars_wire(bars) -> Mapping[str, object]:
     }
 
 
-def _h_operation_await(
+def h_operation_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # off_main_thread handler: blocks the IO worker thread on the handle's
-    # thread-safe registry (never touches main-thread-owned state). Returns a
-    # structured payload with reason in {'completed', 'user_feedback', 'timeout'}
-    # (ADR-0025). 'cancelled' is returned as structured data (status='cancelled',
-    # optional feedback from the Stop reason); 'failed' is still raised as
-    # PRECONDITION_FAILED so the agent sees it as an error.
+    del params
+    return {
+        "operations": [
+            {"op": op.op, "tab": op.tab, "kind": op.kind}
+            for op in adapter.operation_control.active_operations()
+        ]
+    }
+
+
+def h_operation_cancel(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    operation_id = params["operation_id"]
+    if not isinstance(operation_id, int) or isinstance(operation_id, bool):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "operation_id must be an integer")
+    try:
+        status = adapter.operation_control.cancel_operation(operation_id)
+    except KeyError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="unknown_op"
+        ) from exc
+    return {"status": status}
+
+
+def h_operation_await(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    # Off-main: only the thread-safe handle channel, never owner-thread state.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
-    result = adapter.operation_control.await_operation(operation_id, timeout)
-    if result is None:
-        # Should not happen with the new API, but guard for forward-compat.
+    if not 0 <= timeout <= 300:
         raise RemoteError(
-            ErrorCode.TIMEOUT,
-            f"operation {operation_id} did not complete within {timeout}s",
+            ErrorCode.INVALID_PARAMS,
+            "timeout must be between 0 and 300 seconds",
+            reason="invalid_timeout",
         )
+    try:
+        result = adapter.operation_control.await_operation(operation_id, timeout)
+    except KeyError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="unknown_op"
+        ) from exc
     if result.reason == "timeout":
-        raise RemoteError(
-            ErrorCode.TIMEOUT,
-            f"operation {operation_id} did not complete within {timeout}s",
-        )
+        return {"reason": "timeout"}
     if result.reason == "user_feedback":
         # Non-terminal: operation still running; feedback delivered to the agent.
         return {
             "reason": "user_feedback",
             "feedback": result.feedback,
         }
-    # reason == 'completed'
     outcome = result.outcome
-    assert outcome is not None  # invariant: completed always has outcome
+    if outcome is None:
+        raise RuntimeError("completed operation is missing its outcome")
     if outcome.status == "cancelled":
         # Structured cancellation: return status + optional Stop reason so the
         # agent gets the full picture in one reply (ADR-0025 §cancelled-wire).
@@ -79,21 +106,28 @@ def _h_operation_await(
             payload["feedback"] = result.feedback
         return payload
     if outcome.status == "failed":
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            outcome.error or "operation failed",
-            reason="failed",
-        )
+        return {
+            "reason": "completed",
+            "status": "failed",
+            "error": {
+                "reason": "failed",
+                "message": outcome.error or "operation failed",
+            },
+        }
     return {"reason": "completed", "status": outcome.status}
 
 
-def _h_operation_progress(
+def h_operation_progress(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Live (token, ProgressBarModel) pairs for one operation (run or device
     # setup alike, keyed by operation_id — the SSOT); _progress_bars_wire reads
     # their methods at this point. The mcp poll folds this into its reply.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
-    return _progress_bars_wire(
-        adapter.operation_control.get_operation_progress(operation_id)
+    result = dict(
+        _progress_bars_wire(
+            adapter.operation_control.get_operation_progress(operation_id)
+        )
     )
+    result["elapsed_s"] = adapter.operation_control.elapsed_seconds(operation_id)
+    return result

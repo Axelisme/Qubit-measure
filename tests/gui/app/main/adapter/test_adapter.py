@@ -64,7 +64,7 @@ def test_require_soc_handles_is_framework_request_validation() -> None:
 
     with pytest.raises(RuntimeError, match="soc is required"):
         require_soc_handles(
-            RunRequest(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=MagicMock())
+            RunRequest(soc=None, soccfg=MagicMock(), device_snapshot={})
         )
 
 
@@ -877,8 +877,8 @@ def test_base_adapter_analyze_raises_by_default():
 # ---------------------------------------------------------------------------
 
 
-def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
-    """ExpCfg_cls set → default build_exp_cfg delegates to cfg_assembler.make_cfg."""
+def test_base_adapter_build_exp_cfg_uses_explicit_snapshot():
+    """Materialization receives detached device settings and no live library."""
 
     class _Cfg:
         pass
@@ -898,10 +898,13 @@ def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
     req = MagicMock()
     sentinel = object()
     with patch(
-        "zcu_tools.experiment.v2_gui.adapters.base.make_cfg", return_value=sentinel
+        "zcu_tools.experiment.v2_gui.adapters.base.assemble_experiment_cfg",
+        return_value=sentinel,
     ) as make_cfg:
         out = _Adapter().build_exp_cfg({"reps": 1}, req)
-    make_cfg.assert_called_once_with({"reps": 1}, _Cfg, ml=req.ml)
+    make_cfg.assert_called_once_with(
+        {"reps": 1}, _Cfg, ml=None, device_snapshot=req.device_snapshot
+    )
     assert out is sentinel
 
 

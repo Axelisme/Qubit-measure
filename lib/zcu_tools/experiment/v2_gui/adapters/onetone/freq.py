@@ -9,7 +9,12 @@ from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 import numpy as np
 from matplotlib.figure import Figure
 
-from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
+from zcu_tools.experiment.v2.onetone.freq import (
+    FreqCfg,
+    FreqExp,
+    FreqResult,
+    HomophasalSamplingCfg,
+)
 from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -30,6 +35,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.cfg import ScalarSpec
 
 OneToneFreqRunResult: TypeAlias = FreqResult
 SamplingMode: TypeAlias = Literal["linear", "homophasal"]
@@ -37,7 +43,6 @@ EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
 EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _SAMPLING_MODE_CHOICES: list[SamplingMode] = ["linear", "homophasal"]
-_HOMOPHASAL_MD_KEYS = ("r_f", "rf_w", "theta0")
 _EDELAY_MD_KEY = "res_edelay_calibration"
 _EDELAY_CALIBRATION_FIELDS = frozenset({"edelay", "res_ch", "ro_ch"})
 _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
@@ -99,7 +104,8 @@ class OneToneFreqAdapter(
             "'rf_w' seeds the default span; 'res_probe_len' seeds the readout "
             "window; 'res_ch' / 'ro_ch' seed drive / readout channels; "
             "'timeFly' seeds the trigger offset. Homophasal sampling also "
-            "requires fitted 'r_f', 'rf_w', and 'theta0'. Analysis optionally "
+            "requires explicit cfg calibration values for 'r_f', 'rf_w', and "
+            "'theta0', supplied directly or as expressions. Analysis optionally "
             "uses a route-matched 'res_edelay_calibration' value."
         ),
         expects_ml=(
@@ -124,7 +130,8 @@ class OneToneFreqAdapter(
             "cleanly; widen it if the resonator has drifted. Use "
             "homophasal sampling after a fit has written 'theta0' when you "
             "want equal resonator-circle phase spacing instead of a linear "
-            "frequency grid."
+            "frequency grid. The homophasal calibration fields start empty; "
+            "fill them with fitted values or expressions before selecting that mode."
             " Electrical-delay mode 'auto' uses a route-matched calibration "
             "when available and otherwise runs bounded adaptive search; use "
             "'calibrated' to require that prior or 'manual' to supply a seed."
@@ -250,6 +257,21 @@ class OneToneFreqAdapter(
                 choices=_SAMPLING_MODE_CHOICES,
                 default="linear",
             )
+            .field(
+                "homophasal.r_f",
+                spec=ScalarSpec("Resonance frequency (MHz)", float, optional=True),
+                default=None,
+            )
+            .field(
+                "homophasal.rf_w",
+                spec=ScalarSpec("Linewidth (MHz)", float, optional=True),
+                default=None,
+            )
+            .field(
+                "homophasal.theta0",
+                spec=ScalarSpec("Phase offset (rad)", float, optional=True),
+                default=None,
+            )
             .reps(100)
             .rounds(100)
             .build()
@@ -266,45 +288,13 @@ class OneToneFreqAdapter(
             f"{', '.join(_SAMPLING_MODE_CHOICES)}, got {value!r}"
         )
 
-    def _homophasal_params_from_md(self, md: object) -> dict[str, float]:
-        values: dict[str, float] = {}
-        missing: list[str] = []
-        invalid: list[str] = []
-        get = getattr(md, "get")
-        for key in _HOMOPHASAL_MD_KEYS:
-            value = get(key)
-            if value is None:
-                missing.append(key)
-                continue
-            if isinstance(value, bool) or not isinstance(value, Real):
-                invalid.append(f"{key}={value!r}")
-                continue
-            values[key] = float(value)
-
-        problems: list[str] = []
-        if missing:
-            problems.append(f"missing: {', '.join(missing)}")
-        if invalid:
-            problems.append(f"non-numeric: {', '.join(invalid)}")
-        if problems:
-            raise ValueError(
-                "homophasal sampling requires numeric MetaDict keys "
-                f"{', '.join(_HOMOPHASAL_MD_KEYS)} ({'; '.join(problems)})"
-            )
-        if values["r_f"] <= 0.0:
-            raise ValueError(f"MetaDict r_f must be positive, got {values['r_f']}")
-        if values["rf_w"] <= 0.0:
-            raise ValueError(f"MetaDict rf_w must be positive, got {values['rf_w']}")
-        return values
-
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        if self._sampling_mode(raw_cfg) == "homophasal":
-            self._homophasal_params_from_md(req.md)
-
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
         cfg_raw = dict(raw_cfg)
         if self._sampling_mode(cfg_raw) == "homophasal":
-            cfg_raw["homophasal"] = self._homophasal_params_from_md(req.md)
+            # Validate required fit values before the assembler can query devices.
+            cfg_raw["homophasal"] = HomophasalSamplingCfg.model_validate(
+                cfg_raw.get("homophasal")
+            )
         else:
             cfg_raw.pop("homophasal", None)
         return super().build_exp_cfg(cfg_raw, req)

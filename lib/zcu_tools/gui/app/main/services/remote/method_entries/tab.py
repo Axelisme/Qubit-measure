@@ -2,33 +2,69 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
+from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
     _json,
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.new",
-        "tab:_h_tab_new",
+        "tab:h_tab_new",
         MethodSpec(
             10.0,
             "Create a new tab for the named adapter. Returns {tab_id}.",
             (_str("adapter_name", "Adapter to instantiate"),),
         ),
+        agent=AgentMethodPolicy(
+            refresh_after_write=True, created_resource="tab:{tab_id}"
+        ),
+    ),
+    method_entry(
+        "tab.open_file",
+        "tab:h_tab_open_file",
+        MethodSpec(
+            30.0,
+            "Create a tab, load a result file without a SoC, and focus it. "
+            "Read context.snapshot explicitly first. A load failure closes the new "
+            "tab and restores prior focus. Returns the load outcome including "
+            "tab_id and cfg_backfill; not_applied retains the loaded result. "
+            "Read tab.snapshot and tab.get_cfg before subsequent guarded writes.",
+            (_str("adapter_name"), _str("data_path")),
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=("context",),
+            refresh_after_write=True,
+            created_resource="tab:{tab_id}",
+        ),
     ),
     method_entry(
         "tab.close",
-        "tab:_h_tab_close",
-        MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),
+        "tab:h_tab_close",
+        MethodSpec(
+            5.0,
+            "Close an idle tab. All unsaved artifacts require discard_unsaved=true; "
+            "busy operations cannot be discarded. Returns {ok: true}.",
+            (
+                _str("tab_id"),
+                ParamSpec(
+                    "discard_unsaved", JsonType.BOOLEAN, required=False, default=False
+                ),
+            ),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool", tool_names=("tab_close",), refresh_after_write=True
+        ),
     ),
     method_entry(
         "tab.set_active",
-        "tab:_h_tab_set_active",
+        "tab:h_tab_set_active",
         MethodSpec(
             5.0,
             "Activate a tab. VIEW-ONLY: this changes which tab the user sees, NOT your "
@@ -38,7 +74,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.list_all",
-        "tab:_h_tab_list_all",
+        "tab:h_tab_list_all",
         MethodSpec(
             5.0,
             "List all open tabs. Returns {tabs, active_tab_id, running_tab_id}: tabs "
@@ -46,40 +82,39 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the tab the USER is focused on (a collaboration cue, NOT your operation "
             "target); running_tab_id is the tab currently running (or null when "
             "nothing is running).",
-            tool_name="gui_tab_list",
         ),
     ),
     method_entry(
         "tab.snapshot",
-        "tab:_h_tab_snapshot",
+        "tab:h_tab_snapshot",
         MethodSpec(
             5.0,
-            "Tab summary",
+            "Tab operation state. Pass tab_id to inspect existence, result and "
+            "analysis revisions/availability, and all effective save paths. "
+            "Result arrays are not required for this observation. Read writeback "
+            "preview separately for proposal contents. The all-tabs summary is "
+            "only an index and does not refresh a per-tab guard baseline.",
             (_str_opt("tab_id", "Tab to inspect; omit for all tabs"),),
+        ),
+        agent=AgentMethodPolicy(
+            reveals=(
+                "tab:{tab_id}",
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:analyze",
+                "tab:{tab_id}:post_analyze",
+                "tab:{tab_id}:path:data",
+                "tab:{tab_id}:path:analysis_image",
+                "tab:{tab_id}:path:post_analysis_image",
+            ),
+            reveals_when_nonempty=("tab_id",),
         ),
     ),
     method_entry(
         "tab.get_cfg",
-        "tab:_h_tab_get_cfg",
+        "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
-            "Read the tab's settable cfg as a NESTED tree of current values (the "
-            "read-only view; edit a leaf with tab.set_cfg or editor.set_field on the "
-            "tab's editor_id from tab.snapshot, using the leaf's dotted path). Node "
-            "shape, distinguished by '$'-prefixed reserved keys: a SCALAR leaf is "
-            "its bare current value (null = unset); an ENUM scalar leaf is "
-            "{'$value': current, '$choices': [...]}; a SWEEP is a sub-tree of bare "
-            "edges {start, stop, expts, step} (each edge accepts ONLY a number/int "
-            "via tab.set_cfg — NOT an eval/ref); a REF node "
-            "(module/waveform/device selector) is {'$ref': {'current': <chosen>, "
-            "'options': [<names>]}, <chosen variant's settable sub-tree>} — only the "
-            "CURRENTLY-CHOSEN variant is expanded; 'options' lists bare names while "
-            "'current' may be a tagged internal key — switch by passing a bare "
-            "'options' name to tab.set_cfg on the ref's dotted path. "
-            "Any other dict is a plain section sub-tree (its keys are child fields). "
-            "'prefix' (optional, dotted) returns just the sub-tree rooted at that "
-            "node (a prefix at a sweep edge returns the whole sweep node); a prefix "
-            "matching nothing returns {}.",
+            CFG_OBSERVATION_DESCRIPTION,
             (
                 _str("tab_id"),
                 _str_opt(
@@ -89,15 +124,20 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
+        agent=AgentMethodPolicy(
+            reveals=("tab:{tab_id}:cfg",), reveals_without=("prefix",)
+        ),
     ),
     method_entry(
         "tab.set_cfg",
-        "tab:_h_tab_set_cfg",
+        "tab:h_tab_set_cfg",
         MethodSpec(
             5.0,
             "Batch-set canonical cfg paths on a tab in order (fail-fast, non-atomic). "
-            "Copy paths from tab.get_cfg: sweep edges are '<path>.<edge>', reference "
-            "keys are '<path>.ref', and reference children descend directly. Removed "
+            "Copy paths from tab.get_cfg: agent_edit=true accepts only whole sweep "
+            "objects at '<path>' (not edge paths); the default GUI leaf grammar "
+            "accepts sweep edges '<path>.<edge>'. Reference keys are '<path>.ref', "
+            "and reference children descend directly. Removed "
             "'.sweep.*' / '.value.*' aliases are rejected without mutation and name "
             "their replacement. 'edits' is an ORDERED list of {path, value} objects. "
             "Apply ref-switch edits "
@@ -114,11 +154,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 _json("edits", "Ordered list of {path, value} edits"),
-            ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_set_cfg",
-                reason="batch MCP tool preserves ordered edits and untyped JSON value schema",
+                ParamSpec(
+                    "agent_edit",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Agent whole-sweep grammar; GUI leaf edits remain unchanged",
+                ),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

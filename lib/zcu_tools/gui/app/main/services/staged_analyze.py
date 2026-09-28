@@ -84,6 +84,10 @@ class _StagedAnalyzeService:
         # every terminal path settles exactly the token its own start created.
         self._active_tokens: dict[str, int] = {}
 
+    def active_operations(self) -> tuple[tuple[str, int], ...]:
+        """Return each tab's live handle for status, regardless of starter."""
+        return tuple(sorted(self._active_tokens.items()))
+
     # -- shared handle bookkeeping -----------------------------------------
 
     def _release(self, tab_id: str, outcome: OperationOutcome) -> None:

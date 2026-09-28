@@ -33,7 +33,11 @@ from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from .adapter import AnalysisMode, ExpContext
-from .events.completion import AnalyzeFailedPayload, SaveDataFinishedPayload
+from .events.completion import (
+    AnalyzeFailedPayload,
+    SaveArtifactsFinishedPayload,
+    SaveDataFinishedPayload,
+)
 from .events.run import RunFinishedPayload
 from .events.tab import (
     TabContentChangedPayload,
@@ -74,6 +78,7 @@ if TYPE_CHECKING:
 
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
+    from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
@@ -167,8 +172,15 @@ class RenderHost(Protocol):
 
 
 class RenderView(Protocol):
-    """Pure-read View surface the RemoteControlAdapter pulls from (snapshot /
-    screenshot / dialog management). Held by the adapter, not the Controller."""
+    """View reads and explicit presentation commands for RemoteControlAdapter.
+
+    Held by the adapter, not the Controller. Domain completion events do not
+    select panes; agent follow uses the explicit selection command.
+    """
+
+    def select_tab_pane(
+        self, tab_id: str, pane: Literal["run", "analysis", "post_analysis", "data"]
+    ) -> None: ...
 
     def get_view_snapshot(self) -> dict[str, object]: ...
     def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None:
@@ -354,6 +366,7 @@ class Controller(SessionControllerMixin):
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
         bus.subscribe(SaveDataFinishedPayload, self._on_save_data_finished)
+        bus.subscribe(SaveArtifactsFinishedPayload, self._on_save_artifacts_finished)
         bus.subscribe(DeviceSetupFinishedPayload, self._on_device_setup_finished)
         bus.subscribe(
             DeviceOperationFinishedPayload, self._on_device_operation_finished
@@ -458,6 +471,14 @@ class Controller(SessionControllerMixin):
             "Analyze failed" if payload.stage == "primary" else "Post-analysis failed"
         )
         self._notify("error", title, payload.error_message)
+
+    def _on_save_artifacts_finished(
+        self, outcome: SaveArtifactsFinishedPayload
+    ) -> None:
+        if outcome.error is None:
+            self._info("Artifacts saved")
+        else:
+            self._notify("error", "Save failed", outcome.error)
 
     def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
         if outcome.error is None:
@@ -644,27 +665,15 @@ class Controller(SessionControllerMixin):
         return self._soc_svc.has_soc()
 
     def get_soc_info(self, include_cfg: bool = False) -> dict[str, object]:
-        """Hardware summary of the connected SoC (QICK soccfg): a compact
-        per-channel description (generator/readout type, converter port, sample
-        rate, max pulse/buffer length) + ``is_mock``. The structured cfg (the full
-        ~2 KB QICK config) is only computed and included when ``include_cfg`` is
-        true — the common reader (overview assembly) needs only is_mock, so the
-        cfg deserialization is opt-in rather than paid on every call.
-        Raises if no SoC is connected (→ precondition_failed)."""
-        from zcu_tools.program import describe_soc
+        """Read the connected board's GUI-owned compact or full hardware view."""
+        from .services.soc_view import project_soc_info
 
-        soccfg = self._soc_svc.get_soccfg()
-        if soccfg is None:
-            raise FailedPreconditionError("No SoC connected")
-        info: dict[str, object] = {
-            "description": describe_soc(soccfg),
-            "is_mock": self._soc_svc.is_mock_soc(),
-        }
-        if include_cfg:
-            import json
-
-            info["cfg"] = json.loads(soccfg.dump_cfg())
-        return info
+        return project_soc_info(
+            self._soc_svc.get_soccfg(),
+            is_mock=self._soc_svc.is_mock_soc(),
+            endpoint=self._soc_svc.connected_endpoint(),
+            include_cfg=include_cfg,
+        )
 
     def resources_versions(self) -> dict[str, int]:
         """Full resource-version snapshot (the resources.versions RPC payload)."""
@@ -929,9 +938,15 @@ class Controller(SessionControllerMixin):
         )
 
     def apply_writeback_for_pane(
-        self, tab_id: str, pane: WritebackPane
+        self,
+        tab_id: str,
+        pane: WritebackPane,
+        *,
+        item_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
-        return self._writeback_control.apply_writeback_for_pane(tab_id, pane)
+        return self._writeback_control.apply_writeback_for_pane(
+            tab_id, pane, item_ids=item_ids
+        )
 
     def get_writeback_summaries_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -947,9 +962,12 @@ class Controller(SessionControllerMixin):
     # Save (TabService)
     # ------------------------------------------------------------------
 
+    def save_artifacts(self, tab_id: str) -> SaveArtifactsSubmission:
+        return self._save_control.save_artifacts(tab_id)
+
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str = ""
-    ) -> str:
+        self, tab_id: str, data_path: str | None = None, comment: str | None = None
+    ) -> SaveDataSubmission:
         return self._save_control.save_data(tab_id, data_path, comment=comment)
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str:
@@ -1160,12 +1178,7 @@ class Controller(SessionControllerMixin):
         self._cfg_editor_svc.set_change_listener(listener)
 
     def bump_editor_version(self, editor_id: str) -> None:
-        """Bump an editor session's draft version (editor.commit guard input).
-
-        Symmetric teardown is ``drop_editor_version`` (called from
-        ``CfgEditorService._remove``): a session that ends must drop its key, or
-        a stale dependency would spuriously match a retained version.
-        """
+        """Bump draft version; teardown drops the key to invalidate stale guards."""
         self._state.version.bump(f"editor:{editor_id}")
 
     def drop_editor_version(self, editor_id: str) -> None:
@@ -1180,13 +1193,25 @@ class Controller(SessionControllerMixin):
         return self._cfg_editor_svc.set_field(editor_id, path, value)
 
     def cfg_editor_set_fields(
-        self, editor_id: str, edits: list[CfgEdit]
+        self, editor_id: str, edits: list[CfgEdit], *, agent_edit: bool = False
     ) -> CfgEditResult:
-        return self._cfg_editor_svc.set_fields(editor_id, edits)
+        return self._cfg_editor_svc.set_fields(editor_id, edits, agent_edit=agent_edit)
 
     def owner_of_editor(self, editor_id: str) -> str | None:
         """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
         return self._cfg_editor_svc.owner_of_editor(editor_id)
+
+    def edit_library(
+        self,
+        item_kind: str,
+        name: str,
+        edits: list[CfgEdit],
+        *,
+        save_as: str | None = None,
+    ) -> CfgEditResult:
+        return self._cfg_editor_svc.edit_library(
+            item_kind, name, edits, save_as=save_as
+        )
 
     def commit_cfg_editor(self, editor_id: str, name: str) -> None:
         self._cfg_editor_svc.commit(editor_id, name)
@@ -1304,18 +1329,11 @@ class Controller(SessionControllerMixin):
         return self._tab_control.get_tab_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        """Auto-commit boundary for tab CfgFormWidget.
+        """Store an explicit tab cfg replacement through TabControl.
 
-        Writes the latest form draft into ``State.cfg_schema`` as the committed
-        truth. Cfg edits do not change ``TabInteractionState`` (run / analyze /
-        save availability), so no ``TAB_INTERACTION_CHANGED`` is emitted here;
-        the form's own ``validity_changed`` signal drives any UI refresh.
-
-        Do not call from dialog / writeback local LiveModel paths — those keep
-        their drafts off of ``State`` until their own Apply boundary.
-
-        Terminal: → ``TabService.update_tab_cfg`` → ``State.update_tab_cfg_schema``,
-        which bumps ``tab:<id>:cfg`` and emits no event.
+        Editor changes already publish synchronously through CfgEditorService;
+        viewers must not call this method to replay a delayed model snapshot.
+        Dialog and writeback drafts stay off tab State until their own Apply.
         """
         self._tab_control.update_tab_cfg(tab_id, schema)
 

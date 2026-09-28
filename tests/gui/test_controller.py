@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -47,6 +48,7 @@ from zcu_tools.gui.cfg import (
     DirectValue,
 )
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
@@ -398,8 +400,8 @@ def test_start_run_sets_is_running(cf):
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))  # cleanup
 
 
-def test_start_run_uses_committed_state_schema(cf):
-    """start_run reads cfg from State, not from a passed-in schema."""
+def test_start_run_passes_lowered_committed_state_cfg(cf):
+    """start_run delivers concrete values from the committed State cfg."""
     tab_id = cf.ctrl.new_tab("fake")
 
     # Mutate committed cfg in State after tab creation.
@@ -411,13 +413,13 @@ def test_start_run_uses_committed_state_schema(cf):
     mutated = dataclasses.replace(base, value=mutated_value)
     cf.ctrl.update_tab_cfg(tab_id, mutated)
 
-    # Intercept run to capture the schema the adapter actually receives.
-    captured: dict[str, CfgSchema] = {}
+    # Observe the payload at the worker-to-adapter boundary.
+    captured: dict[str, dict[str, object]] = {}
     real_adapter = cf.state.get_tab(tab_id).adapter
 
-    def _capture_run(req, schema):
-        captured["schema"] = schema
-        return real_adapter.run(req, schema)
+    def _capture_run(req, raw_cfg):
+        captured["cfg"] = raw_cfg
+        return real_adapter.run(req, raw_cfg)
 
     spy = MagicMock(spec=FakeAdapter)
     spy.capabilities = real_adapter.capabilities
@@ -427,9 +429,7 @@ def test_start_run_uses_committed_state_schema(cf):
     cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
-    reps_value = captured["schema"].value.fields["reps"]
-    assert isinstance(reps_value, DirectValue)
-    assert reps_value.value == 42
+    assert captured["cfg"]["reps"] == 42
 
 
 def test_start_run_emits_run_started(cf):
@@ -453,6 +453,37 @@ def test_run_finished_emits_run_finished(cf):
     cf.bus.emit.assert_any_call(
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
     )
+
+
+def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
+    cf, tmp_path, monkeypatch
+):
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
+
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.ctrl.start_run(tab_id)
+    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+    cf.state.update_tab_analyze(tab_id, object(), Figure())
+
+    def write_data(req) -> None:
+        Path(req.data_path).write_bytes(b"offline adapter output")
+
+    # FakeAdapter's default save is a no-op; exercise real filesystem I/O here.
+    monkeypatch.setattr(cf.state.get_tab(tab_id).adapter, "save", write_data)
+    cf.ctrl.update_tab_data_path(tab_id, str(tmp_path / "data"))
+    cf.ctrl.update_tab_analysis_image_path(tab_id, str(tmp_path / "analysis.png"))
+    submission = cf.ctrl.save_artifacts(tab_id)
+    with pytest.raises(FailedPreconditionError, match="no cancellation point"):
+        cf.ctrl.operation_control.cancel_operation(submission.operation_id)
+    assert _wait_for(lambda: not cf.state.is_tab_busy(tab_id))
+    artifacts = cf.ctrl.get_tab_snapshot(tab_id).artifacts
+    assert {a.kind for a in artifacts} == {ArtifactKind.DATA, ArtifactKind.ANALYSIS}
+    assert all(a.status is SaveStatus.SAVED for a in artifacts)
+    assert all(a.last_saved_path is not None for a in artifacts)
+    assert all(Path(d.path).is_file() for d in submission.destinations)
+    assert cf.ctrl.operation_control.active_operations() == ()
+    cf.view.show_status_message.assert_called_with("Artifacts saved")
 
 
 def test_save_data_completion_reports_only_data_artifact(cf):

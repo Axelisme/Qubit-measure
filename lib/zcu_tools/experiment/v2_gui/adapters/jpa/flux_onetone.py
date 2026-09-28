@@ -28,7 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
 )
 
-from ._shared import cached_device_snapshot, lower_jpa_flux_dev
+from ._shared import lower_jpa_flux_dev
 from .flux import jpa_flux_sweep_seed
 
 # Bring-up survey: ~101 readout-frequency points around the resonator; the
@@ -131,13 +131,12 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, OneToneFluxResult]):
         self, raw_cfg: dict[str, object], req: RunRequest
     ) -> OneToneFluxCfg:
         cfg_raw = dict(raw_cfg)
-        cfg_raw["dev"] = lower_jpa_flux_dev(cfg_raw, cached_device_snapshot())
+        cfg_raw["dev"] = lower_jpa_flux_dev(cfg_raw, req.device_snapshot)
         return super().build_exp_cfg(cfg_raw, req)
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        del req
-        # Pure preflight over cached/static data — never commands a live device.
-        lower_jpa_flux_dev(raw_cfg, cached_device_snapshot())
+        # Pure preflight over the detached request snapshot.
+        lower_jpa_flux_dev(raw_cfg, req.device_snapshot)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_jpa_flux_onetone_{time.strftime('%m%d')}"

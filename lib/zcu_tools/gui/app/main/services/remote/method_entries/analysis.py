@@ -2,67 +2,74 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _expected_versions,  # pyright: ignore[reportPrivateUsage] - package-local ParamSpec helper
     _obj_default,
     _str,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "analyze.cancel",
-        "analysis:_h_analyze_cancel",
+        "analysis:h_analyze_cancel",
         MethodSpec(
             5.0,
-            "Cancel the tab's in-flight (interactive) analyze: settle its handle as "
-            "cancelled and clear is_analyzing so the tab can then be closed. This is "
-            "the agent-side counterpart of the GUI 'Done' button for an interactive "
-            "picker — interactive analyze is a separate operation from run, so "
-            "gui_tab_run_cancel does NOT settle it. This cancel is op-specific (an "
-            "interactive analyze needs View teardown that no generic handle cancel can "
-            "do — ADR-0026 §8). Returns {ok, cancelled}: ok is always true (the call "
-            "succeeded); cancelled is true when an interactive analyze was settled, or "
-            "false (a graceful no-op) when none was in flight.",
+            "Cancel the tab's in-flight interactive analyze and clear is_analyzing. "
+            "The generic operation.cancel handle path uses the same domain "
+            "cancellation hook and tears down the interactive View. Run "
+            "cancellation does not settle a separate analyze operation. Returns "
+            "{ok, cancelled}: cancelled is false when none was in flight; "
+            "true requests cancellation, not necessarily worker completion.",
             (_str("tab_id"),),
-            tool_name="gui_tab_analyze_cancel",
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.get_analyze_result",
-        "analysis:_h_tab_get_analyze_result",
+        "analysis:h_tab_get_analyze_result",
         MethodSpec(5.0, "Read tab analyze result scalar summary", (_str("tab_id"),)),
     ),
     method_entry(
         "tab.get_analyze_params",
-        "analysis:_h_tab_get_analyze_params",
-        MethodSpec(5.0, "Read current analyze params", (_str("tab_id"),)),
+        "analysis:h_tab_get_analyze_params",
+        MethodSpec(
+            5.0,
+            "Read primary analyze params as {analyze_params, definitions}. Values "
+            "are null before a result exists; definitions come from the live adapter.",
+            (_str("tab_id"),),
+        ),
     ),
     method_entry(
         "tab.analyze",
-        "analysis:_h_tab_analyze",
+        "analysis:h_tab_analyze",
         MethodSpec(
             30.0,
-            "Start analyzing the tab's run result. Analyze runs on a worker thread "
-            "and returns an operation_id (like run/connect/device); the mcp "
-            "gui_tab_analyze_start tool awaits it so the agent sees one synchronous "
-            "call. 'updates' optionally overrides analyze params (read the current "
-            "ones with gui_tab_get_analyze_params). Makes the tab busy while it runs; "
-            "a concurrent save/edit returns precondition_failed until it settles. "
-            "Read the fit summary with gui_tab_get_analyze_result.",
+            "Start analyzing the tab's run result via tab_analyze. Returns "
+            "operation_id, interactive, complete params and invalidated_on_success "
+            "(analysis.writeback/post.result/post.writeback when previously present). "
+            "Invalidation applies only on successful completion. Runs on a worker "
+            "thread; the GUI returns a raw operation_id, which MCP exposes as a "
+            "handle, not a completed result. Call wait(op=handle) for the terminal "
+            "status, error and Stop feedback. 'updates' optionally overrides "
+            "analyze params (read current values with rpc_call on "
+            "tab.get_analyze_params). Makes the tab busy while it runs; a "
+            "concurrent save/edit returns precondition_failed until it settles. "
+            "Read the fit summary with rpc_call on tab.get_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_analyze_start",
-                reason="manual MCP tool adds short-wait handle and fit-result folding",
-            ),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool",
+            tool_names=("tab_analyze",),
+            operation_key="analyze:{tab_id}",
+            refresh_after_write=True,
         ),
     ),
     method_entry(
         "tab.interact",
-        "interactive:_h_tab_interact",
+        "interactive:h_tab_interact",
         MethodSpec(
             30.0,
             "Read or execute one command on the tab's active interactive analysis. "
@@ -73,42 +80,50 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 ParamSpec("payload", JsonType.OBJECT, required=False),
-                _expected_versions(),
-            ),
-            mcp=McpMethodPolicy.internal(
-                reason="GUI-side contract only; agent-facing tool is outside this task"
             ),
         ),
+        agent=AgentMethodPolicy(exposure="tool", tool_names=("tab_interact",)),
     ),
     method_entry(
         "tab.get_post_analyze_result",
-        "analysis:_h_tab_get_post_analyze_result",
+        "analysis:h_tab_get_post_analyze_result",
         MethodSpec(
             5.0, "Read tab post-analysis result scalar summary", (_str("tab_id"),)
         ),
     ),
     method_entry(
         "tab.get_post_analyze_params",
-        "analysis:_h_tab_get_post_analyze_params",
-        MethodSpec(5.0, "Read current post-analysis params", (_str("tab_id"),)),
+        "analysis:h_tab_get_post_analyze_params",
+        MethodSpec(
+            5.0,
+            "Read post-analysis params as {post_analyze_params, definitions}. Values "
+            "are null before post analysis; definitions come from the live adapter.",
+            (_str("tab_id"),),
+        ),
     ),
     method_entry(
         "tab.post_analyze",
-        "analysis:_h_tab_post_analyze",
+        "analysis:h_tab_post_analyze",
         MethodSpec(
             30.0,
-            "Start the second-layer (post) analysis on the tab's PRIMARY analyze "
-            "result. Runs on a worker thread and returns an operation_id (like "
-            "tab.analyze); the mcp gui_tab_post_analyze_start tool awaits it so the "
-            "agent sees one synchronous call. Fast-fails with precondition_failed when the "
-            "tab has no primary analyze result to build on. 'updates' optionally "
-            "overrides post params (see gui_tab_get_post_analyze_params). Read the "
-            "fit summary with gui_tab_get_post_analyze_result.",
+            "Start post analysis on the tab's PRIMARY analyze result via tab_analyze. "
+            "Returns operation_id, interactive=false, complete params and "
+            "invalidated_on_success (post.writeback when previously present). "
+            "Invalidation applies only on successful completion. "
+            "Runs on a worker thread; MCP maps the GUI operation_id "
+            "to a handle. Call wait(op=handle) for the terminal status, error and "
+            "Stop feedback; start alone does not mean completion. Fast-fails "
+            "with precondition_failed when no primary result exists. 'updates' "
+            "overrides post params (read current values with rpc_call on "
+            "tab.get_post_analyze_params). Read the fit summary with rpc_call on "
+            "tab.get_post_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_post_analyze_start",
-                reason="manual MCP tool adds short-wait handle and summary folding",
-            ),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool",
+            tool_names=("tab_analyze",),
+            operation_key="post_analyze:{tab_id}",
+            refresh_after_write=True,
         ),
     ),
 )

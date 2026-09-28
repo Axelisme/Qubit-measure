@@ -36,6 +36,7 @@ Threading:
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import logging
 import queue
@@ -61,6 +62,8 @@ logger = logging.getLogger(__name__)
 # Outbound queue capacity per client. Slow / wedged readers cause messages to
 # be dropped past this point (with a WARN log); see ``_QUEUE_DROP_BUDGET``.
 _OUTBOUND_QUEUE_MAX = 256
+# Includes the complete frame held by the writer, not only queued frames.
+_OUTBOUND_BYTES_MAX = 16 << 20
 
 # Consecutive drops on the same client before we proactively close it.
 _QUEUE_DROP_BUDGET = 8
@@ -115,18 +118,20 @@ class ClientLink:
         "buffer",
         "peer",
         "outbound",
+        "pending_bytes",
         "writer_thread",
         "consecutive_drops",
         "closing",
         "app_ctx",
     )
 
-    def __init__(self, peer: str, token_required: bool) -> None:
+    def __init__(self, peer: str, *, token_required: bool) -> None:
         self.peer = peer
         # If no token is configured, every client starts authenticated.
         self.authed = not token_required
         self.buffer = bytearray()
         self.outbound: queue.Queue[bytes] = queue.Queue(maxsize=_OUTBOUND_QUEUE_MAX)
+        self.pending_bytes = 0  # Protected by the endpoint's clients lock.
         self.writer_thread: threading.Thread | None = None
         self.consecutive_drops: int = 0
         self.closing: bool = False
@@ -303,45 +308,28 @@ class NdjsonRpcEndpoint:
             # Release app state on the owner thread (stop() runs here) before
             # tearing the connection down.
             self._router.on_client_close(link, on_owner_thread=True)
-            link.closing = True
-            try:
-                link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-            except queue.Full:
-                try:
-                    link.outbound.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-                except queue.Full:
-                    pass
+            self._retire_outbound(link)
         for _sock, link in client_snapshot:
             t = link.writer_thread
             if t is not None and t.is_alive():
                 t.join(timeout=2.0)
 
         if self._wake_w is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._wake_w.send(b"x")
-            except OSError:
-                pass
         thread = self._thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)
 
         with self._clients_lock:
             for sock in list(self._clients.keys()):
-                try:
+                with contextlib.suppress(OSError):
                     sock.close()
-                except OSError:
-                    pass
             self._clients.clear()
         for sock in (self._server_sock, self._wake_r, self._wake_w):
             if sock is not None:
-                try:
+                with contextlib.suppress(OSError):
                     sock.close()
-                except OSError:
-                    pass
         self._server_sock = None
         self._wake_r = None
         self._wake_w = None
@@ -375,6 +363,7 @@ class NdjsonRpcEndpoint:
         recipient selection.  ``operation`` must be non-blocking and must not
         call back into the endpoint.
         """
+        del link  # The router owns the app state; this seam only serializes access.
         with self._clients_lock:
             return operation()
 
@@ -382,14 +371,9 @@ class NdjsonRpcEndpoint:
     # Outbound: reply (to one link) + broadcast (push fan-out)
     # ------------------------------------------------------------------
 
-    def reply_ok(self, link: ClientLink, *, rid: str, result) -> None:
-        resp = Response(id=rid, ok=True, result=result)
-        try:
-            line = encode_line(resp.to_wire())
-        except Exception:
-            logger.exception("failed to encode reply for %s", rid)
-            return
-        self._enqueue(link, line, is_push=False)
+    def reply_ok(self, link: ClientLink, *, rid: str, result) -> bool:
+        """Return whether the success reply encoded and entered the outbound queue."""
+        return self._send_response(link, Response(id=rid, ok=True, result=result))
 
     def reply_error(
         self,
@@ -399,16 +383,73 @@ class NdjsonRpcEndpoint:
         code: ErrorCode,
         message: str,
         reason: str = "",
-        data: dict | None = None,
+        data: dict[str, object] | None = None,
     ) -> None:
         env = ErrorEnvelope(code=code.value, message=message, reason=reason, data=data)
-        resp = Response(id=rid, ok=False, error=env)
+        self._send_response(link, Response(id=rid, ok=False, error=env))
+
+    def _send_response(self, link: ClientLink, response: Response) -> bool:
+        encoded_success = False
         try:
-            line = encode_line(resp.to_wire())
+            line = encode_line(response.to_wire())
+            encoded_success = response.ok
         except Exception:
-            logger.exception("failed to encode error reply for %s", rid)
-            return
-        self._enqueue(link, line, is_push=False)
+            logger.exception("failed to encode reply for %.128r", response.id)
+            fallback = Response(
+                id=response.id,
+                ok=False,
+                error=ErrorEnvelope(
+                    code=ErrorCode.INTERNAL.value,
+                    reason="response_encoding_failed",
+                    message=(
+                        "Could not encode RPC response. The request may have executed; "
+                        "inspect state before retrying any mutation."
+                    ),
+                ),
+            )
+            try:
+                line = encode_line(fallback.to_wire())
+            except Exception:
+                # A request ID near the frame limit can prevent even this reply.
+                logger.exception(
+                    "failed to encode fallback reply for %.128r", response.id
+                )
+                self._abort_client(link)
+                return False
+        with self._clients_lock:
+            queued = self._enqueue(link, line, is_push=False)
+        if not queued:
+            # Unlike pushes, a correlated reply must not be silently dropped.
+            self._abort_client(link)
+        return encoded_success and queued
+
+    def _abort_client(self, link: ClientLink) -> None:
+        with self._clients_lock:
+            self._abort_client_locked(link)
+
+    def _abort_client_locked(self, link: ClientLink) -> None:
+        """Wake the IO owner for cleanup; caller holds the clients lock."""
+        link.closing = True
+        for sock, current in self._clients.items():
+            if current is link:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    logger.debug("client %s already disconnected", link.peer)
+                break
+
+    def _retire_outbound(self, link: ClientLink) -> None:
+        """Release queued frames and wake the writer; its in-flight frame stays charged."""
+        with self._clients_lock:
+            link.closing = True
+            while True:
+                try:
+                    line = link.outbound.get_nowait()
+                except queue.Empty:
+                    break
+                link.pending_bytes -= len(line)
+            with contextlib.suppress(queue.Full):
+                link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
 
     def broadcast(self, line: bytes, predicate: Callable[[ClientLink], bool]) -> None:
         """Fan a pre-encoded push line out to every link passing ``predicate``.
@@ -469,10 +510,16 @@ class NdjsonRpcEndpoint:
                     on_delivered(link)
 
     def _enqueue(self, link: ClientLink, line: bytes, *, is_push: bool) -> bool:
+        # Both callers hold the clients lock, including push recipient revalidation.
         if link.closing:
+            return False
+        if link.pending_bytes + len(line) > _OUTBOUND_BYTES_MAX:
+            logger.warning("remote client %s exceeded outbound byte budget", link.peer)
+            self._abort_client_locked(link)
             return False
         try:
             link.outbound.put_nowait(line)
+            link.pending_bytes += len(line)
             link.consecutive_drops = 0
             return True
         except queue.Full:
@@ -487,15 +534,7 @@ class NdjsonRpcEndpoint:
                 logger.warning(
                     "remote client %s exceeded drop budget; closing", link.peer
                 )
-                link.closing = True
-                try:
-                    link.outbound.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-                except queue.Full:
-                    pass
+                self._abort_client_locked(link)
             return False
 
     # ------------------------------------------------------------------
@@ -515,12 +554,10 @@ class NdjsonRpcEndpoint:
                 for key, _mask in events:
                     kind, _ = key.data
                     if kind == "wake":
-                        try:
+                        with contextlib.suppress(OSError):
                             self._wake_r.recv(64)
-                        except OSError:
-                            pass
                     elif kind == "listener":
-                        self._accept_one(sel, token_required)
+                        self._accept_one(sel, token_required=token_required)
                     elif kind == "client":
                         sock = key.fileobj
                         assert isinstance(sock, socket.socket)
@@ -535,18 +572,14 @@ class NdjsonRpcEndpoint:
             with self._clients_lock:
                 client_socks = list(self._clients.keys())
             for sock in client_socks:
-                try:
+                with contextlib.suppress(KeyError, ValueError):
                     sel.unregister(sock)
-                except (KeyError, ValueError):
-                    pass
             for extra in (self._server_sock, self._wake_r):
-                try:
+                with contextlib.suppress(KeyError, ValueError):
                     sel.unregister(extra)
-                except (KeyError, ValueError):
-                    pass
             sel.close()
 
-    def _accept_one(self, sel: selectors.BaseSelector, token_required: bool) -> None:
+    def _accept_one(self, sel: selectors.BaseSelector, *, token_required: bool) -> None:
         assert self._server_sock is not None
         try:
             csock, addr = self._server_sock.accept()
@@ -571,21 +604,42 @@ class NdjsonRpcEndpoint:
 
     def _client_writer(self, sock: socket.socket, link: ClientLink) -> None:
         """Drain the outbound queue to the socket; exits on sentinel / close."""
-        while True:
-            try:
-                line = link.outbound.get(timeout=1.0)
-            except queue.Empty:
-                if link.closing or self._stopping.is_set():
-                    return
-                continue
-            if line is _SHUTDOWN_SENTINEL or line == _SHUTDOWN_SENTINEL:
-                return
-            try:
-                sock.sendall(line)
-            except OSError as exc:
-                logger.info("remote client writer %s exit on send: %s", link.peer, exc)
-                link.closing = True
-                return
+        try:
+            with selectors.DefaultSelector() as writable:
+                writable.register(sock, selectors.EVENT_WRITE)
+                while True:
+                    try:
+                        line = link.outbound.get(timeout=1.0)
+                    except queue.Empty:
+                        if link.closing or self._stopping.is_set():
+                            return
+                        continue
+                    if line is _SHUTDOWN_SENTINEL or line == _SHUTDOWN_SENTINEL:
+                        return
+                    # Accepted sockets are nonblocking. Keep the byte cursor
+                    # across backpressure without replaying a partially sent line.
+                    try:
+                        pending = memoryview(line)
+                        while pending:
+                            if link.closing or self._stopping.is_set():
+                                return
+                            try:
+                                sent = sock.send(pending)
+                            except (BlockingIOError, InterruptedError):
+                                writable.select(timeout=0.5)
+                                continue
+                            if sent == 0:
+                                raise ConnectionError(
+                                    "socket closed during reply delivery"
+                                )
+                            pending = pending[sent:]
+                    finally:
+                        with self._clients_lock:
+                            link.pending_bytes -= len(line)
+                    del pending, line
+        except (OSError, ValueError) as exc:
+            logger.info("remote client writer %s exit on send: %s", link.peer, exc)
+            self._abort_client(link)
 
     def _service_client(
         self, sel: selectors.BaseSelector, sock: socket.socket, link: ClientLink
@@ -602,7 +656,7 @@ class NdjsonRpcEndpoint:
             self._drop_client(sel, sock, link)
             return
         link.buffer.extend(chunk)
-        while True:
+        while not link.closing:
             nl = link.buffer.find(LINE_TERMINATOR)
             if nl < 0:
                 if len(link.buffer) > MAX_LINE_BYTES:
@@ -621,19 +675,11 @@ class NdjsonRpcEndpoint:
     def _drop_client(
         self, sel: selectors.BaseSelector, sock: socket.socket, link: ClientLink
     ) -> None:
-        try:
+        with contextlib.suppress(KeyError, ValueError):
             sel.unregister(sock)
-        except (KeyError, ValueError):
-            pass
-        link.closing = True
-        try:
-            link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-        except queue.Full:
-            pass
-        try:
+        self._retire_outbound(link)
+        with contextlib.suppress(OSError):
             sock.close()
-        except OSError:
-            pass
         with self._clients_lock:
             self._clients.pop(sock, None)
         # Let the app release per-connection state (editor sessions etc.). On a

@@ -27,9 +27,9 @@ opaque id；shared traversal只轉送或保存它，不定義合法值。`allowe
 override與value `with_field`各只有一份generic實作。
 
 `zcu_tools.gui.cfg.lowering` 擁有 generic finished-cfg algorithm，public surface只有三個
-callable ports與三個操作：
+callable ports與四個操作：
 
-- `ExpressionResolver(expr) -> int | float`：解析單次 lowering綁定的 current context；
+- `ExpressionResolver(expr) -> int | float | complex`：解析單次 lowering綁定的 current context；
 - `ReferenceResolver(kind, key) -> str | None`：回傳 module/waveform concrete
   `CfgSectionSpec.label`，`None` 精確表示 live key missing；
 - `RangeFactory(start, stop, *, expts) -> object`：建立 app runtime range object；
@@ -37,6 +37,8 @@ callable ports與三個操作：
   kind，不在shared定義合法值；
 - `validate_finished_cfg(schema, *, resolve_reference)`：執行 static validation；
 - `lower_finished_cfg(...)`：固定執行 static → optional dynamic → lower。
+- `lower_resolved_cfg(schema, *, make_range)`：只消費已呈現的 resolved snapshot，不接
+  expression/reference resolver。
 
 shared core負責既有 path、`RuntimeError` text、first-error Fast Fail、numeric coercion、
 centered sweep contract、snapshot precedence與 drift warning。傳入 expression resolver時才
@@ -46,6 +48,12 @@ linked custom ref只按 embedded custom label選 allowed shape，不呼叫 refer
 library ref每個 validation/lowering stage都即時呼叫 resolver，不快取結果；live key不存在時
 維持 missing error，同名 key重現時重新 relink。resolver只決定 live key與 concrete shape，
 lowered內容仍取 embedded snapshot。app-owned conversion exception不包裝。
+
+Resolved-only lowering 先隔離複製 Spec/Value，以 cached scalar 值與各 reference 自身的
+resolved_label 形成 execution-local 值，再重用既有 static validation/lowering。Error、
+validation_error、缺少 resolved 值或 shape metadata 均拒絕，不靠 raw source 或 live catalog
+補解析。來源 schema 的 chosen key、raw、metadata 不變；range controls 不重新建構或推導。
+這是對明確 resolved snapshot 的操作，不取代 editor commit／Autofluxdep 的 live contract。
 
 `gui.cfg` 不 import `gui.app.*`、`experiment.*`、`meta_tool.*`、Qt、`notebook`或`device`，
 也不提供 `LoweringEnv`、process-global resolver registry或 environment lookup。
@@ -80,5 +88,5 @@ node builders不屬於本決策，維持 [[0043]] dataflow。
 - **把 `MetaDict` / `ModuleLibrary` 放進 shared core**：破壞 import purity與 app ownership。
 - **建立 broad `LoweringEnv`**：把三種獨立能力綁成難以驗證的 environment object。
 - **process-global resolver registry**：引入 import-order side effect與跨 session hidden state。
-- **只信 embedded reference snapshot**：破壞 live missing/relink與unsupported-shape contract。
+- **對 live lowering 只信 embedded reference snapshot**：破壞 live missing/relink與unsupported-shape contract。Resolved-only 入口另要求明確的 cached shape 與有效狀態。
 - **autofluxdep沿用 measure conversion**：保留 app-to-app dependency，讓兩個 app policy無法獨立演化。

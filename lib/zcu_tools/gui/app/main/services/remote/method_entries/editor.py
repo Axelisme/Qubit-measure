@@ -2,41 +2,38 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
+from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
-    _expected_versions,
     _json,
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "editor.new",
-        "editor:_h_editor_new",
+        "editor:h_editor_new",
         MethodSpec(
             5.0,
             "Open a stateful editing session over an EXISTING ModuleLibrary "
             "module/waveform (by 'from_name'). To create a new blank/shaped entry, "
             "use context.ml_create_from_role (e.g. role_id='pulse:blank' or a named role) "
             "then editor.new(from_name=name) to edit it. item_kind is 'module' or "
-            "'waveform'. Returns {editor_id, tree} (tree = the nested current-value "
+            "'waveform'. Returns {editor_id, tree} (tree = the complete cached cfg "
             "view, same shape as editor.get / tab.get_cfg).",
             (
                 _str("item_kind", "'module' or 'waveform'"),
                 _str("from_name", "Existing ml entry name to load for editing"),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_editor_open",
-                reason="folds editor.new tree reply into the editor cfg tool surface",
-            ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "editor.set_field",
-        "editor:_h_editor_set_field",
+        "editor:h_editor_set_field",
         MethodSpec(
             5.0,
             "Set one field in an editing session. 'path' must be a canonical dotted "
@@ -60,7 +57,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
             "list net settable paths a reference key switch ('<path>.ref') dropped/"
             "created so you need not re-list after a variant switch. To read cfg use "
-            "tab.get_cfg / editor.get (the nested current-value tree).",
+            "tab.get_cfg / editor.get (the complete cached observation).",
             (
                 _str("editor_id"),
                 _str("path", "Dotted field path"),
@@ -69,33 +66,31 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "JSON scalar, {__kind:eval, expr}, or {__kind:value_ref, key, type?}",
                 ),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_editor_set",
-                reason="batch MCP tool preserves ordered edits and untyped JSON value schema",
-            ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
+        "editor.set_fields",
+        "editor:h_editor_set_fields",
+        MethodSpec(
+            5.0,
+            "Apply ordered agent cfg edits to one existing editor draft. 'edits' "
+            "is [{path, value}] with canonical scalar/reference paths or a whole "
+            "sweep object at its parent path; GUI editor.set_field still uses leaf "
+            "sweep controls. On error stop without undoing the successful prefix "
+            "and name the failed path/applied count. Returns "
+            "{valid, removed, added, applied, actual}; 'actual' contains "
+            "normalized sweeps. This does not commit the ModuleLibrary item.",
+            (_str("editor_id"), _json("edits", "Ordered {path, value} edits")),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "editor.get",
-        "editor:_h_editor_get",
+        "editor:h_editor_get",
         MethodSpec(
             5.0,
-            "Read an editing session's settable cfg as a NESTED tree of current "
-            "values (the read-only view; edit a leaf with editor.set_field using the "
-            "leaf's dotted path). Node shape, distinguished by '$'-prefixed reserved "
-            "keys: a SCALAR leaf is its bare current value (null = unset); an ENUM "
-            "scalar leaf is {'$value': current, '$choices': [...]}; a SWEEP is a "
-            "sub-tree of bare edges {start, stop, expts, step} (each edge accepts "
-            "ONLY a number/int via editor.set_field — NOT an eval/ref); a REF node "
-            "(module/waveform/device selector) is {'$ref': {'current': <chosen>, "
-            "'options': [<names>]}, <chosen variant's settable sub-tree>} — only the "
-            "CURRENTLY-CHOSEN variant is expanded; 'options' lists bare names while "
-            "'current' may be a tagged internal key — switch by passing a bare "
-            "'options' name to editor.set_field on the ref's dotted path. "
-            "Any other dict is a plain section sub-tree (its keys are child fields). "
-            "'prefix' (optional, dotted) returns just the sub-tree rooted at that "
-            "node (a prefix at a sweep edge returns the whole sweep node); a prefix "
-            "matching nothing returns {}.",
+            CFG_OBSERVATION_DESCRIPTION,
             (
                 _str("editor_id"),
                 _str_opt(
@@ -104,18 +99,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "(e.g. 'modules.readout'); omit for the whole draft. No match → {}",
                 ),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_editor_get_cfg",
-                reason="renames tree reply to the agent-facing cfg shape",
-            ),
+        ),
+        agent=AgentMethodPolicy(
+            reveals=("editor:{editor_id}",), reveals_without=("prefix",)
         ),
     ),
     method_entry(
         "editor.commit",
-        "editor:_h_editor_commit",
+        "editor:h_editor_commit",
         MethodSpec(
             10.0,
-            "Save the editing session (from gui_editor_open) as a ModuleLibrary "
+            "Save the editing session (from rpc_call on editor.new) as a ModuleLibrary "
             "module/waveform: lower the session (eval expressions resolved against "
             "MetaDict to concrete numbers) and register it into the ModuleLibrary "
             "under 'name'. This is NOT 'apply a tab cfg edit' — tab cfg edits are "
@@ -125,19 +119,21 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("editor_id"),
                 _str("name", "ml entry name to register under"),
-                _expected_versions(),
             ),
-            tool_name="gui_editor_save",
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=("editor:{editor_id}", "context"), refresh_after_write=True
         ),
     ),
     method_entry(
         "editor.discard",
-        "editor:_h_editor_discard",
+        "editor:h_editor_discard",
         MethodSpec(
             5.0,
-            "Discard an editing session (from gui_editor_open) without writing to the "
+            "Discard an editing session (from rpc_call on editor.new) without writing to the "
             "ModuleLibrary. Returns {}.",
             (_str("editor_id"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

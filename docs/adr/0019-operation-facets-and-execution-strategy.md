@@ -28,7 +28,7 @@ status: accepted
 | facet | 語義 | 用者 |
 | --- | --- | --- |
 | **Exclusion** | 硬體互斥,能不能現在起（conflict matrix） | run / device |
-| **Handle** | poll / await / terminal outcome（= operation_id 本體） | run / analyze / interactive / device |
+| **Handle** | poll / await / terminal outcome（= operation_id 本體） | run / analyze / interactive / device / data・artifact save |
 | **Progress** | 可觀測進度（token-keyed `ProgressService`,既有） | run / device-setup |
 | **Cancel** | 中斷+取消（request → 驅動者自行 interrupt,持 stop_event） | run / device /（interactive 可選） |
 
@@ -47,10 +47,10 @@ status: accepted
 | FIT analyze | — | ✅ | — | — | OffMain-thread |
 | INTERACTIVE analyze | — | ✅ | — | (可) | **Main-thread-user-paced** |
 | device setup | ✅ | ✅ | ✅ | (可) | Blocking / OffMain |
-| save | — | — | — | — | OffMain（fire-forget） |
+| data / artifact save | — | ✅ | — | — | OffMain-thread（image export marshal 回 owner） |
 | auto-align | — | — | — | — | OffMain-pool（fire-forget） |
 
-**facet opt-in 是防 god-object 的關鍵**:save / auto-align 只有 strategy、沒 Handle/Progress/Cancel,不被逼長出用不到的東西。「每個 op 都一樣」指**同一組 facet 可任意組合**,不是「每個都有全部」。
+Data save 與 artifact batch save 使用 Handle 等待真實存檔完成，不使用 Exclusion、Progress 或 Cancel。Batch 依 analysis→post→data 執行；影像匯出經既有 OwnerScheduler 回 owner thread，data adapter I/O 留在 worker。成功後才更新 artifact 的 last_saved_path；失敗保留先前成功紀錄。OperationOutcome 不保存檔案 payload，路徑由 artifact 查詢。Auto-align 仍只有 strategy。Facet opt-in 表示每種 operation 只選需要的能力，不要求全部綁定。
 
 ### 二、Handle / lifecycle 從 gate 拆成正交 sibling（取代 [[0003]] §一綁死）
 
@@ -72,11 +72,11 @@ status: accepted
 
 - **不建正式 `ExecutionStrategy` class 階層**:strategy 選擇留 domain service(本就是知情 orchestrator),抽 Strategy 物件對 ~5 個 call site 是 over-abstraction(同 [[0003]] 防過度設計精神)。
 - **gate 不 wrap bg**:Exclusion / Handle / Execution 三正交,service 組合,互不巢狀。
-- **不強制所有 op 有 Handle**:save / auto-align 只有 strategy。
+- **不強制所有工作有 Handle**：data save 與 artifact batch 使用 Handle 等待完整工作；auto-align 只有 OffMain-pool strategy。既有單項同步 image export 入口不建立 handle，不等同可含 image 的 batch operation。
 
 ## 替代方案與否決理由
 
-- **gate 作 bg 的使用方,外包 Lease/Lock**:把正交三軸綁成巢狀;interactive(Exclusion❌ Handle✅) 與 save/auto-align(Exclusion❌ Execution✅) 證明正交;且終端 domain 邏輯(writeback/State)必須留 service,gate 驅動 bg 會逼出 gate→service 反向回呼。否決 → 三 sibling 由 service 組合。
+- **gate 作 bg 的使用方,外包 Lease/Lock**:把正交三軸綁成巢狀;interactive 與 data save（Exclusion❌ Handle✅），以及 auto-align（Exclusion❌ Handle❌ Execution✅）證明正交;且終端 domain 邏輯(writeback/State)必須留 service,gate 驅動 bg 會逼出 gate→service 反向回呼。否決 → 三 sibling 由 service 組合。
 - **正式 ExecutionStrategy 多型階層**:domain service 已知情,Strategy 物件徒增 indirection。否決。
 - **interactive widget 持整個 ctrl**(類比「View 持 ctrl」):寬依賴滿足窄需求,7 個 widget 測試要 ctrl,bg.submit API 漏進 View widget;且該 widget 今天**對 ctrl 下零命令**(拖線/action→session、Done→注入 callback),是 passive host 非 command surface。否決 → 窄 `InteractiveHostEnv` port。
 - **liveplot backend 與 routing 拆成兩個 scope**:co-dependent —— `QtLivePlotBackend.make_plot_frame`→`plt.subplots`→`require_current_container()`,沒 routing 直接 crash;analyze 只設 routing 不設 liveplot,只因它從不呼 liveplot API(no-op),非需要解耦。否決 → 同一 `figure_container` facet。

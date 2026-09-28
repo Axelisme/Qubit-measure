@@ -19,16 +19,14 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     ExpContext,
     NoAnalyzeParams,
-    RunRequest,
-    require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
+    EvalValue,
+    ScalarSpec,
     SweepValue,
 )
 
-from .._shared import read_ge_centers, readout_probe_freq
+from .._shared import readout_probe_freq
 
 MistPowerRunResult: TypeAlias = PowerResult
 
@@ -57,11 +55,11 @@ class MistPowerAdapter(
             "already populations (no per-point fit)."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; the run "
-            "classifies each shot against them and fast-fails if any is "
-            "missing. Optionally reads 'confusion_matrix' (readout correction) "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. The run classifies each "
+            "shot using these values; missing or invalid cfg calibration fails "
+            "before hardware. Optionally reads 'confusion_matrix' (readout correction) "
             "and 'ac_stark_coeff' (rescales the x-axis to photon number) at "
             "analyze time, and 't1' to set the relax delay; 'readout_f' or "
             "'r_f' plus 'res_ch' seed the probe drive."
@@ -75,7 +73,7 @@ class MistPowerAdapter(
             "No writeback — the population curves are read off the plot by eye."
         ),
         recommended=(
-            "Run after 'singleshot/ge' has calibrated the discrimination. Sweep "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep "
             "the probe gain across the MIST onset; provide 'ac_stark_coeff' "
             "(from the AC-Stark experiment) for a photon-number x-axis."
         ),
@@ -106,19 +104,25 @@ class MistPowerAdapter(
                 label="Probe gain (a.u.)",
                 default=SweepValue(start=0.0, stop=1.0, expts=151),
             )
+            .field(
+                "g_center",
+                spec=ScalarSpec("Ground center", complex),
+                default=EvalValue("g_center"),
+            )
+            .field(
+                "e_center",
+                spec=ScalarSpec("Excited center", complex),
+                default=EvalValue("e_center"),
+            )
+            .field(
+                "radius",
+                spec=ScalarSpec("Classification radius", float),
+                default=EvalValue("ge_radius"),
+            )
             .reps(1000)
             .rounds(100)
             .build()
         )
-
-    def run(self, req: RunRequest, schema: CfgSchema) -> MistPowerRunResult:
-        # Override the standard run path: the domain run needs the GE
-        # classification trio (not in cfg) — read it from md and forward it.
-        soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
-        cfg = self.build_exp_cfg(raw_cfg, req)
-        g_center, e_center, radius = read_ge_centers(req.md)
-        return PowerExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 

@@ -48,8 +48,11 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
+    from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+
     result = adapter.run(
-        RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+        RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
+        schema_to_raw_dict(schema, ctx.md, ctx.ml),
     )
     analyze_result = adapter.analyze(
         AnalyzeRequest(

@@ -11,10 +11,10 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import render_view
+from ._common import follow_tab, render_view
 
 
-def _h_tab_new(
+def h_tab_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["adapter_name"])
@@ -24,17 +24,35 @@ def _h_tab_new(
     return {"tab_id": tab_id}
 
 
-def _h_tab_close(
+def h_tab_open_file(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    from dataclasses import asdict
+
+    name = str(params["adapter_name"])
+    if name not in adapter.ctrl.get_adapter_names():
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
+    return asdict(
+        adapter.tab_control.open_tab_from_file(name, str(params["data_path"]))
+    )
+
+
+def h_tab_close(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    from .lifecycle import require_idle, require_saved
+
+    require_idle(adapter, tab_id)
+    if not params["discard_unsaved"]:
+        require_saved(adapter, [tab_id])
     adapter.tab_control.close_tab(tab_id)
     return {"ok": True}
 
 
-def _h_tab_set_active(
+def h_tab_set_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -44,7 +62,7 @@ def _h_tab_set_active(
     return {"ok": True}
 
 
-def _h_tab_list_all(
+def h_tab_list_all(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -58,7 +76,7 @@ def _h_tab_list_all(
         for tid in adapter.tab_control.list_tab_ids()
     ]
     # active_tab_id is a view projection (which tab the user is focused on),
-    # sourced from the same RenderView snapshot _assemble_overview reads.
+    # sourced from the RenderView snapshot, separate from the status tool.
     active_tab_id = render_view(adapter).get_view_snapshot().get("active_tab_id")
     return {
         "tabs": tabs,
@@ -74,6 +92,9 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
     # only one that leaves them None, and it never hits the wire).
     assert interaction is not None
     assert snap.run is not None
+    assert snap.analysis is not None
+    assert snap.post_analysis is not None
+    versions = adapter.ctrl.resources_versions()
     return {
         "tab_id": tab_id,
         "adapter_name": adapter.tab_control.get_tab_adapter_name(tab_id),
@@ -91,14 +112,44 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "has_soc": bool(interaction.has_soc),
             "has_run_result": bool(interaction.has_run_result),
             "has_analyze_result": bool(interaction.has_analyze_result),
+            "has_post_analyze_result": bool(interaction.has_post_analyze_result),
             "has_figure": bool(interaction.has_figure),
         },
         "save_paths": _save_paths_wire(snap.paths),
+        "artifacts": [
+            {
+                "kind": artifact.kind.value,
+                "status": artifact.status.value,
+                "default_path": artifact.default_path,
+                "last_saved_path": artifact.last_saved_path,
+                "is_saveable": artifact.is_saveable,
+            }
+            for artifact in snap.artifacts
+        ],
         "result_source_path": snap.run.source_path,
+        # Revisions distinguish replacements even when availability and source
+        # path stay unchanged. Payload arrays remain with the application owner.
+        "result_state": {
+            "revision": versions.get(f"tab:{tab_id}:result", 0),
+            "available": snap.run.result is not None,
+            "source_path": snap.run.source_path,
+        },
+        "analysis_state": {
+            "revision": versions.get(f"tab:{tab_id}:analyze", 0),
+            "available": snap.analysis.result is not None,
+            "has_figure": snap.analysis.figure is not None,
+            "has_writeback_draft": snap.analysis.has_writeback_draft,
+        },
+        "post_analysis_state": {
+            "revision": versions.get(f"tab:{tab_id}:post_analyze", 0),
+            "available": snap.post_analysis.result is not None,
+            "has_figure": snap.post_analysis.figure is not None,
+            "has_writeback_draft": snap.post_analysis.has_writeback_draft,
+        },
     }
 
 
-def _h_tab_snapshot(
+def h_tab_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Always returns {tabs: [...]} (a single tab_id yields a one-element list);
@@ -125,20 +176,16 @@ def _save_paths_wire(paths) -> dict[str, str | None] | None:
     }
 
 
-def _h_tab_get_cfg(
+def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..path_resolver import build_settable_tree
+    from ..cfg_observation import build_cfg_observation
 
     tab_id = str(params["tab_id"])
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    # A tab's cfg draft is a CfgEditorService session keyed by its tab_id (the
-    # same draft the open form attaches to). Build the settable tree off that
-    # session's live root — the one tab.set_cfg/editor.set_field mutates — so
-    # the tree mirrors exactly what can be edited and agent+user share one model
-    # (ADR-0013 F11). Leaf values come straight off the live tree
-    # (ADR-0010: None = unset).
+    # Read the same service-owned draft as the form, including locked fields
+    # and cached input state. A read never resolves live sources.
     editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
     if editor_id is None:
         raise RemoteError(
@@ -148,10 +195,10 @@ def _h_tab_get_cfg(
     raw_prefix = params.get("prefix")
     prefix = str(raw_prefix) if raw_prefix else None
     draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
-    return {"tree": build_settable_tree(draft, prefix=prefix)}
+    return {"tree": build_cfg_observation(draft, prefix=prefix)}
 
 
-def _h_tab_set_cfg(
+def h_tab_set_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -183,4 +230,7 @@ def _h_tab_set_cfg(
                 f"edits[{i}] must be an object with 'path' and 'value'",
             )
         edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-    return adapter.ctrl.cfg_editor_set_fields(editor_id, edits).to_wire()
+    follow_tab(adapter, tab_id, "run")
+    return adapter.ctrl.cfg_editor_set_fields(
+        editor_id, edits, agent_edit=params.get("agent_edit") is True
+    ).to_wire()

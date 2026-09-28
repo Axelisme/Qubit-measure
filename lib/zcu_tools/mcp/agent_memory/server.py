@@ -34,7 +34,7 @@ _BOOTSTRAP["bootstrap_standalone_server"](
 # remote layer, not a leaf.
 from zcu_tools.mcp.agent_memory.method_specs import METHOD_SPECS  # noqa: E402
 from zcu_tools.mcp.agent_memory.store import MemoryStore  # noqa: E402
-from zcu_tools.mcp.core.bridge import (  # noqa: E402
+from zcu_tools.mcp.core.stdio_server import (  # noqa: E402
     McpServerConfig,
     assemble_tools,
     generate_tools,

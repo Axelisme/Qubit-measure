@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-26 — canonical load and flux interactive adapters
+**Last updated:** 2026-09-28 — frozen Run, canonical load, and flux interactive adapters
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -54,12 +54,13 @@ Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 imp
 （例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
 `gui/app/main/README.md`。
 
-`BaseAdapter.build_exp_cfg` 是 GUI run path 的 cfg materialization seam：adapter 先用
-`gui.app.main.adapter.lowering.schema_to_raw_dict(schema, req.md, req.ml)` 在 GUI adapter
-層完成 EvalValue / md lowering，再把
-concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
-assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active
-`ml/md` 綁進長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
+GUI 的 `GuardService.acquire_run_permit` 在接受 Run 時凍結 tab 已呈現的 resolved cfg，
+不重新從 live md/ml 解析 expression 或 reference。`BaseAdapter.build_exp_cfg` 接收這份
+raw cfg；預設以 `ml=None` 和 `RunRequest.device_snapshot` 呼叫
+`assemble_experiment_cfg`。不要把 active `ml/md` 綁進長壽 service object，也不要讓
+`ModuleLibrary` store 擁有 live device snapshot。Analyze 與 load 有各自的 context 契約，
+不能據此推論 Run 會重讀 md/ml。
+
 generic model/default/inheritance與validation/lowering直接從`zcu_tools.gui.cfg`匯入；measure
 entry point只組current md expression、measure module shape與`SweepCfg` ports。measure adapter
 facade只提供framework contract、request/result/writeback/analyze params與session signature
@@ -111,7 +112,7 @@ adapter-defined top-level knobs以generic scalar/`field` verb按GUI顯示順序�
 ExpCfg欄位，也可以是run-only adapter欄位。正式欄位正常lower到
 ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內讀取後 pop 掉。
 `onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
-結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
+結構。`homophasal.r_f` / `rf_w` / `theta0` 是正式校正欄位的 GUI 輸入，預設合法空值，可填 direct 或 expression。通用 lowering 不忽略任一模式下的解析錯誤；linear 不使用合法校正值，homophasal 由 adapter Run 路徑重用 domain model 檢查必要值與正值條件，早於 device I/O。不從 live md 注入校正、不增加 conditional section。
 `twotone/time_domain/t1` 的 `uniform` 是 run-only 欄位：預設 `True` 使用線性 delay
 sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
 沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
@@ -133,7 +134,9 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
 adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
 adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
-直接回報原始錯誤。load 不把 `result.cfg_snapshot` 反填回 Config tab；
+直接回報原始錯誤。`BaseAdapter.load` 本身只讀取結果，不修改 tab cfg。
+GUI 的 `LoadService.load_result` 會嘗試將相容的 `result.cfg_snapshot` 反填到 tab 與
+Config editor；缺少或不相容快照時，tab cfg 維持原值。
 `cfg_snapshot is None` 時 module writeback 維持 graceful skip。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
@@ -168,6 +171,11 @@ opaque draft，adapter不接觸Writeback implementation。
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 `singleshot/amp_rabi`沒有此選項，固定用無衰減joint fit。此選擇不屬於量測cfg，
 不改變raw-IQ acquisition。
+
+`singleshot/amp_rabi` 的 `g_center`、`e_center` 與 `radius` 是正式 experiment cfg 欄位，
+預設以一般 expression 引用 md 的 g_center/e_center/ge_radius，缺值保持 invalid。
+Operator 可切換 direct complex 值；adapter 沿用 BaseAdapter.run，不另外傳入校正參數。
+Result cfg_snapshot 包含實際使用的三個值；其他 singleshot 的遷移不由此段宣稱完成。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，

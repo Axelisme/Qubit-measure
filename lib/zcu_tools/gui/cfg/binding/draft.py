@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from ..model import CfgSchema
 from .fields import CallbackList, SectionField
+from .observation import CfgNodeObservation, observe_cfg
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
-from .targets import SettableTarget, iter_settable_targets, resolve_settable_target
+from .targets import (
+    AgentSweepTarget,
+    SettableTarget,
+    iter_settable_targets,
+    resolve_agent_target,
+    resolve_settable_target,
+)
 
 
 class CfgDraft:
@@ -39,6 +46,11 @@ class CfgDraft:
         self._require_open()
         return CfgSchema(spec=self._root.spec, value=self._root.get_value())
 
+    def observe(self) -> CfgNodeObservation:
+        """Read complete cached model state, including non-editable fields."""
+        self._require_open()
+        return observe_cfg(self._root)
+
     def is_valid(self) -> bool:
         self._require_open()
         return self._root.is_valid()
@@ -46,6 +58,10 @@ class CfgDraft:
     def resolve_target(self, path: str) -> SettableTarget:
         self._require_open()
         return resolve_settable_target(self._root, path)
+
+    def resolve_agent_target(self, path: str) -> SettableTarget | AgentSweepTarget:
+        self._require_open()
+        return resolve_agent_target(self._root, path)
 
     def iter_settable_targets(self):
         self._require_open()

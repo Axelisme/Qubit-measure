@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — interactive analysis（WIRE 57）
+**Last updated:** 2026-09-28，writeback, interactive, and artifact save integration
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -19,15 +19,15 @@ not declare MCP tools and does not own stdio transport.
   `METHOD_REGISTRY` import path stable.
 - `handlers/`：grouped wire method handlers bound to controller, control facets,
   or render-view calls.
-- `method_specs.py`：Qt-free public projection for wire method schema, timeouts,
-  and MCP generation metadata.
+- `method_specs.py`：Qt-free projection for wire method schema and timeouts.
 - `method_entries/`：single registration source for method name, handler ref,
-  `MethodSpec`, MCP exposure policy, and `ParamSpec` shorthands. Handler refs
-  are resolved only by the dispatch projection.
+  `MethodSpec`, agent exposure/guard policy and `ParamSpec` shorthands. The
+  `rpc.catalog` projection uses those same entries; handler refs are resolved
+  only by dispatch.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
-- `path_resolver.py`：dotted-path mutation and settable-tree projection for
-  cfg-editor sessions.
+- `path_resolver.py`：flat mutation-target projection for cfg-editor sessions.
+- `cfg_observation.py`：complete cached cfg observation and prefix projection.
 - `wire_version.py`：measure-gui wire contract version and GUI code revision.
 
 Shared transport primitives live in `zcu_tools.gui.remote`: NDJSON framing,
@@ -45,10 +45,21 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
-- Line size is bounded by UTF-8 byte length.
+- Request and response lines allow up to 8 MiB of UTF-8 bytes, excluding the
+  newline. There is no chunking protocol. Unencodable replies return a bounded
+  `internal` error with reason `response_encoding_failed`. The handler may have
+  executed, so callers must inspect state before retrying a mutation. If the
+  fallback cannot fit or the reply queue rejects delivery, the connection closes.
+  Each client has a 16 MiB encoded-byte budget including its in-flight frame;
+  exceeding it closes that client and releases its backlog. MCP rejects oversized
+  requests before sending and closes on oversized incoming frames with an explicit error.
+- A failed full read does not advance the MCP observation baseline. Large context
+  export is not a framing exception or an implicit partial read.
 - Error codes are closed and typed in `gui.remote.errors`.
 - `wire.version` is available before auth; all other methods require auth when a
-  token is configured.
+  token is configured. MCP `connect(token=...)` authenticates before catalog
+  loading and reuses the credential after a GUI restart; failed auth is not a
+  wire-version mismatch.
 - Loopback without token means any same-user local process can control the GUI.
 
 ## Dispatch And Threads
@@ -102,12 +113,8 @@ subscription only after its close push is accepted by that client's queue.
 
 Diagnostics are separate from EventBus. The controller pushes diagnostics to the
 remote adapter sink, which broadcasts diagnostic payloads to clients regardless
-of subscription. MCP keeps diagnostics in a dedicated queue and automatically
-subscribes to the existing low-frequency event catalog; both queues piggyback on
-the next successful tool reply.
-
-Agent-visible async completion comes from `gui_op_poll` / `gui_op_wait`, not
-from resource-change events.
+of subscription. Measure MCP does not subscribe, queue or piggyback events.
+Agent-visible async completion comes from operation request/reply, not pushes.
 
 ## Version Handshake
 
@@ -118,8 +125,45 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 57`, `GUI_VERSION = 80`, and
-`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 57新增 GUI-side `tab.interact`；GUI 80將 Auto Align 的 single-flight/background delivery 交給同一 plugin，GUI 和 remote 共用。此 method 是 internal，沒有新增 MCP tool。原subtab-qualified pane locator、writeback與save contract維持不變。
+Current measure-gui values are `WIRE_VERSION = 71`, `GUI_VERSION = 103`, and
+`MCP_VERSION = 95` (defined in `zcu_tools.mcp.measure.server`). MCP 95 finalizes
+shared-state workflow and interactive concurrency guidance. WIRE 71 exposes
+shared interactive plugin commands and terminal replies. GUI 103 owns interactive
+sessions and command view follow; MCP 94 adds the fixed `tab_interact` tool.
+WIRE 70 exposes
+shared artifact status, batch save operations and guarded close/shutdown replies.
+GUI 102 tracks ordered saves and actual output paths; MCP 93 adds save, close and
+graceful shutdown tools. WIRE 69 adds
+complete writeback previews and identity-preserving batch results. GUI 101 applies
+explicit items through shared drafts and follows their pane; MCP 92 forwards the
+writeback tool to that owner. WIRE 68 exposes analysis parameters and invalidation
+facts; GUI 100 owns analysis validation and explicit pane following; MCP 91 adds
+run/analyze tools with bounded waits. WIRE 67 adds
+aggregate cfg edits and `context.ml_edit`; GUI 99 owns sequential library
+commits through the shared draft model and preserves batch error categories.
+MCP 90 exposes cfg/library tools and reports partial commits. WIRE 66 moves
+seen guards into the GUI, removes wire expectations and write receipts, exposes
+operation state in snapshots, and adds `tab.open_file`. GUI 98 owns new-tab
+loading and failure cleanup; MCP 89 forwards once without version bookkeeping.
+WIRE 65 adds State-cached device fields to snapshots during setup. WIRE 64 exposes
+predictor calibration; GUI 96 routes it through the shared predictor port.
+GUI 93 removes
+Run's context-content dependency after freezing cfg and device inputs; tab cfg,
+tab existence, SoC, devices and hardware exclusion remain protected. WIRE 63
+carries complete cached cfg observations; GUI 92 bounds response encoding failures.
+WIRE 62 adds
+`context.snapshot`, conditional full-read policy and certified resource creation
+to the live catalog. GUI 90 declares those policies; MCP 82 consumes them.
+GUI 89 reports
+an already failed operation as `operation_failed` on cancel, rather than
+`finished`; MCP 81 likewise reports failure when the short cancellation wait
+observes a failed outcome. GUI 88 made domain cancel RPCs internal in the MCP
+catalog and bounded `notify.await` to 600 seconds. GUI 87 corrected no-project
+RPC guidance. WIRE 61 adds
+`__agent_write_versions` to replies for catalog-declared writes: each changed
+resource carries its versions before and after that handler on the owner thread.
+WIRE 60 adds `rpc.catalog.reveals_without` for partial reads; MCP samples the
+resource version before a full read and records it only after success.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -128,28 +172,54 @@ reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
 ## Resource-Version Guard
 
 The GUI maintains a monotonic resource version table for context, SoC, devices,
-tabs, results, save paths, and editor sessions. Guarded mutation methods accept
-wire-hidden `expected_versions`; the remote adapter compares them atomically on
-the State owner thread before calling the controller.
+tabs, results, save paths, and editor sessions. Each remote connection starts with
+an empty seen map. The adapter compares it with current versions on the State
+owner thread before calling the controller. Missing observations, including
+version zero, are stale. Wire methods do not accept `expected_versions`.
 
-MCP owns the agent baseline:
+Run uses the observed cfg and device snapshots, not live md/ml. Its guard does
+not require exporting the entire context. Load, editor commit and writeback still
+use live context and retain their context guard; Run's change does not authorize
+removing those dependencies.
 
-- guarded mutations send expected versions derived from policy tables;
-- successful writes refresh the baseline;
-- pure reads refresh only keys they fully reveal;
-- stale rejection is translated into semantic tool errors for the agent.
+GUI owns observation and write tracking:
 
-Version numbers are a bridge concern. Agents see stale-resource descriptions, not
-raw counters.
+- Successful full reads record only the keys named by `reveals`. Optional partial
+  parameters, including an explicit empty `prefix`, do not reveal the whole cfg.
+  The dispatcher preserves the original request to distinguish omission from defaults.
+- Successful writes advance only previously seen resources whose observations
+  match the handler's before-versions. Unseen consequential changes stay unseen.
+  New-tab identity certifies existence only, not cfg/result/analysis.
+- Handler failure or timeout does not establish seen. Reply encoding failure
+  rolls back its observation update on the owner thread before the next request.
+  This is not rollback of business effects or proof of client receipt.
+- `tab.snapshot(tab_id)` reveals existence, result/analysis/post revisions,
+  availability and effective paths. It does not serialize raw result arrays or
+  claim cfg/writeback contents. The all-tabs index reveals no per-tab state.
+- `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot` reveals
+  the active label and complete serializable md/ml contents. Encoding failure
+  does not establish a baseline. These replies may be large or sensitive.
+- Off-main methods cannot declare guard/reveals or owner-thread write tracking.
+  Disconnection discards seen; reconnection requires explicit new reads.
+
+MCP forwards each RPC once and returns observed operation state to the agent.
+It does not keep a second seen map, consume write receipts, or perform hidden
+pre-reads to unlock a mutation. Snapshot revisions distinguish successive results,
+including replacements from the same source file.
 
 A stale guarded mutation has one wire-level recovery contract. The server returns
 `PRECONDITION_FAILED` with `data={"stale": [...]}`, where `stale` lists every
 resource whose current version no longer matches the caller baseline. The client
 must re-snapshot each listed resource through its corresponding read method,
-refresh those baselines, and then retry the mutation with fresh
-`expected_versions`. It must not retry against the old snapshots. Stale conflicts
+then decide whether to retry. It must not retry against the old snapshots. Stale conflicts
 do not add another `ErrorCode`; a future Web adapter may translate this existing
 failure into an HTTP-specific status without changing the wire enum (ADR-0052).
+
+`tab.open_file` creates a new tab and reuses the application load operation,
+including cfg backfill, cleanup on load failure and focus restoration. It requires
+an explicitly observed context, not observations of a tab that does not yet exist.
+Backfill failure retains the result and reports `not_applied`; cleanup failure
+reports `cleanup_failed`. Existing-tab `tab.load_data` keeps its stricter guards.
 
 ## Method Surface
 
@@ -162,30 +232,42 @@ The wire surface is grouped by ownership:
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
   `PredictorControlPort`.
-- `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save (data via `tab_id` only; image via `(tab_id, subtab_id)` with `analysis|post_analysis`) and figures via `(tab_id, subtab_id)` (`run` reads live FigureContainer, `analysis`/`post_analysis` read canonical State figures). `tab.snapshot.save_paths` projects independent `data_path`、`analysis_image_path`與`post_analysis_image_path`; save calls accept optional one-shot destinations, and there is no combined remote path setter.
+- `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save (data via `tab_id` only; image via `(tab_id, subtab_id)` with `analysis|post_analysis`) and figures via `(tab_id, subtab_id)` (`run` reads live FigureContainer, `analysis`/`post_analysis` read canonical State figures). `tab.snapshot.save_paths` projects independent `data_path`、`analysis_image_path`與`post_analysis_image_path`; explicit save destinations update the shared GUI drafts. `tab.save_artifacts` submits one application-owned operation for data/analysis/post keys, returns reserved destinations plus an operation id, and guards the observed result, analysis and path resources. Reserved paths are not completion evidence; terminal success and artifact snapshots establish saved results.
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
-- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；取消沿用 `analyze.cancel`。figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。`expected_versions` 沿用 owner-loop guard。此 GUI-side method 不生成 MCP tool。
+- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；取消沿用 `operation.cancel` 的既有 domain hook。figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。此互動介面採 best-effort：不檢查 seen，仍驗 active session、命令及 terminal lifecycle；後提交者為準，不接受 `expected_versions`。固定 MCP `tab_interact` 轉送此 method；命令在執行前 follow Analysis pane，讀取不切頁。
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active ExpContext projection at reply time).
 - `editor.*`：headless cfg-editor session lifecycle.
-- `operation.*` / `notify.*`：generic waits, polls, progress, prompt replies.
+- `operation.*` / `notify.*`：live operation indexing, bounded wait, domain-owned cancellation, progress and prompt replies.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
-Subtab locator is required and closed (`run|analysis|post_analysis`); save_image only `analysis|post_analysis`; legacy `tab.get_current_figure`, `tab.save_post_image`, `tab.save_result` and omitted-subtab fallback are removed (clean break, no alias). MCP convenience bundles (`gui_tab_run`→`run`, `gui_tab_analyze`/`gui_tab_analyze_review`→`analysis`, `gui_tab_post_analyze_start`→`post_analysis`) query the pane they just operated on, and `gui_tab_get_figure`/`gui_tab_save_data`+`gui_tab_save_image`/`gui_tab_writeback_*` use the same qualified wire forms (no `gui_tab_save` bundle, no `gui_tab_commit`).
-
-`method_entries/` is the registration SSOT. Adding an agent-visible method
-requires one entry containing the wire method name, handler ref, method spec, MCP
-mapping or override, and tests for generation / guard policy. `method_specs.py`
-remains the Qt-free public projection used by MCP generation.
+Subtab locator is required and closed (`run|analysis|post_analysis`); save_image
+only accepts `analysis|post_analysis`. `method_entries/` owns the wire method
+name, handler ref, schema, agent exposure and guard/reveal/operation policy.
+Adding a wire method requires one entry; MCP receives the projection through
+`rpc.catalog` after its version handshake. Descriptions direct the caller to
+currently available `rpc_call` methods and to `wait(op)` for asynchronous
+terminal status, not removed aliases. No tool inventory is generated from
+`MethodSpec`.
 
 ## Cfg Editing
 
-`path_resolver.py`只把binding `SettableTarget`投影成flat/tree wire view與prefix query，禁止
-field/editor subtype grammar。Setter只接受listing canonical leaf；legacy `.sweep.*`/`.value.*`
-zero-mutation拒絕並給replacement。Tab/writeback成功batch回final net path diff。
+`path_resolver.py` projects nominal `SettableTarget` entries for mutations and path
+changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
+field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
-`tab.get_cfg` returns the nested settable value tree for discovery. Mutations use
-dotted paths through `tab.set_cfg` or `editor.set_field`.
+`tab.get_cfg`, `editor.get`, and `editor.new` return the same typed `tree` format.
+Nodes contain kind/path/label/valid. Sections and active references have named
+children, including locked literals. Scalar/literal input and sweep inputs retain
+mode/raw/resolved/error/validation_error. Reference nodes include their chosen key,
+cached shape label, error, override flag, and choices. Reads do not resolve sources.
+Unknown objects, non-string object keys, and nonfinite numbers fail serialization;
+complex numbers use the shared reversible tag, with no string fallback.
+
+Prefix reads select a node while preserving its full path; sweep edges and reference
+keys select their parent node. Unknown prefixes return an empty object. Only a
+successful read with no prefix parameter establishes the full cfg observation.
+Wire keys children/input/inputs are not mutation-path segments.
 
 Scalar values may be direct values, tagged eval values, or tagged value refs.
 Eval values store a resolved snapshot at set/lower time. Value refs resolve once
@@ -204,10 +286,17 @@ before editing.
 
 ## Operation Handles
 
-Start methods return operation ids on the wire. MCP captures those ids and
-returns opaque handles to the agent. Generic poll/wait reports status, progress,
-user feedback, cancellation, timeout, or failure; figures, summaries, and device
-snapshots are read through typed getters after completion.
+Start methods return GUI-local operation ids on the wire. The GUI projects active
+run, analyze and device ids from their owners, regardless of who started them.
+MCP assigns session-local opaque integer handles to both started and discovered
+operations; a GUI restart can reuse a wire id but cannot reuse an exposed MCP
+handle. `operation.await` reads the shared handle channel off-main and rejects
+unknown or evicted GUI ids. `operation.cancel` runs on the owner thread and uses
+the domain cancel hook; a non-cancellable operation fails with `not_cancellable`.
+MCP uses `cancel(op)` alone. The domain-specific wire cancellation methods remain
+available to other socket consumers but are absent from its live catalog.
+MCP `wait` reports status, progress, user feedback, timeout or failure as data;
+figures, summaries and device snapshots come from typed getters after completion.
 
 `soc.connect` is synchronous and does not enter the operation-handle table.
 
@@ -218,5 +307,5 @@ Shutdown flows through the same MainWindow close path as the UI, persists state,
 marks the controller shutting down, stops the remote service, and then closes Qt
 resources.
 
-`gui_launch` starts a new GUI process and expects the requested port to be free.
-`gui_bridge_connect` attaches to an already-running GUI.
+The MCP `connect` tool attaches to an existing GUI or explicitly launches one;
+exiting MCP disconnects without closing the GUI.

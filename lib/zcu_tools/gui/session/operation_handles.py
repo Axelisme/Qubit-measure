@@ -312,6 +312,8 @@ class OperationChannel:
 class _OperationRecord:
     channel: OperationChannel
     origin: EventOrigin
+    started_at: float
+    finished_at: float | None = None
 
 
 class OperationHandles:
@@ -343,7 +345,9 @@ class OperationHandles:
         token = self._next_token
         self._next_token += 1
         self._live[token] = _OperationRecord(
-            channel=OperationChannel(cancel_hook), origin=origin
+            channel=OperationChannel(cancel_hook),
+            origin=origin,
+            started_at=time.monotonic(),
         )
         logger.debug("operation create: token=%d", token)
         return token
@@ -358,6 +362,14 @@ class OperationHandles:
         if record is None:
             raise KeyError(f"unknown or evicted operation token: {token}")
         return replace(record.origin, operation_id=str(token))
+
+    def elapsed_seconds(self, token: int) -> float | None:
+        """Elapsed lifetime of one known operation, independent of its bars."""
+        record = self._record(token)
+        if record is None:
+            return None
+        end = record.finished_at if record.finished_at is not None else time.monotonic()
+        return max(0.0, end - record.started_at)
 
     def settle(self, token: int, outcome: OperationOutcome) -> None:
         """Mark the operation terminal: settle its channel and retain (LRU).
@@ -387,7 +399,7 @@ class OperationHandles:
             )
         record.channel.settle(outcome)
         # Publish to _done first, then retract from _live (never "neither").
-        self._done[token] = record
+        self._done[token] = replace(record, finished_at=time.monotonic())
         self._live.pop(token, None)
         # The just-settled token is most-recent, so LRU eviction never drops it.
         while len(self._done) > _DONE_EVENT_LIMIT:
@@ -457,6 +469,25 @@ class OperationHandles:
             # Unknown token: treat as already-done (finished).
             return AwaitResult(reason="completed", outcome=OperationOutcome("finished"))
         return record.channel.consume(timeout)
+
+    def await_known_outcome(self, token: int, timeout: float) -> AwaitResult:
+        """Await one known handle. Unknown/evicted tokens are errors, not success.
+
+        Resolve the record once before blocking so LRU eviction of other done
+        handles cannot turn a valid in-flight wait into an invented outcome.
+        The older await_outcome/poll contract remains available to other apps.
+        """
+        record = self._record(token)
+        if record is None:
+            raise KeyError(f"unknown or evicted operation token: {token}")
+        return record.channel.consume(timeout)
+
+    def known_outcome(self, token: int) -> OperationOutcome | None:
+        """Non-blocking pending/terminal read that rejects unknown handles."""
+        record = self._record(token)
+        if record is None:
+            raise KeyError(f"unknown or evicted operation token: {token}")
+        return record.channel.settled_outcome()
 
     def poll(self, token: int) -> OperationOutcome | None:
         """Non-blocking: outcome if settled, None if still pending, default

@@ -39,6 +39,8 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    FloatSpec,
+    IntSpec,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -700,4 +702,47 @@ def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any)
         soccfg=ctx.soccfg,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         **kw,
+    )
+
+
+def sectioned_test_schema() -> NodeCfgSchema:
+    return sectioned_node_schema(
+        (
+            node_section(
+                "sweep",
+                "Sweep",
+                node_field(
+                    "detune_sweep",
+                    "detune",
+                    SweepSpec(label="Detune"),
+                    SweepValue(start=-20.0, stop=50.0, expts=141),
+                ),
+            ),
+            node_section(
+                "acquire",
+                "Acquisition",
+                node_field(
+                    "reps",
+                    "reps",
+                    IntSpec("Reps"),
+                    1000,
+                ),
+                node_field(
+                    "earlystop_snr",
+                    "earlystop_snr",
+                    FloatSpec("Early-stop SNR", optional=True),
+                    50.0,
+                ),
+            ),
+            node_section(
+                "drive",
+                "Drive",
+                node_field(
+                    "qub_gain",
+                    "gain",
+                    FloatSpec("Gain"),
+                    0.05,
+                ),
+            ),
+        )
     )

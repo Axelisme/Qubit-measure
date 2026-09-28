@@ -79,8 +79,8 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Validate adapter-specific run constraints before opening an operation."""
         ...
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> Any:
-        """Run the experiment and return its result."""
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> Any:
+        """Execute detached resolved inputs; never resolve from live context."""
         ...
 
     def load(self, req: LoadDataRequest) -> Any:

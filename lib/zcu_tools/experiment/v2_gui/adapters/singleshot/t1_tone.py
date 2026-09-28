@@ -34,13 +34,12 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     EvalValue,
+    ScalarSpec,
 )
 
-from ._shared import read_ge_centers, readout_probe_freq
+from ._shared import readout_probe_freq
 
 # Domain T1WithToneExp.analyze returns (t1, t1_b, fig). The T1 with tone value
 # (``t1_with_tone``) is written back to the MetaDict (key ``t1_with_tone``,
@@ -84,14 +83,16 @@ class SsT1ToneAdapter(
             "Runs on real hardware."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; run "
-            "fast-fails if any is missing. "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
+            "calibration fails before hardware. "
             "Optionally reads 'confusion_matrix' to readout-correct populations "
             "at analyze time; 't1_with_tone' or 't1' to seed the sweep stop "
-            "(default 5*t1, fallback 100 us); 'q_f' / 'qub_ch' for the pi "
-            "pulse; 'readout_f' or 'r_f' plus 'res_ch' seed the probe tone; "
+            "(5*t1_with_tone when present, else 5*t1; fallback 500 us); "
+            "'t1' seeds relax delay (5*t1; fallback 100 us); 'q_f' / "
+            "'qub_ch' for the pi pulse; 'readout_f' or 'r_f' plus "
+            "'res_ch' seed the probe tone; "
             "'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout."
         ),
         expects_ml=(
@@ -104,7 +105,8 @@ class SsT1ToneAdapter(
             "MetaDict 't1_with_tone' (us)."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. Use 'uniform=False' (default) to "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
+            "Use 'uniform=False' (default) to "
             "cluster points along the expected exponential decay while preserving "
             "the configured window and point count; use 'uniform=True' for a "
             "linear sweep. The probe-tone gain and frequency are set inside the "
@@ -145,6 +147,21 @@ class SsT1ToneAdapter(
                     expts=101,
                 ),
             )
+            .field(
+                "g_center",
+                spec=ScalarSpec("Ground center", complex),
+                default=EvalValue("g_center"),
+            )
+            .field(
+                "e_center",
+                spec=ScalarSpec("Excited center", complex),
+                default=EvalValue("e_center"),
+            )
+            .field(
+                "radius",
+                spec=ScalarSpec("Classification radius", float),
+                default=EvalValue("ge_radius"),
+            )
             .bool("uniform", label="Uniform (linear) sweep", default=False)
             .reps(1000)
             .rounds(10)
@@ -157,7 +174,7 @@ class SsT1ToneAdapter(
         # Pop ``uniform`` before lowering — it is not part of T1WithToneCfg.
         cfg_raw = dict(raw_cfg)
         cfg_raw.pop("uniform", None)
-        return req.ml.make_cfg(cfg_raw, T1WithToneCfg)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def _uniform(self, raw_cfg: dict[str, object]) -> bool:
         value = raw_cfg.get("uniform", False)
@@ -165,16 +182,12 @@ class SsT1ToneAdapter(
             raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
         return value
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> SsT1ToneRunResult:
-        # Override standard run: domain run needs GE centres + uniform kwarg.
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> SsT1ToneRunResult:
+        # Uniform remains an explicit domain run option.
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        g_center, e_center, radius = read_ge_centers(req.md)
         uniform = self._uniform(raw_cfg)
-        return T1WithToneExp().run(
-            soc, soccfg, cfg, g_center, e_center, radius, uniform=uniform
-        )
+        return T1WithToneExp().run(soc, soccfg, cfg, uniform=uniform)
 
     def analyze(
         self, req: AnalyzeRequest[SsT1ToneRunResult, NoAnalyzeParams]

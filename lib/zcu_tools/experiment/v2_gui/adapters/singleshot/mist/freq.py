@@ -19,15 +19,13 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     ExpContext,
     NoAnalyzeParams,
-    RunRequest,
-    require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
+    EvalValue,
+    ScalarSpec,
 )
 
-from .._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
+from .._shared import readout_probe_freq, readout_probe_freq_range
 
 MistFreqRunResult: TypeAlias = FreqResult
 
@@ -55,11 +53,11 @@ class MistFreqAdapter(
             "already populations (no per-point fit)."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; the run "
-            "classifies each shot against them and fast-fails if any is "
-            "missing. Optionally reads 'confusion_matrix' (the GE 3x3 matrix) "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. The run classifies each "
+            "shot using these values; missing or invalid cfg calibration fails "
+            "before hardware. Optionally reads 'confusion_matrix' (the GE 3x3 matrix) "
             "to readout-correct the populations at analyze time, and 't1' to "
             "set the relax delay; 'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' "
             "seed the probe drive and frequency sweep."
@@ -73,7 +71,7 @@ class MistFreqAdapter(
             "No writeback — the population curves are read off the plot by eye."
         ),
         recommended=(
-            "Run after 'singleshot/ge' has calibrated the discrimination. A "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. A "
             "frequency span around the qubit drive captures the MIST response; "
             "use a large enough shot count (reps) for clean populations."
         ),
@@ -107,19 +105,25 @@ class MistFreqAdapter(
                     description="readout probe frequency range",
                 ),
             )
+            .field(
+                "g_center",
+                spec=ScalarSpec("Ground center", complex),
+                default=EvalValue("g_center"),
+            )
+            .field(
+                "e_center",
+                spec=ScalarSpec("Excited center", complex),
+                default=EvalValue("e_center"),
+            )
+            .field(
+                "radius",
+                spec=ScalarSpec("Classification radius", float),
+                default=EvalValue("ge_radius"),
+            )
             .reps(10000)
             .rounds(1)
             .build()
         )
-
-    def run(self, req: RunRequest, schema: CfgSchema) -> MistFreqRunResult:
-        # Override the standard run path: the domain run needs the GE
-        # classification trio (not in cfg) — read it from md and forward it.
-        soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
-        cfg = self.build_exp_cfg(raw_cfg, req)
-        g_center, e_center, radius = read_ge_centers(req.md)
-        return FreqDepExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 

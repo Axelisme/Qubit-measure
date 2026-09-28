@@ -28,12 +28,14 @@ from zcu_tools.gui.session.state import (
 from zcu_tools.gui.session.types import ExpContext
 
 from .adapter import (
+    AnalysisMode,
     AnalyzeResultWithFigure,
     ExpAdapterProtocol,
     SavePaths,
     T_AnalyzeParams,
     T_Cfg,
 )
+from .artifact_tracker import ArtifactKind, ArtifactSnapshot, ArtifactTracker
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +85,10 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
 
 @dataclass
 class SavePaneState:
-    """Save owns only the data-path override; image paths belong to image panes."""
+    """Save owns the data path and comment drafts; image paths belong to image panes."""
 
     data_path_override: str | None = None
+    comment: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,10 +140,9 @@ _UNSET: object = object()
 class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
     adapter: ExpAdapterProtocol
-    # Committed cfg SSOT for this tab. The tab's CfgFormWidget LiveModel is the
-    # runtime draft; it auto-commits here through Controller.update_tab_cfg on
-    # every change. Run / Save / Session persistence read this field, never
-    # the live form.
+    # The service-owned CfgDraft publishes an isolated snapshot here on every
+    # change, including invalid input. Run / Save / persistence read this field;
+    # widget timers never participate in publication or resource versioning.
     cfg_schema: CfgSchema
 
     # Canonical pane-owned resources.
@@ -156,6 +158,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         default_factory=PostAnalysisPaneState
     )
     save: SavePaneState = field(default_factory=SavePaneState)
+    artifacts: ArtifactTracker = field(default_factory=ArtifactTracker)
 
     # State flags are tab interaction resources, not result ownership.
     is_analyzing: bool = False
@@ -411,9 +414,11 @@ class State(SessionState):
             source_path,
             type(result).__name__,
         )
-        return self._replace_run_pane(
+        retired = self._replace_run_pane(
             tab_id, RunPaneState(result=result, source_path=source_path)
         )
+        self.tabs[tab_id].artifacts.reset_for_load()
+        return retired
 
     def swap_analysis_pane(
         self,
@@ -588,6 +593,51 @@ class State(SessionState):
             type(instance).__name__,
         )
         self.tabs[tab_id].post_analysis.params = instance
+
+    def get_artifact_snapshots(self, tab_id: str) -> tuple[ArtifactSnapshot, ...]:
+        """Observe current panes and shared path/comment drafts on the owner thread.
+
+        Include only capability-declared artifacts, in Data/Analysis/Post order.
+        This is the single read model for Qt and the remote tab projection.
+        """
+        self._assert_owner()
+        tab = self.get_tab(tab_id)
+        tracker = tab.artifacts
+        snapshots = [
+            tracker.observe(
+                ArtifactKind.DATA,
+                result=tab.run.result,
+                has_figure=False,
+                path=tab.effective_data_path(self.exp_context),
+                comment=tab.save.comment,
+            )
+        ]
+        capabilities = tab.adapter.capabilities
+        if capabilities.analysis is not AnalysisMode.NONE:
+            snapshots.append(
+                tracker.observe(
+                    ArtifactKind.ANALYSIS,
+                    result=tab.analysis.result,
+                    has_figure=tab.analysis.figure is not None,
+                    path=tab.effective_analysis_image_path(self.exp_context),
+                )
+            )
+        if capabilities.post_analysis:
+            snapshots.append(
+                tracker.observe(
+                    ArtifactKind.POST_ANALYSIS,
+                    result=tab.post_analysis.result,
+                    has_figure=tab.post_analysis.figure is not None,
+                    path=tab.effective_post_analysis_image_path(self.exp_context),
+                )
+            )
+        return tuple(snapshots)
+
+    def update_tab_comment(self, tab_id: str, comment: str) -> None:
+        """Publish the Data comment draft shared by GUI and remote saves."""
+        self._assert_owner()
+        self.tabs[tab_id].save.comment = comment
+        self.version.bump(f"tab:{tab_id}:save")
 
     def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
         self._assert_owner()

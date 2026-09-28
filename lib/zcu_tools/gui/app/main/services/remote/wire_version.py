@@ -92,9 +92,28 @@ from __future__ import annotations
 # and tab.save_result; preview/apply replies project destination_context.
 # v56: tab.load_data reply includes cfg_backfill applied/not_applied; successful
 # result load does not fail when best-effort Config projection cannot apply.
-# v57: tab.interact exposes service-owned interactive state and validated commands;
-# payload=done settles the existing analysis operation, without MCP tool exposure.
-WIRE_VERSION = 57
+# v57: rpc.catalog exposes the GUI-owned agent method/policy projection.
+# v58: operation.active and operation.cancel expose GUI-owned handles; await
+# distinguishes failed, timeout and unknown handles; progress includes eta_s.
+# v59: rpc.catalog marks successful writes that refresh the MCP version baseline.
+# v60: rpc.catalog marks params whose presence makes a read only partially reveal
+# its resource; MCP records a conservative pre-read version after successful reads.
+# v61: declared successful writes include owner-thread __agent_write_versions
+# receipts for resources changed by that handler; the MCP strips them from tools.
+# v62: context.snapshot fully reads md/ml; the live catalog identifies conditional
+# full reads and newly created resources certified by owner-thread write receipts.
+# v63: cfg reads return complete typed model observations, including locked
+# fields and cached raw/resolved/error state, instead of settable-only values.
+# v64: predictor.calibrate exposes the shared single-point bias correction.
+# v65: device.snapshot includes State-cached field specifications during setup.
+# v66: GUI-owned seen guards replace wire expectations/receipts; snapshots expose
+# operation state and tab.open_file owns new-tab loading with cfg backfill.
+# v67: shared cfg aggregate edits and application-owned sequential library edits.
+# v68: analysis starts expose effective params, interactive mode and invalidation facts.
+# v69: writeback exposes complete previews and identity-preserving batch results.
+# v70: artifact snapshots, batch save operations and guarded close/shutdown replies.
+# v71: shared interactive plugin discovery, commands and terminal operation replies.
+WIRE_VERSION = 71
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -122,6 +141,26 @@ WIRE_VERSION = 57
 # figure/writeback/save-image routing uses the v55 subtab-qualified wire contract.
 # v79: Load projects execution snapshot values into the current tab Config and
 # replaces the owner editor session without reviving stale client handles.
-# v80: measure interactive Auto Align shares one worker/single-flight policy
-# across GUI and remote; remote reads the active frontend's preview metadata.
-GUI_VERSION = 80
+# v80: serve the live agent catalog on the existing remote adapter.
+# v81: project all-origin operations and route cancellation through domain owners.
+# v82: declare catalog write baseline policy separately from read-reveal policy.
+# v83: declare partial cfg read policy in the live agent catalog.
+# v84: attach only this handler's changed resource versions to declared writes.
+# v85: live agent method descriptions name the currently available tools and wait path.
+# v86: tab.run_start live catalog describes its MCP handle and wait path.
+# v87: no-project remote errors point to the current startup.apply RPC entry.
+# v88: route MCP cancellation only through opaque op handles; bound notify.await.
+# v89: report already failed operations as errors when cancellation is requested.
+# v90: expose explicit context, tab, and SoC guard observations in the live catalog.
+# v91: cfg reads project CfgDraft observations without resolving live sources.
+# v92: return bounded errors for unencodable replies; disconnect on failed delivery.
+# v95: bound per-client outbound bytes, including the in-flight frame.
+# v96: predictor.calibrate routes through the shared PredictorControlPort.
+# v97: project cached device fields without driver reads during setup.
+# v98: own per-connection observations and new-tab load/failure cleanup in GUI.
+# v99: own ordered library commits and preserve cfg batch failure categories.
+# v100: validate analysis params and follow run/edit/analyze through explicit view commands.
+# v101: apply explicit writeback items through shared drafts and follow their pane.
+# v102: shared artifact tracking, ordered saves and actual output path reporting.
+# v103: service-owned interactive sessions and best-effort command view follow.
+GUI_VERSION = 103

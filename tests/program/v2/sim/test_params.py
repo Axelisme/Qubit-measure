@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 from zcu_tools.experiment.v2_gui.adapters._support.ctx_helpers import proper_flux_range
 from zcu_tools.gui.cfg import (
-    EvalValue,
+    DirectValue,
     SweepValue,
 )
 from zcu_tools.gui.session.types import ExpContext
@@ -48,9 +48,11 @@ _VALID: dict = {
 
 
 def _numeric_sweep_bounds(sweep: SweepValue) -> tuple[float, float]:
-    if isinstance(sweep.start, EvalValue) or isinstance(sweep.stop, EvalValue):
+    start = sweep.start.value if isinstance(sweep.start, DirectValue) else sweep.start
+    stop = sweep.stop.value if isinstance(sweep.stop, DirectValue) else sweep.stop
+    if not isinstance(start, (int, float)) or not isinstance(stop, (int, float)):
         raise AssertionError("default guide sweep must have numeric fallback bounds")
-    return float(sweep.start), float(sweep.stop)
+    return float(start), float(stop)
 
 
 class TestSimParamsConstruction:

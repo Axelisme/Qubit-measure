@@ -9,6 +9,7 @@ from zcu_tools.gui.cfg import (
     ExpressionResolver,
     ReferenceResolver,
     lower_finished_cfg,
+    lower_resolved_cfg,
     validate_finished_cfg,
     validate_reference_kinds,
 )
@@ -21,10 +22,10 @@ _REFERENCE_KINDS = frozenset({"module", "waveform"})
 
 
 def _make_expression_resolver(md: MetaDict) -> ExpressionResolver:
-    from zcu_tools.gui.session.expression import evaluate_numeric_expr
+    from zcu_tools.gui.session.expression import evaluate_scalar_expr
 
-    def resolve_expression(expr: str, /) -> int | float:
-        return evaluate_numeric_expr(expr, md)
+    def resolve_expression(expr: str, /) -> int | float | complex:
+        return evaluate_scalar_expr(expr, md)
 
     return resolve_expression
 
@@ -83,6 +84,12 @@ def validate_schema(schema: CfgSchema, ml: ModuleLibrary | None) -> None:
         schema,
         resolve_reference=None if ml is None else _make_reference_resolver(ml),
     )
+
+
+def schema_to_resolved_dict(schema: CfgSchema) -> dict[str, object]:
+    """Freeze displayed values with measure range policy, without live resolvers."""
+    validate_reference_kinds(schema, _REFERENCE_KINDS)
+    return lower_resolved_cfg(schema, make_range=_make_sweep_range)
 
 
 def schema_to_raw_dict(

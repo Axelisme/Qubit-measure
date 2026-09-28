@@ -6,6 +6,7 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.device import FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, ContextReadiness
 from zcu_tools.gui.app.main.services.guard import (
     AnalyzePermit,
@@ -22,8 +23,12 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
 )
+from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 
 def _make_state(
@@ -75,11 +80,139 @@ def test_run_permit_issued_for_active_valid_cfg():
 
     assert isinstance(permit, RunPermit)
     assert permit.tab_id == tab_id
-    assert permit.schema is state.get_tab(tab_id).cfg_schema
+    assert permit.raw_cfg == {}
     assert permit.request.soc is state.exp_context.soc
     assert permit.adapter is state.get_tab(tab_id).adapter
     adapter = cast(MagicMock, permit.adapter)
     adapter.validate_run_request.assert_called_once_with(permit.request, {})
+
+
+def test_run_permit_freezes_displayed_expression_without_live_context() -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    schema = state.get_tab(tab_id).cfg_schema
+    schema.spec.fields["gain"] = ScalarSpec(label="Gain", type=float)
+    schema.value.fields["gain"] = EvalValue("gain", resolved=0.25)
+
+    permit = GuardService(state).acquire_run_permit(tab_id)
+    schema.value.fields["gain"] = DirectValue(0.75)
+
+    assert permit.raw_cfg == {"gain": 0.25}
+    md, ml = state.exp_context.md, state.exp_context.ml
+    assert isinstance(md, MagicMock)
+    assert isinstance(ml, MagicMock)
+    assert md.mock_calls == []
+    assert ml.mock_calls == []
+
+
+def test_run_permit_does_not_resolve_missing_cached_expression() -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    schema = state.get_tab(tab_id).cfg_schema
+    schema.spec.fields["gain"] = ScalarSpec(label="Gain", type=float)
+    schema.value.fields["gain"] = EvalValue("gain")
+
+    with pytest.raises(GuardError, match="unresolved"):
+        GuardService(state).acquire_run_permit(tab_id)
+
+    md, ml = state.exp_context.md, state.exp_context.ml
+    adapter = state.get_tab(tab_id).adapter
+    assert isinstance(md, MagicMock)
+    assert isinstance(ml, MagicMock)
+    assert isinstance(adapter, MagicMock)
+    assert md.mock_calls == []
+    assert ml.mock_calls == []
+    adapter.validate_run_request.assert_not_called()
+
+
+def test_run_permit_freezes_cached_reference_shape_and_values() -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    schema = state.get_tab(tab_id).cfg_schema
+    shape = CfgSectionSpec(
+        label="Pulse", fields={"gain": ScalarSpec(label="Gain", type=float)}
+    )
+    schema.spec.fields["asset"] = ReferenceSpec(kind="module", allowed=[shape])
+    value = CfgSectionValue(fields={"gain": DirectValue(0.25)})
+    schema.value.fields["asset"] = ReferenceValue(
+        "library_pulse", value, resolved_label="Pulse"
+    )
+
+    permit = GuardService(state).acquire_run_permit(tab_id)
+    value.fields["gain"] = DirectValue(0.75)
+    shape.fields.clear()
+
+    assert permit.raw_cfg == {"asset": {"gain": 0.25}}
+    ml = state.exp_context.ml
+    assert isinstance(ml, MagicMock)
+    assert ml.mock_calls == []
+
+
+def test_run_permit_detaches_observed_device_settings(monkeypatch) -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    info = FakeDeviceInfo(address="fake", value=0.25)
+    state.put_device(
+        DeviceState(
+            name="bias",
+            type_name="FakeDevice",
+            address="fake",
+            status=DeviceStatus.CONNECTED,
+            remember=False,
+            info=info,
+        )
+    )
+    live_read = MagicMock(side_effect=AssertionError("Unexpected hardware read"))
+    monkeypatch.setattr(GlobalDeviceManager, "get_all_info", live_read)
+
+    permit = GuardService(state).acquire_run_permit(tab_id)
+    info.value = 0.5
+    state.set_device_info("bias", FakeDeviceInfo(address="fake", value=0.75))
+
+    captured = permit.request.device_snapshot["bias"]
+    assert isinstance(captured, FakeDeviceInfo)
+    assert captured.value == 0.25
+    live_read.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        DeviceStatus.CONNECTED,
+        DeviceStatus.CONNECTING,
+        DeviceStatus.DISCONNECTING,
+        DeviceStatus.SETTING_UP,
+    ],
+)
+def test_run_permit_rejects_live_device_without_observed_settings(status) -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    state.put_device(
+        DeviceState(
+            name="bias",
+            type_name="FakeDevice",
+            address="fake",
+            status=status,
+            remember=False,
+        )
+    )
+
+    with pytest.raises(GuardError, match="no observed settings"):
+        GuardService(state).acquire_run_permit(tab_id)
+    adapter = state.get_tab(tab_id).adapter
+    assert isinstance(adapter, MagicMock)
+    adapter.validate_run_request.assert_not_called()
+
+
+def test_run_permit_excludes_remembered_disconnected_device() -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    state.put_device(
+        DeviceState(
+            name="bias",
+            type_name="FakeDevice",
+            address="fake",
+            status=DeviceStatus.MEMORY_ONLY,
+            remember=True,
+        )
+    )
+
+    permit = GuardService(state).acquire_run_permit(tab_id)
+    assert permit.request.device_snapshot == {}
 
 
 def test_run_permit_translates_adapter_preflight_error() -> None:

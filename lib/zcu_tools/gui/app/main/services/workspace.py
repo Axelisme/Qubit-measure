@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.events.tab import TabAddedPayload, TabClosedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabActivatedPayload,
+    TabAddedPayload,
+    TabClosedPayload,
+)
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.cfg import SessionCodecError, raw_to_schema, schema_to_raw
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -48,7 +52,10 @@ class WorkspaceService:
         self._bus.emit(TabClosedPayload(tab_id=tab_id))
 
     def set_active_tab(self, tab_id: str) -> None:
+        previous = self._state.active_tab_id
         self._state.set_active_tab(tab_id)
+        if previous != tab_id:
+            self._bus.emit(TabActivatedPayload(tab_id=tab_id))
 
     def reorder_tabs(self, tab_ids: Sequence[str]) -> None:
         self._state.reorder_tabs(tab_ids)

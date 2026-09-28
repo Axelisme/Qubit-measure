@@ -23,9 +23,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     SweepValue,
 )
 
@@ -34,6 +32,7 @@ OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
     exp_cls = PowerDepExp
+    ExpCfg_cls = PowerDepCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=True
     )
@@ -112,7 +111,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerDepCfg:
         cfg_raw = dict(raw_cfg)
         cfg_raw.pop("earlystop_snr", None)
-        return req.ml.make_cfg(cfg_raw, PowerDepCfg)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def _earlystop_snr(self, raw_cfg: dict[str, object]) -> float | None:
         value = raw_cfg.get("earlystop_snr")
@@ -123,9 +122,10 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
             return None
         return snr
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> OneTonePowerDepRunResult:
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object]
+    ) -> OneTonePowerDepRunResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         earlystop_snr = self._earlystop_snr(raw_cfg)
         return PowerDepExp().run(soc, soccfg, cfg, earlystop_snr=earlystop_snr)

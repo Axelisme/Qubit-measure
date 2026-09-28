@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-22 — reloadable adapters and fixed role composition
+**Last updated:** 2026-09-26 — frozen Run inputs
 
 # measure experiment adapters
 
@@ -30,6 +30,14 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 `cfg_definition()` 使用 `_support` 提供的 measure-domain builder vocabulary，但結構與預設
 policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_value` 兩個方法理解同一
 份設定。generic Spec/Value assembly 由 `zcu_tools.gui.cfg` 擁有，不能搬回本 package。
+
+## Run inputs
+
+`run(req, raw_cfg)` 消費 Guard 已凍結的 resolved cfg，不接 schema，也不重新讀取 md/ml。
+`RunRequest` 只提供 SoC handles 與 detached device snapshot；Base assembler 使用此明確
+snapshot 與 `ml=None`。覆寫 builder 並委派 Base 時須宣告 `ExpCfg_cls`。Domain 必要條件
+仍由 adapter 的 execution path 在硬體操作前拒絕；合法 optional None 不等於解析失敗。
+Analyze 與 writeback 保留各自的 context 契約。
 
 ## 修改原則
 

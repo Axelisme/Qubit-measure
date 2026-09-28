@@ -6,6 +6,8 @@ import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -13,7 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _h_notify_open(
+def h_notify_open(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     message = str(params["message"])
@@ -22,13 +24,19 @@ def _h_notify_open(
     return {"token": token}
 
 
-def _h_notify_await(
+def h_notify_await(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # off_main_thread handler: blocks the IO worker on the thread-safe
     # NotifyChannel.consume(). Never touches main-thread-owned state.
     token = int(params["token"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
+    if not 0 <= timeout <= 600:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "timeout must be between 0 and 600 seconds",
+            reason="invalid_timeout",
+        )
     result = adapter.ctrl.await_notify(token, timeout)
     wire: dict[str, object] = {"reason": result.reason}
     if result.reply is not None:

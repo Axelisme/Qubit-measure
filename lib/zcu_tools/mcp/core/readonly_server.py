@@ -29,14 +29,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from zcu_tools.mcp.core.bridge import (
-    McpBridge,
-    MCPBridgeConfig,
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, resolve_connect_port
+from zcu_tools.mcp.core.stdio_server import (
+    StdioLoopHooks,
     Tool,
     ToolTable,
     assemble_tools,
     generate_tools,
-    resolve_connect_port,
     run_stdio_loop,
 )
 
@@ -96,7 +95,7 @@ def _make_lifecycle_tools(
         p = int(arguments.get("port", port))
         token: str | None = arguments.get("token")
         auto_connect = bool(arguments.get("auto_connect", True))
-        return bridge.launch(repo_root, p, token, auto_connect)
+        return bridge.launch(repo_root, p, token, auto_connect=auto_connect)
 
     overrides: dict[str, Tool] = {
         f"{prefix}connect": {
@@ -225,7 +224,7 @@ def build_readonly_server(
             logger.debug("read-only bridge stop on exit failed", exc_info=True)
 
     def main() -> None:
-        run_stdio_loop(config, tools, on_cleanup=_cleanup_on_exit)
+        run_stdio_loop(config, tools, hooks=StdioLoopHooks(on_cleanup=_cleanup_on_exit))
 
     return ReadonlyServer(
         config=config,

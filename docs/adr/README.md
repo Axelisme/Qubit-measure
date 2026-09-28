@@ -7,9 +7,9 @@
 ## Concurrency / Lifecycle
 
 - [0001 — Permit / Lease typed guard](0001-permit-lease-typed-guard.md)：靜態前置憑證與動態硬體互斥分離。
-- [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：GUI resource version guard、operation handle、off-main wait 三層分工。
+- [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：GUI per-connection seen guard、operation handle、off-main wait 三層分工。
 - [0003 — ShutdownCoordinator and registry cancel](0003-shutdown-coordinator-and-registry-cancel.md)：統一 cancel/poll/await 詞彙與 Qt-free shutdown loop。
-- [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合。
+- [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合；data save 只取 Handle，不持硬體 lease。
 - [0025 — Cross-thread interaction channel](0025-cross-thread-interaction-channel.md)：operation/user prompt 使用單一有序 channel 傳遞 settle、message、stop。
 - [0026 — OperationRunner + scope ports](0026-operation-abstraction-runner-scope-ports.md)：OperationRunner 擁有通用生命週期；各 operation 只提供 policy 與窄 write port。
 - [0058 — Registry-owned VISA session disconnect](0058-registry-owned-visa-session-disconnect.md)：GlobalDeviceManager 以 identity claims 統一擁有 disconnect；close I/O 在 registry lock 外、失敗聚合且保留重試。
@@ -29,7 +29,7 @@
 
 ## Cfg / Value Model
 
-- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI widget與agent共用service-owned `CfgDraft`；Analysis/Post各自持有不洩漏`editor_id`的opaque writeback draft。
+- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI與agent共用service-owned `CfgDraft`；tab snapshot與revision同步發布，writeback持opaque draft。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec tree 靜態、Value tree 可變；locked literal 只在 spec 宣告。
 - [0010 — Complete value tree + None for empty](0010-value-tree-complete-none-for-empty.md)：Value tree 永遠完整；optional empty 統一用 `None`。
 - [0011 — CfgSchema validate boundary](0011-cfgschema-validate-boundary.md)：成品邊界做靜態結構驗證。
@@ -38,7 +38,7 @@
 - [0043 — Autofluxdep runtime cfg override plan](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、runtime patch enforcement、remote/artifact exposure 與 cfg form decoration。
 - [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有Qt-free core，`gui.widgets.cfg`擁有instance-registry Qt renderer，measure adapter與autoflux cfg barrel只暴露app-owned API；lowering ports見 [[0046]]。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：finished-cfg algorithm由shared core擁有，app以expression/reference/range三個窄port提供runtime policy。
-- [0050 — Canonical cfg binding paths](0050-canonical-cfg-binding-paths.md)：binding擁有唯一typed path grammar與batch net diff；remote只投影target。
+- [0050 — Canonical cfg binding paths](0050-canonical-cfg-binding-paths.md)：binding擁有唯一typed path grammar、batch net diff與完整cached observation；remote只投影nominal資料。
 - [0051 — Canonical program cfg shape catalog](0051-canonical-program-cfg-shape-catalog.md)：`gui.measure_cfg`擁有closed program shape vocabulary與raw materialization policy；`gui.cfg`只提供domain-free spec walk。
 
 ## Remote / Transport
@@ -48,7 +48,7 @@
 - [0047 — Typed expected-error taxonomy](0047-typed-expected-error-taxonomy.md)：caller-correctable failure 由 producer 以 closed category 顯式 opt in，transport 只投影。
 - [0049 — Subscriber-aware lazy push](0049-subscriber-aware-lazy-push.md)：endpoint以two-phase recipient transaction在matching subscriber存在時才materialize/encode一次，並維持unsubscribe/disconnect線性化。
 - [0052 — Event meta 與多前端 attribution](0052-event-meta-and-frontend-attribution.md)：bus 為事件蓋章 `EventMeta(seq, origin)`，origin 由 dispatch 邊界宣告、operation 記錄顯式攜帶；coalescing 屬 subscriber-side；wire 封套 additive 加 seq/origin。
-- [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 隨 method 宣告於 `RemoteMethodEntry`。
+- [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 由 `RemoteMethodEntry` 擁有；guard/reveals 留在 GUI，catalog 只投影呼叫所需資訊。
 - [0060 — Agent interface as second view](0060-measure-agent-interface-shared-gui-view.md)：量測 agent 以 40 個特化 tool 操作與 GUI 共用的狀態；一個判斷點一個 tool，寫入類 tool 使 GUI 跟隨到對應子 tab。
 - [0061 — Measure interactive plugin session](0061-measure-interactive-plugin-session.md)：service 擁有互動分析的 committed session/operation，plugin 提供共用 actions/commands 與本地 preview frontend。
 

@@ -27,8 +27,6 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import CfgSchema
 
 T1RunResult: TypeAlias = T1Result
 
@@ -129,9 +127,8 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
         return value
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> T1RunResult:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> T1RunResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         return T1Exp().run(soc, soccfg, cfg, uniform=self._uniform(raw_cfg))
 

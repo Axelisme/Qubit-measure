@@ -14,6 +14,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.param_spec import build_input_schema, validate_params
 
+from ._common import follow_tab
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -79,10 +81,10 @@ def _project(
     }
 
 
-def _h_tab_interact(  # pyright: ignore[reportUnusedFunction] - dynamically resolved method entry
+def h_tab_interact(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Dispatch on the owner loop after the existing resource-version guard."""
+    """Dispatch on the owner loop with best-effort, last-commit-wins semantics."""
     tab_id = cast(str, params["tab_id"])
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
@@ -95,6 +97,7 @@ def _h_tab_interact(  # pyright: ignore[reportUnusedFunction] - dynamically reso
     plugin, session = active.plugin, active.session
     decoded = _decode_payload(params.get("payload"), plugin)
     if decoded is not None:
+        follow_tab(adapter, tab_id, "analysis")
         name, args = decoded
         if name == "done":
             prior_result = control.get_tab_analyze_result(tab_id)

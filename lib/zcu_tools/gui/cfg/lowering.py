@@ -21,6 +21,7 @@ from .model import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    require_finite_scalar,
 )
 from .reference_key import parse_custom_reference_key
 
@@ -32,7 +33,7 @@ _LOCKED_CENTER_ABS_TOL = 1e-12
 
 
 class ExpressionResolver(Protocol):
-    def __call__(self, expr: str, /) -> int | float: ...
+    def __call__(self, expr: str, /) -> int | float | complex: ...
 
 
 class ReferenceResolver(Protocol):
@@ -122,14 +123,24 @@ def lower_finished_cfg(
     )
 
 
-def _coerce_eval_result(value: int | float, type_: type) -> int | float:
+def _coerce_eval_result(
+    value: int | float | complex, type_: type
+) -> int | float | complex:
+    if type_ is complex:
+        result = complex(value)
+        require_finite_scalar(result)
+        return result
+    if isinstance(value, complex):
+        raise RuntimeError("Complex expression result cannot target a real field")
     if type_ is float:
-        return float(value)
+        result = float(value)
+        require_finite_scalar(result)
+        return result
     if type_ is int:
         if not float(value).is_integer():
             raise RuntimeError(f"Expression result {value!r} is not an integer")
         return int(value)
-    raise RuntimeError(f"Eval mode only supports int or float, got {type_!r}")
+    raise RuntimeError(f"Eval mode only supports int, float or complex, got {type_!r}")
 
 
 def _resolve_eval(
@@ -139,7 +150,7 @@ def _resolve_eval(
     path: str,
     label: str,
     type_: type = float,
-) -> int | float:
+) -> int | float | complex:
     if value.resolved is not None:
         resolved = value.resolved
         # A committed snapshot remains authoritative, but drift must stay visible.
@@ -148,7 +159,7 @@ def _resolve_eval(
                 fresh = resolve_expression(value.expr)
             except Exception:
                 fresh = None
-            if fresh is not None and isinstance(fresh, (int, float)):
+            if fresh is not None:
                 if _coerce_eval_result(fresh, type_) != _coerce_eval_result(
                     resolved, type_
                 ):
@@ -173,7 +184,7 @@ def _resolve_eval(
         raise RuntimeError(
             f"Config field '{path}' ({label}) expression {value.expr!r} is unresolved"
         )
-    if not isinstance(resolved, (int, float)):
+    if not isinstance(resolved, (int, float, complex)):
         raise RuntimeError(
             f"Config field '{path}' ({label}) resolved to non-numeric value"
         )
@@ -187,18 +198,20 @@ def _resolve_sweep_edge(
     path: str,
     label: str,
 ) -> float:
+    if isinstance(value, DirectValue):
+        _validate_scalar(ScalarSpec(label, float), value, path)
+        if value.value is None:
+            raise RuntimeError(f"Config field '{path}' ({label}) is incomplete")
+        return float(value.value)
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, EvalValue):
-        return float(
-            _resolve_eval(
-                value,
-                resolve_expression,
-                path=path,
-                label=label,
-                type_=float,
-            )
+        resolved = _resolve_eval(
+            value, resolve_expression, path=path, label=label, type_=float
         )
+        if isinstance(resolved, complex):
+            raise RuntimeError(f"Config field '{path}' ({label}) must be real")
+        return float(resolved)
     raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
 
 
@@ -218,6 +231,30 @@ def _static_center_value(value: object, *, path: str) -> float | None:
     return center
 
 
+def _resolve_range_input[T: (int, float)](
+    value: T | DirectValue, type_: type[T], *, path: str, label: str
+) -> T:
+    direct = value if isinstance(value, DirectValue) else DirectValue(value)
+    _validate_scalar(ScalarSpec(label, type_), direct, path)
+    if direct.value is None:
+        raise RuntimeError(f"Config field '{path}' ({label}) is incomplete")
+    return type_(direct.value)
+
+
+def _validate_sweep_direct_edges(value: SweepValue, full_path: str) -> None:
+    _resolve_range_input(
+        value.expts, int, path=f"{full_path}.expts", label="Sweep points"
+    )
+    _resolve_range_input(
+        value.step, float, path=f"{full_path}.step", label="Sweep step"
+    )
+    for name, edge in (("start", value.start), ("stop", value.stop)):
+        if isinstance(edge, DirectValue):
+            _resolve_sweep_edge(
+                edge, None, path=f"{full_path}.{name}", label=f"Sweep {name}"
+            )
+
+
 def _validate_centered_sweep_contract(
     spec: CenteredSweepSpec,
     value: CenteredSweepValue,
@@ -225,10 +262,23 @@ def _validate_centered_sweep_contract(
     *,
     center: float | None = None,
 ) -> None:
-    if value.expts > 1 and value.span <= 0.0:
+    points = _resolve_range_input(
+        value.expts, int, path=f"{full_path}.expts", label="Sweep points"
+    )
+    span = _resolve_range_input(
+        value.span, float, path=f"{full_path}.span", label="Sweep span"
+    )
+    _resolve_range_input(
+        value.step, float, path=f"{full_path}.step", label="Sweep step"
+    )
+    if points > 1 and span <= 0.0:
         raise RuntimeError(
             f"Config field '{full_path}' ({spec.label}) centered sweep span must be "
             "greater than 0 when expts > 1"
+        )
+    if isinstance(value.center, DirectValue):
+        center = _resolve_sweep_edge(
+            value.center, None, path=f"{full_path}.center", label="Sweep center"
         )
     if spec.locked_center is None:
         return
@@ -256,6 +306,8 @@ def _select_reference_spec(
     ref_value: ReferenceValue,
     resolve_reference: ReferenceResolver | None,
 ) -> CfgSectionSpec:
+    if ref_value.error is not None:
+        raise RuntimeError(ref_value.error)
     chosen = ref_value.chosen_key
     try:
         label = parse_custom_reference_key(chosen)
@@ -287,6 +339,33 @@ def _select_reference_spec(
         f"Library reference {chosen!r} resolved to unsupported spec "
         f"{label!r}; allowed labels: {allowed}"
     )
+
+
+def _lower_centered_sweep(
+    spec: CenteredSweepSpec,
+    value: CenteredSweepValue,
+    *,
+    full_path: str,
+    resolve_expression: ExpressionResolver | None,
+    make_range: RangeFactory,
+) -> object:
+    center = _resolve_sweep_edge(
+        value.center,
+        resolve_expression,
+        path=f"{full_path}.center",
+        label="Sweep center",
+    )
+    _validate_centered_sweep_contract(spec, value, full_path, center=center)
+    points = _resolve_range_input(
+        value.expts, int, path=f"{full_path}.expts", label="Sweep points"
+    )
+    if points == 1:
+        return make_range(center, center, expts=1)
+    span = _resolve_range_input(
+        value.span, float, path=f"{full_path}.span", label="Sweep span"
+    )
+    half_span = span / 2.0
+    return make_range(center - half_span, center + half_span, expts=points)
 
 
 def _lower_section(
@@ -355,28 +434,22 @@ def _lower_section(
                 path=".".join([*path, key, "stop"]),
                 label="Sweep stop",
             )
-            result[key] = make_range(start, stop, expts=node_value.expts)
+            points = _resolve_range_input(
+                node_value.expts,
+                int,
+                path=".".join([*path, key, "expts"]),
+                label="Sweep points",
+            )
+            result[key] = make_range(start, stop, expts=points)
 
         elif isinstance(node_spec, CenteredSweepSpec):
             assert isinstance(node_value, CenteredSweepValue)
-            full_path = ".".join([*path, key])
-            center = _resolve_sweep_edge(
-                node_value.center,
-                resolve_expression,
-                path=f"{full_path}.center",
-                label="Sweep center",
-            )
-            _validate_centered_sweep_contract(
-                node_spec, node_value, full_path, center=center
-            )
-            if node_value.expts == 1:
-                result[key] = make_range(center, center, expts=1)
-                continue
-            half_span = float(node_value.span) / 2.0
-            result[key] = make_range(
-                center - half_span,
-                center + half_span,
-                expts=node_value.expts,
+            result[key] = _lower_centered_sweep(
+                node_spec,
+                node_value,
+                full_path=".".join([*path, key]),
+                resolve_expression=resolve_expression,
+                make_range=make_range,
             )
 
         elif isinstance(node_spec, ReferenceSpec):
@@ -459,14 +532,7 @@ def _validate_static_node(
         return
 
     if isinstance(spec, ScalarSpec):
-        if isinstance(node_value, EvalValue):
-            return
-        if not isinstance(node_value, DirectValue):
-            raise RuntimeError(
-                f"Config field '{full_path}' must be a DirectValue/EvalValue, "
-                f"got {type(node_value).__name__}"
-            )
-        _validate_scalar(spec, node_value, full_path)
+        _validate_scalar_node(spec, node_value, full_path)
         return
 
     if isinstance(spec, SweepSpec):
@@ -475,6 +541,7 @@ def _validate_static_node(
                 f"Config field '{full_path}' must be a SweepValue, "
                 f"got {type(node_value).__name__}"
             )
+        _validate_sweep_direct_edges(node_value, full_path)
         return
 
     if isinstance(spec, CenteredSweepSpec):
@@ -520,7 +587,39 @@ def _validate_static_node(
     )
 
 
+def _validate_scalar_node(spec: ScalarSpec, node_value: object, full_path: str) -> None:
+    if isinstance(node_value, EvalValue):
+        if node_value.validation_error is not None:
+            raise RuntimeError(
+                f"Config field '{full_path}' ({spec.label}): "
+                f"{node_value.validation_error}"
+            )
+        return
+    if not isinstance(node_value, DirectValue):
+        raise RuntimeError(
+            f"Config field '{full_path}' must be a DirectValue/EvalValue, "
+            f"got {type(node_value).__name__}"
+        )
+    _validate_scalar(spec, node_value, full_path)
+
+
+def _ensure_scalar_finite(value: object, spec: ScalarSpec, path: str) -> None:
+    if not isinstance(value, (float, complex)):
+        return
+    try:
+        require_finite_scalar(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Config field '{path}' ({spec.label}): {exc}") from exc
+
+
 def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) -> None:
+    error = (
+        node_value.error
+        if node_value.error is not None
+        else node_value.validation_error
+    )
+    if error is not None:
+        raise RuntimeError(f"Config field '{full_path}' ({spec.label}): {error}")
     value = node_value.value
     if value is None:
         return
@@ -551,6 +650,7 @@ def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) 
             f"Config field '{full_path}' value {value!r} is not compatible with "
             f"spec type {spec.type.__name__}"
         )
+    _ensure_scalar_finite(value, spec, full_path)
     if spec.choices is not None and value not in spec.choices:
         raise RuntimeError(
             f"Config field '{full_path}' value {value!r} is not in allowed choices "

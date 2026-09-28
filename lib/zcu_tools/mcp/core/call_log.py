@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
@@ -193,7 +193,9 @@ def _write_entry(entry: dict[str, Any]) -> None:
 HandlerFn = Callable[[dict[str, Any]], Any]
 
 
-def wrap_handler(name: str, handler: HandlerFn) -> HandlerFn:
+def wrap_handler(
+    name: str, handler: HandlerFn, *, redact_inputs: Collection[str] = ()
+) -> HandlerFn:
     """Return a new handler that logs each invocation then delegates to ``handler``.
 
     The wrapper is transparent: it accepts the same arguments and returns (or
@@ -201,11 +203,20 @@ def wrap_handler(name: str, handler: HandlerFn) -> HandlerFn:
     is writing one JSONL line per call.
 
     ``name`` is the MCP tool name used as the ``tool`` field in the log entry.
+    ``redact_inputs`` hides secret top-level fields only in the log, not from the handler.
     """
 
     def _wrapped(arguments: dict[str, Any]) -> Any:
         ts = datetime.now().isoformat()
         t_start = datetime.now().timestamp()
+        logged_input = (
+            {
+                key: "<REDACTED>" if key in redact_inputs else value
+                for key, value in arguments.items()
+            }
+            if redact_inputs
+            else arguments
+        )
 
         try:
             result = handler(arguments)
@@ -220,7 +231,7 @@ def wrap_handler(name: str, handler: HandlerFn) -> HandlerFn:
                     {
                         "ts": ts,
                         "tool": name,
-                        "input": _serialize_field(arguments),
+                        "input": _serialize_field(logged_input),
                         "output": None,
                         "status": "error",
                         "error": _truncate_if_needed(error_text),
@@ -237,7 +248,7 @@ def wrap_handler(name: str, handler: HandlerFn) -> HandlerFn:
                 {
                     "ts": ts,
                     "tool": name,
-                    "input": _serialize_field(arguments),
+                    "input": _serialize_field(logged_input),
                     "output": _serialize_field(result),
                     "status": "success",
                     "duration_ms": duration_ms,

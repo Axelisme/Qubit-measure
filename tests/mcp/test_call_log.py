@@ -86,6 +86,30 @@ def test_success_entry_written(monkeypatch, tmp_path):
     assert "ts" in e
 
 
+def test_redacted_input_is_not_logged_but_reaches_the_handler(monkeypatch, tmp_path):
+    mod = _reload_call_log(monkeypatch, tmp_path)
+    received: list[str] = []
+
+    def connect(arguments: dict[str, Any]) -> dict[str, Any]:
+        received.append(arguments["token"])
+        if arguments["token"] == "wrong":
+            raise RuntimeError("auth rejected")
+        return {"connected": True}
+
+    wrapped = mod.wrap_handler("connect", connect, redact_inputs={"token"})
+    assert wrapped({"port": 9000, "token": "test-secret"}) == {"connected": True}
+    with pytest.raises(RuntimeError, match="auth rejected"):
+        wrapped({"port": 9000, "token": "wrong"})
+    assert received == ["test-secret", "wrong"]
+    entries = _collect_jsonl_entries(tmp_path / "logs" / "mcp" / "measure")
+    assert [entry["input"] for entry in entries] == [
+        {"port": 9000, "token": "<REDACTED>"},
+        {"port": 9000, "token": "<REDACTED>"},
+    ]
+    assert entries[0]["status"] == "success"
+    assert entries[1]["status"] == "error"
+
+
 def test_error_entry_written_and_reraises(monkeypatch, tmp_path):
     """A failing handler: error entry is written and the original exception is re-raised."""
     mod = _reload_call_log(monkeypatch, tmp_path)

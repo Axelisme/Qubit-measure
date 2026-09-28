@@ -64,8 +64,7 @@ def app():
         host,
         read_port=host,
         write_port=host,
-        version_bump=host.bump_editor_version,
-        version_drop=host.drop_editor_version,
+        versions=host,
         bus=bus,
     )
     service = LoadService(state, MagicMock(), cfg_editor=editors, bus=bus)
@@ -203,8 +202,7 @@ def device_app():
         host,
         read_port=host,
         write_port=host,
-        version_bump=host.bump_editor_version,
-        version_drop=host.drop_editor_version,
+        versions=host,
         bus=bus,
     )
     original, _ = editors.open_seeded(schema, owner_key="tab")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import socket
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -27,7 +28,7 @@ from zcu_tools.gui.app.main.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from ._helpers import Fixture, open_client, recv_response, send
+from ._helpers import Fixture, mcp_client, open_client, recv_response, send
 
 
 class DeferredBackground:
@@ -40,7 +41,7 @@ class DeferredBackground:
 
 class InteractiveFixture(Fixture):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(active_label="interactive-test")
         self.widgets: list[FluxPickFrontend] = []
 
 
@@ -202,7 +203,31 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         assert _interact(sock, tab_id)["error"]["code"] == "precondition_failed"
 
 
-def test_invalid_payload_and_stale_guard_leave_one_active_session(fx) -> None:
+def test_commands_after_gui_and_context_changes_need_no_seen_baseline(fx) -> None:
+    tab_id, token, plugin = _start(fx)
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    plugin.execute_command(active.session, "set_conjugate", {"enabled": True})
+    fx.state.set_context(
+        replace(fx.state.exp_context, md=MetaDict(), ml=ModuleLibrary())
+    )
+    with open_client(fx.service.port) as sock:
+        # First request is a mutation, without any hidden snapshot reads.
+        changed = _interact(
+            sock, tab_id, {"command": "set_conjugate", "args": {"enabled": False}}
+        )
+        assert changed["ok"] is True
+        assert changed["result"]["state"]["conjugate"] is False
+        committed = plugin.project_state(active.session.snapshot())
+        assert isinstance(committed, dict)
+        assert committed["conjugate"] is False
+        assert fx.ctrl.run_analyze_control.get_interactive(tab_id) is active
+        assert _interact(sock, tab_id, {"command": "done"})["ok"] is True
+        settled = _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})
+        assert settled["result"]["status"] == "finished"
+
+
+def test_invalid_payload_preserves_active_session_until_done(fx) -> None:
     tab_id, _token, _plugin = _start(fx)
     with open_client(fx.service.port) as sock:
         baseline = _interact(sock, tab_id)["result"]["state"]
@@ -221,12 +246,6 @@ def test_invalid_payload_and_stale_guard_leave_one_active_session(fx) -> None:
             assert reply["ok"] is False
             assert reply["error"]["code"] == "invalid_params"
             assert _interact(sock, tab_id)["result"]["state"] == baseline
-        stale = _interact(
-            sock, tab_id, {"command": "swap_lines"}, expected_versions={"context": -1}
-        )
-        assert stale["error"]["code"] == "precondition_failed"
-        assert stale["error"]["reason"] == "stale_version"
-        assert _interact(sock, tab_id)["result"]["state"] == baseline
         assert _interact(sock, "missing")["error"]["code"] == "invalid_params"
         assert _interact(sock, tab_id, {"command": "done"})["ok"] is True
         assert (
@@ -405,6 +424,166 @@ def test_cancel_during_remote_alignment_ignores_late_delivery(fx) -> None:
                 "result"
             ]["status"]
             == "cancelled"
+        )
+
+
+@pytest.mark.parametrize("terminal", ["done", "cancel"])
+def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
+    mounted_fx, tmp_path, terminal
+) -> None:
+    fx, window = mounted_fx
+    tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    bridge, call = mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        read = call("tab_interact", {"tab": tab_id})
+        assert read["state"] == active.plugin.project_state(active.session.snapshot())
+        assert Path(read["figure"]).read_bytes().startswith(b"\x89PNG")
+        assert read["preview_active"] is False
+        assert "done" in {command["name"] for command in read["commands"]}
+        changed = call(
+            "tab_interact",
+            {
+                "tab": tab_id,
+                "payload": {"command": "set_conjugate", "args": {"enabled": True}},
+            },
+        )
+        assert changed["state"]["conjugate"] is True
+        assert changed["state"] == active.plugin.project_state(
+            active.session.snapshot()
+        )
+        running = call("status", {})["running"]
+        assert len(running) == 1
+        op = running[0]["op"]
+        if terminal == "done":
+            result = call(
+                "tab_interact", {"tab": tab_id, "payload": {"command": "done"}}
+            )
+            assert result["state"] == changed["state"]
+            assert Path(result["figure"]).read_bytes().startswith(b"\x89PNG")
+            assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+        else:
+            call("cancel", {"op": op})
+        status = "finished" if terminal == "done" else "cancelled"
+        assert call("wait", {"op": op, "timeout": 0.1})["status"] == status
+        with open_client(fx.service.port) as sock:
+            assert (
+                _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                    "result"
+                ]["status"]
+                == status
+            )
+        assert fx.ctrl.run_analyze_control.get_interactive(tab_id) is None
+        assert window.interactive_presentation(tab_id) is None
+    finally:
+        bridge.disconnect()
+
+
+def test_mcp_done_writeback_save_and_close_share_the_gui_result(
+    mounted_fx, tmp_path
+) -> None:
+    fx, window = mounted_fx
+    tab_id, _, widget = _start_mounted(fx, window, "onetone/flux_dep")
+    bridge, call = mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        done = call("tab_interact", {"tab": tab_id, "payload": {"command": "done"}})
+        assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+        call("tab_get", {"tab": tab_id, "include": ["summary"]})
+        preview = call("writeback", {"tab": tab_id})
+        expected = {
+            "flx_half": done["state"]["flux_half"],
+            "flx_int": done["state"]["flux_int"],
+            "flx_period": 2
+            * abs(done["state"]["flux_int"] - done["state"]["flux_half"]),
+        }
+        assert {
+            item["target"]: item["proposed"] for item in preview["items"]
+        } == expected
+        call("rpc_call", {"method": "context.snapshot"})
+        written = call(
+            "writeback",
+            {"tab": tab_id, "write": [{"id": item["id"]} for item in preview["items"]]},
+        )
+        assert {
+            item["target"]: item["after"] for item in written["written"]
+        } == expected
+        assert call("rpc_call", {"method": "context.snapshot"})["md"] == expected
+        call("tab_get", {"tab": tab_id, "include": ["summary", "artifacts"]})
+        image = tmp_path / "interactive-result.png"
+        saved = call(
+            "tab_save",
+            {
+                "tab": tab_id,
+                "artifacts": ["analysis"],
+                "paths": {"analysis": str(image)},
+            },
+        )
+        if "op" in saved:
+            assert (
+                call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
+            )
+        else:
+            assert saved["saved"] == {"analysis": str(image)}
+        assert image.read_bytes().startswith(b"\x89PNG")
+        artifacts = call("tab_get", {"tab": tab_id, "include": ["artifacts"]})[
+            "artifacts"
+        ]
+        analysis = next(item for item in artifacts if item["key"] == "analysis")
+        assert analysis["status"] == "saved"
+        assert analysis["last_saved_path"] == str(image)
+        assert call("tab_close", {"tab": tab_id, "discard_unsaved": True}) == {
+            "closed": tab_id
+        }
+        assert not fx.ctrl.run_analyze_control.has_tab(tab_id)
+    finally:
+        bridge.disconnect()
+
+
+def test_interactive_commands_follow_before_commit_but_reads_do_not(
+    mounted_fx, monkeypatch
+) -> None:
+    fx, window = mounted_fx
+    tab_id, token, _ = _start_mounted(fx, window, "onetone/flux_dep")
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    follow = window.select_tab_pane
+    observed = []
+
+    def select(tab, pane):
+        observed.append(
+            (tab, pane, active.plugin.project_state(active.session.snapshot()))
+        )
+        follow(tab, pane)
+
+    monkeypatch.setattr(window, "select_tab_pane", select)
+    with open_client(fx.service.port) as sock:
+        original = _interact(sock, tab_id)["result"]["state"]
+        invalid = _interact(sock, tab_id, {"command": "unknown"})
+        assert invalid["ok"] is False
+        assert observed == []
+        changed = _interact(
+            sock,
+            tab_id,
+            {
+                "command": "set_conjugate",
+                "args": {"enabled": not original["conjugate"]},
+            },
+        )
+        assert changed["ok"] is True
+        assert observed == [(tab_id, "analysis", original)]
+        assert changed["result"]["state"]["conjugate"] is not original["conjugate"]
+        done = _interact(sock, tab_id, {"command": "done"})
+        assert done["ok"] is True
+        assert observed[-1] == (tab_id, "analysis", changed["result"]["state"])
+        assert len(observed) == 2
+        assert (
+            _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                "result"
+            ]["status"]
+            == "finished"
         )
 
 

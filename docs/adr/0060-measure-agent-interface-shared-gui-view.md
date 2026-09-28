@@ -1,6 +1,6 @@
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
 
-**狀態：** accepted（未實作）
+**狀態：** accepted
 **關聯：** [[0059]]（RPC channel）、[[0061]]（interactive plugin session）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（Stop feedback）、[[0033]]（刪改名不掃描參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context
@@ -22,7 +22,7 @@
 | 名詞沿用 GUI | tool 以 GUI 物件命名，agent 與使用者指稱同一個 tab、同一份寫回清單。 |
 | 草稿先於提交 | cfg 與寫回的修改先落在 GUI 草稿，run、寫入才提交（[[0008]]）。 |
 | 一個判斷點一個 tool | 每個判斷點是獨立 tool，不合併成批次；每個 tool 的回傳足以做該步的判斷。 |
-| 一件事一條路 | 常用操作由特化 tool 提供；其餘 wire method 經 RPC channel（[[0059]]），兩者不重疊。 |
+| 每個 method 一個 exposure | 特化 tool 與 RPC 可操作同一功能；每個 wire method 僅有一個 exposure（[[0059]]）。`tool` 方法由 `rpc_call` 回 `use_tool`，`internal` 不可達。 |
 | 索引與內容分離 | 索引類 tool 只回答「有什麼」；內容由各自的 tool 讀取。 |
 | 能機械推導的就提供 | 可由既有資料算出的值（例如 `eta_s`、正規化後的 sweep）由介面回傳。 |
 | 省 context | 圖一律回傳檔案路徑；大型值只回摘要，指名讀取時才回完整值。 |
@@ -31,7 +31,9 @@
 
 ### 錯誤
 
-會失敗的操作以錯誤回報，附 stable `reason`、訊息與修正提示（[[0047]]）；成功時不回傳空結果。常用 `reason`：`busy`（有衝突的操作進行中）、`unsaved`（有未存檔結果）、`missing`（前置條件不足，附缺少的項目）、`conflict`（參數互相矛盾）、`use_tool`、`not_cancellable`。version guard 衝突時重讀狀態再重試。
+會失敗的操作以錯誤回報，附 stable `reason`、訊息與修正提示（[[0047]]）；成功時不回傳空結果。常用 `reason`：`busy`（有衝突的操作進行中）、`unsaved`（有未存檔結果）、`missing`（前置條件不足，附缺少的項目）、`conflict`（參數互相矛盾）、`use_tool`、`not_cancellable`。version guard 衝突時重讀狀態，再由操作者決定是否重試。
+
+GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0 也拒絕寫入。完整讀取才揭露對應資源；部分 cfg 讀取、裸版本表與 tab 索引不代替完整操作狀態。MCP 不保存 seen，也不在 mutation 前隱藏預讀。`tab_get` 的 summary/artifacts 與 `tab_live` 回傳完整 `operation_state`，包含 result/analysis revision、availability 與 paths，不要求原始陣列。重連後必須重新讀取。自寫只推進先前已看過且版本匹配的資源，連帶 cfg 回填不會把未讀 cfg 變成已讀。
 
 ### 非同步與短暫等待
 
@@ -64,7 +66,7 @@
 - 切換 ref 會移除原本的子路徑，須先切 ref 再改子欄位。
 - `{__kind: "value_ref", key}` 在套用時解析一次並寫入常數。
 
-**sweep 一律整體修改。** sweep 的欄位彼此連動，只能在 sweep 路徑上給整個物件，不接受端點路徑（例如 `sweep.freq.start`）：
+**Agent sweep 使用整體修改。** Agent 在 sweep 路徑上給完整物件，不接受端點路徑（例如 `sweep.freq.start`）。GUI widget仍使用逐欄canonical targets；兩種入口共用binding模型與SweepEditor／CenteredSweepEditor的正規化及驗證，不在remote複製算法（[[0050]]）：
 
 | sweep 種類 | 接受的形式 |
 | --- | --- |
@@ -80,7 +82,7 @@
 
 ### A. 連線與狀態
 
-**`connect(port?, launch = "never" | "if_missing" | "new", clean = false)`**
+**`connect(port?, launch = "never" | "if_missing" | "new", clean = false, token?)`**
 
 | `launch` | 已有 GUI | 沒有 GUI |
 | --- | --- | --- |
@@ -88,10 +90,12 @@
 | `"if_missing"` | 接上 | 啟動並接上 |
 | `"new"` | `reason="port_in_use"` | 啟動並接上 |
 
-未給 `port` 時自動尋找。`clean=true` 在啟動時不還原上次的 GUI session。wire 版本不相容時報錯。已連上時重複呼叫回傳目前狀態。回傳 `{launched, port, versions: {wire, gui, mcp}, status}`。連線隨 MCP 結束而關閉，不另提供 disconnect。
+GUI 啟用 control-token 時以 `token` 認證，不在工具日誌記錄憑證。未給 `port` 時自動尋找。`clean=true` 在啟動時不還原上次的 GUI session。wire 版本不相容時報錯。已連上時重複呼叫回傳目前狀態。回傳 `{launched, port, versions: {wire, gui, mcp}, status}`。連線隨 MCP 結束而關閉，不另提供 disconnect。
 
 **`shutdown(discard_unsaved = false)`**
-以 GUI 的正常關閉流程（保存 session、斷開儀器、清理）關閉目前連上的 GUI。有 run 進行中回 `busy`；有未存檔結果回 `unsaved`，確認後以 `discard_unsaved=true` 關閉。關閉逾時回 `{stopped: false}`，由使用者處理。
+以GUI正常關閉流程保存session、斷開儀器並清理。GUI在同一次owner dispatch檢查所有active operations，含run、analyze、device、save；任何一項進行中都回`busy`。Idle後檢查所有tabs的未存artifacts，回`unsaved`並列出，只有明確`discard_unsaved=true`才略過此檢查。GUI本身的data-only關閉提示不變。
+
+GUI回覆自身PID，MCP等待該process自然退出，最多五秒，不使用shared PID file判斷目標。請求或退出等待逾時回`{stopped:false}`，不重試、不呼叫bridge.stop、不送終止信號。確認退出才回`{stopped:true}`。
 
 **`status()`** — 索引：
 
@@ -137,8 +141,8 @@
 **`md_set(values: {key: value})`**
 依序寫入，遇錯即停、不回滾；回傳 `{key: {before, after}}`。
 
-**`ml_get(name?)`**
-未給 `name` 時列出 modules 與 waveforms（名稱、種類、描述）；給 `name` 時回傳該項 cfg。
+**`ml_get(name?, kind?)`**
+未給`name`時列出modules與waveforms的名稱、種類及描述；給`name`時直接讀取該項cfg，不建立editor。module與waveform同名時須給`kind="module"|"waveform"`消歧。
 
 **`ml_roles()`**
 列出可建立的 role 模板 `[{role_id, label, kind, default_name}]`。
@@ -146,11 +150,14 @@
 **`ml_create(role_id, name?)`**
 由 role 模板建立 module／waveform，預設值由 md 帶入；未給 `name` 時用 `default_name`。回傳 `{name, kind, cfg}`。
 
-**`ml_edit(name, edits, save_as?)`**
-以 cfg 編輯語法修改 library 項目並存檔；任何一步失敗則 library 不變。`save_as` 存為新項目、原項目不動。存檔時 md 表達式求值為數值，library 不保存與 md 的連動。回傳存入的 `{name, cfg}`。
+**`ml_edit(name, edits, save_as?, kind?)`**
+module與waveform同名時須給`kind="module"|"waveform"`消歧。
+GUI application服務以共用CfgDraft模型依序修改並逐項寫入library，第一個錯誤即停止，保留已提交前綴，不rollback。`save_as`在第一項成功時建立新項目，原項目不動；目的地已存在則在寫入前拒絕。存檔時md表達式求值為數值，library不保存與md的連動。
+
+回傳`{name, cfg, applied, failed, skipped}`。`applied`為已提交數；`failed`為null或含零起始index、path、message的物件；`skipped`列出未執行的後綴索引。`cfg`是實際已提交目的地，save_as首項失敗尚未建立目的地時為null。入口需明確讀過context，MCP不以隱藏context/editor讀取通過guard，也不自行串接editor生命週期。
 
 **`ml_rename(name, new_name, kind?)`**、**`ml_delete(name, kind?)`**
-種類由名稱判斷，module 與 waveform 同名時須給 `kind`；名稱衝突時報錯。參照該項目的 cfg 會改為 inline 值（值保留，不再連結 library，[[0033]]），回傳中提示此影響。
+種類由名稱判斷，module與waveform同名時須給`kind`；名稱衝突時報錯。操作只修改library，不掃描或改寫參照。LINKED參照保留舊鍵，不轉inline，舊鍵不存在時失效；MODIFIED參照保留inline修改，轉成Custom值。回傳提示此影響。
 
 ### D. 實驗與 tab
 
@@ -172,10 +179,12 @@
 回傳該實驗的 guide `{behavior, expects_md, expects_ml, typical_writeback, recommended}`。guide 是實驗的操作說明，不是格式契約。
 
 **`tab_open(experiment, from_file?)`**
-開新 tab，回傳 `{tab, experiment}`。`from_file` 載入既有資料檔（不需 SoC）；資料檔與實驗不相容時報錯，且不留下 tab。
+開新 tab，回傳 `{tab, experiment}`。帶 `from_file` 時，先明確讀取 `context.snapshot`，再由 GUI 的單一 `tab.open_file` application 操作建立、載入及聚焦，不需 SoC。MCP 不預讀尚未存在的 tab，也不把組合責任留在 session。
+
+主載入失敗時 GUI 關閉新 tab、恢復先前焦點；清理失敗回 `cleanup_failed` 並說明可能殘留的 tab 或焦點。載入重用既有 `load_tab_result` 與 cfg 回填。成功回覆另含 `cfg_backfill=applied|not_applied`；回填失敗保留載入結果，不承諾所有副作用全有全無。新 tab identity 只認證存在，後續覆寫前仍需明確讀取 tab/cfg；既有 tab.load_data guard 不變。
 
 **`tab_close(tab, discard_unsaved = false)`**
-關閉 tab。執行中回 `busy`；有 artifact 為 `not_saved` 或 `unsaved_changes` 時回 `unsaved` 並列出，確認後以 `discard_unsaved=true` 關閉。
+關閉tab。該tab有active operation時回`busy`，discard不能略過busy。有任何artifact為`not_saved`或`unsaved_changes`時回`unsaved`並列出，確認後以`discard_unsaved=true`關閉。成功回`{closed: tab}`。檢查與關閉在同一次GUI owner dispatch內完成，不在MCP先查再關閉。
 
 **`tab_get(tab, include = ["summary"])`**
 
@@ -205,16 +214,17 @@
 - post 需要先有 primary 結果；分析失敗時報錯。
 
 **`tab_interact(tab, payload?)`**
-操作互動式分析。介面不解讀子命令，只轉送給互動分析外掛註冊的方法。
+操作互動式分析。介面不解讀子命令，只轉送給互動分析外掛註冊的方法。此介面採 best-effort guard，不檢查 per-connection seen；保留 active session、命令驗證與 lifecycle 保護。GUI 與 agent 後提交者為準，不追蹤上一位操作者或 plugin revision。此例外不改變其他 method 的 guard。
 
-- 不帶 `payload`：回傳 `{plugin, info, state, commands, figure}`。`commands` 為外掛註冊的子命令與參數定義（`ParamSpec`）；`state` 為外掛目前的結構化選取狀態。
-- `payload = {command, args}`：參數依外掛宣告驗證後執行一個子命令，回傳 `{info, state, figure}`。
+- 不帶 `payload`：回傳 `{plugin, info, state, commands, figure, preview_active}`。`commands` 為外掛註冊的子命令與參數定義（`ParamSpec`）；`state` 為外掛的 committed state。`preview_active` 表示 GUI 正顯示本地 preview，不改變回傳的 committed state。
+- `payload = {command, args}`：參數依外掛宣告驗證後執行一個子命令，回傳相同欄位。`figure` 是 MCP session 暫存 PNG 的絕對路徑，無圖時為 `null`。
 - `done` 為所有外掛共有的子命令，完成分析，結果經原本的 `op` 送出；取消用 `cancel(op)`。
 
 **`writeback(tab, stage = "primary" | "post", write?)`**
 
 - 不帶 `write`：回傳 `{destination, items: [{id, kind: "md" | "module" | "waveform", target, description, current, proposed}]}`。md 項目為值；module／waveform 項目為 cfg，目標不存在時 `current` 為 `null`。
-- `write = [{id, target?, value?, edits?}]`：只寫入列出的項目。`target` 改寫入名稱，`value` 改 md 值，`edits` 以 cfg 編輯語法修改 module／waveform。依序處理、遇錯即停，寫入目前的 active context（`destination`），回傳 `{written: {target: {before, after}}}`。
+- `write = [{id, target?, value?, edits?}]`：只寫入列出的項目。`target` 改寫入名稱，`value` 改 md 值，`edits` 以 cfg 編輯語法修改 module／waveform。先依序修改草稿，遇錯即停並保留已完成的草稿修改，不開始 context apply。全部成功後，以既有 ContextWritePort 一次提交指定 IDs 到目前的 active context，不暫改 GUI 勾選，也不承諾跨檔 atomic。
+- 寫入成功回傳 `{written: [{id, kind, target, before, after}]}`。每項包含完整的實際寫入前後值；`kind` 為 `md`、`module` 或 `waveform`。不同 kind 可使用同名 target，因此結果以項目列表表示，不以 target 作為唯一 key。
 
 **`tab_save(tab, artifacts = "all" | [key, ...], paths?, comment?)`**
 以 artifact 為單位存檔。`"all"` 依 GUI Save All 的順序存下所有可存項目。`paths` 覆寫個別路徑，其餘用預設路徑；`comment` 寫入 data。回傳 `{saved: {key: path}}`，為實際寫入的路徑（資料檔重名時自動加後綴）。
@@ -309,8 +319,8 @@ tab_close("t1")
 | `project`、`soc_connect`、`soc_info` | `project.info`、`startup.apply`；`soc.connect`；`soc.info` |
 | `contexts`、`context_use`、`context_create` | `context.labels`、`context.active`、`context.use`、`context.new` |
 | `md_get`、`md_set` | `context.md_get`、`context.md_get_attr`、`context.md_set_attr` |
-| `ml_get`、`ml_roles`、`ml_create` | `context.ml_get` 與 editor 讀取、`context.ml_list_roles`、`context.ml_create_from_role` |
-| `ml_edit` | `editor.new`、`editor.set_field`、`editor.commit`，失敗時 `editor.discard` |
+| `ml_get`、`ml_roles`、`ml_create` | `context.ml_get(name?, kind?)`直接讀library、`context.ml_list_roles`、`context.ml_create_from_role` |
+| `ml_edit` | `context.ml_edit`，GUI application擁有草稿、逐項提交與清理 |
 | `ml_rename`、`ml_delete` | `context.ml_rename_*`、`context.ml_del_*` |
 | `experiments`、`guide` | `adapter.list`、`adapter.guide` |
 | `tab_open`、`tab_close` | `tab.new`、`tab.load_data`、`tab.set_active`、`tab.close` |
@@ -325,16 +335,16 @@ tab_close("t1")
 | `predictor_*`、`predict` | `predictor.info`、`predictor.load`、`predictor.set_model_params`、`predictor.predict`；`PredictorService.calibrate_flux_bias` |
 | `screenshot` | `view.screenshot`、`dialog.screenshot` |
 
-需新增或調整，均不改變 GUI 畫面：
+固定工具使用以下 wire 接縫：
 
-- 子 tab 切換：只影響顯示的 wire method，供 GUI 跟隨使用。
-- `tab.get_cfg` 補上型別、ref 可選項與鎖定狀態。
-- cfg 編輯語法：sweep 整體修改與衝突檢查、sweep 端點接受 md 表達式、回傳錯誤清單。
+- 子 tab 切換只影響顯示，供 GUI 跟隨使用。
+- `tab.get_cfg` 回傳型別、ref 可選項與鎖定狀態。
+- cfg 編輯支援 sweep 整體修改與衝突檢查、sweep 端點 md 表達式及錯誤清單。
 - `context.new` 接受 `label`。
-- `tab.snapshot` 補上 artifact 存檔狀態。
-- `tab.writeback_preview` 補上 md 項目的 current 與 module／waveform 項目的 current／proposed cfg。
-- `predictor_calibrate` 的 wire method。
-- `tab_interact` 所需 GUI-side `tab.interact` wire method 已提供：service-owned session 保存 committed `state` 與 operation（[[0061]]）；plugin 宣告子命令與 `ParamSpec`，wire 驗證後執行共用 action，GUI frontend 直接呼叫相同 typed action，不經 JSON。GUI-local preview 只以 `preview_active` presentation metadata 回報，不取代 committed state。MCP tool/bridge 尚未實作。
+- `tab.snapshot` 回傳 artifact 存檔狀態。
+- `tab.writeback_preview` 回傳 md 項目的 current 與 module／waveform 項目的 current／proposed cfg。
+- `predictor_calibrate` 經 GUI PredictorService 校正。
+- `tab_interact` 所需 GUI-side `tab.interact` wire method 已提供：service-owned session 保存 committed `state` 與 operation（[[0061]]）；plugin 宣告子命令與 `ParamSpec`，wire 驗證後執行共用 action，GUI frontend 直接呼叫相同 typed action，不經 JSON。GUI-local preview 只以 `preview_active` presentation metadata 回報，不取代 committed state。固定 MCP `tab_interact` 工具轉送一次讀取或命令，不解讀 plugin 子命令，也不另存 state。工具將 wire PNG 解碼到 session 暫存檔。
 
 ## 範圍外
 
@@ -343,5 +353,5 @@ tab_close("t1")
 ## Consequences
 
 - agent 的每個判斷點對應一個 tool，使用者在 GUI 上看到與 agent 相同的狀態與畫面。
-- 同一個操作只有一個入口；低頻操作經 RPC channel，不增加特化 tool。
-- `tab_interact` 依賴互動分析外掛的子命令重構，須在該重構完成後實作；其餘 tool 可先行實作。
+- 常用操作提供特化 tool；低頻操作經 RPC channel，不增加特化 tool。允許標為 `rpc` 的方法與特化 tool 操作同一功能，exposure 規則見 [[0059]]。兩者共用 GUI guard，不另建狀態或繞過驗證。
+- `tab_interact` 使用外掛的共用 command 與 service-owned session。讀取不切換畫面，命令在執行前跟隨 Analysis pane；`done` 與 `cancel(op)` 結束原本的 analysis operation。

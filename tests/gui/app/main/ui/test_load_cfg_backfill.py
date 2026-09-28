@@ -3,7 +3,7 @@ from typing import ClassVar
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QFileDialog, QPushButton
+from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -14,6 +14,7 @@ from zcu_tools.gui.app.main.app import _make_empty_ctx
 from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
+from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
@@ -24,10 +25,17 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.main._reload_fakes import Loader, OldAdapter
-from tests.gui.app.main.services.remote._helpers import open_client, recv_response, send
+from tests.gui.app.main.services.remote._helpers import (
+    call,
+    mcp_client,
+    open_client,
+    recv_response,
+    send,
+)
 
 
 class RuntimeCfg(ExpCfgModel):
@@ -116,6 +124,13 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
     port = remote.start()
     try:
         with open_client(port) as client:
+            for method, params in (
+                ("tab.snapshot", {"tab_id": tab_id}),
+                ("context.snapshot", {}),
+            ):
+                send(client, {"id": method, "method": method, "params": params})
+                observed = recv_response(client, method)
+                assert observed["ok"], observed
             send(
                 client,
                 {
@@ -153,6 +168,85 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
             else:
                 assert current == original
     finally:
+        remote.stop()
+
+
+def test_mcp_tab_open_from_file_loads_and_backfills_gui(
+    app, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
+    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
+    ctrl, window, state, previous = app
+    remote = RemoteControlAdapter(
+        controller=ctrl,
+        opts=ControlOptions(port=0),
+        owner_scheduler=QtOwnerScheduler(),
+        render_view=window,
+    )
+    port = remote.start()
+    bridge, invoke = mcp_client(port, tmp_path)
+    try:
+        invoke("connect", {"port": port})
+        invoke("rpc_call", {"method": "context.snapshot"})
+        tab = invoke("tab_open", {"experiment": "demo", "from_file": "result.hdf5"})[
+            "tab"
+        ]
+        assert tab != previous
+        assert state.active_tab_id == tab
+        assert state.get_tab(tab).cfg_schema.value.fields["knob"] == DirectValue(42)
+        summary = invoke("tab_get", {"tab": tab, "include": ["summary"]})["summary"]
+        assert summary["state"]["has_result"] is True
+        assert state.active_tab_id == tab
+    finally:
+        bridge.disconnect()
+        remote.stop()
+
+
+def test_failed_mcp_load_restores_non_neighbor_visible_tab(
+    app, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
+    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
+    ctrl, window, state, focused = app
+    middle = ctrl.new_tab("demo")
+    neighbor = ctrl.new_tab("demo")
+    old_tabs = tuple(ctrl.list_tab_ids())
+    assert old_tabs == (focused, middle, neighbor)
+    tabs = next(
+        widget
+        for widget in window.findChildren(QTabWidget)
+        if widget.count() == 3 and isinstance(widget.widget(0), ExpTabWidget)
+    )
+    tabs.setCurrentIndex(0)
+    assert state.active_tab_id == focused
+    assert window.get_view_snapshot()["active_tab_id"] == focused
+
+    def reject_load(self: LoadAdapter, req: LoadDataRequest) -> Result:
+        raise LoadDataError("bad data", reason_code="invalid_data_file")
+
+    monkeypatch.setattr(LoadAdapter, "load", reject_load)
+    remote = RemoteControlAdapter(
+        controller=ctrl,
+        opts=ControlOptions(port=0),
+        owner_scheduler=QtOwnerScheduler(),
+        render_view=window,
+    )
+    port = remote.start()
+    bridge, invoke = mcp_client(port, tmp_path)
+    try:
+        invoke("connect", {"port": port})
+        invoke("rpc_call", {"method": "context.snapshot"})
+        with pytest.raises(GuiRpcError, match="bad data"):
+            invoke("tab_open", {"experiment": "demo", "from_file": "bad.hdf5"})
+        assert tuple(ctrl.list_tab_ids()) == old_tabs
+        assert state.active_tab_id == focused
+        with open_client(port) as sock:
+            snapshot = call(sock, "view.snapshot", {})
+            assert snapshot["ok"], snapshot
+            assert snapshot["result"]["active_tab_id"] == focused
+        assert tabs.currentIndex() == 0
+    finally:
+        bridge.disconnect()
         remote.stop()
 
 
