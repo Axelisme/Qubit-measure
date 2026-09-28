@@ -5,7 +5,7 @@ import logging
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.main.adapter import (
     ExpContext,
@@ -37,6 +37,41 @@ _KIND_PREFIX = {
 
 # Sentinel for "argument not supplied" in set_item_field (None is a real value).
 _UNSET: Any = object()
+
+
+@dataclass(frozen=True)
+class WritebackEdit:
+    """One ordered agent edit; omitted values differ from explicit None."""
+
+    session_id: str
+    target_name: str | None = None
+    proposed_value: Any = _UNSET
+    edits: list[dict[str, object]] | None = None
+
+
+@dataclass(frozen=True)
+class WritebackWritten:
+    """Actual destination values around a successful context write."""
+
+    id: str
+    kind: Literal["md", "module", "waveform"]
+    target: str
+    before: object
+    after: object
+
+
+def _destination_value(item: WritebackItem, context: ExpContext) -> object:
+    if isinstance(item, MetaDictWriteback):
+        value = context.md.get(item.target_name, None)
+    else:
+        collection = (
+            context.ml.modules
+            if isinstance(item, ModuleWriteback)
+            else context.ml.waveforms
+        )
+        target = collection.get(item.target_name)
+        value = None if target is None else target.to_dict()
+    return copy.deepcopy(value)
 
 
 @dataclass(frozen=True)
@@ -387,6 +422,57 @@ class WritebackService:
                 if entry.item.session_id in applied_id_set:
                     entry.applied = True
         return {"applied_ids": applied_ids, "written": written}
+
+    def write_draft(
+        self,
+        draft: WritebackDraft,
+        changes: tuple[WritebackEdit, ...],
+        context: ExpContext,
+    ) -> list[WritebackWritten]:
+        """Edit sequentially, then apply only these IDs once.
+
+        An edit failure keeps the successful draft prefix but starts no context
+        write. Context write failures retain the existing write-port semantics.
+        The caller supplies the live context on the owner thread.
+        """
+        self._require_draft(draft)
+        if not context.has_context():
+            raise FailedPreconditionError("No experiment context.")
+        ids = tuple(change.session_id for change in changes)
+        if len(set(ids)) != len(ids):
+            raise InvalidInputError("Repeated writeback IDs")
+        items = []
+        for change in changes:
+            result = self.edit_draft(
+                draft,
+                change.session_id,
+                target_name=change.target_name,
+                proposed_value=change.proposed_value,
+                edits=change.edits,
+            )
+            if not result["valid"]:
+                raise FailedPreconditionError(
+                    f"Invalid writeback draft: {change.session_id!r}"
+                )
+            items.append(self._find_draft_entry(draft, change.session_id).item)
+        before = [_destination_value(item, context) for item in items]
+        self.apply_draft(draft, item_ids=ids)
+        return [
+            WritebackWritten(
+                id=item.session_id,
+                kind=(
+                    "md"
+                    if isinstance(item, MetaDictWriteback)
+                    else "module"
+                    if isinstance(item, ModuleWriteback)
+                    else "waveform"
+                ),
+                target=item.target_name,
+                before=previous,
+                after=_destination_value(item, context),
+            )
+            for item, previous in zip(items, before, strict=True)
+        ]
 
     def teardown_draft(self, draft: WritebackDraft) -> None:
         """Tear down a draft at most once; cleanup errors never cause a retry."""
