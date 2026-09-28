@@ -125,8 +125,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 70`, `GUI_VERSION = 102`, and
-`MCP_VERSION = 93` (defined in `zcu_tools.mcp.measure.server`). WIRE 70 exposes
+Current measure-gui values are `WIRE_VERSION = 71`, `GUI_VERSION = 103`, and
+`MCP_VERSION = 94` (defined in `zcu_tools.mcp.measure.server`). WIRE 71 exposes
+shared interactive plugin commands and terminal replies. GUI 103 owns interactive
+sessions and command view follow; MCP 94 adds the fixed `tab_interact` tool.
+WIRE 70 exposes
 shared artifact status, batch save operations and guarded close/shutdown replies.
 GUI 102 tracks ordered saves and actual output paths; MCP 93 adds save, close and
 graceful shutdown tools. WIRE 69 adds

@@ -112,7 +112,8 @@ from __future__ import annotations
 # v68: analysis starts expose effective params, interactive mode and invalidation facts.
 # v69: writeback exposes complete previews and identity-preserving batch results.
 # v70: artifact snapshots, batch save operations and guarded close/shutdown replies.
-WIRE_VERSION = 70
+# v71: shared interactive plugin discovery, commands and terminal operation replies.
+WIRE_VERSION = 71
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -161,4 +162,5 @@ WIRE_VERSION = 70
 # v100: validate analysis params and follow run/edit/analyze through explicit view commands.
 # v101: apply explicit writeback items through shared drafts and follow their pane.
 # v102: shared artifact tracking, ordered saves and actual output path reporting.
-GUI_VERSION = 102
+# v103: service-owned interactive sessions and best-effort command view follow.
+GUI_VERSION = 103
