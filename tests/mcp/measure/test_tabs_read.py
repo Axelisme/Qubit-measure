@@ -279,9 +279,6 @@ def test_tab_get_projects_complete_gui_artifacts_with_cfg(tmp_path: Path) -> Non
         {**artifacts[1], "key": "analysis", "kind": "image"},
         {**artifacts[2], "key": "post", "kind": "image"},
     ]
-    assert result["partial"] == {
-        "cfg": "06-cfg-library owns aggregate type/choice/lock projection",
-    }
     assert [
         method
         for method, _ in client.transport.sent

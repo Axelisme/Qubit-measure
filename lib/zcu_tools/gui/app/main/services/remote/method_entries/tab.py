@@ -134,8 +134,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Batch-set canonical cfg paths on a tab in order (fail-fast, non-atomic). "
-            "Copy paths from tab.get_cfg: sweep edges are '<path>.<edge>', reference "
-            "keys are '<path>.ref', and reference children descend directly. Removed "
+            "Copy paths from tab.get_cfg: agent_edit=true accepts only whole sweep "
+            "objects at '<path>' (not edge paths); the default GUI leaf grammar "
+            "accepts sweep edges '<path>.<edge>'. Reference keys are '<path>.ref', "
+            "and reference children descend directly. Removed "
             "'.sweep.*' / '.value.*' aliases are rejected without mutation and name "
             "their replacement. 'edits' is an ORDERED list of {path, value} objects. "
             "Apply ref-switch edits "
@@ -152,6 +154,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 _json("edits", "Ordered list of {path, value} edits"),
+                ParamSpec(
+                    "agent_edit",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Agent whole-sweep grammar; GUI leaf edits remain unchanged",
+                ),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
