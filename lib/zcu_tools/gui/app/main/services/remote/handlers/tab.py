@@ -111,6 +111,16 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "has_figure": bool(interaction.has_figure),
         },
         "save_paths": _save_paths_wire(snap.paths),
+        "artifacts": [
+            {
+                "kind": artifact.kind.value,
+                "status": artifact.status.value,
+                "default_path": artifact.default_path,
+                "last_saved_path": artifact.last_saved_path,
+                "is_saveable": artifact.is_saveable,
+            }
+            for artifact in snap.artifacts
+        ],
         "result_source_path": snap.run.source_path,
         # Revisions distinguish replacements even when availability and source
         # path stay unchanged. Payload arrays remain with the application owner.

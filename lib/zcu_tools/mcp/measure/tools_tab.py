@@ -166,18 +166,18 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
             )
     if "artifacts" in include:
         assert snap is not None
-        paths = snap.get("save_paths") or {}
+        keys = {"data": "data", "analysis": "analysis", "post_analysis": "post"}
         result["artifacts"] = [
-            {"key": key, "kind": kind, "default_path": paths.get(path_key)}
-            for key, kind, path_key in (
-                ("data", "data", "data_path"),
-                ("analysis", "image", "analysis_image_path"),
-                ("post", "image", "post_analysis_image_path"),
-            )
+            {
+                "key": keys[artifact["kind"]],
+                "kind": "data" if artifact["kind"] == "data" else "image",
+                "status": artifact["status"],
+                "default_path": artifact["default_path"],
+                "last_saved_path": artifact["last_saved_path"],
+                "is_saveable": artifact["is_saveable"],
+            }
+            for artifact in snap["artifacts"]
         ]
-        result.setdefault("partial", {})["artifacts"] = (
-            "09-save-lifecycle owns status/last_saved_path"
-        )
     return result
 
 

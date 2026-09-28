@@ -40,6 +40,79 @@ def fx(qapp):  # noqa: ARG001
     f.stop()
 
 
+def _assert_artifacts_match_state(fx, sock, tab_id):
+    artifacts = fx.state.get_artifact_snapshots(tab_id)
+    snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+    assert snapshot["artifacts"] == [
+        {
+            "kind": item.kind.value,
+            "status": item.status.value,
+            "default_path": item.default_path,
+            "last_saved_path": item.last_saved_path,
+            "is_saveable": item.is_saveable,
+        }
+        for item in artifacts
+    ]
+    return artifacts
+
+
+@pytest.mark.parametrize("edit", ["path", "comment"])
+def test_artifact_snapshot_keeps_saved_path_after_draft_edit_and_failed_save(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edit: str
+):
+    tab = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    try:
+        run = fx.ctrl.start_run(tab)
+        assert (
+            call(sock, "operation.await", {"operation_id": run, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        saved = fx.ctrl.save_data(tab, str(tmp_path / "first"), comment="first")
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": saved.operation_id, "timeout": 2},
+            )["result"]["status"]
+            == "finished"
+        )
+        if edit == "path":
+            fx.state.update_tab_data_path_override(tab, str(tmp_path / "next"))
+        else:
+            fx.state.update_tab_comment(tab, "changed")
+        before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0][
+            "artifacts"
+        ][0]
+        assert before["status"] == "unsaved_changes"
+        assert before["last_saved_path"] == saved.data_path
+        assert before["is_saveable"] is True
+        monkeypatch.setattr(
+            FakeAdapter, "save", MagicMock(side_effect=OSError("disk full"))
+        )
+        failed = fx.ctrl.save_data(tab)
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": failed.operation_id, "timeout": 2},
+            )["result"]["status"]
+            == "failed"
+        )
+        after = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0][
+            "artifacts"
+        ][0]
+        assert after == before
+        assert (
+            after["last_saved_path"]
+            == fx.state.get_artifact_snapshots(tab)[0].last_saved_path
+        )
+    finally:
+        sock.close()
+
+
 def test_analyze_params_wire_describes_live_adapter_before_run(fx):
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
@@ -229,6 +302,7 @@ def test_data_save_is_awaitable_and_non_cancellable_until_terminal(
         cancelled = call(sock, "operation.cancel", {"operation_id": operation_id})
         assert cancelled["error"]["reason"] == "not_cancellable"
         assert fx.state.is_tab_busy(tab_id)
+        _assert_artifacts_match_state(fx, sock, tab_id)
         assert fx.state.get_artifact_snapshots(tab_id)[0].last_saved_path is None
         release.set()
         completed = call(
@@ -237,7 +311,7 @@ def test_data_save_is_awaitable_and_non_cancellable_until_terminal(
         assert completed["status"] == ("failed" if fail else "finished")
         assert call(sock, "operation.active")["result"]["operations"] == []
         assert not fx.state.is_tab_busy(tab_id)
-        artifact = fx.state.get_artifact_snapshots(tab_id)[0]
+        artifact = _assert_artifacts_match_state(fx, sock, tab_id)[0]
         if fail:
             assert "disk full" in completed["error"]["message"]
             assert artifact.last_saved_path is None
