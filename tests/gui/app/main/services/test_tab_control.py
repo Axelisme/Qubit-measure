@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from zcu_tools.gui.app.main.services.tab_control import TabControlFacet
+from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from tests.gui._control_fakes import CallLog, call
 
@@ -76,7 +78,9 @@ class RecordingBus:
         self.payloads.append(payload)
 
 
-def _facet() -> tuple[
+def _facet(
+    load_tab_result: Mock | None = None,
+) -> tuple[
     TabControlFacet,
     CallLog,
     RecordingState,
@@ -95,6 +99,7 @@ def _facet() -> tuple[
             tab=cast(Any, tab),
             workspace=cast(Any, workspace),
             bus=cast(Any, bus),
+            load_tab_result=Mock() if load_tab_result is None else load_tab_result,
         ),
         log,
         state,
@@ -168,6 +173,24 @@ def test_tab_control_reset_cfg_rebuilds_default_and_commits() -> None:
         call("tab", "make_default_cfg", "adapter-a"),
         call("tab", "update_tab_cfg", "tab-1", tab.default_schema),
     ]
+
+
+@pytest.mark.parametrize("cleanup_step", ["close_tab", "set_active_tab"])
+def test_open_file_reports_cleanup_failure_without_hiding_load_error(
+    cleanup_step: str,
+) -> None:
+    facet, _log, _state, _tab, workspace, _bus = _facet(
+        Mock(side_effect=ValueError("wrong experiment"))
+    )
+    failure = Mock(side_effect=RuntimeError("cleanup unavailable"))
+    setattr(workspace, cleanup_step, failure)
+    with pytest.raises(
+        FailedPreconditionError, match="wrong experiment.*cleanup unavailable"
+    ) as caught:
+        facet.open_tab_from_file("adapter-a", "bad.h5")
+    assert caught.value.reason_code == "cleanup_failed"
+    assert "new-tab" in str(caught.value)
+    failure.assert_called_once()
 
 
 def test_tab_control_reset_cfg_rejects_running_tab() -> None:

@@ -187,6 +187,7 @@ def test_mcp_tab_open_from_file_loads_and_backfills_gui(
     bridge, invoke = mcp_client(port, tmp_path)
     try:
         invoke("connect", {"port": port})
+        invoke("rpc_call", {"method": "context.snapshot"})
         tab = invoke("tab_open", {"experiment": "demo", "from_file": "result.hdf5"})[
             "tab"
         ]
@@ -234,6 +235,7 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     bridge, invoke = mcp_client(port, tmp_path)
     try:
         invoke("connect", {"port": port})
+        invoke("rpc_call", {"method": "context.snapshot"})
         with pytest.raises(GuiRpcError, match="bad data"):
             invoke("tab_open", {"experiment": "demo", "from_file": "bad.hdf5"})
         assert tuple(ctrl.list_tab_ids()) == old_tabs

@@ -34,121 +34,54 @@ def test_experiments_and_guide_read_live_adapter_descriptions(tmp_path: Path) ->
     assert [method for method, _ in client.transport.sent].count("adapter.guide") == 2
 
 
-@pytest.mark.parametrize("prior_focus", [None, "old-tab"])
-def test_tab_open_failed_load_closes_new_tab_without_soc(
-    tmp_path: Path, prior_focus: str | None
+@pytest.mark.parametrize(
+    "reason", ["invalid_data_file", "cleanup_failed", "stale_version"]
+)
+def test_tab_open_from_file_preserves_error_without_retry(
+    tmp_path: Path, reason: str
 ) -> None:
-    tab = "new-tab"
-
-    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if method == "tab.list_all":
-            return {"tabs": [], "active_tab_id": prior_focus, "running_tab_id": None}
-        if method == "tab.new":
-            return {
-                "tab_id": tab,
-                "__agent_write_versions": {f"tab:{tab}": [0, 1]},
-            }
-        if method == "tab.snapshot":
-            return {"tabs": [{"tab_id": tab, "adapter_name": "ramsey"}]}
-        if method == "context.snapshot":
-            return {"label": None}
-        if method == "tab.get_analyze_result":
-            return {"summary": None}
-        if method in ("tab.close", "tab.set_active"):
-            if method == "tab.set_active":
-                assert params == {"tab_id": prior_focus}
-            return {"ok": True}
-        raise AssertionError(method)
-
-    client = make_client(tmp_path, reply)
-    client.transport.replies["resources.versions"] = {
-        "ok": True,
-        "result": {
-            "versions": {
-                f"tab:{tab}": 1,
-                f"tab:{tab}:result": 0,
-                f"tab:{tab}:analyze": 0,
-                "context": 0,
-            }
-        },
-    }
-    client.transport.replies["tab.load_data"] = {
+    client = make_client(tmp_path)
+    client.transport.replies["tab.open_file"] = {
         "ok": False,
         "error": {
-            "code": "invalid_params",
-            "reason": "incompatible_data",
-            "message": "wrong experiment",
+            "code": "precondition_failed",
+            "reason": reason,
+            "message": "opening failed",
+            "data": {"stale": ["context"]},
         },
     }
-
-    with pytest.raises(GuiRpcError, match="wrong experiment"):
+    with pytest.raises(GuiRpcError) as caught:
         client.call("tab_open", {"experiment": "ramsey", "from_file": "old.h5"})
-    methods = [method for method, _ in client.transport.sent]
-    assert (
-        methods.index("tab.new")
-        < methods.index("tab.load_data")
-        < methods.index("tab.close")
-    )
-    assert "soc.connect" not in methods
-    assert ("tab.set_active" in methods) is (prior_focus is not None)
-    if prior_focus is not None:
-        assert methods.index("tab.close") < methods.index("tab.set_active")
+    assert caught.value.reason == reason
+    assert [
+        item
+        for item in client.transport.sent
+        if item[0] not in ("wire.version", "rpc.catalog")
+    ] == [("tab.open_file", {"adapter_name": "ramsey", "data_path": "old.h5"})]
 
 
-def test_tab_open_from_file_loads_before_focusing_without_soc(tmp_path: Path) -> None:
-    tab = "loaded-tab"
-    path = str(tmp_path / "saved.h5")
-    responses = {
-        "tab.list_all": {
-            "tabs": [],
-            "active_tab_id": "old-tab",
-            "running_tab_id": None,
-        },
-        "tab.new": {
-            "tab_id": tab,
-            "__agent_write_versions": {f"tab:{tab}": [0, 1]},
-        },
-        "tab.snapshot": {"tabs": [{"tab_id": tab, "adapter_name": "ramsey"}]},
-        "context.snapshot": {"label": None},
-        "tab.get_analyze_result": {"summary": None},
-    }
-
+@pytest.mark.parametrize("backfill", ["applied", "not_applied"])
+def test_tab_open_from_file_is_one_application_operation(
+    tmp_path: Path, backfill: str
+) -> None:
     def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if method in responses:
-            return responses[method]
-        if method == "tab.load_data":
-            assert params["tab_id"] == tab
-            assert params["data_path"] == path
-            return {"loaded": True}
-        if method == "tab.set_active":
-            assert params == {"tab_id": tab}
-            return {"ok": True}
-        raise AssertionError(method)
+        assert method == "tab.open_file"
+        assert params == {"adapter_name": "ramsey", "data_path": "saved.h5"}
+        return {"tab_id": "loaded-tab", "cfg_backfill": backfill}
 
     client = make_client(tmp_path, reply)
-    client.transport.replies["resources.versions"] = {
-        "ok": True,
-        "result": {
-            "versions": {
-                f"tab:{tab}": 1,
-                f"tab:{tab}:result": 0,
-                f"tab:{tab}:analyze": 0,
-                "context": 0,
-            }
-        },
-    }
-    assert client.call("tab_open", {"experiment": "ramsey", "from_file": path}) == {
-        "tab": tab,
+    assert client.call(
+        "tab_open", {"experiment": "ramsey", "from_file": "saved.h5"}
+    ) == {
+        "tab": "loaded-tab",
         "experiment": "ramsey",
+        "cfg_backfill": backfill,
     }
-    methods = [method for method, _ in client.transport.sent]
-    assert (
-        methods.index("tab.new")
-        < methods.index("tab.load_data")
-        < methods.index("tab.set_active")
-    )
-    assert "tab.close" not in methods
-    assert "soc.connect" not in methods
+    assert [
+        item
+        for item in client.transport.sent
+        if item[0] not in ("wire.version", "rpc.catalog")
+    ] == [("tab.open_file", {"adapter_name": "ramsey", "data_path": "saved.h5"})]
 
 
 def test_tab_get_summary_reads_explicit_tab_without_changing_focus(

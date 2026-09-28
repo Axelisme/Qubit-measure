@@ -26,6 +26,24 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "tab.open_file",
+        "tab:h_tab_open_file",
+        MethodSpec(
+            30.0,
+            "Create a tab, load a result file without a SoC, and focus it. "
+            "Read context.snapshot explicitly first. A load failure closes the new "
+            "tab and restores prior focus. Returns the load outcome including "
+            "tab_id and cfg_backfill; not_applied retains the loaded result. "
+            "Read tab.snapshot and tab.get_cfg before subsequent guarded writes.",
+            (_str("adapter_name"), _str("data_path")),
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=("context",),
+            refresh_after_write=True,
+            created_resource="tab:{tab_id}",
+        ),
+    ),
+    method_entry(
         "tab.close",
         "tab:h_tab_close",
         MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),

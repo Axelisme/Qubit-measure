@@ -65,7 +65,12 @@ def app() -> App:
         state,
         workspace,
         TabControlFacet(
-            state=state, tab=tabs, workspace=workspace, bus=bus, access=access
+            state=state,
+            tab=tabs,
+            workspace=workspace,
+            bus=bus,
+            load_tab_result=MagicMock(),
+            access=access,
         ),
         registry,
         loader,

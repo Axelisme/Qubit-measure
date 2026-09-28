@@ -66,20 +66,20 @@ def guide(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
 def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create/activate a tab; a failed from_file load must close that new tab."""
     experiment = arguments["experiment"]
+    if "from_file" in arguments:
+        loaded = ctx.send_gui_rpc(
+            "tab.open_file",
+            {"adapter_name": experiment, "data_path": arguments["from_file"]},
+        )
+        return {
+            "tab": loaded["tab_id"],
+            "experiment": experiment,
+            "cfg_backfill": loaded["cfg_backfill"],
+        }
     previous_focus = ctx.session.read_internal("tab.list_all", {})["active_tab_id"]
     created = ctx.send_gui_rpc("tab.new", {"adapter_name": experiment})
     tab = created["tab_id"]
     try:
-        if "from_file" in arguments:
-            # tab.load_data guards the tab's existence, result, analysis and
-            # context; establish a full baseline without demanding a SoC.
-            _tab_snapshot(ctx, tab)
-            ctx.session.read_internal("context.snapshot", {})
-            ctx.session.read_internal("tab.get_analyze_result", {"tab_id": tab})
-            ctx.send_gui_rpc(
-                "tab.load_data",
-                {"tab_id": tab, "data_path": arguments["from_file"]},
-            )
         ctx.send_gui_rpc("tab.set_active", {"tab_id": tab})
     except Exception as open_error:
         try:
@@ -245,7 +245,7 @@ TAB_READ_TOOLS: dict[str, dict[str, Any]] = {
     },
     "tab_open": {
         "handler": tab_open,
-        "description": "Open and focus a new tab; optionally load an existing compatible data file without a SoC. On load failure close the new tab or report cleanup failure; return {tab, experiment} only after success.",
+        "description": "Open and focus a new tab. With from_file, explicitly read context first; GUI creates and loads without a SoC, closes on load failure or reports cleanup_failed. Return {tab, experiment}, plus cfg_backfill=applied|not_applied for from_file. A backfill failure retains the result. Read tab_get before subsequent guarded writes.",
         "inputSchema": {
             "type": "object",
             "properties": {
