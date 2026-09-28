@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -182,6 +183,33 @@ def test_save_artifact_selection_errors_do_not_mutate_drafts(artifacts, paths) -
     assert tab.data_path == "default.h5"
     assert not bus.payloads
     assert not any(entry.target == "save" for entry in log.calls)
+
+
+@pytest.mark.parametrize("data_collision", [False, True])
+def test_colliding_paths_do_not_change_shared_drafts(
+    tmp_path: Path, data_collision: bool
+) -> None:
+    facet, log, state, tab, _save, bus, _notices = _facet()
+    other_kind = ArtifactKind.DATA if data_collision else ArtifactKind.POST_ANALYSIS
+    paths = {
+        ArtifactKind.ANALYSIS: str(
+            tmp_path / ("shared_1.hdf5" if data_collision else "shared.png")
+        ),
+        other_kind: str(
+            tmp_path / ("shared.hdf5" if data_collision else "sub/../shared.png")
+        ),
+    }
+    with pytest.raises(FailedPreconditionError, match="distinct"):
+        facet.save_artifacts(
+            "tab-1", artifacts=tuple(paths), paths=paths, comment="not committed"
+        )
+    assert state.comment == "existing draft"
+    assert tab.data_path == "default.h5"
+    assert tab.analysis_image_path == "default.png"
+    assert tab.post_analysis_image_path == "default.png"
+    assert not bus.payloads
+    assert not any(entry.target == "save" for entry in log.calls)
+    assert not list(tmp_path.iterdir())
 
 
 def _facet() -> tuple[

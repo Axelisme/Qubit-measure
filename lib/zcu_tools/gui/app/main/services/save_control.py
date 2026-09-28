@@ -14,6 +14,7 @@ from zcu_tools.gui.app.main.events.tab import (
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .ports import SaveDestination
+from .save import resolve_artifact_destinations
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
@@ -128,6 +129,7 @@ class SaveControlFacet:
                     f"Artifact {kind.value} has an empty path"
                 )
             destinations.append(SaveDestination(kind, path))
+        resolve_artifact_destinations(tuple(destinations))
         setters = {
             ArtifactKind.DATA: self._tab.update_tab_data_path_override,
             ArtifactKind.ANALYSIS: self._tab.update_tab_analysis_image_path_override,

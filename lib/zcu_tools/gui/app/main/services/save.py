@@ -41,6 +41,27 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import OwnerScheduler
 
 
+def resolve_artifact_destinations(
+    destinations: tuple[SaveDestination, ...],
+) -> tuple[SaveDestination, ...]:
+    """Resolve output names and reject collisions without writing files.
+
+    The facade checks before changing drafts; the service checks again at its
+    independent submission boundary. Data naming only inspects existing paths.
+    """
+    resolved = tuple(
+        SaveDestination(
+            d.kind,
+            reserve_labber_filepath(d.path) if d.kind is ArtifactKind.DATA else d.path,
+        )
+        for d in destinations
+    )
+    paths = [Path(d.path).resolve() for d in resolved]
+    if len(set(paths)) != len(paths):
+        raise FailedPreconditionError("Save destinations must have distinct paths")
+    return resolved
+
+
 class SaveService:
     def __init__(
         self,
@@ -227,18 +248,16 @@ class SaveService:
                 raise FailedPreconditionError(
                     f"Artifact {kind.value} has an empty path"
                 )
-        if ArtifactKind.DATA in selected:
-            selected[ArtifactKind.DATA] = reserve_labber_filepath(
-                selected[ArtifactKind.DATA]
+        return resolve_artifact_destinations(
+            tuple(
+                SaveDestination(kind, selected[kind])
+                for kind in (
+                    ArtifactKind.ANALYSIS,
+                    ArtifactKind.POST_ANALYSIS,
+                    ArtifactKind.DATA,
+                )
+                if kind in selected
             )
-        return tuple(
-            SaveDestination(kind, selected[kind])
-            for kind in (
-                ArtifactKind.ANALYSIS,
-                ArtifactKind.POST_ANALYSIS,
-                ArtifactKind.DATA,
-            )
-            if kind in selected
         )
 
     def _export_image(

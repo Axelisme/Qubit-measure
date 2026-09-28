@@ -214,6 +214,38 @@ def test_save_artifacts_runs_in_order_and_preserves_partial_success(
     )
 
 
+@pytest.mark.parametrize("data_collision", [False, True])
+def test_batch_rejects_colliding_actual_paths_before_writing(
+    batch_save_service, tmp_path: Path, data_collision: bool
+) -> None:
+    service, state, adapter, primary, post, handles, _bus, _gate = batch_save_service
+    if data_collision:
+        target = tmp_path / "shared_1.hdf5"
+        other = SaveDestination(ArtifactKind.DATA, str(tmp_path / "shared.hdf5"))
+    else:
+        target = tmp_path / "shared.png"
+        target.write_bytes(b"existing image")
+        other = SaveDestination(
+            ArtifactKind.POST_ANALYSIS, str(tmp_path / "sub" / ".." / "shared.png")
+        )
+    before = state.get_artifact_snapshots("tab")
+    with pytest.raises(FailedPreconditionError, match="distinct"):
+        service.start_save_artifacts(
+            SavePermit("tab"),
+            (SaveDestination(ArtifactKind.ANALYSIS, str(target)), other),
+        )
+    assert state.get_artifact_snapshots("tab") == before
+    assert not state.is_tab_busy("tab")
+    assert handles.live_count() == 0
+    primary.savefig.assert_not_called()
+    post.savefig.assert_not_called()
+    adapter.save.assert_not_called()
+    if data_collision:
+        assert not target.exists()
+    else:
+        assert target.read_bytes() == b"existing image"
+
+
 def test_batch_save_keeps_submission_signature_when_later_drafts_change(
     batch_save_service, tmp_path: Path
 ) -> None:
