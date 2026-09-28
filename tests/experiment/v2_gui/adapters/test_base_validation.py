@@ -68,12 +68,11 @@ def test_fit_requires_analyze() -> None:
             )
 
 
-def test_fit_forbids_interactive_setup() -> None:
-    with pytest.raises(TypeError, match="analysis=FIT.*setup_interactive_analysis"):
+def test_fit_forbids_interactive_plugin() -> None:
+    with pytest.raises(TypeError, match="analysis=FIT.*make_interactive_plugin"):
 
         class _BadAdapter(_FitNoParamsAdapter):
-            def setup_interactive_analysis(self, req: Any, host: Any) -> Any:
-                del req, host
+            def make_interactive_plugin(self, req: Any) -> Any:
                 return object()
 
 
@@ -132,8 +131,10 @@ def test_fit_allows_base_analyze_params_for_no_params() -> None:
     assert _FitNoParamsAdapter.analyze_params_cls() is NoAnalyzeParams
 
 
-def test_interactive_requires_setup() -> None:
-    with pytest.raises(TypeError, match="analysis=INTERACTIVE.*setup_interactive"):
+def test_interactive_requires_plugin_and_frontend() -> None:
+    with pytest.raises(
+        TypeError, match="analysis=INTERACTIVE.*make_interactive_plugin"
+    ):
 
         class _BadAdapter(_MinimalNoAnalysisAdapter):
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
@@ -149,8 +150,17 @@ def test_interactive_forbids_analyze() -> None:
                 analysis=AnalysisMode.INTERACTIVE
             )
 
-            def setup_interactive_analysis(self, req: Any, host: Any) -> Any:
-                del req, host
+            def make_interactive_plugin(self, req: Any) -> Any:
+                return object()
+
+            def make_interactive_frontend(
+                self,
+                plugin: Any,
+                session: Any,
+                env: Any,
+                request_finish: Any,
+                request_cancel: Any,
+            ) -> Any:
                 return object()
 
             def analyze(self, req: Any) -> NoAnalysisResult:
@@ -167,12 +177,25 @@ def test_none_forbids_analyze() -> None:
                 return NoAnalysisResult()
 
 
-def test_none_forbids_interactive_setup() -> None:
-    with pytest.raises(TypeError, match="analysis=NONE.*setup_interactive"):
+def test_none_forbids_interactive_plugin() -> None:
+    with pytest.raises(TypeError, match="analysis=NONE.*make_interactive_plugin"):
 
         class _BadAdapter(_MinimalNoAnalysisAdapter):
-            def setup_interactive_analysis(self, req: Any, host: Any) -> Any:
-                del req, host
+            def make_interactive_plugin(self, req: Any) -> Any:
+                return object()
+
+
+def test_interactive_requires_frontend() -> None:
+    with pytest.raises(
+        TypeError, match="analysis=INTERACTIVE.*make_interactive_frontend"
+    ):
+
+        class _BadAdapter(_MinimalNoAnalysisAdapter):  # type: ignore[reportUnusedClass]
+            capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+                analysis=AnalysisMode.INTERACTIVE
+            )
+
+            def make_interactive_plugin(self, req: Any) -> Any:
                 return object()
 
 

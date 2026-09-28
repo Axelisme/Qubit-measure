@@ -93,12 +93,14 @@ class DummyAdapter:
         del req
         return DummyAnalyzeResult()
 
-    def setup_interactive_analysis(
-        self,
-        req: AnalyzeRequest[object, DummyAnalyzeParams],
-        host: object,
+    def make_interactive_plugin(
+        self, request: AnalyzeRequest[object, DummyAnalyzeParams]
     ):
-        del req, host
+        raise NotImplementedError
+
+    def make_interactive_frontend(
+        self, plugin, session, env, request_finish, request_cancel
+    ):
         raise NotImplementedError
 
     def get_writeback_items(

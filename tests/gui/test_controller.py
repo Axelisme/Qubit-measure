@@ -17,6 +17,7 @@ from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import (
+    AnalysisMode,
     ContextReadiness,
     ExpContext,
 )
@@ -29,6 +30,7 @@ from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.main.interactive import PluginDefinition
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services import (
     StartupConnectionRequest,
@@ -121,6 +123,18 @@ class ControllerFixture:
         )
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
         self.ctrl.attach_caretaker(self.caretaker)
+
+    def start_plugin(self, permit) -> int:
+        tab = self.state.get_tab(permit.tab_id)
+        adapter = MagicMock(wraps=tab.adapter)
+        adapter.capabilities = dataclasses.replace(
+            tab.adapter.capabilities, analysis=AnalysisMode.INTERACTIVE
+        )
+        adapter.make_interactive_plugin.return_value = PluginDefinition(
+            "test-picker", 0, (), lambda state: None, lambda state: state
+        )
+        tab.adapter = adapter
+        return self.ctrl.run_analyze_control.analyze(permit.tab_id, object())
 
     def quiesce(self) -> None:
         """Join the Controller's in-flight background work and flush its queued
@@ -228,8 +242,8 @@ def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.update_tab_result(tab_id, object())  # a result exists to analyze
-    # Drive an interactive picker into flight (the View's mount is a MagicMock).
-    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    # Start the service-owned session; the View mount remains a fixture double.
+    cf.start_plugin(AnalyzePermit(tab_id=tab_id))
     assert cf.state.is_tab_analyzing(tab_id) is True
     # is_analyzing makes the tab busy, so closing it is rejected up front.
     with pytest.raises(RuntimeError, match="busy"):
@@ -272,7 +286,7 @@ def test_send_feedback_nudge_delivers_to_interactive_channel(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.update_tab_result(tab_id, object())
-    token = cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    token = cf.start_plugin(AnalyzePermit(tab_id=tab_id))
     assert cf.state.is_tab_analyzing(tab_id) is True
 
     cf.ctrl.send_feedback("nudge text", stop=False)
@@ -297,7 +311,7 @@ def test_send_feedback_stop_cancels_interactive_analyze(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.update_tab_result(tab_id, object())
-    token = cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    token = cf.start_plugin(AnalyzePermit(tab_id=tab_id))
     assert cf.state.is_tab_analyzing(tab_id) is True
 
     cancelled = cf.ctrl.send_feedback("stop - wrong feature", stop=True)
@@ -333,7 +347,7 @@ def test_can_cancel_active_operation_true_for_interactive_analyze(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.update_tab_result(tab_id, object())
-    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    cf.start_plugin(AnalyzePermit(tab_id=tab_id))
     assert cf.state.is_tab_analyzing(tab_id) is True
 
     result = cf.ctrl.can_cancel_active_operation()
@@ -376,7 +390,7 @@ def test_active_operation_helper_returns_tag_for_interactive(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.update_tab_result(tab_id, object())
-    cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
+    cf.start_plugin(AnalyzePermit(tab_id=tab_id))
 
     operation = cf.ctrl._active_operation()
     assert operation is not None

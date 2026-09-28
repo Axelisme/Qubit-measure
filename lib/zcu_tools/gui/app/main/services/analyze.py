@@ -4,12 +4,15 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from matplotlib.figure import Figure
+
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest, WritebackRequest
 from zcu_tools.gui.app.main.events.completion import AnalyzeFailedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
@@ -22,8 +25,9 @@ from .staged_analyze import _StagedAnalyzeService
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import ExpAdapterProtocol, InteractiveSession
+    from zcu_tools.gui.app.main.adapter import ExpAdapterProtocol
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.ports import OwnerScheduler
     from zcu_tools.gui.session.types import ExpContext
 
     from ..state import RetiredPaneResources
@@ -36,6 +40,14 @@ class _AnalyzeCapture:
     context: ExpContext
     adapter: ExpAdapterProtocol
     params: object | None
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveInteractive:
+    """The service-owned plugin and committed session for one active tab."""
+
+    plugin: PluginDefinition[Any, Any]
+    session: Session[Any]
 
 
 class AnalyzeService(_StagedAnalyzeService):
@@ -67,6 +79,7 @@ class AnalyzeService(_StagedAnalyzeService):
         # analyze (which would settle the handle while the worker callback is still
         # in flight). Entries are removed by every interactive terminal path.
         self._interactive_tabs: set[str] = set()
+        self._interactive_instances: dict[str, ActiveInteractive] = {}
         # Captured at operation start so proposal generation cannot accidentally
         # consume a context or run result replaced while the worker was running.
         self._captured_inputs: dict[str, _AnalyzeCapture] = {}
@@ -125,51 +138,33 @@ class AnalyzeService(_StagedAnalyzeService):
             self._captured_inputs.pop(tab_id, None)
             raise
 
-    def start_interactive(self, permit: AnalyzePermit) -> int:
-        """Begin an INTERACTIVE analysis: open the async handle and mark the tab
-        analyzing. There is NO worker — the View mounts the interactive canvas on
-        the main thread and the user paces the work (Main-thread-user-paced
-        strategy, ADR-0019); the handle is held until ``finish_interactive``
-        (Done). Returns the operation token (handle).
-
-        ADR-0025: cancel_hook triggers cancel_interactive so handles.stop(token)
-        causes the channel to directly settle-cancelled, allowing an awaiter's
-        Stop event to fold reason correctly before Settled arrives.
-
-        INTERACTIVE does NOT go through OperationRunner (stage2c_spec.md §interactive).
-        """
+    def start_plugin(
+        self,
+        permit: AnalyzePermit,
+        plugin: PluginDefinition[Any, Any],
+        owner: OwnerScheduler,
+    ) -> int:
+        """Capture operation inputs and register one service-owned session."""
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
-
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
-        adapter = tab.adapter
-        # The interactive control commits the user/agent's params before this
-        # operation starts. Capture that committed value alongside the run,
-        # context, and adapter so the terminal path does not fall back to the
-        # active tab's mutable inputs.
-        captured_inputs = _AnalyzeCapture(
+        captured = _AnalyzeCapture(
             run_result=tab.run.result,
             context=ctx,
-            adapter=adapter,
+            adapter=tab.adapter,
             params=tab.analysis.params,
         )
-        self._captured_inputs[tab_id] = captured_inputs
+        session = plugin.open(owner)
 
-        # Open the token with a cancel_hook that executes the interactive teardown.
-        # The hook runs *after* Stop is enqueued, so Settled(cancelled) from the
-        # hook's _release lands after Stop — the consumer folds reason correctly.
-        # Wrap cancel_interactive (returns bool) so the hook matches CancelHook
-        # signature (returns None). The bool return is irrelevant here — stop()
-        # already knows this is an interactive op.
-        def _hook() -> None:
+        def cancel() -> None:
             self.cancel_interactive(tab_id)
 
         try:
-            token = self._open_token(tab_id, cancel_hook=_hook)
+            token = self._open_token(tab_id, cancel_hook=cancel)
         except Exception:
-            self._captured_inputs.pop(tab_id, None)
+            session.dispose()
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id=tab_id,
@@ -177,40 +172,62 @@ class AnalyzeService(_StagedAnalyzeService):
                 )
             )
             raise
+        self._captured_inputs[tab_id] = captured
+        self._interactive_instances[tab_id] = ActiveInteractive(plugin, session)
         self._interactive_tabs.add(tab_id)
         self._begin(tab_id)
         return token
 
-    def finish_interactive(self, tab_id: str, session: InteractiveSession) -> None:
-        """The user finished the interactive pick (Done): build the result and run
-        the SAME terminal path as a FIT analyze (writeback compute + State update +
-        lease release + events), so the agent's analyze-result poll resolves."""
-        token = self._active_tokens.get(tab_id)
-        captured_inputs = self._captured_inputs.pop(tab_id, None)
-        if token is None:
-            self._interactive_tabs.discard(tab_id)
-            # A late Done after cancellation has no operation-start inputs and
-            # must not resurrect a result by rereading the active context.
-            if captured_inputs is None:
-                session.finish()
-                return
-            self._on_analyze_finished(
-                tab_id, session.finish(), captured_inputs=captured_inputs
-            )
-            return
-        if captured_inputs is None:
-            raise RuntimeError(
-                f"interactive analysis {tab_id!r} lost its operation-start inputs"
-            )
+    def get_interactive(self, tab_id: str) -> ActiveInteractive | None:
+        """Read the active plugin and session; never return a retired binding."""
+        return self._interactive_instances.get(tab_id)
+
+    def finish_plugin(self, tab_id: str, figure: Figure | None = None) -> bool:
+        """Finish from the committed snapshot; validation errors leave it editable."""
+        active = self._interactive_instances.get(tab_id)
+        if active is None:
+            return False
+        try:
+            result = active.plugin.finish(active.session, figure)
+        except Exception as exc:
+            try:
+                active.session.ensure_input_open()
+            except FailedPreconditionError:
+                token = self._active_tokens[tab_id]
+                with self._bus.origin(self._handles.event_origin(token)):
+                    self._interactive_instances.pop(tab_id)
+                    active.session.dispose()
+                    self._interactive_tabs.discard(tab_id)
+                    self._captured_inputs.pop(tab_id, None)
+                    logger.exception(
+                        "interactive result construction failed: tab_id=%r", tab_id
+                    )
+                    self._state.set_tab_analyzing(tab_id, False)
+                    self._release(tab_id, OperationOutcome("failed", str(exc)))
+                    self._bus.emit(
+                        TabInteractionChangedPayload(
+                            tab_id=tab_id,
+                            fact=TabInteractionFact.PRIMARY_ANALYZE_FAILED,
+                        )
+                    )
+                    self._bus.emit(
+                        AnalyzeFailedPayload(
+                            tab_id=tab_id, stage="primary", error_message=str(exc)
+                        )
+                    )
+                return True
+            raise
+        token = self._active_tokens[tab_id]
+        captured = self._captured_inputs[tab_id]
         with self._bus.origin(self._handles.event_origin(token)):
+            self._interactive_instances.pop(tab_id)
+            active.session.dispose()
             self._interactive_tabs.discard(tab_id)
-            self._on_analyze_finished(
-                tab_id, session.finish(), captured_inputs=captured_inputs
-            )
+            self._on_analyze_finished(tab_id, result, captured_inputs=captured)
+        return True
 
     def is_interactive_active(self, tab_id: str) -> bool:
-        """Whether ``tab_id`` currently holds an in-flight INTERACTIVE picker
-        (opened by ``start_interactive``, not yet settled by Done / cancel)."""
+        """Whether this tab owns an in-flight plugin session."""
         return tab_id in self._interactive_tabs
 
     def active_interactive_tab(self) -> str | None:
@@ -242,6 +259,9 @@ class AnalyzeService(_StagedAnalyzeService):
         token = self._active_tokens[tab_id]
         with self._bus.origin(self._handles.event_origin(token)):
             self._interactive_tabs.discard(tab_id)
+            active = self._interactive_instances.pop(tab_id, None)
+            if active is not None:
+                active.session.dispose()
             self._captured_inputs.pop(tab_id, None)
             logger.info("cancel_interactive: tab_id=%r", tab_id)
             self._state.set_tab_analyzing(tab_id, False)
@@ -261,7 +281,7 @@ class AnalyzeService(_StagedAnalyzeService):
         *,
         captured_inputs: _AnalyzeCapture,
     ) -> None:
-        """Terminal path used by finish_interactive (interactive → same FIT terminal).
+        """Terminal path used by finish_plugin (interactive → same FIT terminal).
 
         FIT analyze uses _submit_with_runner's internal _finish directly.
         Interactive calls here, which runs record + clears analyzing + settles

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     _obj_default,
@@ -65,6 +66,23 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             operation_key="analyze:{tab_id}",
             refresh_after_write=True,
         ),
+    ),
+    method_entry(
+        "tab.interact",
+        "interactive:h_tab_interact",
+        MethodSpec(
+            30.0,
+            "Read or execute one command on the tab's active interactive analysis. "
+            "Omit payload to discover committed state and commands; use "
+            "{command, args} for one validated action, or command=done to settle "
+            "the existing analysis operation. The GUI-local preview never becomes "
+            "the returned state; figure may show it and preview_active reports it.",
+            (
+                _str("tab_id"),
+                ParamSpec("payload", JsonType.OBJECT, required=False),
+            ),
+        ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.get_post_analyze_result",
