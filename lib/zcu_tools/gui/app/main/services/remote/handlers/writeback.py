@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import (
@@ -11,12 +12,14 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleWriteback,
     WaveformWriteback,
 )
+from zcu_tools.gui.app.main.services.writeback import WritebackEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._wire_values import _coerce_wire_value, _json_safe
+from ._common import follow_tab
+from ._wire_values import _coerce_wire_value, context_wire_value
 
 _VALID_WRITEBACK_SUBTABS = frozenset({"analysis", "post_analysis"})
 
@@ -38,6 +41,17 @@ def _destination_context(adapter: RemoteControlAdapter) -> dict[str, object]:
     }
 
 
+def _writeback_wire_value(value: object) -> object:
+    try:
+        return context_wire_value(value)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"cannot fully project writeback value: {exc}",
+            reason="unserializable_context",
+        ) from exc
+
+
 def _writeback_item_wire(item) -> dict[str, object]:
     base: dict[str, object] = {
         "id": item.session_id,
@@ -47,7 +61,7 @@ def _writeback_item_wire(item) -> dict[str, object]:
     }
     if isinstance(item, MetaDictWriteback):
         base["kind"] = "metadict"
-        base["proposed_value"] = _json_safe(item.proposed_value)
+        base["proposed_value"] = _writeback_wire_value(item.proposed_value)
     elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
         is_module = isinstance(item, ModuleWriteback)
         base["kind"] = "module" if is_module else "waveform"
@@ -95,9 +109,23 @@ def h_tab_writeback_preview(
         pane = snap.post_analysis
     if pane is None:
         raise RemoteError(ErrorCode.INTERNAL, "snapshot has no requested pane")
+    values = (
+        adapter.writeback_control.get_writeback_values_for_pane(
+            tab_id, "analysis" if subtab_id == "analysis" else "post_analysis"
+        )
+        if pane.has_writeback_draft
+        else {}
+    )
     return {
         "has_draft": pane.has_writeback_draft,
-        "items": [_writeback_item_wire(it) for it in pane.writeback_items],
+        "items": [
+            {
+                **_writeback_item_wire(item),
+                "current": _writeback_wire_value(values[item.session_id].current),
+                "proposed": _writeback_wire_value(values[item.session_id].proposed),
+            }
+            for item in pane.writeback_items
+        ],
         "destination_context": _destination_context(adapter),
     }
 
@@ -189,6 +217,62 @@ def _find_writeback_item_for_pane(
     )
 
 
+def _batch_cfg_edits(raw: object) -> list[dict[str, object]]:
+    if not isinstance(raw, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "edits must be a list")
+    edits = []
+    for edit in raw:
+        if (
+            not isinstance(edit, dict)
+            or set(edit) != {"path", "value"}
+            or not isinstance(edit["path"], str)
+            or not edit["path"]
+        ):
+            raise RemoteError(ErrorCode.INVALID_PARAMS, "edits require path and value")
+        edits.append({"path": edit["path"], "value": edit["value"]})
+    return edits
+
+
+def _batch_change(raw: object) -> WritebackEdit:
+    if not isinstance(raw, dict) or set(raw) - {"id", "target", "value", "edits"}:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid writeback item fields")
+    session_id = raw.get("id")
+    if not isinstance(session_id, str) or not session_id:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "id must be a nonempty string")
+    target = raw.get("target")
+    if "target" in raw and (not isinstance(target, str) or not target):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "target must be a nonempty string")
+    if "value" in raw and "edits" in raw:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "value and edits are exclusive")
+    change = WritebackEdit(
+        session_id,
+        target_name=target,
+        edits=_batch_cfg_edits(raw["edits"]) if "edits" in raw else None,
+    )
+    if "value" in raw:
+        change = replace(change, proposed_value=_coerce_wire_value(raw["value"]))
+    return change
+
+
+def h_tab_writeback_write(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    tab_id = str(params["tab_id"])
+    subtab = str(params["subtab_id"])
+    if subtab not in _VALID_WRITEBACK_SUBTABS:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid writeback subtab_id")
+    if not adapter.writeback_control.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    raw = params["write"]
+    if not isinstance(raw, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "write must be a list")
+    changes = tuple(_batch_change(item) for item in raw)
+    pane = "analysis" if subtab == "analysis" else "post_analysis"
+    follow_tab(adapter, tab_id, pane)
+    result = adapter.writeback_control.write_writeback_for_pane(tab_id, pane, changes)
+    return {"written": [_writeback_wire_value(asdict(item)) for item in result]}
+
+
 def h_tab_writeback_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -203,8 +287,22 @@ def h_tab_writeback_apply(
         )
     if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    pane = subtab_id  # type: ignore[assignment]
-    result = adapter.writeback_control.apply_writeback_for_pane(tab_id, pane)  # type: ignore[arg-type]
+    pane = "analysis" if subtab_id == "analysis" else "post_analysis"
+    item_ids = None
+    if "ids" in params:
+        ids = params["ids"]
+        if not isinstance(ids, list) or any(
+            not isinstance(item, str) or not item for item in ids
+        ):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "ids must be a list of nonempty strings"
+            )
+        item_ids = tuple(ids)
+    result = adapter.writeback_control.apply_writeback_for_pane(
+        tab_id,
+        pane,
+        item_ids=item_ids,
+    )
     context_version = adapter.writeback_control.get_context_version()
     return {
         "applied_ids": list(result["applied_ids"]),
