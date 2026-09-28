@@ -16,7 +16,7 @@ Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。
 
 Measure GUI 的 `RemoteMethodEntry` 同時宣告 method schema、agent exposure、guard dependencies、成功讀取所揭露的資源及 operation key。GUI 的 `rpc.catalog` 只投影非 internal method 呼叫所需的名稱、描述、參數 schema、timeout、exposure、tool 路由與 operation key，不把 guard／reveal policy 複製到 MCP。MCP 每次連線重新讀 catalog。固定的 40 個特化 tool 涵蓋常用判斷點，另有 `rpc_list`、`rpc_describe` 和 `rpc_call` 供低頻 method 使用。固定工具不從 catalog 動態生成。`tool` exposure 經通用 call 回 `use_tool`，`internal` 不列入 catalog；標成 `rpc` 的 method 仍可同時被特化工具使用。每個入口最終仍經 GUI 驗證，不提供任意程式碼執行。`tab_open(from_file)` 對應一次 GUI `tab.open_file`；`tab_save` 對應一次帶 operation handle 的 `tab.save_artifacts`；`cancel(op)` 對應 GUI `operation.cancel`。固定的 `tab_interact` 對應 GUI `tab.interact`，讀取不切焦點、command 跟隨 Analysis pane；此 method 不用 seen guard。工具的個別輸入、畫面跟隨與 operation 結果見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md)。
 
-GUI owner 在自己的序列中比較每條連線的 seen map 與目前資源版本，再接受 guarded command。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能替代未曾觀察。成功寫入只推進先前看過且版本相符的資源。MCP 不存第二份 seen、不送 wire expected versions、不用隱藏預讀解鎖。Stale 須重讀對應資源，再由呼叫者決定是否重試；event origin 不能授權寫入。Guard 不替代長時間操作的 snapshot、資源互斥與後續提交檢查，operation 的生命週期歸 [[0066]]。Timeout、斷線或無法編碼的回覆也不能證明命令沒有副作用；沒有明確冪等契約時不自動重送。
+GUI owner 在自己的序列中比較每條連線的 seen map 與目前資源版本，再接受 guarded command。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能替代未曾觀察。成功寫入只推進先前看過且版本相符的資源。唯一例外是建立新 tab：`tab.new` 與 `tab.open_file` 成功回傳 tab ID、且該 tab 的存在版本由 0 變 1 時，GUI 把這個存在性資源記入該連線的 seen；新 tab 的 cfg、result 等其他資源仍須明確完整讀取。MCP 不存第二份 seen、不送 wire expected versions、不用隱藏預讀解鎖。Stale 須重讀對應資源，再由呼叫者決定是否重試；event origin 不能授權寫入。Guard 不替代長時間操作的 snapshot、資源互斥與後續提交檢查，operation 的生命週期歸 [[0066]]。Timeout、斷線或無法編碼的回覆也不能證明命令沒有副作用；沒有明確冪等契約時不自動重送。
 
 ## 事件與錯誤
 

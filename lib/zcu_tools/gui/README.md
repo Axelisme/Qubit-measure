@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-29 — app-local remote layout
+**Last updated:** 2026-09-29 — cfg form snapshot coalescing
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -226,6 +226,9 @@ protocol。
 `CfgFormWidget.attach()`先成功建立完整root widget，再訂閱caller-owned draft；build失敗不留下
 draft callbacks。detach以stable Python callback解除change/validity subscriptions並刪除Qt tree，
 仍不close draft。
+
+`schema_changed` 按 event-loop tick 收合：同一 tick 內的多次 draft 變更只在單次 0 ms `QTimer`
+觸發時送出一份 `draft.snapshot()`；`validity_changed` 不延後，逐次即時送出。
 
 `CfgFormWidget` accepts an optional field decoration provider keyed by full dotted
 cfg path. The shared renderer applies `hidden`, `enabled`, `tone`, `badge`, and
