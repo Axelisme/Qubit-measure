@@ -49,7 +49,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v92: writeback forwards preview and explicit-item batch writes to the GUI owner.
 # v93: artifact save, guarded tab close and graceful shutdown tools.
 # v94: fixed tab_interact tool over the shared GUI plugin session.
-MCP_VERSION = 94
+# v95: finalized shared-state workflow guidance and interactive concurrency instructions.
+MCP_VERSION = 95
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
