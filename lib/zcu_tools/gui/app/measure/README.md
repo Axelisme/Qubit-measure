@@ -39,9 +39,11 @@ refresh／override／revision 的未落實條件見
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
 版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
 `SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
-不同時 bump device version，caller 再發布變更。Remote 的
-`expected_versions` 是受護 RPC 的 optional stale guard；哪些 key 重要由
-MCP 的 last-seen／dependency policy 決定，不讓 agent 直接組版本。
+不同時 bump device version，caller 再發布變更。Remote adapter 在
+GUI owner thread 比對每條連線的 seen 與目前資源版本；
+受護 RPC 的依賴與讀取揭露資源由 GUI method entries 宣告。未讀過的 key
+即使版本為 0 也不能寫入。MCP 不保存 seen、不傳 `expected_versions`，
+也不隱藏預讀或自動重試；agent 收到 stale 後需明確重讀對應資源。
 GUI 事件與 service 協作見 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)，
 wire guard 與 off-owner await 見 [Remote README](remote/README.md)。
 
@@ -576,9 +578,9 @@ handlers remain on the app controller façade because they span project setup an
 connection policy rather than a single session-control domain.
 
 `zcu_tools.mcp.measure` is the agent-facing bridge: fixed tool declarations,
-short waits, live catalog, and stale guard baseline. The GUI owns operation
-handles; MCP does not keep a second operation registry. New GUI RPC methods
-that should be agent-accessible need a live catalog policy and tests.
+short waits and live catalog. The GUI remote adapter owns per-connection seen
+and operation outcomes; MCP only maps opaque agent handles to GUI operation IDs.
+New GUI RPC methods that should be agent-accessible need a live catalog policy and tests.
 
 ## Dialog Rules
 
@@ -647,9 +649,13 @@ plugin-declared commands; writes validate each command's ParamSpec before its
 typed action. The View supplies an optional live PNG and `preview_active` as
 presentation metadata. `done` discards local preview and finishes the existing
 analysis operation. Flux Auto Align uses one plugin-owned single-flight worker
-policy for GUI and remote; terminal callbacks do not recommit. The wire method
-is internal to the GUI process, with no MCP tool in this change. Notebook line pickers keep their existing interaction model. A failed Action does not
-publish partial state; subscriber errors do not undo a committed change. `done`
+policy for GUI and remote; terminal callbacks do not recommit. The fixed MCP
+`tab_interact` tool forwards one request to the GUI `tab.interact` method. Reads do not change focus; validated commands follow the Analysis pane.
+This best-effort method has no per-connection seen guard; a later committed
+command wins. Cancel through `cancel(op)` / `operation.cancel`, not a domain
+cancel tool. Notebook line pickers keep their existing interaction model.
+A failed Action does not publish partial state; subscriber errors do not undo
+a committed change. `done`
 is reserved for terminal delivery. A local preview is not committed state, and
 Esc, focus loss, hide, invalid placement or an external commit drop it.
 

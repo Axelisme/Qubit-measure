@@ -27,6 +27,12 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 - Reload experiments 會重建 concrete adapters 及 family helpers，但保留 `base.py` 與 `_support/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
+`run(req, raw_cfg)` 使用 Guard 已凍結的 resolved cfg，不重讀 live md/ml。
+`RunRequest` 只提供 SoC handles 與 detached device snapshot；Base assembler
+以此 snapshot 和 `ml=None` 建立 experiment cfg。自訂 builder 若委派 Base，
+須宣告 `ExpCfg_cls`；domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。
+Analyze 與 writeback 保持各自的 context 契約。
+
 `cfg_definition()` 使用 `_support` 提供的 measure-domain builder vocabulary，但結構與預設
 policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_value` 兩個方法理解同一
 份設定。generic Spec/Value assembly 由 `zcu_tools.gui.cfg` 擁有，不能搬回本 package。

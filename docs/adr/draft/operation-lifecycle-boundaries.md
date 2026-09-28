@@ -6,9 +6,9 @@
 
 核准目標：關閉時停止接受新工作，請求可取消工作停止，等待必要的 domain 終局與 executor cleanup。期限到達只回報未完成；共用預設不自動強制退出。若 app 提供強制退出，必須明示未保存結果、未完成寫入和資源未清理的風險。
 
-現況證據：`gui/session/services/shutdown.py` 的 `tick()` 可以回報 `TIMED_OUT`；`gui/session/adapters/qt_shutdown_driver.py` 的 `_on_tick()` 對 `WAITING` 之外的狀態都執行 `_finish_shutdown()`，包括 `TIMED_OUT` 和 tick 例外。measure `ui/main_window.py::_perform_close()` 隨後 persist、停止 remote 並關窗，沒有檢查 executor quiescence。autofluxdep `ui/main_window.py::_perform_close()` 呼叫 `quiesce_background()`，但未使用其 bool 結果阻止 close。`OperationHandles.cancel_all()` 只列出 live handles，不涵蓋 save 等無 handle 工作。autofluxdep 在 running RUN close 另有 app-local 確認與明示 Force Close 分支，不能視為其他工作的共用預設。
+現況證據：`gui/session/services/shutdown.py` 的 `tick()` 可以回報 `TIMED_OUT`；`gui/session/adapters/qt_shutdown_driver.py` 的 `_on_tick()` 對 `WAITING` 之外的狀態都執行 `_finish_shutdown()`，包括 `TIMED_OUT` 和 tick 例外。measure `ui/main_window.py::_perform_close()` 隨後 persist、停止 remote 並關窗，沒有檢查 executor quiescence。autofluxdep `ui/main_window.py::_perform_close()` 呼叫 `quiesce_background()`，但未使用其 bool 結果阻止 close。`OperationHandles.cancel_all()` 只列出 live handles，包含 data save 與 artifact batch save，但不涵蓋無 handle 的 auto-align 背景工作及單項同步 image export。autofluxdep 在 running RUN close 另有 app-local 確認與明示 Force Close 分支，不能視為其他工作的共用預設。
 
-轉正條件：共用 timeout 不觸發預設 close callback；各 app 能回報未完成狀態並區分使用者明示的強制退出；需要等待的無 handle 工作有 owner／executor 的可驗證 quiescence 契約，保存與 remote／資源 teardown 在必要工作清理後才執行。不以本 draft 指示當前實作立即退出或自動恢復。
+轉正條件：共用 timeout 不觸發預設 close callback；各 app 能回報未完成狀態並區分使用者明示的強制退出；需要等待的無 handle 背景工作（例如 auto-align）有 owner／executor 的可驗證 quiescence 契約，保存與 remote／資源 teardown 在必要工作清理後才執行。不以本 draft 指示當前實作立即退出或自動恢復。
 
 ## GUI device disconnect 與 factory owner
 
