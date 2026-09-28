@@ -1,6 +1,6 @@
 # ADR-0059：measure-gui MCP 的 RPC channel——由 live GUI 提供 method catalog
 
-**狀態：** accepted（未實作）
+**狀態：** accepted
 **關聯：** [[0060]]（特化 tool）；[[0002]]（version guard / operation handle）、[[0013]]（remote adapter 為第二個 View）、[[0014]]（共用 transport 與 app policy 邊界）、[[0035]] 與 [[0047]]（tool error 契約）。
 
 ## Context
@@ -31,7 +31,7 @@ GUI 提供 wire method `rpc.catalog`，回傳每個非 `internal` method 的 `me
 | `tool(names…)` | 由列出的特化 tool 使用；`rpc_call` 以 `reason="use_tool"` 拒絕並指名 tool。 |
 | `internal` | agent 不可達，不出現在 catalog。 |
 
-每個 method 對 agent 只有一個入口。
+每個 method 只有一個 exposure 標籤。特化 tool 與 `rpc_call` 可以操作同一功能：標為 `rpc` 的底層方法即使被特化 tool 使用，仍可直接呼叫。標為 `tool` 的方法仍回 `use_tool`，`internal` 仍不可達。兩種入口共用 GUI 驗證、guard 與 operation owner；raw RPC 不保證特化 tool 的參數或回覆轉換。
 
 ### 4. guard policy 隨 method 宣告
 

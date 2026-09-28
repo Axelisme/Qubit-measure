@@ -353,5 +353,5 @@ tab_close("t1")
 ## Consequences
 
 - agent 的每個判斷點對應一個 tool，使用者在 GUI 上看到與 agent 相同的狀態與畫面。
-- 同一個操作只有一個入口；低頻操作經 RPC channel，不增加特化 tool。
+- 常用操作提供特化 tool；低頻操作經 RPC channel，不增加特化 tool。允許標為 `rpc` 的方法與特化 tool 操作同一功能，exposure 規則見 [[0059]]。兩者共用 GUI guard，不另建狀態或繞過驗證。
 - `tab_interact` 使用外掛的共用 command 與 service-owned session。讀取不切換畫面，命令在執行前跟隨 Analysis pane；`done` 與 `cancel(op)` 結束原本的 analysis operation。
