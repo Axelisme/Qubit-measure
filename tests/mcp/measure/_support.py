@@ -61,18 +61,6 @@ class WireTransport:
             reply = {"ok": True, "result": self.responder(method, params)}
         else:
             raise AssertionError(f"Unexpected RPC: {method}")
-        result = reply.get("result")
-        if (
-            reply.get("ok")
-            and isinstance(result, dict)
-            and "__agent_write_versions" not in result
-            and any(
-                entry.method == method and entry.agent.refresh_after_write
-                for entry in METHOD_ENTRIES
-            )
-        ):
-            # Recording writes change no State unless a test supplies a receipt.
-            reply = {**reply, "result": {**result, "__agent_write_versions": {}}}
         if self.deliver_reply is None:
             raise AssertionError("Transport has not been attached")
         self.deliver_reply({**reply, "id": payload["id"]})

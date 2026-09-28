@@ -40,12 +40,6 @@ class CatalogEntry(TypedDict):
     timeout_seconds: float
     exposure: Literal["rpc", "tool"]
     tool_names: list[str]
-    guard_deps: tuple[str, ...]
-    reveals: tuple[str, ...]
-    reveals_without: tuple[str, ...]
-    reveals_when_nonempty: tuple[str, ...]
-    refresh_after_write: bool
-    created_resource: str | None
     operation_key: str | None
 
 
@@ -212,10 +206,6 @@ class MeasureMcpSession:
     def catalog(self) -> Mapping[str, CatalogEntry]:
         """Validated live GUI entries, refreshed for each new connection."""
         return self._catalog
-
-    @property
-    def last_seen_versions(self) -> MutableMapping[str, int]:
-        return self._last_seen
 
     @property
     def operation_handles(self) -> MutableMapping[str, int]:
