@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+from zcu_tools.gui.app.main.adapter.analyze_params import reconstruct_params
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -95,8 +96,10 @@ def h_tab_analyze(
             ErrorCode.INTERNAL, "analyze_params is not a dataclass instance"
         )
     try:
-        updated = dataclasses.replace(ap, **raw_updates)
-    except (TypeError, ValueError) as exc:
+        updated = reconstruct_params(
+            type(ap), {**dataclasses.asdict(ap), **raw_updates}
+        )
+    except (RuntimeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     operation_id = control.analyze(tab_id, updated)
     return {"operation_id": operation_id}
@@ -174,8 +177,10 @@ def h_tab_post_analyze(
             ErrorCode.INTERNAL, "post_analyze_params is not a dataclass instance"
         )
     try:
-        updated = dataclasses.replace(pp, **raw_updates)
-    except (TypeError, ValueError) as exc:
+        updated = reconstruct_params(
+            type(pp), {**dataclasses.asdict(pp), **raw_updates}
+        )
+    except (RuntimeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     operation_id = control.start_post_analyze(tab_id, updated)
     return {"operation_id": operation_id}
