@@ -103,10 +103,11 @@ def h_tab_analyze(
             type(ap), {**dataclasses.asdict(ap), **raw_updates}
         )
     except (RuntimeError, ValueError) as exc:
+        definitions = describe_analyze_params(type(ap))
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            str(exc),
-            data={"definitions": describe_analyze_params(type(ap))},
+            f"{exc}. Legal parameters: {definitions}",
+            data={"definitions": definitions},
         ) from exc
     operation_id = control.analyze(tab_id, updated)
     return {"operation_id": operation_id}
@@ -188,10 +189,11 @@ def h_tab_post_analyze(
             type(pp), {**dataclasses.asdict(pp), **raw_updates}
         )
     except (RuntimeError, ValueError) as exc:
+        definitions = describe_analyze_params(type(pp))
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            str(exc),
-            data={"definitions": describe_analyze_params(type(pp))},
+            f"{exc}. Legal parameters: {definitions}",
+            data={"definitions": definitions},
         ) from exc
     operation_id = control.start_post_analyze(tab_id, updated)
     return {"operation_id": operation_id}

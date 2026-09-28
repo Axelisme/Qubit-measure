@@ -89,6 +89,12 @@ def test_analysis_parameter_errors_do_not_start_operation(handler, updates) -> N
     assert definitions["fit_bg_amp_slope"]["type"] == "bool"
     assert definitions["model_type"]["choices"] == ["hm", "t", "auto"]
     assert definitions["manual_edelay"]["optional"] is True
+    # MCP forwards the message even when structured wire error data is omitted.
+    message = str(caught.value)
+    for field in definitions:
+        assert field in message
+    assert "bool" in message
+    assert all(choice in message for choice in ("hm", "auto"))
     adapter.run_analyze_control.analyze.assert_not_called()
     adapter.run_analyze_control.start_post_analyze.assert_not_called()
     assert original == OneToneFreqAnalyzeParams()
