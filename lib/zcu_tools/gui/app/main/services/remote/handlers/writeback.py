@@ -95,9 +95,23 @@ def h_tab_writeback_preview(
         pane = snap.post_analysis
     if pane is None:
         raise RemoteError(ErrorCode.INTERNAL, "snapshot has no requested pane")
+    values = (
+        adapter.writeback_control.get_writeback_values_for_pane(
+            tab_id, "analysis" if subtab_id == "analysis" else "post_analysis"
+        )
+        if pane.has_writeback_draft
+        else {}
+    )
     return {
         "has_draft": pane.has_writeback_draft,
-        "items": [_writeback_item_wire(it) for it in pane.writeback_items],
+        "items": [
+            {
+                **_writeback_item_wire(item),
+                "current": _json_safe(values[item.session_id].current),
+                "proposed": _json_safe(values[item.session_id].proposed),
+            }
+            for item in pane.writeback_items
+        ],
         "destination_context": _destination_context(adapter),
     }
 

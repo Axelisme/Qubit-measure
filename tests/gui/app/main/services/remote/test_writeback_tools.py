@@ -26,6 +26,7 @@ from zcu_tools.gui.app.main.services.ports import (
     PostAnalysisPaneSnapshot,
     TabSnapshot,
 )
+from zcu_tools.gui.app.main.services.writeback import WritebackValues
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -107,6 +108,10 @@ def _ctrl() -> MagicMock:
     wc = MagicMock()
     wc.has_tab.return_value = True
     wc.get_context_version.return_value = 7
+    wc.get_writeback_values_for_pane.return_value = {
+        "md-1": WritebackValues(current=6000.0, proposed=6012.3),
+        "ml-1": WritebackValues(current=None, proposed={"type": "pulse", "gain": 0.5}),
+    }
     wc.set_writeback_item_for_pane.return_value = {
         "valid": True,
         "removed": [],
@@ -152,6 +157,22 @@ def test_preview_serializes_metadict_and_module():
     assert "editor_id" not in mod
     assert mod["has_edit_schema"] is True
     assert mod["role_id"] == "readout"
+
+
+def test_preview_serializes_full_service_values_at_the_requested_pane():
+    ctrl = _ctrl()
+    result = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
+    assert isinstance(result["items"], list)
+    items = {item["id"]: item for item in result["items"]}
+    assert items["md-1"]["current"] == 6000.0
+    assert items["md-1"]["proposed"] == 6012.3
+    assert items["ml-1"]["current"] is None
+    assert items["ml-1"]["proposed"] == {"type": "pulse", "gain": 0.5}
+    ctrl.writeback_control.get_writeback_values_for_pane.assert_called_once_with(
+        "t", "analysis"
+    )
 
 
 def test_preview_distinguishes_empty_draft_from_missing_draft():
@@ -488,14 +509,18 @@ def _complex_items() -> list[WritebackItem]:
 
 def test_preview_serializes_complex_as_tag():
     ctrl = _ctrl()
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+        "md-1": WritebackValues(current=None, proposed=complex(1.5, -2.25)),
+    }
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
-        tab_id, _complex_items(), has_writeback_draft=False
+        tab_id, _complex_items(), has_writeback_draft=True
     )
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == {"__complex__": [1.5, -2.25]}
+    assert item["proposed"] == {"__complex__": [1.5, -2.25]}
 
 
 def test_set_coerces_complex_tag_back_to_complex():
@@ -519,7 +544,7 @@ def test_complex_preview_set_round_trip_is_lossless():
     """preview tag -> set -> the same complex the service would apply."""
     ctrl = _ctrl()
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
-        tab_id, _complex_items(), has_writeback_draft=False
+        tab_id, _complex_items(), has_writeback_draft=True
     )
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
@@ -562,14 +587,18 @@ def _matrix_items() -> list[WritebackItem]:
 
 def test_preview_serializes_nested_list_verbatim():
     ctrl = _ctrl()
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+        "md-1": WritebackValues(current=None, proposed=_CONFUSION),
+    }
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
-        tab_id, _matrix_items(), has_writeback_draft=False
+        tab_id, _matrix_items(), has_writeback_draft=True
     )
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == _CONFUSION
+    assert item["proposed"] == _CONFUSION
 
 
 def test_set_passes_nested_list_through_untouched():
@@ -592,7 +621,7 @@ def test_nested_list_preview_set_round_trip_is_lossless():
     """preview verbatim -> set -> the same nested list the service would apply."""
     ctrl = _ctrl()
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
-        tab_id, _matrix_items(), has_writeback_draft=False
+        tab_id, _matrix_items(), has_writeback_draft=True
     )
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}

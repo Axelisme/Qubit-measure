@@ -25,7 +25,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "ExpContext projection at reply time. Each item: id "
             "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
             "kind (metadict|module|waveform), description, selected; metadict adds "
-            "proposed_value; module/waveform add has_edit_schema, and "
+            "proposed_value; every item includes complete current/proposed values "
+            "(md values or module/waveform cfg dictionaries). Current is read from "
+            "the active context at preview time and is null for a missing target; "
+            "proposed cfg is lowered from the shared GUI draft. Invalid cfg or "
+            "missing context fails instead of reporting an empty preview. "
+            "Module/waveform add has_edit_schema, and "
             "may include role_id when the proposal corresponds to a ModuleLibrary "
             "role. A complex metadict proposed_value is carried as "
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '

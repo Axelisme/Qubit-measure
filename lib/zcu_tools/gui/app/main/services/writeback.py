@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import (
+    ExpContext,
     MetaDictWriteback,
     ModuleWriteback,
     WaveformWriteback,
     WritebackItem,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
@@ -35,6 +37,14 @@ _KIND_PREFIX = {
 
 # Sentinel for "argument not supplied" in set_item_field (None is a real value).
 _UNSET: Any = object()
+
+
+@dataclass(frozen=True)
+class WritebackValues:
+    """Complete values at the active destination and in the current draft."""
+
+    current: object
+    proposed: object
 
 
 @dataclass
@@ -207,6 +217,38 @@ class WritebackService:
     def preview_draft(self, draft: WritebackDraft) -> list[WritebackItem]:
         self._require_draft(draft)
         return list(draft.items)
+
+    def preview_values(
+        self, draft: WritebackDraft, context: ExpContext
+    ) -> dict[str, WritebackValues]:
+        """Read live destination values; do not reuse presentation baselines.
+
+        Missing targets have current=None. Missing context or invalid cfg raises;
+        this is not a promise that later writes will see the same context.
+        """
+        self._require_draft(draft)
+        md, ml = context.md, context.ml
+        if not context.has_context():
+            raise FailedPreconditionError("No experiment context.")
+        values = {}
+        for item in draft.items:
+            if isinstance(item, MetaDictWriteback):
+                current = md.get(item.target_name, None)
+                proposed = item.proposed_value
+            elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                collection = (
+                    ml.modules if isinstance(item, ModuleWriteback) else ml.waveforms
+                )
+                target = collection.get(item.target_name)
+                current = None if target is None else target.to_dict()
+                schema = self.get_item_draft(draft, item.session_id).snapshot()
+                proposed = schema_to_raw_dict(schema, md, ml)
+            else:
+                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
+            values[item.session_id] = WritebackValues(
+                current=copy.deepcopy(current), proposed=copy.deepcopy(proposed)
+            )
+        return values
 
     def edit_draft(
         self,

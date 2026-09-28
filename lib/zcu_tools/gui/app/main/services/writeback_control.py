@@ -12,6 +12,8 @@ from zcu_tools.gui.app.main.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
+from .writeback import WritebackDraft
+
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 
 if TYPE_CHECKING:
@@ -20,7 +22,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .guard import GuardService
-    from .writeback import WritebackService
+    from .writeback import WritebackService, WritebackValues
 
 
 class WritebackControlPort(Protocol):
@@ -51,6 +53,10 @@ class WritebackControlPort(Protocol):
     def get_writeback_applied_for_pane(
         self, tab_id: str, pane: WritebackPane
     ) -> dict[str, bool]: ...
+
+    def get_writeback_values_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, WritebackValues]: ...
 
     def get_context_version(self) -> int: ...
 
@@ -127,6 +133,14 @@ class WritebackControlFacet:
         result = self._writeback.apply_draft(draft, item_ids=item_ids)  # type: ignore[arg-type]
         self._emit_draft_changed(tab_id)
         return result
+
+    def get_writeback_values_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, WritebackValues]:
+        draft = self._draft_for_pane(tab_id, pane)
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        return self._writeback.preview_values(draft, self._state.exp_context)
 
     def get_writeback_summaries_for_pane(
         self, tab_id: str, pane: WritebackPane
