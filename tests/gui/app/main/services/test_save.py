@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,7 +41,10 @@ def _assert_saved_fixed_size(figure: MagicMock, image_path: str) -> None:
 
 
 def _make_service(
-    *, handles: OperationHandles | None = None, gate: MagicMock | None = None
+    *,
+    handles: OperationHandles | None = None,
+    gate: MagicMock | None = None,
+    bus: EventBus | None = None,
 ) -> tuple[SaveService, State, MagicMock]:
     state = State(MagicMock())
     adapter = MagicMock()
@@ -50,7 +54,7 @@ def _make_service(
     )
     state.update_tab_result("tab", object())
     bg = MagicMock()  # BackgroundRunner stand-in; submit() is inspected per-test
-    bus = EventBus()
+    bus = bus if bus is not None else EventBus()
     runner = OperationRunner(
         gate if gate is not None else MagicMock(),
         handles if handles is not None else OperationHandles(),
@@ -139,6 +143,55 @@ def test_save_terminal_restores_agent_origin_with_operation_id(
             ),
         )
     ]
+
+
+@pytest.mark.parametrize("failed", [False, True])
+@pytest.mark.parametrize("origin_kind", ["user", "agent"])
+def test_save_terminal_subscribers_observe_settled_handle(
+    tmp_path: Path, failed: bool, origin_kind: Literal["user", "agent"]
+) -> None:
+    handles = OperationHandles()
+    bus = EventBus()
+    svc, state, bg = _make_service(handles=handles, bus=bus)
+    observed = []
+
+    def observe(payload, meta):
+        if (
+            isinstance(payload, TabInteractionChangedPayload)
+            and payload.fact is TabInteractionFact.SAVE_STARTED
+        ):
+            return
+        token = int(meta.origin.operation_id)
+        observed.append(
+            (
+                type(payload),
+                handles.known_outcome(token),
+                state.is_tab_busy("tab"),
+                svc.active_save_operations(),
+                state.get_artifact_snapshots("tab")[0].last_saved_path,
+            )
+        )
+
+    bus.subscribe_with_meta(TabInteractionChangedPayload, observe)
+    bus.subscribe_with_meta(SaveDataFinishedPayload, observe)
+    with bus.origin(EventOrigin(kind=origin_kind)):
+        started = svc.start_save_data(SavePermit(tab_id="tab"), str(tmp_path / "save"))
+    if failed:
+        bg.submit.call_args.kwargs["on_error"](OSError("disk full"))
+    else:
+        bg.submit.call_args.kwargs["on_done"](None)
+
+    assert [entry[0] for entry in observed] == [
+        TabInteractionChangedPayload,
+        SaveDataFinishedPayload,
+    ]
+    for _, outcome, busy, active, last_path in observed:
+        assert outcome is not None
+        assert outcome.status == ("failed" if failed else "finished")
+        assert outcome.error == ("disk full" if failed else None)
+        assert not busy
+        assert active == ()
+        assert last_path == (None if failed else started.data_path)
 
 
 def test_save_submit_failure_leaves_no_busy_tab_or_live_handle(tmp_path: Path) -> None:
@@ -230,16 +283,15 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
 # ---------------------------------------------------------------------------
 
 
-def test_on_save_data_finished_emits_completion(qapp) -> None:  # noqa: ARG001
-    svc, _, _ = _make_service()
+def test_save_success_emits_completion(tmp_path: Path) -> None:
+    svc, _, bg = _make_service()
     facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
 
     finished = _record_outcomes(svc)
 
-    # Stage the active path as start_save_data would
-    svc.start_save_data(permit, "/tmp/data")
-    svc._on_save_data_finished("tab")
+    svc.start_save_data(permit, str(tmp_path / "data"))
+    bg.submit.call_args.kwargs["on_done"](None)
 
     assert len(finished) == 1
     assert finished[0].tab_id == "tab"
@@ -249,21 +301,16 @@ def test_on_save_data_finished_emits_completion(qapp) -> None:  # noqa: ARG001
     ]
 
 
-# ---------------------------------------------------------------------------
-# _on_save_failed
-# ---------------------------------------------------------------------------
-
-
-def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
-    svc, _, _ = _make_service()
+def test_save_failure_emits_save_failed(tmp_path: Path) -> None:
+    svc, _, bg = _make_service()
     facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
 
     failed = _record_outcomes(svc)
 
-    svc.start_save_data(permit, "/tmp/data")
+    svc.start_save_data(permit, str(tmp_path / "data"))
     error = OSError("write error")
-    svc._on_save_failed("tab", error)
+    bg.submit.call_args.kwargs["on_error"](error)
 
     assert len(failed) == 1
     assert failed[0].tab_id == "tab"

@@ -72,11 +72,11 @@ Data save 使用 Handle 等待真實存檔完成，不使用 Exclusion、Progres
 
 - **不建正式 `ExecutionStrategy` class 階層**:strategy 選擇留 domain service(本就是知情 orchestrator),抽 Strategy 物件對 ~5 個 call site 是 over-abstraction(同 [[0003]] 防過度設計精神)。
 - **gate 不 wrap bg**:Exclusion / Handle / Execution 三正交,service 組合,互不巢狀。
-- **不強制所有 op 有 Handle**:save / auto-align 只有 strategy。
+- **不強制所有工作有 Handle**：data save 使用 Handle 等待背景 I/O；auto-align 只有 OffMain-pool strategy，同步 image export 不建立 operation handle。
 
 ## 替代方案與否決理由
 
-- **gate 作 bg 的使用方,外包 Lease/Lock**:把正交三軸綁成巢狀;interactive(Exclusion❌ Handle✅) 與 save/auto-align(Exclusion❌ Execution✅) 證明正交;且終端 domain 邏輯(writeback/State)必須留 service,gate 驅動 bg 會逼出 gate→service 反向回呼。否決 → 三 sibling 由 service 組合。
+- **gate 作 bg 的使用方,外包 Lease/Lock**:把正交三軸綁成巢狀;interactive 與 data save（Exclusion❌ Handle✅），以及 auto-align（Exclusion❌ Handle❌ Execution✅）證明正交;且終端 domain 邏輯(writeback/State)必須留 service,gate 驅動 bg 會逼出 gate→service 反向回呼。否決 → 三 sibling 由 service 組合。
 - **正式 ExecutionStrategy 多型階層**:domain service 已知情,Strategy 物件徒增 indirection。否決。
 - **interactive widget 持整個 ctrl**(類比「View 持 ctrl」):寬依賴滿足窄需求,7 個 widget 測試要 ctrl,bg.submit API 漏進 View widget;且該 widget 今天**對 ctrl 下零命令**(拖線/action→session、Done→注入 callback),是 passive host 非 command surface。否決 → 窄 `InteractiveHostEnv` port。
 - **liveplot backend 與 routing 拆成兩個 scope**:co-dependent —— `QtLivePlotBackend.make_plot_frame`→`plt.subplots`→`require_current_container()`,沒 routing 直接 crash;analyze 只設 routing 不設 liveplot,只因它從不呼 liveplot API(no-op),非需要解耦。否決 → 同一 `figure_container` facet。

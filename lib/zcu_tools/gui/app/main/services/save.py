@@ -56,14 +56,18 @@ class SaveService:
         adapter = self._state.get_tab(tab_id).adapter
 
         def on_terminal(result: BgResult, settle: SettleFn) -> None:
-            self._active_operations.pop(tab_id, None)
-            if result.ok:
-                self._on_save_data_finished(tab_id)
-                settle(OperationOutcome("finished"))
-            else:
-                error = result.error or RuntimeError("save failed without an error")
-                self._on_save_failed(tab_id, error)
-                settle(OperationOutcome("failed", str(error)))
+            error = (
+                None
+                if result.ok
+                else result.error or RuntimeError("save failed without an error")
+            )
+            payload = self._finish_save_state(tab_id, error)
+            settle(
+                OperationOutcome(
+                    "finished" if error is None else "failed", payload.error
+                )
+            )
+            self._emit_save_finished(payload)
 
         return self._runner.begin(
             OperationSpec(
@@ -96,7 +100,8 @@ class SaveService:
         try:
             token = self._start_save(tab_id, req)
         except Exception as error:
-            self._on_save_failed(tab_id, error)
+            # OperationRunner has already settled a synchronous submission failure.
+            self._emit_save_finished(self._finish_save_state(tab_id, error))
             raise
         # Inline executors may have delivered terminal before begin returns.
         if tab_id in self._active_paths:
@@ -189,24 +194,31 @@ class SaveService:
             TabInteractionChangedPayload(tab_id=tab_id, fact=fact),
         )
 
-    def _on_save_data_finished(self, tab_id: str) -> None:
+    def _finish_save_state(
+        self, tab_id: str, error: Exception | None
+    ) -> SaveDataFinishedPayload:
         path = self._active_paths.pop(tab_id, "")
-        logger.info("_on_save_data_finished: tab_id=%r path=%r", tab_id, path)
-        self._state.get_tab(tab_id).artifacts.succeeded(ArtifactKind.DATA, path)
-        self._mark_saving(tab_id, False, TabInteractionFact.SAVE_SUCCEEDED)
-        self._bus.emit(SaveDataFinishedPayload(tab_id=tab_id, data_path=path))
-
-    def _on_save_failed(self, tab_id: str, error: Exception) -> None:
-        path = self._active_paths.pop(tab_id, "")
-        logger.warning(
-            "_on_save_failed: tab_id=%r path=%r error=%r", tab_id, path, error
-        )
-        self._state.get_tab(tab_id).artifacts.failed(ArtifactKind.DATA)
-        self._mark_saving(tab_id, False, TabInteractionFact.SAVE_FAILED)
-        self._bus.emit(
-            SaveDataFinishedPayload(
-                tab_id=tab_id,
-                data_path=path,
-                error=str(error),
+        self._active_operations.pop(tab_id, None)
+        tracker = self._state.get_tab(tab_id).artifacts
+        if error is None:
+            logger.info("save finished: tab_id=%r path=%r", tab_id, path)
+            tracker.succeeded(ArtifactKind.DATA, path)
+        else:
+            logger.warning(
+                "save failed: tab_id=%r path=%r error=%r", tab_id, path, error
             )
+            tracker.failed(ArtifactKind.DATA)
+        self._state.set_tab_saving_data(tab_id, False)
+        return SaveDataFinishedPayload(
+            tab_id=tab_id, data_path=path, error=None if error is None else str(error)
         )
+
+    def _emit_save_finished(self, payload: SaveDataFinishedPayload) -> None:
+        """Publish only after State and the shared handle agree on terminal state."""
+        fact = (
+            TabInteractionFact.SAVE_SUCCEEDED
+            if payload.error is None
+            else TabInteractionFact.SAVE_FAILED
+        )
+        self._bus.emit(TabInteractionChangedPayload(tab_id=payload.tab_id, fact=fact))
+        self._bus.emit(payload)
