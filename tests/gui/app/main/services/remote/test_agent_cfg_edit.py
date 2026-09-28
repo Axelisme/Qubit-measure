@@ -154,6 +154,80 @@ def test_tab_edit_mcp_failure_preserves_successful_prefix(mcp_tab):
     assert inputs["expts"]["resolved"] == 4
 
 
+@pytest.mark.parametrize("method", ["tab.set_cfg", "editor.set_fields"])
+@pytest.mark.parametrize("source", ["value_ref", "reference_child"])
+def test_agent_batch_preserves_precondition_category_and_reason(
+    live_tab, monkeypatch, method, source
+):
+    from zcu_tools.gui.session.value_lookup import UnavailableValue
+
+    fixture, tab_id = live_tab
+    spec = CfgSectionSpec(
+        fields={
+            "gain": ScalarSpec("Gain", float),
+            "drive": ReferenceSpec(
+                "module",
+                [
+                    CfgSectionSpec(
+                        label="Pulse", fields={"gain": ScalarSpec("Gain", float)}
+                    )
+                ],
+                optional=True,
+            ),
+        }
+    )
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
+        CfgSchema(spec, make_default_value(spec)), gc=False, owner_key=tab_id
+    )
+    if source == "value_ref":
+
+        def unavailable(*_args):
+            raise UnavailableValue("device.flux.value", "device unavailable")
+
+        monkeypatch.setattr(fixture.ctrl, "read_value_source", unavailable)
+        failing = {
+            "path": "gain",
+            "value": {
+                "__kind": "value_ref",
+                "key": "device.flux.value",
+                "type": "float",
+            },
+        }
+        reason = ""
+    else:
+        from zcu_tools.gui.cfg.binding.targets import SettableTargetUnavailable
+
+        draft = fixture.ctrl.get_cfg_editor_draft(editor_id)
+        resolve = draft.resolve_agent_target
+
+        def resolve_available(path):
+            if path == "drive.gain":
+                raise SettableTargetUnavailable("reference shape currently unavailable")
+            return resolve(path)
+
+        monkeypatch.setattr(draft, "resolve_agent_target", resolve_available)
+        failing = {"path": "drive.gain", "value": 0.5}
+        reason = "settable_target_unavailable"
+    params = (
+        {"tab_id": tab_id, "agent_edit": True}
+        if method == "tab.set_cfg"
+        else {"editor_id": editor_id}
+    )
+    params["edits"] = [{"path": "gain", "value": 0.25}, failing]
+    sock = open_client(fixture.service.port)
+    try:
+        reply = call(sock, method, params)
+        assert reply["error"]["code"] == "precondition_failed"
+        assert reply["error"].get("reason", "") == reason
+        assert (
+            f"{failing['path']!r} failed after 1 applied" in reply["error"]["message"]
+        )
+        tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
+        assert tree["children"]["gain"]["input"]["resolved"] == 0.25
+    finally:
+        sock.close()
+
+
 def test_library_editor_batch_uses_shared_agent_sweep_and_preserves_prefix(live_tab):
     fixture, tab_id = live_tab
     editor_id = fixture.ctrl.editor_id_for_owner(tab_id)

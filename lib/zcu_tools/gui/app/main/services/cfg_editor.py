@@ -69,7 +69,12 @@ from zcu_tools.gui.cfg.binding import (
     SettableTarget,
     SettableTargetKind,
 )
-from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+    InvalidInputError,
+)
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
@@ -264,7 +269,11 @@ class CfgEditorSession:
                         value = self.resolve_value_ref(value, target.value_type)
                     target.set_value(value)
             except ExpectedError as exc:
-                raise SettablePathError(
+                error_type = {
+                    ExpectedErrorCategory.INVALID_INPUT: SettablePathError,
+                    ExpectedErrorCategory.FAILED_PRECONDITION: FailedPreconditionError,
+                }[exc.category]
+                raise error_type(
                     f"agent edit at {edit.path!r} failed after {applied} applied: {exc}",
                     reason_code=exc.reason_code,
                 ) from exc
