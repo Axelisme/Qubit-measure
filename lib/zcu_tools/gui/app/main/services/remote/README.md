@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-28，guarded artifact save operation
+**Last updated:** 2026-09-28，writeback and artifact save integration
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,13 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 67`, `GUI_VERSION = 99`, and
-`MCP_VERSION = 90` (defined in `zcu_tools.mcp.measure.server`). WIRE 67 adds
+Current measure-gui values are `WIRE_VERSION = 69`, `GUI_VERSION = 101`, and
+`MCP_VERSION = 92` (defined in `zcu_tools.mcp.measure.server`). WIRE 69 adds
+complete writeback previews and identity-preserving batch results. GUI 101 applies
+explicit items through shared drafts and follows their pane; MCP 92 forwards the
+writeback tool to that owner. WIRE 68 exposes analysis parameters and invalidation
+facts; GUI 100 owns analysis validation and explicit pane following; MCP 91 adds
+run/analyze tools with bounded waits. WIRE 67 adds
 aggregate cfg edits and `context.ml_edit`; GUI 99 owns sequential library
 commits through the shared draft model and preserves batch error categories.
 MCP 90 exposes cfg/library tools and reports partial commits. WIRE 66 moves

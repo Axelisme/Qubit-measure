@@ -15,6 +15,7 @@ from zcu_tools.mcp.measure import (
     tools_screenshot,
     tools_setup,
     tools_tab,
+    tools_writeback,
 )
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -33,6 +34,7 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
         tools_save.build_save_tools(context),
         tools_cfg.build_cfg_tools(context),
         tools_ml.build_ml_tools(context),
+        tools_writeback.build_writeback_tools(context),
         tools_screenshot.build_screenshot_tools(context),
         tools_setup.build_setup_tools(context),
     ):

@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-28，shared cfg/library、artifacts與graceful shutdown
+**Last updated:** 2026-09-28，shared writeback、artifacts與graceful shutdown
 
 # `zcu_tools/mcp/measure/`
 
@@ -41,6 +41,10 @@ validity 與 cached choices；GUI model 是來源，讀取不重新解析 md/ml�
 `ml_edit`只送一次GUI application命令。CfgEditorService使用共用CfgDraft，經ContextWritePort逐項提交；首錯即停，保留已提交前綴並清理內部草稿。回覆區分applied、failed、skipped與實際cfg。save_as不修改來源，首次成功才建立目的地。Agent須明確觀察context，沒有editor/context隱藏預讀或自動重試。
 
 Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，MODIFIED參照保留inline修改。既有draft由service反應library變更並發布，同一份狀態供widget與MCP觀察。
+
+## Writeback
+
+`writeback` 的 preview 直接投影 GUI 共享草稿與目前 context，不在 MCP materialize cfg。寫入只送一次 `tab.writeback_write`；GUI 依序修改指定草稿，首錯保留已改前綴且不開始 context apply。全部成功後一次 apply 指定 IDs，不改 GUI 勾選；結果以含 id、kind、target、before、after 的列表保留跨 kind 同名目的地。MCP 不隱藏預讀、不重試。GUI 在改草稿前透過明確 view 命令切到目標 analysis/post pane；preview 與非同步完成不切頁。
 
 ## 驗證
 

@@ -13,6 +13,8 @@ from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
+from ._wire_values import context_wire_value
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -126,28 +128,6 @@ def h_context_active(
     return {"label": adapter.context_control.get_active_context_label()}
 
 
-def _context_wire_value(value: object) -> object:
-    """Project supported context values without coercing unknown types or keys."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, complex):
-        return {"__complex__": [value.real, value.imag]}
-    if isinstance(value, np.ndarray):
-        return _context_wire_value(value.tolist())
-    if isinstance(value, np.generic):
-        return _context_wire_value(value.item())
-    if isinstance(value, dict):
-        result: dict[str, object] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError(f"unsupported context key: {type(key).__name__}")
-            result[key] = _context_wire_value(item)
-        return result
-    if isinstance(value, list):
-        return [_context_wire_value(item) for item in value]
-    raise TypeError(f"unsupported context value: {type(value).__name__}")
-
-
 def h_context_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -170,7 +150,7 @@ def h_context_snapshot(
         }
         # Validate every nested value before JSON encoding. Success is a full
         # context observation and advances the MCP guard baseline.
-        return json.loads(json.dumps(_context_wire_value(snapshot), allow_nan=False))
+        return json.loads(json.dumps(context_wire_value(snapshot), allow_nan=False))
     except (TypeError, ValueError, RecursionError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -221,7 +201,7 @@ def h_context_md_get_attr(
             reason="unknown_md_key",
         )
     try:
-        return {"key": key, "value": _context_wire_value(value)}
+        return {"key": key, "value": context_wire_value(value)}
     except (TypeError, ValueError, RecursionError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -373,8 +353,8 @@ def h_context_md_set_attr(
         return {}
     current = ctx.get_current_md().get(key, sentinel)
     return {
-        "before": None if previous is sentinel else _context_wire_value(previous),
-        "after": _context_wire_value(current),
+        "before": None if previous is sentinel else context_wire_value(previous),
+        "after": context_wire_value(current),
     }
 
 

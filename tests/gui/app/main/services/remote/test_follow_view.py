@@ -15,6 +15,9 @@ from zcu_tools.gui.app.main.services.remote.handlers.run_save import (
     h_tab_save_artifacts,
 )
 from zcu_tools.gui.app.main.services.remote.handlers.tab import h_tab_set_cfg
+from zcu_tools.gui.app.main.services.remote.handlers.writeback import (
+    h_tab_writeback_write,
+)
 
 
 @dataclass
@@ -104,6 +107,49 @@ def test_failed_save_view_selection_does_not_start_save():
             },
         )
     adapter.save_control.save_artifacts.assert_not_called()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("headless", [False, True])
+def test_writeback_selects_its_pane_before_shared_draft_changes(pane, headless):
+    adapter = MagicMock()
+    order = []
+    if headless:
+        adapter.render_view = None
+    else:
+        adapter.render_view.select_tab_pane.side_effect = lambda tab, selected: (
+            order.append((tab, selected))
+        )
+
+    def write(*args):
+        order.append("write")
+        return []
+
+    adapter.writeback_control.write_writeback_for_pane.side_effect = write
+    assert h_tab_writeback_write(
+        adapter,
+        {
+            "tab_id": "t",
+            "subtab_id": pane,
+            "write": [],
+        },
+    ) == {"written": []}
+    assert order == (["write"] if headless else [("t", pane), "write"])
+
+
+def test_failed_writeback_view_selection_leaves_draft_untouched():
+    adapter = MagicMock()
+    adapter.render_view.select_tab_pane.side_effect = ValueError("unavailable pane")
+    with pytest.raises(ValueError, match="unavailable pane"):
+        h_tab_writeback_write(
+            adapter,
+            {
+                "tab_id": "t",
+                "subtab_id": "analysis",
+                "write": [{"id": "md-1"}],
+            },
+        )
+    adapter.writeback_control.write_writeback_for_pane.assert_not_called()
 
 
 def test_failed_view_selection_does_not_start_an_operation():

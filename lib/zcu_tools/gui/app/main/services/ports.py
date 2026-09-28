@@ -333,7 +333,9 @@ class CfgEditorPort(Protocol):
     # than re-exposing the handle. Signature mirrors CfgEditorService.set_field.
     def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult: ...
 
-    def set_fields(self, editor_id: str, edits: Sequence[CfgEdit]) -> CfgEditResult: ...
+    def set_fields(
+        self, editor_id: str, edits: Sequence[CfgEdit], *, agent_edit: bool = False
+    ) -> CfgEditResult: ...
 
 
 @runtime_checkable
