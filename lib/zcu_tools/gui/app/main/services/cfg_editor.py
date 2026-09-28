@@ -623,7 +623,46 @@ class CfgEditorService:
         save_as: str | None = None,
     ) -> CfgEditResult:
         """Commit edits in order, retaining the successful prefix on failure."""
-        raise NotImplementedError
+        if not edits:
+            raise CfgEditorError("library edits must not be empty")
+        if item_kind not in _ITEM_KINDS:
+            raise CfgEditorError(
+                f"item_kind must be one of {_ITEM_KINDS}, got {item_kind!r}"
+            )
+        if save_as is not None:
+            ml = self._read.get_current_ml()
+            store = ml.modules if item_kind == "module" else ml.waveforms
+            if save_as in store:
+                raise CfgEditorError(
+                    f"{item_kind} destination already exists: {save_as!r}"
+                )
+
+        # This draft is internal to the application, not an agent session. Keep
+        # it across writes so later edits see the shape created by earlier ones.
+        editor_id, _ = self.open(item_kind, from_name=name, gc=False)
+        try:
+            session = self._require(editor_id)
+            destination = save_as if save_as is not None else name
+            write = (
+                self._write.set_ml_module_from_schema
+                if item_kind == "module"
+                else self._write.set_ml_waveform_from_schema
+            )
+            for applied, edit in enumerate(edits):
+                try:
+                    session.set_agent_fields((edit,))
+                    if not session.draft.is_valid():
+                        raise CfgEditorError(f"invalid cfg draft after {edit.path!r}")
+                    write(destination, session.commit_schema())
+                except ExpectedError as exc:
+                    return CfgEditResult(
+                        valid=False,
+                        applied=applied,
+                        errors=({"path": edit.path, "message": str(exc)},),
+                    )
+            return CfgEditResult(valid=True, applied=len(edits))
+        finally:
+            self.teardown(editor_id, reason="library_edit_finished")
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService
