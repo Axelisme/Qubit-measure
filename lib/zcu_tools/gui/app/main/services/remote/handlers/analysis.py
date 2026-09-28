@@ -12,6 +12,8 @@ from zcu_tools.gui.app.main.adapter.analyze_params import (
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ._common import follow_tab
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -120,6 +122,7 @@ def h_tab_analyze(
             invalidated.append("post.result")
         if snap.post_analysis.has_writeback_draft:
             invalidated.append("post.writeback")
+    follow_tab(adapter, tab_id, "analysis")
     operation_id = control.analyze(tab_id, updated)
     return {
         "operation_id": operation_id,
@@ -216,6 +219,7 @@ def h_tab_post_analyze(
         if snap.post_analysis is not None and snap.post_analysis.has_writeback_draft
         else []
     )
+    follow_tab(adapter, tab_id, "post_analysis")
     operation_id = control.start_post_analyze(tab_id, updated)
     return {
         "operation_id": operation_id,

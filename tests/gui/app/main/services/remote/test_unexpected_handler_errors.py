@@ -49,7 +49,9 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     run_control.start_run.side_effect = run_error
     _assert_escapes_unchanged(
         lambda: h_tab_run_start(
-            cast(Any, SimpleNamespace(run_analyze_control=run_control)),
+            cast(
+                Any, SimpleNamespace(run_analyze_control=run_control, render_view=None)
+            ),
             {"tab_id": "t1"},
         ),
         run_error,
@@ -67,7 +69,10 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     analyze_control.analyze.side_effect = analyze_error
     _assert_escapes_unchanged(
         lambda: h_tab_analyze(
-            cast(Any, SimpleNamespace(run_analyze_control=analyze_control)),
+            cast(
+                Any,
+                SimpleNamespace(run_analyze_control=analyze_control, render_view=None),
+            ),
             {"tab_id": "t1", "updates": {}},
         ),
         analyze_error,
