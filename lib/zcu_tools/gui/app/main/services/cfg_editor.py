@@ -614,6 +614,17 @@ class CfgEditorService:
             session.set_agent_fields(edits) if agent_edit else session.set_fields(edits)
         )
 
+    def edit_library(
+        self,
+        item_kind: str,
+        name: str,
+        edits: Sequence[CfgEdit],
+        *,
+        save_as: str | None = None,
+    ) -> CfgEditResult:
+        """Commit edits in order, retaining the successful prefix on failure."""
+        raise NotImplementedError
+
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService
         # (the single write authority) lowers + registers. The Repository owns

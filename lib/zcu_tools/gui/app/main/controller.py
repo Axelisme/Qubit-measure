@@ -1165,6 +1165,18 @@ class Controller(SessionControllerMixin):
         """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
         return self._cfg_editor_svc.owner_of_editor(editor_id)
 
+    def edit_library(
+        self,
+        item_kind: str,
+        name: str,
+        edits: list[CfgEdit],
+        *,
+        save_as: str | None = None,
+    ) -> CfgEditResult:
+        return self._cfg_editor_svc.edit_library(
+            item_kind, name, edits, save_as=save_as
+        )
+
     def commit_cfg_editor(self, editor_id: str, name: str) -> None:
         self._cfg_editor_svc.commit(editor_id, name)
 

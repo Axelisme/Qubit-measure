@@ -126,6 +126,7 @@ def test_ml_roles_and_create_use_gui_role_defaults(library_client):
 def test_ml_edit_commits_only_full_draft_and_save_as_preserves_source(library_client):
     invoke, library = library_client
     before = library.waveforms["seed"].to_dict()
+    invoke("rpc_call", {"method": "context.snapshot"})
     saved = invoke(
         "ml_edit",
         {
@@ -155,6 +156,20 @@ def test_ml_edit_commits_only_full_draft_and_save_as_preserves_source(library_cl
         )
     assert library.waveforms["seed"].to_dict() == before
     assert library.waveforms["copy"].to_dict() == saved["cfg"]
+
+
+def test_ml_edit_requires_explicit_context_observation(library_client):
+    invoke, library = library_client
+    before = library.waveforms["seed"].to_dict()
+    with pytest.raises(GuiRpcError) as exc:
+        invoke("ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.5}]})
+    assert exc.value.reason == "stale_version"
+    assert library.waveforms["seed"].to_dict() == before
+    invoke("rpc_call", {"method": "context.snapshot"})
+    saved = invoke(
+        "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.5}]}
+    )
+    assert saved["cfg"]["length"] == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize("destination", ["seed", "occupied"])

@@ -93,9 +93,6 @@ def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
                 f"save_as name {destination!r} already exists as {kind}; "
                 "choose a new name"
             )
-    # editor.commit depends on a full context observation. A summary index is
-    # not a guard baseline; the snapshot also refuses incomplete context data.
-    ctx.session.read_internal("context.snapshot", {})
     editor_id = ctx.send_gui_rpc("editor.new", {"item_kind": kind, "from_name": name})[
         "editor_id"
     ]
@@ -106,9 +103,6 @@ def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
         )
         if not result["valid"]:
             raise ValueError("edited library draft is invalid; no changes committed")
-        # The batch bumps the draft version; a full read reveals that version
-        # for the guarded commit without weakening the GUI's stale check.
-        ctx.session.read_internal("editor.get", {"editor_id": editor_id})
         commit_attempted = True
         ctx.send_gui_rpc("editor.commit", {"editor_id": editor_id, "name": destination})
     except Exception as error:
@@ -204,7 +198,7 @@ ML_TOOLS: dict[str, dict[str, Any]] = {
     },
     "ml_edit": {
         "handler": ml_edit,
-        "description": "Edit an existing named ModuleLibrary item using ordered canonical {path,value} agent edits, then commit only on full success. save_as writes a new item and leaves the source unchanged; an error discards the draft without writing to the library. Eval inputs lower to numeric values at commit. Return {name,cfg}; kind disambiguates shared names.",
+        "description": "Edit an existing named ModuleLibrary item using ordered canonical {path,value} agent edits, then commit only on full success. save_as writes a new item and leaves the source unchanged; an error discards the draft without writing to the library. Eval inputs lower to numeric values at commit. Read context.snapshot explicitly before editing; no hidden read refreshes the guard. Return {name,cfg}; kind disambiguates shared names.",
         "inputSchema": {
             "type": "object",
             "properties": {
