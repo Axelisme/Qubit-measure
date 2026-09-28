@@ -80,9 +80,13 @@ class SaveControlFacet:
         return self._save.start_save_data(permit, resolved, comment=draft_comment)
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str:
+        if image_path is not None and not image_path.strip():
+            raise FailedPreconditionError(f"Tab {tab_id!r} has an empty image path")
         permit = self._guard.acquire_save_permit(tab_id)
         self._require_tab_idle(tab_id)
-        resolved = image_path or self._tab.get_tab_analysis_image_path(tab_id)
+        if image_path is not None:
+            self._tab.update_tab_analysis_image_path_override(tab_id, image_path)
+        resolved = self._tab.get_tab_analysis_image_path(tab_id)
         if resolved is None:
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no analysis image path configured"
@@ -92,9 +96,15 @@ class SaveControlFacet:
         return resolved
 
     def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
+        if image_path is not None and not image_path.strip():
+            raise FailedPreconditionError(
+                f"Tab {tab_id!r} has an empty post image path"
+            )
         permit = self._guard.acquire_save_permit(tab_id)
         self._require_tab_idle(tab_id)
-        resolved = image_path or self._tab.get_tab_post_analysis_image_path(tab_id)
+        if image_path is not None:
+            self._tab.update_tab_post_analysis_image_path_override(tab_id, image_path)
+        resolved = self._tab.get_tab_post_analysis_image_path(tab_id)
         if resolved is None:
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no post-analysis image path configured"

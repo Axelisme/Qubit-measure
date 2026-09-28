@@ -115,7 +115,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             30.0,
             "Save a pane's canonical image file (analysis|post_analysis only; run "
             "has no canonical image). Requires (tab_id, subtab_id) with closed "
-            "values analysis|post_analysis.",
+            "values analysis|post_analysis. Explicit image_path updates the GUI "
+            "draft before saving; omission keeps the draft, and an empty path is rejected.",
             (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),

@@ -63,6 +63,18 @@ class RecordingTab:
         self._log.add("tab", "get_tab_analysis_image_path", tab_id)
         return self.analysis_image_path
 
+    def update_tab_analysis_image_path_override(self, tab_id: str, path: str) -> None:
+        self._log.add("tab", "update_tab_analysis_image_path_override", tab_id, path)
+        self.analysis_image_path = path
+
+    def update_tab_post_analysis_image_path_override(
+        self, tab_id: str, path: str
+    ) -> None:
+        self._log.add(
+            "tab", "update_tab_post_analysis_image_path_override", tab_id, path
+        )
+        self.post_analysis_image_path = path
+
     def get_tab_post_analysis_image_path(self, tab_id: str) -> str | None:
         self._log.add("tab", "get_tab_post_analysis_image_path", tab_id)
         return self.post_analysis_image_path
@@ -214,6 +226,81 @@ def test_save_post_image_uses_default_path_and_notifies() -> None:
         call("save", "save_post_image_sync", "permit:tab-1", "default.png"),
     ]
     assert notifications == ["Post-analysis image saved to default.png"]
+
+
+@pytest.mark.parametrize("post", [False, True])
+def test_image_save_explicit_path_becomes_shared_draft_and_omission_reuses_it(
+    post: bool,
+) -> None:
+    facet, log, _state, tab, _save, _bus, _notifications = _facet()
+    save = facet.save_post_image if post else facet.save_image
+    assert save("tab-1", "chosen.png") == "chosen.png"
+    assert (
+        tab.post_analysis_image_path if post else tab.analysis_image_path
+    ) == "chosen.png"
+    assert save("tab-1") == "chosen.png"
+    calls = [entry for entry in log.calls if entry.target == "save"]
+    assert (
+        calls
+        == [
+            call(
+                "save",
+                "save_post_image_sync" if post else "save_image_sync",
+                "permit:tab-1",
+                "chosen.png",
+            )
+        ]
+        * 2
+    )
+
+
+@pytest.mark.parametrize("post", [False, True])
+@pytest.mark.parametrize("path", ["", "  "])
+def test_image_save_rejects_empty_path_without_mutating_draft(
+    post: bool, path: str
+) -> None:
+    facet, log, _state, tab, _save, _bus, _notifications = _facet()
+    save = facet.save_post_image if post else facet.save_image
+    with pytest.raises(FailedPreconditionError, match="empty .*image path"):
+        save("tab-1", path)
+    assert tab.analysis_image_path == "default.png"
+    assert tab.post_analysis_image_path == "default.png"
+    assert log.calls == []
+
+
+@pytest.mark.parametrize("post", [False, True])
+def test_image_save_failure_keeps_explicit_draft_without_success_notification(
+    post: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facet, _log, _state, tab, saver, _bus, notifications = _facet()
+
+    def fail(permit: object, path: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        saver, "save_post_image_sync" if post else "save_image_sync", fail
+    )
+    save = facet.save_post_image if post else facet.save_image
+    with pytest.raises(OSError, match="disk full"):
+        save("tab-1", "chosen.png")
+    assert (
+        tab.post_analysis_image_path if post else tab.analysis_image_path
+    ) == "chosen.png"
+    assert notifications == []
+
+
+@pytest.mark.parametrize("post", [False, True])
+def test_busy_image_save_does_not_change_shared_draft(
+    post: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facet, log, state, tab, _save, _bus, _notifications = _facet()
+    monkeypatch.setattr(state, "is_tab_busy", lambda tab_id: True)
+    save = facet.save_post_image if post else facet.save_image
+    with pytest.raises(FailedPreconditionError, match="busy"):
+        save("tab-1", "chosen.png")
+    assert tab.analysis_image_path == "default.png"
+    assert tab.post_analysis_image_path == "default.png"
+    assert not any(entry.target == "save" for entry in log.calls)
 
 
 def test_missing_save_paths_fast_fails() -> None:
