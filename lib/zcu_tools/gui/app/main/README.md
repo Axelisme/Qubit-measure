@@ -592,8 +592,10 @@ plugin-declared commands; writes validate each command's ParamSpec before its
 typed action. The View supplies an optional live PNG and `preview_active` as
 presentation metadata. `done` discards local preview and finishes the existing
 analysis operation. Flux Auto Align uses one plugin-owned single-flight worker
-policy for GUI and remote; terminal callbacks do not recommit. The wire method
-is internal to the GUI process, with no MCP tool in this change. See ADR-0061;
+policy for GUI and remote; terminal callbacks do not recommit. The fixed MCP
+`tab_interact` forwards one request; commands follow Analysis before mutation,
+while reads preserve focus. This best-effort interface has no seen guard and
+uses last-commit-wins semantics. See ADR-0061;
 notebook line pickers keep their existing interaction model.
 
 ## Adapter-Facing Rules

@@ -82,7 +82,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ParamSpec("payload", JsonType.OBJECT, required=False),
             ),
         ),
-        agent=AgentMethodPolicy(exposure="internal"),
+        agent=AgentMethodPolicy(exposure="tool", tool_names=("tab_interact",)),
     ),
     method_entry(
         "tab.get_post_analyze_result",

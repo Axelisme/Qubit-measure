@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import socket
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -27,7 +28,7 @@ from zcu_tools.gui.app.main.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from ._helpers import Fixture, open_client, recv_response, send
+from ._helpers import Fixture, mcp_client, open_client, recv_response, send
 
 
 class DeferredBackground:
@@ -40,7 +41,7 @@ class DeferredBackground:
 
 class InteractiveFixture(Fixture):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(active_label="interactive-test")
         self.widgets: list[FluxPickFrontend] = []
 
 
@@ -423,6 +424,105 @@ def test_cancel_during_remote_alignment_ignores_late_delivery(fx) -> None:
                 "result"
             ]["status"]
             == "cancelled"
+        )
+
+
+@pytest.mark.parametrize("terminal", ["done", "cancel"])
+def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
+    mounted_fx, tmp_path, terminal
+) -> None:
+    fx, window = mounted_fx
+    tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    bridge, call = mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        read = call("tab_interact", {"tab": tab_id})
+        assert read["state"] == active.plugin.project_state(active.session.snapshot())
+        assert Path(read["figure"]).read_bytes().startswith(b"\x89PNG")
+        assert read["preview_active"] is False
+        assert "done" in {command["name"] for command in read["commands"]}
+        changed = call(
+            "tab_interact",
+            {
+                "tab": tab_id,
+                "payload": {"command": "set_conjugate", "args": {"enabled": True}},
+            },
+        )
+        assert changed["state"]["conjugate"] is True
+        assert changed["state"] == active.plugin.project_state(
+            active.session.snapshot()
+        )
+        running = call("status", {})["running"]
+        assert len(running) == 1
+        op = running[0]["op"]
+        if terminal == "done":
+            result = call(
+                "tab_interact", {"tab": tab_id, "payload": {"command": "done"}}
+            )
+            assert result["state"] == changed["state"]
+            assert Path(result["figure"]).read_bytes().startswith(b"\x89PNG")
+            assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+        else:
+            call("cancel", {"op": op})
+        status = "finished" if terminal == "done" else "cancelled"
+        assert call("wait", {"op": op, "timeout": 0.1})["status"] == status
+        with open_client(fx.service.port) as sock:
+            assert (
+                _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                    "result"
+                ]["status"]
+                == status
+            )
+        assert fx.ctrl.run_analyze_control.get_interactive(tab_id) is None
+        assert window.interactive_presentation(tab_id) is None
+    finally:
+        bridge.disconnect()
+
+
+def test_interactive_commands_follow_before_commit_but_reads_do_not(
+    mounted_fx, monkeypatch
+) -> None:
+    fx, window = mounted_fx
+    tab_id, token, _ = _start_mounted(fx, window, "onetone/flux_dep")
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    follow = window.select_tab_pane
+    observed = []
+
+    def select(tab, pane):
+        observed.append(
+            (tab, pane, active.plugin.project_state(active.session.snapshot()))
+        )
+        follow(tab, pane)
+
+    monkeypatch.setattr(window, "select_tab_pane", select)
+    with open_client(fx.service.port) as sock:
+        original = _interact(sock, tab_id)["result"]["state"]
+        invalid = _interact(sock, tab_id, {"command": "unknown"})
+        assert invalid["ok"] is False
+        assert observed == []
+        changed = _interact(
+            sock,
+            tab_id,
+            {
+                "command": "set_conjugate",
+                "args": {"enabled": not original["conjugate"]},
+            },
+        )
+        assert changed["ok"] is True
+        assert observed == [(tab_id, "analysis", original)]
+        assert changed["result"]["state"]["conjugate"] is not original["conjugate"]
+        done = _interact(sock, tab_id, {"command": "done"})
+        assert done["ok"] is True
+        assert observed[-1] == (tab_id, "analysis", changed["result"]["state"])
+        assert len(observed) == 2
+        assert (
+            _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                "result"
+            ]["status"]
+            == "finished"
         )
 
 
