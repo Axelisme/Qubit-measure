@@ -2,23 +2,24 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "adapter.list",
-        "view:_h_adapter_list",
+        "view:h_adapter_list",
         MethodSpec(5.0, "List available adapters. Returns {adapters: [name]}."),
     ),
     method_entry(
         "adapter.guide",
-        "view:_h_adapter_guide",
+        "view:h_adapter_guide",
         MethodSpec(
             5.0,
             "Read an adapter's human-facing orientation guide BEFORE running it: "
@@ -32,57 +33,56 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "app.shutdown",
-        "view:_h_app_shutdown",
+        "view:h_app_shutdown",
         MethodSpec(
             5.0,
-            "Gracefully close the GUI: runs the normal window-close path (persist "
-            "session, disconnect devices, cleanup) — the same as a user closing the "
-            "window. Returns immediately; the close happens just after. No OS kill. "
-            "Prefer this over gui_stop's force path to stop a GUI cleanly.",
-            mcp=McpMethodPolicy.internal("used only by gui_stop lifecycle shutdown"),
+            "Gracefully close an idle GUI. Any active operation returns busy. "
+            "All unsaved artifacts require discard_unsaved=true. Persist session "
+            "and clean up through the normal shutdown path after this reply. No OS kill.",
+            (
+                ParamSpec(
+                    "discard_unsaved", JsonType.BOOLEAN, required=False, default=False
+                ),
+            ),
         ),
+        agent=AgentMethodPolicy(exposure="tool", tool_names=("shutdown",)),
     ),
     method_entry(
         "dialog.screenshot",
-        "view:_h_dialog_screenshot",
+        "view:h_dialog_screenshot",
         MethodSpec(
             10.0,
-            "Capture a named dialog as base64 PNG",
-            (_str("name", "Dialog name"),),
-            mcp=McpMethodPolicy.override(
-                "gui_screenshot",
-                reason="manual MCP tool writes PNG files instead of returning base64",
+            "Capture a named dialog as base64 PNG, or write PNG to out_path and return its path/byte count.",
+            (
+                _str("name", "Dialog name"),
+                _str_opt("out_path", "Write PNG here instead of returning base64"),
             ),
         ),
     ),
     method_entry(
         "view.snapshot",
-        "view:_h_view_snapshot",
+        "view:h_view_snapshot",
         MethodSpec(
             5.0,
             "Capture view state summary",
-            mcp=McpMethodPolicy.internal(
-                "folded into gui_overview active-tab projection"
-            ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "view.screenshot",
-        "view:_h_view_screenshot",
+        "view:h_view_screenshot",
         MethodSpec(
             10.0,
             "Capture the WHOLE main window (client area + floating widgets) as base64 "
             "PNG. Runs MainWindow.grab() on the main thread (auto-marshalled, like "
-            "dialog.screenshot).",
-            mcp=McpMethodPolicy.override(
-                "gui_screenshot",
-                reason="manual MCP tool writes PNG files instead of returning base64",
-            ),
+            "dialog.screenshot). Optional out_path writes a PNG file instead of "
+            "returning base64 bytes.",
+            (_str_opt("out_path", "Write PNG here instead of returning base64"),),
         ),
     ),
     method_entry(
         "tab.get_figure",
-        "view:_h_tab_get_figure",
+        "view:h_tab_get_figure",
         MethodSpec(
             10.0,
             "Get a tab pane's figure as PNG (subtab-qualified). Run reads the live "
@@ -94,10 +94,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: run|analysis|post_analysis"),
                 _str_opt("out_path", "Write PNG here instead of returning base64"),
-            ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_get_figure",
-                reason="manual MCP tool writes PNG files instead of returning base64",
             ),
         ),
     ),

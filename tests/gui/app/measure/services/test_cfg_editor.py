@@ -124,8 +124,7 @@ def service(ctrl):
         ctrl,
         read_port=ctrl,
         write_port=ctrl,
-        version_bump=ctrl.bump_editor_version,
-        version_drop=ctrl.drop_editor_version,
+        versions=ctrl,
         bus=EventBus(),
     )
 
@@ -553,6 +552,33 @@ def _make_tab_seed():
     return CfgSchema(spec=spec, value=make_default_value(spec))
 
 
+def test_complex_cfg_edit_and_remote_projection_share_lossless_tag(service):
+    import json
+
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
+        project_target_entries,
+    )
+    from zcu_tools.gui.cfg import CfgSectionValue, DirectValue, ScalarSpec
+
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"center": ScalarSpec("Center", complex)}),
+        CfgSectionValue(fields={"center": DirectValue(0j)}),
+    )
+    editor_id, _ = service.open_seeded(schema, gc=False, owner_key="complex-tab")
+    service.set_field(editor_id, "center", {"__complex__": [1.234567891234567, -0.5]})
+    draft = service.get_draft(editor_id)
+    assert draft.snapshot().value.fields["center"] == DirectValue(
+        1.234567891234567 - 0.5j
+    )
+    entries = json.loads(json.dumps(project_target_entries(draft)))
+    assert entries[0]["value"] == {"__complex__": [1.234567891234567, -0.5]}
+    with pytest.raises(CfgEditorError, match="two components"):
+        service.set_field(editor_id, "center", {"__complex__": [1]})
+    assert draft.snapshot().value.fields["center"] == DirectValue(
+        1.234567891234567 - 0.5j
+    )
+
+
 def test_open_seeded_owns_model_and_is_addressable(service):
     editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     assert service.editor_id_for_owner("tab-1") == editor_id
@@ -757,12 +783,14 @@ def _service_with_version_table(ctrl):
     def _drop(eid: str) -> None:
         table.drop_prefix(f"editor:{eid}")
 
+    versions = MagicMock()
+    versions.bump_editor_version.side_effect = _bump
+    versions.drop_editor_version.side_effect = _drop
     svc = CfgEditorService(
         ctrl,
         read_port=ctrl,
         write_port=ctrl,
-        version_bump=_bump,
-        version_drop=_drop,
+        versions=versions,
         bus=EventBus(),
     )
     return svc, table

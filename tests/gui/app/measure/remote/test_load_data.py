@@ -6,7 +6,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.remote.handlers.run_save import _h_tab_load_data
+from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -34,7 +34,7 @@ def test_tab_load_data_dispatch_returns_serializable_outcome() -> None:
     )
     adapter = SimpleNamespace(run_analyze_control=ctrl)
 
-    reply = _h_tab_load_data(
+    reply = h_tab_load_data(
         cast(Any, adapter), {"tab_id": "tab-1", "data_path": "/tmp/result.hdf5"}
     )
 

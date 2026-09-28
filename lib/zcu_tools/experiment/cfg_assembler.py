@@ -21,7 +21,7 @@ def assemble_experiment_cfg(
     raw_cfg: Mapping[str, Any],
     cfg_model: type[T_ExpCfg],
     *,
-    ml: ModuleLibrary,
+    ml: ModuleLibrary | None,
     device_snapshot: Mapping[str, DeviceInfo],
     overrides: Mapping[str, Any] | None = None,
 ) -> T_ExpCfg:

@@ -12,6 +12,8 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
+from .writeback import WritebackDraft
+
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 
 if TYPE_CHECKING:
@@ -20,7 +22,12 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .guard import GuardService
-    from .writeback import WritebackService
+    from .writeback import (
+        WritebackEdit,
+        WritebackService,
+        WritebackValues,
+        WritebackWritten,
+    )
 
 
 class WritebackControlPort(Protocol):
@@ -37,7 +44,11 @@ class WritebackControlPort(Protocol):
     ) -> dict[str, object]: ...
 
     def apply_writeback_for_pane(
-        self, tab_id: str, pane: WritebackPane
+        self,
+        tab_id: str,
+        pane: WritebackPane,
+        *,
+        item_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]: ...
 
     def get_writeback_summaries_for_pane(
@@ -47,6 +58,14 @@ class WritebackControlPort(Protocol):
     def get_writeback_applied_for_pane(
         self, tab_id: str, pane: WritebackPane
     ) -> dict[str, bool]: ...
+
+    def get_writeback_values_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, WritebackValues]: ...
+
+    def write_writeback_for_pane(
+        self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
+    ) -> list[WritebackWritten]: ...
 
     def get_context_version(self) -> int: ...
 
@@ -111,14 +130,40 @@ class WritebackControlFacet:
         return result
 
     def apply_writeback_for_pane(
-        self, tab_id: str, pane: WritebackPane
+        self,
+        tab_id: str,
+        pane: WritebackPane,
+        *,
+        item_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        result = self._writeback.apply_draft(draft)  # type: ignore[arg-type]
+        result = self._writeback.apply_draft(draft, item_ids=item_ids)  # type: ignore[arg-type]
         self._emit_draft_changed(tab_id)
         return result
+
+    def write_writeback_for_pane(
+        self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
+    ) -> list[WritebackWritten]:
+        self._guard.acquire_writeback_permit(tab_id)
+        self._require_tab_idle(tab_id)
+        draft = self._draft_for_pane(tab_id, pane)
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        try:
+            return self._writeback.write_draft(draft, changes, self._state.session_env)
+        finally:
+            # Failed batches may have changed the shared draft's prefix.
+            self._emit_draft_changed(tab_id)
+
+    def get_writeback_values_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, WritebackValues]:
+        draft = self._draft_for_pane(tab_id, pane)
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        return self._writeback.preview_values(draft, self._state.session_env)
 
     def get_writeback_summaries_for_pane(
         self, tab_id: str, pane: WritebackPane

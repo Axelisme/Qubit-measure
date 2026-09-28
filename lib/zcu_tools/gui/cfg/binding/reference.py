@@ -112,6 +112,11 @@ class ReferenceField(CfgField):
         self._require_open()
         return self._available_keys
 
+    def available_options(self) -> tuple[str, ...]:
+        """Return canonical custom labels and cached library keys for readers."""
+        self._require_open()
+        return (*(spec.label for spec in self.spec.allowed), *self._available_keys)
+
     def _load_available_keys(self) -> tuple[str, ...]:
         allowed_labels = frozenset(item.label for item in self.spec.allowed)
         return tuple(self._references.keys(self.spec.kind, allowed_labels))
@@ -160,6 +165,16 @@ class ReferenceField(CfgField):
             chosen_key=self._chosen_key,
             value=sub_value,
             is_overridden=self.is_modified(),
+            resolved_label=(
+                self.sub_field.spec.label
+                if self.sub_field is not None and not self._missing_library_ref
+                else None
+            ),
+            error=(
+                f"Unknown {self.spec.kind} reference: {self._chosen_key!r}"
+                if self._missing_library_ref
+                else None
+            ),
         )
 
     def set_value(self, value: object) -> None:

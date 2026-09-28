@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-27 — entry routing; datafile, resources, cfg_editing test owners
+**Last updated:** 2026-09-29 — entry routing; datafile, resources, cfg_editing test owners
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -219,9 +219,11 @@ Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷
 不是 ticket 命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，
 但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
 
-onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering、md preflight 與 writeback
-contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md fit params，runtime
-取樣公式由 domain-level tests 擁有。`onetone/freq` writeback tests 覆蓋 MetaDict
+onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering 與 writeback contract。
+`tests/gui/app/measure/adapter/test_lowering_adapter.py` 擁有 homophasal 正式 optional cfg
+到 domain assembly 的接縫，校正不從 live md 注入；runtime 取樣公式由 domain-level tests
+擁有。Guard tests 驗證 cached-only cfg 與 device snapshot 凍結；RunService tests 驗證
+worker delivery 與既有 operation cleanup。`onetone/freq` writeback tests 覆蓋 MetaDict
 `r_f` / `rf_w` / `theta0` 與 `readout_rf` ModuleLibrary writeback 的 no-snapshot gate、
 pulse-readout schema、non-pulse skip，以及 default 仍不 adopt library readout。
 

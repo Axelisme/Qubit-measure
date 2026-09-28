@@ -37,10 +37,6 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -156,11 +152,10 @@ class T2RamseyAdapter(
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2RamseyCfg:
         # Strip the run-only detune_ratio knob before lowering to T2RamseyCfg,
         # which would reject the unknown key.
-        return req.ml.make_cfg(strip_detune_ratio(raw_cfg), T2RamseyCfg)
+        return super().build_exp_cfg(strip_detune_ratio(raw_cfg), req)
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> T2RamseyRunResult:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> T2RamseyRunResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         # detune_ratio (fringes-per-step) → absolute applied detune (MHz) over the
         # lowered length sweep step (SweepCfg guarantees step != 0 for expts > 1).

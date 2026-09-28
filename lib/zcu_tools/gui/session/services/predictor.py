@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.events import PredictorChangedPayload
 from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -133,7 +133,10 @@ class PredictorLoadError(FailedPreconditionError):
 
 
 class PredictorNotLoaded(FailedPreconditionError):
-    """Expected failure: predict_freq called before any predictor was loaded."""
+    """Expected failure: a predictor operation needs a loaded model."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, reason_code="predictor_not_loaded")
 
 
 # ---------------------------------------------------------------------------
@@ -296,10 +299,14 @@ class PredictorService:
             raise PredictorNotLoaded("No predictor loaded — load one first")
         frm, to = req.transition
         if frm < 0 or to < 0:
-            raise ValueError(f"Transition levels must be >= 0, got {req.transition}")
+            raise InvalidInputError(
+                f"Transition levels must be >= 0, got {req.transition}",
+                reason_code="invalid_transition",
+            )
         if frm >= to:
-            raise ValueError(
-                f"Transition from-level must be < to-level, got {req.transition}"
+            raise InvalidInputError(
+                f"Transition from-level must be < to-level, got {req.transition}",
+                reason_code="invalid_transition",
             )
 
         flux_bias = float(

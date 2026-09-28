@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 
 _SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
@@ -235,6 +235,17 @@ class MainWindow(QMainWindow):
                 self._tabs.removeTab(index)
             tab_w.deleteLater()
 
+    def select_tab_widget(self, tab_id: str) -> None:
+        self._tabs.setCurrentWidget(self._tab_widgets[tab_id])
+
+    def select_tab_pane(
+        self, tab_id: str, pane: Literal["run", "analysis", "post_analysis", "data"]
+    ) -> None:
+        """Follow an explicit command, including on the already active tab."""
+        widget = self._tab_widgets[tab_id]
+        widget.select_pane(pane)
+        self._tabs.setCurrentWidget(widget)
+
     def has_tab_widget(self, tab_id: str) -> bool:
         return tab_id in self._tab_widgets
 
@@ -451,15 +462,6 @@ class MainWindow(QMainWindow):
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
-
-    def refresh_inspect_panel(self) -> None:
-        inspect = self._dialog_registry.dialog(DialogName.INSPECT)
-        if inspect is not None and inspect.isVisible():
-            # InspectDialog defines ``refresh``; cast through ``Any`` to avoid
-            # importing the concrete class in the hot signature surface.
-            from typing import cast
-
-            cast(Any, inspect).refresh()
 
     def refresh_predictor_panel(self) -> None:
         info = self._ctrl.predictor_control.get_predictor_info()
@@ -867,24 +869,15 @@ class MainWindow(QMainWindow):
     def _dispatch_artifact_save(
         self, tab_w: ExpTabWidget, kind: ArtifactKind, save_call: Callable[[], object]
     ) -> bool:
-        """One artifact's lifecycle: notify start, controller call, sync success/failure.
-
-        Tracker/invariant failures propagate (Fast Fail). Operational/file failures
-        are presented via dialog and return False for Fast Fail; no silent suppression.
-        For image artifacts, sync success is promoted immediately; data async
-        success arrives via :meth:`handle_save_data_finished`.
-        """
-        tab_w.notify_save_started(kind)
+        """Present operational errors; render the State-owned terminal outcome."""
         try:
             save_call()
         except (ExpectedError, OSError, ValueError) as exc:
-            tab_w.notify_save_failed(kind)
+            self.refresh_tab_interaction(tab_w.tab_id)
             self._present_save_error(kind, exc)
             return False
-        else:
-            if kind in (ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS):
-                tab_w.notify_save_succeeded(kind)
-            return True
+        self.refresh_tab_interaction(tab_w.tab_id)
+        return True
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
@@ -892,7 +885,7 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         # Path/comment read is invariant; let exception propagate (Fast Fail)
-        path = tab_w.get_data_path()
+        path = tab_w.get_data_path() or None
         comment = tab_w.get_comment()
         self._dispatch_artifact_save(
             tab_w,
@@ -927,46 +920,15 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "_on_save_all_clicked")
         if tab_w is None:
             return
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        if snapshot.capabilities is None:
-            raise RuntimeError(
-                f"render snapshot for tab {tab_id!r} has no capabilities"
-            )
-        artifacts = tab_w.ordered_saveable_kinds(snapshot)
-        if not artifacts:
-            return
-        for kind in artifacts:
-            if kind == ArtifactKind.DATA:
-                path = tab_w.get_data_path()
-                comment = tab_w.get_comment()
-                ok = self._dispatch_artifact_save(
-                    tab_w,
-                    kind,
-                    lambda p=path, c=comment: self._ctrl.save_data(
-                        tab_id, p, comment=c
-                    ),
-                )
-            elif kind == ArtifactKind.ANALYSIS:
-                path = tab_w.get_image_path()
-                ok = self._dispatch_artifact_save(
-                    tab_w, kind, lambda p=path: self._ctrl.save_image(tab_id, p)
-                )
-            elif kind == ArtifactKind.POST_ANALYSIS:
-                path = tab_w.get_post_image_path()
-                ok = self._dispatch_artifact_save(
-                    tab_w, kind, lambda p=path: self._ctrl.save_post_image(tab_id, p)
-                )
-            else:
-                raise RuntimeError(f"unknown artifact {kind!r}")
-            if not ok:
-                break
+        try:
+            self._ctrl.save_artifacts(tab_id)
+        except (ExpectedError, OSError, ValueError) as exc:
+            self.show_error_dialog("Save failed", str(exc))
+        self.refresh_tab_interaction(tab_id)
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         tab_id = payload.tab_id
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        tab_w.handle_save_data_finished(payload)
+        self.refresh_tab_interaction(tab_id)
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control

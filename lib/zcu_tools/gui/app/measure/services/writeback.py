@@ -5,14 +5,16 @@ import logging
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
+    SessionEnv,
     WaveformWriteback,
     WritebackItem,
 )
+from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
@@ -35,6 +37,49 @@ _KIND_PREFIX = {
 
 # Sentinel for "argument not supplied" in set_item_field (None is a real value).
 _UNSET: Any = object()
+
+
+@dataclass(frozen=True)
+class WritebackEdit:
+    """One ordered agent edit; omitted values differ from explicit None."""
+
+    session_id: str
+    target_name: str | None = None
+    proposed_value: Any = _UNSET
+    edits: list[dict[str, object]] | None = None
+
+
+@dataclass(frozen=True)
+class WritebackWritten:
+    """Actual destination values around a successful context write."""
+
+    id: str
+    kind: Literal["md", "module", "waveform"]
+    target: str
+    before: object
+    after: object
+
+
+def _destination_value(item: WritebackItem, context: SessionEnv) -> object:
+    if isinstance(item, MetaDictWriteback):
+        value = context.md.get(item.target_name, None)
+    else:
+        collection = (
+            context.ml.modules
+            if isinstance(item, ModuleWriteback)
+            else context.ml.waveforms
+        )
+        target = collection.get(item.target_name)
+        value = None if target is None else target.to_dict()
+    return copy.deepcopy(value)
+
+
+@dataclass(frozen=True)
+class WritebackValues:
+    """Complete values at the active destination and in the current draft."""
+
+    current: object
+    proposed: object
 
 
 @dataclass
@@ -108,11 +153,26 @@ class WritebackDraft:
             edits=edits,
         )
 
-    def apply(self) -> dict[str, Any]:
-        return self._service.apply_draft(self)
+    def apply(self, *, item_ids: tuple[str, ...] | None = None) -> dict[str, Any]:
+        return self._service.apply_draft(self, item_ids=item_ids)
 
     def teardown(self) -> None:
         self._service.teardown_draft(self)
+
+
+def _entries_to_apply(
+    entries: list[_DraftEntry], item_ids: tuple[str, ...] | None
+) -> list[_DraftEntry]:
+    """Resolve explicit IDs independently of the GUI checkbox selection."""
+    if item_ids is None:
+        return [entry for entry in entries if entry.item.selected]
+    requested = set(item_ids)
+    if len(requested) != len(item_ids):
+        raise InvalidInputError("duplicate writeback item IDs")
+    unknown = requested - {entry.item.session_id for entry in entries}
+    if unknown:
+        raise InvalidInputError(f"unknown writeback item IDs: {sorted(unknown)}")
+    return [entry for entry in entries if entry.item.session_id in requested]
 
 
 class WritebackService:
@@ -193,6 +253,38 @@ class WritebackService:
         self._require_draft(draft)
         return list(draft.items)
 
+    def preview_values(
+        self, draft: WritebackDraft, context: SessionEnv
+    ) -> dict[str, WritebackValues]:
+        """Read live destination values; do not reuse presentation baselines.
+
+        Missing targets have current=None. Missing context or invalid cfg raises;
+        this is not a promise that later writes will see the same context.
+        """
+        self._require_draft(draft)
+        md, ml = context.md, context.ml
+        if not context.has_context():
+            raise FailedPreconditionError("No experiment context.")
+        values = {}
+        for item in draft.items:
+            if isinstance(item, MetaDictWriteback):
+                current = md.get(item.target_name, None)
+                proposed = item.proposed_value
+            elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                collection = (
+                    ml.modules if isinstance(item, ModuleWriteback) else ml.waveforms
+                )
+                target = collection.get(item.target_name)
+                current = None if target is None else target.to_dict()
+                schema = self.get_item_draft(draft, item.session_id).snapshot()
+                proposed = schema_to_raw_dict(schema, md, ml)
+            else:
+                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
+            values[item.session_id] = WritebackValues(
+                current=copy.deepcopy(current), proposed=copy.deepcopy(proposed)
+            )
+        return values
+
     def edit_draft(
         self,
         draft: WritebackDraft,
@@ -203,7 +295,7 @@ class WritebackService:
         proposed_value: Any = _UNSET,
         edits: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
-        """Apply one draft-local edit, preserving ordered fail-fast semantics."""
+        """Apply one draft-local edit; agent cfg changes use aggregate grammar."""
         self._require_draft(draft)
         entry = self._find_draft_entry(draft, session_id)
         item = entry.item
@@ -251,7 +343,9 @@ class WritebackService:
                         f"edits[{i}] must be an object with 'path' and 'value'"
                     )
                 typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-            result = self._cfg_editor.set_fields(entry.editor_id, typed_edits)
+            result = self._cfg_editor.set_fields(
+                entry.editor_id, typed_edits, agent_edit=True
+            )
         if result is None:
             return {"valid": True, "removed": [], "added": []}
         return result.to_wire()
@@ -266,15 +360,21 @@ class WritebackService:
             )
         return self._cfg_editor.get_draft(entry.editor_id)
 
-    def apply_draft(self, draft: WritebackDraft) -> dict[str, Any]:
-        """Apply selected entries through exactly one ``ContextWritePort`` call."""
+    def apply_draft(
+        self, draft: WritebackDraft, *, item_ids: tuple[str, ...] | None = None
+    ) -> dict[str, Any]:
+        """Apply explicit IDs, or GUI selection, through one context write.
+
+        Explicit IDs never change selection. Unknown or repeated IDs fail before
+        writing; an empty tuple is a no-op. Writes retain draft order.
+        """
         self._require_draft(draft)
         applied_ids: list[str] = []
         md: dict[str, Any] = {}
         ml_modules: dict[str, CfgSchema] = {}
         ml_waveforms: dict[str, CfgSchema] = {}
 
-        selected_entries = [entry for entry in draft._entries if entry.item.selected]
+        selected_entries = _entries_to_apply(draft._entries, item_ids)
         destinations: set[tuple[str, str]] = set()
         for entry in selected_entries:
             item = entry.item
@@ -322,6 +422,57 @@ class WritebackService:
                 if entry.item.session_id in applied_id_set:
                     entry.applied = True
         return {"applied_ids": applied_ids, "written": written}
+
+    def write_draft(
+        self,
+        draft: WritebackDraft,
+        changes: tuple[WritebackEdit, ...],
+        context: SessionEnv,
+    ) -> list[WritebackWritten]:
+        """Edit sequentially, then apply only these IDs once.
+
+        An edit failure keeps the successful draft prefix but starts no context
+        write. Context write failures retain the existing write-port semantics.
+        The caller supplies the live context on the owner thread.
+        """
+        self._require_draft(draft)
+        if not context.has_context():
+            raise FailedPreconditionError("No experiment context.")
+        ids = tuple(change.session_id for change in changes)
+        if len(set(ids)) != len(ids):
+            raise InvalidInputError("Repeated writeback IDs")
+        items = []
+        for change in changes:
+            result = self.edit_draft(
+                draft,
+                change.session_id,
+                target_name=change.target_name,
+                proposed_value=change.proposed_value,
+                edits=change.edits,
+            )
+            if not result["valid"]:
+                raise FailedPreconditionError(
+                    f"Invalid writeback draft: {change.session_id!r}"
+                )
+            items.append(self._find_draft_entry(draft, change.session_id).item)
+        before = [_destination_value(item, context) for item in items]
+        self.apply_draft(draft, item_ids=ids)
+        return [
+            WritebackWritten(
+                id=item.session_id,
+                kind=(
+                    "md"
+                    if isinstance(item, MetaDictWriteback)
+                    else "module"
+                    if isinstance(item, ModuleWriteback)
+                    else "waveform"
+                ),
+                target=item.target_name,
+                before=previous,
+                after=_destination_value(item, context),
+            )
+            for item, previous in zip(items, before, strict=True)
+        ]
 
     def teardown_draft(self, draft: WritebackDraft) -> None:
         """Tear down a draft at most once; cleanup errors never cause a retry."""

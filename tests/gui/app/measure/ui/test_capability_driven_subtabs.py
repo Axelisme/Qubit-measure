@@ -12,6 +12,8 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 
+from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+
 
 @dataclass
 class DummyParams:
@@ -117,7 +119,7 @@ def make_snapshot(
         analysis_image=analysis_image_snap,
         post_analysis_image=post_image_snap,
     )
-    return TabSnapshot(
+    snapshot = TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
         tab_id=tab_id,
@@ -143,6 +145,7 @@ def make_snapshot(
         save=save_snap,
         paths=paths_snap,
     )
+    return with_artifacts(snapshot)
 
 
 @pytest.fixture
@@ -174,6 +177,62 @@ def exp_tab_widget(qapp, monkeypatch):
     yield mod.ExpTabWidget
     monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
+
+
+@pytest.mark.parametrize("post", [False, True])
+def test_explicit_pane_selection_and_unavailable_pane(qapp, exp_tab_widget, post):
+    from qtpy.QtWidgets import QTabWidget
+
+    snapshot = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=post)
+    tab = exp_tab_widget("tab-1", make_ctrl(), snapshot.capabilities)
+    tabs = next(
+        widget for widget in tab.findChildren(QTabWidget) if widget.tabText(0) == "Run"
+    )
+    for pane, label in [("data", "Data"), ("analysis", "Analysis"), ("run", "Run")]:
+        tab.select_pane(pane)
+        assert tabs.tabText(tabs.currentIndex()) == label
+    if post:
+        tab.select_pane("post_analysis")
+        assert tabs.tabText(tabs.currentIndex()) == "Post-Analysis"
+    else:
+        with pytest.raises(ValueError, match="Unavailable"):
+            tab.select_pane("post_analysis")
+        assert tabs.tabText(tabs.currentIndex()) == "Run"
+    tab.deleteLater()
+
+
+def test_main_window_follow_selects_subpane_on_already_selected_tab(
+    qapp, exp_tab_widget
+):
+    from qtpy.QtWidgets import QTabWidget
+    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+
+    ctrl = make_ctrl()
+    ctrl.list_tab_ids.return_value = ["tab-1", "tab-2"]
+    ctrl.get_tab_snapshot.side_effect = lambda tab_id: make_snapshot(
+        tab_id,
+        analysis=AnalysisMode.FIT,
+        post=True,
+    )
+    window = MainWindow(ctrl)
+    window.add_tab_widget("tab-1", "fake")
+    window.add_tab_widget("tab-2", "fake")
+    window.select_tab_pane("tab-1", "data")
+    assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
+    window.select_tab_pane("tab-1", "analysis")
+    assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
+    pages = [
+        widget
+        for widget in window.findChildren(QTabWidget)
+        if widget.tabText(0) == "Run"
+    ]
+    assert sorted(widget.tabText(widget.currentIndex()) for widget in pages) == [
+        "Analysis",
+        "Run",
+    ]
+    window.remove_tab_widget("tab-1")
+    window.remove_tab_widget("tab-2")
+    window.deleteLater()
 
 
 def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
@@ -595,6 +654,12 @@ def test_render_host_routes_to_correct_pane_container(qapp):
     log: list[str] = []
 
     class FakeHost:
+        def interactive_presentation(self, tab_id: str) -> None:
+            return None
+
+        def discard_interactive_preview(self, tab_id: str) -> None:
+            pass
+
         def make_run_container(self, tab_id: str) -> Any:
             log.append("run")
             return "run_c"

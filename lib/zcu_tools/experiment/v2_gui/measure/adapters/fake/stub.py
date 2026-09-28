@@ -27,9 +27,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     SweepSpec,
     SweepValue,
 )
@@ -126,8 +124,7 @@ class FakeAdapter(
             sweep=raw_cfg["sweep"],
         )
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> FakeRunResult:
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return FakeExp().run(cfg)
 

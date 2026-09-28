@@ -291,9 +291,12 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
         fields={"freq": SweepValue(start=5800.0, stop=5808.0, expts=5)}
     )
 
+    from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+
+    raw_cfg = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     with use_pbar_factory(factory):
         run_result = adapter.run(
-            RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}), raw_cfg
         )
         QApplication.processEvents()
 

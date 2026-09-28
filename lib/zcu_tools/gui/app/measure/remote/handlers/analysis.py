@@ -5,13 +5,20 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.adapter.analyze_params import (
+    describe_analyze_params,
+    reconstruct_params,
+)
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+from ._common import follow_tab
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _h_analyze_cancel(
+def h_analyze_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -24,7 +31,7 @@ def _h_analyze_cancel(
     return {"ok": True, "cancelled": cancelled}
 
 
-def _h_tab_get_analyze_result(
+def h_tab_get_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -43,7 +50,7 @@ def _h_tab_get_analyze_result(
     return {"summary": to_summary()}
 
 
-def _h_tab_get_analyze_params(
+def h_tab_get_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -53,15 +60,18 @@ def _h_tab_get_analyze_params(
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = control.get_tab_snapshot(tab_id)
+    definitions = adapter.tab_control.analyze_param_definitions(
+        adapter.tab_control.get_tab_adapter_name(tab_id), stage="primary"
+    )
     ap = None if snap.analysis is None else snap.analysis.params
     if ap is None:
-        return {"analyze_params": None}
+        return {"analyze_params": None, "definitions": definitions}
     if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
-        return {"analyze_params": {}}
-    return {"analyze_params": dataclasses.asdict(ap)}
+        return {"analyze_params": {}, "definitions": definitions}
+    return {"analyze_params": dataclasses.asdict(ap), "definitions": definitions}
 
 
-def _h_tab_analyze(
+def h_tab_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -92,14 +102,37 @@ def _h_tab_analyze(
             ErrorCode.INTERNAL, "analyze_params is not a dataclass instance"
         )
     try:
-        updated = dataclasses.replace(ap, **raw_updates)
-    except (TypeError, ValueError) as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+        updated = reconstruct_params(
+            type(ap), {**dataclasses.asdict(ap), **raw_updates}
+        )
+    except (RuntimeError, ValueError) as exc:
+        definitions = describe_analyze_params(type(ap))
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"{exc}. Legal parameters: {definitions}",
+            data={"definitions": definitions},
+        ) from exc
+    if snap.capabilities is None:
+        raise RemoteError(ErrorCode.INTERNAL, "snapshot has no capabilities")
+    invalidated = []
+    if snap.analysis is not None and snap.analysis.has_writeback_draft:
+        invalidated.append("analysis.writeback")
+    if snap.post_analysis is not None:
+        if snap.post_analysis.result is not None:
+            invalidated.append("post.result")
+        if snap.post_analysis.has_writeback_draft:
+            invalidated.append("post.writeback")
+    follow_tab(adapter, tab_id, "analysis")
     operation_id = control.analyze(tab_id, updated)
-    return {"operation_id": operation_id}
+    return {
+        "operation_id": operation_id,
+        "interactive": snap.capabilities.analysis is AnalysisMode.INTERACTIVE,
+        "params": dataclasses.asdict(updated),
+        "invalidated_on_success": invalidated,
+    }
 
 
-def _h_tab_get_post_analyze_result(
+def h_tab_get_post_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -118,7 +151,7 @@ def _h_tab_get_post_analyze_result(
     return {"summary": to_summary()}
 
 
-def _h_tab_get_post_analyze_params(
+def h_tab_get_post_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -128,15 +161,18 @@ def _h_tab_get_post_analyze_params(
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = control.get_tab_snapshot(tab_id)
+    definitions = adapter.tab_control.analyze_param_definitions(
+        adapter.tab_control.get_tab_adapter_name(tab_id), stage="post"
+    )
     pp = None if snap.post_analysis is None else snap.post_analysis.params
     if pp is None:
-        return {"post_analyze_params": None}
+        return {"post_analyze_params": None, "definitions": definitions}
     if not dataclasses.is_dataclass(pp) or isinstance(pp, type):
-        return {"post_analyze_params": {}}
-    return {"post_analyze_params": dataclasses.asdict(pp)}
+        return {"post_analyze_params": {}, "definitions": definitions}
+    return {"post_analyze_params": dataclasses.asdict(pp), "definitions": definitions}
 
 
-def _h_tab_post_analyze(
+def h_tab_post_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -168,8 +204,26 @@ def _h_tab_post_analyze(
             ErrorCode.INTERNAL, "post_analyze_params is not a dataclass instance"
         )
     try:
-        updated = dataclasses.replace(pp, **raw_updates)
-    except (TypeError, ValueError) as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+        updated = reconstruct_params(
+            type(pp), {**dataclasses.asdict(pp), **raw_updates}
+        )
+    except (RuntimeError, ValueError) as exc:
+        definitions = describe_analyze_params(type(pp))
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"{exc}. Legal parameters: {definitions}",
+            data={"definitions": definitions},
+        ) from exc
+    invalidated = (
+        ["post.writeback"]
+        if snap.post_analysis is not None and snap.post_analysis.has_writeback_draft
+        else []
+    )
+    follow_tab(adapter, tab_id, "post_analysis")
     operation_id = control.start_post_analyze(tab_id, updated)
-    return {"operation_id": operation_id}
+    return {
+        "operation_id": operation_id,
+        "interactive": False,
+        "params": dataclasses.asdict(updated),
+        "invalidated_on_success": invalidated,
+    }

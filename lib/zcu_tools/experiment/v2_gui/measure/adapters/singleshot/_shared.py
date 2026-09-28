@@ -1,14 +1,9 @@
-"""Shared helpers for the single-shot downstream adapters.
+"""Shared defaults and analyze-time helpers for single-shot adapters.
 
-The single-shot sweep / check experiments classify each raw shot inside the
-program against the |g>/|e> IQ-cluster centres + radius produced by the
-``singleshot/ge`` experiment (its writeback proposes ``g_center`` / ``e_center``
-/ ``ge_radius`` into the MetaDict). Their domain ``run`` (mist) or ``analyze``
-(check) therefore needs those three values as explicit inputs.
-
-``read_ge_centers`` is the single read point: it pulls the trio off a MetaDict
-and fast-fails (pointing the user back to ``singleshot/ge``) if any is missing,
-so a downstream run never silently classifies against absent/garbage centres.
+Sweep runs classify shots using the GE centre/radius trio frozen from resolved
+cfg, not the live MetaDict. ``singleshot/ge`` writeback can seed those defaults,
+but direct cfg values work too. ``singleshot/check`` instead reads the trio from
+MetaDict during analyze; ``read_ge_centers`` fast-fails there if any is missing.
 """
 
 from __future__ import annotations
@@ -53,8 +48,8 @@ def read_ge_centers(md: MetaDict) -> tuple[complex, complex, float]:
     ``g_center`` / ``e_center`` are complex IQ-cluster centres (kept complex —
     the GE writeback round-trips complex md values end-to-end); ``radius`` is the
     optimised classification radius (float). Fast-fails with an actionable message
-    if any of the three is absent or ``None`` — a downstream single-shot run must
-    never classify against missing centres.
+    if any of the three is absent or ``None`` during ``singleshot/check`` analyze.
+    Sweep runs consume their resolved cfg values and do not call this helper.
     """
     g_center = _require_complex(md, _G_CENTER_KEY)
     e_center = _require_complex(md, _E_CENTER_KEY)

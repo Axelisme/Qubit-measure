@@ -43,14 +43,14 @@ def _raise_arb_waveform_error(exc: ArbWaveformError) -> NoReturn:
     raise RemoteError(code, str(exc), reason=exc.reason, data=exc.data) from exc
 
 
-def _h_arb_waveform_list(
+def h_arb_waveform_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"waveforms": adapter.ctrl.list_arb_waveforms()}
 
 
-def _h_arb_waveform_preview(
+def h_arb_waveform_preview(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = require_str(params, "name")
@@ -60,7 +60,7 @@ def _h_arb_waveform_preview(
         _raise_arb_waveform_error(exc)
 
 
-def _h_arb_waveform_set(
+def h_arb_waveform_set(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = require_str(params, "name")

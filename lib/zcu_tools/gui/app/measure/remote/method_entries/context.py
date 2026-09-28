@@ -2,36 +2,59 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     _json,
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "context.ml_edit",
+        "context:h_context_ml_edit",
+        MethodSpec(
+            10.0,
+            "Apply nonempty ordered library edits through the shared draft model. "
+            "Commit each successful edit, stop at the first failure without rollback. "
+            "save_as creates a new entry after the first successful edit; source stays unchanged. "
+            "Returns valid/applied/errors. Read context.snapshot explicitly first.",
+            (_str("kind"), _str("name"), _json("edits"), _str_opt("save_as")),
+        ),
+        agent=AgentMethodPolicy(
+            exposure="tool",
+            tool_names=("ml_edit",),
+            guard_deps=("context",),
+            refresh_after_write=True,
+        ),
+    ),
+    method_entry(
         "context.use",
-        "context:_h_context_use",
+        "context:h_context_use",
         MethodSpec(
             5.0,
             "Switch the active context to 'label'. Echoes {label, has_active_context}. "
             "An unknown label fails fast (invalid_params) with the available labels; no "
             "applied project fails with precondition_failed.",
             (_str("label", "Context label to switch to"),),
-            tool_name="gui_context_switch",
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.new",
-        "context:_h_context_new",
+        "context:h_context_new",
         MethodSpec(
             10.0,
-            "Create a new context and make it active. Echoes {label, has_active_context} "
-            "— the auto-derived label (the agent cannot name it directly).",
+            "Create a new context and make it active. Optional label names it; "
+            "otherwise the GUI derives a label from bind_device value/unit. "
+            "clone_from='current' copies the active context (or starts empty when "
+            "none is active); null starts empty. An unknown clone source fails "
+            "without changing active/labels. Echoes {label, has_active_context}.",
             (
+                _str_opt("label", "Optional explicit context label"),
                 _str_opt(
                     "bind_device",
                     "Connected flux device to bind: its current value/unit name the "
@@ -42,57 +65,70 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "clone_from", "Label of an existing context to clone ml/md from"
                 ),
             ),
-            tool_name="gui_context_create",
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.labels",
-        "context:_h_context_labels",
+        "context:h_context_labels",
         MethodSpec(
             5.0,
             "List context labels",
-            mcp=McpMethodPolicy.internal("folded into gui_context_list"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "context.active",
-        "context:_h_context_active",
+        "context:h_context_active",
         MethodSpec(
             5.0,
             "Active context label",
-            mcp=McpMethodPolicy.internal(
-                "folded into gui_context_list and gui_overview"
-            ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
+    ),
+    method_entry(
+        "context.snapshot",
+        "context:h_context_snapshot",
+        MethodSpec(
+            15.0,
+            "Explicit full read of the active context: {label, md, ml: {modules, "
+            "waveforms}}. md contains every value and ml contains every entry's "
+            "complete cfg, not just their names. May return large or sensitive data; "
+            "use rpc_call only when you need to re-snapshot the whole context "
+            "before a guarded mutation. Unsupported values fail the entire read.",
+        ),
+        agent=AgentMethodPolicy(reveals=("context",)),
     ),
     method_entry(
         "context.md_get",
-        "context:_h_context_md_get",
+        "context:h_context_md_get",
         MethodSpec(
             5.0,
-            "List MetaDict keys",
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_read",
-                reason="merged MCP read covers key listing and per-key reads",
+            "List MetaDict keys; summaries=true also returns {values} with scalars "
+            "and descriptions, never full non-scalar contents.",
+            (
+                ParamSpec(
+                    "summaries",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Include compact value summaries",
+                ),
             ),
         ),
     ),
     method_entry(
         "context.md_get_attr",
-        "context:_h_context_md_get_attr",
+        "context:h_context_md_get_attr",
         MethodSpec(
             5.0,
             "Read one MetaDict attribute",
             (_str("key", "MetaDict key"),),
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_read",
-                reason="merged MCP read covers key listing and per-key reads",
-            ),
         ),
     ),
     method_entry(
         "value.list",
-        "context:_h_value_list",
+        "context:h_value_list",
         MethodSpec(
             5.0,
             "List registered read-only value sources. Returns "
@@ -103,7 +139,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "value.read",
-        "context:_h_value_read",
+        "context:h_value_read",
         MethodSpec(
             5.0,
             "Resolve one registered value source immediately. Returns "
@@ -117,95 +153,106 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_get",
-        "context:_h_context_ml_get",
+        "context:h_context_ml_get",
         MethodSpec(
             5.0,
-            "List ModuleLibrary entries with their discriminator: returns "
-            "{modules: [{name, kind}], waveforms: [{name, style}]}, sorted by name. "
-            "'kind' is the module type tag (e.g. 'pulse', 'reset/bath'); 'style' is the "
-            "waveform style (e.g. 'gauss', 'const'). Read one entry's full cfg with "
-            "gui_context_ml_inspect.",
-            tool_name="gui_context_ml_list",
+            "List ModuleLibrary modules/waveforms as {modules, waveforms}, each "
+            "entry carrying name, discriminator kind/style and description. "
+            "With name, return {name, kind: 'module'|'waveform', cfg} for the "
+            "named stored cfg without opening an editor. Require kind if the "
+            "same name exists in both collections; unknown names fail with "
+            "available options.",
+            (
+                _str_opt("name", "Entry to read; omit for the index"),
+                _str_opt("kind", "module or waveform when names collide"),
+            ),
         ),
     ),
     method_entry(
         "context.md_set_attr",
-        "context:_h_context_md_set_attr",
+        "context:h_context_md_set_attr",
         MethodSpec(
             5.0,
-            "Set one MetaDict attribute",
-            (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_write",
-                reason="batch MCP write preserves ordered MetaDict updates",
+            "Set one MetaDict attribute; receipt=true returns its actual "
+            "{before, after} from the owner turn.",
+            (
+                _str("key", "MetaDict key"),
+                _json("value", "JSON-safe value"),
+                ParamSpec(
+                    "receipt",
+                    JsonType.BOOLEAN,
+                    required=False,
+                    default=False,
+                    description="Return actual before/after values",
+                ),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.md_del_attr",
-        "context:_h_context_md_del_attr",
+        "context:h_context_md_del_attr",
         MethodSpec(
             5.0,
             "Delete one MetaDict attribute",
             (_str("key", "MetaDict key"),),
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_delete",
-                reason="batch MCP delete preserves ordered MetaDict deletes",
-            ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_del_module",
-        "context:_h_context_ml_del_module",
+        "context:h_context_ml_del_module",
         MethodSpec(
             5.0,
-            "Delete one ModuleLibrary module. Echoes {deleted: name}. cfg refs pointing "
-            "at this entry degrade to inline Custom (the value is kept inline, not lost); "
-            "to re-link, edit them.",
+            "Delete one ModuleLibrary module. Echoes {deleted: name}. LINKED cfg refs "
+            "keep the missing key and become invalid until it returns or is edited; "
+            "MODIFIED refs retain their inline Custom value.",
             (_str("name", "Module name"),),
-            tool_name="gui_context_ml_delete_module",
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_del_waveform",
-        "context:_h_context_ml_del_waveform",
+        "context:h_context_ml_del_waveform",
         MethodSpec(
             5.0,
-            "Delete one ModuleLibrary waveform. Echoes {deleted: name}. cfg refs pointing "
-            "at this entry degrade to inline Custom (the value is kept inline, not lost); "
-            "to re-link, edit them.",
+            "Delete one ModuleLibrary waveform. Echoes {deleted: name}. LINKED cfg refs "
+            "keep the missing key and become invalid until it returns or is edited; "
+            "MODIFIED refs retain their inline Custom value.",
             (_str("name", "Waveform name"),),
-            tool_name="gui_context_ml_delete_waveform",
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_rename_module",
-        "context:_h_context_ml_rename_module",
+        "context:h_context_ml_rename_module",
         MethodSpec(
             5.0,
             "Rename a ModuleLibrary module old→new (clash fails fast). Echoes "
-            "{renamed: new}. cfg refs to 'old' degrade to inline Custom (the value is "
-            "kept inline, not lost); to re-link, edit them.",
+            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
+            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
             (_str("old", "Current module name"), _str("new", "New module name")),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_rename_waveform",
-        "context:_h_context_ml_rename_waveform",
+        "context:h_context_ml_rename_waveform",
         MethodSpec(
             5.0,
             "Rename a ModuleLibrary waveform old→new (clash fails fast). Echoes "
-            "{renamed: new}. cfg refs to 'old' degrade to inline Custom (the value is "
-            "kept inline, not lost); to re-link, edit them.",
+            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
+            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
             (_str("old", "Current waveform name"), _str("new", "New waveform name")),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_list_roles",
-        "context:_h_context_ml_list_roles",
+        "context:h_context_ml_list_roles",
         MethodSpec(
             5.0,
-            "List experiment-role templates for gui_context_ml_create_from_role. Returns "
+            "List experiment-role templates for context.ml_create_from_role. Returns "
             "{roles: [{role_id, label, item_kind, default_name}]}. Each role seeds a "
             "blank module/waveform with md-linked defaults (e.g. 'res_probe', "
             "'bath_reset'); 'default_name' is the suggested entry name.",
@@ -213,19 +260,20 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_create_from_role",
-        "context:_h_context_ml_create_from_role",
+        "context:h_context_ml_create_from_role",
         MethodSpec(
             10.0,
             "Create a blank ModuleLibrary module/waveform from a named role "
-            "(gui_context_ml_list_roles) and register it under 'name'. The item kind "
+            "(from context.ml_list_roles) and register it under 'name'. The item kind "
             "(module/waveform) is derived from 'role_id'. One-shot: seeds the role's "
             "md-linked defaults (lowered to the md's current values) — it does NOT open "
             "an editing session. Echoes {created: name}. To then change the entry use "
-            "gui_editor_open(from_name=name).",
+            "rpc_call on editor.new(item_kind, from_name=name).",
             (
-                _str("role_id", "role id from gui_context_ml_list_roles"),
+                _str("role_id", "role id from context.ml_list_roles"),
                 _str("name", "new ml entry name"),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

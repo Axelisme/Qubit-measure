@@ -35,9 +35,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     EvalValue,
     SweepValue,
 )
@@ -171,12 +169,11 @@ class DualToneFreqAdapter(
             .build()
         )
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> DualToneFreqRunResult:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> DualToneFreqRunResult:
         # The dual-tone freq map runs as a 2D hard sweep (both freq axes are QICK
         # register sweeps); the notebook drives FreqExp.run with method="hard".
         # BaseAdapter.run does not pass method, so override to inject it while
         # keeping the same soc-handle / build-cfg policy.
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         soc, soccfg = require_soc_handles(req)
         return self.exp_cls().run(soc, soccfg, cfg, method="hard")

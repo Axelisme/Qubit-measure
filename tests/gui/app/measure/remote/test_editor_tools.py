@@ -17,24 +17,45 @@ from zcu_tools.gui.session.services.context import MlEntryValidationError
 from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
-def test_open_returns_editor_id_and_tree(monkeypatch):
-    # editor.new now returns the freshly-opened draft as a nested {tree} (same
-    # shape as editor.get / tab.get_cfg); build_settable_tree is patched so
-    # this stays a mock-only wire-shape test (deep tree building is covered by
-    # test_remote_cfg_set_field against a live session).
-    import zcu_tools.gui.app.measure.remote.path_resolver as pr
+@pytest.fixture
+def draft():
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        CfgSectionSpec,
+        CfgSectionValue,
+        DirectValue,
+        ScalarSpec,
+    )
+    from zcu_tools.gui.cfg.binding import CfgDraft
 
-    monkeypatch.setattr(pr, "build_settable_tree", lambda root, **_: {"freq": 0.0})
+    model = CfgDraft(
+        CfgSchema(
+            CfgSectionSpec(fields={"freq": ScalarSpec("Frequency", float)}),
+            CfgSectionValue({"freq": DirectValue(5000.0)}),
+        ),
+        evaluate_expression=MagicMock(),
+        provide_options=lambda source_id: (),
+        references=MagicMock(),
+    )
+    try:
+        yield model
+    finally:
+        model.close()
+
+
+def test_open_returns_editor_id_and_tree(draft):
     ctrl = MagicMock()
     ctrl.open_cfg_editor.return_value = ("editor-abc", [{"path": "freq"}])
+    ctrl.get_cfg_editor_draft.return_value = draft
     res = _dispatch(
         ctrl, "editor.new", {"item_kind": "module", "from_name": "readout_rf"}
     )
     assert res["editor_id"] == "editor-abc"
-    assert res["tree"] == {"freq": 0.0}
-    # editor.new is modify-only: from_name is the sole opening selector.
+    tree = res["tree"]
+    assert isinstance(tree, dict)
+    assert tree["children"]["freq"]["input"]["resolved"] == 5000.0
+    assert tree["valid"]
     ctrl.open_cfg_editor.assert_called_once_with("module", from_name="readout_rf")
-    ctrl.get_cfg_editor_draft.assert_called_once_with("editor-abc")
 
 
 def test_open_translates_cfg_editor_error():
@@ -70,28 +91,15 @@ def test_set_field_eval_value_passed_through():
     ctrl.cfg_editor_set_field.assert_called_once_with("e", "freq", ev)
 
 
-def test_get_wraps_tree(monkeypatch):
-    # editor.get returns the session's nested current-value {tree}; the handler
-    # reads the draft via get_cfg_editor_draft and wraps build_settable_tree's
-    # output. build_settable_tree is patched (mock-only wire-shape test).
-    import zcu_tools.gui.app.measure.remote.path_resolver as pr
-
-    captured: dict[str, object] = {}
-
-    def _fake_tree(root, *, prefix=None):
-        captured["root"] = root
-        captured["prefix"] = prefix
-        return {"freq": 5000.0}
-
-    monkeypatch.setattr(pr, "build_settable_tree", _fake_tree)
+def test_get_projects_selected_node_from_the_model(draft):
     ctrl = MagicMock()
-    sentinel_root = object()
-    ctrl.get_cfg_editor_draft.return_value = sentinel_root
-    res = _dispatch(ctrl, "editor.get", {"editor_id": "e", "prefix": "modules"})
-    assert res == {"tree": {"freq": 5000.0}}
-    ctrl.get_cfg_editor_draft.assert_called_once_with("e")
-    assert captured["root"] is sentinel_root
-    assert captured["prefix"] == "modules"
+    ctrl.get_cfg_editor_draft.return_value = draft
+    res = _dispatch(ctrl, "editor.get", {"editor_id": "e", "prefix": "freq"})
+    tree = res["tree"]
+    assert isinstance(tree, dict)
+    assert tree["path"] == "freq"
+    assert tree["input"]["resolved"] == 5000.0
+    assert tree["kind"] == "scalar"
 
 
 def test_get_unknown_editor_is_invalid_params():

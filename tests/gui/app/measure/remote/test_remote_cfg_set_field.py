@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue, DirectValue
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.binding import CfgDraft
 
 from ._helpers import Fixture, call, open_client
@@ -302,8 +302,10 @@ def _single_point_centered_sweep_root():
 
 
 def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
+    )
     from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
         project_target_entries,
     )
 
@@ -318,7 +320,10 @@ def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
     assert entries["sweep.span"] == 20.0
     assert entries["sweep.expts"] == 5
     assert entries["sweep.step"] == pytest.approx(5.0)
-    assert build_settable_tree(root)["sweep"] == {
+    assert {
+        key: item["resolved"]
+        for key, item in _node(build_cfg_observation(root), "sweep")["inputs"].items()
+    } == {
         "center": 5.0,
         "span": 20.0,
         "expts": 5,
@@ -338,8 +343,8 @@ def test_resolver_centered_sweep_rejects_start_stop_edges(qapp):  # noqa: ARG001
 
 
 def test_resolver_centered_sweep_rejects_locked_center_mismatch(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
     )
     from zcu_tools.gui.cfg.binding import SettablePathError
 
@@ -349,9 +354,8 @@ def test_resolver_centered_sweep_rejects_locked_center_mismatch(qapp):  # noqa: 
         _set(root, "sweep.center", 5.0)
 
     assert "locked to 0.0" in str(exc.value)
-    sweep = build_settable_tree(root)["sweep"]
-    assert isinstance(sweep, dict)
-    assert sweep["center"] == 0.0
+    sweep = _node(build_cfg_observation(root), "sweep")
+    assert sweep["inputs"]["center"]["resolved"] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -382,8 +386,8 @@ def test_resolver_centered_sweep_value_errors_are_remote_errors(
 def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
     qapp,  # noqa: ARG001
 ):
-    from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
     )
     from zcu_tools.gui.cfg.binding import SettablePathError
 
@@ -393,7 +397,10 @@ def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
         _set(root, "sweep.expts", 2)
 
     assert "span" in str(exc.value)
-    assert build_settable_tree(root)["sweep"] == {
+    assert {
+        key: item["resolved"]
+        for key, item in _node(build_cfg_observation(root), "sweep")["inputs"].items()
+    } == {
         "center": 0.0,
         "span": 0.0,
         "expts": 1,
@@ -484,8 +491,6 @@ def test_context_get_md_attr_unknown_rejected(lf):
 
 
 def test_context_get_ml_names(lf):
-    # context.ml_get now surfaces each entry's discriminator: modules carry the
-    # 'type' tag, waveforms the 'style' tag — so the stored values need those attrs.
     from types import SimpleNamespace
 
     ml = lf.state.session_env.ml
@@ -498,11 +503,13 @@ def test_context_get_ml_names(lf):
     try:
         resp = call(sock, "context.ml_get")
         assert resp["ok"] is True
-        assert resp["result"]["modules"] == [
-            {"name": "pi", "kind": "pulse"},
-            {"name": "readout", "kind": "pulse"},
+        index = resp["result"]
+        assert [m["name"] for m in index["modules"]] == ["pi", "readout"]
+        assert all(m["kind"] == "pulse" for m in index["modules"])
+        assert [(w["name"], w["style"]) for w in index["waveforms"]] == [
+            ("gauss", "gauss")
         ]
-        assert resp["result"]["waveforms"] == [{"name": "gauss", "style": "gauss"}]
+        assert all(e["description"] for entries in index.values() for e in entries)
     finally:
         sock.close()
 
@@ -524,10 +531,7 @@ def test_device_list_and_snapshot(lf):
 
 
 # ---------------------------------------------------------------------------
-# tab.get_cfg — returns a NESTED current-value tree built off the tab's
-# cfg-editor session (ADR-0013 F11). Reserved '$'-keys: a dict with $value is
-# an enum leaf, a dict with $ref is a ref node, any other dict is a sub-tree,
-# a non-dict is a bare scalar value (null = unset, ADR-0010).
+# tab.get_cfg returns complete cached model observations from the tab session.
 # ---------------------------------------------------------------------------
 
 
@@ -538,23 +542,22 @@ def test_tab_get_cfg_returns_nested_tree_with_scalar_values(lf):
         assert resp["ok"] is True
         tree = resp["result"]["tree"]
         assert isinstance(tree, dict)
-        # A scalar leaf is its bare current value (not a {path, kind, ...} entry).
-        assert "reps" in tree
-        assert not isinstance(tree["reps"], dict)
+        reps = tree["children"]["reps"]
+        assert reps["kind"] == "scalar"
+        assert reps["path"] == "reps"
+        assert reps["input"]["resolved"] == lf.get_value("reps")
     finally:
         sock.close()
 
 
-def test_tab_get_cfg_sweep_is_subtree_of_bare_edges(lf):
+def test_tab_get_cfg_sweep_contains_input_states(lf):
     sock = open_client(lf.service.port)
     try:
         tree = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})["result"]["tree"]
-        # The fake adapter's sweep is exposed as a sub-tree of bare edges.
-        assert "sweep" in tree
-        sweep = tree["sweep"]
-        assert isinstance(sweep, dict)
-        assert set(sweep) == {"start", "stop", "expts", "step"}
-        assert all(not isinstance(v, dict) for v in sweep.values())
+        sweep = tree["children"]["sweep"]
+        assert sweep["kind"] == "sweep"
+        assert set(sweep["inputs"]) == {"start", "stop", "expts", "step"}
+        assert sweep["inputs"]["expts"]["resolved"] == lf.get_value("sweep.expts")
     finally:
         sock.close()
 
@@ -567,20 +570,59 @@ def test_tab_get_cfg_prefix_returns_subtree(lf):
             "result"
         ]["tree"]
         # The prefix sub-tree equals the corresponding sub-dict of the full tree.
-        assert scoped == full["sweep"]
+        assert scoped == full["children"]["sweep"]
     finally:
         sock.close()
 
 
-def test_tab_get_cfg_prefix_scalar_leaf_wrapped_under_its_name(lf):
+def test_tab_get_cfg_prefix_scalar_preserves_its_full_path(lf):
     sock = open_client(lf.service.port)
     try:
-        # 'reps' is a scalar leaf; the prefix reply wraps it so the result is
-        # always a dict keyed by the leaf name.
         resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "prefix": "reps"})
         tree = resp["result"]["tree"]
-        assert set(tree) == {"reps"}
-        assert not isinstance(tree["reps"], dict)
+        assert tree["path"] == "reps"
+        assert tree["kind"] == "scalar"
+        assert tree["input"]["resolved"] == lf.get_value("reps")
+    finally:
+        sock.close()
+
+
+def test_tab_and_editor_read_the_same_incomplete_model_input(lf):
+    from zcu_tools.gui.cfg.binding import ScalarField
+
+    draft = lf.ctrl.get_cfg_editor_draft(lf.editor_id)
+    reps = draft.root.fields["reps"]
+    assert isinstance(reps, ScalarField)
+    reps.set_text("1e")
+    sock = open_client(lf.service.port)
+    try:
+        tab = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})
+        editor = call(sock, "editor.get", {"editor_id": lf.editor_id})
+        assert tab["ok"] and editor["ok"]
+        assert tab["result"]["tree"] == editor["result"]["tree"]
+        observed = tab["result"]["tree"]["children"]["reps"]
+        assert not observed["valid"]
+        assert observed["input"]["raw"] == "1e"
+        assert observed["input"]["resolved"] is None
+        assert observed["input"]["error"] is not None
+    finally:
+        sock.close()
+
+
+def test_editor_read_rejects_unrepresentable_cfg_instead_of_stringifying(lf):
+    from zcu_tools.gui.cfg import LiteralSpec, make_default_value
+    from zcu_tools.gui.remote.errors import ErrorCode
+
+    spec = CfgSectionSpec(fields={"fixed": LiteralSpec(object())})
+    editor_id, _ = lf.ctrl.open_seeded_cfg_editor(
+        CfgSchema(spec, make_default_value(spec)), gc=False
+    )
+    sock = open_client(lf.service.port)
+    try:
+        response = call(sock, "editor.get", {"editor_id": editor_id})
+        assert not response["ok"]
+        assert response["error"]["code"] == ErrorCode.CONTROLLER_ERROR.value
+        assert "Unsupported cfg observation value" in response["error"]["message"]
     finally:
         sock.close()
 
@@ -715,10 +757,8 @@ def test_tab_set_cfg_bad_path_rejected(lf):
 
 
 # ---------------------------------------------------------------------------
-# build_settable_tree — direct unit tests for the tree node shapes (enum leaf,
-# ref node with current+options+chosen-variant-only sub-tree). These use the
-# fakefreq root (which has Module/Waveform refs + an enum scalar) so the $ref /
-# $value / $choices shapes are exercised without a socket.
+# Complete observations of production cfg shapes, including immutable fields
+# and cached choices, through the public projection contract.
 # ---------------------------------------------------------------------------
 
 
@@ -731,77 +771,73 @@ def _node(tree: dict[str, object], dotted: str) -> Any:
     """
     node: Any = tree
     for seg in dotted.split("."):
-        node = node[seg]
+        node = node["children"][seg]
     return node
 
 
 def test_tree_enum_scalar_leaf_has_value_and_choices(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
     )
 
     root = _fakefreq_root()
-    tree = build_settable_tree(root)
+    tree = build_cfg_observation(root)
     # 'nqz' is an enum scalar (choices [1, 2]) under the readout pulse cfg.
     nqz = _node(tree, "modules.readout.pulse_cfg.nqz")
-    assert nqz == {"$value": 2, "$choices": [1, 2]}
+    assert nqz["input"]["resolved"] == 2
+    assert nqz["choices"] == [1, 2]
 
 
 def test_tree_moduleref_node_current_options_and_variant_subtree(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
     )
 
     root = _fakefreq_root()
-    readout = _node(build_settable_tree(root), "modules.readout")
-    # A ref node carries $ref {current, options} plus the chosen variant's
-    # settable sub-tree (siblings of $ref).
-    assert readout["$ref"]["current"] == "<Custom:Pulse Readout>"
-    assert readout["$ref"]["options"] == ["Direct Readout", "Pulse Readout"]
-    # Only the chosen ('Pulse Readout') variant is expanded — it has pulse_cfg.
-    assert "pulse_cfg" in readout
-    assert "ro_cfg" in readout
+    readout = _node(build_cfg_observation(root), "modules.readout")
+    assert readout["ref"] == "<Custom:Pulse Readout>"
+    assert readout["choices"] == ["Direct Readout", "Pulse Readout"]
+    assert "pulse_cfg" in readout["children"]
+    assert "ro_cfg" in readout["children"]
 
 
 def test_tree_moduleref_only_chosen_variant_expanded(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
     )
 
     root = _fakefreq_root()
     # Switch to the 'Direct Readout' variant; the tree must now expand THAT
     # variant's sub-tree, not the previous one.
     _set(root, "modules.readout.ref", "Direct Readout")
-    readout = _node(build_settable_tree(root), "modules.readout")
-    assert readout["$ref"]["current"] == "<Custom:Direct Readout>"
-    # Direct Readout has no pulse_cfg sub-section (it is a different shape).
-    assert "pulse_cfg" not in readout
+    readout = _node(build_cfg_observation(root), "modules.readout")
+    assert readout["ref"] == "<Custom:Direct Readout>"
+    assert "pulse_cfg" not in readout["children"]
 
 
-def test_tree_omits_immutable_literal_fields(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
+def test_tree_includes_immutable_literal_fields(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
     )
 
     root = _fakefreq_root()
-    pulse_cfg = _node(build_settable_tree(root), "modules.readout.pulse_cfg")
-    # 'type'/'freq' are literal (immutable) fields — not settable, so omitted
-    # (they must NOT read as a settable null scalar).
-    assert "type" not in pulse_cfg
-    assert "freq" not in pulse_cfg
+    pulse_cfg = _node(build_cfg_observation(root), "modules.readout.pulse_cfg")
+    for name in ("type", "freq"):
+        leaf = pulse_cfg["children"][name]
+        assert leaf["kind"] == "literal"
+        assert not leaf["editable"]
+        assert leaf["input"]["resolved"] is not None
 
 
 def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.remote.path_resolver import (
-        build_settable_tree,
+    from zcu_tools.gui.app.measure.remote.cfg_observation import (
+        build_cfg_observation,
     )
 
     root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
-    flux_dev = _node(build_settable_tree(root, "dev"), "flux_dev")
-    assert flux_dev == {
-        "$value": "flux_yoko",
-        "$choices": ["flux_yoko", "flux_yoko_2"],
-    }
+    flux_dev = _node(build_cfg_observation(root, "dev"), "flux_dev")
+    assert flux_dev["input"]["resolved"] == "flux_yoko"
+    assert flux_dev["choices"] == ["flux_yoko", "flux_yoko_2"]
 
 
 # ---------------------------------------------------------------------------

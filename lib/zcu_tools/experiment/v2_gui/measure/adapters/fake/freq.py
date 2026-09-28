@@ -51,9 +51,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     SweepValue,
 )
 from zcu_tools.plotting.liveplot import LivePlot1D
@@ -263,6 +261,7 @@ class FakeFreqAdapter(
         requires_soc=False
     )
     exp_cls = FakeFreqExp
+    ExpCfg_cls = FakeFreqCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -349,12 +348,11 @@ class FakeFreqAdapter(
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
-        return req.ml.make_cfg(raw_cfg, FakeFreqCfg, fast_mode=self._fast_mode)
+        return super().build_exp_cfg({**raw_cfg, "fast_mode": self._fast_mode}, req)
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> FakeFreqRunResult:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeFreqRunResult:
         import dataclasses
 
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FakeFreqExp(self._model_type, self._params).run(cfg)
         freq_cfg = FreqCfg(

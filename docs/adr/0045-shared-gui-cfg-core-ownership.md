@@ -7,7 +7,7 @@ status: accepted
 **狀態：** accepted（2026-07-11）。
 **關聯：** [[0009]]、[[0010]]、[[0011]]、[[0012]]、[[0062]]、[[0046]]、[[0051]]。
 
-> 現行定位：跨 owner 分工見 [[0065]]。本篇 `gui.measure_cfg` 的位置已過時；現行 shape owner 是 `experiment.cfg_editing`。
+> 現行定位：跨 owner 分工見 [[0065]]。原編輯支援的位置已過時；現行 shape owner 是 `experiment.cfg_editing`。
 
 ## 背景
 

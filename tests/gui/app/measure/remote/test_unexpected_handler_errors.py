@@ -6,27 +6,27 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.remote.handlers.analysis import _h_tab_analyze
+from zcu_tools.gui.app.measure.remote.handlers.analysis import h_tab_analyze
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
-    _h_device_connect,
-    _h_soc_connect,
+    h_device_connect,
+    h_soc_connect,
 )
-from zcu_tools.gui.app.measure.remote.handlers.context import _h_value_read
+from zcu_tools.gui.app.measure.remote.handlers.context import h_value_read
 from zcu_tools.gui.app.measure.remote.handlers.editor import (
-    _h_editor_commit,
-    _h_editor_set_field,
+    h_editor_commit,
+    h_editor_set_field,
 )
 from zcu_tools.gui.app.measure.remote.handlers.run_save import (
-    _h_tab_load_data,
-    _h_tab_run_start,
-    _h_tab_save_data,
+    h_tab_load_data,
+    h_tab_run_start,
+    h_tab_save_data,
 )
 from zcu_tools.gui.app.measure.remote.handlers.view import (
-    _h_tab_get_figure,
+    h_tab_get_figure,
 )
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
-    _h_tab_writeback_apply,
-    _h_tab_writeback_set,
+    h_tab_writeback_apply,
+    h_tab_writeback_set,
 )
 from zcu_tools.gui.session.value_lookup import ProviderError
 
@@ -48,8 +48,10 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     run_control.has_tab.return_value = True
     run_control.start_run.side_effect = run_error
     _assert_escapes_unchanged(
-        lambda: _h_tab_run_start(
-            cast(Any, SimpleNamespace(run_analyze_control=run_control)),
+        lambda: h_tab_run_start(
+            cast(
+                Any, SimpleNamespace(run_analyze_control=run_control, render_view=None)
+            ),
             {"tab_id": "t1"},
         ),
         run_error,
@@ -60,12 +62,17 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     analyze_control.has_tab.return_value = True
     analyze_control.get_tab_snapshot.return_value = SimpleNamespace(
         interaction=SimpleNamespace(has_run_result=True),
-        analysis=SimpleNamespace(params=_AnalyzeParams()),
+        analysis=SimpleNamespace(params=_AnalyzeParams(), has_writeback_draft=False),
+        post_analysis=None,
+        capabilities=SimpleNamespace(analysis=None),
     )
     analyze_control.analyze.side_effect = analyze_error
     _assert_escapes_unchanged(
-        lambda: _h_tab_analyze(
-            cast(Any, SimpleNamespace(run_analyze_control=analyze_control)),
+        lambda: h_tab_analyze(
+            cast(
+                Any,
+                SimpleNamespace(run_analyze_control=analyze_control, render_view=None),
+            ),
             {"tab_id": "t1", "updates": {}},
         ),
         analyze_error,
@@ -77,7 +84,7 @@ def test_device_runtime_error_escapes_handler_unchanged() -> None:
     control = MagicMock()
     control.start_connect_device.side_effect = error
     _assert_escapes_unchanged(
-        lambda: _h_device_connect(
+        lambda: h_device_connect(
             cast(Any, SimpleNamespace(device_control=control)),
             {
                 "type_name": "fake",
@@ -95,7 +102,7 @@ def test_provider_error_escapes_value_handler_unchanged() -> None:
     control = MagicMock()
     control.read_value_source.side_effect = error
     _assert_escapes_unchanged(
-        lambda: _h_value_read(
+        lambda: h_value_read(
             cast(Any, SimpleNamespace(context_control=control)),
             {"key": "ctx.value", "type": None},
         ),
@@ -110,13 +117,13 @@ def test_editor_runtime_errors_escape_handlers_unchanged(handler_name: str) -> N
     if handler_name == "set":
         ctrl.owner_of_editor.return_value = None
         ctrl.cfg_editor_set_field.side_effect = error
-        call = lambda: _h_editor_set_field(
+        call = lambda: h_editor_set_field(
             cast(Any, SimpleNamespace(ctrl=ctrl)),
             {"editor_id": "e1", "path": "pulse.freq", "value": 1.0},
         )
     else:
         ctrl.commit_cfg_editor.side_effect = error
-        call = lambda: _h_editor_commit(
+        call = lambda: h_editor_commit(
             cast(Any, SimpleNamespace(ctrl=ctrl)),
             {"editor_id": "e1", "name": "module"},
         )
@@ -129,7 +136,7 @@ def test_load_and_save_runtime_errors_escape_handlers_unchanged() -> None:
     load_control.has_tab.return_value = True
     load_control.load_tab_result.side_effect = load_error
     _assert_escapes_unchanged(
-        lambda: _h_tab_load_data(
+        lambda: h_tab_load_data(
             cast(Any, SimpleNamespace(run_analyze_control=load_control)),
             {"tab_id": "t1", "data_path": "result.hdf5"},
         ),
@@ -140,7 +147,7 @@ def test_load_and_save_runtime_errors_escape_handlers_unchanged() -> None:
     save_control = MagicMock()
     save_control.save_data.side_effect = save_error
     _assert_escapes_unchanged(
-        lambda: _h_tab_save_data(
+        lambda: h_tab_save_data(
             cast(Any, SimpleNamespace(save_control=save_control)),
             {"tab_id": "t1", "data_path": None, "comment": ""},
         ),
@@ -201,7 +208,7 @@ def test_figure_runtime_error_escapes_handler_unchanged() -> None:
     tab_control.get_tab_snapshot.return_value = snap
     tab_control.has_tab.return_value = True
     _assert_escapes_unchanged(
-        lambda: _h_tab_get_figure(
+        lambda: h_tab_get_figure(
             cast(
                 Any, SimpleNamespace(render_view=render_view, tab_control=tab_control)
             ),
@@ -275,7 +282,7 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
     )
     if handler_name == "set":
         control.set_writeback_item_for_pane.side_effect = error
-        call = lambda: _h_tab_writeback_set(
+        call = lambda: h_tab_writeback_set(
             cast(
                 Any,
                 SimpleNamespace(
@@ -294,7 +301,7 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
         )
     else:
         control.apply_writeback_for_pane.side_effect = error
-        call = lambda: _h_tab_writeback_apply(
+        call = lambda: h_tab_writeback_apply(
             cast(
                 Any,
                 SimpleNamespace(
@@ -311,7 +318,7 @@ def test_soc_connect_runtime_error_escapes_handler_unchanged() -> None:
     ctrl = MagicMock()
     ctrl.connect_sync.side_effect = error
     _assert_escapes_unchanged(
-        lambda: _h_soc_connect(
+        lambda: h_soc_connect(
             cast(Any, SimpleNamespace(ctrl=ctrl)),
             {"kind": "mock"},
         ),

@@ -7,27 +7,27 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.remote.handlers.arb_waveform import (
-    _h_arb_waveform_list,
+    h_arb_waveform_list,
 )
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
-    _h_device_connect,
-    _h_startup_apply,
+    h_device_connect,
+    h_startup_apply,
 )
 from zcu_tools.gui.app.measure.remote.handlers.context import (
-    _h_context_md_del_attr,
-    _h_context_md_set_attr,
+    h_context_md_del_attr,
+    h_context_md_set_attr,
 )
-from zcu_tools.gui.app.measure.remote.handlers.editor import _h_editor_new
+from zcu_tools.gui.app.measure.remote.handlers.editor import h_editor_new
 from zcu_tools.gui.app.measure.remote.handlers.run_save import (
-    _h_tab_load_data,
-    _h_tab_run_start,
+    h_tab_load_data,
+    h_tab_run_start,
 )
 from zcu_tools.gui.app.measure.remote.handlers.view import (
-    _h_dialog_screenshot,
-    _h_tab_get_figure,
+    h_dialog_screenshot,
+    h_tab_get_figure,
 )
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
-    _h_tab_writeback_set,
+    h_tab_writeback_set,
 )
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
 from zcu_tools.gui.app.measure.services.guard import GuardError
@@ -124,7 +124,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     run_control.start_run.side_effect = GuardError(
         "No run result", reason_code="no_run_result"
     )
-    run_adapter = SimpleNamespace(run_analyze_control=run_control)
+    run_adapter = SimpleNamespace(run_analyze_control=run_control, render_view=None)
 
     load_control = MagicMock()
     load_control.has_tab.return_value = True
@@ -289,7 +289,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
 
     cases: list[tuple[Callable[[], object], WireTuple]] = [
         (
-            lambda: _h_tab_run_start(cast(Any, run_adapter), {"tab_id": "t1"}),
+            lambda: h_tab_run_start(cast(Any, run_adapter), {"tab_id": "t1"}),
             (
                 ErrorCode.PRECONDITION_FAILED,
                 "No run result",
@@ -298,7 +298,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
             ),
         ),
         (
-            lambda: _h_tab_load_data(
+            lambda: h_tab_load_data(
                 cast(Any, load_adapter), {"tab_id": "t1", "data_path": "bad.h5"}
             ),
             (
@@ -309,20 +309,20 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
             ),
         ),
         (
-            lambda: _h_editor_new(
+            lambda: h_editor_new(
                 cast(Any, editor_adapter),
                 {"item_kind": "module", "from_name": "missing"},
             ),
             (ErrorCode.INVALID_PARAMS, "unknown module", "", None),
         ),
         (
-            lambda: _h_context_md_set_attr(
+            lambda: h_context_md_set_attr(
                 cast(Any, context_adapter), {"key": "x", "value": 1}
             ),
             (ErrorCode.PRECONDITION_FAILED, "No context", "", None),
         ),
         (
-            lambda: _h_context_md_del_attr(
+            lambda: h_context_md_del_attr(
                 cast(Any, context_adapter), {"key": "missing"}
             ),
             (
@@ -333,14 +333,14 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
             ),
         ),
         (
-            lambda: _h_device_connect(
+            lambda: h_device_connect(
                 cast(Any, device_adapter),
                 {"type_name": "fake", "name": "flux", "address": "mock"},
             ),
             (ErrorCode.PRECONDITION_FAILED, "Device busy", "", None),
         ),
         (
-            lambda: _h_arb_waveform_list(cast(Any, arb_adapter), {}),
+            lambda: h_arb_waveform_list(cast(Any, arb_adapter), {}),
             (
                 ErrorCode.PRECONDITION_FAILED,
                 "No project database_path is configured.",
@@ -349,7 +349,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
             ),
         ),
         (
-            lambda: _h_tab_get_figure(
+            lambda: h_tab_get_figure(
                 cast(Any, view_adapter), {"tab_id": "t1", "subtab_id": "analysis"}
             ),
             (
@@ -360,7 +360,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
             ),
         ),
         (
-            lambda: _h_tab_writeback_set(
+            lambda: h_tab_writeback_set(
                 cast(Any, writeback_adapter),
                 {
                     "tab_id": "t1",
@@ -382,7 +382,7 @@ def test_dialog_screenshot_expected_errors_use_producer_taxonomy() -> None:
     adapter = SimpleNamespace(render_view=render_view)
 
     assert _remote_error(
-        lambda: _h_dialog_screenshot(cast(Any, adapter), {"name": "unknown"})
+        lambda: h_dialog_screenshot(cast(Any, adapter), {"name": "unknown"})
     ) == (ErrorCode.INVALID_PARAMS, "unknown dialog name: 'unknown'", "", None)
     render_view.take_dialog_screenshot.assert_not_called()
 
@@ -390,7 +390,7 @@ def test_dialog_screenshot_expected_errors_use_producer_taxonomy() -> None:
         "dialog 'setup' is not open"
     )
     assert _remote_error(
-        lambda: _h_dialog_screenshot(cast(Any, adapter), {"name": "setup"})
+        lambda: h_dialog_screenshot(cast(Any, adapter), {"name": "setup"})
     ) == (
         ErrorCode.PRECONDITION_FAILED,
         "dialog 'setup' is not open",
@@ -426,7 +426,7 @@ def test_result_scope_projection_uses_category_not_reason_prefix(
     adapter = SimpleNamespace(ctrl=ctrl)
 
     actual = _remote_error(
-        lambda: _h_startup_apply(
+        lambda: h_startup_apply(
             cast(Any, adapter),
             {
                 "chip_name": "chip",

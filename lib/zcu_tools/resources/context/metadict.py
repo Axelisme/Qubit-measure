@@ -80,6 +80,18 @@ def _dump_tagged_values(obj: Any) -> Any:
     return obj
 
 
+def _reject_reserved_literal_tags(value: Any) -> None:
+    """Reject user dicts that reload would mistake for serialization markers."""
+    if isinstance(value, dict):
+        if len(value) == 1 and next(iter(value)) in (_COMPLEX_TAG, _STRING_TAG):
+            raise ValueError("reserved MetaDict tag cannot be stored as a literal dict")
+        for nested in value.values():
+            _reject_reserved_literal_tags(nested)
+    elif isinstance(value, list | tuple):
+        for nested in value:
+            _reject_reserved_literal_tags(nested)
+
+
 class MetaDict(SyncFile):
     def __init__(
         self, json_path: str | Path | None = None, readonly: bool = False
@@ -101,27 +113,26 @@ class MetaDict(SyncFile):
         return md
 
     def _load(self, path: str) -> None:
-        file_data = None
         try:
             with open(path, "r", encoding="utf-8") as f:
                 file_data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except FileNotFoundError:
             warnings.warn(f"Failed to load {self._path}, ignoring...")
+            return
 
-        if file_data is not None:
-            if not isinstance(file_data, dict):
-                raise ValueError(
-                    f"MetaDict file must contain a JSON object, got {type(file_data).__name__}"
-                )
-            restored = _restore_complex(file_data)
-            try:
-                self._validate_data_keys(restored)
-            except (AttributeError, TypeError) as exc:
-                raise ValueError(
-                    "MetaDict file contains a protected or invalid data key"
-                ) from exc
-            self._data.clear()
-            self._data.update(restored)
+        if not isinstance(file_data, dict):
+            raise ValueError(
+                f"MetaDict file must contain a JSON object, got {type(file_data).__name__}"
+            )
+        restored = _restore_complex(file_data)
+        try:
+            self._validate_data_keys(restored)
+        except (AttributeError, TypeError) as exc:
+            raise ValueError(
+                "MetaDict file contains a protected or invalid data key"
+            ) from exc
+        self._data.clear()
+        self._data.update(restored)
 
     def _dump(self, path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +189,7 @@ class MetaDict(SyncFile):
         if self._readonly:
             raise AttributeError("MetaDict is read-only")
 
+        _reject_reserved_literal_tags(value)
         self.sync()
         self._data[name] = value
         self._dirty = True
@@ -229,6 +241,8 @@ class MetaDict(SyncFile):
             updates.update(values)
         updates.update(kwargs)
         self._validate_data_keys(updates)
+        for value in updates.values():
+            _reject_reserved_literal_tags(value)
         if not updates:
             return
 

@@ -6,37 +6,36 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _bool_default,
-    _expected_versions,
     _json,
     _str,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "arb_waveform.list",
-        "arb_waveform:_h_arb_waveform_list",
+        "arb_waveform:h_arb_waveform_list",
         MethodSpec(
             5.0,
             "List qubit-scoped arbitrary waveform data keys. Returns {waveforms: [name]}.",
-            tool_name="list_arb_waveform",
         ),
+        agent=AgentMethodPolicy(reveals=("arb_waveforms",)),
     ),
     method_entry(
         "arb_waveform.preview",
-        "arb_waveform:_h_arb_waveform_preview",
+        "arb_waveform:h_arb_waveform_preview",
         MethodSpec(
             10.0,
             "Load one arbitrary waveform asset and render a normalized I/Q/Abs preview "
             "PNG. Returns {recipe, preview_figure}; recipe is null for raw imported "
             "assets.",
             (_str("name", "Arbitrary waveform data_key"),),
-            tool_name="get_arb_waveform_preview",
         ),
+        agent=AgentMethodPolicy(reveals=("arb_waveforms",)),
     ),
     method_entry(
         "arb_waveform.set",
-        "arb_waveform:_h_arb_waveform_set",
+        "arb_waveform:h_arb_waveform_set",
         MethodSpec(
             10.0,
             "Create or overwrite an arbitrary waveform from a formula recipe. The recipe "
@@ -48,9 +47,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _bool_default(
                     "overwrite", False, "Allow replacing an existing data_key"
                 ),
-                _expected_versions(),
             ),
-            tool_name="set_arb_waveform",
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=("arb_waveforms",), refresh_after_write=True
         ),
     ),
 )

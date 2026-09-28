@@ -160,12 +160,18 @@ class MainDialogRegistry:
 
     def take_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""
-        dialog = self._dialog(dialog_name)
-        if dialog is None or not dialog.isVisible():
-            raise FailedPreconditionError(
-                f"dialog {dialog_name.value!r} is not currently open"
-            )
-        return widget_to_png_bytes(dialog, subject=f"{dialog_name.value!r} dialog")
+        names = (
+            (DialogName.SETUP, DialogName.STARTUP)
+            if dialog_name is DialogName.SETUP
+            else (dialog_name,)
+        )
+        for name in names:
+            dialog = self._dialog(name)
+            if dialog is not None and dialog.isVisible():
+                return widget_to_png_bytes(dialog, subject=f"{name.value!r} dialog")
+        raise FailedPreconditionError(
+            f"dialog {dialog_name.value!r} is not currently open"
+        )
 
 
 __all__ = ["MainDialogRegistry"]

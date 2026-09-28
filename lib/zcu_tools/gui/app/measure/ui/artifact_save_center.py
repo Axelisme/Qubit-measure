@@ -1,29 +1,10 @@
-"""Data save center — capability-driven artifact rows with terminal-outcome status.
+"""Data save center — render State-owned artifacts and draft paths.
 
-Owns the Data subtab's compact save rows, high-contrast status rendering and
-tab-local status lifecycle. Save All updates this center in place and preserves
-the data-path editor's focus, cursor and selection. It does not call concrete
-save services; it only renders interaction derived from :class:`TabSnapshot` and
-the narrow status owner.
-
-Status derivation (S3):
-- NO RESULT — capability present but no result yet.
-- NOT SAVED — result present, never saved for the current signature.
-- UNSAVED CHANGES — result present, saved baseline exists but current signature
-  differs (path/comment/result revision changed).
-- SAVED — result present and current signature equals the last successfully
-  saved signature.
-
-For the async measurement data save, the pending signature is captured at
-``notify_save_started`` and only promoted to ``saved`` on true terminal success.
-If the current signature drifts during the async window, the terminal success
-afterwards shows UNSAVED CHANGES, not an erroneous SAVED.
+Save All preserves data-path editor focus, cursor and selection.
 """
 
 from __future__ import annotations
 
-import enum
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
@@ -40,33 +21,15 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKind,
+    ArtifactSnapshot,
+    SaveStatus,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
     from zcu_tools.gui.app.measure.services import TabSnapshot
-
-# ---------------------------------------------------------------------------
-# Closed artifact kind
-# ---------------------------------------------------------------------------
-
-
-class ArtifactKind(enum.Enum):
-    DATA = enum.auto()
-    ANALYSIS = enum.auto()
-    POST_ANALYSIS = enum.auto()
-
-
-# ---------------------------------------------------------------------------
-# Status model (tab-local, not persisted across process)
-# ---------------------------------------------------------------------------
-
-
-class SaveStatus(enum.Enum):
-    NO_RESULT = enum.auto()
-    NOT_SAVED = enum.auto()
-    UNSAVED_CHANGES = enum.auto()
-    SAVED = enum.auto()
-
 
 _STATUS_TEXT: dict[SaveStatus, str] = {
     SaveStatus.NO_RESULT: "— NO RESULT",
@@ -81,113 +44,6 @@ _STATUS_COLOR: dict[SaveStatus, str] = {
     SaveStatus.UNSAVED_CHANGES: "#c45100",
     SaveStatus.SAVED: "#0067c0",
 }
-
-
-# ---------------------------------------------------------------------------
-# Internal status tracker — Qt-free, owned by the save center
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _ArtifactRecord:
-    has_result: bool = False
-    has_figure: bool = False
-    result_obj: object | None = None
-    result_rev: int = 0
-    current_sig: tuple[object, ...] | None = None
-    saved_sig: tuple[object, ...] | None = None
-    pending_sig: tuple[object, ...] | None = None
-
-
-class _StatusTracker:
-    """Tab-local per-artifact status lifecycle (S3).
-
-    Signature per artifact:
-    - data: (result_rev, data_path, comment)
-    - analysis: (result_rev, analysis_image_path)
-    - post_analysis: (result_rev, post_image_path)
-
-    ``result_rev`` is a monotonic token owned by the tracker; it increments
-    when ``result_obj`` identity changes via ``is not``. Retaining the object
-    avoids aliasing after Python ``id`` reuse.
-    """
-
-    def __init__(self, artifacts: list[ArtifactKind]) -> None:
-        self._records: dict[ArtifactKind, _ArtifactRecord] = {
-            k: _ArtifactRecord() for k in artifacts
-        }
-
-    def update_result(
-        self,
-        kind: ArtifactKind,
-        has_result: bool,
-        result_obj: object | None,
-        has_figure: bool,
-    ) -> None:
-        rec = self._records[kind]
-        if not has_result:
-            rec.has_result = False
-            rec.has_figure = False
-            rec.result_obj = None
-            return
-        # has_result True — detect replacement via identity
-        if rec.result_obj is not result_obj:
-            rec.result_rev += 1
-            rec.result_obj = result_obj
-        rec.has_result = True
-        # figure gating only for image artifacts
-        if kind in (ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS):
-            rec.has_figure = bool(has_figure)
-        else:
-            rec.has_figure = True
-
-    def set_current_sig(self, kind: ArtifactKind, sig: tuple[object, ...]) -> None:
-        self._records[kind].current_sig = sig
-
-    def notify_started(self, kind: ArtifactKind) -> None:
-        rec = self._records[kind]
-        if rec.current_sig is not None:
-            rec.pending_sig = rec.current_sig
-
-    def notify_succeeded(self, kind: ArtifactKind) -> None:
-        rec = self._records[kind]
-        if rec.pending_sig is not None:
-            rec.saved_sig = rec.pending_sig
-            rec.pending_sig = None
-        elif rec.current_sig is not None:
-            rec.saved_sig = rec.current_sig
-
-    def notify_failed(self, kind: ArtifactKind) -> None:
-        rec = self._records[kind]
-        rec.pending_sig = None
-
-    def handle_data_finished(self, error: str | None) -> None:
-        rec = self._records[ArtifactKind.DATA]
-        if error is None and rec.pending_sig is not None:
-            rec.saved_sig = rec.pending_sig
-        rec.pending_sig = None
-
-    def status(self, kind: ArtifactKind) -> SaveStatus:
-        rec = self._records[kind]
-        if not rec.has_result:
-            return SaveStatus.NO_RESULT
-        if rec.saved_sig is None:
-            return SaveStatus.NOT_SAVED
-        if rec.current_sig == rec.saved_sig:
-            return SaveStatus.SAVED
-        return SaveStatus.UNSAVED_CHANGES
-
-    def is_saveable(self, kind: ArtifactKind) -> bool:
-        rec = self._records[kind]
-        if kind == ArtifactKind.DATA:
-            return bool(rec.has_result)
-        return bool(rec.has_result and rec.has_figure)
-
-    def result_rev(self, kind: ArtifactKind) -> int:
-        return self._records[kind].result_rev
-
-    def __repr__(self) -> str:
-        return f"_StatusTracker({self._records!r})"
 
 
 class _FocusPreservingSaveAllButton(QPushButton):
@@ -245,7 +101,7 @@ class ArtifactSaveCenter(QWidget):
         if self._has_post:
             self._artifacts.append(ArtifactKind.POST_ANALYSIS)
 
-        self._tracker = _StatusTracker(self._artifacts)
+        self._snapshots: dict[ArtifactKind, ArtifactSnapshot] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 10, 10, 10)
@@ -341,8 +197,7 @@ class ArtifactSaveCenter(QWidget):
         # Internal comment edit is created in _build_row for DATA
         self._comment_edit: QTextEdit  # assigned in row construction
 
-        self._refresh_all_status_labels()
-        self._wire_internal_status_updates()
+        self._path_edits[ArtifactKind.DATA].installEventFilter(self)
 
     # -- row construction --------------------------------------------
 
@@ -410,17 +265,6 @@ class ArtifactSaveCenter(QWidget):
             self._comment_edit = comment
 
         return container
-
-    def _wire_internal_status_updates(self) -> None:
-        for kind, edit in self._path_edits.items():
-            edit.textChanged.connect(
-                lambda _text, k=kind: self._on_path_or_comment_changed(k)
-            )
-        self._path_edits[ArtifactKind.DATA].installEventFilter(self)
-        if hasattr(self, "_comment_edit"):
-            self._comment_edit.textChanged.connect(
-                lambda: self._on_path_or_comment_changed(ArtifactKind.DATA)
-            )
 
     # -- browse handlers (view-only, no controller) ------------------
 
@@ -577,7 +421,6 @@ class ArtifactSaveCenter(QWidget):
             )
             if had_focus:
                 edit.setFocus()
-        self._recompute_current_sig(kind)
 
     def set_data_path(self, path: str) -> None:
         self._set_path_preserving_editor_state(ArtifactKind.DATA, path)
@@ -594,15 +437,23 @@ class ArtifactSaveCenter(QWidget):
 
     def set_comment_text(self, text: str) -> None:
         if hasattr(self, "_comment_edit"):
-            self._comment_edit.blockSignals(True)
-            self._comment_edit.setPlainText(text)
-            self._comment_edit.blockSignals(False)
-            self._recompute_current_sig(ArtifactKind.DATA)
+            edit = self._comment_edit
+            if edit.toPlainText() == text:
+                return
+            was_blocked = edit.blockSignals(True)
+            try:
+                edit.setPlainText(text)
+            finally:
+                edit.blockSignals(was_blocked)
 
     # -- narrow binding interface for ExpTabWidget -------------------
 
     def bind_data_path_changed(self, handler: Callable[[str], None]) -> None:
         self._path_edits[ArtifactKind.DATA].textChanged.connect(handler)
+
+    def bind_comment_changed(self, handler: Callable[[str], None]) -> None:
+        """Bind user edits of the data comment to the shared Save draft."""
+        self._comment_edit.textChanged.connect(lambda: handler(self.get_comment()))
 
     def bind_analysis_path_changed(self, handler: Callable[[str], None]) -> None:
         if ArtifactKind.ANALYSIS in self._path_edits:
@@ -659,108 +510,21 @@ class ArtifactSaveCenter(QWidget):
         """Return True if measurement data is unsaved (NOT_SAVED or UNSAVED_CHANGES)."""
         if ArtifactKind.DATA not in self._artifacts:
             return False
-        self._recompute_current_sig(ArtifactKind.DATA)
-        return self._tracker.status(ArtifactKind.DATA) in (
+        return self._snapshots[ArtifactKind.DATA].status in (
             SaveStatus.NOT_SAVED,
             SaveStatus.UNSAVED_CHANGES,
         )
 
-    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
-        """Ordered saveable artifacts for Save All (analysis→post→data)."""
-        kinds: list[ArtifactKind] = []
-        if self._has_analysis:
-            if (
-                snapshot.analysis is not None
-                and snapshot.analysis.result is not None
-                and snapshot.analysis.figure is not None
-            ):
-                kinds.append(ArtifactKind.ANALYSIS)
-        if self._has_post:
-            if (
-                snapshot.post_analysis is not None
-                and snapshot.post_analysis.result is not None
-                and snapshot.post_analysis.figure is not None
-            ):
-                kinds.append(ArtifactKind.POST_ANALYSIS)
-        if snapshot.run is not None and snapshot.run.result is not None:
-            kinds.append(ArtifactKind.DATA)
-        return kinds
-
-    # -- tracker helpers ----------------------------------------------
-
-    def _current_sig_for(self, kind: ArtifactKind) -> tuple[object, ...]:
-        rev = self._tracker.result_rev(kind)
-        if kind == ArtifactKind.DATA:
-            path = self._path_edits[ArtifactKind.DATA].text()
-            comment = self.get_comment()
-            return (rev, path, comment)
-        else:
-            path = self._path_edits[kind].text()
-            return (rev, path)
-
-    def _recompute_current_sig(self, kind: ArtifactKind) -> None:
-        sig = self._current_sig_for(kind)
-        self._tracker.set_current_sig(kind, sig)
-        self._refresh_status_label(kind)
-
-    def _on_path_or_comment_changed(self, kind: ArtifactKind) -> None:
-        self._recompute_current_sig(kind)
-
-    def _refresh_status_label(self, kind: ArtifactKind) -> None:
-        status = self._tracker.status(kind)
-        label = self._status_labels[kind]
-        label.setText(_STATUS_TEXT[status])
-        label.setStyleSheet(f"color: {_STATUS_COLOR[status]};")
-
-    def _refresh_all_status_labels(self) -> None:
-        for kind in self._artifacts:
-            self._refresh_status_label(kind)
-
     # -- snapshot-driven updates --------------------------------------
 
     def update_from_snapshot(self, snapshot: TabSnapshot) -> None:
-        if snapshot.run is not None and snapshot.run.result is not None:
-            has_data = True
-            data_obj = snapshot.run.result
-        else:
-            has_data = False
-            data_obj = None
-        self._tracker.update_result(ArtifactKind.DATA, has_data, data_obj, False)
-
-        if self._has_analysis:
-            if snapshot.analysis is not None and snapshot.analysis.result is not None:
-                has_ana = True
-                ana_obj = snapshot.analysis.result
-            else:
-                has_ana = False
-                ana_obj = None
-            has_fig = bool(
-                snapshot.analysis is not None and snapshot.analysis.figure is not None
-            )
-            self._tracker.update_result(
-                ArtifactKind.ANALYSIS, has_ana, ana_obj, has_fig
-            )
-
-        if self._has_post:
-            if (
-                snapshot.post_analysis is not None
-                and snapshot.post_analysis.result is not None
-            ):
-                has_post = True
-                post_obj = snapshot.post_analysis.result
-            else:
-                has_post = False
-                post_obj = None
-            has_fig = bool(
-                snapshot.post_analysis is not None
-                and snapshot.post_analysis.figure is not None
-            )
-            self._tracker.update_result(
-                ArtifactKind.POST_ANALYSIS, has_post, post_obj, has_fig
-            )
-
+        artifacts = {artifact.kind: artifact for artifact in snapshot.artifacts}
         for kind in self._artifacts:
-            self._recompute_current_sig(kind)
+            artifact = artifacts[kind]
+            self._snapshots[kind] = artifact
+            label = self._status_labels[kind]
+            label.setText(_STATUS_TEXT[artifact.status])
+            label.setStyleSheet(f"color: {_STATUS_COLOR[artifact.status]};")
 
     def update_interaction(self, snapshot: TabSnapshot) -> None:
         assert snapshot.interaction is not None
@@ -769,39 +533,18 @@ class ArtifactSaveCenter(QWidget):
         state = snapshot.interaction
         idle = not (state.is_running or state.is_analyzing or state.is_saving_data)
         has_active = state.has_active_context
-        has_context = state.has_context
 
         for kind in self._artifacts:
-            btn = self._save_btns[kind]
-            if not idle or not has_active:
-                btn.setEnabled(False)
-            else:
-                btn.setEnabled(self._tracker.is_saveable(kind))
+            self._save_btns[kind].setEnabled(
+                idle and has_active and self._snapshots[kind].is_saveable
+            )
         if self._has_load:
-            self.load_button.setEnabled(idle and has_context)
-        any_saveable = any(self._tracker.is_saveable(k) for k in self._artifacts)
-        self.save_all_button.setEnabled(idle and has_active and any_saveable)
-
-    # -- save outcome notifications -----------------------------------
-
-    def notify_save_started(self, kind: ArtifactKind) -> None:
-        self._recompute_current_sig(kind)
-        self._tracker.notify_started(kind)
-        self._refresh_status_label(kind)
-
-    def notify_save_succeeded(self, kind: ArtifactKind) -> None:
-        self._recompute_current_sig(kind)
-        self._tracker.notify_succeeded(kind)
-        self._refresh_status_label(kind)
-
-    def notify_save_failed(self, kind: ArtifactKind) -> None:
-        self._tracker.notify_failed(kind)
-        self._refresh_status_label(kind)
-
-    def handle_data_finished(self, error: str | None) -> None:
-        self._recompute_current_sig(ArtifactKind.DATA)
-        self._tracker.handle_data_finished(error)
-        self._refresh_status_label(ArtifactKind.DATA)
+            self.load_button.setEnabled(idle and state.has_context)
+        self.save_all_button.setEnabled(
+            idle
+            and has_active
+            and any(self._snapshots[k].is_saveable for k in self._artifacts)
+        )
 
     # -- helpers for tests --------------------------------------------
 

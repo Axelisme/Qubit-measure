@@ -68,7 +68,7 @@ def test_build_input_schema_marks_array_param():
 def test_forwarder_passes_list_intact():
     """A multi-element list sent to a ARRAY-typed forwarder must reach the
     handler as-is — no char-split, no stringify."""
-    from zcu_tools.mcp.core.bridge import make_forwarder
+    from zcu_tools.mcp.core.stdio_server import make_forwarder
 
     received: list[tuple[object, float]] = []
 

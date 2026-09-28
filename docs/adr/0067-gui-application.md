@@ -28,7 +28,7 @@ Capability 不等於當次 readiness、檔案相容、權限或 hardware lease�
 
 Domain 模組定義事件 enum、payload 和已提交的 fact。Producer 不傳 widget 名稱、刷新旗標或重畫遮罩。App 組裝 bus 訂閱與對外投影；GUI coordinator 把 fact 轉為畫面動作。例如 measure 的 tab content fact 在完整 pane state commit 後發布，operation terminal fact 與 content commit 是不同事件，避免成功時畫兩次。具體的保留 figure 恢復順序由 [measure app](../../lib/zcu_tools/gui/app/measure/README.md) 管理。Remote 以自己的投影呈現相同事實；這不規定 wire payload 或診斷通道。
 
-Measure 的互動分析由 app service 持有已提交的 Qt-free plugin session，Action 對最新 snapshot 驗證並一次提交。Qt frontend 可維持尚未提交的 pointer preview，不能把它當作另一份分析狀態。GUI 與 remote command 走同一份 plugin Action；session 終結與 operation settle 由 app owner 處理。點選、預覽、失敗復原和 widget cleanup 見 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)。
+Measure 的互動分析由 app service 持有已提交的 Qt-free plugin session，Action 對最新 snapshot 驗證並一次提交。Qt frontend 可維持尚未提交的 pointer preview，不能把它當作另一份分析狀態。GUI 與 remote command 走同一份 plugin Action；session 終結與 operation settle 由 app owner 處理。`tab.interact` 保留 active-session、command 與 terminal 驗證，但不要求 per-connection seen；GUI 與 agent 在 owner loop 依提交順序生效，後提交者勝出，沒有 last-operator 身分或 plugin revision。MCP 固定 `tab_interact` tool 只轉送一個 read 或 command；read 不切焦點，經驗證的 command 切到 Analysis pane，回傳 PNG 由 MCP 放到 session 專屬暫存。點選、預覽、失敗復原和 widget cleanup 見 [measure app](../../lib/zcu_tools/gui/app/measure/README.md)。
 
 ## 繪圖與限制
 

@@ -11,6 +11,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import field_serializer
 
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.cfg_model import ConfigBase
@@ -209,6 +210,14 @@ class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
     modules: LenRabiModuleCfg
     sweep: LenRabiSweepCfg
     shots: int
+    g_center: complex
+    e_center: complex
+    radius: float
+
+    @field_serializer("g_center", "e_center")
+    def serialize_center(self, value: complex) -> str:
+        """Keep experiment comments JSON-safe with a lossless complex literal."""
+        return str(value)
 
 
 class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
@@ -235,9 +244,6 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         soc,
         soccfg,
         cfg: LenRabiCfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
     ) -> LenRabiResult:
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -275,7 +281,9 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
 
             def update_view(raw_iq: NDArray[np.complex128]) -> None:
                 acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
-                populations = classify_rabi_iq(raw_iq, g_center, e_center, radius)
+                populations = classify_rabi_iq(
+                    raw_iq, cfg.g_center, cfg.e_center, cfg.radius
+                )
                 populations[~acquired_rows] = np.nan
                 other = 1.0 - populations.sum(axis=1)
                 viewer.update(lengths, np.column_stack((populations, other)).T)

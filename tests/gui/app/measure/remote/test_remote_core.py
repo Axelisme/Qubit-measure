@@ -9,18 +9,13 @@ handlers a chance to execute.
 
 from __future__ import annotations
 
-import json
-import socket
 import time
+from functools import partial
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.registry import register_all
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
-from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
     RemoteControlAdapter,
@@ -29,129 +24,38 @@ from zcu_tools.gui.app.measure.remote.wire_version import (
     GUI_VERSION,
     WIRE_VERSION,
 )
-from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.measure.assembly import build_measure_tools
+from zcu_tools.mcp.measure.session import MeasureMcpSession
+from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-def _make_ctx() -> SessionEnv:
-    return SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
-        soc=MagicMock(),
-        soccfg=MagicMock(),
-        res_name="fake_res",
-        result_dir="/tmp/zcu_result",
-        database_path="/tmp/zcu_db/fake_chip/fake_qubit",
-        active_label="ctx001",
-        readiness=ContextReadiness.ACTIVE,
-    )
-
-
-def _make_view() -> MagicMock:
-    view = MagicMock()
-    view.show_status_message = MagicMock()
-    view.make_run_container = MagicMock(return_value=None)
-    # tab.list_all / overview read active_tab_id off the render view; return a real
-    # (JSON-serializable) snapshot so the wire reply encodes cleanly.
-    view.get_view_snapshot = MagicMock(
-        return_value={"active_tab_id": None, "tab_ids": []}
-    )
-    return view
-
-
-class _Fixture:
-    """Hold strong refs to Controller + service to survive GC mid-test."""
-
-    def __init__(self, opts: ControlOptions | None = None) -> None:
-        self.state = State(_make_ctx())
-        self.registry = Registry()
-        register_all(self.registry)
-        if not self.registry.has("fake"):
-            self.registry.register("fake", FakeAdapter)
-        self.view = _make_view()
-        io_manager = IOManager()
-        io_manager._em = MagicMock()
-        self.bus = EventBus()
-        self.ctrl = Controller(
-            state=self.state,
-            registry=self.registry,
-            io_manager=io_manager,
-            view=self.view,
-            bus=self.bus,
-        )
-        if opts is None:
-            opts = ControlOptions(port=0)
-        # tab.list_all now reads active_tab_id off the render view (a view
-        # projection), so the fixture must supply one — mirror _helpers.Fixture.
-        self.service = RemoteControlAdapter(
-            controller=self.ctrl,
-            opts=opts,
-            owner_scheduler=QtOwnerScheduler(),
-            render_view=self.view,
-        )
-
-    def start(self) -> int:
-        return self.service.start()
-
-    def stop(self) -> None:
-        self.service.stop()
+from ._helpers import call as _raw_call
+from ._helpers import call_mcp_with_qt as _call_mcp_with_qt
+from ._helpers import observe_run_inputs
+from ._remote_core_support import (
+    RemoteCoreFixture as _Fixture,
+)
+from ._remote_core_support import (
+    open_client as _open_client,
+)
+from ._remote_core_support import (
+    recv_response as _recv_response,
+)
+from ._remote_core_support import (
+    send as _send,
+)
 
 
 @pytest.fixture()
-def fx(qapp):  # noqa: ARG001
+def fx(qapp):
     f = _Fixture()
     f.start()
     yield f
     f.stop()
 
 
-def _send(sock: socket.socket, obj: dict) -> None:
-    sock.sendall((json.dumps(obj) + "\n").encode("utf-8"))
-
-
-def _recv_response(sock: socket.socket, timeout_s: float = 3.0) -> dict:
-    """Wait for one NDJSON response, pumping the Qt event loop in between."""
-    app = QCoreApplication.instance()
-    assert app is not None
-    deadline = time.monotonic() + timeout_s
-    buf = bytearray()
-    sock.setblocking(False)
-    while time.monotonic() < deadline:
-        try:
-            chunk = sock.recv(4096)
-            if chunk:
-                buf.extend(chunk)
-                if b"\n" in buf:
-                    line, _, rest = bytes(buf).partition(b"\n")
-                    return json.loads(line.decode("utf-8"))
-                    # rest discarded — single-response helper
-            else:
-                # peer closed cleanly mid-recv → return ""
-                if buf and b"\n" in buf:
-                    line, _, _ = bytes(buf).partition(b"\n")
-                    return json.loads(line.decode("utf-8"))
-                raise AssertionError("peer closed without a response line")
-        except BlockingIOError:
-            pass
-        app.processEvents()
-        time.sleep(0.005)
-    raise AssertionError(f"no response within {timeout_s}s")
-
-
-def _open_client(port: int) -> socket.socket:
-    sock = socket.create_connection(("127.0.0.1", port), timeout=1.0)
-    return sock
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+pytestmark = pytest.mark.uses_wall_clock
 
 
 def test_service_binds_loopback_only(fx):
@@ -161,7 +65,7 @@ def test_service_binds_loopback_only(fx):
     assert fx.service.port > 0
 
 
-def test_external_requires_token(qapp):  # noqa: ARG001
+def test_external_requires_token(qapp):
     with pytest.raises(RuntimeError, match="token"):
         RemoteControlAdapter(
             controller=MagicMock(),
@@ -177,6 +81,62 @@ def test_unknown_method_returns_error_code(fx):
         resp = _recv_response(sock)
         assert resp["ok"] is False
         assert resp["error"]["code"] == "unknown_method"
+    finally:
+        sock.close()
+
+
+def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(sock, {"id": "catalog", "method": "rpc.catalog", "params": {}})
+        reply = _recv_response(sock)
+        assert reply["ok"] is True
+        methods = {entry["method"]: entry for entry in reply["result"]["methods"]}
+        assert "rpc.catalog" not in methods
+        assert methods["adapter.guide"]["exposure"] == "rpc"
+        assert methods["adapter.guide"]["tool_names"] == []
+        assert methods["adapter.guide"]["params"]["required"] == ["adapter_name"]
+        assert methods["soc.info"]["exposure"] == "rpc"
+        assert methods["soc.info"]["timeout_seconds"] == 5.0
+        assert methods["tab.run_start"]["exposure"] == "rpc"
+        assert methods["tab.run_start"]["tool_names"] == []
+        assert methods["tab.run_start"]["operation_key"] == "tab:{tab_id}"
+
+        _send(sock, {"id": "bad", "method": "adapter.guide", "params": {}})
+        assert _recv_response(sock)["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_notify_await_rejects_wait_beyond_transport_budget(fx):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(
+            sock,
+            {
+                "id": "too-long",
+                "method": "notify.await",
+                "params": {"token": 1, "timeout": 601},
+            },
+        )
+        rejected = _recv_response(sock)
+        assert rejected["ok"] is False
+        assert rejected["error"]["code"] == "invalid_params"
+        assert rejected["error"]["reason"] == "invalid_timeout"
+
+        # An unknown prompt returns immediately; this checks the upper bound
+        # without waiting for a real user or for the backstop to expire.
+        _send(
+            sock,
+            {
+                "id": "bounded",
+                "method": "notify.await",
+                "params": {"token": 1, "timeout": 600},
+            },
+        )
+        accepted = _recv_response(sock)
+        assert accepted["ok"] is True
+        assert accepted["result"] == {"reason": "dismiss"}
     finally:
         sock.close()
 
@@ -243,6 +203,25 @@ def test_invalid_typed_request_rejected(fx):
         sock.close()
 
 
+@pytest.mark.parametrize("operation_id", [True, "1", 1.5, None])
+def test_cancel_rejects_invalid_operation_id_over_socket(fx, operation_id):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(
+            sock,
+            {
+                "id": "invalid-cancel",
+                "method": "operation.cancel",
+                "params": {"operation_id": operation_id},
+            },
+        )
+        reply = _recv_response(sock)
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
 def test_wire_version_reported(fx):
     sock = _open_client(fx.service.port)
     try:
@@ -256,7 +235,7 @@ def test_wire_version_reported(fx):
         sock.close()
 
 
-def test_wire_version_is_no_auth(qapp):  # noqa: ARG001
+def test_wire_version_is_no_auth(qapp):
     # wire.version is a handshake probe: it must answer before auth even on a
     # token-gated service, so a caller can detect a stale process on connect.
     f = _Fixture(ControlOptions(port=0, token="s3cr3t"))
@@ -278,7 +257,7 @@ def test_wire_version_is_no_auth(qapp):  # noqa: ARG001
         f.stop()
 
 
-def test_token_gated_when_set(qapp):  # noqa: ARG001
+def test_token_gated_when_set(qapp):
     f = _Fixture(ControlOptions(port=0, token="s3cr3t"))
     f.start()
     try:
@@ -306,6 +285,67 @@ def test_token_gated_when_set(qapp):  # noqa: ARG001
             sock.close()
     finally:
         f.stop()
+
+
+def test_measure_connect_authenticates_and_reconnects_to_token_gated_gui(
+    qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
+    # This test owns authentication, not the unrelated status orientation reads.
+    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
+    first = _Fixture(ControlOptions(port=0, token="test-secret"))
+    port = first.start()
+    config = MCPBridgeConfig(
+        tool_prefix="",
+        server_display_name="measure-test",
+        server_instructions="",
+        app_name="gui",
+        default_port=port,
+        mcp_version=80,
+        wire_version=WIRE_VERSION,
+        pid_file=tmp_path / "unused.pid",
+        log_file=tmp_path / "unused.log",
+        run_script_name="run_measure_gui.py",
+    )
+
+    def resolver(config: MCPBridgeConfig, requested: int | None) -> int:
+        return config.default_port if requested is None else requested
+
+    session = MeasureMcpSession(
+        config, resolve_connect_port=resolver, port_is_open=lambda _: True
+    )
+    bridge = McpBridge(config)
+    session.attach_bridge(bridge)
+    tools = build_measure_tools(
+        MeasureToolContext(config, session, resolve_connect_port=resolver)
+    )
+    call = partial(_call_mcp_with_qt, tools)
+
+    second: _Fixture | None = None
+    try:
+        for credential in (None, "wrong"):
+            args: dict[str, Any] = {"port": port}
+            if credential is not None:
+                args["token"] = credential
+            with pytest.raises(RuntimeError) as exc_info:
+                call("connect", args)
+            assert getattr(exc_info.value, "reason", None) == "unauthorized"
+        assert call("connect", {"port": port, "token": "test-secret"})["port"] == port
+        assert call("rpc_list", {"domain": "adapter"})["methods"]
+
+        first.stop()
+        second = _Fixture(ControlOptions(port=port, token="test-secret"))
+        assert second.start() == port
+        deadline = time.monotonic() + 2
+        while bridge.is_connected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not bridge.is_connected
+        assert call("rpc_list", {"domain": "adapter"})["methods"]
+    finally:
+        bridge.disconnect()
+        first.stop()
+        if second is not None:
+            second.stop()
 
 
 def test_shutdown_closes_clients(fx):
@@ -345,6 +385,9 @@ def test_run_start_then_running_tab_then_finishes(fx):
             sock, {"id": "1", "method": "tab.new", "params": {"adapter_name": "fake"}}
         )
         tab_id = _recv_response(sock)["result"]["tab_id"]
+        observe_run_inputs(
+            fx, tab_id, lambda method, params: _raw_call(sock, method, params)["result"]
+        )
 
         _send(
             sock, {"id": "2", "method": "tab.run_start", "params": {"tab_id": tab_id}}

@@ -84,8 +84,7 @@ def test_cfg_editor_service_satisfies_cfg_editor_port():
         env_ctrl=MagicMock(),
         read_port=MagicMock(),
         write_port=MagicMock(),
-        version_bump=MagicMock(),
-        version_drop=MagicMock(),
+        versions=MagicMock(),
         bus=EventBus(),
     )
     assert isinstance(svc, CfgEditorPort)

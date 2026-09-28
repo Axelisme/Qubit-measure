@@ -10,15 +10,27 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ScalarSpec,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.resources.context import MetaDict
 
 
 @pytest.fixture
-def service():
+def publications():
+    return []
+
+
+@pytest.fixture
+def metadata():
+    return MetaDict()
+
+
+@pytest.fixture
+def service(publications, metadata):
     host = MagicMock()
-    host.get_current_md.return_value = {}
+    host.get_current_md.return_value = metadata
     host.get_current_ml.return_value = None
     host.list_device_names.return_value = []
     host.list_arb_waveforms.return_value = []
@@ -26,9 +38,9 @@ def service():
         host,
         read_port=host,
         write_port=host,
-        version_bump=host.bump_editor_version,
-        version_drop=host.drop_editor_version,
+        versions=host,
         bus=BaseEventBus(),
+        publish_owner=lambda owner, schema: publications.append((owner, schema)),
     )
     yield svc
     editor_id = svc.editor_id_for_owner("tab")
@@ -92,6 +104,58 @@ def test_prepare_is_invisible_until_activation_and_retirement(service):
     service.discard_prepared(prepared)
     service.set_field(prepared.editor_id, "reps", 3)
     assert service.snapshot_owner("tab").value.fields["reps"] == DirectValue(3)
+
+
+def test_only_active_owner_publishes_complete_model_without_a_viewer(
+    service, publications
+):
+    original, _ = service.open_seeded(seed(1), owner_key="tab")
+    old_draft = service.get_draft(original)
+    assert publications == [("tab", seed(1))]
+    service.set_field(original, "reps", 3)
+    assert publications[-1] == ("tab", seed(3))
+    assert publications[0] == ("tab", seed(1))
+    publications.clear()
+
+    prepared = service.prepare_replacement("tab", seed(2))
+    assert publications == []
+    retired = service.activate_replacement(prepared)
+    assert retired is not None
+    assert publications == []
+    old_draft.root.fields["reps"].set_value(99)
+    assert publications == []
+    service.set_field(prepared.editor_id, "reps", 4)
+    assert publications == [("tab", seed(4))]
+    service.retire_replaced(retired)
+
+
+def test_expression_refresh_publishes_resolved_and_error_state(
+    service, publications, metadata
+):
+    metadata.count = 4
+    schema = CfgSchema(
+        spec=seed(1).spec,
+        value=CfgSectionValue(fields={"reps": EvalValue("count")}),
+    )
+    service.open_seeded(schema, owner_key="tab")
+    first = publications[-1][1].value.fields["reps"]
+    assert isinstance(first, EvalValue)
+    assert first.resolved == 4
+    assert first.error is None
+
+    metadata.count = 7
+    service.refresh_expressions()
+    refreshed = publications[-1][1].value.fields["reps"]
+    assert isinstance(refreshed, EvalValue)
+    assert refreshed.resolved == 7
+    assert first.resolved == 4
+
+    metadata.count = "invalid"
+    service.refresh_expressions()
+    invalid = publications[-1][1].value.fields["reps"]
+    assert isinstance(invalid, EvalValue)
+    assert invalid.resolved is None
+    assert invalid.error is not None
 
 
 def test_discard_prepared_preserves_live_editor(service):

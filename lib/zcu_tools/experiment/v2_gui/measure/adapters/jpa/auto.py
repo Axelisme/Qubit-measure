@@ -34,11 +34,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import CfgSchema
 
 from ._shared import (
-    cached_device_snapshot,
     lower_jpa_flux_dev,
     lower_jpa_rf_dev,
     lower_jpa_rf_power_dev,
@@ -244,18 +241,16 @@ class JpaAutoOptimizeAdapter(
         cfg_raw = dict(raw_cfg)
         # num_points is a run argument only — it never enters the Experiment cfg.
         cfg_raw.pop("num_points", None)
-        cfg_raw["dev"] = _lower_jpa_auto_devs(cfg_raw, cached_device_snapshot())
+        cfg_raw["dev"] = _lower_jpa_auto_devs(cfg_raw, req.device_snapshot)
         return super().build_exp_cfg(cfg_raw, req)
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        del req
-        # Pure preflight over cached/static data — never commands a live device.
+        # Pure preflight over the detached request snapshot.
         _num_points(raw_cfg)
-        _lower_jpa_auto_devs(raw_cfg, cached_device_snapshot())
+        _lower_jpa_auto_devs(raw_cfg, req.device_snapshot)
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> JPAOptimizeResult:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> JPAOptimizeResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         num_points = _num_points(raw_cfg)
         return AutoOptimizeExp().run(soc, soccfg, cfg, num_points=num_points)

@@ -30,7 +30,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 
-from ._shared import cached_device_snapshot, lower_jpa_rf_output_dev
+from ._shared import lower_jpa_rf_output_dev
 
 # Bring-up survey: ~101 readout-frequency points around the resonator. These
 # are inspectable starting bounds, NOT safety certification — the operator must
@@ -121,13 +121,12 @@ class JpaCheckAdapter(
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> CheckCfg:
         cfg_raw = dict(raw_cfg)
-        cfg_raw["dev"] = lower_jpa_rf_output_dev(cfg_raw, cached_device_snapshot())
+        cfg_raw["dev"] = lower_jpa_rf_output_dev(cfg_raw, req.device_snapshot)
         return super().build_exp_cfg(cfg_raw, req)
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        del req
-        # Pure preflight over cached/static data — never commands a live device.
-        lower_jpa_rf_output_dev(raw_cfg, cached_device_snapshot())
+        # Pure preflight over the detached request snapshot.
+        lower_jpa_rf_output_dev(raw_cfg, req.device_snapshot)
 
     def analyze(
         self, req: AnalyzeRequest[CheckResult, NoAnalyzeParams]

@@ -161,13 +161,14 @@ def test_context_service_new_context():
     )
     io_mock.new_context.return_value = mock_ctx
     io_mock.get_active_label.return_value = "flux_1.5_V"
+    io_mock.list_contexts.return_value = ["src_label"]
 
     svc = ContextService(state, io_mock, bus)
 
     svc.new_context(value=1.5, unit="V", clone_from="src_label")
 
     io_mock.new_context.assert_called_with(
-        base_ctx, value=1.5, unit="V", clone_from="src_label"
+        base_ctx, value=1.5, unit="V", clone_from="src_label", label=None
     )
     bus.emit.assert_called_once()
     assert bus.emit.call_args[0][0].EVENT == SessionEvent.CONTEXT_SWITCHED

@@ -18,6 +18,8 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -132,7 +134,7 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     )
 
     tab = ExpTabWidget("t1", ctrl, caps)
-    tab.attach(snap, MagicMock())
+    tab.attach(with_artifacts(snap), MagicMock())
     # Need to populate a real cfg to verify tree – attach a draft directly to cfg_form
     from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.cfg import CfgSchema as CS

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import replace
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode, AnalyzeRequest
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
@@ -61,11 +61,19 @@ class RunAnalyzeRenderHost(Protocol):
     def discard_interactive_preview(self, tab_id: str) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ActiveTabOperation:
+    op: int
+    tab: str
+    kind: Literal["run", "analyze"]
+
+
 class RunAnalyzeControlPort(Protocol):
     """App-facing run/load/analyze operation surface for driving adapters."""
 
     def has_tab(self, tab_id: str) -> bool: ...
     def get_running_tab_id(self) -> str | None: ...
+    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def start_run(self, tab_id: str) -> int: ...
@@ -129,6 +137,21 @@ class RunAnalyzeControlFacet:
 
     def get_running_tab_id(self) -> str | None:
         return self._state.running_tab_id
+
+    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]:
+        operations: list[ActiveTabOperation] = []
+        running = self._state.running_tab_id
+        if running is not None:
+            token = self._run.active_token
+            if token is None:
+                raise RuntimeError("running tab has no operation handle")
+            operations.append(ActiveTabOperation(token, running, "run"))
+        operations.extend(
+            ActiveTabOperation(token, tab, "analyze")
+            for service in (self._analyze, self._post_analyze)
+            for tab, token in service.active_operations()
+        )
+        return tuple(sorted(operations, key=lambda op: op.op))
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)

@@ -35,7 +35,6 @@ from zcu_tools.gui.cfg.binding import (
     SectionField,
     SweepField,
 )
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg import (
     FieldRenderContext,
     FieldRenderer,
@@ -45,45 +44,15 @@ from zcu_tools.gui.widgets.cfg import (
 )
 from zcu_tools.gui.widgets.cfg.registry import FieldWidgetProtocol
 
+from tests.gui.widgets.cfg._form_support import (
+    attach_draft,
+    scalar_field,
+    section_schema,
+)
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def ctrl():
-    c = MagicMock()
-    c.get_bus.return_value = EventBus()
-    c.get_current_md.return_value = MagicMock()
-    c.get_current_ml.return_value = MagicMock()
-    c.list_arb_waveforms.return_value = []
-    return c
-
-
-def _schema(spec_fields: dict, value_fields: dict) -> CfgSchema:
-    return CfgSchema(
-        spec=CfgSectionSpec(fields=spec_fields),
-        value=CfgSectionValue(fields=value_fields),
-    )
-
-
-def _attach(w, schema: CfgSchema, ctrl):
-    """Build a caller-owned draft, attach the widget, and return its root field."""
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
-    w.attach(draft)
-    return draft.root
-
-
-def _scalar_field(
-    ctrl: MagicMock, spec: ScalarSpec, initial_val: object
-) -> ScalarField:
-    bindings = MeasureCfgBindings(ctrl)
-    return ScalarField(
-        spec,
-        bindings.evaluate_expression,
-        bindings.provide_options,
-        initial_val,
-    )
 
 
 _RENDERED_FIELD_TYPES = (
@@ -127,7 +96,7 @@ def test_sweep_value_uses_expts_as_canonical():
     from zcu_tools.program.v2 import SweepCfg
 
     ml = MagicMock()
-    schema = _schema(
+    schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=1.0, stop=2.0, expts=5, step=999.0)},
     )
@@ -141,7 +110,7 @@ def test_sweep_value_step_mode():
     from zcu_tools.program.v2 import SweepCfg
 
     ml = MagicMock()
-    schema = _schema(
+    schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
@@ -193,7 +162,7 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = ["asset_a", "asset_b"]
-    schema = _schema(
+    schema = section_schema(
         {
             "data": ScalarSpec(
                 label="Data key",
@@ -205,7 +174,7 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
         {"data": DirectValue(None)},
     )
     w = CfgFormWidget()
-    model = _attach(w, schema, ctrl)
+    model = attach_draft(w, schema, ctrl)
 
     combo = w.findChild(QComboBox)
     assert combo is not None
@@ -227,7 +196,7 @@ def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = ["asset_a"]
-    schema = _schema(
+    schema = section_schema(
         {
             "data": ScalarSpec(
                 label="Data key",
@@ -238,7 +207,7 @@ def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
         {"data": DirectValue("")},
     )
     w = CfgFormWidget()
-    model = _attach(w, schema, ctrl)
+    model = attach_draft(w, schema, ctrl)
 
     combo = w.findChild(QComboBox)
     assert combo is not None
@@ -257,7 +226,7 @@ def test_dynamic_choice_renders_inactive_current_value_but_remains_invalid(qapp,
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = []
-    schema = _schema(
+    schema = section_schema(
         {
             "data": ScalarSpec(
                 label="Data key",
@@ -269,7 +238,7 @@ def test_dynamic_choice_renders_inactive_current_value_but_remains_invalid(qapp,
         {"data": DirectValue("retired_asset")},
     )
     form = CfgFormWidget()
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
 
     combo = form.findChild(QComboBox)
     assert combo is not None
@@ -322,7 +291,7 @@ def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl)
         fields={"value": ScalarSpec(label="Value", type=int)},
     )
     inner_value = CfgSectionValue(fields={"value": DirectValue(1)})
-    schema = _schema(
+    schema = section_schema(
         {"ref": ReferenceSpec(kind="module", allowed=[inner_spec])},
         {
             "ref": ReferenceValue(
@@ -334,7 +303,7 @@ def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl)
     renderers = default_cfg_renderers()
     form = CfgFormWidget(renderers=renderers)
 
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
 
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
@@ -368,7 +337,7 @@ def test_custom_reference_factory_renders_actual_widget(qapp, ctrl):
         label="Inner",
         fields={"value": ScalarSpec(label="Value", type=int)},
     )
-    schema = _schema(
+    schema = section_schema(
         {"reference": ReferenceSpec(kind="module", allowed=[inner_spec])},
         {
             "reference": ReferenceValue(
@@ -380,7 +349,7 @@ def test_custom_reference_factory_renders_actual_widget(qapp, ctrl):
     registry = _registry_with_factories({ReferenceField: reference_factory})
     form = CfgFormWidget(renderers=registry)
 
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
 
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
@@ -407,7 +376,7 @@ def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
     md = MetaDict()
     md.r_f = 6000.0
     ctrl.get_current_md.return_value = md
-    field = _scalar_field(
+    field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),
         EvalValue("r_f"),
@@ -423,7 +392,7 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
     from zcu_tools.resources.context import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
-    field = _scalar_field(
+    field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),
         EvalValue("missing"),
@@ -452,12 +421,12 @@ def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctr
         ValueInfo("device.flux.value", float, "device:flux"),
         0.125,
     )
-    schema = _schema(
+    schema = section_schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
         {"freq": EvalValue("r_f")},
     )
     form = CfgFormWidget(text_input_enhancer=make_value_source_input_enhancer(ctrl))
-    root = _attach(form, schema, ctrl)
+    root = attach_draft(form, schema, ctrl)
     scalar_widget = form.findChild(ScalarWidget)
     edit = form.findChild(QLineEdit)
     assert scalar_widget is not None
@@ -484,7 +453,7 @@ def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
     md = MetaDict()
     md.r_f = 6000.0
     ctrl.get_current_md.return_value = md
-    field = _scalar_field(
+    field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),
         EvalValue("r_f"),
@@ -502,12 +471,12 @@ def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
 
 
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
-    from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.resources.context import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
-    field = _scalar_field(
+    field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),
         EvalValue("missing"),
@@ -520,10 +489,10 @@ def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
     assert isinstance(value, DirectValue)
     # unset scalar is value=None (ADR-0010) — no placeholder default
     assert value.value is None
-    assert w._mode == "direct"
-    spin = w.findChild(QDoubleSpinBox)
-    assert spin is not None
-    assert spin.value() == pytest.approx(0.0)
+    entry = w.findChild(QLineEdit)
+    assert entry is not None
+    assert entry.text() == ""
+    assert not field.is_valid()
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +519,7 @@ def test_read_schema_before_populate_raises(qapp):
 def test_populate_scalar_fields_round_trip(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {
             "reps": ScalarSpec(label="Reps", type=int),
             "freq": ScalarSpec(label="Freq", type=float),
@@ -561,7 +530,7 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     out = w.read_values()
 
     assert out.fields["reps"].value == 100  # type: ignore[union-attr]
@@ -579,7 +548,7 @@ def test_attach_bad_renderer_return_leaves_draft_callbacks_empty(qapp, ctrl):
         del field, context
         return cast(FieldWidgetProtocol, QWidget())
 
-    schema = _schema(
+    schema = section_schema(
         {"value": ScalarSpec(label="Value", type=int)},
         {"value": DirectValue(1)},
     )
@@ -617,7 +586,7 @@ def test_attach_factory_exception_leaves_draft_callbacks_empty(qapp, ctrl):
         del field, context
         raise RuntimeError("factory exploded")
 
-    schema = _schema(
+    schema = section_schema(
         {"value": ScalarSpec(label="Value", type=int)},
         {"value": DirectValue(1)},
     )
@@ -638,7 +607,7 @@ def test_attach_factory_exception_leaves_draft_callbacks_empty(qapp, ctrl):
 def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"value": ScalarSpec(label="Value", type=int, required=True)},
         {"value": DirectValue(1)},
     )
@@ -667,15 +636,15 @@ def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
 
 
 def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
-    from qtpy.QtWidgets import QScrollArea, QSpinBox  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit, QScrollArea
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(100)},
     )
     w = CfgFormWidget()
-    model = _attach(w, schema, ctrl)
+    model = attach_draft(w, schema, ctrl)
     try:
         scroll = w.findChild(QScrollArea)
         assert scroll is not None
@@ -683,7 +652,7 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         assert scroll.isEnabled()
 
         assert w._root_widget is not None
-        spin = w._root_widget.findChild(QSpinBox)
+        spin = w._root_widget.findChild(QLineEdit)
         assert spin is not None
         assert spin.isEnabled()
 
@@ -702,7 +671,7 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         assert w.isEnabled()
         assert scroll.isEnabled()
         assert w._root_widget is not None and not w._root_widget.isEnabled()
-        reattached_spin = w._root_widget.findChild(QSpinBox)
+        reattached_spin = w._root_widget.findChild(QLineEdit)
         assert reattached_spin is not None
         assert not reattached_spin.isEnabled()
 
@@ -723,14 +692,14 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     md = MetaDict()
     md.r_f = 6000.0
     ctrl.get_current_md.return_value = md
-    schema = _schema(
+    schema = section_schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
         {"freq": EvalValue("r_f")},
     )
     w = CfgFormWidget()
     emitted = []
     w.schema_changed.connect(emitted.append)
-    model = _attach(w, schema, ctrl)
+    model = attach_draft(w, schema, ctrl)
 
     md.r_f = 6100.0
     model.refresh_expressions()
@@ -747,7 +716,7 @@ def test_same_tick_edits_materialize_schema_once_at_form_boundary(
 ):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"nested": CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)})},
         {"nested": CfgSectionValue({"reps": DirectValue(10)})},
     )
@@ -791,7 +760,7 @@ def test_same_tick_edits_materialize_schema_once_at_form_boundary(
 def test_validity_feedback_stays_synchronous_while_schema_is_coalesced(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"value": ScalarSpec(label="Value", type=int, required=True)},
         {"value": DirectValue(1)},
     )
@@ -825,7 +794,7 @@ def test_validity_feedback_stays_synchronous_while_schema_is_coalesced(qapp, ctr
 def test_detach_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"value": ScalarSpec(label="Value", type=int)},
         {"value": DirectValue(1)},
     )
@@ -858,7 +827,7 @@ def test_detach_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
 def test_close_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"value": ScalarSpec(label="Value", type=int)},
         {"value": DirectValue(1)},
     )
@@ -894,13 +863,13 @@ def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
     """Attach/detach never registers an EventBus subscription."""
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
         {"freq": DirectValue(6000.0)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
-    _attach(w, schema, ctrl)  # re-attach swaps models cleanly
+    attach_draft(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)  # re-attach swaps models cleanly
 
     bus = ctrl.get_bus.return_value
     assert bus._subs == {} or all(not subs for subs in bus._subs.values())
@@ -909,31 +878,31 @@ def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
 def test_read_schema_returns_cfg_schema(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(10)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     out = w.read_schema()
     assert isinstance(out, CfgSchema)
     assert out.spec is schema.spec
 
 
 def test_read_values_does_not_mutate_original(qapp, ctrl):
-    from qtpy.QtWidgets import QSpinBox  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(100)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
-    spin = w.findChild(QSpinBox)
-    assert spin is not None
-    spin.setValue(999)
+    entry = w.findChild(QLineEdit)
+    assert entry is not None
+    entry.setText("999")
 
     out = w.read_values()
     assert out.fields["reps"].value == 999  # type: ignore[union-attr]
@@ -943,12 +912,12 @@ def test_read_values_does_not_mutate_original(qapp, ctrl):
 def test_populate_sweep_field_round_trip(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=5.8, stop=6.2, expts=201)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     out = w.read_values()
 
     sv = out.fields["f"]
@@ -960,11 +929,11 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
 
 
 def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
-    from qtpy.QtWidgets import QLabel, QSizePolicy
+    from qtpy.QtWidgets import QLabel, QLineEdit, QSizePolicy
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget
 
-    schema = _schema(
+    schema = section_schema(
         {
             "f": CenteredSweepSpec(
                 label="Freq",
@@ -976,19 +945,20 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
         {"f": CenteredSweepValue(center=0.0, span=100.0, expts=201)},
     )
     w = CfgFormWidget()
-    model = _attach(w, schema, ctrl)
+    model = attach_draft(w, schema, ctrl)
     sweep_widget = w.findChild(CenteredSweepWidget)
     assert sweep_widget is not None
 
     field = cast(CenteredSweepField, model.fields["f"])
     assert field.center_field.spec.editable is False
-    assert sweep_widget._center_widget.isEnabled() is False
-    for value_widget in (
-        sweep_widget._center_widget,
-        sweep_widget._span,
-        sweep_widget._expts,
-        sweep_widget._step,
-    ):
+    span_input = sweep_widget.findChild(QLineEdit, "span")
+    points_input = sweep_widget.findChild(QLineEdit, "expts")
+    assert span_input is not None
+    assert points_input is not None
+    center_input = sweep_widget.findChild(QLineEdit)
+    assert center_input is not None
+    assert not center_input.isEnabled()
+    for value_widget in sweep_widget.findChildren(QLineEdit):
         assert (
             value_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
         )
@@ -1007,34 +977,37 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
     qapp.processEvents()
     assert abs(center_cell.width() - span_cell.width()) <= 1
 
-    sweep_widget._span.setValue(120.0)
-    sweep_widget._expts.setValue(121)
+    span_input.setText("120.0")
+    points_input.setText("121")
     out = w.read_values()
 
     sv = out.fields["f"]
     assert isinstance(sv, CenteredSweepValue)
     assert sv.center == pytest.approx(0.0)
-    assert sv.span == pytest.approx(120.0)
-    assert sv.expts == 121
+    assert sv.span == DirectValue(120.0, raw="120.0")
+    assert sv.expts == DirectValue(121, raw="121")
     assert sv.step == pytest.approx(1.0)
 
-    sweep_widget._span.setValue(0.0)
-    out = w.read_values()
-    sv = out.fields["f"]
+    span_input.setText("0.0")
+    sv = w.read_values().fields["f"]
     assert isinstance(sv, CenteredSweepValue)
-    assert sv.span == pytest.approx(120.0)
-    assert sweep_widget._span.value() == pytest.approx(120.0)
+    assert isinstance(sv.span, DirectValue)
+    assert sv.span.value is None
+    assert sv.span.raw == "0.0"
+    assert sv.span.error is not None
+    assert span_input.text() == "0.0"
+    assert not field.is_valid()
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     out = w.read_values()
 
     sv = out.fields["f"]
@@ -1043,41 +1016,47 @@ def test_populate_sweep_field_step_preserved(qapp, ctrl):
 
 
 def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
-    sweep_widget._step.setValue(0.2)
+    entry = sweep_widget.findChild(QLineEdit, "step")
+    assert entry is not None
+    entry.setText("0.2")
     out = w.read_values()
     sv = out.fields["f"]
     assert isinstance(sv, SweepValue)
     assert sv.expts == 6
     assert sv.stop == pytest.approx(1.0)
-    assert sv.step == pytest.approx(0.2)
+    assert sv.step == DirectValue(0.2, raw="0.2")
 
 
 def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
-    sweep_widget._expts.setValue(5)
+    entry = sweep_widget.findChild(QLineEdit, "expts")
+    assert entry is not None
+    entry.setText("5")
     out = w.read_values()
     sv = out.fields["f"]
     assert isinstance(sv, SweepValue)
@@ -1089,12 +1068,12 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
-    schema = _schema(
+    schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
@@ -1111,7 +1090,7 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
 def test_populate_nested_section_round_trip(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {
             "inner": CfgSectionSpec(
                 fields={"gain": ScalarSpec(label="Gain", type=float)}
@@ -1120,7 +1099,7 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
         {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     out = w.read_values()
 
     inner = out.fields["inner"]
@@ -1132,7 +1111,7 @@ def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
     from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {
             "inner": CfgSectionSpec(
                 label="Inner",
@@ -1142,7 +1121,7 @@ def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
         {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     # Sole tree: inner section is a QTreeWidgetItem header, not a QLabel with "<b>Inner</b>"
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
@@ -1180,7 +1159,7 @@ def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
         "decay": ScalarSpec(label="Decay", type=float),
         "manual_value": ScalarSpec(label="Manual", type=float),
     }
-    schema = _schema(
+    schema = section_schema(
         {
             "search": ChoiceSectionSpec(
                 label="Search",
@@ -1215,7 +1194,7 @@ def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    model = _attach(w, schema, ctrl)
+    model = attach_draft(w, schema, ctrl)
 
     paths = set(w.decoration_paths())
     assert "search.mode" in paths
@@ -1247,7 +1226,7 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
         "half_width": ScalarSpec(label="Half width", type=float),
         "manual_value": ScalarSpec(label="Manual", type=float),
     }
-    schema = _schema(
+    schema = section_schema(
         {
             "search": ChoiceSectionSpec(
                 label="Search",
@@ -1282,7 +1261,7 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
     from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 
     w = CfgFormWidget()
-    model = _attach(w, schema, ctrl)
+    model = attach_draft(w, schema, ctrl)
     root_widget = w._root_widget
     assert isinstance(root_widget, TreeCfgWidget)
     # Choice decoration paths should update section-locally and keep widget instance
@@ -1327,7 +1306,7 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
         "half_width": ScalarSpec(label="Half width", type=float),
         "manual_value": ScalarSpec(label="Manual", type=float),
     }
-    schema = _schema(
+    schema = section_schema(
         {
             "search": ChoiceSectionSpec(
                 fields=fields,
@@ -1357,7 +1336,7 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
         },
     )
     form = CfgFormWidget()
-    model = _attach(form, schema, ctrl)
+    model = attach_draft(form, schema, ctrl)
     original_root = form._root_widget
     assert isinstance(original_root, TreeCfgWidget)
     monkeypatch.setattr(original_root, "refresh_section", lambda _path: False)
@@ -1399,7 +1378,7 @@ def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
                 return FieldDecorationPatch(badge=self._badge)
             return None
 
-    schema = _schema(
+    schema = section_schema(
         {
             "group": CfgSectionSpec(
                 label="Group",
@@ -1413,7 +1392,7 @@ def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     root_widget = w._root_widget
     assert isinstance(root_widget, TreeCfgWidget)
     # Capture unrelated leaf before decoration change
@@ -1447,7 +1426,7 @@ def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl)
                 return FieldDecorationPatch(tooltip="Provider tooltip")
             return None
 
-    schema = _schema(
+    schema = section_schema(
         {
             "gain": ScalarSpec(
                 label="Gain",
@@ -1462,7 +1441,7 @@ def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl)
         },
     )
     w = CfgFormWidget(decoration_provider=TooltipProvider())
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     assert w.decoration_for_path("gain").tooltip == "Provider tooltip"
     assert w.decoration_for_path("window").tooltip == "Sweep tooltip"
@@ -1514,12 +1493,12 @@ def test_sweep_edge_decoration_disables_only_that_edge(qapp, ctrl):
                 )
             return None
 
-    schema = _schema(
+    schema = section_schema(
         {"window": SweepSpec(label="Window")},
         {"window": SweepValue(start=0.0, stop=10.0, expts=21)},
     )
     w = CfgFormWidget(decoration_provider=StopGeneratedProvider())
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
@@ -1563,7 +1542,7 @@ def test_choice_section_unknown_selector_value_fast_fails(qapp, ctrl):
         "auto_gain": ScalarSpec(label="Auto gain", type=float),
         "manual_gain": ScalarSpec(label="Manual gain", type=float),
     }
-    schema = _schema(
+    schema = section_schema(
         {
             "search": ChoiceSectionSpec(
                 label="Search",
@@ -1595,7 +1574,7 @@ def test_choice_section_unknown_selector_value_fast_fails(qapp, ctrl):
     )
 
     with pytest.raises(ValueError, match="unknown value 'unknown'"):
-        _attach(CfgFormWidget(), schema, ctrl)
+        attach_draft(CfgFormWidget(), schema, ctrl)
 
 
 def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
@@ -1604,7 +1583,7 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
     from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    schema = _schema(
+    schema = section_schema(
         {
             "type": LiteralSpec("pulse", label="Type"),
             # a non-type/style LiteralSpec: the lock_literal scenario
@@ -1622,7 +1601,7 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     # Sole tree: hidden literals mean no QTreeWidgetItem for those paths
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
@@ -1671,12 +1650,12 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
                 )
             return None
 
-    schema = _schema(
+    schema = section_schema(
         {"freq": LiteralSpec(0.0, label="Freq")},
         {},
     )
     w = CfgFormWidget(decoration_provider=RevealLiteralProvider())
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     # Sole tree: revealed literal appears as a tree item with generated badge, not ElidedLabel
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
@@ -1717,7 +1696,7 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
             "gain": ScalarSpec(label="Gain", type=float),
         },
     )
-    schema = _schema(
+    schema = section_schema(
         {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[custom_spec])},
         {
             "pulse": ReferenceValue(
@@ -1727,7 +1706,7 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
         },
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     w.show()
 
     ref_widget = w.findChild(ReferenceWidget)
@@ -1769,7 +1748,7 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
             "sigma": ScalarSpec(label="Sigma", type=float),
         },
     )
-    schema = _schema(
+    schema = section_schema(
         {
             "waveform": ReferenceSpec(
                 kind="waveform", label="Waveform", allowed=[custom_spec]
@@ -1783,7 +1762,7 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
@@ -1803,7 +1782,7 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
         label="Long Custom Module Name",
         fields={"gain": ScalarSpec(label="Gain", type=float)},
     )
-    schema = _schema(
+    schema = section_schema(
         {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[custom_spec])},
         {
             "pulse": ReferenceValue(
@@ -1814,7 +1793,7 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
     )
     w = CfgFormWidget()
     w.resize(520, 480)
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     tree = w._root_widget
     assert isinstance(tree, TreeCfgWidget)
@@ -1847,7 +1826,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
         ),
     )
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     out = w.read_values()
 
     mod = out.fields["mod"]
@@ -1866,7 +1845,7 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     schema = FakeFreqAdapter().make_default_cfg(ctx)
 
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     out = w.read_values()
 
     for key in ("reps", "rounds", "sweep", "modules"):
@@ -1889,7 +1868,7 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from typing import Any, cast
 
-    from qtpy.QtWidgets import QDoubleSpinBox
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.resources.context import ModuleLibrary
@@ -1920,7 +1899,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     )
 
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     w.show()
 
     ref_widget = w.findChild(ReferenceWidget)
@@ -1934,10 +1913,9 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert ref_widget._combo.currentText() == "Lib: my_pulse"
     assert cast(ReferenceField, ref_widget._field).is_modified() is False
 
-    # 2. Simulate user edits the inner value via spinbox (leaf widget in tree, not inside ReferenceWidget)
-    spin = w.findChild(QDoubleSpinBox)
-    assert spin is not None
-    spin.setValue(8000.0)
+    # Edit the displayed library frequency through its text input.
+    entry = next(w for w in w.findChildren(QLineEdit) if w.text() == "7000.0")
+    entry.setText("8000.0")
 
     # Verify is_modified is True and combobox text has (modified) suffix
     assert cast(ReferenceField, ref_widget._field).is_modified() is True
@@ -2020,7 +1998,7 @@ def test_optional_module_ref_renders_none_option(qapp, ctrl):
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     module_widgets = w.findChildren(ReferenceWidget)
     assert len(module_widgets) >= 1
@@ -2037,7 +2015,7 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
 
     module_widgets = w.findChildren(ReferenceWidget)
     mw = module_widgets[0]
@@ -2104,7 +2082,7 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
             "gain": ScalarSpec(label="Gain", type=float),
         },
     )
-    schema = _schema(
+    schema = section_schema(
         {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[pulse_spec])},
         {
             "pulse": ReferenceValue(
@@ -2118,7 +2096,7 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
     ctrl.get_current_ml.return_value = ModuleLibrary()
 
     w = CfgFormWidget()
-    _attach(w, schema, ctrl)
+    attach_draft(w, schema, ctrl)
     w.show()
 
     ref_widget = w.findChild(ReferenceWidget)
@@ -2158,19 +2136,19 @@ def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
     lib_spec, lib_val = module_cfg_to_value(
         {"type": "readout/direct", "ro_freq": 7000.0}
     )
-    schema_lib = _schema(
+    schema_lib = section_schema(
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Mod")},
         {"mod": ReferenceValue(chosen_key="lib_ro", value=lib_val)},
     )
     form_lib = CfgFormWidget()
-    _attach(form_lib, schema_lib, ctrl)
+    attach_draft(form_lib, schema_lib, ctrl)
     root_lib = form_lib._root_widget
     assert isinstance(root_lib, TreeCfgWidget)
     item_lib = _ref_item(root_lib, "mod")
     assert item_lib.isExpanded() is False, "library reference should start collapsed"
 
     # Custom case: same shape but custom key
-    schema_custom = _schema(
+    schema_custom = section_schema(
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Mod")},
         {
             "mod": ReferenceValue(
@@ -2180,7 +2158,7 @@ def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
         },
     )
     form_custom = CfgFormWidget()
-    _attach(form_custom, schema_custom, ctrl)
+    attach_draft(form_custom, schema_custom, ctrl)
     root_custom = form_custom._root_widget
     assert isinstance(root_custom, TreeCfgWidget)
     item_custom = _ref_item(root_custom, "mod")
@@ -2201,12 +2179,12 @@ def test_reference_identity_change_reapplies_folding(qapp, ctrl):
     lib_spec, lib_val = module_cfg_to_value(
         {"type": "readout/direct", "ro_freq": 7000.0}
     )
-    schema = _schema(
+    schema = section_schema(
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Mod")},
         {"mod": ReferenceValue(chosen_key="lib_ro", value=lib_val)},
     )
     form = CfgFormWidget()
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
     item = _ref_item(root, "mod")
@@ -2236,7 +2214,7 @@ def test_disabled_optional_reference_collapsed_and_whole_row_click_does_not_expa
         label="Inner",
         fields={"ch": ScalarSpec(label="Ch", type=int)},
     )
-    schema = _schema(
+    schema = section_schema(
         {
             "ref": ReferenceSpec(
                 kind="module", allowed=[inner_spec], label="Ref", optional=True
@@ -2250,7 +2228,7 @@ def test_disabled_optional_reference_collapsed_and_whole_row_click_does_not_expa
         },
     )
     form = CfgFormWidget()
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
     item = _ref_item(root, "ref")
@@ -2311,7 +2289,7 @@ def test_optional_reference_initially_disabled_starts_collapsed_and_non_foldable
         value=CfgSectionValue(fields={"reps": DirectValue(10)}),
     )
     form = CfgFormWidget()
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
     item = _ref_item(root, "ref")
@@ -2344,7 +2322,7 @@ def test_singleton_nested_section_elided_and_multi_child_distinct(qapp, ctrl):
         },
     )
     # Singleton case
-    schema_single = _schema(
+    schema_single = section_schema(
         {"ref": ReferenceSpec(kind="module", allowed=[singleton_outer], label="Ref")},
         {
             "ref": ReferenceValue(
@@ -2360,7 +2338,7 @@ def test_singleton_nested_section_elided_and_multi_child_distinct(qapp, ctrl):
         },
     )
     form_single = CfgFormWidget()
-    _attach(form_single, schema_single, ctrl)
+    attach_draft(form_single, schema_single, ctrl)
     root_single = form_single._root_widget
     assert isinstance(root_single, TreeCfgWidget)
     ref_item_single = _ref_item(root_single, "ref")
@@ -2389,7 +2367,7 @@ def test_singleton_nested_section_elided_and_multi_child_distinct(qapp, ctrl):
     assert isinstance(ref_val, ReferenceValue)
     assert ref_val.value.fields["inner"].fields["gain"].value == pytest.approx(0.5)  # type: ignore[union-attr]
     # Multi-child case should keep distinct structure (wrapper row present)
-    schema_multi = _schema(
+    schema_multi = section_schema(
         {"ref": ReferenceSpec(kind="module", allowed=[multi_outer], label="Ref")},
         {
             "ref": ReferenceValue(
@@ -2406,7 +2384,7 @@ def test_singleton_nested_section_elided_and_multi_child_distinct(qapp, ctrl):
         },
     )
     form_multi = CfgFormWidget()
-    _attach(form_multi, schema_multi, ctrl)
+    attach_draft(form_multi, schema_multi, ctrl)
     root_multi = form_multi._root_widget
     assert isinstance(root_multi, TreeCfgWidget)
     ref_item_multi = _ref_item(root_multi, "ref")
@@ -2438,7 +2416,7 @@ def test_singleton_elision_does_not_hide_editable_reference_field(qapp, ctrl):
         label="Outer",
         fields={"nested_ref": nested_ref_spec},
     )
-    schema = _schema(
+    schema = section_schema(
         {"ref": ReferenceSpec(kind="module", allowed=[outer_with_ref], label="Ref")},
         {
             "ref": ReferenceValue(
@@ -2455,7 +2433,7 @@ def test_singleton_elision_does_not_hide_editable_reference_field(qapp, ctrl):
         },
     )
     form = CfgFormWidget()
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
     # The singleton child is ReferenceField, not SectionField -> should NOT elide
@@ -2479,7 +2457,7 @@ def test_elided_singleton_survives_decoration_provider_refresh(qapp, ctrl):
         },
     )
     singleton_outer = CfgSectionSpec(label="Outer", fields={"inner": inner})
-    schema = _schema(
+    schema = section_schema(
         {"ref": ReferenceSpec(kind="module", allowed=[singleton_outer], label="Ref")},
         {
             "ref": ReferenceValue(
@@ -2495,7 +2473,7 @@ def test_elided_singleton_survives_decoration_provider_refresh(qapp, ctrl):
         },
     )
     form = CfgFormWidget()
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
     # Initially elided
@@ -2559,7 +2537,7 @@ def test_singleton_wrapper_with_disabled_decoration_not_elided(qapp, ctrl):
         },
     )
     singleton_outer = CfgSectionSpec(label="Outer", fields={"inner": inner})
-    schema = _schema(
+    schema = section_schema(
         {"ref": ReferenceSpec(kind="module", allowed=[singleton_outer], label="Ref")},
         {
             "ref": ReferenceValue(
@@ -2584,7 +2562,7 @@ def test_singleton_wrapper_with_disabled_decoration_not_elided(qapp, ctrl):
             return None
 
     form = CfgFormWidget(decoration_provider=DisabledWrapperProvider())
-    _attach(form, schema, ctrl)
+    attach_draft(form, schema, ctrl)
     root = form._root_widget
     assert isinstance(root, TreeCfgWidget)
     # Wrapper should NOT be elided because it has non-neutral decoration

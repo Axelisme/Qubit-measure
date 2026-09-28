@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     DirectValue,
@@ -14,10 +15,13 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.gui.cfg.binding import (
+    AgentSweepKind,
+    AgentSweepTarget,
     CfgDraft,
     LegacySettablePathError,
     SettablePathError,
     SettableTargetKind,
+    SweepField,
 )
 
 from ._fakes import BindingPorts
@@ -107,6 +111,95 @@ def test_sweep_edges_use_canonical_rules() -> None:
     assert draft.resolve_target("sweep.step").get_value() == pytest.approx(2.0)
     with pytest.raises(SettablePathError, match="integer"):
         draft.set_target("sweep.expts", 2.0)
+
+
+def test_agent_whole_sweep_is_normalized_without_changing_gui_leaf_grammar() -> None:
+    draft = _mixed_draft()
+    changes: list[object] = []
+    draft.on_change.connect(lambda: changes.append(draft.snapshot().value))
+    target = draft.resolve_agent_target("sweep")
+    assert isinstance(target, AgentSweepTarget)
+    assert target.path == "sweep" and target.kind is AgentSweepKind.SWEEP
+    actual = target.set_value({"start": 2.0, "stop": 8.0, "step": 2.2})
+    assert actual.expts == 4
+    assert actual.step == pytest.approx(2.0)
+    assert len(changes) == 1
+    assert draft.resolve_target("sweep.step").get_value() == pytest.approx(2.0)
+    assert "sweep" not in [item.path for item in draft.iter_settable_targets()]
+    before = draft.snapshot().value
+    with pytest.raises(SettablePathError, match="conflict"):
+        target.set_value({"start": 2.0, "stop": 8.0, "step": 1.0, "expts": 7})
+    assert draft.snapshot().value == before
+    with pytest.raises(SettablePathError, match="whole sweep"):
+        draft.resolve_agent_target("sweep.start")
+    draft.close()
+
+
+def test_agent_expression_endpoint_and_step_use_resolved_bounds_before_commit() -> None:
+    ports = BindingPorts()
+    ports.expressions["md_x"] = 2.0
+    spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
+    draft = CfgDraft(
+        CfgSchema(spec, make_default_value(spec)),
+        evaluate_expression=ports.evaluate,
+        provide_options=ports.provide,
+        references=ports,
+    )
+    sweep = draft.root.fields["sweep"]
+    assert isinstance(sweep, SweepField)
+    actual = sweep.set_agent_value(
+        {"start": EvalValue("md_x"), "stop": 8.0, "step": 2.0}
+    )
+    assert isinstance(actual.start, EvalValue)
+    assert actual.start.resolved == 2.0
+    assert actual.expts == 4 and actual.step == pytest.approx(2.0)
+    assert draft.resolve_agent_target("sweep").get_value() == actual
+    before = draft.snapshot().value
+    with pytest.raises((SettablePathError, TypeError, ValueError)):
+        sweep.set_agent_value({"start": EvalValue("missing"), "stop": 8.0, "step": 2.0})
+    assert draft.snapshot().value == before
+    draft.close()
+
+
+def test_agent_centered_sweep_accepts_locked_span_but_rejects_center() -> None:
+    draft = _draft(
+        CfgSectionSpec(fields={"centered": CenteredSweepSpec(locked_center=0.5)})
+    )
+    target = draft.resolve_agent_target("centered")
+    assert isinstance(target, AgentSweepTarget)
+    assert target.kind is AgentSweepKind.CENTERED_SWEEP
+    actual = target.set_value({"span": 4.0, "step": 2.0})
+    assert isinstance(actual, CenteredSweepValue)
+    assert actual.center == 0.5
+    assert actual.span == 4.0
+    assert actual.expts == 3 and actual.step == pytest.approx(2.0)
+    before = draft.snapshot().value
+    with pytest.raises(SettablePathError, match="center is locked"):
+        target.set_value({"center": 0.5, "span": 8.0, "expts": 5})
+    assert draft.snapshot().value == before
+    with pytest.raises(SettablePathError, match="missing expts or step"):
+        target.set_value({"span": 4.0})
+    assert draft.snapshot().value == before
+    draft.close()
+
+
+def test_sweep_target_observes_unfinished_text_and_typed_edit_recovers() -> None:
+    draft = _mixed_draft()
+    sweep = draft.root.fields["sweep"]
+    assert isinstance(sweep, SweepField)
+    sweep.set_text("expts", "1e")
+    invalid = draft.resolve_target("sweep.expts").get_value()
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == "1e" and invalid.value is None
+    before = draft.snapshot()
+    with pytest.raises(SettablePathError):
+        draft.set_target("sweep.expts", 2.5)
+    assert draft.snapshot().value == before.value
+    draft.set_target("sweep.expts", 5)
+    assert draft.resolve_target("sweep.expts").get_value() == 5
+    assert sweep.is_valid()
+    assert invalid.raw == "1e" and invalid.value is None
+    draft.close()
 
 
 def test_reference_bare_label_is_normalized_and_legacy_aliases_do_not_mutate() -> None:

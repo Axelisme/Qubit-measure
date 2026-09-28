@@ -32,6 +32,8 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+
 
 def make_ctrl():
     ctrl = MagicMock()
@@ -97,7 +99,7 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         thr: float = 0.5
 
     analysis_snap = dataclasses.replace(analysis_snap, params=P())
-    return TabSnapshot(
+    snapshot = TabSnapshot(
         adapter_name="fake",
         cfg_schema=schema,
         tab_id=tab_id,
@@ -123,6 +125,7 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
             data=data_path, analysis_image=image, post_analysis_image=image
         ),
     )
+    return with_artifacts(snapshot)
 
 
 @pytest.fixture

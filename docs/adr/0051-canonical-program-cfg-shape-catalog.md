@@ -7,7 +7,7 @@ status: accepted
 **狀態：** accepted（2026-07-11）。
 **關聯：** [[0067]]、[[0045]]、[[0046]]、[[0050]]。
 
-> 現行定位：跨 owner 分工見 [[0065]]。本篇 `gui.measure_cfg` 路徑已過時；現行 catalog／materializer owner 是 `experiment.cfg_editing`，app normalization 尚未收斂。
+> 現行定位：跨 owner 分工見 [[0065]]。本篇舊路徑已過時；現行 catalog／materializer owner 是 `experiment.cfg_editing`，app normalization 尚未收斂。
 
 ## 背景
 
@@ -22,7 +22,7 @@ shape 漂移。
 
 - closed catalog 固定列出七種 module 與六種 waveform discriminator、label、fresh spec factory；
 - catalog 不做 runtime registration；模組本身只 import `zcu_tools.gui.cfg` 與同 package 的 specs，
-  不 import program/v2、app、session、Qt 或 `resources`（原 `meta_tool`）。package 位於
+  不 import program/v2、app、session、Qt 或 `resources`（資源家族）。package 位於
   `experiment` 之下，import 時會載入 `experiment` package 的 base 依賴（見 [[0065]]）；test 以顯式 runtime cfg class 集合驗 closed discriminator parity；
 - 每次 factory call 建立 deep-fresh Spec tree，包括 nested section、scalar choices 與
   `ReferenceSpec.allowed` mutable containers；

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-27 — 局部術語與文件 owner 分流
+**Last updated:** 2026-09-29 — 局部術語與文件 owner 分流
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -119,17 +119,18 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   presentation without selecting a subtab; Analysis remains an explicit user
   selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
-  action row放在`Measurement data`card之前，同時擁有capability-driven artifact rows、
-  high-contrast status rendering and the tab-local status lifecycle derived from
-  result availability, path/comment edits and true terminal save outcomes (not
-  persisted across process), with figure-gated save enablement while status still
-  tracks result lifecycle. The center owns the saveability decision and the ordered
-  Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
-  successes); tracker/invariant failures Fast Fail and operational failures are
-  presented centrally, and async data completion is routed to the center. The center
-  also owns the tab-local unsaved-data decision; `MainWindow` consults it before
-  user-triggered tab/app closes, combines app-close data-loss and active-operation
-  risks into one confirmation, and keeps programmatic RPC shutdown non-interactive.
+  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現各artifact的
+  status、saveability與草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
+  `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
+  Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
+  都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
+  Save All由SaveControl/SaveService選擇可存項目，依analysis→post→data順序執行，
+  使用單一operation並Fast Fail，不回滾已完成的存檔。Qt按鈕不再編排各項存檔。
+  AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
+  Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
+  GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前
+  查詢其投影，並將app關閉的資料流失與active-operation風險合併確認。
+  Programmatic RPC shutdown不彈互動式確認。
   Save All updates that center in place: terminal status updates do not replace the Data
   pane or its widgets, and the data-path editor retains focus, cursor and selection.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
@@ -231,7 +232,9 @@ previous canonical pane for failure recovery; success shows the new pane's figur
 and draft, failure/cancel restores the retained pane (primary failure restores
 primary then post). Save/Guide show a placeholder and never borrow another pane's
 figure. Local analyze/post/save-path edits keep synchronous State commit timing
-but have no Qt reaction.
+but have no Qt reaction. Explicit image destinations committed by a save command
+publish a separate save-draft fact. The coordinator projects those State paths
+into open editors before export, including when export subsequently fails.
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
@@ -259,7 +262,7 @@ Key ownership rules:
 - `OperationGate` is the app-local thin wrapper over the shared
   `RunBlocksHardwareGate` hardware exclusion policy。active lease另投影captured
   origin、domain note與duration；`state.hardware_gate`是read-only internal RPC，
-  `gui_overview.hardware_gate.active`提供MCP orientation snapshot。
+  MCP 需要時透過 live catalog 讀取。
 - `OperationHandles` owns async handles, cancellation hooks, and feedback/stop
   channel state.
 - `OperationRunner` owns the generic operation lifecycle; each operation supplies
@@ -281,7 +284,7 @@ Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消
 catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
 
 Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
-共同阻止 reload，包含非 handle-backed data save。共用 `ExperimentAccess` 阻止 local/remote
+共同阻止 reload，包含 handle-backed data及artifact batch save。共用 `ExperimentAccess` 阻止 local/remote
 experiment driving facets 在切換時重入。確認等待期間 tab identity、resource versions 或 run
 result 改變會使確認失效。重新建立的 tabs 使用新 id，舊 RPC locator 不可沿用。
 
@@ -301,7 +304,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
-3. `GuardService` validates static preconditions and materializes a permit.
+3. `GuardService` validates static preconditions and freezes a permit containing
+   cached resolved cfg and detached State-owned device settings. Missing observed
+   settings for a live device reject the permit without querying hardware.
+   `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
 4. The operation policy builds worker thunks with the needed ambient scopes:
    plotting, progress, `Schedule` cancellation, and device setup cancellation.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
@@ -382,6 +388,12 @@ bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
 
+`CfgEditorService` 在 active draft 變更時同步發布完整 `CfgSchema`，composition 將 tab owner
+投影到 `State.cfg_schema` 並更新整份 cfg 的 resource revision。Invalid raw 同樣發布，不依賴
+viewer 是否 attach 或 Qt timer 是否執行。Widget 只輸入與渲染，不重送 schema 到 State。
+Inspect/writeback owner 不寫 tab cfg；prepared replacement 保留原有 owner State swap 邊界。
+Run permit 使用此 snapshot 的 cached resolved 值，不重新解析來源。
+
 CfgEditor在app seam解碼`ValueRef`，並以typed `CfgEdit` batch依序操作binding target。
 Batch維持fail-fast/non-atomic；只有reference shape edit列出前後path set，成功回final net diff，
 每筆成功edit仍各自bump version與觸發subscriber-aware lazy push。
@@ -391,9 +403,11 @@ The GUI uses a two-tree model:
 - Spec tree: static shape, labels, variants, literal locks, optional/ref rules.
 - Value tree: mutable draft data shown by the editor.
 
-`adapter.lowering.schema_to_raw_dict(schema, md, ml)` is the finished-cfg lowering
-boundary. `CfgSchema` 本身只保存 shared spec/value data。`EvalValue` resolves
-against current `MetaDict` when a field is set or lowered. `ValueRef` is
+`adapter.lowering.schema_to_resolved_dict(schema)` freezes cached values for Run;
+unresolved or invalid fields reject the entire cfg. Legal optional `None` remains
+valid. `schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
+non-Run consumers. `CfgSchema` 保存 shared spec/value data；`CfgDraft` 擁有 expression
+解析與 cached validity，Run 不重新讀取 `MetaDict` 或 `ModuleLibrary`。 `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
 
@@ -495,12 +509,16 @@ controlled fields.
 - Analyze and post-analyze use async handles but no hardware exclusion.
 - `OperationChannel` is the ordered cross-thread channel for terminal state,
   user messages, and Send & Stop.
-- `NotifyChannel` mirrors the same pattern for `gui_prompt_user`.
+- `NotifyChannel` mirrors the same pattern for the `notify.open` / `notify.await`
+  RPC prompt. `notify.await` bounds the consumer wait so MCP transport stays alive.
 - `FeedbackDockController` owns the docked feedback panel, target-tab
   resolution, and op-count plus agent-presence gate; `MainWindow` keeps the
   public render-view refresh façade.
-- Generic `operation.await` / `operation.poll` report only status and progress;
-  products such as figures or fit summaries are read through typed getters.
+- GUI domain owners project live run/analyze/device handles for `status`, including
+  GUI-started work. Shared `OperationHandles` own the wait channel; unknown or
+  evicted handles are errors to measure MCP, not finished operations. `wait`
+  reports status, progress and feedback but no result payload. Figures and fit
+  summaries are read through typed getters.
 
 Cancellation is operation-specific through the registered cancel hook. Run
 cancellation sets the operation `stop_event`; worker thunks expose it to
@@ -556,10 +574,10 @@ use `PredictorControlPort` for predictor load/query/compute. SoC/startup
 handlers remain on the app controller façade because they span project setup and
 connection policy rather than a single session-control domain.
 
-`zcu_tools.mcp.measure` is the agent-facing bridge: tool declarations,
-short-wait wrappers, diagnostics piggyback, operation-handle bookkeeping, stale
-guard baseline, and generated/override tool mapping. New GUI RPC methods that
-should be agent-accessible need MCP tool mapping and tests.
+`zcu_tools.mcp.measure` is the agent-facing bridge: fixed tool declarations,
+short waits, live catalog, and stale guard baseline. The GUI owns operation
+handles; MCP does not keep a second operation registry. New GUI RPC methods
+that should be agent-accessible need a live catalog policy and tests.
 
 ## Dialog Rules
 

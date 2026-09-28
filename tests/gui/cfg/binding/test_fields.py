@@ -24,6 +24,104 @@ from zcu_tools.gui.cfg.binding import (
 from ._fakes import BindingPorts
 
 
+def test_complex_scalar_expression_direct_input_and_invalid_recovery() -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Center", complex),
+        lambda expression: -1 + 2j,
+        ports.provide,
+        EvalValue("g_center"),
+    )
+    assert field.get_value() == EvalValue("g_center", resolved=-1 + 2j)
+    assert field.is_valid()
+    field.set_text("3-4j")
+    assert field.get_value() == DirectValue(3 - 4j, raw="3-4j")
+    field.set_text("3-")
+    assert not field.is_valid()
+    value = field.get_value()
+    assert isinstance(value, DirectValue)
+    assert value.value is None
+    assert value.raw == "3-"
+    field.set_text("1j")
+    assert field.get_value() == DirectValue(1j, raw="1j")
+    assert field.is_valid()
+
+
+@pytest.mark.parametrize(
+    ("type_", "text", "valid"),
+    [
+        (float, "nan", 2.5),
+        (float, "-inf", 2.5),
+        (complex, "(nan+2j)", 1 + 2j),
+        (complex, "(1+infj)", 1 + 2j),
+    ],
+)
+def test_scalar_nonfinite_direct_input_preserves_invalid_raw_and_recovers(
+    type_: type, text: str, valid: float | complex
+) -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Value", type_), ports.evaluate, ports.provide, DirectValue(valid)
+    )
+    field.set_text(text)
+    invalid = field.get_value()
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == text
+    assert invalid.value is None
+    assert invalid.error is not None and "finite" in invalid.error
+    assert not field.is_valid()
+    field.set_text(str(valid))
+    assert field.is_valid()
+    assert field.get_value() == DirectValue(valid, raw=str(valid))
+
+
+@pytest.mark.parametrize(
+    ("type_", "nonfinite", "valid"),
+    [
+        (float, float("nan"), 2.5),
+        (float, float("inf"), 2.5),
+        (complex, complex(float("nan"), 1), 1 + 2j),
+        (complex, complex(1, float("inf")), 1 + 2j),
+    ],
+)
+def test_scalar_nonfinite_expression_is_invalid_then_refreshes(
+    type_: type, nonfinite: float | complex, valid: float | complex
+) -> None:
+    ports = BindingPorts()
+    current = [nonfinite]
+    field = ScalarField(
+        ScalarSpec("Value", type_),
+        lambda expression: current[0],
+        ports.provide,
+        EvalValue("x"),
+    )
+    invalid = field.get_value()
+    assert isinstance(invalid, EvalValue)
+    assert invalid.expr == "x"
+    assert invalid.resolved is None
+    assert invalid.error is not None and "finite" in invalid.error
+    assert not field.is_valid()
+    current[0] = valid
+    field.refresh_expressions()
+    assert field.is_valid()
+    assert field.get_value() == EvalValue("x", resolved=valid)
+
+
+def test_complex_expression_cannot_enter_real_field() -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Frequency", float),
+        lambda expression: 1j,
+        ports.provide,
+        EvalValue("g_center"),
+    )
+    assert not field.is_valid()
+    value = field.get_value()
+    assert isinstance(value, EvalValue)
+    assert value.resolved is None
+    assert value.error
+
+
 def test_scalar_field_resolves_expressions_and_refreshes_snapshot() -> None:
     ports = BindingPorts()
     ports.expressions["freq"] = 5
@@ -38,6 +136,79 @@ def test_scalar_field_resolves_expressions_and_refreshes_snapshot() -> None:
     ports.expressions["freq"] = 7
     field.refresh_expressions()
     assert field.get_value() == EvalValue("freq", resolved=7.0)
+
+
+@pytest.mark.parametrize("expression", [False, True])
+def test_scalar_choice_error_survives_snapshot_until_model_refresh(expression) -> None:
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        raw_to_schema,
+        schema_to_raw,
+        validate_finished_cfg,
+    )
+    from zcu_tools.gui.cfg.binding import CfgDraft
+
+    ports = BindingPorts()
+    ports.expressions["level"] = 1.0
+    ports.options["levels"] = (1.0,)
+    schema = CfgSchema(
+        CfgSectionSpec(
+            fields={"level": ScalarSpec("Level", float, choices_source="levels")}
+        ),
+        CfgSectionValue(
+            fields={
+                "level": EvalValue("level")
+                if expression
+                else DirectValue(1.0, raw="1.00")
+            }
+        ),
+    )
+    draft = CfgDraft(
+        schema,
+        evaluate_expression=ports.evaluate,
+        provide_options=ports.provide,
+        references=ports,
+    )
+    try:
+        valid = draft.snapshot()
+        assert draft.is_valid()
+        ports.options["levels"] = (2.0,)
+        draft.refresh_options("levels")
+        invalid = draft.snapshot()
+        assert not draft.is_valid()
+        with pytest.raises(RuntimeError, match="level.*available option"):
+            validate_finished_cfg(invalid, resolve_reference=None)
+        value = invalid.value.fields["level"]
+        assert isinstance(value, (DirectValue, EvalValue))
+        assert value.validation_error is not None
+        assert (value.resolved if isinstance(value, EvalValue) else value.value) == 1.0
+
+        restored = raw_to_schema(invalid, schema_to_raw(invalid))
+        restored_value = restored.value.fields["level"]
+        assert isinstance(restored_value, (DirectValue, EvalValue))
+        assert restored_value.validation_error is None
+        reopened = CfgDraft(
+            restored,
+            evaluate_expression=ports.evaluate,
+            provide_options=ports.provide,
+            references=ports,
+        )
+        try:
+            assert not reopened.is_valid()
+            with pytest.raises(RuntimeError, match="level.*available option"):
+                validate_finished_cfg(reopened.snapshot(), resolve_reference=None)
+        finally:
+            reopened.close()
+        ports.options["levels"] = (1.0, 2.0)
+        draft.refresh_options("levels")
+        assert draft.is_valid()
+        recovered = draft.snapshot()
+        validate_finished_cfg(recovered, resolve_reference=None)
+        validate_finished_cfg(valid, resolve_reference=None)
+        with pytest.raises(RuntimeError, match="level.*available option"):
+            validate_finished_cfg(invalid, resolve_reference=None)
+    finally:
+        draft.close()
 
 
 def test_scalar_field_dynamic_options_drive_membership_and_observability() -> None:
@@ -68,6 +239,53 @@ def test_scalar_field_dynamic_options_drive_membership_and_observability() -> No
     assert not field.is_valid()
     changed.assert_called_once()
     validity_changed.assert_called_once_with(False)
+
+
+def test_direct_text_input_retains_invalid_raw_without_reusing_previous_value() -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Mixer", float, optional=True),
+        ports.evaluate,
+        ports.provide,
+        DirectValue(5.0),
+    )
+
+    field.set_text("1e")
+    value = field.get_value()
+    assert isinstance(value, DirectValue)
+    assert value.raw == "1e"
+    assert value.value is None
+    assert value.error
+    assert not field.is_valid()
+
+    field.set_text(" 1e2 ")
+    assert field.get_value() == DirectValue(100.0, raw=" 1e2 ")
+    assert field.is_valid()
+
+    field.set_text("")
+    assert field.get_value() == DirectValue(None, raw="")
+    assert field.is_valid()
+
+
+@pytest.mark.parametrize(
+    ("optional", "text", "expected"),
+    [(True, "  name  ", "name"), (True, "   ", None), (False, "  name  ", "  name  ")],
+)
+def test_direct_text_keeps_existing_string_input_semantics(
+    *, optional: bool, text: str, expected: str | None
+) -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Name", str, optional=optional),
+        ports.evaluate,
+        ports.provide,
+        DirectValue("initial"),
+    )
+
+    field.set_text(text)
+
+    assert field.get_value() == DirectValue(expected, raw=text)
+    assert field.is_valid()
 
 
 def test_scalar_field_optional_unset_remains_valid() -> None:
@@ -135,6 +353,25 @@ def test_scalar_field_rejects_wrong_runtime_type_before_mutation(
         field.set_value(value)
 
     assert field.get_value() == DirectValue(7)
+    changed.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("type_", "nonfinite", "valid"),
+    [(float, float("nan"), 2.0), (complex, complex(0, float("inf")), 1 + 2j)],
+)
+def test_nonfinite_typed_scalar_fails_before_mutation(
+    type_: type, nonfinite: float | complex, valid: float | complex
+) -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Value", type_), ports.evaluate, ports.provide, DirectValue(valid)
+    )
+    changed = MagicMock()
+    field.on_change.connect(changed)
+    with pytest.raises(ValueError, match="finite"):
+        field.set_value(DirectValue(nonfinite))
+    assert field.get_value() == DirectValue(valid)
     changed.assert_not_called()
 
 
@@ -348,6 +585,137 @@ def test_scalar_field_empty_dynamic_options_respect_required_and_optional_semant
 
     assert field.available_options() == expected_options
     assert field.is_valid() is expected_valid
+
+
+def test_sweep_resolves_initial_and_replacement_expression_bounds_before_step() -> None:
+    values = {"start": 1.0, "stop": 3.0}
+    initial = SweepValue(EvalValue("start"), EvalValue("stop"), 5)
+    field = SweepField(SweepSpec(), lambda expression: values[expression], initial)
+    try:
+        assert field.is_valid()
+        assert field.get_value().step == pytest.approx(0.5)
+        values["stop"] = 5.0
+        field.set_value(initial)
+        assert field.is_valid()
+        assert field.get_value().step == pytest.approx(1.0)
+        field.set_text("step", "1e")
+        unfinished = field.get_value()
+        field.set_value(unfinished)
+        assert field.get_value().step == unfinished.step
+        assert not field.is_valid()
+    finally:
+        field.teardown()
+
+
+def test_sweep_snapshot_preserves_incomplete_edge_and_recovers() -> None:
+    ports = BindingPorts()
+    field = SweepField(SweepSpec(), ports.evaluate, SweepValue(0.0, 1.0, 5))
+
+    field.start_field.set_text("1e")
+    invalid = field.get_value().start
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == "1e"
+    assert invalid.value is None
+    assert invalid.error is not None
+    assert not field.is_valid()
+
+    field.start_field.set_text("0.20")
+    recovered = field.get_value()
+    assert recovered.start == DirectValue(0.2, raw="0.20")
+    assert recovered.step == pytest.approx(0.2)
+    assert field.is_valid()
+    field.teardown()
+
+
+def test_centered_sweep_snapshot_preserves_incomplete_center_and_recovers() -> None:
+    ports = BindingPorts()
+    field = CenteredSweepField(
+        CenteredSweepSpec(), ports.evaluate, CenteredSweepValue(2.0, 4.0, 5)
+    )
+    field.center_field.set_text("-")
+    invalid = field.get_value().center
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == "-"
+    assert invalid.value is None
+    assert invalid.error is not None
+    assert not field.is_valid()
+
+    field.center_field.set_text("3.00")
+    recovered = field.get_value()
+    assert recovered.center == DirectValue(3.0, raw="3.00")
+    assert recovered.step == pytest.approx(1.0)
+    assert field.is_valid()
+    field.teardown()
+
+
+@pytest.mark.parametrize(
+    ("centered", "part", "bad", "good"),
+    [
+        (False, "expts", "1e", "005"),
+        (True, "expts", "0", "005"),
+        (False, "expts", "9" * 400, "005"),
+        (False, "step", "1e", "0.3"),
+        (True, "step", "-1", "0.3"),
+        (True, "span", "-1", "2.00"),
+        (True, "span", "0", "2.00"),
+    ],
+)
+def test_sweep_text_controls_keep_invalid_state_and_recover(centered, part, bad, good):
+    ports = BindingPorts()
+    field = (
+        CenteredSweepField(
+            CenteredSweepSpec(), ports.evaluate, CenteredSweepValue(2.0, 1.0, 5)
+        )
+        if centered
+        else SweepField(SweepSpec(), ports.evaluate, SweepValue(0.0, 1.0, 5))
+    )
+    field.set_text(part, bad)
+    invalid = field.get_value()
+    invalid_input = getattr(invalid, part)
+    assert isinstance(invalid_input, DirectValue)
+    assert invalid_input.raw == bad
+    assert invalid_input.value is None
+    assert invalid_input.error is not None
+    assert not field.is_valid()
+
+    field.set_text(part, good)
+    recovered = field.get_value()
+    recovered_input = getattr(recovered, part)
+    assert isinstance(recovered_input, DirectValue)
+    assert recovered_input.raw == good
+    assert recovered_input.error is None
+    assert field.is_valid()
+    assert getattr(invalid, part) == invalid_input
+    if part == "step":
+        assert recovered.expts == 4
+        assert recovered_input.value == pytest.approx(1.0 / 3.0)
+    field.teardown()
+
+
+@pytest.mark.parametrize("points", [0, 1.5, True])
+def test_typed_sweep_points_reject_invalid_values_without_mutation(points):
+    field = SweepField(SweepSpec(), BindingPorts().evaluate, SweepValue(0.0, 1.0, 5))
+    before = field.get_value()
+    with pytest.raises((TypeError, ValueError)):
+        field.update_expts(points)
+    assert field.get_value() == before
+    field.teardown()
+
+
+@pytest.mark.parametrize("text", ["nan", "inf", "-inf"])
+def test_nonfinite_sweep_edge_text_is_model_error_not_callback_failure(text):
+    field = SweepField(SweepSpec(), BindingPorts().evaluate, SweepValue(0.0, 1.0, 5))
+    field.start_field.set_text(text)
+    invalid = field.get_value().start
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == text
+    assert invalid.value is None
+    assert invalid.error is not None
+    assert not field.is_valid()
+    field.start_field.set_text("0.20")
+    assert field.is_valid()
+    assert field.get_value().step == pytest.approx(0.2)
+    field.teardown()
 
 
 def test_sweep_fields_keep_canonical_step_rules() -> None:

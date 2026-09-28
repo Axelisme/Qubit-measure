@@ -30,7 +30,7 @@ class InteractivePluginProvider(Protocol):
     """
 
     def make_interactive_plugin(
-        self, request: AnalyzeRequest[Any, Any]
+        self, request: AnalyzeRequest[Any, Any], /
     ) -> PluginDefinition[Any, Any]: ...
 
     def make_interactive_frontend(

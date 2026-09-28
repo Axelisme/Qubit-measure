@@ -35,6 +35,7 @@ class RecordingContext:
         value: float | None,
         unit: str,
         clone_from: str | None,
+        label: str | None,
     ) -> None:
         self._log.add(
             "context",
@@ -42,6 +43,7 @@ class RecordingContext:
             value=value,
             unit=unit,
             clone_from=clone_from,
+            label=label,
         )
 
     def get_context_labels(self) -> list[str]:
@@ -244,10 +246,17 @@ def test_context_control_facet_forwards_deliberate_context_contract() -> None:
 def test_context_control_new_context_without_bind_device_is_unbound() -> None:
     facet, log, _context, _device = _facet()
 
-    facet.new_context(clone_from="base")
+    facet.new_context(clone_from="base", label="copy")
 
     assert log.calls == [
-        call("context", "new_context", value=None, unit="none", clone_from="base"),
+        call(
+            "context",
+            "new_context",
+            value=None,
+            unit="none",
+            clone_from="base",
+            label="copy",
+        ),
     ]
 
 
@@ -259,5 +268,12 @@ def test_context_control_new_context_resolves_bound_device_unit_and_value() -> N
     assert log.calls == [
         call("device", "get_device_unit_strict", "flux"),
         call("device", "get_device_value_for_new_context", "flux"),
-        call("context", "new_context", value=0.005, unit="A", clone_from="base"),
+        call(
+            "context",
+            "new_context",
+            value=0.005,
+            unit="A",
+            clone_from="base",
+            label=None,
+        ),
     ]

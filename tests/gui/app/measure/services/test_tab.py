@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AnalysisMode,
+    ContextReadiness,
+    SessionEnv,
+)
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
@@ -34,7 +41,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             cfg_schema=MagicMock(),
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=MagicMock(), params=analyze_params),
-            save=SavePaneState(data_path_override="data.h5"),
+            save=SavePaneState(data_path_override="data.h5", comment="draft note"),
         ),
     )
     writeback = MagicMock()
@@ -53,6 +60,8 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert snapshot.analysis is not None
     assert snapshot.analysis.params is analyze_params
     assert snapshot.paths is not None and snapshot.paths.data.path == "data.h5"
+    assert snapshot.save is not None
+    assert asdict(snapshot.save)["comment"] == "draft note"
     assert state.get_tab("tab").analysis.params is analyze_params
 
 
@@ -209,3 +218,104 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
 
     with pytest.raises(RuntimeError, match="primary analyze result"):
         service.initialize_tab_post_analyze_params("tab")
+
+
+def test_tab_snapshot_loaded_artifacts_have_no_success_record() -> None:
+    state = _active_state()
+    adapter = MagicMock()
+    adapter.capabilities = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True
+    )
+    state.add_tab(
+        "tab",
+        Session(
+            adapter_name="fake",
+            adapter=adapter,
+            cfg_schema=MagicMock(),
+            save=SavePaneState(data_path_override="data.hdf5"),
+            analysis=AnalysisPaneState(image_path_override="analysis.png"),
+        ),
+    )
+    state.update_tab_loaded_result("tab", object(), "existing.hdf5")
+
+    snapshot = TabService(state, MagicMock(), MagicMock()).get_snapshot("tab")
+
+    assert snapshot.run is not None and snapshot.run.source_path == "existing.hdf5"
+    assert [(a.kind, a.status) for a in snapshot.artifacts] == [
+        (ArtifactKind.DATA, SaveStatus.NOT_SAVED),
+        (ArtifactKind.ANALYSIS, SaveStatus.NO_RESULT),
+        (ArtifactKind.POST_ANALYSIS, SaveStatus.NO_RESULT),
+    ]
+    data = snapshot.artifacts[0]
+    assert data.default_path == "data.hdf5"
+    assert data.is_saveable is True
+    assert data.last_saved_path is None
+
+
+def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift() -> None:
+    state = _active_state()
+    adapter = MagicMock()
+    adapter.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
+    state.add_tab(
+        "tab",
+        Session(
+            adapter_name="fake",
+            adapter=adapter,
+            cfg_schema=MagicMock(),
+            save=SavePaneState(data_path_override="data.hdf5"),
+        ),
+    )
+    state.update_tab_result("tab", object())
+    state.update_tab_comment("tab", "initial")
+    service = TabService(state, MagicMock(), MagicMock())
+    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
+
+    state.get_tab("tab").artifacts.started(ArtifactKind.DATA)
+    state.update_tab_comment("tab", "edited during save")
+    state.get_tab("tab").artifacts.succeeded(ArtifactKind.DATA, "data_1.hdf5")
+    data = service.get_snapshot("tab").artifacts[0]
+    assert data.status is SaveStatus.UNSAVED_CHANGES
+    assert data.default_path == "data.hdf5"
+    assert data.last_saved_path == "data_1.hdf5"
+
+    state.update_tab_comment("tab", "initial")
+    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.SAVED
+    state.update_tab_result("tab", object())
+    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.UNSAVED_CHANGES
+    state.update_tab_loaded_result("tab", object(), "imported.hdf5")
+    loaded = service.get_snapshot("tab").artifacts[0]
+    assert loaded.status is SaveStatus.NOT_SAVED
+    assert loaded.last_saved_path is None
+
+
+def test_artifact_failure_preserves_previous_success_but_does_not_mark_new_draft_saved() -> (
+    None
+):
+    state = _active_state()
+    adapter = MagicMock()
+    adapter.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
+    state.add_tab(
+        "tab",
+        Session(
+            adapter_name="fake",
+            adapter=adapter,
+            cfg_schema=MagicMock(),
+            save=SavePaneState(data_path_override="first.hdf5"),
+        ),
+    )
+    state.update_tab_result("tab", object())
+    service = TabService(state, MagicMock(), MagicMock())
+    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
+    tracker = state.get_tab("tab").artifacts
+    tracker.started(ArtifactKind.DATA)
+    tracker.succeeded(ArtifactKind.DATA, "first_1.hdf5")
+    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.SAVED
+
+    state.update_tab_data_path_override("tab", "next.hdf5")
+    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.UNSAVED_CHANGES
+    tracker.started(ArtifactKind.DATA)
+    tracker.failed(ArtifactKind.DATA)
+    after_failure = service.get_snapshot("tab").artifacts[0]
+    assert after_failure.status is SaveStatus.UNSAVED_CHANGES
+    assert after_failure.last_saved_path == "first_1.hdf5"
+    assert after_failure.default_path == "next.hdf5"

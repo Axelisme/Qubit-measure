@@ -102,7 +102,7 @@ class RunService:
         cancel_requested = threading.Event()
         adapter = permit.adapter
         request = permit.request
-        schema = permit.schema
+        raw_cfg = permit.raw_cfg
 
         def request_cancel() -> None:
             cancel_requested.set()
@@ -117,7 +117,7 @@ class RunService:
                 with progress_ambient(factory):
                     with schedule_stop_scope(stop_signal):
                         with device_setup_cancel_scope(stop_event):
-                            result = adapter.run(request, schema)
+                            result = adapter.run(request, raw_cfg)
                             stop_signal.raise_if_error()
                             return result
 
@@ -224,8 +224,8 @@ class RunService:
         Returns True when a live run token existed and was signalled (the request
         was issued), False when no run was in flight (a graceful no-op). This is
         NOT a claim that the worker has stopped: the worker self-judges 'cancelled'
-        and emits its terminal asynchronously (ADR-0066) — the true terminal is
-        observed via gui_op_wait/poll on the run handle.
+        and emits its terminal asynchronously (ADR-0019) — the true terminal is
+        observed via the GUI's operation.await RPC or the MCP wait(op) tool.
         """
         logger.info("cancel_run")
         # Async notification: set the operation's stop_event via the handle.

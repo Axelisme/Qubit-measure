@@ -20,6 +20,8 @@ from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
+from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
@@ -68,6 +70,7 @@ def _snapshot(
         AnalysisPaneSnapshot,
         PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
+        SavePaneSnapshot,
         TabPathsSnapshot,
     )
 
@@ -100,7 +103,7 @@ def _snapshot(
             override=None, path="/tmp/p.png" if has_post_analyze_result else None
         ),
     )
-    return TabSnapshot(
+    snapshot = TabSnapshot(
         adapter_name="ge",
         tab_id=tab_id,
         interaction=TabInteractionState(
@@ -122,8 +125,10 @@ def _snapshot(
         ),
         analysis=analysis_pane,
         post_analysis=post_analysis_pane,
+        save=SavePaneSnapshot(data_path=paths.data),
         paths=paths,
     )
+    return with_artifacts(snapshot)
 
 
 def test_post_tab_visible_only_for_post_analysis_adapter(qapp):

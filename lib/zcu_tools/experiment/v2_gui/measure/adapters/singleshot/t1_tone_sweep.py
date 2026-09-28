@@ -48,13 +48,14 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
+    EvalValue,
+    ScalarSpec,
     SweepValue,
+    resolved_direct_number,
 )
 
-from ._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
+from ._shared import readout_probe_freq, readout_probe_freq_range
 
 SsT1ToneSweepRunResult: TypeAlias = Any  # T1WithToneSweepResult (frozen domain)
 
@@ -96,7 +97,9 @@ class _SsT1ToneSweepBase(
         outer_key = cls.outer_key
         outer_label = cls.outer_label
         outer_default = deepcopy(cls.outer_default)
-        outer_expts = outer_default.expts
+        outer_expts = resolved_direct_number(outer_default.expts)
+        if not isinstance(outer_expts, int):
+            raise TypeError("Outer sweep default requires an integer point count")
         outer_sweep = (
             custom(
                 lambda ctx: readout_probe_freq_range(ctx, outer_expts),
@@ -134,6 +137,21 @@ class _SsT1ToneSweepBase(
                 ),
             )
             .sweep(outer_key, label=outer_label, default=outer_sweep)
+            .field(
+                "g_center",
+                spec=ScalarSpec("Ground center", complex),
+                default=EvalValue("g_center"),
+            )
+            .field(
+                "e_center",
+                spec=ScalarSpec("Excited center", complex),
+                default=EvalValue("e_center"),
+            )
+            .field(
+                "radius",
+                spec=ScalarSpec("Classification radius", float),
+                default=EvalValue("ge_radius"),
+            )
             .bool("uniform", label="Uniform (linear) sweep", default=True)
             .reps(1000)
             .rounds(10)
@@ -146,7 +164,7 @@ class _SsT1ToneSweepBase(
         # Pop ``uniform`` before lowering — it is a run-only flag.
         cfg_raw = dict(raw_cfg)
         cfg_raw.pop("uniform", None)
-        return req.ml.make_cfg(cfg_raw, T1WithToneSweepCfg)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def _uniform(self, raw_cfg: dict[str, object]) -> bool:
         value = raw_cfg.get("uniform", True)
@@ -154,16 +172,14 @@ class _SsT1ToneSweepBase(
             raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
         return value
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> SsT1ToneSweepRunResult:
-        # Override standard run: domain run needs GE centres + uniform kwarg.
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object]
+    ) -> SsT1ToneSweepRunResult:
+        # Uniform remains an explicit domain run option.
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        g_center, e_center, radius = read_ge_centers(req.md)
         uniform = self._uniform(raw_cfg)
-        return T1WithToneSweepExp().run(
-            soc, soccfg, cfg, g_center, e_center, radius, uniform=uniform
-        )
+        return T1WithToneSweepExp().run(soc, soccfg, cfg, uniform=uniform)
 
     def analyze(
         self, req: AnalyzeRequest[SsT1ToneSweepRunResult, NoAnalyzeParams]
@@ -202,11 +218,11 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
             "hardware."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
-            "if any is missing. Optionally reads 'confusion_matrix' (readout "
-            "correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
+            "calibration fails before hardware. Optionally reads 'confusion_matrix' "
+            "(readout correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
             "number) at analyze time; 't1' to seed the length sweep stop; "
             "'readout_f' or 'r_f' plus 'res_ch' seed the probe tone."
         ),
@@ -219,7 +235,8 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
             "No writeback — the rate landscape is read off the grid by eye."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. Keep the gain sweep coarse (the inner "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
+            "Keep the gain sweep coarse (the inner "
             "length sweep multiplies the run time). Provide 'ac_stark_coeff' "
             "for a photon-number x-axis. 'uniform=True' (default) uses a linear "
             "length sweep; set False to cluster points along the expected "
@@ -246,11 +263,11 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
             "Runs on real hardware."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; run fast-fails "
-            "if any is missing. Optionally reads 'confusion_matrix' (readout "
-            "correction) at analyze time; 't1' to seed the length sweep stop; "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
+            "calibration fails before hardware. Optionally reads 'confusion_matrix' "
+            "(readout correction) at analyze time; 't1' to seed the length sweep stop; "
             "'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the probe drive "
             "and frequency sweep. "
             "('ac_stark_coeff' applies only to a gain sweep, not this one.)"
@@ -264,7 +281,8 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
             "No writeback — the rate landscape is read off the grid by eye."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. Keep the frequency sweep coarse (the "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
+            "Keep the frequency sweep coarse (the "
             "inner length sweep multiplies the run time). 'uniform=True' "
             "(default) uses a linear length sweep; set False to cluster points "
             "along the expected exponential decay while preserving the configured "

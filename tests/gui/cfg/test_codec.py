@@ -6,6 +6,8 @@ covers the exact cfg payload and value-tree rebuild transforms.
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from typing import cast
 
 import pytest
@@ -28,6 +30,155 @@ from zcu_tools.gui.cfg import (
     raw_to_schema,
     schema_to_raw,
 )
+
+
+def test_invalid_direct_text_round_trips_without_becoming_optional_unset() -> None:
+    from zcu_tools.gui.cfg.lowering import validate_finished_cfg
+
+    value = DirectValue(None, raw="1e", error="Invalid number")
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"mixer": ScalarSpec("Mixer", float, optional=True)}),
+        CfgSectionValue(fields={"mixer": value}),
+    )
+    restored = raw_to_schema(schema, schema_to_raw(schema))
+
+    assert restored.value.fields["mixer"] == value
+    with pytest.raises(RuntimeError, match="mixer.*Invalid number"):
+        validate_finished_cfg(restored, resolve_reference=None)
+
+
+@pytest.mark.parametrize(
+    "edge",
+    [DirectValue(None, raw="1e", error="Invalid number"), DirectValue(None, raw="")],
+)
+@pytest.mark.parametrize("centered", [False, True])
+def test_incomplete_sweep_edge_round_trips_and_cannot_be_finished(
+    edge, centered
+) -> None:
+    from zcu_tools.gui.cfg.lowering import validate_finished_cfg
+
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    value = CenteredSweepValue(edge, 1.0, 5) if centered else SweepValue(edge, 1.0, 5)
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"axis": spec}),
+        CfgSectionValue(fields={"axis": value}),
+    )
+    restored = raw_to_schema(schema, schema_to_raw(schema))
+    assert restored.value == schema.value
+    path = r"axis\.center" if centered else r"axis\.start"
+    with pytest.raises(RuntimeError, match=path):
+        validate_finished_cfg(restored, resolve_reference=None)
+
+
+@pytest.mark.parametrize(
+    ("spec", "value", "expected", "expected_step"),
+    [
+        (
+            SweepSpec(),
+            SweepValue(DirectValue(0.2, raw="0.20"), 1.0, 5),
+            (0.2, 1.0, 5),
+            0.2,
+        ),
+        (
+            CenteredSweepSpec(locked_center=0.2),
+            CenteredSweepValue(DirectValue(0.2, raw="0.20"), 1.6, 5),
+            (-0.6, 1.0, 5),
+            0.4,
+        ),
+    ],
+)
+def test_direct_sweep_text_round_trips_and_lowers_to_numeric_range(
+    spec, value, expected, expected_step
+) -> None:
+    from zcu_tools.gui.cfg.lowering import lower_finished_cfg
+
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"axis": spec}),
+        CfgSectionValue(fields={"axis": value}),
+    )
+    restored = raw_to_schema(schema, schema_to_raw(schema))
+    assert restored.value == schema.value
+    raw = lower_finished_cfg(
+        restored,
+        resolve_expression=None,
+        resolve_reference=None,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    assert raw["axis"] == pytest.approx(expected)
+    assert value.step == pytest.approx(expected_step)
+
+
+@pytest.mark.parametrize(
+    ("centered", "part"),
+    [
+        (False, "expts"),
+        (False, "step"),
+        (True, "span"),
+        (True, "expts"),
+        (True, "step"),
+    ],
+)
+@pytest.mark.parametrize(
+    "entry",
+    [DirectValue(None, raw=""), DirectValue(None, raw="1e", error="Invalid number")],
+)
+def test_sweep_control_carriers_round_trip_and_block_finished_cfg(
+    centered, part, entry
+):
+    from zcu_tools.gui.cfg.lowering import lower_finished_cfg
+
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    initial = CenteredSweepValue(0.0, 1.0, 5) if centered else SweepValue(0.0, 1.0, 5)
+    value = replace(initial, **{part: entry}, auto_norm=False)
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"axis": spec}), CfgSectionValue(fields={"axis": value})
+    )
+    restored = raw_to_schema(schema, json.loads(json.dumps(schema_to_raw(schema))))
+    assert getattr(restored.value.fields["axis"], part) == entry
+    with pytest.raises(RuntimeError, match=rf"axis\.{part}"):
+        lower_finished_cfg(
+            restored,
+            resolve_expression=None,
+            resolve_reference=None,
+            make_range=lambda start, stop, *, expts: (start, stop, expts),
+        )
+
+
+def test_sweep_control_raw_and_canonical_step_survive_codec_and_lowering():
+    from zcu_tools.gui.cfg.binding import SweepEditor
+    from zcu_tools.gui.cfg.lowering import lower_finished_cfg
+
+    value = SweepEditor.update_step(
+        SweepValue(0.0, 1.0, 5), DirectValue(0.3, raw="0.30")
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"axis": SweepSpec()}),
+        CfgSectionValue(fields={"axis": value}),
+    )
+    restored = raw_to_schema(schema, json.loads(json.dumps(schema_to_raw(schema))))
+    assert restored.value == schema.value
+    result = lower_finished_cfg(
+        restored,
+        resolve_expression=None,
+        resolve_reference=None,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    assert result["axis"] == (0.0, 1.0, 4)
+
+
+def test_complex_direct_value_has_lossless_json_codec_and_typed_lowering() -> None:
+    import json
+
+    from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+
+    value = DirectValue(0.123456789123456 + 9.876543219876543j)
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"center": ScalarSpec("Center", complex)}),
+        CfgSectionValue(fields={"center": value}),
+    )
+    restored = raw_to_schema(schema, json.loads(json.dumps(schema_to_raw(schema))))
+    assert restored.value.fields["center"] == value
+    assert schema_to_raw_dict(restored, None, None) == {"center": value.value}
 
 
 def test_decode_eval_wire_carriers() -> None:

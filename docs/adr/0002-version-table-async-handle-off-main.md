@@ -20,8 +20,14 @@ GUI 有兩個平級 client（Qt View、remote RPC agent）並發驅動同一批�
 - **粒度（中粒度）**：`context`、`soc`、`device:<name>`、每 tab 的 `tab:<id>:cfg` / `:result` / `:save_path` / `tab:<id>`（存在性）、`editor:<id>`。tab 資源綁 `tab_id`（uuid4，永不重用）→ 無 key 撞名。
 - **版本號 = per-resource 單調遞增整數**（非 wall-clock）。`VersionTable` 是 `State` 的一個區塊。
 - **bump 責任歸資源 owner service，且在「資源實際被寫」同點、必在 State owner loop**：worker 不直接提交 `State`；同步操作在 service mutator bump，背景操作在回到 owner 的 terminal policy 寫入時 bump。不靠 origin、不靠 emit/release 順序——只靠「由 owner 在資源被寫處 bump」。
-- **bump = 狀態真的變了，不含「值未變的快取同步」**：讀取衍生的快取更新若值未變則不 bump、不 emit（否則純讀 spurious 推進版本號、誤使他人 `expected_versions` 失效）；讀到外部來源真的變了才 bump + emit。
-- **guard 用 optional `expected_versions`（類 HTTP If-Match）**：`run.start` / `save.*` / `editor.commit` 帶可選參數，server 在主線 `_dispatch._run()` 單一同步序列內**原子**比對，不符→`PRECONDITION_FAILED` + 回當前版本。依賴消失（tab close 刪 entry）= 視同 stale 擋下。
+- **bump = 狀態真的變了，不含「值未變的快取同步」**：讀取衍生的快取更新若值未變則不 bump、不 emit（否則純讀 spurious 推進版本號、誤使其他連線的 seen 過時）；讀到外部來源真的變了才 bump + emit。
+- **GUI per-connection seen guard**：每條 measure remote 連線從空 seen map 開始。GUI owner thread 依 method entry 的 guard dependencies 比對 seen 與目前版本；未看過的 key 即使版本為 0 也拒絕。不符時回 `PRECONDITION_FAILED`、`reason=stale_version` 與 `data.stale`。Wire 不接收 `expected_versions`。
+
+GUI remote 按每條連線保存 seen map；未看過的依賴即使版本為 0 也拒絕 mutation。
+完整讀取成功才依 method entry 記錄揭露的資源；部分讀取、失敗、逾時、回覆編碼失敗
+不留下新的觀察。成功自寫只推進先前 seen 等於寫入前版本的資源；新 tab 回傳只認證
+其存在，不認證 cfg/result/analyze。MCP 不保存 seen、不傳 `expected_versions`，
+也不隱藏預讀或在斷線後自動重送 mutation。
 
 ### 2. Operation handle（歷史設計）
 
@@ -29,13 +35,13 @@ GUI 有兩個平級 client（Qt View、remote RPC agent）並發驅動同一批�
 
 ### 3. off-main blocking handler
 
-`MethodSpec.off_main_thread`（預設 False）。`_dispatch` 看到 True 不 marshal 上主線，在 IO worker thread 直接執行。受**嚴格契約**：只能做 thread-safe 等待，**不得碰 main-thread-owned 狀態**（版本表 / change-related / CfgEditor / `_snapshots`）、不需要 stale guard。`operation.await` 即此類。
+`MethodSpec.off_main_thread`（預設 False）。`_dispatch` 看到 True 不 marshal 上主線，在 IO worker thread 直接執行。受**嚴格契約**：只能做 thread-safe 等待，**不得碰 main-thread-owned 狀態**（版本表 / change-related / CfgEditor / `_snapshots`）、不需要 stale guard。Measure registry 拒絕 off-main 方法宣告 guard、reveals 或 owner-thread 寫入追蹤。`operation.await` 即此類。
 
 ## 三層分工（脊椎）
 
-- **RPC = mechanism**：持版本表、提供 `resources.versions`、原子比對 `expected_versions`。Operation handle 的 wire 投影由現行 [Remote owner](0060-measure-agent-interface-shared-gui-view.md) 說明。
-- **mcp = policy + 簿記 + 翻譯**：持 `last_seen`、知道每操作依賴哪些資源、組 `expected_versions`、收 `PRECONDITION_FAILED`。版本號只在 RPC↔mcp 之間流動。
-- **agent（LLM）= 不看資源版本號**：mcp 把 `PRECONDITION_FAILED`（帶 `data.stale` 資源身份）翻成「tab X cfg 過時了」。Operation handle 的 agent 呈現與 poll／wait 工具不由本文規定，見 [Remote owner](0060-measure-agent-interface-shared-gui-view.md) 與 [[0066]]。
+- **GUI**：State 擁有版本表；measure remote entries 擁有 guard／reveals policy。Remote adapter 擁有每條連線的 seen，owner thread 完成比對、執行及觀察更新。
+- **MCP**：轉送單次 RPC、翻譯 stale 錯誤、維護 catalog 與 operation handles。不持 seen、不查版本建立 baseline、不重送 mutation。GUI 重連後 seen 從空集合開始。
+- **agent**：讀取操作狀態，遇 stale 時重讀對應資源，再決定是否寫入。Agent 不計算或提交版本；poll／wait 操作句柄的 agent 呈現見 [[0060]]，operation lifecycle 見 [[0066]]。
 
 ## 演化（被取代的設計，保留脈絡）
 
@@ -47,7 +53,7 @@ GUI 有兩個平級 client（Qt View、remote RPC agent）並發驅動同一批�
 
 - **bump 綁進 `EventBus.emit`（一點涵蓋）**：emit 與資源被寫不必然同點（async emit 在同步窗外）；定為「資源 owner service 在主線 bump」。
 - **per-connection 計數抵銷**（begin +1 / terminal −1）：依賴「一次操作恰 1 begin + 1 terminal」的脆性前提，與另一機制並存邏輯雜。版本表一套機制治兩種窗，更收斂。
-- **agent 拿裸版本號自己 diff**：違三層分工，版本號是 mcp 簿記非 agent 關注。
+- **agent 拿裸版本號自己 diff**：違三層分工，版本比對由 GUI 負責，agent 不應自行提交 expected versions。
 - **兩套並存（版本表 + origin/change-buffer）**：兩套通知會漂移，全面取代。
 - **`processEvents` 轉 event loop 解死鎖**：重入反模式，[Operation ADR](0066-operation-lifecycle.md) 說明 owner-loop 不能阻塞等待完成。
 

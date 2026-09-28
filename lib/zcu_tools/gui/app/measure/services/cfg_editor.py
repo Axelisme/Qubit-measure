@@ -63,15 +63,22 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
     EvalValue,
+    decode_complex,
     decode_eval_wire,
 )
 from zcu_tools.gui.cfg.binding import (
+    AgentSweepTarget,
     CfgDraft,
     SettablePathError,
     SettableTarget,
     SettableTargetKind,
 )
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+    InvalidInputError,
+)
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
@@ -104,19 +111,29 @@ ChangeListener = Callable[[str, str, ChangePayloadFactory], None]
 _MAX_HEADLESS_EDITORS = 16
 
 
-class CfgEditorHost(MeasureCfgBindingHost, ContextReadPort, ContextWritePort, Protocol):
-    """Composition-root surface for ``CfgEditorService`` — the facets it needs,
-    all provided by the Controller: the reactive env (``_EditorCtrl``), the
-    context read port (``ContextReadPort``, to seed from_name) + context write
-    port (``ContextWritePort``, used at commit), and the editor-version bump. The
-    service itself decomposes this into the narrow dependencies; this
-    composed protocol exists only so ``build_app_services`` can type the single
-    object (the Controller) that happens to satisfy all three.
-    """
+class EditorVersionPort(Protocol):
+    """Resource-version lifecycle for repository-owned editor identities."""
 
     def bump_editor_version(self, editor_id: str) -> None: ...
 
     def drop_editor_version(self, editor_id: str) -> None: ...
+
+
+class CfgEditorHost(
+    MeasureCfgBindingHost,
+    ContextReadPort,
+    ContextWritePort,
+    EditorVersionPort,
+    Protocol,
+):
+    """Composition-root surface for ``CfgEditorService`` — the facets it needs,
+    all provided by the Controller: the reactive env (``_EditorCtrl``), the
+    context read port (``ContextReadPort``, to seed from_name) + context write
+    port (``ContextWritePort``, used at commit), and editor-version lifecycle. The
+    service itself decomposes this into the narrow dependencies; this
+    composed protocol exists only so ``build_app_services`` can type the single
+    object (the Controller) that satisfies these ports.
+    """
 
 
 class CfgEditorError(InvalidInputError):
@@ -221,6 +238,66 @@ class CfgEditorSession:
             added=tuple(sorted(after - before)),
         )
 
+    def set_agent_fields(self, edits: Sequence[CfgEdit]) -> CfgEditResult:
+        """Apply ordered agent edits, keeping every successful prefix on failure."""
+        before: set[str] | None = None
+        actual: dict[str, object] = {}
+        for applied, edit in enumerate(edits):
+            try:
+                target = self.draft.resolve_agent_target(edit.path)
+                if target.affects_path_shape and before is None:
+                    before = {item.path for item in self.draft.iter_settable_targets()}
+                if isinstance(target, AgentSweepTarget):
+                    if not isinstance(edit.value, dict):
+                        raise SettablePathError(
+                            f"whole sweep at {edit.path!r} expects an object"
+                        )
+                    payload = {
+                        key: _decode_value(value) for key, value in edit.value.items()
+                    }
+                    actual[edit.path] = _agent_sweep_actual(target.set_value(payload))
+                else:
+                    value = _decode_value(edit.value)
+                    if (
+                        isinstance(value, EvalValue)
+                        and target.kind is not SettableTargetKind.SCALAR
+                    ):
+                        raise SettablePathError(
+                            f"eval value is only valid for scalar target {edit.path!r}"
+                        )
+                    if isinstance(value, ValueRef):
+                        if target.kind is not SettableTargetKind.SCALAR:
+                            raise SettablePathError(
+                                f"value_ref is only valid for scalar target {edit.path!r}"
+                            )
+                        value = self.resolve_value_ref(value, target.value_type)
+                    target.set_value(value)
+            except ExpectedError as exc:
+                error_type = {
+                    ExpectedErrorCategory.INVALID_INPUT: SettablePathError,
+                    ExpectedErrorCategory.FAILED_PRECONDITION: FailedPreconditionError,
+                }[exc.category]
+                raise error_type(
+                    f"agent edit at {edit.path!r} failed after {applied} applied: {exc}",
+                    reason_code=exc.reason_code,
+                ) from exc
+        after = (
+            {item.path for item in self.draft.iter_settable_targets()}
+            if before is not None
+            else None
+        )
+        return CfgEditResult(
+            valid=bool(self.draft.is_valid()),
+            removed=tuple(sorted(before - after))
+            if before is not None and after is not None
+            else (),
+            added=tuple(sorted(after - before))
+            if before is not None and after is not None
+            else (),
+            applied=len(edits),
+            actual=actual,
+        )
+
     def commit_schema(self) -> CfgSchema:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
@@ -272,14 +349,20 @@ class CfgEditorService:
     Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
     (narrow port); ``read_port`` (ContextReadPort) reads the current ml to seed
     ``from_name`` sessions; ``write_port`` (ContextWritePort) is the single ml/md
-    write authority used at commit (ADR-0067 — the session no longer lowers /
-    registers itself); ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
+    write authority used at commit (ADR-0006 — the session no longer lowers /
+    registers itself); ``versions`` bumps / forgets the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a
     stale dependency on a gone session reads version 0). Existing-entry
     ``open(from_name=...)`` sessions also retain the exact source
     ``ModuleLibrary`` identity; ``replace`` fast-fails after a context switch so
     a dirty draft cannot write into a same-named entry in another context.
+
+    ``publish_owner`` receives an isolated schema on seeded-session creation and
+    every active draft change, synchronously on the owner thread. It includes
+    invalid input. Composition routes it into the owning resource's State and
+    revision; a viewer is never needed to publish. Prepared replacements remain
+    unpublished until their owner commits the replacement State.
     """
 
     def __init__(
@@ -287,15 +370,16 @@ class CfgEditorService:
         env_ctrl: MeasureCfgBindingHost,
         read_port: ContextReadPort,
         write_port: ContextWritePort,
-        version_bump: Callable[[str], None],
-        version_drop: Callable[[str], None],
+        versions: EditorVersionPort,
         bus: EventBus,
+        *,
+        publish_owner: Callable[[str, CfgSchema], None] | None = None,
     ) -> None:
         self._bindings = MeasureCfgBindings(env_ctrl)
         self._read = read_port
         self._write = write_port
-        self._version_bump = version_bump
-        self._version_drop = version_drop
+        self._versions = versions
+        self._publish_owner = publish_owner
         self._editors: dict[str, CfgEditorSession] = {}
         self._seq = itertools.count()
         self._listener: ChangeListener | None = None
@@ -409,6 +493,7 @@ class CfgEditorService:
         )
         self._editors[editor_id] = session
         self._attach_change_stream(session)
+        self._publish_owner_snapshot(session)
         if gc:
             self._evict_excess_gc()
         return editor_id, session.current_targets()
@@ -500,7 +585,7 @@ class CfgEditorService:
             session.draft.close()
         finally:
             try:
-                self._version_drop(session.editor_id)
+                self._versions.drop_editor_version(session.editor_id)
             finally:
                 self._emit(
                     session.editor_id, "editor_closed", lambda: {"reason": "reopened"}
@@ -534,8 +619,63 @@ class CfgEditorService:
     def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult:
         return self._require(editor_id).set_field(path, value)
 
-    def set_fields(self, editor_id: str, edits: Sequence[CfgEdit]) -> CfgEditResult:
-        return self._require(editor_id).set_fields(edits)
+    def set_fields(
+        self, editor_id: str, edits: Sequence[CfgEdit], *, agent_edit: bool = False
+    ) -> CfgEditResult:
+        session = self._require(editor_id)
+        return (
+            session.set_agent_fields(edits) if agent_edit else session.set_fields(edits)
+        )
+
+    def edit_library(
+        self,
+        item_kind: str,
+        name: str,
+        edits: Sequence[CfgEdit],
+        *,
+        save_as: str | None = None,
+    ) -> CfgEditResult:
+        """Commit edits in order, retaining the successful prefix on failure."""
+        if not edits:
+            raise CfgEditorError("library edits must not be empty")
+        if item_kind not in _ITEM_KINDS:
+            raise CfgEditorError(
+                f"item_kind must be one of {_ITEM_KINDS}, got {item_kind!r}"
+            )
+        if save_as is not None:
+            ml = self._read.get_current_ml()
+            store = ml.modules if item_kind == "module" else ml.waveforms
+            if save_as in store:
+                raise CfgEditorError(
+                    f"{item_kind} destination already exists: {save_as!r}"
+                )
+
+        # This draft is internal to the application, not an agent session. Keep
+        # it across writes so later edits see the shape created by earlier ones.
+        editor_id, _ = self.open(item_kind, from_name=name, gc=False)
+        try:
+            session = self._require(editor_id)
+            destination = save_as if save_as is not None else name
+            write = (
+                self._write.set_ml_module_from_schema
+                if item_kind == "module"
+                else self._write.set_ml_waveform_from_schema
+            )
+            for applied, edit in enumerate(edits):
+                try:
+                    session.set_agent_fields((edit,))
+                    if not session.draft.is_valid():
+                        raise CfgEditorError(f"invalid cfg draft after {edit.path!r}")
+                    write(destination, session.commit_schema())
+                except ExpectedError as exc:
+                    return CfgEditResult(
+                        valid=False,
+                        applied=applied,
+                        errors=({"path": edit.path, "message": str(exc)},),
+                    )
+            return CfgEditResult(valid=True, applied=len(edits))
+        finally:
+            self.teardown(editor_id, reason="library_edit_finished")
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0067: the aggregate yields its un-lowered CfgSchema; the app
@@ -648,9 +788,11 @@ class CfgEditorService:
         editor_id = session.editor_id
 
         def _on_change(*_: object) -> None:
-            # The draft for this session was just written (main thread); bump its
-            # version so editor.commit's guard can detect a concurrent edit.
-            self._version_bump(editor_id)
+            # Prepared and retired drafts must not publish into the active owner.
+            if self._editors.get(editor_id) is not session:
+                return
+            self._publish_owner_snapshot(session)
+            self._versions.bump_editor_version(editor_id)
             self._emit(
                 editor_id,
                 "editor_changed",
@@ -659,6 +801,16 @@ class CfgEditorService:
 
         session.change_cb = _on_change
         session.draft.on_change.connect(_on_change)
+
+    def _publish_owner_snapshot(self, session: CfgEditorSession) -> None:
+        """Publish complete model state synchronously, including invalid input.
+
+        The composition root routes known owners to their State projection.
+        Viewer timers never participate in this write or its resource revision.
+        Replacement activation leaves publication to its atomic owner swap.
+        """
+        if self._publish_owner is not None and session.owner_key is not None:
+            self._publish_owner(session.owner_key, session.draft.snapshot())
 
     def _emit(
         self,
@@ -686,7 +838,7 @@ class CfgEditorService:
         # a later stale dependency on this gone editor reads version 0 and the
         # guard treats it as stale, rather than spuriously matching a retained
         # version. Done whether or not we tear the root down — the session is gone.
-        self._version_drop(editor_id)
+        self._versions.drop_editor_version(editor_id)
         # Notify subscribers the session is gone (after state is consistent).
         self._emit(editor_id, "editor_closed", lambda: {"reason": reason})
 
@@ -743,6 +895,32 @@ class CfgEditorService:
         return waveform_cfg_to_value(ml.waveforms[from_name])
 
 
+def _agent_sweep_actual(value: object) -> dict[str, object]:
+    """Project a cached sweep value without evaluating an expression again."""
+    from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
+
+    if isinstance(value, SweepValue):
+        parts = ("start", "stop", "expts", "step")
+    elif isinstance(value, CenteredSweepValue):
+        parts = ("center", "span", "expts", "step")
+    else:
+        raise TypeError(f"Unexpected agent sweep value: {type(value).__name__}")
+    result: dict[str, object] = {}
+    for part in parts:
+        item = getattr(value, part)
+        if isinstance(item, EvalValue):
+            result[part] = {
+                "__kind": "eval",
+                "expr": item.expr,
+                "resolved": item.resolved,
+            }
+        elif isinstance(item, DirectValue):
+            result[part] = item.value
+        else:
+            result[part] = item
+    return result
+
+
 def _decode_value(value: object) -> object:
     """Turn tagged values into model-layer value objects; pass others through.
 
@@ -758,6 +936,11 @@ def _decode_value(value: object) -> object:
         raise CfgEditorError(str(exc)) from exc
     if ref is not None:
         return ref
+    if isinstance(value, dict) and "__complex__" in value:
+        try:
+            return decode_complex(value)
+        except ValueError as exc:
+            raise CfgEditorError(str(exc)) from exc
     if isinstance(value, dict) and value.get("__kind") == "eval":
         decoded = decode_eval_wire(value)
         if decoded is None:

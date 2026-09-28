@@ -72,13 +72,14 @@ def test_new_context_preserves_lookup_when_io_returns_fresh_context() -> None:
         values=EmptyValueLookup(),
     )
     io.get_active_label.return_value = "flux_1.0_V"
+    io.list_contexts.return_value = ["base"]
     svc = ContextService(state, io, MagicMock(), values=registry)
 
     old_ctx = state.session_env
     svc.new_context(value=1.0, unit="V", clone_from="base")
 
     io.new_context.assert_called_once_with(
-        old_ctx, value=1.0, unit="V", clone_from="base"
+        old_ctx, value=1.0, unit="V", clone_from="base", label=None
     )
     assert state.session_env.values is registry
     assert state.session_env.active_label == "flux_1.0_V"

@@ -41,6 +41,10 @@ def _ctrl_backed_by_real_service() -> MagicMock:
 
 
 class _PoisonController:
+    def resources_versions(self) -> dict[str, int]:
+        # Version receipts belong to remote dispatch, not predictor domain work.
+        return {}
+
     def __getattr__(self, name: str) -> object:
         raise AssertionError(f"broad controller used for {name}")
 
@@ -105,7 +109,7 @@ def test_predictor_handlers_dispatch_only_through_predictor_control_facet():
     assert isinstance(pred.predict_freq.call_args.args[0], PredictFreqRequest)
 
     assert _dispatch_with_predictor_control("predictor.clear", {}, pred) == {
-        "loaded": False
+        "loaded": False,
     }
     pred.clear_predictor.assert_called_once_with()
 

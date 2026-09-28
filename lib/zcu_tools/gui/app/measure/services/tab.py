@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
     PostAnalysisPaneState,
@@ -130,12 +131,13 @@ class TabService:
                 image_path=post_image_path,
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
             ),
-            save=SavePaneSnapshot(data_path=data_path),
+            save=SavePaneSnapshot(data_path=data_path, comment=tab.save.comment),
             paths=TabPathsSnapshot(
                 data=data_path,
                 analysis_image=analysis_image_path,
                 post_analysis_image=post_image_path,
             ),
+            artifacts=self._state.get_artifact_snapshots(tab_id),
         )
 
     def new_tab(self, adapter_name: str, from_dict: TabSnapshot | None = None) -> str:
@@ -184,6 +186,18 @@ class TabService:
 
         return dataclasses.asdict(self._registry.create(adapter_name).guide())
 
+    def analyze_param_definitions(
+        self, adapter_name: str, *, stage: Literal["primary", "post"]
+    ) -> list[dict[str, Any]]:
+        """Describe canonical adapter parameters before or after a result exists."""
+        adapter = self._registry.create(adapter_name)
+        params_cls = (
+            adapter.analyze_params_cls()
+            if stage == "primary"
+            else adapter.post_analyze_params_cls()
+        )
+        return describe_analyze_params(params_cls)
+
     def close_tab(self, tab_id: str) -> None:
         logger.info("close_tab: tab_id=%r", tab_id)
         retired = self._state.remove_tab(tab_id)
@@ -194,10 +208,10 @@ class TabService:
                 logger.exception("closed-tab draft teardown failed")
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        """Commit boundary: store the latest draft as the committed cfg.
+        """Store an explicit cfg replacement and advance its resource version.
 
-        Idempotent. Called from ``Controller.update_tab_cfg`` whenever the
-        tab's CfgFormWidget reports a change.
+        Active editor changes publish directly through their composition-injected
+        State sink; the viewer does not commit model changes.
         """
         self._state.update_tab_cfg_schema(tab_id, schema)
 

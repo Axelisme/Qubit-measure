@@ -54,7 +54,13 @@ def serialize(node: object) -> Any:
     if isinstance(node, EvalValue):
         return {"E": node.expr, "r": node.resolved}
     if isinstance(node, SweepValue):
-        return {"sweep": [node.start, node.stop, node.expts, round(node.step, 9)]}
+        controls = [
+            serialize(value) if isinstance(value, (DirectValue, EvalValue)) else value
+            for value in (node.start, node.stop, node.expts, node.step)
+        ]
+        if isinstance(node.step, (int, float)):
+            controls[3] = round(node.step, 9)
+        return {"sweep": controls}
     if isinstance(node, ReferenceValue):
         return {
             "ref": node.chosen_key,

@@ -1,8 +1,22 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.session.expression import coerce_eval_result, evaluate_numeric_expr
+from zcu_tools.gui.session.expression import (
+    coerce_eval_result,
+    evaluate_numeric_expr,
+    evaluate_scalar_expr,
+)
 from zcu_tools.resources.context import MetaDict
+
+
+def test_complex_scalar_expression_preserves_real_only_numeric_boundary():
+    md = MetaDict()
+    md.g_center = -1 + 2j
+    assert evaluate_scalar_expr("g_center + 0.5j", md) == -1 + 2.5j
+    with pytest.raises(RuntimeError, match="real number"):
+        evaluate_numeric_expr("g_center", md)
+    with pytest.raises(RuntimeError, match="Unsupported expression syntax"):
+        evaluate_scalar_expr("g_center.real", md)
 
 
 def test_evaluate_numeric_expr_uses_metadict_variables():

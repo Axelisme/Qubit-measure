@@ -25,6 +25,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer, current_stop_signal
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    ContextReadiness,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -32,7 +33,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.services.guard import RunPermit
+from zcu_tools.gui.app.measure.services.guard import GuardService, RunPermit
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate,
     OperationKind,
@@ -43,6 +44,9 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    ScalarSpec,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
@@ -64,10 +68,21 @@ def _empty_schema() -> CfgSchema:
     return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
 
-def _make_state() -> tuple[State, str, MagicMock]:
+def _make_state(
+    *,
+    readiness: ContextReadiness = ContextReadiness.EMPTY,
+) -> tuple[State, str, MagicMock]:
     md = MagicMock()
     ml = MagicMock()
-    state = State(SessionEnv(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock()))
+    state = State(
+        SessionEnv(
+            md=md,
+            ml=ml,
+            soc=MagicMock(),
+            soccfg=MagicMock(),
+            readiness=readiness,
+        )
+    )
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(requires_soc=True)
@@ -83,8 +98,8 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
     return RunPermit(
         tab_id=tab_id,
         adapter_name=state.get_tab(tab_id).adapter_name,
-        request=RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg),
-        schema=state.get_tab(tab_id).cfg_schema,
+        request=RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
+        raw_cfg={},
         adapter=adapter,
     )
 
@@ -243,6 +258,26 @@ def test_start_run_acquires_lease_and_submits_to_bg():
         isinstance(call.args[0], TabInteractionChangedPayload)
         for call in svc._bus.emit.call_args_list  # type: ignore[attr-defined]
     )
+
+
+def test_worker_executes_permit_after_model_changes_and_releases_lease():
+    state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    schema = state.get_tab(tab_id).cfg_schema
+    schema.spec.fields["gain"] = ScalarSpec(label="Gain", type=float)
+    schema.value.fields["gain"] = EvalValue("gain", resolved=0.25)
+    permit = GuardService(state).acquire_run_permit(tab_id)
+    svc, gate, bg, _ = _make_run_service(state)
+    result = object()
+    adapter.run.return_value = result
+
+    svc.start_run(permit)
+    schema.value.fields["gain"] = DirectValue(0.75)
+    bg.run_work()
+
+    adapter.run.assert_called_once_with(permit.request, {"gain": 0.25})
+    assert state.get_tab(tab_id).run.result is result
+    assert not state.is_tab_running(tab_id)
+    assert not gate.has_active(OperationKind.RUN)
 
 
 def test_start_run_rejects_when_tab_busy():

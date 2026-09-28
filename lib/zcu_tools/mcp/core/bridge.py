@@ -14,18 +14,17 @@ or diagnostics.
     ``connect`` / ``disconnect`` / ``launch`` / ``stop`` (lifecycle), and
     ``wire_version_note`` (the handshake probe). An optional ``on_event`` hook
     receives event-push lines (the reader otherwise drops them).
-  - :class:`McpServerConfig` carries the prefix + display name + instructions the
-    stdio loop / tool-gen need; :class:`MCPBridgeConfig` adds the GUI-bridge launch
-    knobs (name / port / versions / pid+log file names / run-script name).
-  - Module helpers build the MCP tool surface from a method-spec table
-    (``coerce_arg`` / ``make_forwarder`` / ``generate_tools``) and run the MCP
-    stdio protocol loop (``build_initialize_result`` / ``run_stdio_loop``).
+  - :class:`MCPBridgeConfig` extends
+    :class:`~zcu_tools.mcp.core.stdio_server.McpServerConfig` with the GUI-bridge
+    launch knobs (name / port / versions / pid+log file names / run-script name).
+    Tool generation and the MCP stdio loop live in
+    :mod:`zcu_tools.mcp.core.stdio_server`.
 
-App-specific policy stays in each ``mcp_server.py``: the read-only apps wrap
+App-specific policy stays with each app: the read-only apps wrap
 ``send_rpc_raw`` in a thin error-raising ``send_gui_rpc`` and drop events;
-measure-gui composes ``send_rpc_raw`` with its optimistic-concurrency guard,
-operation tracking, the diagnostic queue (via ``on_event``), and its hand-written
-tools.
+measure-gui's session composes ``send_rpc_raw`` with its optimistic-concurrency
+guard, operation tracking, and hand-written tools. It does not subscribe to push
+events; operation request/reply supplies Stop feedback.
 
 Threading:
   - Main (stdio) thread: reads MCP request lines, dispatches into tool handlers,
@@ -46,39 +45,17 @@ import subprocess
 import sys
 import threading
 import time
-import traceback
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
+from zcu_tools.gui.remote.errors import RemoteError
+from zcu_tools.gui.remote.framing import MAX_LINE_BYTES, encode_line
+from zcu_tools.mcp.core.stdio_server import McpServerConfig
 
 logger = logging.getLogger(__name__)
-
-_GENERATED_RPC_TRANSPORT_SLACK_SECONDS = 1.0
-
-# The type of a generated/override MCP tool entry.
-Tool = dict[str, Any]
-ToolTable = dict[str, Tool]
-# A function issuing one GUI RPC and returning the result dict (raises on error).
-# Read-only apps pass a thin wrapper over McpBridge.send_rpc_raw; measure-gui
-# passes its guarded send_gui_rpc.
-SendFn = Callable[..., dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class McpServerConfig:
-    """The minimal config the stdio loop + tool generation need.
-
-    ``tool_prefix`` is the wire-method -> tool-name prefix (e.g. ``fluxdep_``). A
-    no-subprocess server (e.g. agent-memory, dispatching in-process) needs only
-    this; the GUI bridges add the launch fields via :class:`MCPBridgeConfig`.
-    """
-
-    tool_prefix: str
-    server_display_name: str
-    server_instructions: str
 
 
 @dataclass(frozen=True)
@@ -119,7 +96,7 @@ def resolve_connect_port(config: MCPBridgeConfig, requested: int | None) -> int:
     return config.default_port
 
 
-def _port_is_open(port: int) -> bool:
+def port_is_open(port: int) -> bool:
     try:
         socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
         return True
@@ -156,6 +133,14 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
+class GuiAuthenticationError(RuntimeError):
+    """The GUI rejected a control-token authentication request."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(f"GUI auth failed ({code}): {message}")
+
+
 class GuiTransportTimeoutError(TimeoutError):
     """The GUI socket did not return an RPC reply before the transport deadline."""
 
@@ -167,10 +152,24 @@ class GuiTransportTimeoutError(TimeoutError):
         )
 
 
+class GuiMessageTooLargeError(ValueError):
+    """A request was not sent, or an oversized incoming frame closed the socket."""
+
+    def __init__(self, direction: Literal["request", "response"]) -> None:
+        self.direction = direction
+        self.reason = "message_too_large"
+        detail = (
+            "The request was not sent."
+            if direction == "request"
+            else "The request may have executed; inspect state before retrying."
+        )
+        super().__init__(f"GUI {direction} exceeds {MAX_LINE_BYTES} bytes. {detail}")
+
+
 # A line arrived from the GUI: route it (reply keyed by id / event push).
 DeliverFn = Callable[[dict[str, Any]], None]
-# The transport closed (real socket dropped): wake any pending RPC waiters.
-OnClosedFn = Callable[[], None]
+# A terminal transport failure wakes pending RPCs with its cause, without replay.
+OnClosedFn = Callable[[Exception | None], None]
 
 
 class Transport(Protocol):
@@ -229,7 +228,8 @@ class SocketTransport:
 
     @property
     def is_open(self) -> bool:
-        return self._sock is not None
+        with self._sock_lock:
+            return self._sock is not None
 
     def open(self, port: int) -> None:
         """Connect to 127.0.0.1:port and start the reader thread.
@@ -246,44 +246,43 @@ class SocketTransport:
             raise
         # Short blocking timeout so the reader loop wakes to observe the stop flag.
         sock.settimeout(1.0)
-        self._sock = sock
-        self._reader_stop.clear()
+        with self._sock_lock:
+            self._sock = sock
+            self._reader_stop.clear()
         self._reader_thread = threading.Thread(
             target=self._reader_loop, name=f"mcp-{self._app_name}-reader", daemon=True
         )
         self._reader_thread.start()
 
     def send_line(self, payload: dict[str, Any]) -> None:
-        sock = self._sock
-        if sock is None:
-            raise RuntimeError("transport not open")
-        data = (json.dumps(payload) + "\n").encode("utf-8")
+        try:
+            data = encode_line(payload)
+        except RemoteError as exc:
+            raise GuiMessageTooLargeError("request") from exc
         with self._sock_lock:
-            sock.sendall(data)
+            if self._sock is None:
+                raise RuntimeError("transport not open")
+            self._sock.sendall(data)
 
     def close(self) -> None:
-        sock = self._sock
-        if sock is None:
-            return
-        self._reader_stop.set()
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
+        with self._sock_lock:
+            self._reader_stop.set()
+            sock, self._sock = self._sock, None
+        if sock is not None:
+            with suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
             sock.close()
-        except OSError:
-            pass
-        self._sock = None
         t = self._reader_thread
-        if t is not None and t.is_alive():
+        if t is not None and t.is_alive() and t is not threading.current_thread():
             t.join(timeout=2.0)
         self._reader_thread = None
 
     def _reader_loop(self) -> None:
         """Sole reader of the GUI socket; routes replies, hands events to hook."""
         buf = bytearray()
-        while not self._reader_stop.is_set():
+        sock: socket.socket | None = None
+        failure: Exception | None = None
+        while not self._reader_stop.is_set() and failure is None:
             sock = self._sock
             if sock is None:
                 return
@@ -298,29 +297,40 @@ class SocketTransport:
             buf.extend(chunk)
             while True:
                 nl = buf.find(b"\n")
+                frame_size = len(buf) if nl < 0 else nl
+                if frame_size > MAX_LINE_BYTES:
+                    failure = GuiMessageTooLargeError("response")
+                    break
                 if nl < 0:
                     break
                 line = bytes(buf[:nl])
                 del buf[: nl + 1]
                 if not line:
                     continue
-                try:
-                    msg = json.loads(line.decode("utf-8"))
-                except Exception:
-                    # A malformed NDJSON line is skipped so one bad frame never
-                    # stalls the reader; log it so the drop is observable.
-                    logger.debug("skipping unparseable GUI socket line", exc_info=True)
-                    continue
-                if isinstance(msg, dict) and "id" in msg:
-                    if self._deliver_reply is not None:
-                        self._deliver_reply(msg)
-                elif isinstance(msg, dict) and "event" in msg:
-                    if self._deliver_event is not None:
-                        self._deliver_event(msg)
-                    # else: event pushes are dropped (read-only apps).
-        # Socket dropped: let the bridge wake any pending RPC waiters.
+                self._route_line(line)
+        # Unexpected EOF invalidates liveness before waking callers. A deliberate
+        # close already retired the socket and must not affect a new connection.
+        with self._sock_lock:
+            if self._reader_stop.is_set() or self._sock is not sock or sock is None:
+                return
+            self._sock = None
+        sock.close()
         if self._on_closed is not None:
-            self._on_closed()
+            self._on_closed(failure)
+
+    def _route_line(self, line: bytes) -> None:
+        try:
+            msg = json.loads(line.decode("utf-8"))
+        except (UnicodeError, ValueError):
+            logger.debug("skipping unparseable GUI socket line", exc_info=True)
+            return
+        if isinstance(msg, dict) and "id" in msg:
+            if self._deliver_reply is not None:
+                self._deliver_reply(msg)
+        elif (
+            isinstance(msg, dict) and "event" in msg and self._deliver_event is not None
+        ):
+            self._deliver_event(msg)
 
 
 class McpBridge:
@@ -343,7 +353,7 @@ class McpBridge:
         self._rid_cond = threading.Condition()
         self._rid_counter = 0
         self._pending: dict[str, dict[str, Any]] = {}
-        self._proc: subprocess.Popen | None = None
+        self._proc: subprocess.Popen[bytes] | None = None
         # The wire transport. None until connect()/launch() builds a real
         # SocketTransport, or a test injects a fake via set_transport / the ctor.
         self._transport: Transport | None = None
@@ -359,7 +369,9 @@ class McpBridge:
         self._transport = transport
         if transport is not None:
             transport.attach(
-                self._deliver_reply, self._deliver_event, self._on_socket_closed
+                self._deliver_reply,
+                self._deliver_event,
+                lambda failure: self._on_socket_closed(transport, failure),
             )
 
     def _deliver_event(self, msg: dict[str, Any]) -> None:
@@ -367,13 +379,19 @@ class McpBridge:
         if self._on_event is not None:
             self._on_event(msg)
 
-    def _on_socket_closed(self) -> None:
-        # The reader thread saw the socket drop: wake every pending RPC waiter so
-        # callers see "disconnected" instead of blocking to their timeout.
+    def _on_socket_closed(
+        self, transport: Transport, failure: Exception | None
+    ) -> None:
+        # Ignore late callbacks from a retired socket after a reconnect.
         with self._rid_cond:
+            if self._transport is not transport:
+                return
             for holder in self._pending.values():
-                holder["error"] = "GUI socket closed unexpectedly."
+                holder["error"] = failure or ConnectionError(
+                    "GUI socket closed unexpectedly."
+                )
                 holder["done"] = True
+            self._pending.clear()
             self._rid_cond.notify_all()
 
     @property
@@ -385,10 +403,8 @@ class McpBridge:
     # ------------------------------------------------------------------
 
     def _write_pid_file(self, pid: int) -> None:
-        try:
+        with suppress(OSError):
             self.config.pid_file.write_text(str(pid))
-        except OSError:
-            pass
 
     def _read_pid_file(self) -> int | None:
         try:
@@ -448,9 +464,15 @@ class McpBridge:
             self._pending[rid] = holder
         try:
             transport.send_line({"id": rid, "method": method, "params": params})
+        except GuiMessageTooLargeError:
+            # Local preflight failure: no bytes were sent, so this connection is safe.
+            with self._rid_cond:
+                self._pending.pop(rid, None)
+            raise
         except Exception:
             with self._rid_cond:
                 self._pending.pop(rid, None)
+            self._close_timed_out_transport(transport)
             raise
 
         deadline = time.monotonic() + timeout_seconds
@@ -467,7 +489,7 @@ class McpBridge:
             self._close_timed_out_transport(transport)
             raise GuiTransportTimeoutError(method, timeout_seconds)
         if "error" in holder and "message" not in holder:
-            raise ConnectionError(holder["error"])
+            raise holder["error"]
         return holder["message"]
 
     def wire_version_note(self) -> str:
@@ -524,10 +546,13 @@ class McpBridge:
         if token:
             resp = self.send_rpc_raw("auth", {"token": token}, 30.0)
             if not resp.get("ok", False):
-                err = resp.get("error", {})
-                raise RuntimeError(
-                    f"GUI auth failed ({err.get('code')}): {err.get('message')}"
-                )
+                err = resp.get("error")
+                if not isinstance(err, dict):
+                    err = {}
+                code = str(err.get("code", "unauthorized"))
+                message = str(err.get("message", "authentication rejected"))
+                self.disconnect()
+                raise GuiAuthenticationError(code, message)
             return (
                 f"Connected to {cfg.server_display_name} on 127.0.0.1:{port} "
                 f"with token auth." + self.wire_version_note()
@@ -539,19 +564,21 @@ class McpBridge:
 
     def disconnect(self) -> str:
         transport = self._transport
-        if transport is None or not transport.is_open:
+        if transport is None:
             return "Not connected."
-        transport.close()
+        was_open = transport.is_open
         self._transport = None
-        return "Disconnected from GUI."
+        transport.close()
+        return "Disconnected from GUI." if was_open else "Not connected."
 
     def launch(
         self,
         repo_root: Path,
         port: int,
         token: str | None = None,
+        *,
         auto_connect: bool = True,
-        extra_args: list | None = None,
+        extra_args: list[str] | None = None,
     ) -> str:
         """Fork the GUI subprocess on ``port``, wait until ready, maybe connect.
 
@@ -567,7 +594,7 @@ class McpBridge:
         if not run_gui.exists():
             raise FileNotFoundError(f"{cfg.run_script_name} not found at {run_gui}")
 
-        if _port_is_open(port):
+        if port_is_open(port):
             raise RuntimeError(
                 f"Port {port} is already in use — a GUI is likely already running "
                 f"there. Use {cfg.tool_prefix}connect to attach to it, or launch "
@@ -605,25 +632,7 @@ class McpBridge:
             )
         self._write_pid_file(self._proc.pid)
 
-        deadline = time.monotonic() + 15.0
-        ready = False
-        while time.monotonic() < deadline:
-            rc = self._proc.poll()
-            if rc is not None:
-                stderr = b""
-                if self._proc.stderr is not None:
-                    stderr = self._proc.stderr.read() or b""
-                tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
-                self._proc = None
-                raise RuntimeError(
-                    f"GUI process exited during startup (returncode={rc}) before "
-                    f"port {port} was ready. Last stderr:\n" + "\n".join(tail)
-                )
-            if _port_is_open(port):
-                ready = True
-                break
-            time.sleep(0.3)
-
+        ready = self._wait_for_launch(self._proc, port)
         pid = self._proc.pid
         if not ready:
             return (
@@ -641,6 +650,26 @@ class McpBridge:
             )
         return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
 
+    def _wait_for_launch(self, proc: subprocess.Popen[bytes], port: int) -> bool:
+        """Wait for readiness, reporting an early process exit with its stderr."""
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            rc = proc.poll()
+            if rc is not None:
+                stderr = b""
+                if proc.stderr is not None:
+                    stderr = proc.stderr.read() or b""
+                tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
+                self._proc = None
+                raise RuntimeError(
+                    f"GUI process exited during startup (returncode={rc}) before "
+                    f"port {port} was ready. Last stderr:\n" + "\n".join(tail)
+                )
+            if port_is_open(port):
+                return True
+            time.sleep(0.3)
+        return False
+
     @property
     def launched_gui(self) -> bool:
         """True if THIS bridge launched a GUI subprocess that is still running.
@@ -657,14 +686,27 @@ class McpBridge:
         proc = self._proc
         return proc is not None and proc.poll() is None
 
-    def _pid_for_stop(self) -> tuple[int | None, subprocess.Popen | None]:
+    def wait_for_gui_exit(self, pid: int, timeout: float = 5.0) -> bool:
+        """Wait for the responding GUI process without terminating it.
+
+        The PID comes from that GUI's shutdown reply, never a shared PID file.
+        A timeout leaves the process and connection alone.
+        """
+        if isinstance(pid, bool) or pid <= 0 or timeout < 0:
+            raise ValueError("expected a positive GUI PID and nonnegative timeout")
+        proc = self._proc
+        if proc is not None and (proc.pid != pid or proc.poll() is not None):
+            proc = None
+        return self._await_exit(pid, proc, timeout)
+
+    def _pid_for_stop(self) -> tuple[int | None, subprocess.Popen[bytes] | None]:
         proc = self._proc
         if proc is not None and proc.poll() is None:
             return proc.pid, proc
         return self._read_pid_file(), None
 
     def _await_exit(
-        self, pid: int, proc: subprocess.Popen | None, timeout: float
+        self, pid: int, proc: subprocess.Popen[bytes] | None, timeout: float
     ) -> bool:
         if proc is not None:
             try:
@@ -763,287 +805,12 @@ class McpBridge:
         return {"exited": True, "note": f"GUI process (pid={pid}) closed."}
 
 
-# ---------------------------------------------------------------------------
-# Tool generation from a method-spec table (the wire SSOT)
-# ---------------------------------------------------------------------------
-
-
-def coerce_arg(value: object, json_type: JsonType) -> object:
-    if value is None:
-        return None
-    if json_type is JsonType.STRING:
-        return str(value)
-    if json_type is JsonType.INTEGER:
-        return int(value)  # type: ignore[arg-type]
-    if json_type is JsonType.NUMBER:
-        return float(value)  # type: ignore[arg-type]
-    if json_type is JsonType.BOOLEAN:
-        return bool(value)
-    if json_type is JsonType.OBJECT:
-        return dict(value)  # type: ignore[call-overload]
-    if json_type is JsonType.ARRAY:
-        # Require a list; param_spec.validate_params already enforces this on the
-        # wire path, but the forwarder goes directly through coerce_arg, so we
-        # guard here too (mirrors the OBJECT guard above).
-        if not isinstance(value, list):
-            raise TypeError(
-                f"expected list for ARRAY param, got {type(value).__name__!r}"
-            )
-        return list(value)
-    return value  # JSON: pass through
-
-
-def generated_rpc_timeout_seconds(spec: Any) -> float:
-    """Transport ceiling for generated tools: handler budget plus wire slack."""
-
-    return float(spec.timeout_seconds) + _GENERATED_RPC_TRANSPORT_SLACK_SECONDS
-
-
-def make_forwarder(method: str, spec, send_fn: SendFn):
-    """Build an MCP forwarder that projects arguments into RPC params per spec.
-
-    ``send_fn`` issues the RPC: read-only apps pass a thin error-raising wrapper
-    over :meth:`McpBridge.send_rpc_raw`; measure-gui passes its guarded
-    ``send_gui_rpc``.
-    """
-    rpc_timeout = generated_rpc_timeout_seconds(spec)
-
-    def _forwarder(arguments: dict[str, Any]) -> dict[str, Any]:
-        rpc_params: dict[str, Any] = {}
-        for p in spec.params:
-            if p.required:
-                if p.name not in arguments or arguments[p.name] is None:
-                    raise ValueError(f"missing {p.name!r}")
-                rpc_params[p.name] = coerce_arg(arguments[p.name], p.json_type)
-            elif arguments.get(p.name) is not None:
-                rpc_params[p.name] = coerce_arg(arguments[p.name], p.json_type)
-        return send_fn(method, rpc_params, timeout_seconds=rpc_timeout)
-
-    return _forwarder
-
-
-def generate_tools(
-    config: McpServerConfig,
-    method_specs: dict[str, Any],
-    non_generated: frozenset[str],
-    send_fn: SendFn,
-) -> ToolTable:
-    """Generate one MCP tool per method spec (skipping ``non_generated``)."""
-    out: ToolTable = {}
-    for method, spec in method_specs.items():
-        if method in non_generated:
-            continue
-        tool_name = spec.tool_name or config.tool_prefix + method.replace(".", "_")
-        out[tool_name] = {
-            "handler": make_forwarder(method, spec, send_fn),
-            "description": spec.description or method,
-            "inputSchema": build_input_schema(spec.params),
-        }
-    return out
-
-
-def assemble_tools(
-    generated: ToolTable, overrides: ToolTable, override_names: frozenset[str]
-) -> ToolTable:
-    """Merge generated + selected override tools; fail-fast on name collision."""
-    selected = {
-        name: spec for name, spec in overrides.items() if name in override_names
-    }
-    collisions = set(generated) & set(selected)
-    if collisions:
-        raise RuntimeError(f"override/generated tool collision: {sorted(collisions)}")
-    return {**generated, **selected}
-
-
-# ---------------------------------------------------------------------------
-# MCP stdio protocol loop
-# ---------------------------------------------------------------------------
-
-
-def build_initialize_result(
-    config: McpServerConfig, server_version: str = "1.0.0"
-) -> dict[str, Any]:
-    return {
-        "protocolVersion": "2024-11-05",
-        "capabilities": {"tools": {}},
-        "serverInfo": {"name": config.server_display_name, "version": server_version},
-        "instructions": config.server_instructions,
-    }
-
-
-def run_stdio_loop(
-    config: McpServerConfig,
-    tools: ToolTable,
-    *,
-    on_cleanup: Callable[[], None] | None = None,
-    on_each_reply: Callable[[], list[dict[str, Any]]] | None = None,
-    on_start: Callable[[], None] | None = None,
-    on_error: Callable[[str], None] | None = None,
-    server_version: str = "1.0.0",
-) -> None:
-    """Run the MCP stdio JSON-RPC loop until stdin closes.
-
-    Hooks (all optional; defaults give the bare read-only behaviour):
-      - ``on_start`` runs once after stdin/stdout are reconfigured to UTF-8, before
-        the loop (measure-gui attaches its per-session file logging here).
-      - ``on_cleanup`` runs once when stdin closes (e.g. stop a server-launched GUI).
-      - ``on_each_reply`` (measure-gui) returns ready-made content blocks to
-        piggyback on every successful tool reply (e.g. drained diagnostics): a list
-        of ``{"type": "text", "text": ...}`` dicts, each appended after the tool's
-        own content. The hook owns the wording (returns ``[]`` for nothing).
-      - ``on_error`` is called from within each ``except`` block with a
-        preformatted context message (measure-gui passes ``logger.exception``) so
-        the active exception is logged with its traceback.
-
-    ``server_version`` is the ``serverInfo.version`` reported on ``initialize``.
-
-    A ``RuntimeError`` carrying a ``reason`` attribute (set from the GUI wire error
-    envelope) has its tag appended to the tool-error text, so an agent can branch
-    on the machine-readable reason without parsing the prose.
-    """
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    if on_start is not None:
-        on_start()
-
-    while True:
-        try:
-            line = sys.stdin.readline()
-            if not line:
-                if on_cleanup is not None:
-                    on_cleanup()
-                break
-            line = line.strip()
-            if not line:
-                continue
-
-            req = json.loads(line)
-            method = req.get("method")
-            rid = req.get("id")
-
-            if method == "initialize":
-                resp = {
-                    "jsonrpc": "2.0",
-                    "id": rid,
-                    "result": build_initialize_result(config, server_version),
-                }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-            elif method == "notifications/initialized":
-                continue
-
-            elif method == "tools/list":
-                tools_list = [
-                    {
-                        "name": name,
-                        "description": info["description"],
-                        "inputSchema": info["inputSchema"],
-                    }
-                    for name, info in tools.items()
-                ]
-                resp = {"jsonrpc": "2.0", "id": rid, "result": {"tools": tools_list}}
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-            elif method == "tools/call":
-                params = req.get("params", {})
-                name = params.get("name")
-                arguments = params.get("arguments", {})
-
-                tool = tools.get(name)
-                if not tool:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": rid,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Method not found: {name}",
-                        },
-                    }
-                else:
-                    try:
-                        handler: Callable[[dict[str, Any]], Any] = tool["handler"]
-                        res = handler(arguments)
-                        # Compact separators (no indent, no spaces) keep the tool
-                        # reply token-light. ensure_ascii stays default (True): the
-                        # outer JSON-RPC envelope re-escapes non-ASCII anyway, so
-                        # turning it off here buys nothing.
-                        text = (
-                            res
-                            if isinstance(res, str)
-                            else json.dumps(res, separators=(",", ":"))
-                        )
-                        content = [{"type": "text", "text": text}]
-                        if on_each_reply is not None:
-                            content.extend(on_each_reply())
-                        resp = {
-                            "jsonrpc": "2.0",
-                            "id": rid,
-                            "result": {"content": content},
-                        }
-                    except Exception as e:
-                        if on_error is not None:
-                            on_error(f"MCP tool {name!r} dispatch failed")
-                        # GUI-side business errors (RuntimeError with an already-
-                        # clear message) carry no useful Python stack for the agent
-                        # — the traceback is always the same forwarder frames, pure
-                        # noise. Strip it for those; keep the full traceback only for
-                        # unexpected bridge-side failures, where the stack is the
-                        # actual debugging signal.
-                        if isinstance(e, RuntimeError):
-                            text = f"Error executing tool {name!r}: {e}"
-                            # Surface the machine-readable reason tag (e.g.
-                            # no_run_result / no_project) when the wire carried one,
-                            # so the agent can branch on it without parsing prose.
-                            reason = getattr(e, "reason", None)
-                            if reason:
-                                text += f"\nreason: {reason}"
-                        else:
-                            text = (
-                                f"Error executing tool {name!r}: {e}\n"
-                                f"{traceback.format_exc()}"
-                            )
-                        resp = {
-                            "jsonrpc": "2.0",
-                            "id": rid,
-                            "result": {
-                                "isError": True,
-                                "content": [{"type": "text", "text": text}],
-                            },
-                        }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-            else:
-                if rid is not None:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": rid,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Method not found: {method}",
-                        },
-                    }
-                    sys.stdout.write(json.dumps(resp) + "\n")
-                    sys.stdout.flush()
-        except Exception as e:
-            if on_error is not None:
-                on_error("MCP loop exception")
-            sys.stderr.write(f"MCP Loop Exception: {e}\n{traceback.format_exc()}\n")
-            sys.stderr.flush()
-
-
 __all__ = [
+    "GuiAuthenticationError",
+    "GuiMessageTooLargeError",
     "GuiTransportTimeoutError",
     "McpBridge",
     "MCPBridgeConfig",
-    "McpServerConfig",
-    "assemble_tools",
-    "build_initialize_result",
-    "coerce_arg",
-    "generate_tools",
-    "generated_rpc_timeout_seconds",
-    "make_forwarder",
+    "port_is_open",
     "resolve_connect_port",
-    "run_stdio_loop",
 ]

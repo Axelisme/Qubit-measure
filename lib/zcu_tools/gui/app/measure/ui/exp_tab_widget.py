@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
-from zcu_tools.gui.app.measure.ui.artifact_save_center import (
-    ArtifactKind,
-    ArtifactSaveCenter,
-)
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.cfg import CfgSchema
@@ -75,7 +71,6 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.measure.adapter import WritebackItem
     from zcu_tools.gui.app.measure.controller import Controller
-    from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
     from zcu_tools.gui.app.measure.services import TabSnapshot
 
 
@@ -274,7 +269,6 @@ class ExpTabWidget(QWidget):
         self._progress_control = ctrl.progress_control
         # editor_id of this tab's shared cfg-editor session
         self._cfg_editor_id: str | None = None
-        self._schema_cb: Callable[[CfgSchema], None] | None = None
         # The action boundary is retained for Reset; button slots close over it.
         self._actions: TabActions | None = None
         # Optional injected Figure->PNG renderer for Data preview (tests)
@@ -459,6 +453,7 @@ class ExpTabWidget(QWidget):
 
         # ── Tab: Data (always) — save center ──────────────────────
         self._save_center = ArtifactSaveCenter(self.tab_id, capabilities)
+        self._save_center.bind_comment_changed(self._on_comment_changed)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
         save_scroll.setWidget(self._save_center)
@@ -791,29 +786,31 @@ class ExpTabWidget(QWidget):
     def get_comment(self) -> str:
         return self._save_center.get_comment()
 
-    # -- Data save center status delegation (S3) ------------------
-
-    def notify_save_started(self, kind: ArtifactKind) -> None:
-        """Capture pending signature for ``kind``."""
-        self._save_center.notify_save_started(kind)
-
-    def notify_save_succeeded(self, kind: ArtifactKind) -> None:
-        self._save_center.notify_save_succeeded(kind)
-
-    def notify_save_failed(self, kind: ArtifactKind) -> None:
-        self._save_center.notify_save_failed(kind)
-
-    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
-        """Apply async data terminal outcome (error None => success)."""
-        self._save_center.handle_data_finished(payload.error)
+    def _on_comment_changed(self, text: str) -> None:
+        if self._actions is None:
+            return
+        self._ctrl.save_control.set_comment(self.tab_id, text)
+        self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
 
     def has_unsaved_data(self) -> bool:
         """Return True if this tab contains unsaved measurement data."""
         return self._save_center.has_unsaved_data()
 
-    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
-        """Ordered saveable artifacts for Save All (snapshot single-fetch)."""
-        return self._save_center.ordered_saveable_kinds(snapshot)
+    def select_pane(
+        self, pane: Literal["run", "analysis", "post_analysis", "data"]
+    ) -> None:
+        """Select an explicit available pane without changing domain state."""
+        if pane == "run":
+            panel = self._run_panel
+        elif pane == "data":
+            panel = self._save_panel
+        elif pane == "analysis" and self._has_analysis:
+            panel = self._analysis_panel
+        elif pane == "post_analysis" and self._has_post:
+            panel = self._post_panel
+        else:
+            raise ValueError(f"Unavailable tab pane: {pane!r}")
+        self._left_tabs.setCurrentWidget(panel)
 
     def focus_result_panel(self) -> None:
         """Focus Analysis when supported, otherwise focus Save."""
@@ -984,28 +981,9 @@ class ExpTabWidget(QWidget):
         if self._ctrl.editor_id_for_owner(self.tab_id) != editor_id:
             raise RuntimeError("Cannot attach a retired cfg editor")
         self.cfg_form.detach()
-        if self._schema_cb is not None:
-            self.cfg_form.schema_changed.disconnect(self._schema_cb)
-            self._schema_cb = None
         self._cfg_editor_id = None
         self.cfg_form.attach(self._ctrl.get_cfg_editor_draft(editor_id))
         self._cfg_editor_id = editor_id
-        if self._actions is not None:
-            self._connect_cfg_schema()
-
-    def _connect_cfg_schema(self) -> None:
-        editor_id = self._cfg_editor_id
-        assert editor_id is not None
-
-        def schema_cb(schema: CfgSchema) -> None:
-            if (
-                self._cfg_editor_id == editor_id
-                and self._ctrl.editor_id_for_owner(self.tab_id) == editor_id
-            ):
-                self._ctrl.update_tab_cfg(self.tab_id, schema)
-
-        self._schema_cb = schema_cb
-        self.cfg_form.schema_changed.connect(schema_cb)
 
     def _is_data_visible(self) -> bool:
         return self._left_tabs.currentWidget() is self._save_panel
@@ -1156,7 +1134,12 @@ class ExpTabWidget(QWidget):
             self.post_writeback_widget.setEnabled(
                 idle and state.has_context and state.has_post_analyze_result
             )
-        # Data save center owns all save-row enablement and status.
+        # The center renders the shared draft and State-owned artifact status.
+        if snapshot.save is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no save pane"
+            )
+        self._save_center.set_comment_text(snapshot.save.comment)
         self._save_center.update_interaction(snapshot)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
@@ -1169,21 +1152,23 @@ class ExpTabWidget(QWidget):
         def data_path_cb(_text: str) -> None:
             data_path = self.get_data_path()
             self._ctrl.update_tab_data_path(tab_id, data_path if data_path else None)
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
         def analysis_image_cb(_text: str) -> None:
             image_path = self.get_image_path()
             self._ctrl.update_tab_analysis_image_path(
                 tab_id, image_path if image_path else None
             )
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
         def post_image_cb(_text: str) -> None:
             image_path = self.get_post_image_path()
             self._ctrl.update_tab_post_analysis_image_path(
                 tab_id, image_path if image_path else None
             )
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
         self.cfg_form.validity_changed.connect(validity_cb)
-        self._connect_cfg_schema()
 
         self._save_center.bind_data_path_changed(data_path_cb)
         if self._has_analysis:
@@ -1242,9 +1227,6 @@ class ExpTabWidget(QWidget):
         if self._actions is None:
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)
-        if self._schema_cb is not None:
-            self.cfg_form.schema_changed.disconnect(self._schema_cb)
-            self._schema_cb = None
         self._save_center.unbind_data_path_changed(self._data_path_cb)
         if self._has_analysis:
             self._save_center.unbind_analysis_path_changed(self._analysis_image_cb)

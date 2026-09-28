@@ -27,24 +27,6 @@ def _json(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.JSON, required=True, description=desc)
 
 
-def _expected_versions() -> ParamSpec:
-    """Wire-only optimistic-concurrency guard param (mcp-filled, MCP-hidden).
-
-    The mcp layer attaches the resource->version map this op depends on; the
-    server compares it atomically. Hidden from the agent-facing MCP schema.
-    Stale recovery follows the re-snapshot-then-retry contract in the
-    ``Resource-Version Guard`` section of this package's README.
-    """
-    return ParamSpec(
-        "expected_versions",
-        JsonType.OBJECT,
-        required=False,
-        default={},
-        description="Resource versions the caller depends on (mcp bookkeeping)",
-        mcp_hidden=True,
-    )
-
-
 def _int(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.INTEGER, required=True, description=desc)
 
@@ -77,5 +59,8 @@ def _bool_default(name: str, default: bool, desc: str = "") -> ParamSpec:
 
 def _comment() -> ParamSpec:
     return ParamSpec(
-        "comment", JsonType.STRING, required=False, default="", description="Comment"
+        "comment",
+        JsonType.STRING,
+        required=False,
+        description="Omit to use the current GUI Save comment draft",
     )

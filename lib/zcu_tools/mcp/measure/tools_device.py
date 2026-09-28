@@ -1,206 +1,197 @@
-"""Measure MCP tools-device override tools."""
+"""Fixed device tools over the GUI's device service and operation handles."""
 
 from __future__ import annotations
 
+import time
 from functools import partial
 from typing import Any
 
-from zcu_tools.mcp.measure.tool_context import (
-    MeasureToolContext,
-    _start_op_with_short_wait,
-)
+from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.tools_operation import wait
+
+_TERMINAL_WAIT_SECONDS = 30.0
 
 
-def _device_snapshot(ctx: MeasureToolContext, name: str) -> Any:
-    """Fetch one device's snapshot (now including its live ``info`` params)."""
-    return ctx.send_gui_rpc("device.snapshot", {"name": name}).get("snapshot")
+def devices(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> list[dict[str, Any]] | dict[str, Any]:
+    name = arguments.get("name")
+    if name is None:
+        return [
+            {
+                "name": item["name"],
+                "type": item["type_name"],
+                "connected": item["status"] in ("connected", "setting_up"),
+            }
+            for item in ctx.session.read_internal("device.list", {})["devices"]
+        ]
+
+    snapshot = ctx.session.read_internal("device.snapshot", {"name": name})["snapshot"]
+    status = snapshot["status"]
+    connected = status in ("connected", "setting_up")
+    return {
+        "name": snapshot["name"],
+        "type": snapshot["type_name"],
+        "address": snapshot["address"],
+        "connected": connected,
+        "error": snapshot["error"],
+        "fields": (
+            _live_fields(ctx, name)
+            if status == "connected"
+            else snapshot["fields"]
+            if status == "setting_up"
+            else []
+        ),
+    }
 
 
-def tool_gui_device_connect(
+def _live_fields(ctx: MeasureToolContext, name: str) -> list[dict[str, Any]]:
+    return ctx.session.read_internal("device.setup_spec", {"name": name})["fields"]
+
+
+def _check_terminal(op: int, outcome: dict[str, Any]) -> bool:
+    status = outcome["status"]
+    if status == "finished":
+        return True
+    if status == "running":
+        return False
+    error = outcome.get("error", {})
+    raise GuiRpcError(
+        f"device operation {op} {status}: {error.get('message', status)}",
+        reason=f"operation_{status}",
+        code="precondition_failed",
+    )
+
+
+def _await_device(ctx: MeasureToolContext, op: int) -> None:
+    deadline = time.monotonic() + _TERMINAL_WAIT_SECONDS
+    while True:
+        remaining = max(0.0, deadline - time.monotonic())
+        outcome = wait(ctx, {"op": op, "timeout": remaining})
+        if _check_terminal(op, outcome):
+            return
+        if time.monotonic() >= deadline:
+            raise GuiRpcError(
+                f"device operation pending; use wait(op={op}) to recover",
+                reason="device_pending",
+                code="timeout",
+            )
+
+
+def device_connect(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    name = str(arguments["name"])
-    # type_name/address omitted => reconnect a remembered (memory-only) device,
-    # reusing its stored type/address (E4: reconnect folded into connect). Both
-    # wire methods key on device:{name} in _OP_BY_KEY, so the short-wait/handle
-    # path is identical regardless of which one ran.
-    type_name = arguments.get("type_name")
-    address = arguments.get("address")
-    if type_name is None and address is None:
-        ctx.send_gui_rpc("device.reconnect", {"name": name})
+    name = arguments["name"]
+    has_type = "type" in arguments
+    has_address = "address" in arguments
+    if has_type != has_address:
+        raise ValueError("provide both type and address, or name only to reconnect")
+    if has_type:
+        started = ctx.send_gui_rpc(
+            "device.connect",
+            {
+                "name": name,
+                "type_name": arguments["type"],
+                "address": arguments["address"],
+            },
+        )
     else:
-        params: dict[str, Any] = {
-            "type_name": str(type_name),
-            "name": name,
-            "address": str(address),
-        }
-        if "remember" in arguments:
-            params["remember"] = bool(arguments["remember"])
-        ctx.send_gui_rpc(
-            "device.connect", params
-        )  # operation_id captured into _OP_BY_KEY
-    wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    return _start_op_with_short_wait(
-        ctx,
-        f"device:{name}",
-        f"Device {name!r} connect",
-        wait_seconds,
-        lambda: {"snapshot": _device_snapshot(ctx, name)},
-        "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
-    )
+        started = ctx.send_gui_rpc("device.reconnect", {"name": name})
+    _await_device(ctx, started["handle"])
+    result = devices(ctx, {"name": name})
+    if not isinstance(result, dict):
+        raise GuiRpcError("invalid device detail", reason="incompatible_wire")
+    return result
 
 
-def tool_gui_device_disconnect(
+def device_disconnect(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    name = str(arguments["name"])
-    params: dict[str, Any] = {"name": name}
-    if "remember" in arguments:
-        params["remember"] = bool(arguments["remember"])
-    wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    ctx.send_gui_rpc("device.disconnect", params)
-    return _start_op_with_short_wait(
-        ctx,
-        f"device:{name}",
-        f"Device {name!r} disconnect",
-        wait_seconds,
-        lambda: {"snapshot": _device_snapshot(ctx, name)},
-        "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
+    name = arguments["name"]
+    forget = arguments.get("forget", False)
+    started = ctx.send_gui_rpc(
+        "device.disconnect", {"name": name, "remember": not forget}
     )
+    _await_device(ctx, started["handle"])
+    return {"name": name, "connected": False, "forgotten": forget}
 
 
-def tool_gui_device_setup(
-    ctx: MeasureToolContext, arguments: dict[str, Any]
-) -> dict[str, Any]:
-    name = str(arguments["name"])
-    updates = arguments.get("updates", {})
-    if not isinstance(updates, dict):
-        raise ValueError("'updates' must be an object")
-    wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    ctx.send_gui_rpc("device.setup", {"name": name, "updates": dict(updates)})
-    return _start_op_with_short_wait(
-        ctx,
-        f"device:{name}",
-        f"Device {name!r} apply",
-        wait_seconds,
-        lambda: {"snapshot": _device_snapshot(ctx, name)},
-        "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
-    )
+def device_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    name = arguments["name"]
+    values = arguments["values"]
+    fields = _live_fields(ctx, name)
+    by_name = {field["name"]: field for field in fields}
+    legal = sorted(key for key, field in by_name.items() if field["settable"])
+    for key, value in values.items():
+        field = by_name.get(key)
+        if field is None or not field["settable"]:
+            raise ValueError(f"invalid device field {key!r}; legal fields: {legal}")
+        if "choices" in field and value not in field["choices"]:
+            raise ValueError(
+                f"invalid choice for device field {key!r}; "
+                f"choices: {field['choices']}; legal fields: {legal}"
+            )
+
+    started = ctx.send_gui_rpc("device.setup", {"name": name, "updates": values})
+    op = started["handle"]
+    outcome = wait(ctx, {"op": op, "timeout": 0.25})
+    if not _check_terminal(op, outcome):
+        return {"status": "running", "op": op}
+    return {"fields": _live_fields(ctx, name)}
 
 
-OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
-    "gui_device_connect": {
-        "handler": tool_gui_device_connect,
-        "description": (
-            "Connect a hardware device. Two modes by which params you pass:\n"
-            "  - FIRST connect / re-register: pass type_name (driver class, e.g. "
-            "'YOKOGS200', 'SGS100A') AND address (VISA/GPIB/IP). remember defaults "
-            "to true (device persists across sessions); set remember=false for a "
-            "memory-only device.\n"
-            "  - RECONNECT a remembered device: pass ONLY name (omit type_name and "
-            "address) — the stored type/address are reused (this also covers a "
-            "memory-only device that was disconnected with remember=true).\n"
-            "Waits up to wait_seconds (default 1.0): if it lands in time returns "
-            "{status:'finished', handle, snapshot:{...}} (snapshot includes the "
-            "device's live info params); otherwise {status:'pending', handle} — "
-            "poll/wait the handle with gui_op_poll / gui_op_wait. The reply always "
-            "carries 'handle'."
-        ),
+DEVICE_TOOLS: dict[str, dict[str, Any]] = {
+    "devices": {
+        "handler": devices,
+        "description": "List devices by name/type/connected, or read one device with its address, error and field choices. A setting_up device remains connected; detail reports its State-cached fields without polling hardware while the ramp runs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "minLength": 1}},
+        },
+    },
+    "device_connect": {
+        "handler": device_connect,
+        "description": "Connect a device synchronously. Supply both type and address for a first connection, or name only to reconnect a remembered device. Returns devices(name).",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Friendly name for this device",
-                },
-                "type_name": {
-                    "type": "string",
-                    "description": (
-                        "Driver class name, e.g. 'YOKOGS200'. Omit (with address) "
-                        "to reconnect a remembered device by name."
-                    ),
-                },
-                "address": {
-                    "type": "string",
-                    "description": (
-                        "VISA or IP address. Omit (with type_name) to reconnect a "
-                        "remembered device by name."
-                    ),
-                },
-                "remember": {
-                    "type": "boolean",
-                    "description": "Persist device across sessions (default true)",
-                },
-                "wait_seconds": {
-                    "type": "number",
-                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
-                },
+                "name": {"type": "string", "minLength": 1},
+                "type": {"type": "string", "minLength": 1},
+                "address": {"type": "string", "minLength": 1},
             },
             "required": ["name"],
         },
     },
-    "gui_device_disconnect": {
-        "handler": tool_gui_device_disconnect,
-        "description": (
-            "Disconnect a device. Waits up to wait_seconds (default 1.0): if it "
-            "lands in time returns {status:'finished', handle, snapshot:{...}}; "
-            "otherwise {status:'pending', handle} — poll/wait the handle with "
-            "gui_op_poll / gui_op_wait. The reply always carries 'handle'. Two "
-            "terminal states by 'remember': remember=true (default) keeps the "
-            "device in persistent storage as memory-only (reconnect later via "
-            "gui_device_connect with name only); remember=false also removes it "
-            "from persistent storage."
-        ),
+    "device_disconnect": {
+        "handler": device_disconnect,
+        "description": "Disconnect a connected device synchronously. If forget is true, also remove its remembered entry after successful disconnection.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string"},
-                "remember": {
-                    "type": "boolean",
-                    "description": "Keep device in persistent storage (default true)",
-                },
-                "wait_seconds": {
-                    "type": "number",
-                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
-                },
+                "name": {"type": "string", "minLength": 1},
+                "forget": {"type": "boolean", "default": False},
             },
             "required": ["name"],
         },
     },
-    "gui_device_apply": {
-        "handler": tool_gui_device_setup,
-        "description": (
-            "Apply device-field updates: patch the device's info fields via "
-            "'updates' (e.g. {'value': 0.5} to ramp a source's output value — this "
-            "is the way to set an output value, ramped/cancellable, no separate "
-            "set_value). Waits up to wait_seconds (default 1.0): if it lands in "
-            "time returns {status:'finished', handle, snapshot:{...}}; otherwise "
-            "{status:'pending', handle} — poll/wait the handle with gui_op_poll / "
-            "gui_op_wait (a 'running' poll reply carries the live progress bars, "
-            "e.g. a ramp). The reply always carries 'handle'. The device must "
-            "already be connected. Read the settable fields with gui_device_fields."
-        ),
+    "device_set": {
+        "handler": device_set,
+        "description": "Validate and set native-unit device fields; return complete fields on a quick finish or status=running and an opaque op for a long ramp.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Device name"},
-                "updates": {
-                    "type": "object",
-                    "description": "Device info field updates (e.g. {'value': 0.5})",
-                },
-                "wait_seconds": {
-                    "type": "number",
-                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
-                },
+                "name": {"type": "string", "minLength": 1},
+                "values": {"type": "object", "minProperties": 1},
             },
-            "required": ["name", "updates"],
+            "required": ["name", "values"],
         },
     },
 }
 
 
-def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
+def build_device_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         name: {**entry, "handler": partial(entry["handler"], ctx)}
-        for name, entry in OVERRIDE_TOOLS.items()
+        for name, entry in DEVICE_TOOLS.items()
     }

@@ -33,6 +33,8 @@ from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
 
+from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+
 
 @dataclass
 class DummyParams:
@@ -169,7 +171,7 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
         analysis_image=PathResourceSnapshot(override=None, path=None),
         post_analysis_image=PathResourceSnapshot(override=None, path=None),
     )
-    return TabSnapshot(
+    snapshot = TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
         tab_id=tab_id,
@@ -193,6 +195,7 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
         save=save_snap,
         paths=paths_snap,
     )
+    return with_artifacts(snapshot)
 
 
 @pytest.fixture

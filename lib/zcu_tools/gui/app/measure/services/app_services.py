@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
@@ -38,6 +39,7 @@ from .writeback_control import WritebackControlFacet
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -149,35 +151,34 @@ def build_app_services(
     context = session.context
     device = session.device
     arb_waveform = ArbWaveformService(state)
+
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
-    # direction command edge — cfg_editor never calls writeback, ADR-0067).
+    # direction command edge — cfg_editor never calls writeback, ADR-0004).
+    def publish_tab_cfg(owner_key: str, schema: CfgSchema) -> None:
+        # Other editor owners (inspect/writeback) keep their drafts off tab State.
+        if owner_key in state.tabs:
+            state.update_tab_cfg_schema(owner_key, schema)
+
     cfg_editor = CfgEditorService(
         cfg_editor_ctrl,
         read_port=cfg_editor_ctrl,
         write_port=cfg_editor_ctrl,
-        version_bump=cfg_editor_ctrl.bump_editor_version,
-        version_drop=cfg_editor_ctrl.drop_editor_version,
+        versions=cfg_editor_ctrl,
         bus=bus,
+        publish_owner=publish_tab_cfg,
     )
     writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
     tab = TabService(state, registry, writeback)
     workspace = WorkspaceService(state, tab, bus)
-    tab_control = TabControlFacet(
-        state=state,
-        tab=tab,
-        workspace=workspace,
-        bus=bus,
-        access=access,
-    )
     guard = GuardService(state)
     load = LoadService(state, writeback, cfg_editor=cfg_editor, bus=bus)
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
-    save = SaveService(state, background, bus)
+    save = SaveService(state, runner, bus, owner_scheduler=QtOwnerScheduler())
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -194,7 +195,21 @@ def build_app_services(
         ),
         access=access,
     )
-    operation_control = OperationControlFacet(handles=handles, progress=progress)
+    tab_control = TabControlFacet(
+        state=state,
+        tab=tab,
+        workspace=workspace,
+        bus=bus,
+        load_tab_result=run_analyze_control.load_tab_result,
+        access=access,
+    )
+    operation_control = OperationControlFacet(
+        save=save,
+        handles=handles,
+        progress=progress,
+        run_analyze=run_analyze_control,
+        device=session.device_control,
+    )
     save_control = SaveControlFacet(
         state=state,
         bus=bus,

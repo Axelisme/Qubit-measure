@@ -4,14 +4,16 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from pydantic import TypeAdapter
+
+from zcu_tools.device import DeviceInfo
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ExpAdapterProtocol,
     RunRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.app.measure.adapter.lowering import schema_to_resolved_dict
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness
 
@@ -38,17 +40,15 @@ class GuardError(FailedPreconditionError):
 class RunPermit:
     """Proof that a run request is statically valid for ``tab_id``.
 
-    Carries the worker payload assembled while issuing the permit (RunRequest,
-    committed CfgSchema, adapter), so RunService does not re-read State. Pure
-    credential — no release needed. Committed-cfg validity is verified at issue
-    time by lowering once; the lowered raw is not load-bearing because the run
-    worker re-lowers inside ``adapter.run(req, schema)``.
+    Carries detached resolved cfg and observed device settings captured at issue.
+    RunService never re-reads State and the adapter never re-lowers a schema.
+    This credential requires no release; the operation owns its hardware lease.
     """
 
     tab_id: str
     adapter_name: str
     request: RunRequest
-    schema: CfgSchema
+    raw_cfg: dict[str, object]
     adapter: ExpAdapterProtocol
 
 
@@ -133,16 +133,28 @@ class GuardService:
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
         ctx = self._state.session_env
-        req = RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
-
-        # Lowering verifies committed cfg validity (fail-fast before any worker).
+        # Freeze only observed values. Never query devices during permit issue.
         try:
-            raw_cfg = schema_to_raw_dict(tab.cfg_schema, ctx.md, ctx.ml)
+            raw_cfg = schema_to_resolved_dict(tab.cfg_schema)
+            device_snapshot: dict[str, DeviceInfo] = {}
+            info_type = TypeAdapter(DeviceInfo)
+            for device in self._state.list_devices():
+                if device.is_live():
+                    if device.info is None:
+                        raise ValueError(
+                            f"Device {device.name!r} has no observed settings"
+                        )
+                    device_snapshot[device.name] = info_type.validate_python(
+                        device.info
+                    )
         except Exception as exc:
             raise GuardError(
                 f"Config invalid: {exc}", reason_code="invalid_cfg"
             ) from exc
 
+        req = RunRequest(
+            soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot=device_snapshot
+        )
         if tab.adapter.capabilities.requires_soc:
             try:
                 require_soc_handles(req)
@@ -161,7 +173,7 @@ class GuardService:
             tab_id=tab_id,
             adapter_name=tab.adapter_name,
             request=req,
-            schema=tab.cfg_schema,
+            raw_cfg=raw_cfg,
             adapter=tab.adapter,
         )
 

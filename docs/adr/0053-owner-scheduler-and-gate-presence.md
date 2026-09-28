@@ -81,7 +81,7 @@ session core（不建`QApplication`且阻擋Qt imports），pump owner queue跑s
 
 ## 後果
 
-- KNOWN_QT_DEBT 預期 13 → 2(剩 `app/main/app.py` composition root 與 `app/autofluxdep/controller.py`,各有明確後續歸屬)。
+- KNOWN_QT_DEBT 預期 13 → 2(剩 `app/measure/app.py` composition root 與 `app/autofluxdep/controller.py`,各有明確後續歸屬)。
 - Web/headless runtime 屆時只需新增 asyncio scheduler + transport,不再觸碰 core。
 - gate presence 讓 Hybrid 模式(Qt + agent 並用)的互斥失敗從「被拒絕」變成「知道被誰、為何拒絕」。
 - `cfg_binding.py` 與 `error_handler.py` 的 Qt 觸碰部分上移 ui 層(批次 3 工作單項目,機制不涉本 ADR)。

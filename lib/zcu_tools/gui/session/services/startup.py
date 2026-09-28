@@ -181,6 +181,16 @@ class StartupService:
             params_path=scope.params_path,
             scope_id=scope.scope_id,
         )
+        current = self._state.session_env
+        prefs = self._state.startup_prefs
+        if (
+            (current.chip_name, current.qub_name, current.res_name)
+            == (resolved.chip_name, resolved.qub_name, resolved.res_name)
+            and current.result_dir == resolved.result_dir
+            and current.database_path == resolved.database_path
+            and prefs.scope_id == resolved.scope_id
+        ):
+            return resolved
         self._context.set_startup_context(
             MetaDict(),
             ModuleLibrary(),

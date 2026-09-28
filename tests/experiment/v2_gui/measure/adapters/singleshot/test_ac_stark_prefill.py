@@ -30,6 +30,9 @@ def _ctx(*, with_pi_amp: bool = True) -> SessionEnv:
     md.res_ch = 2
     md.qub_ch = 3
     md.rf_w = 4.0
+    md.g_center = -1 + 0j
+    md.e_center = 1 + 0j
+    md.ge_radius = 0.5
     ml = ModuleLibrary()
     if with_pi_amp:
         ml.modules["pi_amp"] = PulseCfg(
