@@ -81,6 +81,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
         item = preview["result"]["items"][0]
         assert item["current"] == wire_before
         assert item["proposed"] == wire_after
+        assert item["proposed_value"] == wire_after
         assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
         assert call(sock, "context.snapshot", {})["ok"]
         written = call(
@@ -104,6 +105,37 @@ def test_complete_md_values_survive_preview_and_write_socket(
         assert not rejected["ok"]
         assert rejected["error"]["code"] == "precondition_failed"
         assert rejected["error"]["reason"] == "unserializable_context"
+        for invalid in (
+            np.array([float("nan")]),
+            {"nested": [float("inf")]},
+            complex(float("inf"), 1),
+            complex(1, float("nan")),
+        ):
+            md.value = 1.0
+            fx.ctrl.set_writeback_item_for_pane(
+                tab, "analysis", "md-1", proposed_value=invalid
+            )
+            rejected_preview = call(sock, "tab.writeback_preview", params)
+            assert not rejected_preview["ok"]
+            assert rejected_preview["error"]["code"] == "precondition_failed"
+            assert rejected_preview["error"]["reason"] == "unserializable_context"
+            assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+            assert call(sock, "context.snapshot", {})["ok"]
+            rejected_write = call(
+                sock,
+                "tab.writeback_write",
+                {
+                    **params,
+                    "write": [{"id": "md-1"}],
+                },
+            )
+            assert not rejected_write["ok"]
+            assert rejected_write["error"]["code"] == "precondition_failed"
+            assert rejected_write["error"]["reason"] == "unserializable_context"
+            # Reply projection fails after apply; no rollback is promised.
+            rejected_current = call(sock, "tab.writeback_preview", params)
+            assert not rejected_current["ok"]
+            assert rejected_current["error"]["reason"] == "unserializable_context"
     finally:
         sock.close()
         fx.stop()

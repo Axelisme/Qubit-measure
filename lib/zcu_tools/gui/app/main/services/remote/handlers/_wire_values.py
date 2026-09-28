@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 _COMPLEX_TAG = "__complex__"
@@ -9,10 +11,12 @@ _COMPLEX_TAG = "__complex__"
 
 def context_wire_value(value: object) -> object:
     """Project complete context values; reject unsupported types and keys."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("non-finite context number")
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, complex):
-        return {"__complex__": [value.real, value.imag]}
+        return context_wire_value({"__complex__": [value.real, value.imag]})
     if isinstance(value, np.ndarray):
         return context_wire_value(value.tolist())
     if isinstance(value, np.generic):
