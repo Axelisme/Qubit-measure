@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
@@ -236,6 +236,14 @@ class MainWindow(QMainWindow):
 
     def select_tab_widget(self, tab_id: str) -> None:
         self._tabs.setCurrentWidget(self._tab_widgets[tab_id])
+
+    def select_tab_pane(
+        self, tab_id: str, pane: Literal["run", "analysis", "post_analysis", "data"]
+    ) -> None:
+        """Follow an explicit command, including on the already active tab."""
+        widget = self._tab_widgets[tab_id]
+        widget.select_pane(pane)
+        self._tabs.setCurrentWidget(widget)
 
     def has_tab_widget(self, tab_id: str) -> bool:
         return tab_id in self._tab_widgets

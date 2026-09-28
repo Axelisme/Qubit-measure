@@ -11,7 +11,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ._common import render_view
+from ._common import follow_tab, render_view
 
 
 def h_tab_new(
@@ -230,6 +230,7 @@ def h_tab_set_cfg(
                 f"edits[{i}] must be an object with 'path' and 'value'",
             )
         edits.append(CfgEdit(str(edit["path"]), edit["value"]))
+    follow_tab(adapter, tab_id, "run")
     return adapter.ctrl.cfg_editor_set_fields(
         editor_id, edits, agent_edit=params.get("agent_edit") is True
     ).to_wire()

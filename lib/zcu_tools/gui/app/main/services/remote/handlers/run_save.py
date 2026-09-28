@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ._common import follow_tab
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -19,6 +21,7 @@ def h_tab_run_start(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    follow_tab(adapter, tab_id, "run")
     operation_id = control.start_run(tab_id)
     return {"operation_id": operation_id}
 
