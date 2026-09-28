@@ -603,6 +603,85 @@ def test_socket_self_write_advances_only_its_prior_seen_context(fx) -> None:
         second.close()
 
 
+@pytest.mark.parametrize("observe_cfg", [False, True])
+def test_context_self_write_advances_only_observed_dependent_cfg(
+    fx, observe_cfg
+) -> None:
+    _prepare_guarded_context(fx)
+    fx.ctrl.context_control.create_md_attr("count", 4)
+    tab_id = fx.ctrl.new_tab("fake")
+    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(
+        fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
+    )
+    fx.ctrl.cfg_editor_set_field(editor_id, "reps", {"__kind": "eval", "expr": "count"})
+    sock = _open_client(fx.service.port)
+    try:
+        for method, params in (
+            ("tab.snapshot", {"tab_id": tab_id}),
+            ("context.snapshot", {}),
+            ("soc.info", {"include_cfg": True}),
+            ("device.list", {}),
+        ):
+            assert _raw_call(sock, method, params)["ok"] is True
+        if observe_cfg:
+            assert _raw_call(sock, "tab.get_cfg", {"tab_id": tab_id})["ok"] is True
+        before = fx.state.version.get(f"tab:{tab_id}:cfg")
+        assert (
+            _raw_call(sock, "context.md_set_attr", {"key": "count", "value": 7})["ok"]
+            is True
+        )
+        assert fx.state.version.get(f"tab:{tab_id}:cfg") > before
+        started = _raw_call(sock, "tab.run_start", {"tab_id": tab_id})
+        if observe_cfg:
+            assert started["ok"] is True
+        else:
+            assert started["error"]["reason"] == "stale_version"
+            assert f"tab:{tab_id}:cfg" in started["error"]["data"]["stale"]
+    finally:
+        sock.close()
+
+
+def test_editor_consecutive_self_writes_preserve_commit_observation(fx) -> None:
+    ml = ModuleLibrary()
+    ml.waveforms["seed"] = WaveformCfgFactory.from_raw(
+        {"style": "const", "length": 0.1}
+    )
+    _prepare_guarded_context(fx, ml)
+    first = _open_client(fx.service.port)
+    second = _open_client(fx.service.port)
+    try:
+        editor_id = _raw_call(
+            first, "editor.new", {"item_kind": "waveform", "from_name": "seed"}
+        )["result"]["editor_id"]
+        for sock in (first, second):
+            assert _raw_call(sock, "editor.get", {"editor_id": editor_id})["ok"] is True
+            assert _raw_call(sock, "context.snapshot", {})["ok"] is True
+        for length in (0.2, 0.3):
+            assert (
+                _raw_call(
+                    first,
+                    "editor.set_field",
+                    {"editor_id": editor_id, "path": "length", "value": length},
+                )["ok"]
+                is True
+            )
+        stale = _raw_call(
+            second, "editor.commit", {"editor_id": editor_id, "name": "other"}
+        )
+        assert stale["error"]["reason"] == "stale_version"
+        assert (
+            _raw_call(first, "editor.commit", {"editor_id": editor_id, "name": "copy"})[
+                "ok"
+            ]
+            is True
+        )
+        assert ml.waveforms["copy"].to_dict()["length"] == 0.3
+        assert "other" not in ml.waveforms
+    finally:
+        first.close()
+        second.close()
+
+
 def test_timed_out_socket_read_does_not_establish_guard_baseline(fx) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
@@ -644,14 +723,23 @@ def test_timed_out_socket_read_does_not_establish_guard_baseline(fx) -> None:
         sock.close()
 
 
+@pytest.mark.parametrize("with_device", [False, True])
 def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
-    fx, tmp_path: Path
+    fx, tmp_path: Path, with_device: bool
 ) -> None:
     _prepare_guarded_context(fx)
     port = fx.service.port
     bridge, call = _mcp_client(port, tmp_path)
     try:
         assert call("connect", {"port": port})["port"] == port
+        if with_device:
+            call(
+                "device_connect",
+                {"name": "bias", "type": "FakeDevice", "address": "none"},
+            )
+            # A fresh connection must observe the already registered device itself.
+            bridge.disconnect()
+            call("connect", {"port": port})
         tab_id = call(
             "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
         )["tab_id"]
@@ -672,6 +760,8 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
         assert started["handle"] > 0
         _await_completed_run(call, started["handle"])
     finally:
+        if with_device:
+            call("device_disconnect", {"name": "bias", "forget": True})
         bridge.disconnect()
 
 

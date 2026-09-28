@@ -667,6 +667,13 @@ def test_save_data_delegates_to_save_control(fx):
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
     try:
+        assert fx.state.version.get(f"tab:{tab_id}:path:data") == 0
+        unseen = call(
+            sock, "tab.save_data", {"tab_id": tab_id, "data_path": "/tmp/data.h5"}
+        )
+        assert unseen["error"]["reason"] == "stale_version"
+        assert f"tab:{tab_id}:path:data" in unseen["error"]["data"]["stale"]
+        fx.service.save_control.save_data.assert_not_called()
         assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
         resp = call(
             sock,

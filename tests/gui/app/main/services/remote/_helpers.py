@@ -56,7 +56,7 @@ def make_ctx() -> ExpContext:
 
 
 def observe_run_inputs(
-    fx, tab_id: str, invoke: Callable[[str, dict[str, Any]], object]
+    fx, tab_id: str, invoke: Callable[[str, dict[str, Any]], Any]
 ) -> None:
     """Prepare the headless form owner and explicitly read each run dependency."""
     if fx.ctrl.editor_id_for_owner(tab_id) is None:
@@ -67,9 +67,11 @@ def observe_run_inputs(
         ("tab.snapshot", {"tab_id": tab_id}),
         ("tab.get_cfg", {"tab_id": tab_id}),
         ("soc.info", {"include_cfg": True}),
-        ("device.list", {}),
     ):
         invoke(method, params)
+    devices = invoke("device.list", {})["devices"]
+    for device in devices:
+        invoke("device.snapshot", {"name": device["name"]})
 
 
 def make_view() -> MagicMock:
