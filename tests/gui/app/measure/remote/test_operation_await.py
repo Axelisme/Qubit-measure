@@ -2,7 +2,7 @@
 
 The handler is off_main_thread (blocks the IO worker). It calls
 operation_control.await_operation(operation_id, timeout) and shapes the AwaitResult into
-a wire result (ADR-0025 §cancelled-wire):
+a wire result (ADR-0066):
   - completed/cancelled → structured {reason:'completed', status:'cancelled',
     feedback?} (NOT a raise; feedback present only when a Stop reason was latched).
   - completed/failed → structured failed/error, not a failed tool call.
@@ -130,7 +130,7 @@ def test_failed_returns_status_and_error():
 
 
 # ---------------------------------------------------------------------------
-# cancelled path (ADR-0025 §cancelled-wire) — structured result, NOT a raise
+# cancelled path (ADR-0066) — structured result, NOT a raise
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +189,7 @@ def test_timeout_returns_running_signal():
 
 
 # ---------------------------------------------------------------------------
-# user_feedback path (ADR-0025)
+# user_feedback path (ADR-0066)
 # ---------------------------------------------------------------------------
 
 

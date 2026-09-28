@@ -36,7 +36,7 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """Set the minimal return values required by MainWindow.__init__ on a mock ctrl.
 
     MainWindow calls active_operation_count() and has_agent_connected() during
-    bus-event handlers (FeedbackPanel docking, ADR-0025 C3); tests
+    bus-event handlers (FeedbackPanel docking, ADR-0066); tests
     that emit bus events must stub both to deterministic values.
     """
     ctrl.active_operation_count.return_value = 0
@@ -1282,7 +1282,7 @@ def _editor_wiring_ctrl() -> MagicMock:
     ctrl.list_device_names.return_value = []
     ctrl.list_arb_waveforms.return_value = []
     ctrl.has_soc.return_value = False
-    # MainWindow reads both during bus-event handlers (ADR-0025 C3 gate).
+    # MainWindow reads both during bus-event handlers (ADR-0066 gate).
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
 
@@ -1854,7 +1854,7 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
 
 
 # ---------------------------------------------------------------------------
-# FeedbackPanel docking gate (ADR-0025 C3): op-count AND agent-connected
+# FeedbackPanel docking gate (ADR-0066): op-count AND agent-connected
 # ---------------------------------------------------------------------------
 
 

@@ -1,4 +1,4 @@
-"""Tests for BackgroundRunner — the pure OffMain executor (ADR-0019, ADR-0026 §2).
+"""Tests for BackgroundRunner — the pure OffMain executor (ADR-0066).
 
 Covers both substrates (dedicated QThread vs shared pool), the done/error
 delivery on the main thread, that a None result is delivered (not swallowed),
@@ -121,7 +121,7 @@ def test_pool_delivers_error(qapp):
 
 def test_figure_ambient_routing_active_during_work(qapp):
     # Work thunk closes over figure_ambient: the routing ContextVar is set on
-    # the worker thread for the duration of the thunk (ADR-0026 §2).
+    # the worker thread for the duration of the thunk (ADR-0066).
     # BackgroundRunner itself is unaware of the scope — only the thunk knows.
     bg = _bg()
     container = object()
@@ -184,7 +184,7 @@ def test_figure_ambient_none_container_is_noop(qapp):
 
 def test_progress_ambient_installs_pbar_factory(qapp):
     # progress_ambient installs the pbar ContextVar so the worker thread can
-    # create progress bars (ADR-0026 §2). We verify it is callable from the
+    # create progress bars (ADR-0066). We verify it is callable from the
     # worker by reading back the ContextVar value directly.
     from zcu_tools.progress_bar.interface import _pbar_factory as _cv
 

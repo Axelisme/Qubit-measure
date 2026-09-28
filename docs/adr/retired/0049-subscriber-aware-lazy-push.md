@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-28）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
+
 ---
 status: accepted
 ---

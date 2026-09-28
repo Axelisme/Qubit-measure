@@ -57,7 +57,7 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     """Simulate the CfgEditorService open/commit/get_draft contract.
 
     The embedded editor opens a *committable* session from the live ml
-    (open_cfg_editor with from_name; ADR-0006) and commits via replace_cfg_editor;
+    (open_cfg_editor with from_name; ADR-0067) and commits via replace_cfg_editor;
     seeded sessions still exist for tab/writeback. Build a real CfgDraft
     per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
     commit (records last commit), and teardown.

@@ -1,4 +1,4 @@
-"""Tests for OperationGate — the Exclusion facet (ADR-0019).
+"""Tests for OperationGate — the Exclusion facet (ADR-0066).
 
 Pure hardware mutual-exclusion keyed by an externally-minted token: the
 fail-fast ``ensure_can_start`` guard, ``register`` / ``release``, and the

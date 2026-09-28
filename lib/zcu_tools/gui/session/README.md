@@ -85,7 +85,7 @@ introduced.
   `ExpectedError` taxonomy；`OperationConflictError`、context validation、predictor readiness與
   value-lookup expected leaves攜帶typed category。`ValueLookupError` parent、`ProviderError`、
   SoC/device async terminal與registration failures保持unexpected，不因共同ancestry被降級
-  （ADR-0047）。
+  （ADR-0068）。
 - **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ runtime-specific `BackgroundExecutor` 各自建；Qt composition 使用 `session/adapters/qt_background.py` 的 `BackgroundRunner`，headless composition 使用注入 `ManualOwnerScheduler` 的 `ThreadPoolBackgroundExecutor`。兩者都保留 shared-pool / dedicated-worker 語意，terminal callback 一律回 owner thread；具體 owner 可在 teardown 呼 `quiesce()` 等待 worker 與 terminal delivery。`tests/gui/session/test_headless_composition.py` 以subprocess阻擋Qt imports，穿過正式`build_session_services`與offline MockSoc success/cancel lifecycle，作為無`QApplication` composition的可執行邊界。`ProgressService`/`IOManager`/`QtProgressTransport`/`QtShutdownDriver` 是共用 session service/adapter。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub`/`ProjectIOPort` port。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure/autofluxdep 各自 `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
 - **app 繼承/實作**：measure `State(SessionState)`、autofluxdep `AutoFluxDepState(SessionState)`；兩 Controller 暴露 `setup_control: SetupControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。

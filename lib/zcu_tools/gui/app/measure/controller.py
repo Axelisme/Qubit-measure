@@ -100,7 +100,7 @@ class _ActiveOperation:
         return f"{self.kind}:{self.owner_id}"
 
 
-# A View has two distinct down-channels from the Controller (ADR-0013):
+# A View has two distinct down-channels from the Controller (ADR-0068):
 #   - diagnostics (error / info) — fanned out to *every* attached View;
 #   - render help (pbar / live container) — pulled from the *one* View that has
 #     a real canvas.
@@ -117,7 +117,7 @@ class DiagnosticSink(Protocol):
     Fanned out to every attached sink. Each View renders it its own way — the
     Qt window pops a dialog (error) or status bar (info); the remote adapter
     enqueues a diagnostic line. Diagnostics never go through EventBus (a channel
-    that reports a fault must not be the faulty channel — ADR-0013).
+    that reports a fault must not be the faulty channel — ADR-0068).
     """
 
     def notify_diagnostic(
@@ -396,7 +396,7 @@ class Controller(SessionControllerMixin):
             self._diag_sinks.remove(sink)
 
     def _notify(self, severity: Severity, title: str, message: str) -> None:
-        """Fan a diagnostic out to every attached View (ADR-0013). Never via
+        """Fan a diagnostic out to every attached View (ADR-0068). Never via
         EventBus — diagnostics must not depend on the channel they report on."""
         for sink in list(self._diag_sinks):
             sink.notify_diagnostic(severity, title, message)

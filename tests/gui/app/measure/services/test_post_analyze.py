@@ -179,7 +179,7 @@ def test_start_post_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
 
 def test_start_post_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG001
     # The figure_container is captured in the work thunk's closure via
-    # ``figure_ambient`` (ADR-0026 §2). Verify submit receives a single thunk.
+    # ``figure_ambient`` (ADR-0066). Verify submit receives a single thunk.
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     container = MagicMock()
@@ -258,7 +258,7 @@ def test_on_post_analyze_failed_resets_state(qapp):  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# Concurrent tabs — no exclusion gate (ADR-0019): each settles its own token
+# Concurrent tabs — no exclusion gate (ADR-0066): each settles its own token
 # ---------------------------------------------------------------------------
 
 

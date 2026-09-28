@@ -32,13 +32,7 @@
 
 ## Remote / Transport
 
-- [0013 — RemoteControlAdapter as second view](0013-remote-adapter-as-second-view.md)：remote socket 是 MainWindow 平級 driving adapter。
-- [0014 — Shared GUI transport layer](0014-gui-shared-transport-layer.md)：三個 GUI app 共用 NDJSON RPC endpoint 與 MCP bridge primitive。
-- [0047 — Typed expected-error taxonomy](0047-typed-expected-error-taxonomy.md)：caller-correctable failure 由 producer 以 closed category 顯式 opt in，transport 只投影。
-- [0049 — Subscriber-aware lazy push](0049-subscriber-aware-lazy-push.md)：endpoint以two-phase recipient transaction在matching subscriber存在時才materialize/encode一次，並維持unsubscribe/disconnect線性化。
-- [0052 — Event meta 與多前端 attribution](0052-event-meta-and-frontend-attribution.md)：bus 為事件蓋章 `EventMeta(seq, origin)`，origin 由 dispatch 邊界宣告、operation 記錄顯式攜帶；coalescing 屬 subscriber-side；wire 封套 additive 加 seq/origin。
-- [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 由 `RemoteMethodEntry` 擁有；guard/reveals 留在 GUI，catalog 只投影呼叫所需資訊。
-- [0060 — Agent interface as second view](0060-measure-agent-interface-shared-gui-view.md)：量測 agent 以 40 個特化 tool 操作與 GUI 共用的狀態；一個判斷點一個 tool，寫入類 tool 使 GUI 跟隨到對應子 tab。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：四個 app 的共用傳輸和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
@@ -66,15 +60,16 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 ## Draft
 
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
-- [外部 agent launch 責任](draft/external-agent-launch-ownership.md)：已核准方向待 Remote／Transport ADR 核實轉正。
+- [GUI 事件收合](draft/remote-event-coalescing.md)：UI／cfg 的 per-tick 收合尚未落實。
 - [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：editing port、refresh／override、revision 與 atomic batch／Apply 尚待實作。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
 
-以下舊篇保留原號與正文；現行 GUI 決策見 0067，Operation 見 0066，Persistence 見 0063，workflow 見 0062，process startup 見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役；0013 的 transport 內容留待 Remote／Transport 核實。
+以下舊篇保留原號與正文；現行 GUI 決策見 0067，Operation 見 0066，Remote／Transport 見 0068，Persistence 見 0063，workflow 見 0062，process startup 見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役。
 
+- [0013 — Remote adapter second view](retired/0013-remote-adapter-as-second-view.md)、[0014 — Shared GUI transport](retired/0014-gui-shared-transport-layer.md)、[0047 — Expected errors](retired/0047-typed-expected-error-taxonomy.md)、[0049 — Lazy push](retired/0049-subscriber-aware-lazy-push.md)、[0052 — Event attribution](retired/0052-event-meta-and-frontend-attribution.md)、[0059 — MCP RPC catalog](retired/0059-measure-mcp-rpc-channel.md)、[0060 — Measure agent interface](retired/0060-measure-agent-interface-shared-gui-view.md)：跨模組邊界由 0068 接替；0052 未落實的 GUI 收合見 draft。
 - [0004 — Service dependency three questions](retired/0004-service-dependency-three-questions.md)：依賴語意與方向由 0067 接替。
 - [0005 — Service roles](retired/0005-service-roles-ddd-hexagonal.md)：前端與 owner 角色由 0067 接替。
 - [0006 — Single ml/md write authority](retired/0006-single-ml-md-write-authority.md)：寫入權威由 0067 接替；cfg lowering 見 0065 與 measure README。
@@ -92,7 +87,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [0026 — OperationRunner and ports](retired/0026-operation-abstraction-runner-scope-ports.md)：runner 分界由 0066 承接；局部 port 與 scope 見 session／app README。
 - [0058 — Registry-owned disconnect](retired/0058-registry-owned-visa-session-disconnect.md)：跨 owner teardown 由 0066 承接，registry 局部契約見 device README。
 - [0044 — GUI process runtime](retired/0044-gui-process-runtime.md)：跨模組啟動邊界由 0064 接替，局部契約見 gui README。
-- [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：launch 邊界暫見 Remote draft；已核實的 operation feedback 見 0066。
+- [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：外部 agent 啟動邊界由 0068 接替；operation feedback 見 0066。
 - [0015 — GUI memento caretaker](retired/0015-persistence-caretaker-memento-single-file.md)：app 與 shared caretaker 的責任由 0063 接替。
 - [0027 — Experiment data persistence](retired/0027-experiment-data-persistence-native-labber-axes-list.md)：資料責任由 0063 接替，細節在 datafile 與 experiment owner 文件。
 - [0032 — Waveform reference time axis](retired/0032-arbitrary-waveform-reference-time-axis.md)：時間權威由 0063 接替。

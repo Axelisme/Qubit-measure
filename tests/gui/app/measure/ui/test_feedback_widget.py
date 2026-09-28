@@ -1,4 +1,4 @@
-"""Tests for FeedbackPanel (docked collapsible panel, ADR-0025 §Stop-gating).
+"""Tests for FeedbackPanel (docked collapsible panel, ADR-0066).
 
 Uses a mock Controller so no Qt event loop or real services are needed for
 the widget logic. The qapp fixture (provided by pytest-qt) ensures a

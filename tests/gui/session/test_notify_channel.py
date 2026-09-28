@@ -1,4 +1,4 @@
-"""Tests for NotifyChannel — per-prompt FIFO (ADR-0025 invariants, Stage 4b).
+"""Tests for NotifyChannel — per-prompt FIFO (ADR-0066 invariants, Stage 4b).
 
 Covers:
   - reply / dismiss / timeout event folding

@@ -40,4 +40,4 @@ Worker 發資料通知、主線程繪圖，與 worker 呼叫既有 pyplot API、
 
 不維護 service tier 表，也不把所有呼叫塞進 Controller。前者無法說明單條邊的用途，後者會放大依賴及模糊寫入 owner。Frontend 可以有不同 presentation，卻不能擁有另一份可提交的業務真相。
 
-Cfg 的編輯和 lowering 邊界見 [[0065]]；持久化見 [[0063]]；workflow 見 [[0062]]；process composition 見 [[0064]]；operation owner-loop、取消與 settle 見 [[0066]]；scheduler 與 gate presence 的局部機制見 [[0053]]。Remote／Transport 的協定仍由 [[0013]] 等原篇承接，直到其 domain 完成核實。本篇不宣稱四個 app 具有相同能力或所有可變繪圖資料已有跨線程 snapshot 保證。
+Cfg 的編輯和 lowering 邊界見 [[0065]]；持久化見 [[0063]]；workflow 見 [[0062]]；process composition 見 [[0064]]；operation owner-loop、取消與 settle 見 [[0066]]；scheduler 與 gate presence 的局部機制見 [[0053]]。Remote／Transport 的協定見 [[0068]]。本篇不宣稱四個 app 具有相同能力或所有可變繪圖資料已有跨線程 snapshot 保證。

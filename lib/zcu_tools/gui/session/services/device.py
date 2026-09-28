@@ -133,7 +133,7 @@ class DeviceEntry:
 
 @dataclass(frozen=True)
 class DeviceSetupSnapshot:
-    # Live progress is polled via operation.progress (by operation_id, ADR-0013
+    # Live progress is polled via operation.progress (by operation_id, ADR-0068
     # device↔run alignment), not carried here — this names *which* device is
     # setting up.
     device_name: str
@@ -679,7 +679,7 @@ class DeviceService:
         """Assemble the read-time projection of a device-state entry from State.
 
         Live setup progress is no longer spliced here — it is polled separately
-        via operation.progress (by operation_id, ADR-0013 device↔run alignment).
+        via operation.progress (by operation_id, ADR-0068 device↔run alignment).
         """
         return DeviceSnapshot(
             name=dev.name,

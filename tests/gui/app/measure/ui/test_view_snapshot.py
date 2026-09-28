@@ -2,7 +2,7 @@
 
 The key invariant: tab_ids in the view snapshot must equal State's list_tab_ids(),
 never _tab_widgets.keys(), so ghost widget entries cannot leak into the projection
-(ADR-0013: view is a reader of State, not a second source of truth).
+(ADR-0068: view is a reader of State, not a second source of truth).
 
 MainWindow inherits from QMainWindow (a Qt C++ type) so object.__new__ is
 forbidden. Instead we invoke ``MainWindow.get_view_snapshot`` as an unbound method

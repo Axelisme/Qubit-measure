@@ -21,7 +21,7 @@ MEASUREMENT agent 是 operator：
 
 `lib/` implementation 不屬於量測證據。MEASUREMENT agent 不讀、不搜尋、不修改或引用其中的實作。
 
-處理 agent launch 或 lifecycle 時讀 [外部 agent launch 責任草案](docs/adr/draft/external-agent-launch-ownership.md)。外部 CLI 或 MCP workflow 擁有啟動流程，GUI 不提供 launch UI。
+處理 agent launch 或 lifecycle 時讀 [Remote／Transport ADR](docs/adr/0068-remote-transport.md)。外部 CLI 或 MCP workflow 擁有啟動流程，GUI 不提供 launch UI。
 
 MEASUREMENT 只套用本節與語言規則。以下規則屬於 DEVELOPMENT。
 

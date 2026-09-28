@@ -5,7 +5,7 @@ status: accepted
 # 0053 — Owner scheduler seam 與 hardware gate presence
 
 **狀態:** accepted（2026-07-12 contract freeze）。
-**關聯:** [[0066]]、[[0067]]、[[0064]]、[[0052]]。
+**關聯:** [[0066]]、[[0067]]、[[0064]]、[[0068]]。
 
 ## 背景
 
@@ -65,7 +65,7 @@ serializer catalog。4處consumer改訂閱bus；QObject/Signal/parent全數移�
 `ExclusionRequest`新增required nonblank `note`作為service→gate internal carrier；不改
 `OperationRunner.__init__/begin`或`OperationSpec`。`_ActiveLease`與`register(...)`擴充三欄:
 
-- `origin_kind`:發起者(取自 [[0052]] `EventOrigin.kind`:user/agent/system);
+- `origin_kind`:發起者(取自 [[0068]] `EventOrigin.kind`:user/agent/system);
 - `note`:發起 service 提供的人讀描述；固定模板為measure `run <adapter_name> (tab <tab_id>)`、autofluxdep `autofluxdep run`、SoC `connect SoC (mock|remote)`、device `<connect|disconnect|setup> device: <name>`;
 - `since`:內部單調開始時間(顯示用途,不參與互斥判斷)。
 

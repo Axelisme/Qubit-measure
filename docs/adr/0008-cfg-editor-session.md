@@ -7,7 +7,7 @@ status: accepted
 **狀態：** accepted（已實作）。
 > 現行定位：measure 的 headless session／writeback 局部契約有效；跨 app 分界見 [[0065]]、[[0067]]。
 
-**關聯：** external-refresh 是 [[0067]] Reaction 標準模式；commit 的 ml/md 寫入歸 [[0067]] 單一權威；tab cfg 讀寫收斂見 [[0013]] F11；agent 樂觀模型見 [[0002]]。
+**關聯：** external-refresh 是 [[0067]] Reaction 標準模式；commit 的 ml/md 寫入歸 [[0067]] 單一權威；tab cfg 讀寫收斂見 [[0068]]；agent 樂觀模型見 [[0002]]。
 
 ## 脈絡
 
@@ -29,7 +29,7 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 - **完整 observation**：`CfgDraft.observe()` 回傳 detached、含 Literal／readonly 的 nominal tree，保留 raw、validity、resolved 與 cached reference metadata；GUI 與 agent 讀取同一份 model 狀態，remote 只做 typed projection，不現場 resolve。讀取要建立 cfg observation baseline，必須成功讀取無 prefix 的完整 cfg；prefix 與裸版本不代表完整內容已見。Persistence 的 expression tag 只存 expr，不能代替 observation 或執行快照。Ref 切換後 agent 重讀新結構；commit 失敗保留 session。
 - **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不帶 reason 區分**（修復動作都是重開）。
 - **editor 專屬變更流**（`editor_changed{editor_id, paths}` / `editor_closed{editor_id, reason}`，**不走全域 EventBus**）：service 保留內部變更流；measure MCP 使用 request/reply，**agent 不 subscribe**——agent 改為「下次 `editor.set_field` 撞 `unknown editor session` 才知 session 沒了」，與樂觀模型一致（撞牆→重開）。
-- **tab cfg 讀/寫/發現全收斂到 session model**（[[0013]] F11）：`tab.get_cfg`／`editor.get` 的完整 observation、`editor.set_field` 的 mutation、tab snapshot 暴露的 `editor_id` 都對該 tab 的 editor session model，**agent 與人同一棵**。原 `cfg.set_field` RPC / `get_tab_live_model_root`（戳 View 的另一棵 model）已刪。
+- **tab cfg 讀/寫/發現全收斂到 session model**（[[0068]]）：`tab.get_cfg`／`editor.get` 的完整 observation、`editor.set_field` 的 mutation、tab snapshot 暴露的 `editor_id` 都對該 tab 的 editor session model，**agent 與人同一棵**。原 `cfg.set_field` RPC / `get_tab_live_model_root`（戳 View 的另一棵 model）已刪。
 
 ## writeback opaque draft（建立在 service-owned 上）
 
