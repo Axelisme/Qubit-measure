@@ -121,7 +121,7 @@ def test_status_indexes_gui_origin_operations_without_an_agent_start(
         "project": {"chip": "chip", "qubit": "qubit", "resonator": "res"},
         "soc": {"connected": True, "mock": True},
         "context": {"active": "bias"},
-        "devices": [{"name": "flux", "connected": True}],
+        "devices": [{"name": "flux", "status": "connected", "connected": True}],
         "predictor": {"loaded": False},
         "ready": {"can_run": True, "missing": []},
         "tabs": [{"tab": "gui-tab", "experiment": "ramsey", "running": False}],

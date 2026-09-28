@@ -130,12 +130,12 @@ def test_commit_ok_returns_empty():
     ctrl = MagicMock()
     ctrl.commit_cfg_editor.return_value = None
     res = _dispatch(ctrl, "editor.commit", {"editor_id": "e", "name": "agent_mod"})
-    assert res == {"__agent_write_versions": {}}
+    assert res == {}
     ctrl.commit_cfg_editor.assert_called_once_with("e", "agent_mod")
 
 
 def test_discard_returns_empty():
     ctrl = MagicMock()
     res = _dispatch(ctrl, "editor.discard", {"editor_id": "e"})
-    assert res == {"__agent_write_versions": {}}
+    assert res == {}
     ctrl.discard_cfg_editor.assert_called_once_with("e")

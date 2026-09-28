@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27，04 device and predictor tools
+**Last updated:** 2026-09-28，GUI-owned seen and new-tab file loading
 
 # `zcu_tools/mcp/measure/`
 
@@ -7,9 +7,11 @@
 ## 連線與操作
 
 - `assembly.py` 建立固定手寫工具表。01／02 提供 `connect`、`status`、`wait`、`cancel` 與三個 `rpc_*`；05 增加 `experiments`、`guide`、`tab_open`、`tab_get`、`tab_live`、`screenshot`；04 的 predictor 工具經 GUI 同一 `PredictorService` 讀、載、預測與單點 bias 校正；device 四工具沿 GUI `DeviceService` 驗證欄位與讀取現況，使用 02 的 opaque operation handle 等待、取消或逾時後恢復，不另存一份操作結果。其餘 domain tools 依各自 ticket 接入；`rpc_call` 只能呼叫 catalog 標為 `rpc` 的 method。05 的 `tab_get` 已提供基礎讀取，但 cfg 的型別／選項／鎖定由06補，artifact 的狀態／最後存檔路徑由09補，未完成欄位明示 partial，不假報完整。
-- `session.py` 擁有單一 MCP session 的 catalog、guard observation、bridge 與 opaque integer operation handles。明確重連或非預期 EOF 後清 catalog/observations/舊 handle 對應；下一個 GUI incarnation 可重用 wire operation ID，但不重用此 MCP session 曾向 agent 外露的 handle。GUI-origin operation 由 `status` 收錄，與 agent-started operation 使用同一映射；wait/cancel/progress 在每次 wire 操作前確認連線，再把 opaque handle 解析成該 GUI 世代的 ID。送出前若斷線即失敗，不用舊 ID 向重啟後的 GUI 重送。這不是第二個 operation outcome store。
-- 資源版本由 GUI owner bump。MCP 在完整 read 前取保守版本，成功後只更新 catalog 指定的資源；`prefix` 局部讀取不揭露整份 cfg，status 的 orientation reads 不吸收其他資源。GUI catalog 宣告哪些寫入回傳 owner-thread 前後版本；MCP 只更新該次變更且寫入前版本符合既有觀察的資源，不吸收別的 GUI 編輯。新建 `tab.new` 回執只確立新 tab 的存在版本，不把未讀 cfg 或其他資源當成已觀察。stale 拒絕不刷新 baseline，需重讀資源後才由呼叫者決定是否重試；斷線或 transport timeout 不自動重送。
-- 接手既有或重啟後的 GUI 時，明確呼叫 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)` 和 `context.snapshot`，分別重讀 tab 存在、完整 SoC cfg、目前 active label 與所有可序列化 md/ml cfg。`context.snapshot` 可能回傳大型敏感資料，遇無法序列化的值會失敗且不刷新版本；摘要、局部 getter 與裸 `resources.versions` 都不能替代完整讀取。
+- `session.py` 擁有單一 MCP session 的 catalog、bridge 與 opaque integer operation handles。明確重連或非預期 EOF 後清 catalog/舊 handle 對應；下一個 GUI incarnation 可重用 wire operation ID，但不重用此 MCP session 曾向 agent 外露的 handle。GUI-origin operation 由 `status` 收錄，與 agent-started operation 使用同一映射；wait/cancel/progress 在每次 wire 操作前確認連線，再把 opaque handle 解析成該 GUI 世代的 ID。送出前若斷線即失敗，不用舊 ID 向重啟後的 GUI 重送。這不是第二個 operation outcome store。
+- GUI owner bump 資源版本，remote adapter 保存每連線的 seen。完整讀取成功才記錄宣告的資源；部分讀取、失敗、逾時與回覆編碼失敗不建立觀察。未看過的 key 即使版本 0 仍拒絕。自寫只推進先前 seen 等於寫入前版本的資源；未看過的連帶 cfg 變更不加入 seen。MCP 不保存版本、不送 expected_versions、不解析寫入收據。stale、斷線或 timeout 都不自動重送。
+- `tab_get` summary/artifacts 與 `tab_live` 保留完整 `operation_state`，含 result/analysis revisions、availability 及有效 paths。cfg-only 讀取不暗中讀 snapshot；原始 result 陣列不是操作狀態的必要內容。
+- `tab_open(from_file)` 只送一次 GUI `tab.open_file`，不隱藏預讀。Agent 必須先讀 context。GUI 負責建立、載入、失敗清理與聚焦；成功另回 cfg_backfill，not_applied 保留結果。新 tab 只建立存在 baseline，後续寫入仍需明確讀取對應資源。
+- 接手既有或重啟後的 GUI 時，明確呼叫 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)` 和 `context.snapshot`，分別重讀 tab 操作狀態、完整 SoC cfg、目前 active label 與所有可序列化 md/ml cfg。`context.snapshot` 可能回傳大型敏感資料，遇無法序列化的值會失敗且不刷新版本；摘要、局部 getter 與裸 `resources.versions` 都不能替代完整讀取。
 - 圖像由 GUI owner 渲染並寫入 MCP session 專屬暫存 PNG；工具只回絕對路徑，連線期間可讀，server 關閉時清理。`tab_live` 的 elapsed_s 來自 GUI operation handle 的單一起時，不取各進度條 elapsed 的最大值。既有無 `out_path` 的 GUI screenshot RPC 仍可回 base64，MCP 特化工具不用 inline 圖片。
 - `bridge` 只管 socket/GUI subprocess。`connect(token=...)` 使用現有 GUI control-token 認證；session 留住本次憑證供斷線後重新握手，顯式切換 port 不沿用前一 GUI 的 token。未授權與 wire 不相容分別回報；MCP 工具記錄遮蔽 token。`connect(launch=...)` 對已由此 bridge 啟動且仍活著的 GUI 不會在另一個空 port 假裝再次啟動；MCP 清理只斷線，不殺 GUI。所有硬體 gate、取消與 operation 結果都仍歸 GUI owners。
 
@@ -18,7 +20,7 @@
 Shared SocketTransport 送出前與接收逐幀使用 shared framing 的8 MiB UTF-8 bytes上限，
 不含換行，不分批。超限request在送出前拒絕，既有連線仍可使用；超限response會關閉
 該連線並使pending RPC收到明確的message_too_large錯誤，不能假定mutation未執行。
-兩者都不自動重送；重新連線仍走既有catalog與observation重建流程。
+兩者都不自動重送；重新連線重新載入 catalog，GUI seen 從空集合開始。
 
 ## Cfg 讀取
 

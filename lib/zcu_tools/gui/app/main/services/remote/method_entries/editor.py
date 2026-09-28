@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
-    _expected_versions,
     _json,
     _str,
     _str_opt,
@@ -104,7 +103,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("editor_id"),
                 _str("name", "ml entry name to register under"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(

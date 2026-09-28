@@ -122,28 +122,31 @@ _Avoid_: 把 value `with_*` 寫成回新物件（與 spec 對稱但破壞「defa
 
 **並發感知三層分工**（脊椎，見 `docs/adr/0002`）:
 
-- **RPC = mechanism**:持版本表、提供 `resources.versions`、`expected_versions` 原子比對。
-- **mcp = policy + 簿記 + 翻譯**:持 last-seen 版本、知依賴對應、組 `expected_versions`、把拒絕翻成語義。版本號**只在 RPC↔mcp 流動**。
-- **agent（LLM）= 只收語義**「tab X cfg 過時了」,**從不看到版本號**。
+- **GUI**：擁有資源版本、每連線 seen、guard dependencies 與 reveals policy；在 owner thread 比對與更新。
+- **MCP**：轉送 RPC、維護 catalog 與 operation handles、把 stale 拒絕翻成語義。不保存觀察版本。
+- **Agent**：讀取狀態，收到「tab X cfg 過時了」後重讀，再決定是否重試。Snapshot revisions 可見，但 agent 不提交版本。
 
 **Resource version**（`State.version` = `VersionTable`）:
 每個資源的單調遞增整數(per-resource,非 wall-clock)。資源 key 中粒度:`context` / `soc` / `device:<name>` / `tab:<id>:cfg`·`:result`·`:save_path` / `tab:<id>`(存在) / `editor:<id>`。tab 資源綁 `tab_id`(uuid4,永不重用)。**bump 的責任歸該資源的 owner service,且只在 Qt 主線**(state mutator / 各 service terminal slot / `DeviceService._emit_device_changed` / `Controller.bump_editor_version`)—— 是「State 寫入只在主線」不變式的推論。VersionTable 是被動容器(只 +1);tab close 時 `drop_prefix` 忘掉該 tab 全部 key(依賴一個 dropped key 讀作 0 = 視同 stale)。
-**version bump = 狀態真的變了，不含「值未變的快取同步」**:bump 對應「資源狀態實際改變」(client 寫入,或讀取時發現外部變化);**讀取的快取刷新**(`get_device_info` 把 driver 回值寫回 `State.devices[name].info`,經 `refresh_device_info_cache`)的判定為:**值與快取相同 → 純同步,不 bump、不 emit**(否則一次純讀會 spurious 推進版本號、誤使其他 client 的 `expected_versions` 失效);**值不同(pydantic `!=`)→ driver 值在外部變了 = 真實狀態變化,bump `device:<name>` + emit `DEVICE_CHANGED`**(讓 readers requery、讓依賴此值的 guard 能擋)。原則精確化:不 bump 的是「值未變的同步」,不是「所有讀取路徑」。
+**version bump = 狀態真的變了，不含「值未變的快取同步」**:bump 對應「資源狀態實際改變」(client 寫入,或讀取時發現外部變化);**讀取的快取刷新**(`get_device_info` 把 driver 回值寫回 `State.devices[name].info`,經 `refresh_device_info_cache`)的判定為:**值與快取相同 → 純同步,不 bump、不 emit**(否則一次純讀會 spurious 推進版本號、誤使其他連線的 seen 過時);**值不同(pydantic `!=`)→ driver 值在外部變了 = 真實狀態變化,bump `device:<name>` + emit `DEVICE_CHANGED`**(讓 readers requery、讓依賴此值的 guard 能擋)。原則精確化:不 bump 的是「值未變的同步」,不是「所有讀取路徑」。
 _Avoid_: 讓「值未變的快取同步」bump;讓「讀到值真的變了」靜默不 bump/不 emit
 
 _Avoid_: 用 wall-clock 時戳取代版本號、在 worker thread bump、把 bump 散進每個 emit(綁 owner 而非 emit)、期望版本號區分「誰改的」(只答「變了沒」)
 
-**Version guard**（`_guard_versions`）:
-一道 **optimistic-concurrency 閘**(If-Match 式):受護操作(`tab.run_start` / `save.*` / `editor.commit`)帶 optional `expected_versions`(資源→版本),server 在主線 `_dispatch._run()` 單一同步序列內**原子**比對當前版本;不符(含 key 不存在=資源已 drop)→ `PRECONDITION_FAILED(reason=stale_version)`。沒帶=不檢查(同普通 RPC)。比對與真人 GUI 寫同在主線 → 無 TOCTOU。guard 是純 mechanism,**不懂依賴語義**(哪些 key 重要由 mcp 決定)。
-_Avoid_: 把它當永久鎖、讓 RPC 端懂「什麼叫 stale」或「run 依賴什麼」(那是 mcp policy)、在比對前 auto-refresh(會抹掉真人的變動)
+**Version guard**：
+樂觀並發檢查。GUI 在 owner thread 比對受保護操作的依賴與該連線 seen，再執行操作。未讀過或版本不符時回 `PRECONDITION_FAILED(reason=stale_version)`。缺失 seen 即使當前版本為 0 也拒絕。依賴宣告屬 measure remote policy，不屬 MCP session。
+_Avoid_: 把 guard 當永久鎖、以隱藏預讀解鎖、因版本為 0 而豁免首次讀取。
 
-**expected_versions**（wire-only,MCP-hidden）:
-guard 操作的 optional 參數。GUI 的 `rpc.catalog` 是方法依賴的單一來源。MCP 依該方法的 `guard_deps` 與 last-seen 組出版本。
+**Seen map**：
+GUI 為每條 remote 連線保存的資源觀察版本。完整讀取成功才建立對應觀察；部分讀取與裸版本表不建立。失敗、逾時或編碼失敗不留下新的觀察。斷線即丟棄，重連從空集合開始。
 
-`tab.run_start` 依已呈現的 tab cfg、tab、SoC、devices。整份 context 無法匯出不會阻斷 snapshot-only Run。`tab.load_data`、editor commit 與 writeback 依各自會用到的 live context 保留 guard。
+成功自寫只推進先前已看過且與寫入前版本匹配的資源。新 tab identity 只認證存在，不認證 cfg/result/analyze。連帶 cfg 回填不會把未讀資源變成已讀。
+_Avoid_: MCP 保存第二份 seen、wire expected_versions、寫入收據、用無關讀取刷新 baseline。
 
-`ParamSpec.mcp_hidden=True` 讓 handler 驗證版本，但不把版本號放入 MCP inputSchema。完整揭露資源的讀取或成功寫入回執，才推進受影響且先前已觀察的 last-seen 版本。`status()` 不刷新未讀狀態。GUI 使用者改過但 agent 未重讀的資料保持 stale。
-_Avoid_: 讓 expected_versions 出現在 agent schema、讓 agent 自己組版本、save 依賴 cfg(存檔來自 result 自帶 cfg_snapshot)
+**Operation state**：
+足以判斷受保護操作的狀態摘要，包含資源 revision、availability 與有效 paths。`tab.snapshot(tab_id)` 揭露 tab 存在、result/analyze/post 與 paths；cfg、context、writeback 內容由各自的完整 read 揭露。它不等於原始量測陣列，也不表示所有資源已讀。
+
+`tab.run_start` 依已呈現的 tab cfg、tab、SoC、devices。整份 context 無法匯出不會阻斷 snapshot-only Run。`tab.load_data`、editor commit 與 writeback 保留 live context guard。新 tab 的 `tab.open_file` 只要求先讀共享 context，不要求讀尚未存在的 tab；既有 tab.load_data 不放寬。
 
 **Operation feedback**（與版本 guard 分開）:
 GUI 端 EventBus 與 remote wire push 留給其他 consumers；measure MCP 不訂閱、不排隊、不 piggyback event 或 diagnostic。agent 在 `wait(op)` 的 `operation.await` request/reply 中取得終態、錯誤與 Send & Stop feedback；資源改動由 guard 回報 stale 資源，再從相應 getter 重讀。

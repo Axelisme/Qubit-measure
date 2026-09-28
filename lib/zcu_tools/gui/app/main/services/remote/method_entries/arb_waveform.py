@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _bool_default,
-    _expected_versions,
     _json,
     _str,
 )
@@ -48,7 +47,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _bool_default(
                     "overwrite", False, "Allow replacing an existing data_key"
                 ),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(

@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-27，MCP 88 / GUI 97 / WIRE 65（cached device fields during setup）
+**Last updated:** 2026-09-28，GUI-owned seen and new-tab file loading
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,9 +125,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 65`, `GUI_VERSION = 97`, and
-`MCP_VERSION = 88` (defined in `zcu_tools.mcp.measure.server`). WIRE 65
-adds State-cached device fields to snapshots during setup. WIRE 64 exposes
+Current measure-gui values are `WIRE_VERSION = 66`, `GUI_VERSION = 98`, and
+`MCP_VERSION = 89` (defined in `zcu_tools.mcp.measure.server`). WIRE 66 moves
+seen guards into the GUI, removes wire expectations and write receipts, exposes
+operation state in snapshots, and adds `tab.open_file`. GUI 98 owns new-tab
+loading and failure cleanup; MCP 89 forwards once without version bookkeeping.
+WIRE 65 adds State-cached device fields to snapshots during setup. WIRE 64 exposes
 predictor calibration; GUI 96 routes it through the shared predictor port.
 GUI 93 removes
 Run's context-content dependency after freezing cfg and device inputs; tab cfg,
@@ -154,48 +157,54 @@ reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
 ## Resource-Version Guard
 
 The GUI maintains a monotonic resource version table for context, SoC, devices,
-tabs, results, save paths, and editor sessions. Guarded mutation methods accept
-wire-hidden `expected_versions`; the remote adapter compares them atomically on
-the State owner thread before calling the controller.
+tabs, results, save paths, and editor sessions. Each remote connection starts with
+an empty seen map. The adapter compares it with current versions on the State
+owner thread before calling the controller. Missing observations, including
+version zero, are stale. Wire methods do not accept `expected_versions`.
 
 Run uses the observed cfg and device snapshots, not live md/ml. Its guard does
 not require exporting the entire context. Load, editor commit and writeback still
 use live context and retain their context guard; Run's change does not authorize
 removing those dependencies.
 
-MCP owns the agent baseline:
+GUI owns observation and write tracking:
 
-- guarded mutations send expected versions derived from the live catalog;
-- catalog-declared successful writes report only resources changed by their
-  owner-thread handler; MCP advances a resource only if its prior observation
-  matches that handler's before-version, never from a later version query;
-- successful full reads record pre-read versions only for keys named by their
-  `reveals` policy; `reveals_without` excludes those keys when a named optional
-  parameter is present, and `reveals_when_nonempty` requires named inputs to be
-  true. A partial or unmatched `prefix` cannot reveal the entire cfg/editor;
-  reads with no `reveals` preserve unrelated observations;
-- `tab.snapshot(tab_id)` reveals that tab's existence, `soc.info(include_cfg=true)`
-  reveals the full SoC cfg and explicit `context.snapshot` returns the active label,
-  every serializable md value and every ml entry cfg. Summary reads do not establish
-  these baselines. The full context reply may be large or sensitive and fails
-  rather than claiming a complete snapshot when a value cannot be encoded;
-- a successful `tab.new` owner-thread receipt certifies only the newly created
-  tab's existence at version 1. It does not reveal the tab's cfg, result or
-  analysis state and cannot certify unrelated GUI edits;
-- stale rejection preserves the baseline and becomes a semantic tool error;
-  the agent re-snapshots the affected resource before retrying.
+- Successful full reads record only the keys named by `reveals`. Optional partial
+  parameters, including an explicit empty `prefix`, do not reveal the whole cfg.
+  The dispatcher preserves the original request to distinguish omission from defaults.
+- Successful writes advance only previously seen resources whose observations
+  match the handler's before-versions. Unseen consequential changes stay unseen.
+  New-tab identity certifies existence only, not cfg/result/analysis.
+- Handler failure or timeout does not establish seen. Reply encoding failure
+  rolls back its observation update on the owner thread before the next request.
+  This is not rollback of business effects or proof of client receipt.
+- `tab.snapshot(tab_id)` reveals existence, result/analysis/post revisions,
+  availability and effective paths. It does not serialize raw result arrays or
+  claim cfg/writeback contents. The all-tabs index reveals no per-tab state.
+- `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot` reveals
+  the active label and complete serializable md/ml contents. Encoding failure
+  does not establish a baseline. These replies may be large or sensitive.
+- Off-main methods cannot declare guard/reveals or owner-thread write tracking.
+  Disconnection discards seen; reconnection requires explicit new reads.
 
-Version numbers are a bridge concern. Agents see stale-resource descriptions, not
-raw counters.
+MCP forwards each RPC once and returns observed operation state to the agent.
+It does not keep a second seen map, consume write receipts, or perform hidden
+pre-reads to unlock a mutation. Snapshot revisions distinguish successive results,
+including replacements from the same source file.
 
 A stale guarded mutation has one wire-level recovery contract. The server returns
 `PRECONDITION_FAILED` with `data={"stale": [...]}`, where `stale` lists every
 resource whose current version no longer matches the caller baseline. The client
 must re-snapshot each listed resource through its corresponding read method,
-refresh those baselines, and then retry the mutation with fresh
-`expected_versions`. It must not retry against the old snapshots. Stale conflicts
+then decide whether to retry. It must not retry against the old snapshots. Stale conflicts
 do not add another `ErrorCode`; a future Web adapter may translate this existing
 failure into an HTTP-specific status without changing the wire enum (ADR-0052).
+
+`tab.open_file` creates a new tab and reuses the application load operation,
+including cfg backfill, cleanup on load failure and focus restoration. It requires
+an explicitly observed context, not observations of a tab that does not yet exist.
+Backfill failure retains the result and reports `not_applied`; cleanup failure
+reports `cleanup_failed`. Existing-tab `tab.load_data` keeps its stricter guards.
 
 ## Method Surface
 

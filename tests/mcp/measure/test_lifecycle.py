@@ -135,12 +135,6 @@ CATALOG = [
         "timeout_seconds": 5.0,
         "exposure": "rpc",
         "tool_names": [],
-        "guard_deps": [],
-        "reveals": [],
-        "reveals_without": [],
-        "reveals_when_nonempty": [],
-        "refresh_after_write": False,
-        "created_resource": None,
         "operation_key": None,
     },
     {
@@ -154,12 +148,6 @@ CATALOG = [
         "timeout_seconds": 5.0,
         "exposure": "tool",
         "tool_names": ["guide"],
-        "guard_deps": [],
-        "reveals": [],
-        "reveals_without": [],
-        "reveals_when_nonempty": [],
-        "refresh_after_write": False,
-        "created_resource": None,
         "operation_key": None,
     },
 ]
@@ -591,7 +579,7 @@ def test_response_encoding_error_does_not_replay_mutation(tmp_path: Path) -> Non
     assert [method for method, _ in client.transport.sent].count("project.save") == 1
 
 
-def test_connect_switches_an_explicit_port_and_discards_previous_observations(
+def test_connect_switches_an_explicit_port_and_expires_operation_handles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -618,12 +606,10 @@ def test_connect_switches_an_explicit_port_and_discards_previous_observations(
 
     monkeypatch.setattr(client.context.bridge, "connect", connect)
     client.call("connect", {"port": 9911})
-    client.context.session.last_seen_versions["context"] = 12
     client.context.session.operation_handles["tab:old"] = 43
     client.call("connect", {"port": 9912})
     assert ports == [9911, 9912]
     assert not client.context.session.operation_handles
-    assert "context" not in client.context.session.last_seen_versions
     assert client.call("rpc_list", {})["methods"] == [
         {"method": "project.info", "description": "List adapters", "tool_names": []},
     ]
@@ -716,13 +702,7 @@ def test_connect_refuses_second_port_while_launched_gui_is_alive(
                     {**CATALOG[0], field: invalid},
                 ]
             }
-            for field in (
-                "tool_names",
-                "guard_deps",
-                "reveals",
-                "reveals_without",
-                "reveals_when_nonempty",
-            )
+            for field in ("tool_names",)
             for invalid in (None, "not-a-list", [1], [""])
         ),
         *(
@@ -731,43 +711,6 @@ def test_connect_refuses_second_port_while_launched_gui_is_alive(
         ),
         {"methods": "invalid"},
         {"methods": [CATALOG[0], CATALOG[0]]},
-        {
-            "methods": [
-                {
-                    key: value
-                    for key, value in CATALOG[0].items()
-                    if key != "reveals_without"
-                }
-            ]
-        },
-        {"methods": [{**CATALOG[0], "reveals_without": ["prefix"]}]},
-        {
-            "methods": [
-                {
-                    key: value
-                    for key, value in CATALOG[0].items()
-                    if key != "created_resource"
-                }
-            ]
-        },
-        {
-            "methods": [
-                {
-                    key: value
-                    for key, value in CATALOG[0].items()
-                    if key != "reveals_when_nonempty"
-                }
-            ]
-        },
-        {
-            "methods": [
-                {
-                    **CATALOG[0],
-                    "created_resource": "tab:{tab_id!r}",
-                    "refresh_after_write": True,
-                }
-            ]
-        },
     ],
 )
 def test_connect_rejects_malformed_or_duplicate_catalog(

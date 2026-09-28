@@ -166,9 +166,30 @@ class RemoteControlServiceBase:
         del link, req
         return False
 
-    def _guard(self, params: Mapping[str, object]) -> None:
+    def _guard(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> None:
         """Pre-handler check on the State owner thread (e.g. version guard)."""
-        del params
+        del ctx, method, params
+
+    def _before_handler(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> dict[str, int] | None:
+        """Sample app-owned state before the handler, on the State owner thread."""
+        del ctx, method, params
+        return None
+
+    def _owner_success(
+        self,
+        ctx: SubscriptionCtx,
+        method: str,
+        params: Mapping[str, object],
+        result: Mapping[str, object],
+        before: dict[str, int] | None,
+    ) -> Callable[[], None] | None:
+        """Complete an owner-thread observation; return a reply-failure undo action."""
+        del ctx, method, params, result, before
+        return None
 
     def _after_success(
         self,
@@ -320,7 +341,9 @@ class RemoteControlServiceBase:
             handler_params = validate_params(spec.params, req.params)
         else:
             handler_params = req.params
-        self._dispatch_on_owner(link, req.id, req.method, spec, handler_params)
+        self._dispatch_on_owner(
+            link, req.id, req.method, spec, handler_params, request_params=req.params
+        )
 
     # ------------------------------------------------------------------
     # events.* state-owning handlers
@@ -375,37 +398,38 @@ class RemoteControlServiceBase:
     # Dispatch onto the State owner thread (marshal + off-main + policy seams)
     # ------------------------------------------------------------------
 
-    def _dispatch_on_owner(self, link: ClientLink, rid, method, spec, params) -> None:
+    def _dispatch_on_owner(
+        self, link: ClientLink, rid, method, spec, params, *, request_params
+    ) -> None:
         holder: dict[str, object] = {}
         bus = self._get_bus()
-        request_origin = EventOrigin(kind="agent", client_id=_ctx(link).client_id)
+        ctx = _ctx(link)
+        request_origin = EventOrigin(kind="agent", client_id=ctx.client_id)
 
         if spec.off_main_thread:
-            # Blocking handler (e.g. operation.await): run on THIS IO worker
-            # thread, never the owner thread — marshalling it onto the owner thread
-            # would deadlock (it would occupy the event loop that must dispatch
-            # the worker signal it awaits). It must only do thread-safe waiting
-            # and must not touch the guard / post-success seams, so neither runs.
-            try:
-                with bus.origin(request_origin):
-                    holder["result"] = spec.handler(self, params)
-            except RemoteError as exc:
-                holder["remote_error"] = exc
-            except ExpectedError as exc:
-                _store_expected_error(holder, exc, origin="off-main handler")
-            except Exception as exc:  # noqa: BLE001 — Controller error envelope
-                logger.exception("off-main handler raised: %s", exc)
-                holder["controller_error"] = exc
+            # Blocking handlers wait on this IO worker, never on the State owner.
+            # Registry validation rejects guard/reveal declarations for these.
+            self._run_off_main(spec, params, bus, request_origin, holder)
         else:
             done = threading.Event()
+            handshake = threading.Lock()
+            completed = False
+            abandoned = False
 
             def _run() -> None:
-                # Runs on the owner thread (where State + VersionTable live), so
-                # the guard's compare-and-act is atomic against any other GUI write.
+                nonlocal completed
+                # Guard, handler and successful observation share one owner turn.
+                before: dict[str, int] | None = None
                 with bus.origin(request_origin):
                     try:
-                        self._guard(params)
-                        holder["result"] = spec.handler(self, params)
+                        self._guard(ctx, method, params)
+                        before = self._before_handler(ctx, method, params)
+                        result = spec.handler(self, params)
+                        if not isinstance(result, dict):
+                            raise TypeError(
+                                f"handler {method!r} returned non-dict result"
+                            )
+                        holder["result"] = result
                     except RemoteError as exc:
                         holder["remote_error"] = exc
                     except ExpectedError as exc:
@@ -414,17 +438,52 @@ class RemoteControlServiceBase:
                         logger.exception("handler raised: %s", exc)
                         holder["controller_error"] = exc
                     finally:
+                        # Observation and completion are one handshake decision:
+                        # timeout cannot abandon a request after it records seen.
+                        with handshake:
+                            observed = holder.get("result")
+                            if isinstance(observed, dict) and not abandoned:
+                                try:
+                                    holder["rollback"] = self._owner_success(
+                                        ctx, method, request_params, observed, before
+                                    )
+                                except Exception as exc:  # dispatch boundary
+                                    logger.exception(
+                                        "owner observation raised: %s", exc
+                                    )
+                                    holder["controller_error"] = exc
+                            completed = True
                         done.set()
 
             self._owner_scheduler.post(_run)
             if not done.wait(timeout=spec.timeout_seconds):
-                self._endpoint.reply_error(
-                    link,
-                    rid=rid,
-                    code=ErrorCode.TIMEOUT,
-                    message=f"handler did not complete within {spec.timeout_seconds}s",
-                )
-                return
+                with handshake:
+                    timed_out = not completed
+                    abandoned = timed_out
+                if timed_out:
+                    self._endpoint.reply_error(
+                        link,
+                        rid=rid,
+                        code=ErrorCode.TIMEOUT,
+                        message=f"handler did not complete within {spec.timeout_seconds}s",
+                    )
+                    return
+        self._reply_dispatch(link, rid, (method, params), ctx, holder)
+
+    def _run_off_main(self, spec, params, bus, request_origin, holder) -> None:
+        try:
+            with bus.origin(request_origin):
+                holder["result"] = spec.handler(self, params)
+        except RemoteError as exc:
+            holder["remote_error"] = exc
+        except ExpectedError as exc:
+            _store_expected_error(holder, exc, origin="off-main handler")
+        except Exception as exc:  # noqa: BLE001 — Controller error envelope
+            logger.exception("off-main handler raised: %s", exc)
+            holder["controller_error"] = exc
+
+    def _reply_dispatch(self, link, rid, request, ctx, holder) -> None:
+        method, params = request
         if "remote_error" in holder:
             exc = holder["remote_error"]
             assert isinstance(exc, RemoteError)
@@ -443,12 +502,21 @@ class RemoteControlServiceBase:
                 link, rid=rid, code=ErrorCode.CONTROLLER_ERROR, message=str(err)
             )
             return
-        # Every handler returns a wire dict; guard the handler-return invariant
-        # (the result, not a ParamSpec-validated input — not redundant).
         result = holder["result"]
         assert isinstance(result, dict), f"handler {method!r} returned non-dict result"
-        self._after_success(_ctx(link), method, params, result)
-        self._endpoint.reply_ok(link, rid=rid, result=result)
+        self._after_success(ctx, method, params, result)
+        delivered = False
+        try:
+            delivered = self._endpoint.reply_ok(link, rid=rid, result=result)
+        finally:
+            rollback = holder.get("rollback")
+            if not delivered and callable(rollback):
+                # The link's IO worker routes requests sequentially. Queue undo
+                # before it can marshal the next request onto the owner thread.
+                def _undo() -> None:
+                    rollback()
+
+                self._owner_scheduler.post(_undo)
 
     # ------------------------------------------------------------------
     # EventBus integration (subscribe on owner thread; push via broadcast)

@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _comment,
-    _expected_versions,
     _str,
     _str_opt,
 )
@@ -24,7 +23,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "is not completion. After completion, read result state with "
             "rpc_call on tab.snapshot, or the run figure with rpc_call on "
             "tab.get_figure using subtab_id=run.",
-            (_str("tab_id"), _expected_versions()),
+            (_str("tab_id"),),
         ),
         agent=AgentMethodPolicy(
             guard_deps=(
@@ -51,7 +50,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 _str("data_path", "Canonical HDF5 result file to load"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -96,7 +94,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("tab_id"),
                 _str_opt("data_path", "Override data path"),
                 _comment(),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -119,7 +116,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),
                 _str_opt("image_path", "Override image path"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(

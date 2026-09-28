@@ -7,7 +7,7 @@
 ## Concurrency / Lifecycle
 
 - [0001 — Permit / Lease typed guard](0001-permit-lease-typed-guard.md)：靜態前置憑證與動態硬體互斥分離。
-- [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：GUI resource version guard、operation handle、off-main wait 三層分工。
+- [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：GUI per-connection seen guard、operation handle、off-main wait 三層分工。
 - [0003 — ShutdownCoordinator and registry cancel](0003-shutdown-coordinator-and-registry-cancel.md)：統一 cancel/poll/await 詞彙與 Qt-free shutdown loop。
 - [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合。
 - [0025 — Cross-thread interaction channel](0025-cross-thread-interaction-channel.md)：operation/user prompt 使用單一有序 channel 傳遞 settle、message、stop。
@@ -48,7 +48,7 @@
 - [0047 — Typed expected-error taxonomy](0047-typed-expected-error-taxonomy.md)：caller-correctable failure 由 producer 以 closed category 顯式 opt in，transport 只投影。
 - [0049 — Subscriber-aware lazy push](0049-subscriber-aware-lazy-push.md)：endpoint以two-phase recipient transaction在matching subscriber存在時才materialize/encode一次，並維持unsubscribe/disconnect線性化。
 - [0052 — Event meta 與多前端 attribution](0052-event-meta-and-frontend-attribution.md)：bus 為事件蓋章 `EventMeta(seq, origin)`，origin 由 dispatch 邊界宣告、operation 記錄顯式攜帶；coalescing 屬 subscriber-side；wire 封套 additive 加 seq/origin。
-- [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 隨 method 宣告於 `RemoteMethodEntry`。
+- [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 由 `RemoteMethodEntry` 擁有；guard/reveals 留在 GUI，catalog 只投影呼叫所需資訊。
 - [0060 — Agent interface as second view](0060-measure-agent-interface-shared-gui-view.md)：量測 agent 以 40 個特化 tool 操作與 GUI 共用的狀態；一個判斷點一個 tool，寫入類 tool 使 GUI 跟隨到對應子 tab。
 
 ## Persistence
