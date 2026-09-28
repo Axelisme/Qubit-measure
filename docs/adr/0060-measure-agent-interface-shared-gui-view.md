@@ -22,7 +22,7 @@
 | 名詞沿用 GUI | tool 以 GUI 物件命名，agent 與使用者指稱同一個 tab、同一份寫回清單。 |
 | 草稿先於提交 | cfg 與寫回的修改先落在 GUI 草稿，run、寫入才提交（[[0008]]）。 |
 | 一個判斷點一個 tool | 每個判斷點是獨立 tool，不合併成批次；每個 tool 的回傳足以做該步的判斷。 |
-| 一件事一條路 | 常用操作由特化 tool 提供；其餘 wire method 經 RPC channel（[[0059]]），兩者不重疊。 |
+| 每個 method 一個 exposure | 特化 tool 與 RPC 可操作同一功能；每個 wire method 僅有一個 exposure（[[0059]]）。`tool` 方法由 `rpc_call` 回 `use_tool`，`internal` 不可達。 |
 | 索引與內容分離 | 索引類 tool 只回答「有什麼」；內容由各自的 tool 讀取。 |
 | 能機械推導的就提供 | 可由既有資料算出的值（例如 `eta_s`、正規化後的 sweep）由介面回傳。 |
 | 省 context | 圖一律回傳檔案路徑；大型值只回摘要，指名讀取時才回完整值。 |
