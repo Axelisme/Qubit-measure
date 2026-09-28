@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _h_analyze_cancel(
+def h_analyze_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -24,7 +24,7 @@ def _h_analyze_cancel(
     return {"ok": True, "cancelled": cancelled}
 
 
-def _h_tab_get_analyze_result(
+def h_tab_get_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -43,7 +43,7 @@ def _h_tab_get_analyze_result(
     return {"summary": to_summary()}
 
 
-def _h_tab_get_analyze_params(
+def h_tab_get_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -64,7 +64,7 @@ def _h_tab_get_analyze_params(
     return {"analyze_params": dataclasses.asdict(ap), "definitions": definitions}
 
 
-def _h_tab_analyze(
+def h_tab_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -102,7 +102,7 @@ def _h_tab_analyze(
     return {"operation_id": operation_id}
 
 
-def _h_tab_get_post_analyze_result(
+def h_tab_get_post_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -121,7 +121,7 @@ def _h_tab_get_post_analyze_result(
     return {"summary": to_summary()}
 
 
-def _h_tab_get_post_analyze_params(
+def h_tab_get_post_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -142,7 +142,7 @@ def _h_tab_get_post_analyze_params(
     return {"post_analyze_params": dataclasses.asdict(pp), "definitions": definitions}
 
 
-def _h_tab_post_analyze(
+def h_tab_post_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses

@@ -110,7 +110,6 @@ def test_predictor_handlers_dispatch_only_through_predictor_control_facet():
 
     assert _dispatch_with_predictor_control("predictor.clear", {}, pred) == {
         "loaded": False,
-        "__agent_write_versions": {},
     }
     pred.clear_predictor.assert_called_once_with()
 

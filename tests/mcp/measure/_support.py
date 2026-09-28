@@ -10,7 +10,8 @@ from zcu_tools.gui.app.main.services.remote.method_entries._registry import (
     build_agent_catalog,
 )
 from zcu_tools.gui.app.main.services.remote.wire_version import WIRE_VERSION
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import (
     MeasureMcpSession,
@@ -60,18 +61,6 @@ class WireTransport:
             reply = {"ok": True, "result": self.responder(method, params)}
         else:
             raise AssertionError(f"Unexpected RPC: {method}")
-        result = reply.get("result")
-        if (
-            reply.get("ok")
-            and isinstance(result, dict)
-            and "__agent_write_versions" not in result
-            and any(
-                entry.method == method and entry.agent.refresh_after_write
-                for entry in METHOD_ENTRIES
-            )
-        ):
-            # Recording writes change no State unless a test supplies a receipt.
-            reply = {**reply, "result": {**result, "__agent_write_versions": {}}}
         if self.deliver_reply is None:
             raise AssertionError("Transport has not been attached")
         self.deliver_reply({**reply, "id": payload["id"]})
@@ -88,17 +77,6 @@ class MeasureClient:
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.tools[name]["handler"](arguments)
-
-    def observe_versions(self, versions: dict[str, int]) -> None:
-        self.transport.replies["resources.versions"] = {
-            "ok": True,
-            "result": {"versions": versions},
-        }
-        # Seed a prior caller observation; the tests exercise subsequent RPCs.
-        self.context.session.ensure_connected()
-        self.context.session.last_seen_versions.clear()
-        self.context.session.last_seen_versions.update(versions)
-        self.transport.sent.clear()
 
 
 def make_client(

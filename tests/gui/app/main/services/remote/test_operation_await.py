@@ -13,6 +13,7 @@ a wire result (ADR-0025 §cancelled-wire):
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -20,12 +21,22 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.main.services.operation_control import OperationControlFacet
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.main.services.remote.method_entries import METHOD_ENTRIES
+from zcu_tools.gui.app.main.services.remote.method_entries._registry import (
+    build_dispatch_registry,
+)
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.operation_handles import (
     AwaitResult,
     OperationHandles,
     OperationOutcome,
+)
+
+from tests.gui.app.main.services._operation_owner_fakes import (
+    DeviceOperationOwner,
+    TabOperationOwner,
+    UnusedProgress,
 )
 
 
@@ -45,6 +56,20 @@ def test_off_main_thread_flag_set():
     assert METHOD_REGISTRY["operation.await"].off_main_thread is True
 
 
+@pytest.mark.parametrize("method", ["tab.get_cfg", "tab.load_data"])
+def test_remote_registry_rejects_off_main_reveal_or_guard(method: str) -> None:
+    entry = next(item for item in METHOD_ENTRIES if item.method == method)
+    # Suppress the old write-receipt restriction so this tests the guard/reveal
+    # declaration rather than a separate reason to reject off-main writes.
+    candidate = replace(
+        entry,
+        spec=replace(entry.spec, off_main_thread=True),
+        agent=replace(entry.agent, refresh_after_write=False),
+    )
+    with pytest.raises(ValueError, match="owner thread"):
+        build_dispatch_registry((candidate,))
+
+
 # ---------------------------------------------------------------------------
 # completed path
 # ---------------------------------------------------------------------------
@@ -54,9 +79,9 @@ def test_unknown_and_evicted_handle_do_not_become_finished():
     handles = OperationHandles()
     control = OperationControlFacet(
         handles=handles,
-        progress=cast(Any, SimpleNamespace()),
-        run_analyze=cast(Any, SimpleNamespace()),
-        device=cast(Any, SimpleNamespace()),
+        progress=UnusedProgress(),
+        run_analyze=TabOperationOwner(),
+        device=DeviceOperationOwner(),
     )
     for op in (777,):
         with pytest.raises(RemoteError) as exc_info:

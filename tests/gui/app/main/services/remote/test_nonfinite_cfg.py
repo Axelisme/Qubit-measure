@@ -12,7 +12,7 @@ from zcu_tools.gui.cfg.binding import ScalarField
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget
 
-from ._helpers import Fixture, call, mcp_client, open_client
+from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 
 pytestmark = pytest.mark.uses_wall_clock
 
@@ -98,6 +98,9 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
                 invoke("rpc_call", {"method": method, "params": params})["tree"] == tree
             )
 
+        observe_run_inputs(
+            fx, tab_id, lambda method, params: call(sock, method, params)["result"]
+        )
         rejected = call(sock, "tab.run_start", {"tab_id": tab_id}, rid="run")
         assert not rejected["ok"]
         assert rejected["error"]["reason"] == "invalid_cfg"

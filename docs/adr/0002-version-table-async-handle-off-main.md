@@ -20,8 +20,11 @@ GUI 有兩個平級 client（Qt View、remote RPC agent）並發驅動同一批�
 - **粒度（中粒度）**：`context`、`soc`、`device:<name>`、每 tab 的 `tab:<id>:cfg` / `:result` / `:save_path` / `tab:<id>`（存在性）、`editor:<id>`。tab 資源綁 `tab_id`（uuid4，永不重用）→ 無 key 撞名。
 - **版本號 = per-resource 單調遞增整數**（非 wall-clock）。`VersionTable` 是 `State` 的一個區塊。
 - **bump 責任歸資源 owner service，且在「資源實際被寫」同點、必在主線程**：這是更普遍不變式的推論——**所有 `State` 寫入只在主線程；worker 唯一允許的副作用是 emit Qt signal**。sync 操作在 service mutator bump；async 操作（device/run/connect worker）在 worker 回主線的 **terminal Qt slot** bump（與 `update_tab_result` 同處）。不靠 origin、不靠 emit/release 順序——只靠「在主線、在資源被寫處」。
-- **bump = 狀態真的變了，不含「值未變的快取同步」**：讀取衍生的快取更新若值未變則不 bump、不 emit（否則純讀 spurious 推進版本號、誤使他人 `expected_versions` 失效）；讀到外部來源真的變了才 bump + emit。
-- **guard 用 optional `expected_versions`（類 HTTP If-Match）**：`run.start` / `save.*` / `editor.commit` 帶可選參數，server 在主線 `_dispatch._run()` 單一同步序列內**原子**比對，不符→`PRECONDITION_FAILED` + 回當前版本。依賴消失（tab close 刪 entry）= 視同 stale 擋下。
+- **bump = 狀態真的變了，不含「值未變的快取同步」**：讀取衍生的快取更新若值未變則不 bump、不 emit（否則純讀 spurious 推進版本號、誤使其他連線的 seen 過時）；讀到外部來源真的變了才 bump + emit。
+- **GUI per-connection seen**：每條 measure remote 連線從空 seen map 開始。GUI owner thread 依 method entry 的 guard dependencies 比對 seen 與目前版本，再執行 handler。未看過的 key 即使目前為 0 仍拒絕；不符時回 `PRECONDITION_FAILED`、`reason=stale_version` 與 `data.stale`。Wire 不接收 `expected_versions`。
+- 完整讀取成功後，GUI 只記錄該 method 宣告揭露的資源。部分讀取、裸版本表、handler 失敗或逾時都不建立 seen；回覆編碼失敗會在 owner thread 撤銷此次記錄。這不承諾客戶端收到資料，也不撤銷已完成的業務副作用。
+- 成功自寫只推進先前 seen 等於 handler 執行前版本的資源。連帶變更也用同一規則；未看過的 cfg 不因自動回填變成已看過。新 tab 回傳的 identity 只認證存在版本，不認證 cfg/result/analyze。
+- `tab.snapshot(tab_id)` 揭露存在、result/analyze/post revisions、availability 與有效 paths，不要求傳送原始量測陣列。MCP 把操作狀態回給 agent，不以隱藏預讀解鎖寫入。
 
 ### 2. RPC-as-proxy 持 async handle
 
@@ -41,14 +44,14 @@ GUI 有兩個平級 client（Qt View、remote RPC agent）並發驅動同一批�
 
 ### 3. off-main blocking handler
 
-`MethodSpec.off_main_thread`（預設 False）。`_dispatch` 看到 True 不 marshal 上主線，在 IO worker thread 直接執行。受**嚴格契約**：只能做 thread-safe 等待，**不得碰 main-thread-owned 狀態**（版本表 / change-related / CfgEditor / `_snapshots`）、不需要 stale guard。`operation.await` 即此類。
+`MethodSpec.off_main_thread`（預設 False）。`_dispatch` 看到 True 不 marshal 上主線，在 IO worker thread 直接執行。受**嚴格契約**：只能做 thread-safe 等待，**不得碰 main-thread-owned 狀態**（版本表 / change-related / CfgEditor / `_snapshots`）、不需要 stale guard。Measure registry 拒絕 off-main 方法宣告 guard、reveals 或 owner-thread 寫入追蹤。`operation.await` 即此類。
 
 ## 三層分工（脊椎）
 
-- **RPC = mechanism**：持版本表、提供 `resources.versions`、guard 原子比對、回 `operation_id`。
-- **mcp = policy + 簿記 + 翻譯**：持 `last_seen`、知道每操作依賴哪些資源、組 `expected_versions`、收 `PRECONDITION_FAILED`；持「語義 key→最新 operation_id」對照（device→name / run→tab_id；connect 已改同步 `soc.connect`、無 operation_id）。版本號與 operation_id **只在 RPC↔mcp 之間流動**，從回傳 strip 掉。
-- **agent（LLM）= 只收語義**：
-  - resource-change 感知 = **樂觀 + guard 撞牆**：mcp 把 `PRECONDITION_FAILED`（帶 `data.stale` 資源身份）翻成「tab X cfg 過時了」。agent **不 subscribe event、不看版本號**。
+- **GUI**：State 擁有版本表；measure remote entries 擁有 guard/reveals policy。Remote adapter 擁有每條連線的 seen，owner thread 完成比對、執行及觀察更新。
+- **MCP**：轉送單次 RPC、翻譯 stale 錯誤、維護 catalog 與 operation handles。不持 seen、不查版本建立 baseline、不重送 mutation。GUI 重連後 seen 從空集合開始。
+- **Agent**：讀取操作狀態，遇 stale 時重讀對應資源，再決定是否寫入。Snapshot revisions 可見，但不用 agent 計算或提交版本。
+  - 資源變動以 `PRECONDITION_FAILED` 的 `data.stale` 指出；MCP 轉成「tab X cfg 過時了」等提示。Agent 不訂閱 event。
   - async 完成 = **poll / wait 操作句柄**：泛型 `gui_op_poll(handle)`（非阻塞）涵蓋 run / device / soc（Phase 171 把 per-op `gui_run_poll` / `gui_device_poll` 收斂成單一泛型工具，START reply 直接外露 handle）；`gui_op_wait(handle)` 回 `{status, waited_seconds}`，timeout 不 raise，內部對 handle 發 `operation.await`。
 
 ## 演化（被取代的設計，保留脈絡）
@@ -61,7 +64,7 @@ GUI 有兩個平級 client（Qt View、remote RPC agent）並發驅動同一批�
 
 - **bump 綁進 `EventBus.emit`（一點涵蓋）**：emit 與資源被寫不必然同點（async emit 在同步窗外）；定為「資源 owner service 在主線 bump」。
 - **per-connection 計數抵銷**（begin +1 / terminal −1）：依賴「一次操作恰 1 begin + 1 terminal」的脆性前提，與另一機制並存邏輯雜。版本表一套機制治兩種窗，更收斂。
-- **agent 拿裸版本號自己 diff**：違三層分工，版本號是 mcp 簿記非 agent 關注。
+- **agent 拿裸版本號自己 diff**：違三層分工，版本比對由 GUI 負責，agent 不應自行提交 expected versions。
 - **兩套並存（版本表 + origin/change-buffer）**：兩套通知會漂移，全面取代。
 - **`processEvents` 轉 event loop 解死鎖**：重入反模式，CONTEXT.md 明文 avoid。
 

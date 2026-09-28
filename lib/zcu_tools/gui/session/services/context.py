@@ -276,15 +276,39 @@ class ContextService:
         value: float | None = None,
         unit: str = "none",
         clone_from: str | None = None,
+        label: str | None = None,
     ) -> None:
+        if label is not None and (
+            not label.strip()
+            or label in {".", ".."}
+            or any(
+                char in "/\\" or ord(char) < 32 or ord(char) == 127 for char in label
+            )
+        ):
+            raise InvalidInputError(
+                "context label must be a nonempty path segment without separators or control characters",
+                reason_code="invalid_context_label",
+            )
+        if clone_from is not None:
+            available = self._io.list_contexts()
+            if clone_from not in available:
+                raise InvalidInputError(
+                    f"unknown context label: {clone_from!r}; available: {available}",
+                    reason_code="unknown_context",
+                )
         logger.info(
-            "new_context: value=%r unit=%r clone_from=%r", value, unit, clone_from
+            "new_context: value=%r unit=%r clone_from=%r label=%r",
+            value,
+            unit,
+            clone_from,
+            label,
         )
         new_ctx = self._io.new_context(
             self._state.exp_context,
             value=value,
             unit=unit,
             clone_from=clone_from,
+            label=label,
         )
         label = self._io.get_active_label() or ""
         new_ctx = self._attach_values(
@@ -336,6 +360,10 @@ class ContextService:
     def set_md_attr(self, key: str, value: Any) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
+        try:
+            _validate_md_key(key)
+        except FailedPreconditionError as exc:
+            raise InvalidInputError(str(exc), reason_code="invalid_md_key") from exc
         md = self._state.exp_context.md
         setattr(md, key, value)
         # Semantic context content change: bump so concurrency guards on

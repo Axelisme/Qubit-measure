@@ -16,7 +16,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "soc.connect",
-        "connection_device:_h_soc_connect",
+        "connection_device:h_soc_connect",
         MethodSpec(
             # Synchronous connect (runs on the main thread; the IO worker blocks on it).
             # Bounded by make_soc_proxy's 1s COMMTIMEOUT for a remote board (mock is
@@ -38,19 +38,22 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "startup.apply",
-        "connection_device:_h_startup_apply",
+        "connection_device:h_startup_apply",
         MethodSpec(
             30.0,
-            "Set the project: chip / qubit / resonator names, plus an optional "
-            "scope_id returned by result_scope.list. Omitting scope_id uses or creates "
-            "the generated result scope at <project-root>/result/<chip>/<qub>; explicit "
+            "Atomically update project chip / qubit / resonator names; omitted names "
+            "inherit an already applied project. Without a project all three names "
+            "are required. scope_id selects a discovered result scope; when omitted "
+            "after a chip/qubit change, the GUI uses the new identity's generated "
+            "scope; otherwise it retains the old scope. Effective changes deactivate "
+            "the selected context; no-op/failed updates leave it selected. Explicit "
             "result_dir/database_path overrides are not accepted. Echoes the resolved "
             "project: {chip_name, qub_name, res_name, result_dir, database_path, "
             "params_path, scope_id}.",
             (
-                _str("chip_name"),
-                _str("qub_name"),
-                _str("res_name"),
+                _str_opt("chip_name", "Chip identity; required for first project"),
+                _str_opt("qub_name", "Qubit identity; required for first project"),
+                _str_opt("res_name", "Resonator identity; required for first project"),
                 _str_opt(
                     "scope_id",
                     "Optional scope_id returned by result_scope.list",
@@ -61,7 +64,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.connect",
-        "connection_device:_h_device_connect",
+        "connection_device:h_device_connect",
         MethodSpec(
             30.0,
             "Connect a hardware device by driver type, friendly name, and address. "
@@ -88,7 +91,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.disconnect",
-        "connection_device:_h_device_disconnect",
+        "connection_device:h_device_disconnect",
         MethodSpec(
             30.0,
             "Disconnect a registered device by name via rpc_call. The call starts "
@@ -110,7 +113,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.reconnect",
-        "connection_device:_h_device_reconnect",
+        "connection_device:h_device_reconnect",
         MethodSpec(
             30.0,
             "Reconnect a remembered (memory-only) device by name, reusing its stored "
@@ -125,7 +128,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.forget",
-        "connection_device:_h_device_forget",
+        "connection_device:h_device_forget",
         MethodSpec(
             5.0,
             "Forget a memory-only device (synchronous). Echoes {forgotten: name}.",
@@ -135,7 +138,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.setup",
-        "connection_device:_h_device_setup",
+        "connection_device:h_device_setup",
         MethodSpec(
             30.0,
             "Apply 'updates' to a connected device by name via rpc_call. "
@@ -150,7 +153,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.setup_spec",
-        "connection_device:_h_device_setup_spec",
+        "connection_device:h_device_setup_spec",
         MethodSpec(
             5.0,
             "List the fields accepted by device.setup's 'updates' for a connected "
@@ -164,7 +167,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.cancel_operation",
-        "connection_device:_h_device_cancel_operation",
+        "connection_device:h_device_cancel_operation",
         MethodSpec(
             5.0,
             "Request cancellation of the named device's in-flight operation. Returns "
@@ -177,7 +180,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.active_operations",
-        "connection_device:_h_device_active_operations",
+        "connection_device:h_device_active_operations",
         MethodSpec(
             5.0,
             "List EVERY in-flight device operation (connect / disconnect / apply run "
@@ -190,7 +193,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.list",
-        "connection_device:_h_device_list",
+        "connection_device:h_device_list",
         MethodSpec(
             5.0,
             "List registered devices with their current lifecycle status: "
@@ -204,12 +207,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.snapshot",
-        "connection_device:_h_device_snapshot",
+        "connection_device:h_device_snapshot",
         MethodSpec(
             5.0,
             "Read one device's full cached snapshot — the richest single-device read: "
-            "{snapshot: {name, type_name, address, status, error, info}} where 'info' "
-            "is the live device parameter dict (or null when not connected) and "
+            "{snapshot: {name, type_name, address, status, error, info, fields}} "
+            "where 'info' is the State-cached device parameter dict (or null "
+            "without info) and 'fields' is its cached field/choice projection. "
+            "During setting_up these remain readable without driver I/O. "
             "'status' uses the same vocabulary as device.list. An unknown device "
             "name raises INVALID_PARAMS.",
             (_str("name", "Device name"),),

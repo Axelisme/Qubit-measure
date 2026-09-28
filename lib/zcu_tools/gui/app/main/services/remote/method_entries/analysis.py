@@ -13,7 +13,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "analyze.cancel",
-        "analysis:_h_analyze_cancel",
+        "analysis:h_analyze_cancel",
         MethodSpec(
             5.0,
             "Cancel the tab's in-flight interactive analyze and clear is_analyzing. "
@@ -28,12 +28,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.get_analyze_result",
-        "analysis:_h_tab_get_analyze_result",
+        "analysis:h_tab_get_analyze_result",
         MethodSpec(5.0, "Read tab analyze result scalar summary", (_str("tab_id"),)),
     ),
     method_entry(
         "tab.get_analyze_params",
-        "analysis:_h_tab_get_analyze_params",
+        "analysis:h_tab_get_analyze_params",
         MethodSpec(
             5.0,
             "Read primary analyze params as {analyze_params, definitions}. Values "
@@ -43,7 +43,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.analyze",
-        "analysis:_h_tab_analyze",
+        "analysis:h_tab_analyze",
         MethodSpec(
             30.0,
             "Start analyzing the tab's run result via rpc_call. Runs on a worker "
@@ -62,14 +62,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.get_post_analyze_result",
-        "analysis:_h_tab_get_post_analyze_result",
+        "analysis:h_tab_get_post_analyze_result",
         MethodSpec(
             5.0, "Read tab post-analysis result scalar summary", (_str("tab_id"),)
         ),
     ),
     method_entry(
         "tab.get_post_analyze_params",
-        "analysis:_h_tab_get_post_analyze_params",
+        "analysis:h_tab_get_post_analyze_params",
         MethodSpec(
             5.0,
             "Read post-analysis params as {post_analyze_params, definitions}. Values "
@@ -79,7 +79,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.post_analyze",
-        "analysis:_h_tab_post_analyze",
+        "analysis:h_tab_post_analyze",
         MethodSpec(
             30.0,
             "Start post analysis on the tab's PRIMARY analyze result via "

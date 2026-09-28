@@ -15,7 +15,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.new",
-        "tab:_h_tab_new",
+        "tab:h_tab_new",
         MethodSpec(
             10.0,
             "Create a new tab for the named adapter. Returns {tab_id}.",
@@ -26,14 +26,32 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "tab.open_file",
+        "tab:h_tab_open_file",
+        MethodSpec(
+            30.0,
+            "Create a tab, load a result file without a SoC, and focus it. "
+            "Read context.snapshot explicitly first. A load failure closes the new "
+            "tab and restores prior focus. Returns the load outcome including "
+            "tab_id and cfg_backfill; not_applied retains the loaded result. "
+            "Read tab.snapshot and tab.get_cfg before subsequent guarded writes.",
+            (_str("adapter_name"), _str("data_path")),
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=("context",),
+            refresh_after_write=True,
+            created_resource="tab:{tab_id}",
+        ),
+    ),
+    method_entry(
         "tab.close",
-        "tab:_h_tab_close",
+        "tab:h_tab_close",
         MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "tab.set_active",
-        "tab:_h_tab_set_active",
+        "tab:h_tab_set_active",
         MethodSpec(
             5.0,
             "Activate a tab. VIEW-ONLY: this changes which tab the user sees, NOT your "
@@ -43,7 +61,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.list_all",
-        "tab:_h_tab_list_all",
+        "tab:h_tab_list_all",
         MethodSpec(
             5.0,
             "List all open tabs. Returns {tabs, active_tab_id, running_tab_id}: tabs "
@@ -55,21 +73,32 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.snapshot",
-        "tab:_h_tab_snapshot",
+        "tab:h_tab_snapshot",
         MethodSpec(
             5.0,
-            "Tab summary. Pass tab_id to fully inspect this tab's existence; "
-            "the all-tabs summary is only an index and does not refresh a "
-            "per-tab guard baseline.",
+            "Tab operation state. Pass tab_id to inspect existence, result and "
+            "analysis revisions/availability, and all effective save paths. "
+            "Result arrays are not required for this observation. Read writeback "
+            "preview separately for proposal contents. The all-tabs summary is "
+            "only an index and does not refresh a per-tab guard baseline.",
             (_str_opt("tab_id", "Tab to inspect; omit for all tabs"),),
         ),
         agent=AgentMethodPolicy(
-            reveals=("tab:{tab_id}",), reveals_when_nonempty=("tab_id",)
+            reveals=(
+                "tab:{tab_id}",
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:analyze",
+                "tab:{tab_id}:post_analyze",
+                "tab:{tab_id}:path:data",
+                "tab:{tab_id}:path:analysis_image",
+                "tab:{tab_id}:path:post_analysis_image",
+            ),
+            reveals_when_nonempty=("tab_id",),
         ),
     ),
     method_entry(
         "tab.get_cfg",
-        "tab:_h_tab_get_cfg",
+        "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
             CFG_OBSERVATION_DESCRIPTION,
@@ -88,7 +117,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.set_cfg",
-        "tab:_h_tab_set_cfg",
+        "tab:h_tab_set_cfg",
         MethodSpec(
             5.0,
             "Batch-set canonical cfg paths on a tab in order (fail-fast, non-atomic). "

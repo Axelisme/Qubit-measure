@@ -15,7 +15,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "predictor.load",
-        "predictor:_h_predictor_load",
+        "predictor:h_predictor_load",
         MethodSpec(
             30.0,
             "Install a FluxoniumPredictor from a params.json file (its fluxdep_fit "
@@ -30,7 +30,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.set_model_params",
-        "predictor:_h_predictor_set_model_params",
+        "predictor:h_predictor_set_model_params",
         MethodSpec(
             10.0,
             "Build+install a FluxoniumPredictor directly from typed model params "
@@ -55,7 +55,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.clear",
-        "predictor:_h_predictor_clear",
+        "predictor:h_predictor_clear",
         MethodSpec(
             5.0,
             "Unload the current predictor (idempotent — succeeds with no predictor "
@@ -65,7 +65,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.predict",
-        "predictor:_h_predictor_predict",
+        "predictor:h_predictor_predict",
         MethodSpec(
             10.0,
             "Predict a transition frequency at a device-value setpoint. Returns "
@@ -84,8 +84,26 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "predictor.calibrate",
+        "predictor:h_predictor_calibrate",
+        MethodSpec(
+            30.0,
+            "Calibrate the installed predictor flux_bias from one measured transition "
+            "frequency in MHz at a device-value setpoint in native instrument units. "
+            "Uses the shared PredictorService and returns {flux_bias_before, "
+            "flux_bias_after}; no hardware read or write is performed.",
+            (
+                _num("device_value", "Measured setpoint in native instrument units"),
+                _num("frequency_mhz", "Measured transition frequency in MHz"),
+                _int_default("from_level", 0, "Transition from level"),
+                _int_default("to_level", 1, "Transition to level"),
+            ),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
         "predictor.info",
-        "predictor:_h_predictor_info",
+        "predictor:h_predictor_info",
         MethodSpec(
             5.0,
             "Read the current predictor's installed model. Returns {loaded: false} "

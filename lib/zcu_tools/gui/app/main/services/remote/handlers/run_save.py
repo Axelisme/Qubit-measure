@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _h_tab_run_start(
+def h_tab_run_start(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -22,7 +22,7 @@ def _h_tab_run_start(
     return {"operation_id": operation_id}
 
 
-def _h_tab_load_data(
+def h_tab_load_data(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
@@ -48,7 +48,7 @@ def _h_tab_load_data(
     return result
 
 
-def _h_tab_run_cancel(
+def h_tab_run_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -59,14 +59,14 @@ def _h_tab_run_cancel(
     return {"ok": True, "cancelled": cancelled}
 
 
-def _h_run_running_tab(
+def h_run_running_tab(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"tab_id": adapter.run_analyze_control.get_running_tab_id()}
 
 
-def _h_tab_save_data(
+def h_tab_save_data(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -83,7 +83,7 @@ def _h_tab_save_data(
     return {"data_path": written}
 
 
-def _h_tab_save_image(
+def h_tab_save_image(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])

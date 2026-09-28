@@ -32,10 +32,13 @@ from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import remote_error_from_expected
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 
 def make_ctx() -> ExpContext:
@@ -43,13 +46,32 @@ def make_ctx() -> ExpContext:
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),
-        soccfg=MagicMock(),
+        soccfg=make_mock_soccfg(),
         res_name="fake_res",
         result_dir="/tmp/zcu_result",
         database_path="/tmp/zcu_db/fake_chip/fake_qubit",
         active_label="ctx001",
         readiness=ContextReadiness.ACTIVE,
     )
+
+
+def observe_run_inputs(
+    fx, tab_id: str, invoke: Callable[[str, dict[str, Any]], Any]
+) -> None:
+    """Prepare the headless form owner and explicitly read each run dependency."""
+    if fx.ctrl.editor_id_for_owner(tab_id) is None:
+        fx.ctrl.open_seeded_cfg_editor(
+            fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
+        )
+    for method, params in (
+        ("tab.snapshot", {"tab_id": tab_id}),
+        ("tab.get_cfg", {"tab_id": tab_id}),
+        ("soc.info", {"include_cfg": True}),
+    ):
+        invoke(method, params)
+    devices = invoke("device.list", {})["devices"]
+    for device in devices:
+        invoke("device.snapshot", {"name": device["name"]})
 
 
 def make_view() -> MagicMock:
@@ -104,18 +126,25 @@ class Fixture:
         project_root: str | None = None,
         *,
         active_label: str | None = None,
+        empty_project: bool = False,
     ) -> None:
-        self.state = State(make_ctx())
+        initial = (
+            ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+            if empty_project
+            else make_ctx()
+        )
+        self.state = State(initial)
         self.registry = Registry()
         register_all(self.registry)
         if not self.registry.has("fake"):
             self.registry.register("fake", FakeAdapter)
         self.view = make_view()
         io_manager = IOManager()
-        exp_manager = MagicMock()
-        if active_label is not None:
-            exp_manager.current_label = active_label
-        io_manager._em = exp_manager
+        if not empty_project:
+            exp_manager = MagicMock()
+            if active_label is not None:
+                exp_manager.current_label = active_label
+            io_manager._em = exp_manager
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,

@@ -62,6 +62,19 @@ def test_context_snapshot_returns_full_active_md_and_ml_over_the_socket(fx):
                 "waveforms": {"square": ml.waveforms["square"].to_dict()},
             },
         }
+        assert call(sock, "context.md_get_attr", {"key": "trace"})["result"] == {
+            "key": "trace",
+            "value": [3.0, 4.0],
+        }
+        assert call(sock, "context.md_get", {"summaries": True})["result"] == {
+            "keys": ["peaks", "phase", "r_f", "trace"],
+            "values": {
+                "peaks": "2 items",
+                "phase": "complex",
+                "r_f": 6000.0,
+                "trace": "2 array",
+            },
+        }
     finally:
         reset_inbox(sock)
         sock.close()
@@ -83,6 +96,10 @@ def test_context_snapshot_rejects_lossy_md_projection_over_socket(fx, value):
         assert reply["ok"] is False, reply
         assert reply["error"]["code"] == "precondition_failed"
         assert reply["error"]["reason"] == "unserializable_context"
+        attr = call(sock, "context.md_get_attr", {"key": "nested"}, rid="nested")
+        assert attr["ok"] is False
+        assert attr["error"]["code"] == "precondition_failed"
+        assert attr["error"]["reason"] == "unserializable_context"
     finally:
         reset_inbox(sock)
         sock.close()

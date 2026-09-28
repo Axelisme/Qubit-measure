@@ -171,13 +171,6 @@ def build_app_services(
     # (built above) — built after writeback (read-model dependency, ADR-0005).
     tab = TabService(state, registry, writeback)
     workspace = WorkspaceService(state, tab, bus)
-    tab_control = TabControlFacet(
-        state=state,
-        tab=tab,
-        workspace=workspace,
-        bus=bus,
-        access=access,
-    )
     guard = GuardService(state)
     load = LoadService(state, writeback, cfg_editor=cfg_editor, bus=bus)
     run = RunService(state, runner, bus, handles, writeback)
@@ -194,6 +187,14 @@ def build_app_services(
         analyze=analyze,
         post_analyze=post_analyze,
         render_host=render_host,
+        access=access,
+    )
+    tab_control = TabControlFacet(
+        state=state,
+        tab=tab,
+        workspace=workspace,
+        bus=bus,
+        load_tab_result=run_analyze_control.load_tab_result,
         access=access,
     )
     operation_control = OperationControlFacet(

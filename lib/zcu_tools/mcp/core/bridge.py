@@ -14,12 +14,11 @@ or diagnostics.
     ``connect`` / ``disconnect`` / ``launch`` / ``stop`` (lifecycle), and
     ``wire_version_note`` (the handshake probe). An optional ``on_event`` hook
     receives event-push lines (the reader otherwise drops them).
-  - :class:`McpServerConfig` carries the prefix + display name + instructions the
-    stdio loop / tool-gen need; :class:`MCPBridgeConfig` adds the GUI-bridge launch
-    knobs (name / port / versions / pid+log file names / run-script name).
-  - Module helpers build the MCP tool surface from a method-spec table
-    (``coerce_arg`` / ``make_forwarder`` / ``generate_tools``) and run the MCP
-    stdio protocol loop (``build_initialize_result`` / ``run_stdio_loop``).
+  - :class:`MCPBridgeConfig` extends
+    :class:`~zcu_tools.mcp.core.stdio_server.McpServerConfig` with the GUI-bridge
+    launch knobs (name / port / versions / pid+log file names / run-script name).
+    Tool generation and the MCP stdio loop live in
+    :mod:`zcu_tools.mcp.core.stdio_server`.
 
 App-specific policy stays with each app: the read-only apps wrap
 ``send_rpc_raw`` in a thin error-raising ``send_gui_rpc`` and drop events;
@@ -46,7 +45,6 @@ import subprocess
 import sys
 import threading
 import time
-import traceback
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -55,33 +53,9 @@ from typing import Any, Literal, Protocol
 
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES, encode_line
-from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
+from zcu_tools.mcp.core.stdio_server import McpServerConfig
 
 logger = logging.getLogger(__name__)
-
-_GENERATED_RPC_TRANSPORT_SLACK_SECONDS = 1.0
-
-# The type of a generated/override MCP tool entry.
-Tool = dict[str, Any]
-ToolTable = dict[str, Tool]
-# A function issuing one GUI RPC and returning the result dict (raises on error).
-# Read-only apps pass a thin wrapper over McpBridge.send_rpc_raw; measure-gui
-# passes its guarded send_gui_rpc.
-SendFn = Callable[..., dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class McpServerConfig:
-    """The minimal config the stdio loop + tool generation need.
-
-    ``tool_prefix`` is the wire-method -> tool-name prefix (e.g. ``fluxdep_``). A
-    no-subprocess server (e.g. agent-memory, dispatching in-process) needs only
-    this; the GUI bridges add the launch fields via :class:`MCPBridgeConfig`.
-    """
-
-    tool_prefix: str
-    server_display_name: str
-    server_instructions: str
 
 
 @dataclass(frozen=True)
@@ -818,291 +792,12 @@ class McpBridge:
         return {"exited": True, "note": f"GUI process (pid={pid}) closed."}
 
 
-# ---------------------------------------------------------------------------
-# Tool generation from a method-spec table (the wire SSOT)
-# ---------------------------------------------------------------------------
-
-
-def coerce_arg(value: object, json_type: JsonType) -> object:
-    if value is None:
-        return None
-    if json_type is JsonType.STRING:
-        return str(value)
-    if json_type is JsonType.INTEGER:
-        return int(value)  # type: ignore[arg-type]
-    if json_type is JsonType.NUMBER:
-        return float(value)  # type: ignore[arg-type]
-    if json_type is JsonType.BOOLEAN:
-        return bool(value)
-    if json_type is JsonType.OBJECT:
-        return dict(value)  # type: ignore[call-overload]
-    if json_type is JsonType.ARRAY:
-        # Require a list; param_spec.validate_params already enforces this on the
-        # wire path, but the forwarder goes directly through coerce_arg, so we
-        # guard here too (mirrors the OBJECT guard above).
-        if not isinstance(value, list):
-            raise TypeError(
-                f"expected list for ARRAY param, got {type(value).__name__!r}"
-            )
-        return list(value)
-    return value  # JSON: pass through
-
-
-def generated_rpc_timeout_seconds(spec: Any) -> float:
-    """Transport ceiling for generated tools: handler budget plus wire slack."""
-
-    return float(spec.timeout_seconds) + _GENERATED_RPC_TRANSPORT_SLACK_SECONDS
-
-
-def make_forwarder(method: str, spec, send_fn: SendFn):
-    """Build an MCP forwarder that projects arguments into RPC params per spec.
-
-    ``send_fn`` issues the RPC: read-only apps pass a thin error-raising wrapper
-    over :meth:`McpBridge.send_rpc_raw`; measure-gui passes its guarded
-    ``send_gui_rpc``.
-    """
-    rpc_timeout = generated_rpc_timeout_seconds(spec)
-
-    def _forwarder(arguments: dict[str, Any]) -> dict[str, Any]:
-        rpc_params: dict[str, Any] = {}
-        for p in spec.params:
-            if p.required:
-                if p.name not in arguments or arguments[p.name] is None:
-                    raise ValueError(f"missing {p.name!r}")
-                rpc_params[p.name] = coerce_arg(arguments[p.name], p.json_type)
-            elif arguments.get(p.name) is not None:
-                rpc_params[p.name] = coerce_arg(arguments[p.name], p.json_type)
-        return send_fn(method, rpc_params, timeout_seconds=rpc_timeout)
-
-    return _forwarder
-
-
-def generate_tools(
-    config: McpServerConfig,
-    method_specs: dict[str, Any],
-    non_generated: frozenset[str],
-    send_fn: SendFn,
-) -> ToolTable:
-    """Generate one MCP tool per method spec (skipping ``non_generated``)."""
-    out: ToolTable = {}
-    for method, spec in method_specs.items():
-        if method in non_generated:
-            continue
-        tool_name = spec.tool_name or config.tool_prefix + method.replace(".", "_")
-        out[tool_name] = {
-            "handler": make_forwarder(method, spec, send_fn),
-            "description": spec.description or method,
-            "inputSchema": build_input_schema(spec.params),
-        }
-    return out
-
-
-def assemble_tools(
-    generated: ToolTable, overrides: ToolTable, override_names: frozenset[str]
-) -> ToolTable:
-    """Merge generated + selected override tools; fail-fast on name collision."""
-    selected = {
-        name: spec for name, spec in overrides.items() if name in override_names
-    }
-    collisions = set(generated) & set(selected)
-    if collisions:
-        raise RuntimeError(f"override/generated tool collision: {sorted(collisions)}")
-    return {**generated, **selected}
-
-
-# ---------------------------------------------------------------------------
-# MCP stdio protocol loop
-# ---------------------------------------------------------------------------
-
-
-def build_initialize_result(
-    config: McpServerConfig, server_version: str = "1.0.0"
-) -> dict[str, Any]:
-    return {
-        "protocolVersion": "2024-11-05",
-        "capabilities": {"tools": {}},
-        "serverInfo": {"name": config.server_display_name, "version": server_version},
-        "instructions": config.server_instructions,
-    }
-
-
-def run_stdio_loop(
-    config: McpServerConfig,
-    tools: ToolTable,
-    *,
-    on_cleanup: Callable[[], None] | None = None,
-    on_each_reply: Callable[[], list[dict[str, Any]]] | None = None,
-    on_start: Callable[[], None] | None = None,
-    on_error: Callable[[str], None] | None = None,
-    server_version: str = "1.0.0",
-) -> None:
-    """Run the MCP stdio JSON-RPC loop until stdin closes.
-
-    Hooks (all optional; defaults give the bare read-only behaviour):
-      - ``on_start`` runs once after stdin/stdout are reconfigured to UTF-8, before
-        the loop (measure-gui attaches its per-session file logging here).
-      - ``on_cleanup`` runs once when stdin closes (e.g. stop a server-launched GUI).
-      - ``on_each_reply`` lets an app append ready-made content blocks to each
-        successful tool reply: a list of ``{"type": "text", "text": ...}`` dicts,
-        appended after the tool's own content. The hook owns the wording (returns
-        ``[]`` for nothing). Measure-gui does not register this hook; it reads
-        Stop feedback through operation request/reply instead.
-      - ``on_error`` is called from within each ``except`` block with a
-        preformatted context message (measure-gui passes ``logger.exception``) so
-        the active exception is logged with its traceback.
-
-    ``server_version`` is the ``serverInfo.version`` reported on ``initialize``.
-
-    A ``RuntimeError`` carrying a ``reason`` attribute (set from the GUI wire error
-    envelope) has its tag appended to the tool-error text, so an agent can branch
-    on the machine-readable reason without parsing the prose.
-    """
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    if on_start is not None:
-        on_start()
-
-    while True:
-        try:
-            line = sys.stdin.readline()
-            if not line:
-                if on_cleanup is not None:
-                    on_cleanup()
-                break
-            line = line.strip()
-            if not line:
-                continue
-
-            req = json.loads(line)
-            method = req.get("method")
-            rid = req.get("id")
-
-            if method == "initialize":
-                resp = {
-                    "jsonrpc": "2.0",
-                    "id": rid,
-                    "result": build_initialize_result(config, server_version),
-                }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-            elif method == "notifications/initialized":
-                continue
-
-            elif method == "tools/list":
-                tools_list = [
-                    {
-                        "name": name,
-                        "description": info["description"],
-                        "inputSchema": info["inputSchema"],
-                    }
-                    for name, info in tools.items()
-                ]
-                resp = {"jsonrpc": "2.0", "id": rid, "result": {"tools": tools_list}}
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-            elif method == "tools/call":
-                params = req.get("params", {})
-                name = params.get("name")
-                arguments = params.get("arguments", {})
-
-                tool = tools.get(name)
-                if not tool:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": rid,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Method not found: {name}",
-                        },
-                    }
-                else:
-                    try:
-                        handler: Callable[[dict[str, Any]], Any] = tool["handler"]
-                        res = handler(arguments)
-                        # Compact separators (no indent, no spaces) keep the tool
-                        # reply token-light. ensure_ascii stays default (True): the
-                        # outer JSON-RPC envelope re-escapes non-ASCII anyway, so
-                        # turning it off here buys nothing.
-                        text = (
-                            res
-                            if isinstance(res, str)
-                            else json.dumps(res, separators=(",", ":"))
-                        )
-                        content = [{"type": "text", "text": text}]
-                        if on_each_reply is not None:
-                            content.extend(on_each_reply())
-                        resp = {
-                            "jsonrpc": "2.0",
-                            "id": rid,
-                            "result": {"content": content},
-                        }
-                    except Exception as e:
-                        if on_error is not None:
-                            on_error(f"MCP tool {name!r} dispatch failed")
-                        # GUI-side business errors (RuntimeError with an already-
-                        # clear message) carry no useful Python stack for the agent
-                        # — the traceback is always the same forwarder frames, pure
-                        # noise. Strip it for those; keep the full traceback only for
-                        # unexpected bridge-side failures, where the stack is the
-                        # actual debugging signal.
-                        if isinstance(e, RuntimeError):
-                            text = f"Error executing tool {name!r}: {e}"
-                            # Surface the machine-readable reason tag (e.g.
-                            # no_run_result / no_project) when the wire carried one,
-                            # so the agent can branch on it without parsing prose.
-                            reason = getattr(e, "reason", None)
-                            if reason:
-                                text += f"\nreason: {reason}"
-                        else:
-                            text = (
-                                f"Error executing tool {name!r}: {e}\n"
-                                f"{traceback.format_exc()}"
-                            )
-                        resp = {
-                            "jsonrpc": "2.0",
-                            "id": rid,
-                            "result": {
-                                "isError": True,
-                                "content": [{"type": "text", "text": text}],
-                            },
-                        }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-            else:
-                if rid is not None:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": rid,
-                        "error": {
-                            "code": -32601,
-                            "message": f"Method not found: {method}",
-                        },
-                    }
-                    sys.stdout.write(json.dumps(resp) + "\n")
-                    sys.stdout.flush()
-        except Exception as e:
-            if on_error is not None:
-                on_error("MCP loop exception")
-            sys.stderr.write(f"MCP Loop Exception: {e}\n{traceback.format_exc()}\n")
-            sys.stderr.flush()
-
-
 __all__ = [
     "GuiAuthenticationError",
     "GuiMessageTooLargeError",
     "GuiTransportTimeoutError",
     "McpBridge",
     "MCPBridgeConfig",
-    "McpServerConfig",
-    "assemble_tools",
-    "build_initialize_result",
-    "coerce_arg",
-    "generate_tools",
-    "generated_rpc_timeout_seconds",
-    "make_forwarder",
     "port_is_open",
     "resolve_connect_port",
-    "run_stdio_loop",
 ]

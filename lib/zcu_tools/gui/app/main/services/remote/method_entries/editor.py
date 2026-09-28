@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
-    _expected_versions,
     _json,
     _str,
     _str_opt,
@@ -16,7 +15,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "editor.new",
-        "editor:_h_editor_new",
+        "editor:h_editor_new",
         MethodSpec(
             5.0,
             "Open a stateful editing session over an EXISTING ModuleLibrary "
@@ -34,7 +33,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "editor.set_field",
-        "editor:_h_editor_set_field",
+        "editor:h_editor_set_field",
         MethodSpec(
             5.0,
             "Set one field in an editing session. 'path' must be a canonical dotted "
@@ -72,7 +71,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "editor.get",
-        "editor:_h_editor_get",
+        "editor:h_editor_get",
         MethodSpec(
             5.0,
             CFG_OBSERVATION_DESCRIPTION,
@@ -91,7 +90,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "editor.commit",
-        "editor:_h_editor_commit",
+        "editor:h_editor_commit",
         MethodSpec(
             10.0,
             "Save the editing session (from rpc_call on editor.new) as a ModuleLibrary "
@@ -104,7 +103,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("editor_id"),
                 _str("name", "ml entry name to register under"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -113,7 +111,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "editor.discard",
-        "editor:_h_editor_discard",
+        "editor:h_editor_discard",
         MethodSpec(
             5.0,
             "Discard an editing session (from rpc_call on editor.new) without writing to the "

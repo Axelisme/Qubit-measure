@@ -13,12 +13,12 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "adapter.list",
-        "view:_h_adapter_list",
+        "view:h_adapter_list",
         MethodSpec(5.0, "List available adapters. Returns {adapters: [name]}."),
     ),
     method_entry(
         "adapter.guide",
-        "view:_h_adapter_guide",
+        "view:h_adapter_guide",
         MethodSpec(
             5.0,
             "Read an adapter's human-facing orientation guide BEFORE running it: "
@@ -32,7 +32,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "app.shutdown",
-        "view:_h_app_shutdown",
+        "view:h_app_shutdown",
         MethodSpec(
             5.0,
             "Gracefully close the GUI: runs the normal window-close path (persist "
@@ -43,7 +43,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "dialog.screenshot",
-        "view:_h_dialog_screenshot",
+        "view:h_dialog_screenshot",
         MethodSpec(
             10.0,
             "Capture a named dialog as base64 PNG, or write PNG to out_path and return its path/byte count.",
@@ -55,7 +55,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "view.snapshot",
-        "view:_h_view_snapshot",
+        "view:h_view_snapshot",
         MethodSpec(
             5.0,
             "Capture view state summary",
@@ -64,7 +64,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "view.screenshot",
-        "view:_h_view_screenshot",
+        "view:h_view_screenshot",
         MethodSpec(
             10.0,
             "Capture the WHOLE main window (client area + floating widgets) as base64 "
@@ -76,7 +76,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.get_figure",
-        "view:_h_tab_get_figure",
+        "view:h_tab_get_figure",
         MethodSpec(
             10.0,
             "Get a tab pane's figure as PNG (subtab-qualified). Run reads the live "

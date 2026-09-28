@@ -513,28 +513,26 @@ def test_device_handlers_dispatch_only_through_device_control_facet():
             "address": "none",
         },
         dev,
-    ) == {"operation_id": 101, "__agent_write_versions": {}}
+    ) == {"operation_id": 101}
     assert isinstance(dev.start_connect_device.call_args.args[0], ConnectDeviceRequest)
 
     assert _dispatch_with_device_control(
         "device.disconnect", {"name": "bias"}, dev
-    ) == {"operation_id": 102, "__agent_write_versions": {}}
+    ) == {"operation_id": 102}
     assert isinstance(
         dev.start_disconnect_device.call_args.args[0], DisconnectDeviceRequest
     )
 
     assert _dispatch_with_device_control("device.reconnect", {"name": "bias"}, dev) == {
         "operation_id": 103,
-        "__agent_write_versions": {},
     }
     assert _dispatch_with_device_control("device.forget", {"name": "bias"}, dev) == {
         "forgotten": "bias",
-        "__agent_write_versions": {},
     }
 
     assert _dispatch_with_device_control(
         "device.setup", {"name": "bias", "updates": {"value": 2.0}}, dev
-    ) == {"operation_id": 104, "__agent_write_versions": {}}
+    ) == {"operation_id": 104}
     assert isinstance(dev.start_setup_device.call_args.args[0], SetupDeviceRequest)
 
     assert "fields" in _dispatch_with_device_control(
@@ -666,20 +664,28 @@ def test_save_data_delegates_to_save_control(fx):
     fx.service.save_control.save_data = MagicMock(  # type: ignore[method-assign]
         return_value="/tmp/data.hdf5"
     )
+    tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
     try:
+        assert fx.state.version.get(f"tab:{tab_id}:path:data") == 0
+        unseen = call(
+            sock, "tab.save_data", {"tab_id": tab_id, "data_path": "/tmp/data.h5"}
+        )
+        assert unseen["error"]["reason"] == "stale_version"
+        assert f"tab:{tab_id}:path:data" in unseen["error"]["data"]["stale"]
+        fx.service.save_control.save_data.assert_not_called()
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
         resp = call(
             sock,
             "tab.save_data",
-            {"tab_id": "tab1", "data_path": "/tmp/data.h5", "comment": "note"},
+            {"tab_id": tab_id, "data_path": "/tmp/data.h5", "comment": "note"},
         )
         assert resp["ok"] is True
         assert resp["result"] == {
             "data_path": "/tmp/data.hdf5",
-            "__agent_write_versions": {},
         }
         fx.service.save_control.save_data.assert_called_once_with(
-            "tab1", "/tmp/data.h5", comment="note"
+            tab_id, "/tmp/data.h5", comment="note"
         )
         fx.service.save_control.save_data.reset_mock()
         omitted = call(sock, "tab.save_data", {"tab_id": "tab1"}, rid="2")
@@ -702,24 +708,26 @@ def test_save_image_delegates_to_save_control(fx):
     fx.service.save_control.save_post_image = MagicMock(  # type: ignore[method-assign]
         return_value="/tmp/post.png"
     )
+    tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
     try:
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
         resp = call(
             sock,
             "tab.save_image",
-            {"tab_id": "tab1", "subtab_id": "analysis", "image_path": "/tmp/image.png"},
+            {"tab_id": tab_id, "subtab_id": "analysis", "image_path": "/tmp/image.png"},
         )
         assert resp["ok"] is True
         assert resp["result"]["image_path"] == "/tmp/image.png"
         fx.service.save_control.save_image.assert_called_once_with(
-            "tab1", "/tmp/image.png"
+            tab_id, "/tmp/image.png"
         )
         fx.ctrl.save_image.assert_not_called()
         resp2 = call(
             sock,
             "tab.save_image",
             {
-                "tab_id": "tab1",
+                "tab_id": tab_id,
                 "subtab_id": "post_analysis",
                 "image_path": "/tmp/post.png",
             },
@@ -727,7 +735,7 @@ def test_save_image_delegates_to_save_control(fx):
         assert resp2["ok"] is True
         assert resp2["result"]["image_path"] == "/tmp/post.png"
         fx.service.save_control.save_post_image.assert_called_once_with(
-            "tab1", "/tmp/post.png"
+            tab_id, "/tmp/post.png"
         )
     finally:
         sock.close()
@@ -862,16 +870,6 @@ def test_result_scope_list_reports_discovered_params(qapp, tmp_path):  # noqa: A
             sock.close()
     finally:
         fx.stop()
-
-
-def test_startup_apply_missing_required_rejected(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "startup.apply", {"chip_name": "C", "qub_name": "Q"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
 
 
 def test_soc_connect_remote_missing_ip_rejected(fx):

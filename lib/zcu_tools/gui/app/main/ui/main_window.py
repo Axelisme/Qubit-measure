@@ -454,15 +454,6 @@ class MainWindow(QMainWindow):
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
-    def refresh_inspect_panel(self) -> None:
-        inspect = self._dialog_registry.dialog(DialogName.INSPECT)
-        if inspect is not None and inspect.isVisible():
-            # InspectDialog defines ``refresh``; cast through ``Any`` to avoid
-            # importing the concrete class in the hot signature surface.
-            from typing import cast
-
-            cast(Any, inspect).refresh()
-
     def refresh_predictor_panel(self) -> None:
         info = self._ctrl.predictor_control.get_predictor_info()
         if info is None:
