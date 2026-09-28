@@ -58,9 +58,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "fail-fast and non-atomic. proposed_value and edits are mutually exclusive "
             "(different item kinds). Echoes the edited {item}; an edits batch also "
             "returns {valid, removed, added} as the final net before/after path-set "
-            "difference (same shape as tab.set_cfg; A→B→A is empty). Removed "
-            "'.sweep.*' / '.value.*' aliases are rejected with a canonical "
-            "replacement. Read the item's current paths via tab.writeback_preview.",
+            "difference (same shape as tab.set_cfg; A→B→A is empty). Agent edits "
+            "use the shared aggregate grammar: edit a sweep as one object, not "
+            "the GUI's leaf controls. Read current/proposed values via "
+            "tab.writeback_preview.",
             (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),

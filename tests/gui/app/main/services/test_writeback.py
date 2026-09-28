@@ -184,7 +184,29 @@ def test_draft_cfg_edits_use_private_editor_session():
     result = draft.edit("ml-1", edits=[{"path": "freq", "value": 5000.0}])
 
     assert result == {"valid": True, "removed": [], "added": []}
-    cfg_editor.set_fields.assert_called_once_with("editor-1", [CfgEdit("freq", 5000.0)])
+    cfg_editor.set_fields.assert_called_once_with(
+        "editor-1", [CfgEdit("freq", 5000.0)], agent_edit=True
+    )
+
+
+def test_agent_writeback_edits_delegate_to_shared_aggregate_grammar():
+    editor = MagicMock()
+    editor.open_seeded.return_value = ("editor-1", ())
+    editor.set_fields.return_value = CfgEditResult(valid=True)
+    service = WritebackService(editor, MagicMock())
+    draft = service.create_draft(
+        [
+            ModuleWriteback(target_name="a", description="d", edit_schema=MagicMock()),
+        ]
+    )
+    sweep = {"start": 1.0, "stop": 2.0, "expts": 3}
+
+    result = service.edit_draft(draft, "ml-1", edits=[{"path": "freq", "value": sweep}])
+
+    assert result["valid"] is True
+    editor.set_fields.assert_called_once_with(
+        "editor-1", [CfgEdit("freq", sweep)], agent_edit=True
+    )
 
 
 def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape():

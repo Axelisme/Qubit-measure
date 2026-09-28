@@ -260,7 +260,7 @@ class WritebackService:
         proposed_value: Any = _UNSET,
         edits: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
-        """Apply one draft-local edit, preserving ordered fail-fast semantics."""
+        """Apply one draft-local edit; agent cfg changes use aggregate grammar."""
         self._require_draft(draft)
         entry = self._find_draft_entry(draft, session_id)
         item = entry.item
@@ -308,7 +308,9 @@ class WritebackService:
                         f"edits[{i}] must be an object with 'path' and 'value'"
                     )
                 typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-            result = self._cfg_editor.set_fields(entry.editor_id, typed_edits)
+            result = self._cfg_editor.set_fields(
+                entry.editor_id, typed_edits, agent_edit=True
+            )
         if result is None:
             return {"valid": True, "removed": [], "added": []}
         return result.to_wire()
