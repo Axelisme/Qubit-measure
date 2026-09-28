@@ -808,6 +808,13 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
 
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         started = call("tab_run", {"tab": tab_id})
         assert set(started) == {"op"}
         assert isinstance(started["op"], int) and started["op"] > 0
@@ -830,6 +837,13 @@ def test_tab_run_rejects_missing_active_context_without_starting(
         call("connect", {"port": fx.service.port})
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         with pytest.raises(RuntimeError) as exc:
             call("tab_run", {"tab": tab_id})
         assert getattr(exc.value, "reason", None) == "no_active_context"
@@ -861,6 +875,13 @@ def test_tab_run_busy_and_cancel_keep_the_gui_partial_result(
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         op = call("tab_run", {"tab": tab_id})["op"]
         assert entered.wait(1)
         with pytest.raises(RuntimeError, match="busy"):
