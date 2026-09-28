@@ -66,7 +66,7 @@ GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0
 - 切換 ref 會移除原本的子路徑，須先切 ref 再改子欄位。
 - `{__kind: "value_ref", key}` 在套用時解析一次並寫入常數。
 
-**sweep 一律整體修改。** sweep 的欄位彼此連動，只能在 sweep 路徑上給整個物件，不接受端點路徑（例如 `sweep.freq.start`）：
+**Agent sweep 使用整體修改。** Agent 在 sweep 路徑上給完整物件，不接受端點路徑（例如 `sweep.freq.start`）。GUI widget仍使用逐欄canonical targets；兩種入口共用binding模型與SweepEditor／CenteredSweepEditor的正規化及驗證，不在remote複製算法（[[0050]]）：
 
 | sweep 種類 | 接受的形式 |
 | --- | --- |
@@ -139,8 +139,8 @@ GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0
 **`md_set(values: {key: value})`**
 依序寫入，遇錯即停、不回滾；回傳 `{key: {before, after}}`。
 
-**`ml_get(name?)`**
-未給 `name` 時列出 modules 與 waveforms（名稱、種類、描述）；給 `name` 時回傳該項 cfg。
+**`ml_get(name?, kind?)`**
+未給`name`時列出modules與waveforms的名稱、種類及描述；給`name`時直接讀取該項cfg，不建立editor。module與waveform同名時須給`kind="module"|"waveform"`消歧。
 
 **`ml_roles()`**
 列出可建立的 role 模板 `[{role_id, label, kind, default_name}]`。
@@ -148,11 +148,14 @@ GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0
 **`ml_create(role_id, name?)`**
 由 role 模板建立 module／waveform，預設值由 md 帶入；未給 `name` 時用 `default_name`。回傳 `{name, kind, cfg}`。
 
-**`ml_edit(name, edits, save_as?)`**
-以 cfg 編輯語法修改 library 項目並存檔；任何一步失敗則 library 不變。`save_as` 存為新項目、原項目不動。存檔時 md 表達式求值為數值，library 不保存與 md 的連動。回傳存入的 `{name, cfg}`。
+**`ml_edit(name, edits, save_as?, kind?)`**
+module與waveform同名時須給`kind="module"|"waveform"`消歧。
+GUI application服務以共用CfgDraft模型依序修改並逐項寫入library，第一個錯誤即停止，保留已提交前綴，不rollback。`save_as`在第一項成功時建立新項目，原項目不動；目的地已存在則在寫入前拒絕。存檔時md表達式求值為數值，library不保存與md的連動。
+
+回傳`{name, cfg, applied, failed, skipped}`。`applied`為已提交數；`failed`為null或含零起始index、path、message的物件；`skipped`列出未執行的後綴索引。`cfg`是實際已提交目的地，save_as首項失敗尚未建立目的地時為null。入口需明確讀過context，MCP不以隱藏context/editor讀取通過guard，也不自行串接editor生命週期。
 
 **`ml_rename(name, new_name, kind?)`**、**`ml_delete(name, kind?)`**
-種類由名稱判斷，module 與 waveform 同名時須給 `kind`；名稱衝突時報錯。參照該項目的 cfg 會改為 inline 值（值保留，不再連結 library，[[0033]]），回傳中提示此影響。
+種類由名稱判斷，module與waveform同名時須給`kind`；名稱衝突時報錯。操作只修改library，不掃描或改寫參照。LINKED參照保留舊鍵，不轉inline，舊鍵不存在時失效；MODIFIED參照保留inline修改，轉成Custom值。回傳提示此影響。
 
 ### D. 實驗與 tab
 
@@ -313,8 +316,8 @@ tab_close("t1")
 | `project`、`soc_connect`、`soc_info` | `project.info`、`startup.apply`；`soc.connect`；`soc.info` |
 | `contexts`、`context_use`、`context_create` | `context.labels`、`context.active`、`context.use`、`context.new` |
 | `md_get`、`md_set` | `context.md_get`、`context.md_get_attr`、`context.md_set_attr` |
-| `ml_get`、`ml_roles`、`ml_create` | `context.ml_get` 與 editor 讀取、`context.ml_list_roles`、`context.ml_create_from_role` |
-| `ml_edit` | `editor.new`、`editor.set_field`、`editor.commit`，失敗時 `editor.discard` |
+| `ml_get`、`ml_roles`、`ml_create` | `context.ml_get(name?, kind?)`直接讀library、`context.ml_list_roles`、`context.ml_create_from_role` |
+| `ml_edit` | `context.ml_edit`，GUI application擁有草稿、逐項提交與清理 |
 | `ml_rename`、`ml_delete` | `context.ml_rename_*`、`context.ml_del_*` |
 | `experiments`、`guide` | `adapter.list`、`adapter.guide` |
 | `tab_open`、`tab_close` | `tab.new`、`tab.load_data`、`tab.set_active`、`tab.close` |

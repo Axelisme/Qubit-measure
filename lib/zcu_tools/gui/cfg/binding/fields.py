@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Literal, cast
 
@@ -164,8 +164,35 @@ class ScalarField(CfgField):
         if isinstance(new_value, EvalValue):
             new_value = self._resolved_eval_value(new_value)
 
-        if new_value != self._value:
-            self._value = new_value
+        self._commit_prepared_value(new_value)
+
+    def prepare_agent_value(
+        self, value: ScalarValue
+    ) -> tuple[ScalarValue, Callable[[], None]]:
+        """Preflight an endpoint and return its single-use, immediate commit."""
+        self._require_open()
+        if isinstance(value, EvalValue):
+            prepared = self._resolved_eval_value(value)
+        else:
+            self._validate_direct_value(value)
+            prepared = value
+        previous = self._value
+        committed = False
+
+        def commit() -> None:
+            nonlocal committed
+            self._require_open()
+            if committed or self._value != previous:
+                raise RuntimeError("stale prepared scalar value")
+            committed = True
+            self._commit_prepared_value(prepared)
+
+        return prepared, commit
+
+    def _commit_prepared_value(self, value: ScalarValue) -> None:
+        """Install an already-resolved scalar without re-evaluating its expression."""
+        if value != self._value:
+            self._value = value
             self._refresh_validity()
             self.on_change.emit(self.get_value())
         else:
@@ -308,6 +335,53 @@ class LiteralField(CfgField):
         del value
 
 
+def _agent_request_keys(request: Mapping[str, object], required: set[str]) -> None:
+    keys = set(request)
+    allowed = required | {"expts", "step"}
+    if required == {"span"}:
+        allowed.add("center")  # Report a locked center explicitly at the field.
+    unknown = keys - allowed
+    if unknown:
+        raise ValueError(f"unexpected whole sweep keys: {unknown}")
+    missing = required - keys
+    if missing:
+        raise ValueError(f"missing whole sweep keys: {missing}")
+    if "expts" in keys and "step" in keys:
+        raise ValueError("conflict: expts and step")
+    if "expts" not in keys and "step" not in keys:
+        raise ValueError("missing expts or step")
+
+
+def _agent_number(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{label} must be a number")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise ValueError(f"{label} must be finite")
+    return numeric
+
+
+def _agent_expts(value: object) -> int:
+    if type(value) is not int:
+        raise TypeError("expts must be an integer")
+    return value
+
+
+def _agent_endpoint(
+    field: ScalarField, value: object
+) -> tuple[ScalarValue, Callable[[], None]]:
+    if isinstance(value, EvalValue):
+        source = value
+    else:
+        source = DirectValue(_agent_number(value, "endpoint"))
+    resolved, commit = field.prepare_agent_value(source)
+    if isinstance(resolved, EvalValue):
+        if resolved.resolved is None:
+            raise ValueError(f"unresolved sweep endpoint: {resolved.error}")
+        _agent_number(resolved.resolved, "endpoint")
+    return resolved, commit
+
+
 class SweepField(CfgField):
     spec: SweepSpec
 
@@ -368,6 +442,27 @@ class SweepField(CfgField):
             )
         self._apply_value(SweepEditor.canonicalize(value))
 
+    def set_agent_value(self, request: Mapping[str, object]) -> SweepValue:
+        """Resolve and validate a whole-sweep request before one committed update."""
+        self._require_open()
+        _agent_request_keys(request, {"start", "stop"})
+        if not self.spec.editable:
+            raise ValueError("whole sweep is locked")
+        start, commit_start = _agent_endpoint(self.start_field, request["start"])
+        stop, commit_stop = _agent_endpoint(self.stop_field, request["stop"])
+        candidate = replace(self.get_value(), start=start, stop=stop, auto_norm=False)
+        if "expts" in request:
+            candidate = SweepEditor.update_expts(
+                candidate, _agent_expts(request["expts"])
+            )
+        else:
+            candidate = SweepEditor.update_step(
+                candidate, _agent_number(request["step"], "step")
+            )
+        _agent_number(resolved_direct_number(candidate.step), "normalized step")
+        self._apply_value(candidate, commits=(commit_start, commit_stop))
+        return self.get_value()
+
     def set_text(self, edge: Literal["expts", "step"], text: str) -> None:
         self._require_open()
         if edge == "expts":
@@ -386,11 +481,20 @@ class SweepField(CfgField):
             candidate = edit(current, DirectValue(None, raw=text, error=str(exc)))
         self._apply_value(candidate)
 
-    def _apply_value(self, canonical: SweepValue) -> None:
+    def _apply_value(
+        self,
+        canonical: SweepValue,
+        *,
+        commits: tuple[Callable[[], None], ...] | None = None,
+    ) -> None:
         self._updating = True
         try:
-            self.start_field.set_value(self._coerce_edge(canonical.start))
-            self.stop_field.set_value(self._coerce_edge(canonical.stop))
+            if commits is not None:
+                for commit in commits:
+                    commit()
+            else:
+                self.start_field.set_value(self._coerce_edge(canonical.start))
+                self.stop_field.set_value(self._coerce_edge(canonical.stop))
             self._expts = canonical.expts
             self._step = canonical.step
             self._step = SweepEditor.canonicalize(self.get_value()).step
@@ -517,6 +621,38 @@ class CenteredSweepField(CfgField):
         self._validate_value(canonical)
         self._apply_value(canonical)
 
+    def set_agent_value(self, request: Mapping[str, object]) -> CenteredSweepValue:
+        """Resolve and validate a centered sweep before one committed update."""
+        self._require_open()
+        locked = self.spec.locked_center is not None or not self.spec.center_editable
+        _agent_request_keys(request, {"span"} if locked else {"center", "span"})
+        if not self.spec.editable:
+            raise ValueError("whole sweep is locked")
+        if locked and "center" in request:
+            raise ValueError("center is locked")
+        commits: tuple[Callable[[], None], ...] = ()
+        center = self.get_value().center
+        if not locked:
+            center, commit_center = _agent_endpoint(
+                self.center_field, request["center"]
+            )
+            commits = (commit_center,)
+        candidate = replace(
+            self.get_value(), center=center, span=_agent_number(request["span"], "span")
+        )
+        if "expts" in request:
+            candidate = CenteredSweepEditor.update_expts(
+                candidate, _agent_expts(request["expts"])
+            )
+        else:
+            candidate = CenteredSweepEditor.update_step(
+                candidate, _agent_number(request["step"], "step")
+            )
+        self._validate_value(candidate)
+        _agent_number(resolved_direct_number(candidate.step), "normalized step")
+        self._apply_value(candidate, commits=commits)
+        return self.get_value()
+
     def set_text(self, edge: Literal["span", "expts", "step"], text: str) -> None:
         self._require_open()
         type_ = float
@@ -538,10 +674,19 @@ class CenteredSweepField(CfgField):
             candidate = edit(current, DirectValue(None, raw=text, error=str(exc)))
         self._apply_value(candidate)
 
-    def _apply_value(self, canonical: CenteredSweepValue) -> None:
+    def _apply_value(
+        self,
+        canonical: CenteredSweepValue,
+        *,
+        commits: tuple[Callable[[], None], ...] | None = None,
+    ) -> None:
         self._updating = True
         try:
-            self.center_field.set_value(self._coerce_center(canonical.center))
+            if commits is not None:
+                for commit in commits:
+                    commit()
+            else:
+                self.center_field.set_value(self._coerce_center(canonical.center))
             self._span = canonical.span
             self._expts = canonical.expts
             self._step = canonical.step

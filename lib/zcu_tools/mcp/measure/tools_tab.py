@@ -137,9 +137,6 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
         result["cfg"] = ctx.session.read_internal("tab.get_cfg", {"tab_id": tab})[
             "tree"
         ]
-        result.setdefault("partial", {})["cfg"] = (
-            "06-cfg-library owns aggregate type/choice/lock projection"
-        )
     if "analyze_params" in include:
         primary = ctx.session.read_internal("tab.get_analyze_params", {"tab_id": tab})
         post = ctx.session.read_internal("tab.get_post_analyze_params", {"tab_id": tab})
@@ -257,7 +254,7 @@ TAB_READ_TOOLS: dict[str, dict[str, Any]] = {
     },
     "tab_get": {
         "handler": tab_get,
-        "description": "Read explicit tab sections without changing GUI focus. 05 provides the base summary/cfg/analyze_params/analysis/post/artifacts projection; 06 adds cfg type/choice/lock detail, 09 adds artifact status/last saved paths. Missing later fields must be marked partial, not fabricated.",
+        "description": "Read explicit tab sections without changing GUI focus. cfg is the complete GUI-owned cached observation (kind, type, current input, choices and locks); agent edits whole sweeps through tab_edit, not the GUI's leaf control paths. Artifact status/last saved paths remain partial until 09; missing fields are marked partial, not fabricated.",
         "inputSchema": {
             "type": "object",
             "properties": {
