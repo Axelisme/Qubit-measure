@@ -14,7 +14,10 @@ from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.main.figure_export import save_figure_to_path
+from zcu_tools.gui.app.main.figure_export import (
+    resolve_figure_path,
+    save_figure_to_path,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
@@ -52,7 +55,9 @@ def resolve_artifact_destinations(
     resolved = tuple(
         SaveDestination(
             d.kind,
-            reserve_labber_filepath(d.path) if d.kind is ArtifactKind.DATA else d.path,
+            reserve_labber_filepath(d.path)
+            if d.kind is ArtifactKind.DATA
+            else resolve_figure_path(d.path),
         )
         for d in destinations
     )

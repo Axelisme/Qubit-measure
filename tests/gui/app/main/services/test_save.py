@@ -6,6 +6,8 @@ from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
+from matplotlib import rc_context
+from matplotlib.figure import Figure
 from qtpy.QtCore import QEventLoop, QTimer
 from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
 from zcu_tools.gui.app.main.events.completion import (
@@ -214,9 +216,11 @@ def test_save_artifacts_runs_in_order_and_preserves_partial_success(
     )
 
 
-@pytest.mark.parametrize("data_collision", [False, True])
+@pytest.mark.parametrize(
+    "data_collision,extensionless", [(False, False), (True, False), (False, True)]
+)
 def test_batch_rejects_colliding_actual_paths_before_writing(
-    batch_save_service, tmp_path: Path, data_collision: bool
+    batch_save_service, tmp_path: Path, data_collision: bool, extensionless: bool
 ) -> None:
     service, state, adapter, primary, post, handles, _bus, _gate = batch_save_service
     if data_collision:
@@ -232,7 +236,13 @@ def test_batch_rejects_colliding_actual_paths_before_writing(
     with pytest.raises(FailedPreconditionError, match="distinct"):
         service.start_save_artifacts(
             SavePermit("tab"),
-            (SaveDestination(ArtifactKind.ANALYSIS, str(target)), other),
+            (
+                SaveDestination(
+                    ArtifactKind.ANALYSIS,
+                    str(target.with_suffix("") if extensionless else target),
+                ),
+                other,
+            ),
         )
     assert state.get_artifact_snapshots("tab") == before
     assert not state.is_tab_busy("tab")
@@ -244,6 +254,35 @@ def test_batch_rejects_colliding_actual_paths_before_writing(
         assert not target.exists()
     else:
         assert target.read_bytes() == b"existing image"
+
+
+@pytest.mark.parametrize("image_format", ["png", "svg"])
+def test_batch_extensionless_image_reports_existing_output(
+    batch_save_service, tmp_path: Path, image_format: str
+) -> None:
+    service, state, _adapter, _primary, _post, handles, bus, _gate = batch_save_service
+    figure = Figure()
+    figure.subplots().plot([0, 1], [1, 0])
+    state.update_tab_analyze("tab", object(), figure)
+    draft_path = str(tmp_path / "figure")
+    state.update_tab_analysis_image_path_override("tab", draft_path)
+    with rc_context({"savefig.format": image_format}):
+        submission = service.start_save_artifacts(
+            SavePermit("tab"), (SaveDestination(ArtifactKind.ANALYSIS, draft_path),)
+        )
+        outcome = _await_artifact_completion(bus, handles, submission.operation_id)
+    assert outcome.status == "finished"
+    expected = tmp_path / f"figure.{image_format}"
+    assert submission.destinations[0].path == str(expected)
+    artifact = next(
+        a
+        for a in state.get_artifact_snapshots("tab")
+        if a.kind is ArtifactKind.ANALYSIS
+    )
+    assert artifact.last_saved_path == str(expected)
+    assert artifact.status is SaveStatus.SAVED
+    assert expected.stat().st_size > 0
+    assert not Path(draft_path).exists()
 
 
 def test_batch_save_keeps_submission_signature_when_later_drafts_change(

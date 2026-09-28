@@ -185,9 +185,11 @@ def test_save_artifact_selection_errors_do_not_mutate_drafts(artifacts, paths) -
     assert not any(entry.target == "save" for entry in log.calls)
 
 
-@pytest.mark.parametrize("data_collision", [False, True])
+@pytest.mark.parametrize(
+    "data_collision,extensionless", [(False, False), (True, False), (False, True)]
+)
 def test_colliding_paths_do_not_change_shared_drafts(
-    tmp_path: Path, data_collision: bool
+    tmp_path: Path, data_collision: bool, extensionless: bool
 ) -> None:
     facet, log, state, tab, _save, bus, _notices = _facet()
     other_kind = ArtifactKind.DATA if data_collision else ArtifactKind.POST_ANALYSIS
@@ -199,6 +201,8 @@ def test_colliding_paths_do_not_change_shared_drafts(
             tmp_path / ("shared.hdf5" if data_collision else "sub/../shared.png")
         ),
     }
+    if extensionless:
+        paths[ArtifactKind.ANALYSIS] = str(tmp_path / "shared")
     with pytest.raises(FailedPreconditionError, match="distinct"):
         facet.save_artifacts(
             "tab-1", artifacts=tuple(paths), paths=paths, comment="not committed"
