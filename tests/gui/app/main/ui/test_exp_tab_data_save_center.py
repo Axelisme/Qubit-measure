@@ -985,6 +985,7 @@ def test_cleared_gui_data_path_saves_to_state_default(
         if button == "single":
             assert save.start_save_data.call_args.args[1] == default
         else:
+            save.start_save_artifacts.assert_called_once()
             assert save.start_save_artifacts.call_args.args[1][0].path == default
         assert state.get_tab(tab_id).save.data_path_override is None
         state.get_tab(tab_id).artifacts.started(ArtifactKind.DATA)
