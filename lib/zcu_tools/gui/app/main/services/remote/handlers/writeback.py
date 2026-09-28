@@ -203,8 +203,22 @@ def h_tab_writeback_apply(
         )
     if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    pane = subtab_id  # type: ignore[assignment]
-    result = adapter.writeback_control.apply_writeback_for_pane(tab_id, pane)  # type: ignore[arg-type]
+    pane = "analysis" if subtab_id == "analysis" else "post_analysis"
+    item_ids = None
+    if "ids" in params:
+        ids = params["ids"]
+        if not isinstance(ids, list) or any(
+            not isinstance(item, str) or not item for item in ids
+        ):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "ids must be a list of nonempty strings"
+            )
+        item_ids = tuple(ids)
+    result = adapter.writeback_control.apply_writeback_for_pane(
+        tab_id,
+        pane,
+        item_ids=item_ids,
+    )
     context_version = adapter.writeback_control.get_context_version()
     return {
         "applied_ids": list(result["applied_ids"]),

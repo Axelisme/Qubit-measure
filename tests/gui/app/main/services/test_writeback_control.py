@@ -65,8 +65,10 @@ class RecordingWriteback:
         self._log.add("writeback", "edit_draft", draft, session_id, **changes)
         return {"valid": True}
 
-    def apply_draft(self, draft: object) -> dict[str, Any]:
-        self._log.add("writeback", "apply_draft", draft)
+    def apply_draft(
+        self, draft: object, *, item_ids: tuple[str, ...] | None = None
+    ) -> dict[str, Any]:
+        self._log.add("writeback", "apply_draft", draft, item_ids=item_ids)
         return {"applied_ids": ["pane-item"], "written": {}}
 
     def get_all_applied(self, draft: object) -> dict[str, bool]:
@@ -138,11 +140,23 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
 
     assert call("writeback", "get_item_draft", draft, "md-1") in log.calls
     assert call("writeback", "edit_draft", draft, "md-1", selected=False) in log.calls
-    assert call("writeback", "apply_draft", draft) in log.calls
+    assert call("writeback", "apply_draft", draft, item_ids=None) in log.calls
     assert [event.fact for event in events] == [
         TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
         TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
     ]
+
+
+@pytest.mark.parametrize("item_ids", [("md-1",), ()])
+def test_explicit_item_ids_reach_the_pane_owned_service(item_ids) -> None:
+    facet, log, _state, writeback, _versions, _bus = _facet()
+
+    facet.apply_writeback_for_pane("tab-1", "post_analysis", item_ids=item_ids)
+
+    assert (
+        call("writeback", "apply_draft", writeback.post_draft, item_ids=item_ids)
+        in log.calls
+    )
 
 
 def test_applied_projection_reads_the_pane_owned_draft() -> None:

@@ -37,7 +37,11 @@ class WritebackControlPort(Protocol):
     ) -> dict[str, object]: ...
 
     def apply_writeback_for_pane(
-        self, tab_id: str, pane: WritebackPane
+        self,
+        tab_id: str,
+        pane: WritebackPane,
+        *,
+        item_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]: ...
 
     def get_writeback_summaries_for_pane(
@@ -111,12 +115,16 @@ class WritebackControlFacet:
         return result
 
     def apply_writeback_for_pane(
-        self, tab_id: str, pane: WritebackPane
+        self,
+        tab_id: str,
+        pane: WritebackPane,
+        *,
+        item_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        result = self._writeback.apply_draft(draft)  # type: ignore[arg-type]
+        result = self._writeback.apply_draft(draft, item_ids=item_ids)  # type: ignore[arg-type]
         self._emit_draft_changed(tab_id)
         return result
 

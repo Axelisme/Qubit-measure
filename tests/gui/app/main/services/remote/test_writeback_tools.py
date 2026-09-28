@@ -184,8 +184,42 @@ def test_apply_reads_persistent_draft():
     assert res["context_version"] == 7
     assert "destination_context" in res
     ctrl.writeback_control.apply_writeback_for_pane.assert_called_once_with(
-        "t", "analysis"
+        "t", "analysis", item_ids=None
     )
+
+
+@pytest.mark.parametrize("ids", [["md-1"], []])
+def test_apply_passes_explicit_ids_without_editing_selection(ids):
+    ctrl = _ctrl()
+    _dispatch(
+        ctrl,
+        "tab.writeback_apply",
+        {
+            "tab_id": "t",
+            "subtab_id": "analysis",
+            "ids": ids,
+        },
+    )
+    ctrl.writeback_control.apply_writeback_for_pane.assert_called_once_with(
+        "t", "analysis", item_ids=tuple(ids)
+    )
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_not_called()
+
+
+@pytest.mark.parametrize("ids", [None, "md-1", [""], [1]])
+def test_apply_rejects_malformed_ids_before_service(ids):
+    ctrl = _ctrl()
+    with pytest.raises(RemoteError):
+        _dispatch(
+            ctrl,
+            "tab.writeback_apply",
+            {
+                "tab_id": "t",
+                "subtab_id": "analysis",
+                "ids": ids,
+            },
+        )
+    ctrl.writeback_control.apply_writeback_for_pane.assert_not_called()
 
 
 def test_destination_context_projection_does_not_hide_programmer_errors():
@@ -263,7 +297,9 @@ def test_apply_delegates_to_writeback_control_without_ctrl_fallback():
     assert res["context_version"] == 7
     assert "destination_context" in res
     writeback_control.has_tab.assert_called_once_with("t")
-    writeback_control.apply_writeback_for_pane.assert_called_once_with("t", "analysis")
+    writeback_control.apply_writeback_for_pane.assert_called_once_with(
+        "t", "analysis", item_ids=None
+    )
     writeback_control.get_context_version.assert_called_once_with()
     ctrl.has_tab.assert_not_called()
 
