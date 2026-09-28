@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-28 — frozen Run and interactive plugin integration
+**Last updated:** 2026-09-28 — frozen Run, canonical load, and flux interactive adapters
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -132,13 +132,12 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 `BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
 `exp.load(filepath=...)`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
 參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
-adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。legacy
-單檔案資料相容只在 adapter migration 邊界提供，adapter 只能透過 `legacy_migration_experiment` 指向白名單 converter；
-流程是 canonical load 先失敗，才把原檔 read-only 轉成 `/tmp` canonical HDF5 後再呼同一個
-`exp.load()`。這是 adapter 邊界，不是 experiment runtime compatibility。`BaseAdapter.load`
-本身只讀取結果，不修改 tab cfg。GUI 的 `LoadService.load_result` 在取得結果後，會嘗試將
-相容的 `result.cfg_snapshot` 投影並反填到 tab 與 Config editor；缺少或不相容快照時，
-tab cfg 維持原值。`cfg_snapshot is None` 時 module writeback 維持 graceful skip。
+adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
+adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
+直接回報原始錯誤。`BaseAdapter.load` 本身只讀取結果，不修改 tab cfg。
+GUI 的 `LoadService.load_result` 會嘗試將相容的 `result.cfg_snapshot` 反填到 tab 與
+Config editor；缺少或不相容快照時，tab cfg 維持原值。
+`cfg_snapshot is None` 時 module writeback 維持 graceful skip。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；

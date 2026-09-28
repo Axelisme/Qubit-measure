@@ -38,10 +38,6 @@ DATASET_ROLE_CHANNELS_ATTR = "zcu_tools.dataset_role_channels"
 DATASET_ROLE_ATTR = "zcu_tools.dataset_role"
 _STREAMING_VERSION_ATTR = "zcu_tools.streaming_grouped_dataset_version"
 _STREAMING_GROUPED_DATASET_VERSION = 1
-_GROUPED_V1_MIGRATION_COMMAND = """.venv/bin/python script/migrate_experiment_data.py \\
-  --experiment grouped/v1 \\
-  --input INPUT.hdf5 \\
-  --output OUTPUT.hdf5"""
 
 
 def save_grouped_labber_data(
@@ -113,8 +109,8 @@ def load_grouped_labber_data(
         if version == _STREAMING_GROUPED_DATASET_VERSION:
             if raw_streaming_version is None:
                 raise ValueError(
-                    "grouped dataset version 1 requires manual migration:\n"
-                    f"{_GROUPED_V1_MIGRATION_COMMAND}"
+                    "unmarked grouped dataset version 1 is unsupported; "
+                    "load a canonical grouped v2 file"
                 )
             streaming_version = _read_exact_version(
                 raw_streaming_version, "streaming grouped dataset"

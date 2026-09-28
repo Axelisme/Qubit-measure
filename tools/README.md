@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-26
 
 `tools/` 放 repo 內部的品質檢查。`script/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
@@ -123,6 +123,38 @@ Compare 要求相同方法與 detector selection/state；任一 error 或方法�
 
 Exit 0 只表示報表成功，不表示品質合格；即使有診斷或 import gate fail 也可成功產生報表。
 工具錯誤、無效 receipt 或不可比條件 exit 2。規則沒有新門檻，既有 gate 輸出與 exit 語意不變。
+
+### Radon CC advisory
+
+Radon 是 opt-in 報表，不加入 `gate.py` 或 ratchet，也不取代 Ruff `C901`。
+先安裝 locked quality 環境，再產生快照：
+
+```bash
+uv sync --directory <worktree> --locked --group quality
+uv run --directory <worktree> --no-sync -- python tools/quality_report.py snapshot --with-radon --output .agent_state/quality/radon.json
+```
+
+`--with-radon` 可與 `--with-pyright` 同時使用；`--top N` 控制 stderr 熱點數量。
+報表在 worktree Python 內使用 Radon 分析函式，不呼叫 CLI 或 `uv tool install` 提供的全域 executable。
+選集由 repo 掃描器決定，固定 `no_assert=False`；不採用 `RADONCFG`、個人或 repo 的 Radon CLI
+設定，因此 `cc_min`、`exclude`、`no_assert` 等 CLI 設定不會悄悄改變報表。
+未選用時明列 skipped；選用但未安裝、解析失敗或輸出無效時記 error，exit 2，不當作零筆。
+高複雜度本身不改變 exit code，也不判定品質合格與否。
+
+報表沿用來源掃描排除規則，只分析 `lib/` 與 `tools/`，不含 tests、script 或 Notebook。
+保留 Radon JSON 提供的函式、方法及 closure，排除 class aggregate；巢狀 block 以 qualified name
+顯示。Radon 未提供的 block 不另自行推導，例如函式內定義的 class 可能不在其輸出中。
+計算包含 assert，不按 rank 過濾；CC 與 Ruff 的演算法不同，不能直接共用 12 的門檻。
+
+JSON 的 `detectors.radon.findings` 保存 path、line，以及 details 中的 name、complexity、rank；
+全部 `counted=false`，不混入違規計數。stderr 分開顯示 production/tools 的等級分布與 CC 熱點；
+可 import `complexity_summary(snapshot, top=10)` 取得同樣資料。
+A 為 CC 1–5、B 為 6–10、C 為 11–20、D 為 21–30、E 為 31–40、F 為 41 以上。
+這些是閱讀與重構線索，不是拆函式指令，不引入 MI 品質總分。
+
+新增 detector 後 snapshot schema 為 2，舊 schema 1 需以目前方法重新量測，不自動補零。
+Radon distribution 版本隨既有 method.distributions 保存；方法或選用狀態不同仍拒絕比較。
+`compare` 保持違規計數比較，**不比較 CC 分數升降，也不配對函式改名或搬移**。
 
 ## ratchet 是判準，不是另一個檢查
 

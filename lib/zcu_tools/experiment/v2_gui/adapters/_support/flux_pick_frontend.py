@@ -1,4 +1,4 @@
-"""Measure-only Qt frontend: local line preview, committed actions on release."""
+"""Measure-only Qt frontend: click-follow preview and click-to-place commit."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ from collections.abc import Callable
 from math import isfinite
 from typing import Any, cast
 
-from matplotlib.backend_bases import MouseEvent
+from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QFocusEvent, QHideEvent, QKeyEvent  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, QObject, Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QHideEvent, QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QHBoxLayout,
@@ -33,7 +33,7 @@ from .flux_pick_plugin import FluxPickPlugin
 
 
 class FluxPickFrontend(InteractiveFrontend):
-    """Render the latest session snapshot, or a disposable local drag candidate."""
+    """Render the latest session snapshot, or a disposable local line preview."""
 
     def __init__(
         self,
@@ -52,6 +52,7 @@ class FluxPickFrontend(InteractiveFrontend):
         self._request_cancel = request_cancel
         self._figure = Figure(figsize=(8, 5))
         self._canvas = FigureCanvasQTAgg(self._figure)
+        self._canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         state = session.snapshot()
         inputs = plugin.inputs
         self._picker = TwoLinePicker(
@@ -84,22 +85,17 @@ class FluxPickFrontend(InteractiveFrontend):
         self._done.clicked.connect(self._finish)
         self._cancel = QPushButton("Cancel")
         self._cancel.clicked.connect(self._cancel_analysis)
-        for widget in (
-            self._conjugate,
-            self._align,
-            self._swap,
-            self._info,
-            self._done,
-            self._cancel,
-        ):
+        for widget in (self._conjugate, self._align, self._swap, self._info):
             buttons.addWidget(widget)
         buttons.addStretch(1)
+        buttons.addWidget(self._done)
+        buttons.addWidget(self._cancel)
         root = QHBoxLayout(self)
         root.addWidget(self._canvas, stretch=1)
         root.addWidget(controls)
+        self._canvas.installEventFilter(self)
         self._canvas.mpl_connect("button_press_event", self._on_press)
         self._canvas.mpl_connect("motion_notify_event", self._on_move)
-        self._canvas.mpl_connect("button_release_event", self._on_release)
         self._unsubscribe = session.subscribe(self._on_committed)
         self._unsubscribe_alignment = plugin.subscribe_alignment(self._on_alignment)
         self._canvas.draw_idle()
@@ -134,9 +130,35 @@ class FluxPickFrontend(InteractiveFrontend):
             self._show_committed(self._session.snapshot())
 
     def _on_press(self, event: MouseEvent) -> None:
-        if not self._retired and self._picker.is_main_axes(event.inaxes):
+        if self._retired or event.button != MouseButton.LEFT:
+            return
+        role = self._picker.selected_role
+        if role is None:
+            if self._picker.is_main_axes(event.inaxes):
+                self._picker.on_press(event.xdata)
+                if self._picker.selected_role is not None:
+                    self._canvas.setFocus(Qt.FocusReason.MouseFocusReason)
+            return
+        x = event.xdata
+        if (
+            not self._picker.is_main_axes(event.inaxes)
+            or x is None
+            or event.ydata is None
+            or not isfinite(x)
+        ):
             self.cancel_preview()
-            self._picker.on_press(event.xdata)
+            return
+        # Recalculate against the latest committed snapshot; preview artists
+        # never supply the replacement state.
+        try:
+            committed = self._plugin.actions.move.execute(self._session, (role, x))
+        except InvalidInputError as exc:
+            self.cancel_preview()
+            self._info.setText(str(exc))
+            return
+        position = committed.flux_half if role == "half" else committed.flux_int
+        self._picker.show_loss(role, position, event.ydata)
+        self._repaint()
 
     def _on_move(self, event: MouseEvent) -> None:
         if self._retired or not self._picker.is_main_axes(event.inaxes):
@@ -151,32 +173,6 @@ class FluxPickFrontend(InteractiveFrontend):
             self._picker.on_move(x)
             self._preview_active = True
             self._repaint()
-
-    def _on_release(self, event: MouseEvent) -> None:
-        if self._retired:
-            return
-        role = self._picker.selected_role
-        x = event.xdata
-        if (
-            role is None
-            or not self._picker.is_main_axes(event.inaxes)
-            or x is None
-            or event.ydata is None
-            or not isfinite(x)
-        ):
-            self.cancel_preview()
-            return
-        # The Action recalculates on the latest committed snapshot. The picker
-        # is just a local artist cache and never supplies the replacement state.
-        try:
-            committed = self._plugin.actions.move.execute(self._session, (role, x))
-        except InvalidInputError as exc:
-            self.cancel_preview()
-            self._info.setText(str(exc))
-            return
-        position = committed.flux_half if role == "half" else committed.flux_int
-        self._picker.show_loss(role, position, event.ydata)
-        self._repaint()
 
     def _set_conjugate(self, enabled: bool) -> None:  # noqa: FBT001 - Qt toggled(bool)
         if not self._retired:
@@ -225,6 +221,7 @@ class FluxPickFrontend(InteractiveFrontend):
         if self._retired:
             return
         self._retired = True
+        self._canvas.removeEventFilter(self)
         self._unsubscribe()
         self._unsubscribe_alignment()
         self._picker.show_state(self._committed)
@@ -237,16 +234,16 @@ class FluxPickFrontend(InteractiveFrontend):
         ):
             widget.setEnabled(False)
 
-    def keyPressEvent(self, a0: QKeyEvent | None) -> None:
-        if a0 is not None and a0.key() == Qt.Key.Key_Escape:
-            self.cancel_preview()
-            a0.accept()
-        else:
-            super().keyPressEvent(a0)
-
-    def focusOutEvent(self, a0: QFocusEvent | None) -> None:
-        self.cancel_preview()
-        super().focusOutEvent(a0)
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is self._canvas and a1 is not None:
+            if a1.type() == QEvent.Type.FocusOut:
+                self.cancel_preview()
+            elif a1.type() == QEvent.Type.KeyPress:
+                key_event = cast(QKeyEvent, a1)
+                if key_event.key() == Qt.Key.Key_Escape:
+                    self.cancel_preview()
+                    return True
+        return super().eventFilter(a0, a1)
 
     def hideEvent(self, a0: QHideEvent | None) -> None:
         self.cancel_preview()

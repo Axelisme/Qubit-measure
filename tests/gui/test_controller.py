@@ -8,17 +8,19 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment.v2_gui.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import (
-    AnalysisMode,
     ContextReadiness,
     ExpContext,
 )
@@ -31,7 +33,6 @@ from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.main.interactive import PluginDefinition
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services import (
     StartupConnectionRequest,
@@ -53,6 +54,7 @@ from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import (
     on_device_connected,
@@ -126,18 +128,6 @@ class ControllerFixture:
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
         self.ctrl.attach_caretaker(self.caretaker)
 
-    def start_plugin(self, permit) -> int:
-        tab = self.state.get_tab(permit.tab_id)
-        adapter = MagicMock(wraps=tab.adapter)
-        adapter.capabilities = dataclasses.replace(
-            tab.adapter.capabilities, analysis=AnalysisMode.INTERACTIVE
-        )
-        adapter.make_interactive_plugin.return_value = PluginDefinition(
-            "test-picker", 0, (), lambda state: None, lambda state: state
-        )
-        tab.adapter = adapter
-        return self.ctrl.run_analyze_control.analyze(permit.tab_id, object())
-
     def quiesce(self) -> None:
         """Join the Controller's in-flight background work and flush its queued
         main-thread deliveries (run/analyze/save/device all share one
@@ -156,6 +146,25 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:  # noqa: ARG001
     fixture = ControllerFixture(cache_dir=tmp_path)
     yield fixture
     fixture.quiesce()
+
+
+def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
+    cf.state.set_context(
+        dataclasses.replace(cf.state.exp_context, md=MetaDict(), ml=ModuleLibrary())
+    )
+    tab_id = cf.ctrl.new_tab("twotone/flux_dep")
+    values = np.linspace(-5.0, 5.0, 60)
+    freqs = np.linspace(4.0, 5.0, 30)
+    signals = np.exp(-(values[:, None] ** 2)) * np.exp(
+        1j * values[:, None] * freqs[None, :] / 10
+    )
+    cf.state.update_tab_result(
+        tab_id, SimpleNamespace(signals=signals, values=values, freqs=freqs)
+    )
+    token = cf.ctrl.analyze(tab_id, FluxPickParams())
+    cf.view.mount_interactive_analysis.assert_called_once()
+    assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
+    return tab_id, token
 
 
 def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
@@ -240,12 +249,7 @@ def test_close_tab_removes_from_state(cf):
 
 
 def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
-    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
-
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.state.update_tab_result(tab_id, object())  # a result exists to analyze
-    # Start the service-owned session; the View mount remains a fixture double.
-    cf.start_plugin(AnalyzePermit(tab_id=tab_id))
+    tab_id, _token = _start_flux_picker(cf)
     assert cf.state.is_tab_analyzing(tab_id) is True
     # is_analyzing makes the tab busy, so closing it is rejected up front.
     with pytest.raises(RuntimeError, match="busy"):
@@ -284,11 +288,7 @@ def test_send_feedback_posts_without_stop(cf):
 def test_send_feedback_nudge_delivers_to_interactive_channel(cf):
     # stop=False while an interactive analyze is active: message arrives on
     # the channel's consume() as user_feedback (non-terminal).
-    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
-
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.state.update_tab_result(tab_id, object())
-    token = cf.start_plugin(AnalyzePermit(tab_id=tab_id))
+    tab_id, token = _start_flux_picker(cf)
     assert cf.state.is_tab_analyzing(tab_id) is True
 
     cf.ctrl.send_feedback("nudge text", stop=False)
@@ -299,7 +299,8 @@ def test_send_feedback_nudge_delivers_to_interactive_channel(cf):
     assert result.reason == "user_feedback"
     assert result.feedback == "nudge text"
     # Handle still live (non-terminal).
-    assert cf.ctrl._operation_handles.poll(token) is None
+    assert cf.ctrl.can_cancel_active_operation() is True
+    assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
     # Cleanup: cancel the interactive analyze.
     cf.ctrl.cancel_analyze(tab_id)
 
@@ -309,11 +310,7 @@ def test_cancel_active_operation_noop_when_idle(cf):
 
 
 def test_send_feedback_stop_cancels_interactive_analyze(cf):
-    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
-
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.state.update_tab_result(tab_id, object())
-    token = cf.start_plugin(AnalyzePermit(tab_id=tab_id))
+    tab_id, token = _start_flux_picker(cf)
     assert cf.state.is_tab_analyzing(tab_id) is True
 
     cancelled = cf.ctrl.send_feedback("stop - wrong feature", stop=True)
@@ -345,11 +342,7 @@ def test_can_cancel_active_operation_false_when_no_op(cf):
 
 def test_can_cancel_active_operation_true_for_interactive_analyze(cf):
     """Interactive analyze registers a cancel hook → returns True."""
-    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
-
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.state.update_tab_result(tab_id, object())
-    cf.start_plugin(AnalyzePermit(tab_id=tab_id))
+    tab_id, _token = _start_flux_picker(cf)
     assert cf.state.is_tab_analyzing(tab_id) is True
 
     result = cf.ctrl.can_cancel_active_operation()
@@ -382,25 +375,17 @@ def test_can_cancel_active_operation_false_for_soc_connect(cf):
     cf.ctrl._operation_handles.settle(token, OperationOutcome("finished"))
 
 
-def test_active_operation_helper_returns_none_when_idle(cf):
-    assert cf.ctrl._active_operation() is None
+def test_cancel_active_operation_returns_interactive_tag(cf):
+    """The public cancel command identifies and tears down the picker."""
+    tab_id, token = _start_flux_picker(cf)
 
-
-def test_active_operation_helper_returns_tag_for_interactive(cf):
-    """_active_operation() returns the correct tag for an interactive analyze."""
-    from zcu_tools.gui.app.main.services.guard import AnalyzePermit
-
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.state.update_tab_result(tab_id, object())
-    cf.start_plugin(AnalyzePermit(tab_id=tab_id))
-
-    operation = cf.ctrl._active_operation()
-    assert operation is not None
-    assert operation.kind == "analyze"
-    assert operation.owner_id == tab_id
-    assert operation.tag() == f"analyze:{tab_id}"
-    # Cleanup.
-    cf.ctrl.cancel_analyze(tab_id)
+    assert cf.ctrl.cancel_active_operation() == f"analyze:{tab_id}"
+    assert cf.state.is_tab_analyzing(tab_id) is False
+    assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is None
+    result = cf.ctrl.await_operation(token, timeout=1.0)
+    assert result is not None
+    assert result.outcome is not None
+    assert result.outcome.status == "cancelled"
 
 
 # ---------------------------------------------------------------------------

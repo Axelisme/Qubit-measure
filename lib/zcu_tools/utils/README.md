@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-09-25 — GE fit symmetry and population constraints
+**Last updated:** 2026-09-26 — grouped v1 loader contract
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -22,10 +22,9 @@ import。
   timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 roles 寫成
   root Labber log 的平行 scalar channels。ordered role-to-channel attrs 保存 domain
   identity；experiment loader 傳 required roles，省略 required roles 只用於
-  diagnostic 與 migration tooling。
-- unmarked grouped v1 是離線 migration input。runtime loader 不做 compatibility
-  load、不改寫 input，只回報 `script/migrate_experiment_data.py --experiment
-  grouped/v1` 的手動指令。
+  diagnostic inspection。
+- unmarked grouped v1 不屬於 runtime 可載入格式；loader 明確要求 canonical
+  grouped v2，不改寫 input。marker-qualified streaming grouped v1 仍走獨立 decoder。
 - `StreamingLabberRoleSpec` / `open_streaming_grouped_labber_data` 處理
   grouped Labber file 的 partial-write use case。它保留 marker-qualified grouped v1
   root/`Log_N` layout 與 heterogeneous axes，不共用 one-shot v2 decoder。

@@ -32,8 +32,9 @@ only read the canonical `samples.csv` produced here.
 
 Sources must be flat v2 CSVs (`dev_value` / `dev_unit`, optional `flux` /
 `flux_int` / `flux_period`). Legacy `calibrated mA` / `Flux` tables must be
-migrated explicitly with `script/migrate_sample_table_v2.py` first — the merge
-never guesses units or integer flux branches.
+converted explicitly with `zcu_tools.meta_tool.migrate_sample_table_v2` and
+saved to a distinct v2 CSV before merging. No migration CLI ships with this
+repo; the merge never guesses units or integer flux branches.
 
 # Import
 

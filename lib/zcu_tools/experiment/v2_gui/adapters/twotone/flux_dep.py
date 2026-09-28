@@ -52,8 +52,6 @@ class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
     exp_cls = FreqFluxExp
-    ExpCfg_cls = FreqFluxCfg
-    legacy_migration_experiment: ClassVar[str | None] = "twotone/flux_dep"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True
     )

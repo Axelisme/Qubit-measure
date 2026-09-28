@@ -1,6 +1,6 @@
 # ZCU-Tools
 
-**Last updated:** 2026-07-02 — experiment runtime map
+**Last updated:** 2026-09-26 — canonical experiment data
 
 ZCU-Tools 是 ZCU216/QICK 平台上的量子量測工具集。工作站端負責 GUI、
 Notebook、MCP automation、資料分析與模擬；ZCU 板端只跑 Pyro server，讓工作站
@@ -34,7 +34,6 @@ uv sync --python 3.12 --extra all  # includes design stack when needed
 .venv/bin/python script/run_dispersive_gui.py
 .venv/bin/python script/run_autofluxdep_gui.py
 .venv/bin/python script/generate_fluxonium_sample.py --help
-.venv/bin/python script/migrate_experiment_data.py --help
 ```
 
 `run_measure_gui.py` 是主要量測 GUI；`fluxdep` / `dispersive` GUI 負責
@@ -66,8 +65,9 @@ Notebook 仍可直接呼叫 `zcu_tools.experiment.v2` 與 `zcu_tools.notebook` h
 - `ModuleLibrary` 與 `MetaDict` 由 `ExperimentManager` 管理；GUI 和 Notebook 共用同一個
   project/context 概念。
 
-Experiment runtime 只讀寫 canonical HDF5。Legacy artifact 透過 migration script 轉換，
-不作為一般 runtime loading format。
+一般 experiment 與 measure GUI 只載入 canonical HDF5；帶明確 marker 的 autofluxdep
+streaming grouped v1 仍由其專用 loader 處理。Legacy artifact 不由 runtime 載入或
+自動轉換；舊 converter/CLI 已退休。
 
 ## Documentation Map
 

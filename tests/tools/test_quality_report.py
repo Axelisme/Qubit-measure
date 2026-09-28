@@ -15,16 +15,19 @@ from quality_report import (
     ReportError,
     Snapshot,
     compare,
+    complexity_summary,
+    normalize_complexity,
     normalize_diagnostics,
     normalize_tool_version,
     observe,
+    radon_findings,
     summarize,
 )
 
 
 def snapshot(*findings: Finding) -> Snapshot:
     return Snapshot(
-        schema_version=1,
+        schema_version=2,
         captured_at="2026-09-25T00:00:00+00:00",
         candidate=Candidate(
             commit="base", tree="tree", status="", source_digest="source"
@@ -47,6 +50,196 @@ def snapshot(*findings: Finding) -> Snapshot:
         },
         import_contracts=GateResult(state="pass", detail="contracts kept"),
     )
+
+
+def test_radon_analysis_ignores_cli_filters_and_counts_asserts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("radon")
+    config = "[radon]\ncc_min = F\nexclude = lib/*\nno_assert = True\n"
+    config_path = tmp_path / "radon.cfg"
+    config_path.write_text(config, encoding="utf-8")
+    monkeypatch.setenv("RADONCFG", str(config_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "sample.py").write_text(
+        "def plain():\n    return 1\n\ndef validated(value):\n    assert value\n    return value\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_sample.py").write_text(
+        "def test_other():\n    assert True\n", encoding="utf-8"
+    )
+    findings = radon_findings(tmp_path)
+    assert [(f.details["name"], f.details["complexity"]) for f in findings] == [
+        ("plain", 1),
+        ("validated", 2),
+    ]
+    assert {f.path for f in findings} == {"lib/sample.py"}
+
+
+def test_radon_analysis_reports_syntax_failure(tmp_path: Path) -> None:
+    pytest.importorskip("radon")
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "broken.py").write_text("def broken(:", encoding="utf-8")
+    result = observe("Radon lib/tools", lambda: radon_findings(tmp_path))
+    assert result.state == "error"
+    assert result.findings == ()
+    assert result.reason is not None and "SyntaxError" in result.reason
+
+
+def complexity_report(payload, root: Path) -> Snapshot:
+    report = snapshot()
+    data = json.loads(report.model_dump_json())
+    data["detectors"]["radon"]["findings"] = [
+        item.model_dump(mode="json") for item in normalize_complexity(payload, root)
+    ]
+    return Snapshot.model_validate_json(json.dumps(data))
+
+
+def test_complexity_preserves_nested_functions_without_class_aggregate(
+    tmp_path: Path,
+) -> None:
+    report = complexity_report(
+        {
+            "lib/sample.py": [
+                {
+                    "type": "method",
+                    "classname": "Worker",
+                    "name": "run",
+                    "lineno": 2,
+                    "complexity": 31,
+                    "rank": "E",
+                    "closures": [
+                        {
+                            "type": "function",
+                            "name": "choose",
+                            "lineno": 3,
+                            "complexity": 4,
+                            "rank": "A",
+                        }
+                    ],
+                },
+                {
+                    "type": "class",
+                    "name": "Worker",
+                    "lineno": 1,
+                    "complexity": 40,
+                    "rank": "E",
+                    "methods": [
+                        {
+                            "type": "method",
+                            "name": "run",
+                            "lineno": 2,
+                            "complexity": 31,
+                            "rank": "E",
+                            "closures": [
+                                {
+                                    "type": "function",
+                                    "name": "choose",
+                                    "lineno": 3,
+                                    "complexity": 4,
+                                    "rank": "A",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ]
+        },
+        tmp_path,
+    )
+    restored = Snapshot.model_validate_json(report.model_dump_json())
+    findings = restored.detectors["radon"].findings
+    assert [(f.details["name"], f.line, f.details["complexity"]) for f in findings] == [
+        ("Worker.run", 2, 31),
+        ("Worker.run.choose", 3, 4),
+    ]
+    assert all(not f.counted for f in findings)
+    assert summarize(restored)["file"] == {}
+    assert compare(snapshot(), restored)["changes"] == []
+    summary = complexity_summary(restored, top=1)
+    assert summary["ranks_by_scope"] == {"production": {"A": 1, "E": 1}}
+    assert summary["hotspots"] == [findings[0].model_dump(mode="json")]
+
+
+def test_complexity_hotspots_rank_scores_and_keep_scopes_separate(
+    tmp_path: Path,
+) -> None:
+    def block(name: str, cc: int, rank: str):
+        return {
+            "type": "function",
+            "name": name,
+            "lineno": 1,
+            "complexity": cc,
+            "rank": rank,
+        }
+
+    report = complexity_report(
+        {
+            "lib/a.py": [block("small", 2, "A")],
+            "tools/b.py": [block("large", 22, "D")],
+        },
+        tmp_path,
+    )
+    summary = complexity_summary(report)
+    assert summary["ranks_by_scope"] == {
+        "production": {"A": 1},
+        "tools": {"D": 1},
+    }
+    hotspots = summary["hotspots"]
+    assert isinstance(hotspots, list)
+    assert [item["path"] for item in hotspots if isinstance(item, dict)] == [
+        "tools/b.py",
+        "lib/a.py",
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"lib/a.py": {"error": "invalid syntax"}},
+        {"lib/a.py": [{"type": "function", "name": "bad"}]},
+        {
+            "lib/a.py": [
+                {
+                    "type": "function",
+                    "name": "bad",
+                    "lineno": 1,
+                    "complexity": "20",
+                    "rank": "C",
+                }
+            ]
+        },
+        {"../outside.py": []},
+    ],
+)
+def test_invalid_complexity_is_an_error_not_a_clean_observation(
+    payload, tmp_path: Path
+) -> None:
+    result = observe("Radon lib/tools", lambda: normalize_complexity(payload, tmp_path))
+    assert result.state == "error"
+    assert result.reason
+    assert result.findings == ()
+
+
+@pytest.mark.parametrize("state", ["skipped", "error"])
+def test_complexity_not_measured_state_survives_summary_and_blocks_comparison(
+    state: str,
+) -> None:
+    data = json.loads(snapshot().model_dump_json())
+    data["detectors"]["radon"] = {
+        "state": state,
+        "selection": "whole tree",
+        "findings": [],
+        "reason": "not available",
+    }
+    report = Snapshot.model_validate_json(json.dumps(data))
+    summary = complexity_summary(report)
+    assert summary["state"] == state
+    assert summary["reason"] == "not available"
+    with pytest.raises(ReportError, match="radon: selection/state differs"):
+        compare(snapshot(), report)
 
 
 def test_counts_keep_scope_rule_and_directory_ownership() -> None:
@@ -190,7 +383,7 @@ def test_invalid_or_incompatible_receipts_fail_explicitly(mutation: str) -> None
     before = snapshot()
     data = json.loads(before.model_dump_json())
     if mutation == "schema":
-        data["schema_version"] = 2
+        data["schema_version"] = 1
     elif mutation == "inventory":
         del data["detectors"]["ruff"]
     elif mutation == "state":

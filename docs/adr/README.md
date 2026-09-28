@@ -55,10 +55,10 @@
 ## Persistence
 
 - [0015 — PersistenceCaretaker](0015-persistence-caretaker-memento-single-file.md)：GUI app-state 用單一 memento file，由 caretaker 管理讀寫時機。
-- [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、strict grouped dataset roles；legacy artifacts 只經 explicit migration 進入 canonical 格式。
+- [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、strict grouped dataset roles；runtime 與 GUI 只接受 canonical data，repo 不提供已退休的 converter。
 - [0039 — QubitParams owns params.json](0039-qubit-params-json-owner.md)：`meta_tool.QubitParams` 是 result-scope `params.json` 的 typed 讀寫權威。
 - [0040 — Autofluxdep run result artifact](0040-autofluxdep-run-result-artifact.md)：autofluxdep run output 以 run directory、journal 與 per-node streaming Labber-readable HDF5 作 canonical artifact。
-- [0057 — Flat SampleTable v2 coordinate contract](0057-flat-sampletable-v2-coordinate-contract.md)：五欄平鋪 coordinate（flux/dev_value/dev_unit/flux_int/flux_period）與 A/V base unit、explicit provenance precedence；legacy 只經 operator migration 進入。
+- [0057 — Flat SampleTable v2 coordinate contract](0057-flat-sampletable-v2-coordinate-contract.md)：五欄平鋪 coordinate（flux/dev_value/dev_unit/flux_int/flux_period）與 A/V base unit、explicit provenance precedence；legacy 可用仍存在的 pure migration API 顯式轉換，CSV CLI 已退休。
 
 ## Experiment Runtime
 

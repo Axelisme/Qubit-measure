@@ -245,7 +245,7 @@ def test_grouped_v2_accepts_flat_numeric_list_values(tmp_path):
     )
 
 
-def test_grouped_v2_rejects_unmarked_v1_with_manual_migration_command(tmp_path):
+def test_grouped_v2_rejects_unmarked_v1_with_canonical_requirement(tmp_path):
     path = save_grouped_labber_data(
         str(tmp_path / "legacy_v1"), {"signal": _payload_2d()}
     )
@@ -253,17 +253,11 @@ def test_grouped_v2_rejects_unmarked_v1_with_manual_migration_command(tmp_path):
         f.attrs["zcu_tools.grouped_dataset_version"] = 1
         del f.attrs["zcu_tools.dataset_role_channels"]
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(
+        ValueError,
+        match="unmarked grouped dataset version 1 is unsupported; load a canonical grouped v2 file",
+    ):
         load_grouped_labber_data(path)
-
-    assert (
-        str(exc_info.value)
-        == """grouped dataset version 1 requires manual migration:
-.venv/bin/python script/migrate_experiment_data.py \\
-  --experiment grouped/v1 \\
-  --input INPUT.hdf5 \\
-  --output OUTPUT.hdf5"""
-    )
 
 
 @pytest.mark.parametrize(
