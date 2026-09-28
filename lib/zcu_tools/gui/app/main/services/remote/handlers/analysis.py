@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.adapter.analyze_params import (
     describe_analyze_params,
     reconstruct_params,
@@ -109,8 +110,23 @@ def h_tab_analyze(
             f"{exc}. Legal parameters: {definitions}",
             data={"definitions": definitions},
         ) from exc
+    if snap.capabilities is None:
+        raise RemoteError(ErrorCode.INTERNAL, "snapshot has no capabilities")
+    invalidated = []
+    if snap.analysis is not None and snap.analysis.has_writeback_draft:
+        invalidated.append("analysis.writeback")
+    if snap.post_analysis is not None:
+        if snap.post_analysis.result is not None:
+            invalidated.append("post.result")
+        if snap.post_analysis.has_writeback_draft:
+            invalidated.append("post.writeback")
     operation_id = control.analyze(tab_id, updated)
-    return {"operation_id": operation_id}
+    return {
+        "operation_id": operation_id,
+        "interactive": snap.capabilities.analysis is AnalysisMode.INTERACTIVE,
+        "params": dataclasses.asdict(updated),
+        "invalidated_on_success": invalidated,
+    }
 
 
 def h_tab_get_post_analyze_result(
@@ -195,5 +211,15 @@ def h_tab_post_analyze(
             f"{exc}. Legal parameters: {definitions}",
             data={"definitions": definitions},
         ) from exc
+    invalidated = (
+        ["post.writeback"]
+        if snap.post_analysis is not None and snap.post_analysis.has_writeback_draft
+        else []
+    )
     operation_id = control.start_post_analyze(tab_id, updated)
-    return {"operation_id": operation_id}
+    return {
+        "operation_id": operation_id,
+        "interactive": False,
+        "params": dataclasses.asdict(updated),
+        "invalidated_on_success": invalidated,
+    }

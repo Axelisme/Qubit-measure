@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -7,6 +8,7 @@ import pytest
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
     OneToneFreqAnalyzeParams,
 )
+from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.services.remote.handlers.analysis import (
     h_tab_analyze,
     h_tab_get_analyze_params,
@@ -19,8 +21,11 @@ def _adapter_with_params(params: OneToneFreqAnalyzeParams) -> MagicMock:
     control = MagicMock()
     control.has_tab.return_value = True
     control.get_tab_snapshot.return_value = SimpleNamespace(
-        analysis=SimpleNamespace(params=params),
-        post_analysis=SimpleNamespace(params=params),
+        analysis=SimpleNamespace(params=params, has_writeback_draft=False),
+        post_analysis=SimpleNamespace(
+            params=params, has_writeback_draft=False, result=None
+        ),
+        capabilities=SimpleNamespace(analysis=AnalysisMode.FIT),
         interaction=None,
     )
     control.analyze.return_value = "op-1"
@@ -56,7 +61,9 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
             },
         },
     )
-    assert started == {"operation_id": "op-1"}
+    assert started["operation_id"] == "op-1"
+    assert started["interactive"] is False
+    assert started["invalidated_on_success"] == []
     forwarded = adapter.run_analyze_control.analyze.call_args.args[1]
     assert forwarded == OneToneFreqAnalyzeParams(
         fit_bg_amp_slope=False,
@@ -105,12 +112,36 @@ def test_analysis_parameter_errors_do_not_start_operation(handler, updates) -> N
     [(h_tab_analyze, "analyze"), (h_tab_post_analyze, "start_post_analyze")],
 )
 def test_analysis_parameters_preserve_omitted_values_and_accept_null(handler, method):
-    adapter = _adapter_with_params(OneToneFreqAnalyzeParams(model_type="t"))
-    assert handler(adapter, {"tab_id": "t", "updates": {"manual_edelay": None}}) == {
-        "operation_id": "op-1"
-    }
+    original = OneToneFreqAnalyzeParams(model_type="t")
+    adapter = _adapter_with_params(original)
+    reply = handler(adapter, {"tab_id": "t", "updates": {"manual_edelay": None}})
+    assert reply["operation_id"] == "op-1"
+    assert reply["params"] == asdict(original)
     operation = getattr(adapter.run_analyze_control, method)
     operation.assert_called_once_with("t", OneToneFreqAnalyzeParams(model_type="t"))
+
+
+@pytest.mark.parametrize(
+    "handler, expected",
+    [
+        (h_tab_analyze, ["analysis.writeback", "post.result", "post.writeback"]),
+        (h_tab_post_analyze, ["post.writeback"]),
+    ],
+)
+def test_start_projects_only_content_replaced_on_success(handler, expected):
+    original = OneToneFreqAnalyzeParams()
+    adapter = _adapter_with_params(original)
+    snapshot = adapter.run_analyze_control.get_tab_snapshot.return_value
+    snapshot.analysis.has_writeback_draft = True
+    snapshot.post_analysis.has_writeback_draft = True
+    snapshot.post_analysis.result = object()
+    snapshot.capabilities.analysis = AnalysisMode.INTERACTIVE
+
+    reply = handler(adapter, {"tab_id": "t", "updates": {}})
+
+    assert reply["invalidated_on_success"] == expected
+    assert reply["params"] == asdict(original)
+    assert reply["interactive"] is (handler is h_tab_analyze)
 
 
 def test_remote_analyze_params_rejects_removed_key() -> None:
