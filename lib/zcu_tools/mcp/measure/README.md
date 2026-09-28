@@ -30,6 +30,12 @@ validity 與 cached choices；GUI model 是來源，讀取不重新解析 md/ml�
 保留其完整 path；即使 prefix 是空字串也不更新整份 cfg 觀察版本。失敗讀取與裸版本表
 不推進基線，其他 cfg 的更新不影響目標 cfg。Wire 格式與描述由 GUI catalog 擁有。
 
+## 關閉
+
+`tab_close`與`shutdown`只送一次GUI命令，GUI在同次owner dispatch檢查active operations與全部unsaved artifacts。`discard_unsaved`不能略過busy。GUI自身data-only提示不變。
+
+`shutdown`等待回覆中的GUI PID自然退出，最多五秒，不以shared PID file選程序。不呼叫bridge.stop或送終止信號；請求或等待逾時回stopped=false，讓操作者處理，不自動重試。
+
 ## 驗證
 
 `tests/mcp/measure/` 以 public tools/session、recording transport 驗證 catalog、連線、guard、operation。GUI remote/service 測試驗證真 socket 與 GUI-origin path。離線選集只用 fake/mock，不啟動真儀器；測試路徑與 fixture 見 `tests/README.md`。

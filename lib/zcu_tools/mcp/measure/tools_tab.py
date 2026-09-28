@@ -104,6 +104,18 @@ def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
     return {"tab": tab, "experiment": experiment}
 
 
+def tab_close(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    tab = arguments["tab"]
+    ctx.send_gui_rpc(
+        "tab.close",
+        {
+            "tab_id": tab,
+            "discard_unsaved": arguments.get("discard_unsaved", False),
+        },
+    )
+    return {"closed": tab}
+
+
 def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Project requested sections of one explicit tab without changing focus."""
     tab = arguments["tab"]
@@ -253,6 +265,19 @@ TAB_READ_TOOLS: dict[str, dict[str, Any]] = {
                 "from_file": {"type": "string", "minLength": 1},
             },
             "required": ["experiment"],
+        },
+    },
+    "tab_close": {
+        "handler": tab_close,
+        "description": "Close the specified idle tab. All unsaved artifacts require "
+        "discard_unsaved=true. Active operations cannot be discarded. No hidden reads or retry.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab": _TAB,
+                "discard_unsaved": {"type": "boolean", "default": False},
+            },
+            "required": ["tab"],
         },
     },
     "tab_get": {

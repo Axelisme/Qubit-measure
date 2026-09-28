@@ -45,7 +45,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(exposure="internal"),
+        agent=AgentMethodPolicy(exposure="tool", tool_names=("shutdown",)),
     ),
     method_entry(
         "dialog.screenshot",

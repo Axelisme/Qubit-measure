@@ -93,7 +93,9 @@ GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0
 未給 `port` 時自動尋找。`clean=true` 在啟動時不還原上次的 GUI session。wire 版本不相容時報錯。已連上時重複呼叫回傳目前狀態。回傳 `{launched, port, versions: {wire, gui, mcp}, status}`。連線隨 MCP 結束而關閉，不另提供 disconnect。
 
 **`shutdown(discard_unsaved = false)`**
-以 GUI 的正常關閉流程（保存 session、斷開儀器、清理）關閉目前連上的 GUI。有 run 進行中回 `busy`；有未存檔結果回 `unsaved`，確認後以 `discard_unsaved=true` 關閉。關閉逾時回 `{stopped: false}`，由使用者處理。
+以GUI正常關閉流程保存session、斷開儀器並清理。GUI在同一次owner dispatch檢查所有active operations，含run、analyze、device、save；任何一項進行中都回`busy`。Idle後檢查所有tabs的未存artifacts，回`unsaved`並列出，只有明確`discard_unsaved=true`才略過此檢查。GUI本身的data-only關閉提示不變。
+
+GUI回覆自身PID，MCP等待該process自然退出，最多五秒，不使用shared PID file判斷目標。請求或退出等待逾時回`{stopped:false}`，不重試、不呼叫bridge.stop、不送終止信號。確認退出才回`{stopped:true}`。
 
 **`status()`** — 索引：
 
@@ -179,7 +181,7 @@ GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0
 主載入失敗時 GUI 關閉新 tab、恢復先前焦點；清理失敗回 `cleanup_failed` 並說明可能殘留的 tab 或焦點。載入重用既有 `load_tab_result` 與 cfg 回填。成功回覆另含 `cfg_backfill=applied|not_applied`；回填失敗保留載入結果，不承諾所有副作用全有全無。新 tab identity 只認證存在，後續覆寫前仍需明確讀取 tab/cfg；既有 tab.load_data guard 不變。
 
 **`tab_close(tab, discard_unsaved = false)`**
-關閉 tab。執行中回 `busy`；有 artifact 為 `not_saved` 或 `unsaved_changes` 時回 `unsaved` 並列出，確認後以 `discard_unsaved=true` 關閉。
+關閉tab。該tab有active operation時回`busy`，discard不能略過busy。有任何artifact為`not_saved`或`unsaved_changes`時回`unsaved`並列出，確認後以`discard_unsaved=true`關閉。成功回`{closed: tab}`。檢查與關閉在同一次GUI owner dispatch內完成，不在MCP先查再關閉。
 
 **`tab_get(tab, include = ["summary"])`**
 

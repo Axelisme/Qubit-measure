@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -44,7 +45,7 @@ def h_app_shutdown(
     if not params["discard_unsaved"]:
         require_saved(adapter, adapter.tab_control.list_tab_ids())
     render_view(adapter).request_shutdown()
-    return {"shutting_down": True}
+    return {"shutting_down": True, "pid": os.getpid()}
 
 
 def h_view_snapshot(

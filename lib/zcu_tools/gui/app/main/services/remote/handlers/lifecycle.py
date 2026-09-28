@@ -33,6 +33,7 @@ def require_saved(adapter: RemoteControlAdapter, tab_ids: list[str]) -> None:
         ArtifactKind.POST_ANALYSIS: "post",
     }
     unsaved = []
+    descriptions = []
     for tab_id in tab_ids:
         artifacts = [
             keys[item.kind]
@@ -41,10 +42,12 @@ def require_saved(adapter: RemoteControlAdapter, tab_ids: list[str]) -> None:
         ]
         if artifacts:
             unsaved.append({"tab": tab_id, "artifacts": artifacts})
+            descriptions.append(f"{tab_id}: {', '.join(artifacts)}")
     if unsaved:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            "Save these artifacts or explicitly set discard_unsaved=true.",
+            f"Unsaved artifacts ({'; '.join(descriptions)}). "
+            "Save them or explicitly set discard_unsaved=true.",
             reason="unsaved",
             data={"unsaved": unsaved},
         )

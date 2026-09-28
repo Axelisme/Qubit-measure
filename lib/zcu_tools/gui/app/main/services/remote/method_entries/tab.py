@@ -58,7 +58,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
+        agent=AgentMethodPolicy(
+            exposure="tool", tool_names=("tab_close",), refresh_after_write=True
+        ),
     ),
     method_entry(
         "tab.set_active",
