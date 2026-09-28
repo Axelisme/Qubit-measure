@@ -141,7 +141,7 @@ def test_device_setup_failure_emits_setup_failed(qapp):
 def test_device_setup_cancel_emits_setup_cancelled(qapp):
     # cancel_device_operation sets the stop_event via the handle; the driver's
     # setup returns normally, and DeviceService relabels it 'cancelled' because
-    # the stop_event is set (the _on_setup_done cancel interpretation, ADR-0019).
+    # the stop_event is set (the _on_setup_done cancel interpretation, ADR-0066).
     svc, device = _make_svc()
     _connect(svc)
     device.get_info.return_value = FakeDeviceInfo(address="none")

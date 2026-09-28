@@ -349,7 +349,7 @@ class CfgEditorService:
     Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
     (narrow port); ``read_port`` (ContextReadPort) reads the current ml to seed
     ``from_name`` sessions; ``write_port`` (ContextWritePort) is the single ml/md
-    write authority used at commit (ADR-0006 — the session no longer lowers /
+    write authority used at commit (ADR-0067 — the session no longer lowers /
     registers itself); ``versions`` bumps / forgets the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a

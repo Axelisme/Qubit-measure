@@ -1,4 +1,4 @@
-"""Tests for ContextService ml/md writes — the single write authority (ADR-0006).
+"""Tests for ContextService ml/md writes — the single write authority (ADR-0067).
 
 ml writes go through ``apply_ml_writes``, which registers the entries (lowered by
 the app-injected ``lower_module`` / ``lower_waveform`` callbacks — here the real

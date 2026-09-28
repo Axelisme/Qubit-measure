@@ -213,7 +213,7 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
     """Invoke a handler plus the shared expected-error projection boundary.
 
     Handlers now receive the ``RemoteControlAdapter`` (not the bare ctrl) and
-    reach the façade via ``adapter.ctrl`` (ADR-0013). This wraps ``ctrl`` in a
+    reach the façade via ``adapter.ctrl`` (ADR-0068). This wraps ``ctrl`` in a
     minimal adapter stub so unit tests can drive a single handler without a live
     socket. The lightweight adapter delegates nominal ``ExpectedError`` mapping
     to the production translator; unexpected exceptions escape unchanged.

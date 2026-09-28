@@ -76,7 +76,7 @@ request coercion與structured policies（例如arb waveform data）仍由原hand
 
 ordinary `RuntimeError`、ProviderError、I/O/persistence與invariant failure進controller-error
 branch並記錄traceback。translator projection failure也由同一controller branch收斂，不會留下
-empty reply holder（ADR-0047）。
+empty reply holder（ADR-0068）。
 
 Only bounded wait handlers run off-main:
 
@@ -213,7 +213,7 @@ resource whose current version no longer matches the caller baseline. The client
 must re-snapshot each listed resource through its corresponding read method,
 then decide whether to retry. It must not retry against the old snapshots. Stale conflicts
 do not add another `ErrorCode`; a future Web adapter may translate this existing
-failure into an HTTP-specific status without changing the wire enum (ADR-0052).
+failure into an HTTP-specific status without changing the wire enum (ADR-0068).
 
 `tab.open_file` creates a new tab and reuses the application load operation,
 including cfg backfill, cleanup on load failure and focus restoration. It requires

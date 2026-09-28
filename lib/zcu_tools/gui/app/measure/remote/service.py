@@ -1,7 +1,7 @@
 """RemoteControlAdapter — measure-gui's second View (driving adapter).
 
 The RPC face onto the Controller, peer to the Qt ``MainWindow`` (ADR-0067 /
-ADR-0013): the second user-facing client (user = an automation agent / another
+ADR-0068): the second user-facing client (user = an automation agent / another
 server). The shared dispatch scaffolding (the EndpointRouter seam, the
 main-thread marshal, the EventBus push fan-out) lives in
 :class:`RemoteControlServiceBase`; this is the *richest* of the three apps and
@@ -173,7 +173,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
     def _extra_start(self) -> None:
         self._wire_editor_change_listener()
-        # Become a diagnostic-only View (ADR-0013): receive ctrl error/info
+        # Become a diagnostic-only View (ADR-0068): receive ctrl error/info
         # fan-out and push it to clients out-of-band of EventBus.
         self.ctrl.add_diagnostic_sink(self)
         # Inject has_live_client so the Controller (and via it, MainWindow) can
@@ -428,7 +428,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         thread (ctrl fans out there). Deliberately *not* gated by event
         subscription and *not* routed through EventBus — diagnostics must reach
         the agent regardless of what it subscribed to, and a channel that
-        reports a fault must not be the faulty channel (ADR-0013)."""
+        reports a fault must not be the faulty channel (ADR-0068)."""
         try:
             line = encode_line(
                 {

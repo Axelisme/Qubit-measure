@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-28）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
+
 # 0014 — GUI 三 app 共用「純傳輸層」：gui/remote 的 NdjsonRpcEndpoint + McpBridge，policy 留在各 app
 
 **狀態：** accepted（**已實作**，Stage E）。承 [[0013]]——RemoteControlAdapter 是與 MainWindow 平級的第二個 View；本 ADR 把它**拆成兩半**：純傳輸（共用）+ dispatch policy/domain（各 app 自有），adapter 退化成「跑在共用 endpoint 之上的 router」。

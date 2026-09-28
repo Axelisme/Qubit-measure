@@ -5,7 +5,7 @@ status: accepted
 # 並發感知：資源版本表與 off-main blocking handler（handle 模型沿革）
 
 **狀態：** accepted（資源版本表 guard 與 RPC off-main handler 仍有效；下文的舊 handle 模型已由 [[0066]] 接替）。
-**關聯：** Permit／Lease 見 [[0001]]；handle、lease、取消與關閉的現行分界見 [[0066]]；shared transport 見 [[0014]]，external-refresh Reaction 見 [[0067]]。
+**關聯：** Permit／Lease 見 [[0001]]；handle、lease、取消與關閉的現行分界見 [[0066]]；shared transport 見 [[0068]]，external-refresh Reaction 見 [[0067]]。
 
 ## 脈絡
 
@@ -41,12 +41,12 @@ GUI remote 按每條連線保存 seen map；未看過的依賴即使版本為 0 
 
 - **GUI**：State 擁有版本表；measure remote entries 擁有 guard／reveals policy。Remote adapter 擁有每條連線的 seen，owner thread 完成比對、執行及觀察更新。
 - **MCP**：轉送單次 RPC、翻譯 stale 錯誤、維護 catalog 與 operation handles。不持 seen、不查版本建立 baseline、不重送 mutation。GUI 重連後 seen 從空集合開始。
-- **agent**：讀取操作狀態，遇 stale 時重讀對應資源，再決定是否寫入。Agent 不計算或提交版本；poll／wait 操作句柄的 agent 呈現見 [[0060]]，operation lifecycle 見 [[0066]]。
+- **agent**：讀取操作狀態，遇 stale 時重讀對應資源，再決定是否寫入。Agent 不計算或提交版本；poll／wait 操作句柄的 agent 呈現見 [[0068]]，operation lifecycle 見 [[0066]]。
 
 ## 演化（被取代的設計，保留脈絡）
 
 - **Phase 92/93 origin tracking**（`_originating_state` → EventBus `current_origin` / `acting_as` / lease `origin`）：靠「分辨某筆變動是不是 agent 自己造成的」讓 stale guard 放行 agent。**已取代**——其正確性依賴「每個 emit 都正確標 origin」，而 origin 標記容易漏（controller 層 Qt slot 內轉發 emit 已實證漏標）。重新框定為「**版本變了沒**」而非「**誰**改了」即根治。隨之全拆 `current_origin` / `acting_as` / lease `origin` / emit `origin=` / change buffer / `change_categories.py`。
-- **Phase 120c agent 面收斂**：agent 不再曝露 EventBus event（移除 `gui_events_*`），改為「樂觀 + guard 撞牆 / poll-wait 句柄」；diagnostic piggyback 保留。GUI 端 EventBus push 全保留（[[0013]] / [[0014]]）。現行 handle 的呈現見 [Remote owner](0060-measure-agent-interface-shared-gui-view.md)。
+- **Phase 120c agent 面收斂**：agent 不再曝露 EventBus event（移除 `gui_events_*`），改為「樂觀 + guard 撞牆 / poll-wait 句柄」；當時 diagnostic piggyback 保留。GUI 端 EventBus push 仍供其他 consumer 使用（[[0068]]）；現行診斷投影與 handle 呈現見 [Remote owner](0068-remote-transport.md)。
 - **保留自 Phase 93**：off-main handler（本決策 §3）修復主線等待死鎖；舊 `device.wait_setup` 曾在主線 `threading.Event.wait()` 阻塞 event loop → 等不到 Qt queued signal。當時改成 off-main + `gate.await_outcome`，後來的 handle／await 分界見 [[0066]]。
 
 ## 替代方案與否決理由

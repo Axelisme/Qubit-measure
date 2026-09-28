@@ -205,7 +205,7 @@ def h_tab_set_cfg(
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     # Block edits while the tab is running — same guard the human gets via the
-    # disabled form (ADR-0013 F11).
+    # disabled form (ADR-0068).
     if adapter.tab_control.get_running_tab_id() == tab_id:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,

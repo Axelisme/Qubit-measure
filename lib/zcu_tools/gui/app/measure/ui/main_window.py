@@ -573,7 +573,7 @@ class MainWindow(QMainWindow):
         return DEFAULT_LEFT_PANEL_WIDTH
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
-        """DiagnosticSink impl (ADR-0013): render a Controller diagnostic the Qt
+        """DiagnosticSink impl (ADR-0068): render a Controller diagnostic the Qt
         way — error pops a modal dialog, info goes to the status bar."""
         if severity == "error":
             self.show_error_dialog(title or "Error", message)
@@ -970,7 +970,7 @@ class MainWindow(QMainWindow):
 
         tab_ids and active_tab_id are sourced from State (via ctrl.list_tab_ids)
         rather than _tab_widgets, so ghost widget entries that have diverged from
-        State never leak into the projection (ADR-0013 view = second SSOT reader).
+        State never leak into the projection (ADR-0068 view = second SSOT reader).
         """
         # State.tabs is the single SSOT for which tabs exist.
         state_tab_ids: list[str] = self._ctrl.list_tab_ids()

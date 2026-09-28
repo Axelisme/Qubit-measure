@@ -1,4 +1,4 @@
-"""State satisfies the narrow tab state ports (ADR-0026 §3).
+"""State satisfies the narrow tab state ports (ADR-0066).
 
 The run / analyze policies depend on ``RunStatePort`` / ``AnalyzeStatePort``
 rather than the concrete ``State``. These are structural ``runtime_checkable``

@@ -43,7 +43,7 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 
 分層 `app → Controller(façade) → services → State`。MainWindow 是唯一的 driving
 view（給人）；RemoteControlAdapter 是 **read-only observing view**（給 agent 讀
-狀態，不驅動分析）。仿 measure ADR-0013 的 view-split 機制，但 fluxdep 的 remote
+狀態，不驅動分析）。仿 measure ADR-0068 的 view-split 機制，但 fluxdep 的 remote
 view 只暴露查詢，不暴露 mutation。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、

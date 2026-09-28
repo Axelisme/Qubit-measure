@@ -1,4 +1,4 @@
-"""Tests for OperationRunner — kind-agnostic lifecycle mechanism (ADR-0026 §1).
+"""Tests for OperationRunner — kind-agnostic lifecycle mechanism (ADR-0066).
 
 Verifies the mechanism contract with fake gate/handles/progress/bg:
 - exclusion present / absent (ensure+register/release called or skipped)

@@ -371,7 +371,7 @@ def test_push_encode_failure_is_logged_and_contained(qapp, monkeypatch, caplog):
 
 
 def test_diagnostic_pushed_without_subscription(fx):
-    """The adapter is a diagnostic sink (ADR-0013): a Controller diagnostic
+    """The adapter is a diagnostic sink (ADR-0068): a Controller diagnostic
     reaches the client out-of-band of EventBus, with no subscription needed."""
     sock = open_client(fx.service.port)
     try:

@@ -35,7 +35,7 @@ def h_editor_set_field(
     value = params["value"]
     # A tab cfg draft is a session owned by the tab_id; editing it while that
     # tab runs is blocked — same guard the human gets via the disabled form
-    # (ADR-0013 F11). owner-less / ml-entry sessions are unaffected.
+    # (ADR-0068). owner-less / ml-entry sessions are unaffected.
     owner = adapter.ctrl.owner_of_editor(editor_id)
     if owner is not None and adapter.ctrl.get_running_tab_id() == owner:
         raise RemoteError(

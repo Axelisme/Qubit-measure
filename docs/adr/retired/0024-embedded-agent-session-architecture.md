@@ -1,4 +1,4 @@
-> 狀態：已退役（2026-09-27）。有效的 agent launch 邊界暫見 [Remote draft](../draft/external-agent-launch-ownership.md)，已核實的 operation feedback 邊界見 [ADR-0066](../0066-operation-lifecycle.md)；launch 邊界待 Remote ADR 轉正。以下保留歷史正文。
+> 狀態：已退役（2026-09-27）。有效的 agent launch 邊界見 [ADR-0068](../0068-remote-transport.md)，operation feedback 邊界見 [ADR-0066](../0066-operation-lifecycle.md)。以下保留歷史正文。
 
 # ADR-0024 — Agent launch UI 退役
 

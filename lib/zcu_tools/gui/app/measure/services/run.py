@@ -224,7 +224,7 @@ class RunService:
         Returns True when a live run token existed and was signalled (the request
         was issued), False when no run was in flight (a graceful no-op). This is
         NOT a claim that the worker has stopped: the worker self-judges 'cancelled'
-        and emits its terminal asynchronously (ADR-0019) — the true terminal is
+        and emits its terminal asynchronously (ADR-0066) — the true terminal is
         observed via the GUI's operation.await RPC or the MCP wait(op) tool.
         """
         logger.info("cancel_run")

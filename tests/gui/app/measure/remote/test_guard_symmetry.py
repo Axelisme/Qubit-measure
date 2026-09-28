@@ -63,7 +63,7 @@ def _make_controller(readiness: ContextReadiness) -> Controller:
 
 def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
     """Mirror the service path: validate params against the method's ParamSpec
-    before invoking the handler. Handlers receive the adapter (ADR-0013), so
+    before invoking the handler. Handlers receive the adapter (ADR-0068), so
     wrap ctrl in a minimal adapter stub."""
     from types import SimpleNamespace
     from typing import cast

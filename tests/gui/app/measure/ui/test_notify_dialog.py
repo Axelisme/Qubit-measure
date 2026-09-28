@@ -1,4 +1,4 @@
-"""Tests for NotifyUserDialog (Stage 4b, ADR-0025 §dialog-timeout).
+"""Tests for NotifyUserDialog (Stage 4b, ADR-0066).
 
 Uses a mock Controller; qapp fixture (pytest-qt) ensures a QApplication
 exists for widget construction. The dialog is non-modal so open() is never

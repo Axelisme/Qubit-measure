@@ -154,7 +154,7 @@ def build_app_services(
 
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
-    # direction command edge — cfg_editor never calls writeback, ADR-0004).
+    # direction command edge — cfg_editor never calls writeback, ADR-0067).
     def publish_tab_cfg(owner_key: str, schema: CfgSchema) -> None:
         # Other editor owners (inspect/writeback) keep their drafts off tab State.
         if owner_key in state.tabs:

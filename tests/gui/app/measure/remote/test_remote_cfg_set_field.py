@@ -4,7 +4,7 @@ A tab's cfg draft is a service-owned ``CfgEditorSession`` keyed by the tab_id
 (the same draft the open form attaches to). Agents read it with
 ``tab.get_cfg`` and edit it with ``tab.set_cfg`` or ``editor.set_field`` on the
 tab's ``editor_id`` (from ``tab.snapshot``) — the same draft the GUI form uses,
-so user + agent share one model (ADR-0013 F11).
+so user + agent share one model (ADR-0068).
 
 Here the fixture opens a real seeded session owned by the tab on the real
 Controller, then drives edits through ``editor.set_field`` and discovery

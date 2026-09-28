@@ -86,7 +86,7 @@ def _make_view() -> MagicMock:
     view.show_error_dialog = MagicMock()
     view.make_run_container = MagicMock(return_value=None)
 
-    # The Controller fans diagnostics out via notify_diagnostic (ADR-0013);
+    # The Controller fans diagnostics out via notify_diagnostic (ADR-0068);
     # mirror MainWindow's dispatch so tests can assert on show_*.
     def _notify(severity: str, title: str, message: str) -> None:
         if severity == "error":
@@ -275,7 +275,7 @@ def test_cancel_analyze_without_interactive_is_graceful(cf):
 
 # ---------------------------------------------------------------------------
 # send_feedback / cancel_active_operation — user->agent feedback channel
-# (ADR-0025): routes to the active op's OperationChannel; on stop, also
+# (ADR-0066): routes to the active op's OperationChannel; on stop, also
 # runs op-taxonomy cancel teardown (op-taxonomy lives here, not in the View).
 # ---------------------------------------------------------------------------
 
@@ -331,7 +331,7 @@ def test_send_feedback_stop_cancels_interactive_analyze(cf):
 
 
 # ---------------------------------------------------------------------------
-# can_cancel_active_operation (Stage 4a, ADR-0025 §Stop-gating)
+# can_cancel_active_operation (Stage 4a, ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -1035,7 +1035,7 @@ def test_timeout_notify_delivers_to_channel() -> None:
 
 
 def test_await_notify_unknown_token_returns_dismiss() -> None:
-    """Unknown token is treated as already-dismissed (ADR-0025)."""
+    """Unknown token is treated as already-dismissed (ADR-0066)."""
     cf = ControllerFixture()
     result = cf.ctrl.await_notify(99999, timeout=0.1)
     assert result.reason == "dismiss"

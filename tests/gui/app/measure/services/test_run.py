@@ -3,7 +3,7 @@
 Static preconditions (context readiness, committed-cfg validity, soc capability)
 are GuardService's responsibility (see test_guard.py). RunService only handles
 the dynamic boundary: tab-busy, lease acquisition, bg submit, and — since
-ADR-0019 — the cancel *interpretation* of bg's done/failed (it owns the
+ADR-0066 — the cancel *interpretation* of bg's done/failed (it owns the
 stop_event, so it relabels finished vs cancelled here).
 
 Stage 2c: RunService is now an OperationRunner client. Tests use a shared

@@ -248,7 +248,7 @@ Key ownership rules:
   failed-precondition category；shared remote dispatch統一投影generic category。handler只保留
   request coercion與structured/domain-special wire policy，不擁有分類registry。
   ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
-  （ADR-0047）。
+  （ADR-0068）。
 - `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
   contents. Its ModuleLibrary schema-replacement interface validates names and
   lowers before mutation, then emits one `ML_CHANGED` fact and bumps `context`
@@ -659,7 +659,7 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 `RemoteError`，走失敗的 RPC/tool call，不將 `success=false` 當一般 payload。
 寫入受 `arb_waveforms` resource version 的 expected-version guard 約束；GUI 和 agent
 共用同一資產 owner，遠端只作錯誤和 payload 投影。共同錯誤類別見
-[Remote expected-error ADR](../../../../../docs/adr/0047-typed-expected-error-taxonomy.md)。
+[Remote expected-error ADR](../../../../../docs/adr/0068-remote-transport.md)。
 
 ## Adapter-Facing Rules
 

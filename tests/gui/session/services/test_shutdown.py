@@ -1,7 +1,7 @@
 """Qt-free ShutdownCoordinator: begin (cancel-all) + tick (poll) state machine.
 
 No Qt loop and a fake clock — the coordinator only decides *when* to close. It
-drives OperationHandles (cancel_all / poll), not the exclusion gate (ADR-0019)."""
+drives OperationHandles (cancel_all / poll), not the exclusion gate (ADR-0066)."""
 
 from __future__ import annotations
 
