@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 from ._common import render_view
 
 
-def _h_adapter_list(
+def h_adapter_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"adapters": list(adapter.ctrl.get_adapter_names())}
 
 
-def _h_adapter_guide(
+def h_adapter_guide(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["adapter_name"])
@@ -30,7 +30,7 @@ def _h_adapter_guide(
     return {"guide": adapter.ctrl.get_adapter_guide(name)}
 
 
-def _h_app_shutdown(
+def h_app_shutdown(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Graceful close: trigger the window's normal close path (persist session,
@@ -43,7 +43,7 @@ def _h_app_shutdown(
     return {"shutting_down": True}
 
 
-def _h_view_snapshot(
+def h_view_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -56,7 +56,7 @@ def _h_view_snapshot(
     return snap
 
 
-def _h_dialog_screenshot(
+def h_dialog_screenshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from ..dialogs import parse_dialog_name
@@ -72,7 +72,7 @@ def _h_dialog_screenshot(
     return _png_reply(png, params)
 
 
-def _h_view_screenshot(
+def h_view_screenshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Not off_main_thread → MainWindow.grab() is auto-marshalled to the Qt main
@@ -104,7 +104,7 @@ def _png_reply(
 _VALID_SUBTABS = frozenset({"run", "analysis", "post_analysis"})
 
 
-def _h_tab_get_figure(
+def h_tab_get_figure(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])

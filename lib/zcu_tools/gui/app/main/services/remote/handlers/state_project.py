@@ -13,35 +13,35 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _h_state_has_project(
+def h_state_has_project(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"value": bool(adapter.ctrl.has_project())}
 
 
-def _h_state_has_context(
+def h_state_has_context(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"value": bool(adapter.ctrl.has_context())}
 
 
-def _h_state_has_active_context(
+def h_state_has_active_context(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"value": bool(adapter.ctrl.has_active_context())}
 
 
-def _h_state_has_soc(
+def h_state_has_soc(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     return {"value": bool(adapter.ctrl.has_soc())}
 
 
-def _h_state_hardware_gate(
+def h_state_hardware_gate(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -58,14 +58,14 @@ def _h_state_hardware_gate(
     }
 
 
-def _h_soc_info(
+def h_soc_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     include_cfg = bool(params["include_cfg"])  # ParamSpec(_bool_default)-validated
     return adapter.ctrl.get_soc_info(include_cfg=include_cfg)
 
 
-def _h_project_info(
+def h_project_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Project identity (the chip / qubit / resonator names + their output roots).
@@ -101,7 +101,7 @@ def _result_scope_wire(scope: ResultScope) -> dict[str, object]:
     }
 
 
-def _h_result_scope_list(
+def h_result_scope_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -112,7 +112,7 @@ def _h_result_scope_list(
     }
 
 
-def _h_resources_versions(
+def h_resources_versions(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params

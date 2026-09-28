@@ -13,13 +13,13 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "operation.active",
-        "operation:_h_operation_active",
+        "operation:h_operation_active",
         MethodSpec(5.0, "List all live operations from GUI domain owners."),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "operation.await",
-        "operation:_h_operation_await",
+        "operation:h_operation_await",
         MethodSpec(
             130.0,
             "Wait for a known operation with the fixed wait(op) tool. MCP translates "
@@ -37,7 +37,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "operation.cancel",
-        "operation:_h_operation_cancel",
+        "operation:h_operation_cancel",
         MethodSpec(
             5.0,
             "Request cancellation of a GUI-local operation by id (MCP exposes "
@@ -48,7 +48,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "operation.progress",
-        "operation:_h_operation_progress",
+        "operation:h_operation_progress",
         MethodSpec(
             5.0,
             "Read one operation's live progress bars by operation_id (run or device "

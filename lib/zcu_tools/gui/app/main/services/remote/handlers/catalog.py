@@ -1,7 +1,6 @@
 """Live catalog projection for the measure agent."""
 
 # Handler names resolve through the wire registry's string references.
-# pyright: reportUnusedFunction=false
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -14,7 +13,7 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _h_rpc_catalog(
+def h_rpc_catalog(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del adapter, params

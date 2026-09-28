@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from ._common import render_view
 
 
-def _h_tab_new(
+def h_tab_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["adapter_name"])
@@ -24,7 +24,20 @@ def _h_tab_new(
     return {"tab_id": tab_id}
 
 
-def _h_tab_close(
+def h_tab_open_file(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    from dataclasses import asdict
+
+    name = str(params["adapter_name"])
+    if name not in adapter.ctrl.get_adapter_names():
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
+    return asdict(
+        adapter.tab_control.open_tab_from_file(name, str(params["data_path"]))
+    )
+
+
+def h_tab_close(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -34,7 +47,7 @@ def _h_tab_close(
     return {"ok": True}
 
 
-def _h_tab_set_active(
+def h_tab_set_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -44,7 +57,7 @@ def _h_tab_set_active(
     return {"ok": True}
 
 
-def _h_tab_list_all(
+def h_tab_list_all(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -74,6 +87,9 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
     # only one that leaves them None, and it never hits the wire).
     assert interaction is not None
     assert snap.run is not None
+    assert snap.analysis is not None
+    assert snap.post_analysis is not None
+    versions = adapter.ctrl.resources_versions()
     return {
         "tab_id": tab_id,
         "adapter_name": adapter.tab_control.get_tab_adapter_name(tab_id),
@@ -91,14 +107,34 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "has_soc": bool(interaction.has_soc),
             "has_run_result": bool(interaction.has_run_result),
             "has_analyze_result": bool(interaction.has_analyze_result),
+            "has_post_analyze_result": bool(interaction.has_post_analyze_result),
             "has_figure": bool(interaction.has_figure),
         },
         "save_paths": _save_paths_wire(snap.paths),
         "result_source_path": snap.run.source_path,
+        # Revisions distinguish replacements even when availability and source
+        # path stay unchanged. Payload arrays remain with the application owner.
+        "result_state": {
+            "revision": versions.get(f"tab:{tab_id}:result", 0),
+            "available": snap.run.result is not None,
+            "source_path": snap.run.source_path,
+        },
+        "analysis_state": {
+            "revision": versions.get(f"tab:{tab_id}:analyze", 0),
+            "available": snap.analysis.result is not None,
+            "has_figure": snap.analysis.figure is not None,
+            "has_writeback_draft": snap.analysis.has_writeback_draft,
+        },
+        "post_analysis_state": {
+            "revision": versions.get(f"tab:{tab_id}:post_analyze", 0),
+            "available": snap.post_analysis.result is not None,
+            "has_figure": snap.post_analysis.figure is not None,
+            "has_writeback_draft": snap.post_analysis.has_writeback_draft,
+        },
     }
 
 
-def _h_tab_snapshot(
+def h_tab_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Always returns {tabs: [...]} (a single tab_id yields a one-element list);
@@ -125,7 +161,7 @@ def _save_paths_wire(paths) -> dict[str, str | None] | None:
     }
 
 
-def _h_tab_get_cfg(
+def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from ..cfg_observation import build_cfg_observation
@@ -147,7 +183,7 @@ def _h_tab_get_cfg(
     return {"tree": build_cfg_observation(draft, prefix=prefix)}
 
 
-def _h_tab_set_cfg(
+def h_tab_set_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])

@@ -9,7 +9,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "rpc.catalog",
-        "catalog:_h_rpc_catalog",
+        "catalog:h_rpc_catalog",
         MethodSpec(5.0, "Read the live agent-facing method catalog."),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

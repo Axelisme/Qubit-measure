@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.services.predictor import (
     CalibrateFluxBiasRequest,
     PredictCurveRequest,
@@ -342,7 +343,7 @@ def test_calibrate_flux_bias_invalid_transition_raises():
     svc = _make_svc()
     _inject_fake_predictor(svc)
 
-    with pytest.raises(ValueError, match="from-level"):
+    with pytest.raises(InvalidInputError, match="from-level"):
         svc.calibrate_flux_bias(
             CalibrateFluxBiasRequest(
                 value=0.25,

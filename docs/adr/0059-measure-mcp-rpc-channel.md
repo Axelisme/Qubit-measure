@@ -19,7 +19,7 @@ measure-gui 的常用操作由特化 tool 提供（[[0060]]）；其餘 wire met
 
 ### 2. catalog 由 live GUI 提供
 
-GUI 提供 wire method `rpc.catalog`，回傳每個非 `internal` method 的 `method`、`description`、`params`（由 `ParamSpec` 產生的 JSON schema）、`timeout_seconds`、exposure 與 guard policy。MCP 在每次連上 GUI 後重新讀取並快取 catalog；三個通用 tool 只依 catalog 運作，因此 GUI 端的 method 變更在 GUI 重啟後即可呼叫，不需重啟 MCP。
+GUI 提供 wire method `rpc.catalog`，回傳每個非 `internal` method 的 `method`、`description`、`params`（由 `ParamSpec` 產生的 JSON schema）、`timeout_seconds`、exposure 與 operation key。Guard/reveals policy 留在 GUI，不投影到 catalog。MCP 在每次連上 GUI 後重新讀取並快取 catalog；三個通用 tool 只依 catalog 運作，因此 GUI 端的 method 變更在 GUI 重啟後即可呼叫，不需重啟 MCP。
 
 ### 3. exposure 隨 method 宣告
 
@@ -35,7 +35,7 @@ GUI 提供 wire method `rpc.catalog`，回傳每個非 `internal` method 的 `me
 
 ### 4. guard policy 隨 method 宣告
 
-version guard 相依（guard deps）、讀取後揭露的 resource（reveals）與 operation key 以宣告式欄位寫在 `RemoteMethodEntry`：guard deps 與 reveals 為 resource pattern 字串，operation key 為同語法的 template（例如 `"device:{name}"`）。catalog 攜帶這些欄位，MCP session 依此組裝 `expected_versions`、更新已觀察版本並記錄 operation handle；是否過期由 GUI 判定。
+version guard 相依（guard deps）、讀取後揭露的 resource（reveals）與 operation key 以宣告式欄位寫在 `RemoteMethodEntry`：guard deps 與 reveals 為 resource pattern 字串，operation key 為同語法的 template（例如 `"device:{name}"`）。GUI owner thread 依 guard deps 比對每條連線的 seen，依 reveals 記錄成功的完整讀取。缺失 seen 包含版本 0 一律拒絕；成功自寫只推進先前已看過且版本匹配的資源。失敗、逾時及回覆編碼失敗不留下新的觀察，詳 [[0002]]。MCP 不保存觀察、不傳 `expected_versions`，也不以隱藏預讀解鎖。Catalog 只把 operation key 交給 MCP 記錄 operation handle。
 
 這些欄位屬於 measure-gui 的 app policy，放在 app-specific 的 `RemoteMethodEntry`，不放共用層的 `MethodSpec`（[[0014]]）。
 

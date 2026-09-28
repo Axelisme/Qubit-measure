@@ -31,7 +31,9 @@
 
 ### 錯誤
 
-會失敗的操作以錯誤回報，附 stable `reason`、訊息與修正提示（[[0047]]）；成功時不回傳空結果。常用 `reason`：`busy`（有衝突的操作進行中）、`unsaved`（有未存檔結果）、`missing`（前置條件不足，附缺少的項目）、`conflict`（參數互相矛盾）、`use_tool`、`not_cancellable`。version guard 衝突時重讀狀態再重試。
+會失敗的操作以錯誤回報，附 stable `reason`、訊息與修正提示（[[0047]]）；成功時不回傳空結果。常用 `reason`：`busy`（有衝突的操作進行中）、`unsaved`（有未存檔結果）、`missing`（前置條件不足，附缺少的項目）、`conflict`（參數互相矛盾）、`use_tool`、`not_cancellable`。version guard 衝突時重讀狀態，再由操作者決定是否重試。
+
+GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0 也拒絕寫入。完整讀取才揭露對應資源；部分 cfg 讀取、裸版本表與 tab 索引不代替完整操作狀態。MCP 不保存 seen，也不在 mutation 前隱藏預讀。`tab_get` 的 summary/artifacts 與 `tab_live` 回傳完整 `operation_state`，包含 result/analysis revision、availability 與 paths，不要求原始陣列。重連後必須重新讀取。自寫只推進先前已看過且版本匹配的資源，連帶 cfg 回填不會把未讀 cfg 變成已讀。
 
 ### 非同步與短暫等待
 
@@ -172,7 +174,9 @@
 回傳該實驗的 guide `{behavior, expects_md, expects_ml, typical_writeback, recommended}`。guide 是實驗的操作說明，不是格式契約。
 
 **`tab_open(experiment, from_file?)`**
-開新 tab，回傳 `{tab, experiment}`。`from_file` 載入既有資料檔（不需 SoC）；資料檔與實驗不相容時報錯，且不留下 tab。
+開新 tab，回傳 `{tab, experiment}`。帶 `from_file` 時，先明確讀取 `context.snapshot`，再由 GUI 的單一 `tab.open_file` application 操作建立、載入及聚焦，不需 SoC。MCP 不預讀尚未存在的 tab，也不把組合責任留在 session。
+
+主載入失敗時 GUI 關閉新 tab、恢復先前焦點；清理失敗回 `cleanup_failed` 並說明可能殘留的 tab 或焦點。載入重用既有 `load_tab_result` 與 cfg 回填。成功回覆另含 `cfg_backfill=applied|not_applied`；回填失敗保留載入結果，不承諾所有副作用全有全無。新 tab identity 只認證存在，後續覆寫前仍需明確讀取 tab/cfg；既有 tab.load_data guard 不變。
 
 **`tab_close(tab, discard_unsaved = false)`**
 關閉 tab。執行中回 `busy`；有 artifact 為 `not_saved` 或 `unsaved_changes` 時回 `unsaved` 並列出，確認後以 `discard_unsaved=true` 關閉。

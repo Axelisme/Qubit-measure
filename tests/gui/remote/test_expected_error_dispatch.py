@@ -21,6 +21,7 @@ from zcu_tools.gui.remote.control_service import (
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, MethodSpec
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
+from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.value_lookup import ProviderError
 
 _T = TypeVar("_T")
@@ -74,9 +75,10 @@ def test_dispatch_scopes_handler_to_stable_per_connection_agent_origin(
             off_main_thread=off_main_thread,
         ),
     )
-    service._dispatch_on_owner(first, "request-1", "test.origin", spec, {})
-    service._dispatch_on_owner(first, "request-2", "test.origin", spec, {})
-    service._dispatch_on_owner(second, "request-3", "test.origin", spec, {})
+    service._method_registry = {"test.origin": spec}
+    service.route(first, Request("request-1", "test.origin", {}))
+    service.route(first, Request("request-2", "test.origin", {}))
+    service.route(second, Request("request-3", "test.origin", {}))
 
     first_ctx = cast(SubscriptionCtx, first.app_ctx)
     second_ctx = cast(SubscriptionCtx, second.app_ctx)
@@ -114,13 +116,10 @@ def _spec(exc: BaseException, *, off_main_thread: bool = False) -> BoundMethod:
 
 def _dispatch(exc: BaseException, *, off_main_thread: bool = False) -> MagicMock:
     service = _service()
-    service._dispatch_on_owner(
-        _link(),
-        "request-1",
-        "test.raise",
-        _spec(exc, off_main_thread=off_main_thread),
-        {},
-    )
+    service._method_registry = {
+        "test.raise": _spec(exc, off_main_thread=off_main_thread)
+    }
+    service.route(_link(), Request("request-1", "test.raise", {}))
     return cast(MagicMock, service._endpoint)
 
 

@@ -94,7 +94,7 @@ class SoCConnectionService:
         self._runner = runner
         # _active_token: POST-BEGIN set, on_terminal cleared (run.py pattern).
         self._active_token: int | None = None
-        self._pending_is_mock: bool = False
+        self._connected_request: ConnectRequest | None = None
 
     # ------------------------------------------------------------------
     # Queries
@@ -107,12 +107,17 @@ class SoCConnectionService:
         return self._state.exp_context.soccfg
 
     def is_mock_soc(self) -> bool:
-        """Whether the current connection is the offline mock board.
+        """Whether the successful GUI connection is the offline mock board."""
+        return isinstance(self._connected_request, ConnectMockRequest)
 
-        Reflects the last connect request's kind; only meaningful while a SoC is
-        connected (a successful connect keeps soc set, so pair with has_soc).
-        """
-        return self._pending_is_mock
+    def connected_endpoint(self) -> dict[str, str | int | None]:
+        """The last successful remote address, including GUI-initiated connects."""
+        if isinstance(self._connected_request, ConnectRemoteRequest):
+            return {
+                "address": self._connected_request.ip,
+                "port": self._connected_request.port,
+            }
+        return {"address": None, "port": None}
 
     def is_connect_active(self) -> bool:
         # _active_token is POST-BEGIN set and cleared in on_terminal (§B.4 option A,
@@ -182,11 +187,10 @@ class SoCConnectionService:
             note=f"connect SoC ({'mock' if is_mock else 'remote'})",
         )
         self._active_token = token
-        self._pending_is_mock = is_mock
         with self._bus.origin(self._handles.event_origin(token)):
             try:
                 soc, soccfg = self._run_connect_work(req)
-                self._apply_connection(soc, soccfg, is_mock)
+                self._apply_connection(soc, soccfg, req)
                 self._handles.settle(token, OperationOutcome("finished"))
                 return soc, soccfg
             except Exception as exc:
@@ -221,7 +225,7 @@ class SoCConnectionService:
             self._active_token = None
             if bg.ok:
                 soc, soccfg = bg.result
-                self._apply_connection(soc, soccfg, is_mock)
+                self._apply_connection(soc, soccfg, req)
                 settle(OperationOutcome("finished"))
                 self._bus.emit(ConnectionFinishedPayload(success=True, is_mock=is_mock))
             else:
@@ -254,15 +258,16 @@ class SoCConnectionService:
         # POST-BEGIN: set bookkeeping only after begin() succeeds (never written
         # on conflict, mirrors run.py _active_token pattern).
         self._active_token = token
-        self._pending_is_mock = is_mock
         return token
 
     def _apply_connection(
-        self, soc: SocHandle, soccfg: SocCfgHandle, is_mock: bool
+        self, soc: SocHandle, soccfg: SocCfgHandle, req: ConnectRequest
     ) -> None:
+        is_mock = isinstance(req, ConnectMockRequest)
         logger.info("connect succeeded: mock=%s", is_mock)
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
+        self._connected_request = req
         # soc is its own resource (a run depends on it independently of context);
         # bump it here, on the main thread, where the soc is written. Deliberately
         # NOT bumping ``context``: set_context no longer does so, and a soc connect
