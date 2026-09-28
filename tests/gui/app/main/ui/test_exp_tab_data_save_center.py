@@ -24,6 +24,7 @@ from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
+from zcu_tools.gui.app.main.services.remote.handlers.run_save import h_tab_save_image
 from zcu_tools.gui.app.main.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.main.services.tab import TabService
 from zcu_tools.gui.app.main.state import State, TabInteractionState
@@ -973,9 +974,68 @@ def _live_save_ui(tmp_path: Path):
         notify_info=MagicMock(),
     )
     ctrl.save_data.side_effect = ctrl.save_control.save_data
+    ctrl.save_image.side_effect = ctrl.save_control.save_image
+    ctrl.save_post_image.side_effect = ctrl.save_control.save_post_image
     window = MainWindow(ctrl)
     window.add_tab_widget(tab_id, "fake")
-    return window, state, tabs, save, tab_id
+    return window, state, tabs, save, tab_id, ctrl
+
+
+@pytest.mark.parametrize("kind", [ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS])
+@pytest.mark.parametrize("fails", [False, True])
+def test_remote_image_draft_updates_open_gui_and_next_save(
+    exp_tab_factory, qapp, tmp_path: Path, monkeypatch, kind: ArtifactKind, fails: bool
+) -> None:
+    monkeypatch.setattr(
+        FakeAdapter,
+        "capabilities",
+        replace(FakeAdapter.capabilities, post_analysis=True),
+    )
+    window, state, tabs, save, tab_id, ctrl = _live_save_ui(tmp_path)
+    try:
+        state.update_tab_analyze(tab_id, object(), Figure())
+        state.update_tab_post_analyze(tab_id, object(), Figure())
+        window.refresh_tab_interaction(tab_id)
+        center = window.findChild(ArtifactSaveCenter)
+        assert center is not None
+        before = (
+            center.get_analysis_path()
+            if kind is ArtifactKind.ANALYSIS
+            else center.get_post_analysis_path()
+        )
+        path = str(tmp_path / "remote.png")
+        assert before != path
+        params = {"tab_id": tab_id, "subtab_id": kind.value, "image_path": path}
+        export = (
+            save.save_image_sync
+            if kind is ArtifactKind.ANALYSIS
+            else save.save_post_image_sync
+        )
+        if fails:
+            export.side_effect = OSError("export failed")
+            with pytest.raises(OSError, match="export failed"):
+                h_tab_save_image(ctrl, params)
+            export.side_effect = None
+        else:
+            assert h_tab_save_image(ctrl, params) == {"image_path": path}
+        # No manual UI refresh between the remote command and the GUI action.
+        assert (
+            center.get_analysis_path()
+            if kind is ArtifactKind.ANALYSIS
+            else center.get_post_analysis_path()
+        ) == path
+        button = center.save_button(kind)
+        assert button.isEnabled()
+        button.click()
+        assert export.call_count == 2
+        assert [call.args[1] for call in export.call_args_list] == [path, path]
+        projected = next(
+            a for a in tabs.get_snapshot(tab_id).artifacts if a.kind is kind
+        )
+        assert projected.default_path == path
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def test_live_comment_typing_preserves_undo_through_state_projection(
@@ -984,7 +1044,7 @@ def test_live_comment_typing_preserves_undo_through_state_projection(
     from qtpy.QtCore import QEvent, Qt
     from qtpy.QtGui import QKeyEvent
 
-    window, state, tabs, _save, tab_id = _live_save_ui(tmp_path)
+    window, state, tabs, _save, tab_id, _ctrl = _live_save_ui(tmp_path)
     try:
         state.update_tab_comment(tab_id, "original")
         assert tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.NOT_SAVED
@@ -1039,7 +1099,7 @@ def test_live_comment_typing_preserves_undo_through_state_projection(
 def test_cleared_gui_data_path_saves_to_state_default(
     exp_tab_factory, qapp, tmp_path: Path, button: str
 ) -> None:
-    window, state, tabs, save, tab_id = _live_save_ui(tmp_path)
+    window, state, tabs, save, tab_id, _ctrl = _live_save_ui(tmp_path)
     try:
         default = tabs.get_tab_data_path(tab_id)
         assert default is not None and default.startswith(str(tmp_path / "database"))

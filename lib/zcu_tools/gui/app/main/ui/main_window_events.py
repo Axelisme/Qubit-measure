@@ -84,6 +84,7 @@ class _TabReaction(Enum):
     INTERACTION = auto()
     FEEDBACK = auto()
     CLEAR_PLOT = auto()
+    SAVE_PATHS = auto()
 
 
 _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
@@ -155,6 +156,10 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
     TabInteractionFact.ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.SAVE_PATHS_CHANGED: (),
+    TabInteractionFact.SAVE_DRAFT_COMMITTED: (
+        _TabReaction.SAVE_PATHS,
+        _TabReaction.INTERACTION,
+    ),
     TabInteractionFact.WRITEBACK_DRAFT_CHANGED: (_TabReaction.WRITEBACK,),
 }
 
@@ -316,25 +321,34 @@ class MainWindowEventCoordinator:
         if not reactions or not self._host.has_tab_widget(tab_id):
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        for reaction in reactions:
-            if reaction is _TabReaction.CFG:
-                self._host.refresh_tab_cfg(tab_id)
-            elif reaction is _TabReaction.ANALYZE_FORM:
-                self._host.refresh_tab_analyze_form(tab_id, snapshot)
-            elif reaction is _TabReaction.POST_ANALYZE_FORM:
+        actions = {
+            _TabReaction.CFG: lambda: self._host.refresh_tab_cfg(tab_id),
+            _TabReaction.ANALYZE_FORM: lambda: self._host.refresh_tab_analyze_form(
+                tab_id, snapshot
+            ),
+            _TabReaction.POST_ANALYZE_FORM: lambda: (
                 self._host.refresh_tab_post_analyze_form(tab_id, snapshot)
-            elif reaction is _TabReaction.WRITEBACK:
-                self._host.refresh_tab_writeback(tab_id, snapshot)
-            elif reaction is _TabReaction.FIGURE:
-                self._host.refresh_tab_figure(tab_id, snapshot)
-            elif reaction is _TabReaction.POST_FIGURE:
-                self._host.refresh_tab_post_figure(tab_id, snapshot)
-            elif reaction is _TabReaction.INTERACTION:
-                self._host.refresh_tab_interaction(tab_id, snapshot)
-            elif reaction is _TabReaction.FEEDBACK:
-                self._host.refresh_feedback_widget()
-            elif reaction is _TabReaction.CLEAR_PLOT:
-                self._host.clear_tab_plot(tab_id)
+            ),
+            _TabReaction.WRITEBACK: lambda: self._host.refresh_tab_writeback(
+                tab_id, snapshot
+            ),
+            _TabReaction.FIGURE: lambda: self._host.refresh_tab_figure(
+                tab_id, snapshot
+            ),
+            _TabReaction.POST_FIGURE: lambda: self._host.refresh_tab_post_figure(
+                tab_id, snapshot
+            ),
+            _TabReaction.INTERACTION: lambda: self._host.refresh_tab_interaction(
+                tab_id, snapshot
+            ),
+            _TabReaction.FEEDBACK: self._host.refresh_feedback_widget,
+            _TabReaction.CLEAR_PLOT: lambda: self._host.clear_tab_plot(tab_id),
+            _TabReaction.SAVE_PATHS: lambda: self._host.refresh_tab_save_paths(
+                tab_id, snapshot
+            ),
+        }
+        for reaction in reactions:
+            actions[reaction]()
 
     def _on_predictor_changed(self, payload: PredictorChangedPayload) -> None:
         del payload

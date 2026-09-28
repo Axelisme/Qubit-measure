@@ -6,6 +6,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.catalog import ExperimentAccess
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
@@ -86,6 +90,11 @@ class SaveControlFacet:
         self._require_tab_idle(tab_id)
         if image_path is not None:
             self._tab.update_tab_analysis_image_path_override(tab_id, image_path)
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id, TabInteractionFact.SAVE_DRAFT_COMMITTED
+                )
+            )
         resolved = self._tab.get_tab_analysis_image_path(tab_id)
         if resolved is None:
             raise FailedPreconditionError(
@@ -104,6 +113,11 @@ class SaveControlFacet:
         self._require_tab_idle(tab_id)
         if image_path is not None:
             self._tab.update_tab_post_analysis_image_path_override(tab_id, image_path)
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id, TabInteractionFact.SAVE_DRAFT_COMMITTED
+                )
+            )
         resolved = self._tab.get_tab_post_analysis_image_path(tab_id)
         if resolved is None:
             raise FailedPreconditionError(

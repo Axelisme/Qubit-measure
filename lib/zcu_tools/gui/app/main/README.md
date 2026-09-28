@@ -184,7 +184,9 @@ previous canonical pane for failure recovery; success shows the new pane's figur
 and draft, failure/cancel restores the retained pane (primary failure restores
 primary then post). Save/Guide show a placeholder and never borrow another pane's
 figure. Local analyze/post/save-path edits keep synchronous State commit timing
-but have no Qt reaction.
+but have no Qt reaction. Explicit image destinations committed by a save command
+publish a separate save-draft fact. The coordinator projects those State paths
+into open editors before export, including when export subsequently fails.
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
