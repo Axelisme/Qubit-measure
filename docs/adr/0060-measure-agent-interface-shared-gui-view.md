@@ -22,7 +22,7 @@
 | 名詞沿用 GUI | tool 以 GUI 物件命名，agent 與使用者指稱同一個 tab、同一份寫回清單。 |
 | 草稿先於提交 | cfg 與寫回的修改先落在 GUI 草稿，run、寫入才提交（[[0008]]）。 |
 | 一個判斷點一個 tool | 每個判斷點是獨立 tool，不合併成批次；每個 tool 的回傳足以做該步的判斷。 |
-| 一件事一條路 | 常用操作由特化 tool 提供；其餘 wire method 經 RPC channel（[[0059]]），兩者不重疊。 |
+| 每個 method 一個 exposure | 特化 tool 與 RPC 可操作同一功能；每個 wire method 僅有一個 exposure（[[0059]]）。`tool` 方法由 `rpc_call` 回 `use_tool`，`internal` 不可達。 |
 | 索引與內容分離 | 索引類 tool 只回答「有什麼」；內容由各自的 tool 讀取。 |
 | 能機械推導的就提供 | 可由既有資料算出的值（例如 `eta_s`、正規化後的 sweep）由介面回傳。 |
 | 省 context | 圖一律回傳檔案路徑；大型值只回摘要，指名讀取時才回完整值。 |
@@ -82,7 +82,7 @@ GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0
 
 ### A. 連線與狀態
 
-**`connect(port?, launch = "never" | "if_missing" | "new", clean = false)`**
+**`connect(port?, launch = "never" | "if_missing" | "new", clean = false, token?)`**
 
 | `launch` | 已有 GUI | 沒有 GUI |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ GUI 為每條 remote 連線保存 seen map，未讀過的依賴即使版本為 0
 | `"if_missing"` | 接上 | 啟動並接上 |
 | `"new"` | `reason="port_in_use"` | 啟動並接上 |
 
-未給 `port` 時自動尋找。`clean=true` 在啟動時不還原上次的 GUI session。wire 版本不相容時報錯。已連上時重複呼叫回傳目前狀態。回傳 `{launched, port, versions: {wire, gui, mcp}, status}`。連線隨 MCP 結束而關閉，不另提供 disconnect。
+GUI 啟用 control-token 時以 `token` 認證，不在工具日誌記錄憑證。未給 `port` 時自動尋找。`clean=true` 在啟動時不還原上次的 GUI session。wire 版本不相容時報錯。已連上時重複呼叫回傳目前狀態。回傳 `{launched, port, versions: {wire, gui, mcp}, status}`。連線隨 MCP 結束而關閉，不另提供 disconnect。
 
 **`shutdown(discard_unsaved = false)`**
 以GUI正常關閉流程保存session、斷開儀器並清理。GUI在同一次owner dispatch檢查所有active operations，含run、analyze、device、save；任何一項進行中都回`busy`。Idle後檢查所有tabs的未存artifacts，回`unsaved`並列出，只有明確`discard_unsaved=true`才略過此檢查。GUI本身的data-only關閉提示不變。
@@ -335,15 +335,15 @@ tab_close("t1")
 | `predictor_*`、`predict` | `predictor.info`、`predictor.load`、`predictor.set_model_params`、`predictor.predict`；`PredictorService.calibrate_flux_bias` |
 | `screenshot` | `view.screenshot`、`dialog.screenshot` |
 
-需新增或調整，均不改變 GUI 畫面：
+固定工具使用以下 wire 接縫：
 
-- 子 tab 切換：只影響顯示的 wire method，供 GUI 跟隨使用。
-- `tab.get_cfg` 補上型別、ref 可選項與鎖定狀態。
-- cfg 編輯語法：sweep 整體修改與衝突檢查、sweep 端點接受 md 表達式、回傳錯誤清單。
+- 子 tab 切換只影響顯示，供 GUI 跟隨使用。
+- `tab.get_cfg` 回傳型別、ref 可選項與鎖定狀態。
+- cfg 編輯支援 sweep 整體修改與衝突檢查、sweep 端點 md 表達式及錯誤清單。
 - `context.new` 接受 `label`。
-- `tab.snapshot` 補上 artifact 存檔狀態。
-- `tab.writeback_preview` 補上 md 項目的 current 與 module／waveform 項目的 current／proposed cfg。
-- `predictor_calibrate` 的 wire method。
+- `tab.snapshot` 回傳 artifact 存檔狀態。
+- `tab.writeback_preview` 回傳 md 項目的 current 與 module／waveform 項目的 current／proposed cfg。
+- `predictor_calibrate` 經 GUI PredictorService 校正。
 - `tab_interact` 所需 GUI-side `tab.interact` wire method 已提供：service-owned session 保存 committed `state` 與 operation（[[0061]]）；plugin 宣告子命令與 `ParamSpec`，wire 驗證後執行共用 action，GUI frontend 直接呼叫相同 typed action，不經 JSON。GUI-local preview 只以 `preview_active` presentation metadata 回報，不取代 committed state。固定 MCP `tab_interact` 工具轉送一次讀取或命令，不解讀 plugin 子命令，也不另存 state。工具將 wire PNG 解碼到 session 暫存檔。
 
 ## 範圍外
@@ -353,5 +353,5 @@ tab_close("t1")
 ## Consequences
 
 - agent 的每個判斷點對應一個 tool，使用者在 GUI 上看到與 agent 相同的狀態與畫面。
-- 同一個操作只有一個入口；低頻操作經 RPC channel，不增加特化 tool。
+- 常用操作提供特化 tool；低頻操作經 RPC channel，不增加特化 tool。允許標為 `rpc` 的方法與特化 tool 操作同一功能，exposure 規則見 [[0059]]。兩者共用 GUI guard，不另建狀態或繞過驗證。
 - `tab_interact` 使用外掛的共用 command 與 service-owned session。讀取不切換畫面，命令在執行前跟隨 Analysis pane；`done` 與 `cancel(op)` 結束原本的 analysis operation。

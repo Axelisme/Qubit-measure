@@ -126,7 +126,8 @@ The launch/connect note reports three numbers:
   owned here.
 
 Current measure-gui values are `WIRE_VERSION = 71`, `GUI_VERSION = 103`, and
-`MCP_VERSION = 94` (defined in `zcu_tools.mcp.measure.server`). WIRE 71 exposes
+`MCP_VERSION = 95` (defined in `zcu_tools.mcp.measure.server`). MCP 95 finalizes
+shared-state workflow and interactive concurrency guidance. WIRE 71 exposes
 shared interactive plugin commands and terminal replies. GUI 103 owns interactive
 sessions and command view follow; MCP 94 adds the fixed `tab_interact` tool.
 WIRE 70 exposes
