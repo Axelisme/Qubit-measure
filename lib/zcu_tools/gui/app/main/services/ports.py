@@ -27,6 +27,34 @@ from typing import (
 
 
 @dataclass(frozen=True, slots=True)
+class SaveDataSubmission:
+    """Accepted save work; the reserved path is not proof of successful I/O."""
+
+    operation_id: int
+    data_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class SaveDestination:
+    kind: ArtifactKind
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class SaveArtifactsSubmission:
+    """Reserved destinations; only a finished outcome establishes successful I/O."""
+
+    operation_id: int
+    destinations: tuple[SaveDestination, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveSaveOperation:
+    operation_id: int
+    tab_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class CfgEdit:
     path: str
     value: object
@@ -63,6 +91,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
+    from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, ArtifactSnapshot
     from zcu_tools.gui.app.main.state import (
         RetiredPaneResources,
         Session,
@@ -112,6 +141,7 @@ class PostAnalysisPaneSnapshot:
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
     data_path: PathResourceSnapshot
+    comment: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +173,7 @@ class TabSnapshot:
     post_analysis: PostAnalysisPaneSnapshot | None = None
     save: SavePaneSnapshot | None = None
     paths: TabPathsSnapshot | None = None
+    artifacts: tuple[ArtifactSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)

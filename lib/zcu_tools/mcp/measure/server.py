@@ -47,7 +47,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v90: fixed cfg/library tools use shared drafts and report partial library edits.
 # v91: run and analyze tools share GUI operations, bounded waits and complete results.
 # v92: writeback forwards preview and explicit-item batch writes to the GUI owner.
-MCP_VERSION = 92
+# v93: artifact save, guarded tab close and graceful shutdown tools.
+MCP_VERSION = 93
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by

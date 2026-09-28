@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import threading
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from matplotlib import rc_context
+from matplotlib.figure import Figure
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
+from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.main.services.ports import (
+    SaveArtifactsSubmission,
+    SaveDataSubmission,
+    SaveDestination,
+)
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
@@ -33,6 +45,118 @@ def fx(qapp):  # noqa: ARG001
     f.start()
     yield f
     f.stop()
+
+
+def _assert_artifacts_match_state(fx, sock, tab_id):
+    artifacts = fx.state.get_artifact_snapshots(tab_id)
+    snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+    assert snapshot["artifacts"] == [
+        {
+            "kind": item.kind.value,
+            "status": item.status.value,
+            "default_path": item.default_path,
+            "last_saved_path": item.last_saved_path,
+            "is_saveable": item.is_saveable,
+        }
+        for item in artifacts
+    ]
+    return artifacts
+
+
+@pytest.mark.parametrize("edit", ["path", "comment"])
+def test_artifact_snapshot_keeps_saved_path_after_draft_edit_and_failed_save(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edit: str
+):
+    tab = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    try:
+        run = fx.ctrl.start_run(tab)
+        assert (
+            call(sock, "operation.await", {"operation_id": run, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        saved = fx.ctrl.save_data(tab, str(tmp_path / "first"), comment="first")
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": saved.operation_id, "timeout": 2},
+            )["result"]["status"]
+            == "finished"
+        )
+        if edit == "path":
+            fx.state.update_tab_data_path_override(tab, str(tmp_path / "next"))
+        else:
+            fx.state.update_tab_comment(tab, "changed")
+        before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0][
+            "artifacts"
+        ][0]
+        assert before["status"] == "unsaved_changes"
+        assert before["last_saved_path"] == saved.data_path
+        assert before["is_saveable"] is True
+        monkeypatch.setattr(
+            FakeAdapter, "save", MagicMock(side_effect=OSError("disk full"))
+        )
+        failed = fx.ctrl.save_data(tab)
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": failed.operation_id, "timeout": 2},
+            )["result"]["status"]
+            == "failed"
+        )
+        after = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0][
+            "artifacts"
+        ][0]
+        assert after == before
+        assert (
+            after["last_saved_path"]
+            == fx.state.get_artifact_snapshots(tab)[0].last_saved_path
+        )
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("image_format", ["png", "svg"])
+def test_sync_image_reply_and_artifact_name_actual_extensionless_output(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pane: str, image_format: str
+):
+    tab = fx.ctrl.new_tab("fake")
+    adapter = fx.state.get_tab(tab).adapter
+    monkeypatch.setattr(
+        adapter, "capabilities", replace(adapter.capabilities, post_analysis=True)
+    )
+    fx.state.update_tab_result(tab, object())
+    figure = Figure()
+    figure.subplots().plot([0, 1], [1, 0])
+    fx.state.update_tab_analyze(tab, object(), figure)
+    if pane == "post_analysis":
+        fx.state.update_tab_post_analyze(tab, object(), figure)
+    draft = str(tmp_path / "figure")
+    expected = tmp_path / f"figure.{image_format}"
+    with (
+        rc_context({"savefig.format": image_format}),
+        open_client(fx.service.port) as sock,
+    ):
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"] is True
+        reply = call(
+            sock,
+            "tab.save_image",
+            {"tab_id": tab, "subtab_id": pane, "image_path": draft},
+        )
+        assert reply["ok"] is True
+        assert reply["result"]["image_path"] == str(expected)
+        artifacts = _assert_artifacts_match_state(fx, sock, tab)
+    artifact = next(a for a in artifacts if a.kind.value == pane)
+    assert artifact.status is SaveStatus.SAVED
+    assert artifact.last_saved_path == str(expected)
+    assert artifact.default_path == draft
+    assert expected.stat().st_size > 0
+    assert not Path(draft).exists()
 
 
 def test_analyze_params_wire_describes_live_adapter_before_run(fx):
@@ -170,6 +294,83 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
         }
     finally:
         release.set()
+        sock.close()
+
+
+@pytest.mark.parametrize("origin", ["gui", "remote"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_data_save_is_awaitable_and_non_cancellable_until_terminal(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin: str, fail: bool
+) -> None:
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    release = threading.Event()
+    operation_id = None
+
+    def held_save(self, request):
+        if not release.wait(4):
+            raise TimeoutError("fake save release was not signalled")
+        if fail:
+            raise OSError("disk full")
+        # The fake adapter's save is a no-op; this driven stub performs offline I/O.
+        Path(request.data_path).write_bytes(b"fake saved result")
+
+    try:
+        run_id = fx.ctrl.start_run(tab_id)
+        assert (
+            call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        monkeypatch.setattr(FakeAdapter, "save", held_save)
+        path = str(tmp_path / "measurement")
+        if origin == "gui":
+            submitted = fx.ctrl.save_data(tab_id, path, comment="note")
+            operation_id, actual_path = submitted.operation_id, submitted.data_path
+        else:
+            assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+            submitted_wire = call(
+                sock,
+                "tab.save_data",
+                {"tab_id": tab_id, "data_path": path, "comment": "note"},
+            )["result"]
+            operation_id, actual_path = (
+                submitted_wire["operation_id"],
+                submitted_wire["data_path"],
+            )
+        assert call(sock, "operation.active")["result"]["operations"] == [
+            {"op": operation_id, "tab": tab_id, "kind": "save"}
+        ]
+        assert call(
+            sock, "operation.await", {"operation_id": operation_id, "timeout": 0}
+        )["result"] == {"reason": "timeout"}
+        cancelled = call(sock, "operation.cancel", {"operation_id": operation_id})
+        assert cancelled["error"]["reason"] == "not_cancellable"
+        assert fx.state.is_tab_busy(tab_id)
+        _assert_artifacts_match_state(fx, sock, tab_id)
+        assert fx.state.get_artifact_snapshots(tab_id)[0].last_saved_path is None
+        release.set()
+        completed = call(
+            sock, "operation.await", {"operation_id": operation_id, "timeout": 2}
+        )["result"]
+        assert completed["status"] == ("failed" if fail else "finished")
+        assert call(sock, "operation.active")["result"]["operations"] == []
+        assert not fx.state.is_tab_busy(tab_id)
+        artifact = _assert_artifacts_match_state(fx, sock, tab_id)[0]
+        if fail:
+            assert "disk full" in completed["error"]["message"]
+            assert artifact.last_saved_path is None
+            assert artifact.status is not SaveStatus.SAVED
+        else:
+            assert artifact.status is SaveStatus.SAVED
+            assert artifact.last_saved_path == actual_path
+            assert Path(actual_path).is_file()
+            assert actual_path.endswith("_1.hdf5")
+    finally:
+        release.set()
+        if operation_id is not None:
+            call(sock, "operation.await", {"operation_id": operation_id, "timeout": 3})
         sock.close()
 
 
@@ -657,12 +858,157 @@ def test_context_ml_delete_delegates(fx):
         sock.close()
 
 
+def test_artifact_save_projects_primary_and_post_keys_through_one_command(fx, tmp_path):
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    primary = str(tmp_path / "primary.png")
+    post = str(tmp_path / "post.png")
+    submission = SaveArtifactsSubmission(
+        71,
+        (
+            SaveDestination(ArtifactKind.ANALYSIS, primary),
+            SaveDestination(ArtifactKind.POST_ANALYSIS, post),
+        ),
+    )
+    try:
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+        with patch.object(
+            fx.service.save_control, "save_artifacts", return_value=submission
+        ) as save:
+            reply = call(
+                sock,
+                "tab.save_artifacts",
+                {
+                    "tab_id": tab_id,
+                    "artifacts": ["analysis", "post"],
+                    "paths": {"analysis": primary, "post": post},
+                },
+            )
+            assert reply["ok"] is True
+            assert reply["result"] == {
+                "operation_id": 71,
+                "destinations": {"analysis": primary, "post": post},
+            }
+            save.assert_called_once_with(
+                tab_id,
+                artifacts=(ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS),
+                paths={
+                    ArtifactKind.ANALYSIS: primary,
+                    ArtifactKind.POST_ANALYSIS: post,
+                },
+                comment=None,
+            )
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"artifacts": "other"},
+        {"artifacts": ["post_analysis"]},
+        {"artifacts": []},
+        {"artifacts": ["data", "data"]},
+        {"artifacts": ["analysis", "post", "analysis"]},
+        {"paths": {"data": ""}},
+        {"paths": {"analysis": ""}},
+        {"paths": {"post": ""}},
+        {"paths": {"post": 2}},
+        {"paths": {"other": "image.png"}},
+    ],
+)
+def test_artifact_save_rejects_invalid_wire_values_before_application(fx, overrides):
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    try:
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+        with patch.object(fx.service.save_control, "save_artifacts") as save:
+            reply = call(sock, "tab.save_artifacts", {"tab_id": tab_id, **overrides})
+            assert reply["error"]["code"] == "invalid_params"
+            save.assert_not_called()
+    finally:
+        sock.close()
+
+
+def test_artifact_save_requires_snapshot_and_keeps_self_written_path_observed(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+
+    def save_bytes(self, request):
+        Path(request.data_path).write_bytes(b"offline save")
+
+    monkeypatch.setattr(FakeAdapter, "save", save_bytes)
+    try:
+        run_id = fx.ctrl.start_run(tab_id)
+        assert (
+            call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        assert fx.state.version.get(f"tab:{tab_id}:path:data") == 0
+        params = {
+            "tab_id": tab_id,
+            "artifacts": ["data"],
+            "paths": {"data": str(tmp_path / "saved")},
+            "comment": "shared comment",
+        }
+        unseen = call(sock, "tab.save_artifacts", params)
+        assert unseen["error"]["reason"] == "stale_version"
+        assert f"tab:{tab_id}:path:data" in unseen["error"]["data"]["stale"]
+        assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"] is True
+        first = call(sock, "tab.save_artifacts", params)
+        assert first["ok"] is True
+        first = first["result"]
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": first["operation_id"], "timeout": 2},
+            )["result"]["status"]
+            == "finished"
+        )
+        # No snapshot between writes: the command's own path update remains observed.
+        second = call(
+            sock, "tab.save_artifacts", {"tab_id": tab_id, "artifacts": ["data"]}
+        )
+        assert second["ok"] is True
+        second = second["result"]
+        assert (
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": second["operation_id"], "timeout": 2},
+            )["result"]["status"]
+            == "finished"
+        )
+        first_path = first["destinations"]["data"]
+        second_path = second["destinations"]["data"]
+        assert first_path != second_path
+        assert (
+            Path(first_path).read_bytes()
+            == Path(second_path).read_bytes()
+            == b"offline save"
+        )
+        artifact = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0][
+            "artifacts"
+        ][0]
+        assert artifact["last_saved_path"] == second_path
+        assert artifact["status"] == "saved"
+        assert fx.state.get_tab(tab_id).save.comment == "shared comment"
+    finally:
+        fx.ctrl._background_svc.quiesce()
+        sock.close()
+
+
 def test_save_data_delegates_to_save_control(fx):
     fx.ctrl.save_data = MagicMock(  # type: ignore[method-assign]
         side_effect=AssertionError("tab.save_data must use save_control")
     )
     fx.service.save_control.save_data = MagicMock(  # type: ignore[method-assign]
-        return_value="/tmp/data.hdf5"
+        return_value=SaveDataSubmission(7, "/tmp/data.hdf5")
     )
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
@@ -683,9 +1029,16 @@ def test_save_data_delegates_to_save_control(fx):
         assert resp["ok"] is True
         assert resp["result"] == {
             "data_path": "/tmp/data.hdf5",
+            "operation_id": 7,
         }
         fx.service.save_control.save_data.assert_called_once_with(
             tab_id, "/tmp/data.h5", comment="note"
+        )
+        fx.service.save_control.save_data.reset_mock()
+        omitted = call(sock, "tab.save_data", {"tab_id": tab_id}, rid="2")
+        assert omitted["ok"] is True
+        fx.service.save_control.save_data.assert_called_once_with(
+            tab_id, None, comment=None
         )
         fx.ctrl.save_data.assert_not_called()
     finally:

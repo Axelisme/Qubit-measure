@@ -14,7 +14,9 @@ GUI-owned); the existing save/screenshot entry points already do.
 from __future__ import annotations
 
 import io
+import os.path
 
+from matplotlib import rcParams
 from matplotlib.figure import Figure
 
 # Fixed export geometry for SAVED images — full quality, independent of the GUI
@@ -55,6 +57,13 @@ def _render_with_fixed_size(
         fig.savefig(sink, dpi=dpi, **savefig_kwargs)  # type: ignore[arg-type]
     finally:
         fig.set_size_inches(orig_w, orig_h)
+
+
+def resolve_figure_path(path: str) -> str:
+    """Make Matplotlib's implicit filename extension explicit before saving."""
+    if os.path.splitext(path)[1].lstrip("."):
+        return path
+    return f"{path.rstrip('.')}.{rcParams['savefig.format']}"
 
 
 def save_figure_to_path(fig: Figure, path: str) -> None:

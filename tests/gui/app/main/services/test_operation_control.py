@@ -21,6 +21,7 @@ from tests.gui._control_fakes import CallLog, call
 from tests.gui.app.main.services._operation_owner_fakes import (
     DeviceOperation,
     DeviceOperationOwner,
+    SaveOperationOwner,
     TabOperationOwner,
 )
 
@@ -61,6 +62,7 @@ def test_operation_control_routes_await_and_elapsed_to_handles() -> None:
     log = CallLog()
     handles = RecordingHandles(log)
     facet = OperationControlFacet(
+        save=SaveOperationOwner(),
         handles=handles,
         progress=RecordingProgress(log),
         run_analyze=TabOperationOwner(),
@@ -80,6 +82,7 @@ def test_active_operations_merge_tab_and_device_owners() -> None:
     run = TabOperationOwner((ActiveTabOperation(11, "gui-tab", "run"),))
     device = DeviceOperationOwner((DeviceOperation(12),))
     facet = OperationControlFacet(
+        save=SaveOperationOwner(),
         handles=RecordingHandles(log),
         progress=RecordingProgress(log),
         run_analyze=run,
@@ -119,6 +122,7 @@ def test_cancel_by_handle_uses_owner_hook_and_preserves_other_operations() -> No
         on_cancel=lambda _name: handles.cancel(device_token),
     )
     facet = OperationControlFacet(
+        save=SaveOperationOwner(),
         handles=handles,
         progress=RecordingProgress(CallLog()),
         run_analyze=run,
@@ -144,6 +148,7 @@ def test_cancel_does_not_report_a_failed_operation_as_finished() -> None:
     token = handles.create(origin=EventOrigin(kind="user"))
     handles.settle(token, OperationOutcome("failed", error="ramp failed"))
     facet = OperationControlFacet(
+        save=SaveOperationOwner(),
         handles=handles,
         progress=RecordingProgress(CallLog()),
         run_analyze=TabOperationOwner(),
@@ -162,6 +167,7 @@ def test_operation_control_routes_progress_to_progress_service() -> None:
     log = CallLog()
     progress = RecordingProgress(log)
     facet = OperationControlFacet(
+        save=SaveOperationOwner(),
         handles=RecordingHandles(log),
         progress=progress,
         run_analyze=TabOperationOwner(),

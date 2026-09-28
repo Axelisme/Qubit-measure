@@ -13,10 +13,9 @@ from zcu_tools.gui.app.main.adapter import (
     AnalysisMode,
     MetaDictWriteback,
 )
-from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
-from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.main.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -24,6 +23,7 @@ from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import ExpContext
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.main.ui._artifact_snapshots import with_artifacts
 
 
 def _mock_ctrl() -> MagicMock:
@@ -112,6 +112,7 @@ def _snapshot(
     writeback_items: tuple = (),
     figure: object = _DEFAULT_PARAMS,
     post_figure: object = _DEFAULT_PARAMS,
+    data_status: SaveStatus | None = None,
 ) -> TabSnapshot:
     from zcu_tools.gui.app.main.services.ports import (
         AnalysisPaneSnapshot,
@@ -188,7 +189,7 @@ def _snapshot(
         post_analysis_image=post_image_snap,
     )
 
-    return TabSnapshot(
+    snapshot = TabSnapshot(
         adapter_name="fake",
         tab_id=tab_id,
         interaction=TabInteractionState(
@@ -212,6 +213,8 @@ def _snapshot(
         save=save_snap,
         paths=paths_snap,
     )
+    statuses = {ArtifactKind.DATA: data_status} if data_status is not None else None
+    return with_artifacts(snapshot, statuses)
 
 
 def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
@@ -851,7 +854,7 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
     from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(_mock_ctrl())
+    ctrl = _apply_window_defaults(_editor_wiring_ctrl())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.side_effect = lambda tab_id: tab_id in {"tab-a", "tab-b"}
     window = MainWindow(ctrl)
@@ -865,6 +868,8 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
         ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
+    tab_a.attach(_snapshot("tab-a", has_run_result=False), _RecordingTabActions())
+    tab_b.attach(_snapshot("tab-b", has_run_result=False), _RecordingTabActions())
     window._tab_widgets["tab-a"] = tab_a
     window._tab_widgets["tab-b"] = tab_b
     window._tabs.addTab(tab_a, "A")
@@ -2058,15 +2063,12 @@ def _add_tab(
         window._ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
-    snap = _snapshot(tab_id, has_run_result=has_run)
+    snap = _snapshot(
+        tab_id,
+        has_run_result=has_run,
+        data_status=SaveStatus.SAVED if saved else None,
+    )
     tab.attach(snap, _RecordingTabActions())
-    if has_run and saved:
-        tab.notify_save_started(ArtifactKind.DATA)
-        tab.handle_save_data_finished(
-            SaveDataFinishedPayload(
-                tab_id=tab_id, data_path="/tmp/data.hdf5", error=None
-            )
-        )
     window._tab_widgets[tab_id] = tab
     window._tabs.addTab(tab, tab_id)
     return tab
@@ -2149,11 +2151,15 @@ def test_tab_close_with_saved_data_closes_immediately(qapp):
     ctrl.close_tab.assert_called_once_with("tab-1")
 
 
-def test_tab_close_with_unsaved_data_declined_keeps_tab(qapp):
-    """Scenario 2: Cancelling tab-close leaves the tab open."""
+@pytest.mark.parametrize(
+    "data_status", [SaveStatus.NOT_SAVED, SaveStatus.UNSAVED_CHANGES]
+)
+def test_tab_close_with_unsaved_data_declined_keeps_tab(qapp, data_status):
+    """Cancelling tab-close leaves either unsaved data state untouched."""
     dialogs = RecordingDialogPresenter(destructive_answers=[False])
     window, ctrl = _setup_window_with_tabs(dialogs)
     tab = _add_tab(window, "tab-1", has_run=True, saved=False)
+    tab.update_interaction_state(_snapshot("tab-1", data_status=data_status))
     assert tab.has_unsaved_data() is True
 
     window._tabs.tabCloseRequested.emit(0)
@@ -2181,34 +2187,6 @@ def test_tab_close_with_unsaved_data_confirmed_closes_tab(qapp):
     assert call.kind == "destructive_confirm"
     assert call.title == "Unsaved measurement data"
     assert call.action_text == "Discard and Close"
-    ctrl.close_tab.assert_called_once_with("tab-1")
-
-
-def test_tab_close_with_pending_or_failed_save_prompts(qapp):
-    """Scenario 2: Pending or failed save is unsaved; confirm closes, cancel keeps."""
-    dialogs = RecordingDialogPresenter(destructive_answers=[False, True])
-    window, ctrl = _setup_window_with_tabs(dialogs)
-    tab = _add_tab(window, "tab-1", has_run=True, saved=False)
-
-    # Pending save
-    tab.notify_save_started(ArtifactKind.DATA)
-    assert tab.has_unsaved_data() is True
-    window._tabs.tabCloseRequested.emit(0)
-    assert dialogs.calls[-1].kind == "destructive_confirm"
-    assert dialogs.calls[-1].title == "Unsaved measurement data"
-    assert dialogs.calls[-1].action_text == "Discard and Close"
-    ctrl.close_tab.assert_not_called()
-
-    # Failed save
-    tab.handle_save_data_finished(
-        SaveDataFinishedPayload(
-            tab_id="tab-1", data_path="/tmp/data.hdf5", error="Write failed"
-        )
-    )
-    assert tab.has_unsaved_data() is True
-    window._tabs.tabCloseRequested.emit(0)
-    assert dialogs.calls[-1].kind == "destructive_confirm"
-    assert dialogs.calls[-1].title == "Unsaved measurement data"
     ctrl.close_tab.assert_called_once_with("tab-1")
 
 

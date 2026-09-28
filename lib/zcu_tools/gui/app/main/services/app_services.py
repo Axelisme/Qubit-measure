@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
@@ -176,7 +177,7 @@ def build_app_services(
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
-    save = SaveService(state, background, bus)
+    save = SaveService(state, runner, bus, owner_scheduler=QtOwnerScheduler())
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -198,6 +199,7 @@ def build_app_services(
         access=access,
     )
     operation_control = OperationControlFacet(
+        save=save,
         handles=handles,
         progress=progress,
         run_analyze=run_analyze_control,
