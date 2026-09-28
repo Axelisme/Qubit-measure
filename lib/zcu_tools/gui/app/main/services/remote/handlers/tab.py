@@ -43,6 +43,11 @@ def h_tab_close(
     tab_id = str(params["tab_id"])
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    from .lifecycle import require_idle, require_saved
+
+    require_idle(adapter, tab_id)
+    if not params["discard_unsaved"]:
+        require_saved(adapter, [tab_id])
     adapter.tab_control.close_tab(tab_id)
     return {"ok": True}
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
@@ -46,7 +47,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.close",
         "tab:h_tab_close",
-        MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),
+        MethodSpec(
+            5.0,
+            "Close an idle tab. All unsaved artifacts require discard_unsaved=true; "
+            "busy operations cannot be discarded. Returns {ok: true}.",
+            (
+                _str("tab_id"),
+                ParamSpec(
+                    "discard_unsaved", JsonType.BOOLEAN, required=False, default=False
+                ),
+            ),
+        ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(

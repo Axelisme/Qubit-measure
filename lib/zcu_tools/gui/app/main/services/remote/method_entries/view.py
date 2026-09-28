@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     _str,
@@ -35,9 +36,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "view:h_app_shutdown",
         MethodSpec(
             5.0,
-            "Gracefully close the GUI: runs the normal window-close path (persist "
-            "session, disconnect devices, cleanup) — the same as a user closing the "
-            "window. Returns immediately; the close happens just after. No OS kill.",
+            "Gracefully close an idle GUI. Any active operation returns busy. "
+            "All unsaved artifacts require discard_unsaved=true. Persist session "
+            "and clean up through the normal shutdown path after this reply. No OS kill.",
+            (
+                ParamSpec(
+                    "discard_unsaved", JsonType.BOOLEAN, required=False, default=False
+                ),
+            ),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

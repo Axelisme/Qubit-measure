@@ -38,7 +38,11 @@ def h_app_shutdown(
     # actual close to the next event-loop turn so this reply is sent before the
     # remote service tears down. No kill / OS signal — that path is the agent's
     # cross-platform-safe way to stop the GUI.
-    del params
+    from .lifecycle import require_idle, require_saved
+
+    require_idle(adapter)
+    if not params["discard_unsaved"]:
+        require_saved(adapter, adapter.tab_control.list_tab_ids())
     render_view(adapter).request_shutdown()
     return {"shutting_down": True}
 
