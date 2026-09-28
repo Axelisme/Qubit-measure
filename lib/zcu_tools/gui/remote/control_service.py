@@ -166,9 +166,30 @@ class RemoteControlServiceBase:
         del link, req
         return False
 
-    def _guard(self, params: Mapping[str, object]) -> None:
+    def _guard(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> None:
         """Pre-handler check on the State owner thread (e.g. version guard)."""
-        del params
+        del ctx, method, params
+
+    def _before_handler(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> dict[str, int] | None:
+        """Sample app-owned state before the handler, on the State owner thread."""
+        del ctx, method, params
+        return None
+
+    def _owner_success(
+        self,
+        ctx: SubscriptionCtx,
+        method: str,
+        params: Mapping[str, object],
+        result: Mapping[str, object],
+        before: dict[str, int] | None,
+    ) -> Callable[[], None] | None:
+        """Complete an owner-thread observation; return a reply-failure undo action."""
+        del ctx, method, params, result, before
+        return None
 
     def _after_success(
         self,
@@ -378,14 +399,12 @@ class RemoteControlServiceBase:
     def _dispatch_on_owner(self, link: ClientLink, rid, method, spec, params) -> None:
         holder: dict[str, object] = {}
         bus = self._get_bus()
-        request_origin = EventOrigin(kind="agent", client_id=_ctx(link).client_id)
+        ctx = _ctx(link)
+        request_origin = EventOrigin(kind="agent", client_id=ctx.client_id)
 
         if spec.off_main_thread:
-            # Blocking handler (e.g. operation.await): run on THIS IO worker
-            # thread, never the owner thread — marshalling it onto the owner thread
-            # would deadlock (it would occupy the event loop that must dispatch
-            # the worker signal it awaits). It must only do thread-safe waiting
-            # and must not touch the guard / post-success seams, so neither runs.
+            # Blocking handlers wait on this IO worker, never on the State owner.
+            # Registry validation rejects guard/reveal declarations for these.
             try:
                 with bus.origin(request_origin):
                     holder["result"] = spec.handler(self, params)
@@ -398,14 +417,28 @@ class RemoteControlServiceBase:
                 holder["controller_error"] = exc
         else:
             done = threading.Event()
+            handshake = threading.Lock()
+            completed = False
+            abandoned = False
 
             def _run() -> None:
-                # Runs on the owner thread (where State + VersionTable live), so
-                # the guard's compare-and-act is atomic against any other GUI write.
+                nonlocal completed
+                # Guard, handler and successful observation share one owner turn.
                 with bus.origin(request_origin):
                     try:
-                        self._guard(params)
-                        holder["result"] = spec.handler(self, params)
+                        self._guard(ctx, method, params)
+                        before = self._before_handler(ctx, method, params)
+                        result = spec.handler(self, params)
+                        if not isinstance(result, dict):
+                            raise TypeError(
+                                f"handler {method!r} returned non-dict result"
+                            )
+                        holder["result"] = result
+                        with handshake:
+                            if not abandoned:
+                                holder["rollback"] = self._owner_success(
+                                    ctx, method, params, result, before
+                                )
                     except RemoteError as exc:
                         holder["remote_error"] = exc
                     except ExpectedError as exc:
@@ -414,17 +447,24 @@ class RemoteControlServiceBase:
                         logger.exception("handler raised: %s", exc)
                         holder["controller_error"] = exc
                     finally:
+                        with handshake:
+                            completed = True
                         done.set()
 
             self._owner_scheduler.post(_run)
             if not done.wait(timeout=spec.timeout_seconds):
-                self._endpoint.reply_error(
-                    link,
-                    rid=rid,
-                    code=ErrorCode.TIMEOUT,
-                    message=f"handler did not complete within {spec.timeout_seconds}s",
-                )
-                return
+                with handshake:
+                    timed_out = not completed
+                    if timed_out:
+                        abandoned = True
+                if timed_out:
+                    self._endpoint.reply_error(
+                        link,
+                        rid=rid,
+                        code=ErrorCode.TIMEOUT,
+                        message=f"handler did not complete within {spec.timeout_seconds}s",
+                    )
+                    return
         if "remote_error" in holder:
             exc = holder["remote_error"]
             assert isinstance(exc, RemoteError)
@@ -443,12 +483,18 @@ class RemoteControlServiceBase:
                 link, rid=rid, code=ErrorCode.CONTROLLER_ERROR, message=str(err)
             )
             return
-        # Every handler returns a wire dict; guard the handler-return invariant
-        # (the result, not a ParamSpec-validated input — not redundant).
         result = holder["result"]
         assert isinstance(result, dict), f"handler {method!r} returned non-dict result"
-        self._after_success(_ctx(link), method, params, result)
-        self._endpoint.reply_ok(link, rid=rid, result=result)
+        self._after_success(ctx, method, params, result)
+        delivered = False
+        try:
+            delivered = self._endpoint.reply_ok(link, rid=rid, result=result)
+        finally:
+            rollback = holder.get("rollback")
+            if not delivered and callable(rollback):
+                # The link's IO worker routes requests sequentially. Queue undo
+                # before it can marshal the next request onto the owner thread.
+                self._owner_scheduler.post(rollback)
 
     # ------------------------------------------------------------------
     # EventBus integration (subscribe on owner thread; push via broadcast)

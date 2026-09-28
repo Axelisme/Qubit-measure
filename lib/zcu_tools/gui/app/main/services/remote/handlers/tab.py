@@ -74,6 +74,9 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
     # only one that leaves them None, and it never hits the wire).
     assert interaction is not None
     assert snap.run is not None
+    assert snap.analysis is not None
+    assert snap.post_analysis is not None
+    versions = adapter.ctrl.resources_versions()
     return {
         "tab_id": tab_id,
         "adapter_name": adapter.tab_control.get_tab_adapter_name(tab_id),
@@ -91,10 +94,30 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "has_soc": bool(interaction.has_soc),
             "has_run_result": bool(interaction.has_run_result),
             "has_analyze_result": bool(interaction.has_analyze_result),
+            "has_post_analyze_result": bool(interaction.has_post_analyze_result),
             "has_figure": bool(interaction.has_figure),
         },
         "save_paths": _save_paths_wire(snap.paths),
         "result_source_path": snap.run.source_path,
+        # Revisions distinguish replacements even when availability and source
+        # path stay unchanged. Payload arrays remain with the application owner.
+        "result_state": {
+            "revision": versions.get(f"tab:{tab_id}:result", 0),
+            "available": snap.run.result is not None,
+            "source_path": snap.run.source_path,
+        },
+        "analysis_state": {
+            "revision": versions.get(f"tab:{tab_id}:analyze", 0),
+            "available": snap.analysis.result is not None,
+            "has_figure": snap.analysis.figure is not None,
+            "has_writeback_draft": snap.analysis.has_writeback_draft,
+        },
+        "post_analysis_state": {
+            "revision": versions.get(f"tab:{tab_id}:post_analyze", 0),
+            "available": snap.post_analysis.result is not None,
+            "has_figure": snap.post_analysis.figure is not None,
+            "has_writeback_draft": snap.post_analysis.has_writeback_draft,
+        },
     }
 
 

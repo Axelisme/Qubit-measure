@@ -238,8 +238,11 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     # Dispatch policy seams: version guard + editor lifecycle
     # ------------------------------------------------------------------
 
-    def _guard(self, params: Mapping[str, object]) -> None:
-        # Base dispatch seam → measure-gui's named version-guard policy.
+    def _guard(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> None:
+        # The owner-thread seam supplies connection and method identity.
+        del ctx, method
         self._guard_versions(params)
 
     def _guard_versions(self, params: Mapping[str, object]) -> None:

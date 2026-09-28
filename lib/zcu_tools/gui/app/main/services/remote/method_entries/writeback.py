@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _expected_versions,
     _str,
     _str_opt,
 )
@@ -79,7 +78,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     description="Ordered list of {path, value} cfg edits "
                     "(module/waveform items only)",
                 ),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -102,12 +100,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{applied_ids, written, context_version, destination_context}: written lists the destination "
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "
             "context_version is the bumped 'context' resource version after apply (use "
-            "it as an expected_versions guard on a follow-up write); "
+            "re-read the context before a dependent follow-up write); "
             "destination_context is the active ExpContext projection at reply time.",
             (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),
-                _expected_versions(),
             ),
         ),
         agent=AgentMethodPolicy(

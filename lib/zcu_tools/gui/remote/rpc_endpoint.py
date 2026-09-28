@@ -371,8 +371,9 @@ class NdjsonRpcEndpoint:
     # Outbound: reply (to one link) + broadcast (push fan-out)
     # ------------------------------------------------------------------
 
-    def reply_ok(self, link: ClientLink, *, rid: str, result) -> None:
-        self._send_response(link, Response(id=rid, ok=True, result=result))
+    def reply_ok(self, link: ClientLink, *, rid: str, result) -> bool:
+        """Return whether the success reply encoded and entered the outbound queue."""
+        return self._send_response(link, Response(id=rid, ok=True, result=result))
 
     def reply_error(
         self,
@@ -387,9 +388,11 @@ class NdjsonRpcEndpoint:
         env = ErrorEnvelope(code=code.value, message=message, reason=reason, data=data)
         self._send_response(link, Response(id=rid, ok=False, error=env))
 
-    def _send_response(self, link: ClientLink, response: Response) -> None:
+    def _send_response(self, link: ClientLink, response: Response) -> bool:
+        encoded_success = False
         try:
             line = encode_line(response.to_wire())
+            encoded_success = response.ok
         except Exception:
             logger.exception("failed to encode reply for %.128r", response.id)
             fallback = Response(
@@ -412,12 +415,13 @@ class NdjsonRpcEndpoint:
                     "failed to encode fallback reply for %.128r", response.id
                 )
                 self._abort_client(link)
-                return
+                return False
         with self._clients_lock:
             queued = self._enqueue(link, line, is_push=False)
         if not queued:
             # Unlike pushes, a correlated reply must not be silently dropped.
             self._abort_client(link)
+        return encoded_success and queued
 
     def _abort_client(self, link: ClientLink) -> None:
         with self._clients_lock:
