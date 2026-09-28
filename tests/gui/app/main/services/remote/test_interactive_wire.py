@@ -481,6 +481,67 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         bridge.disconnect()
 
 
+def test_mcp_done_writeback_save_and_close_share_the_gui_result(
+    mounted_fx, tmp_path
+) -> None:
+    fx, window = mounted_fx
+    tab_id, _, widget = _start_mounted(fx, window, "onetone/flux_dep")
+    bridge, call = mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        done = call("tab_interact", {"tab": tab_id, "payload": {"command": "done"}})
+        assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+        call("tab_get", {"tab": tab_id, "include": ["summary"]})
+        preview = call("writeback", {"tab": tab_id})
+        expected = {
+            "flx_half": done["state"]["flux_half"],
+            "flx_int": done["state"]["flux_int"],
+            "flx_period": 2
+            * abs(done["state"]["flux_int"] - done["state"]["flux_half"]),
+        }
+        assert {
+            item["target"]: item["proposed"] for item in preview["items"]
+        } == expected
+        call("rpc_call", {"method": "context.snapshot"})
+        written = call(
+            "writeback",
+            {"tab": tab_id, "write": [{"id": item["id"]} for item in preview["items"]]},
+        )
+        assert {
+            item["target"]: item["after"] for item in written["written"]
+        } == expected
+        assert call("rpc_call", {"method": "context.snapshot"})["md"] == expected
+        call("tab_get", {"tab": tab_id, "include": ["summary", "artifacts"]})
+        image = tmp_path / "interactive-result.png"
+        saved = call(
+            "tab_save",
+            {
+                "tab": tab_id,
+                "artifacts": ["analysis"],
+                "paths": {"analysis": str(image)},
+            },
+        )
+        if "op" in saved:
+            assert (
+                call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
+            )
+        else:
+            assert saved["saved"] == {"analysis": str(image)}
+        assert image.read_bytes().startswith(b"\x89PNG")
+        artifacts = call("tab_get", {"tab": tab_id, "include": ["artifacts"]})[
+            "artifacts"
+        ]
+        analysis = next(item for item in artifacts if item["key"] == "analysis")
+        assert analysis["status"] == "saved"
+        assert analysis["last_saved_path"] == str(image)
+        assert call("tab_close", {"tab": tab_id, "discard_unsaved": True}) == {
+            "closed": tab_id
+        }
+        assert not fx.ctrl.run_analyze_control.has_tab(tab_id)
+    finally:
+        bridge.disconnect()
+
+
 def test_interactive_commands_follow_before_commit_but_reads_do_not(
     mounted_fx, monkeypatch
 ) -> None:

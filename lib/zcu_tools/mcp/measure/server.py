@@ -69,6 +69,12 @@ For tab/context/SoC guard conflicts, explicitly read tab.snapshot(tab_id),
 context.snapshot, and soc.info(include_cfg=true), respectively. Summaries,
 partial getters, bare versions and status do not re-snapshot those resources.
 A new tab created with tab.new carries an owner-thread existence receipt.
+Use tab_interact without payload to read the active plugin's committed state and
+commands; send one payload={command,args} to act. This method alone has no seen
+guard: GUI and agent commits use owner-loop order, and the later commit wins.
+Reads preserve focus; commands follow the Analysis pane. done settles the original
+analysis operation, and cancel(op) cancels it. preview_active describes local
+preview, not the committed state. Figure paths belong to this MCP session.
 Use status for the current GUI session and all live operations, wait(op) for a
 bounded outcome, and cancel(op) only when the domain operation supports it.
 wait(op) reports a failed operation as data; cancel(op) on a failed operation

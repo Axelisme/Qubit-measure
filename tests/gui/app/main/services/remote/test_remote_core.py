@@ -796,6 +796,69 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
         bridge.disconnect()
 
 
+def test_mcp_run_analyze_writeback_save_close_on_one_connection(
+    fx, tmp_path: Path
+) -> None:
+    _prepare_guarded_context(fx)
+    # The headless View supplies preview bytes; artifact export below is real.
+    fx.view.take_figure_screenshot_for_subtab.return_value = b"preview"
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        tab_id = call("tab_open", {"experiment": "fake"})["tab"]
+        call("rpc_call", {"method": "context.snapshot"})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
+        started = call("tab_run", {"tab": tab_id})
+        _await_completed_run(call, started["op"])
+        assert call("tab_get", {"tab": tab_id})["summary"]["state"]["has_result"]
+        analyzed = call("tab_analyze", {"tab": tab_id})
+        if "op" in analyzed:
+            assert (
+                call("wait", {"op": analyzed["op"], "timeout": 5})["status"]
+                == "finished"
+            )
+        call("tab_get", {"tab": tab_id, "include": ["summary", "artifacts"]})
+        preview = call("writeback", {"tab": tab_id})
+        assert len(preview["items"]) == 1
+        item = preview["items"][0]
+        assert item["target"] == "fake_peak"
+        written = call("writeback", {"tab": tab_id, "write": [{"id": item["id"]}]})
+        assert written["written"][0]["after"] == item["proposed"]
+        assert (
+            call("rpc_call", {"method": "context.snapshot"})["md"]["fake_peak"]
+            == item["proposed"]
+        )
+        image = tmp_path / "fit.png"
+        saved = call(
+            "tab_save",
+            {
+                "tab": tab_id,
+                "artifacts": ["analysis"],
+                "paths": {"analysis": str(image)},
+            },
+        )
+        if "op" in saved:
+            assert (
+                call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
+            )
+        else:
+            assert saved["saved"] == {"analysis": str(image)}
+        assert image.read_bytes().startswith(b"\x89PNG")
+        assert call("tab_close", {"tab": tab_id, "discard_unsaved": True}) == {
+            "closed": tab_id
+        }
+        assert not fx.ctrl.run_analyze_control.has_tab(tab_id)
+    finally:
+        bridge.disconnect()
+
+
 def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
     fx, tmp_path: Path
 ) -> None:
