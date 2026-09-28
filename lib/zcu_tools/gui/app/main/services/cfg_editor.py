@@ -63,12 +63,18 @@ from zcu_tools.gui.cfg import (
     decode_eval_wire,
 )
 from zcu_tools.gui.cfg.binding import (
+    AgentSweepTarget,
     CfgDraft,
     SettablePathError,
     SettableTarget,
     SettableTargetKind,
 )
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+    InvalidInputError,
+)
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
@@ -226,6 +232,66 @@ class CfgEditorSession:
             valid=bool(self.draft.is_valid()),
             removed=tuple(sorted(before - after)),
             added=tuple(sorted(after - before)),
+        )
+
+    def set_agent_fields(self, edits: Sequence[CfgEdit]) -> CfgEditResult:
+        """Apply ordered agent edits, keeping every successful prefix on failure."""
+        before: set[str] | None = None
+        actual: dict[str, object] = {}
+        for applied, edit in enumerate(edits):
+            try:
+                target = self.draft.resolve_agent_target(edit.path)
+                if target.affects_path_shape and before is None:
+                    before = {item.path for item in self.draft.iter_settable_targets()}
+                if isinstance(target, AgentSweepTarget):
+                    if not isinstance(edit.value, dict):
+                        raise SettablePathError(
+                            f"whole sweep at {edit.path!r} expects an object"
+                        )
+                    payload = {
+                        key: _decode_value(value) for key, value in edit.value.items()
+                    }
+                    actual[edit.path] = _agent_sweep_actual(target.set_value(payload))
+                else:
+                    value = _decode_value(edit.value)
+                    if (
+                        isinstance(value, EvalValue)
+                        and target.kind is not SettableTargetKind.SCALAR
+                    ):
+                        raise SettablePathError(
+                            f"eval value is only valid for scalar target {edit.path!r}"
+                        )
+                    if isinstance(value, ValueRef):
+                        if target.kind is not SettableTargetKind.SCALAR:
+                            raise SettablePathError(
+                                f"value_ref is only valid for scalar target {edit.path!r}"
+                            )
+                        value = self.resolve_value_ref(value, target.value_type)
+                    target.set_value(value)
+            except ExpectedError as exc:
+                error_type = {
+                    ExpectedErrorCategory.INVALID_INPUT: SettablePathError,
+                    ExpectedErrorCategory.FAILED_PRECONDITION: FailedPreconditionError,
+                }[exc.category]
+                raise error_type(
+                    f"agent edit at {edit.path!r} failed after {applied} applied: {exc}",
+                    reason_code=exc.reason_code,
+                ) from exc
+        after = (
+            {item.path for item in self.draft.iter_settable_targets()}
+            if before is not None
+            else None
+        )
+        return CfgEditResult(
+            valid=bool(self.draft.is_valid()),
+            removed=tuple(sorted(before - after))
+            if before is not None and after is not None
+            else (),
+            added=tuple(sorted(after - before))
+            if before is not None and after is not None
+            else (),
+            applied=len(edits),
+            actual=actual,
         )
 
     def commit_schema(self) -> CfgSchema:
@@ -549,8 +615,63 @@ class CfgEditorService:
     def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult:
         return self._require(editor_id).set_field(path, value)
 
-    def set_fields(self, editor_id: str, edits: Sequence[CfgEdit]) -> CfgEditResult:
-        return self._require(editor_id).set_fields(edits)
+    def set_fields(
+        self, editor_id: str, edits: Sequence[CfgEdit], *, agent_edit: bool = False
+    ) -> CfgEditResult:
+        session = self._require(editor_id)
+        return (
+            session.set_agent_fields(edits) if agent_edit else session.set_fields(edits)
+        )
+
+    def edit_library(
+        self,
+        item_kind: str,
+        name: str,
+        edits: Sequence[CfgEdit],
+        *,
+        save_as: str | None = None,
+    ) -> CfgEditResult:
+        """Commit edits in order, retaining the successful prefix on failure."""
+        if not edits:
+            raise CfgEditorError("library edits must not be empty")
+        if item_kind not in _ITEM_KINDS:
+            raise CfgEditorError(
+                f"item_kind must be one of {_ITEM_KINDS}, got {item_kind!r}"
+            )
+        if save_as is not None:
+            ml = self._read.get_current_ml()
+            store = ml.modules if item_kind == "module" else ml.waveforms
+            if save_as in store:
+                raise CfgEditorError(
+                    f"{item_kind} destination already exists: {save_as!r}"
+                )
+
+        # This draft is internal to the application, not an agent session. Keep
+        # it across writes so later edits see the shape created by earlier ones.
+        editor_id, _ = self.open(item_kind, from_name=name, gc=False)
+        try:
+            session = self._require(editor_id)
+            destination = save_as if save_as is not None else name
+            write = (
+                self._write.set_ml_module_from_schema
+                if item_kind == "module"
+                else self._write.set_ml_waveform_from_schema
+            )
+            for applied, edit in enumerate(edits):
+                try:
+                    session.set_agent_fields((edit,))
+                    if not session.draft.is_valid():
+                        raise CfgEditorError(f"invalid cfg draft after {edit.path!r}")
+                    write(destination, session.commit_schema())
+                except ExpectedError as exc:
+                    return CfgEditResult(
+                        valid=False,
+                        applied=applied,
+                        errors=({"path": edit.path, "message": str(exc)},),
+                    )
+            return CfgEditResult(valid=True, applied=len(edits))
+        finally:
+            self.teardown(editor_id, reason="library_edit_finished")
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService
@@ -768,6 +889,32 @@ class CfgEditorService:
         if from_name not in ml.waveforms:
             raise CfgEditorError(f"unknown waveform: {from_name!r}")
         return waveform_cfg_to_value(ml.waveforms[from_name])
+
+
+def _agent_sweep_actual(value: object) -> dict[str, object]:
+    """Project a cached sweep value without evaluating an expression again."""
+    from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
+
+    if isinstance(value, SweepValue):
+        parts = ("start", "stop", "expts", "step")
+    elif isinstance(value, CenteredSweepValue):
+        parts = ("center", "span", "expts", "step")
+    else:
+        raise TypeError(f"Unexpected agent sweep value: {type(value).__name__}")
+    result: dict[str, object] = {}
+    for part in parts:
+        item = getattr(value, part)
+        if isinstance(item, EvalValue):
+            result[part] = {
+                "__kind": "eval",
+                "expr": item.expr,
+                "resolved": item.resolved,
+            }
+        elif isinstance(item, DirectValue):
+            result[part] = item.value
+        else:
+            result[part] = item
+    return result
 
 
 def _decode_value(value: object) -> object:

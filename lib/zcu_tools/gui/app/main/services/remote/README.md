@@ -125,8 +125,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 66`, `GUI_VERSION = 98`, and
-`MCP_VERSION = 89` (defined in `zcu_tools.mcp.measure.server`). WIRE 66 moves
+Current measure-gui values are `WIRE_VERSION = 67`, `GUI_VERSION = 99`, and
+`MCP_VERSION = 90` (defined in `zcu_tools.mcp.measure.server`). WIRE 67 adds
+aggregate cfg edits and `context.ml_edit`; GUI 99 owns sequential library
+commits through the shared draft model and preserves batch error categories.
+MCP 90 exposes cfg/library tools and reports partial commits. WIRE 66 moves
 seen guards into the GUI, removes wire expectations and write receipts, exposes
 operation state in snapshots, and adds `tab.open_file`. GUI 98 owns new-tab
 loading and failure cleanup; MCP 89 forwards once without version bookkeeping.

@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-28，GUI-owned seen and new-tab file loading
+**Last updated:** 2026-09-28，application-owned sequential library edits
 
 # `zcu_tools/mcp/measure/`
 
@@ -28,6 +28,12 @@ Shared SocketTransport 送出前與接收逐幀使用 shared framing 的8 MiB UT
 validity 與 cached choices；GUI model 是來源，讀取不重新解析 md/ml。Prefix 回指定 node，
 保留其完整 path；即使 prefix 是空字串也不更新整份 cfg 觀察版本。失敗讀取與裸版本表
 不推進基線，其他 cfg 的更新不影響目標 cfg。Wire 格式與描述由 GUI catalog 擁有。
+
+## Library 編輯
+
+`ml_edit`只送一次GUI application命令。CfgEditorService使用共用CfgDraft，經ContextWritePort逐項提交；首錯即停，保留已提交前綴並清理內部草稿。回覆區分applied、failed、skipped與實際cfg。save_as不修改來源，首次成功才建立目的地。Agent須明確觀察context，沒有editor/context隱藏預讀或自動重試。
+
+Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，MODIFIED參照保留inline修改。既有draft由service反應library變更並發布，同一份狀態供widget與MCP觀察。
 
 ## 驗證
 

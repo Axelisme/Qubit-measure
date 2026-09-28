@@ -23,6 +23,12 @@ keys in `.ref`, and reference children descend directly. Removed `.sweep.*` and
 `.value.*` spellings fail before mutation and report a verified replacement.
 Unrepresentable or reserved field keys fail when the target tree is built.
 
+These leaf sweep paths remain the GUI widget contract. Agent edits use a nominal
+aggregate target at the sweep parent path and provide the complete sweep object.
+Both entry points mutate the same binding model through SweepEditor or
+CenteredSweepEditor validation and normalization. Remote code does not duplicate
+field subtype grammar; an aggregate edit validates its inputs before committing.
+
 `gui.cfg` owns strict custom-reference-key make/parse/query helpers. Binding
 normalizes allowed bare labels; tags remain internal persistence representation.
 Binding never imports measure session policy. `ValueRef` resolves at the app
