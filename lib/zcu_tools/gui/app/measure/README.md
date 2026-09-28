@@ -240,7 +240,8 @@ not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
 `MainWindowToolbar` owns the top toolbar widgets and slash-grouped new-tab menu;
 it reports selected actions back through a narrow `MainWindowToolbarHost` surface
-instead of reaching into `Controller` directly.
+instead of reaching into `Controller` directly. `main_window_activity.py` projects
+run activity marker text, color, and tooltip without owning Qt widgets.
 
 Key ownership rules:
 
