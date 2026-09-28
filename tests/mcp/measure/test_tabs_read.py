@@ -167,25 +167,51 @@ def test_tab_get_summary_reads_explicit_tab_without_changing_focus(
                         "is_analyzing": False,
                         "has_run_result": True,
                         "has_analyze_result": False,
+                        "has_post_analyze_result": False,
                     },
                     "result_source_path": "old.h5",
+                    "result_state": {
+                        "revision": 4,
+                        "available": True,
+                        "source_path": "old.h5",
+                    },
+                    "analysis_state": {
+                        "revision": 2,
+                        "available": False,
+                        "has_figure": False,
+                        "has_writeback_draft": False,
+                    },
+                    "post_analysis_state": {
+                        "revision": 2,
+                        "available": False,
+                        "has_figure": False,
+                        "has_writeback_draft": False,
+                    },
+                    "save_paths": {
+                        "data_path": "next.h5",
+                        "analysis_image_path": "analysis.png",
+                        "post_analysis_image_path": "post.png",
+                    },
                 }
             ]
         }
 
     client = make_client(tmp_path, reply)
-    assert client.call("tab_get", {"tab": "old-tab", "include": ["summary"]}) == {
-        "summary": {
-            "experiment": "ramsey",
-            "state": {
-                "running": False,
-                "analyzing": False,
-                "has_result": True,
-                "has_analysis": False,
-                "has_post": False,
-            },
-            "source_file": "old.h5",
-        }
+    result = client.call("tab_get", {"tab": "old-tab", "include": ["summary"]})
+    assert (
+        result["operation_state"]
+        == reply("tab.snapshot", {"tab_id": "old-tab"})["tabs"][0]
+    )
+    assert result["summary"] == {
+        "experiment": "ramsey",
+        "state": {
+            "running": False,
+            "analyzing": False,
+            "has_result": True,
+            "has_analysis": False,
+            "has_post": False,
+        },
+        "source_file": "old.h5",
     }
     assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
 
@@ -290,6 +316,10 @@ def test_tab_get_marks_only_unfinished_cfg_and_artifact_owners(tmp_path: Path) -
 
     client = make_client(tmp_path, reply)
     result = client.call("tab_get", {"tab": "old-tab", "include": ["cfg", "artifacts"]})
+    assert (
+        result["operation_state"]
+        == reply("tab.snapshot", {"tab_id": "old-tab"})["tabs"][0]
+    )
     assert result["cfg"] == {"frequency": {"raw": "5", "resolved": 5}}
     assert result["artifacts"][0] == {
         "key": "data",
@@ -319,6 +349,7 @@ def test_tab_live_without_run_does_not_capture_figure(tmp_path: Path) -> None:
     assert client.call("tab_live", {"tab": "old-tab"}) == {
         "running": False,
         "reason": "no_run",
+        "operation_state": reply("tab.snapshot", {"tab_id": "old-tab"})["tabs"][0],
     }
     assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
 
@@ -358,6 +389,10 @@ def test_tab_live_uses_gui_run_operation_elapsed_and_figure_path(
 
     client = make_client(tmp_path, reply)
     result = client.call("tab_live", {"tab": "live-tab"})
+    assert (
+        result["operation_state"]
+        == reply("tab.snapshot", {"tab_id": "live-tab"})["tabs"][0]
+    )
     assert result["running"] is True
     assert result["progress"] == [{"label": "Run 1/10", "percent": 10.0}]
     assert result["elapsed_s"] == 3.25 and result["eta_s"] == 4.5
@@ -365,6 +400,19 @@ def test_tab_live_uses_gui_run_operation_elapsed_and_figure_path(
     assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
     client.context.session.cleanup_pngs()
     assert not Path(result["figure"]).exists()
+
+
+def test_cfg_only_read_calls_only_its_resource(tmp_path: Path) -> None:
+    def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        assert method == "tab.get_cfg" and params == {"tab_id": "old-tab"}
+        return {"tree": {"frequency": {"value": 5.0}}}
+
+    client = make_client(tmp_path, reply)
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+    result = client.call("tab_get", {"tab": "old-tab", "include": ["cfg"]})
+    assert result["cfg"] == {"frequency": {"value": 5.0}}
+    assert client.transport.sent == [("tab.get_cfg", {"tab_id": "old-tab"})]
 
 
 def test_tab_get_rejects_invalid_include_items_before_read(tmp_path: Path) -> None:

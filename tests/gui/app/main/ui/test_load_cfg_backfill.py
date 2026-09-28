@@ -124,6 +124,13 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
     port = remote.start()
     try:
         with open_client(port) as client:
+            for method, params in (
+                ("tab.snapshot", {"tab_id": tab_id}),
+                ("context.snapshot", {}),
+            ):
+                send(client, {"id": method, "method": method, "params": params})
+                observed = recv_response(client, method)
+                assert observed["ok"], observed
             send(
                 client,
                 {

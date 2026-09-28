@@ -58,10 +58,11 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
             entry["name"] == "threshold"
             for entry in overview["analyze_params"]["primary"]["definitions"]
         )
-        assert invoke("tab_live", {"tab": tab}) == {
-            "running": False,
-            "reason": "no_run",
-        }
+        live = invoke("tab_live", {"tab": tab})
+        assert live["running"] is False
+        assert live["reason"] == "no_run"
+        assert live["operation_state"]["tab_id"] == tab
+        assert live["operation_state"]["result_state"]["available"] is False
         assert live_gui.state.active_tab_id == focused
 
         with pytest.raises(GuiRpcError):

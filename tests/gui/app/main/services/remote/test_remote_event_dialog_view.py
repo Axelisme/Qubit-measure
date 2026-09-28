@@ -47,6 +47,7 @@ from zcu_tools.gui.session.events import (
 from ._helpers import (
     Fixture,
     call,
+    observe_run_inputs,
     open_client,
     recv_push,
     send,
@@ -564,6 +565,9 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
     try:
         call(sock, "events.subscribe", {"events": ["run_started", "run_finished"]})
         tab_id = call(sock, "tab.new", {"adapter_name": "fake"})["result"]["tab_id"]
+        observe_run_inputs(
+            fx, tab_id, lambda method, params: call(sock, method, params)["result"]
+        )
         result = call(sock, "tab.run_start", {"tab_id": tab_id})["result"]
         # One run_started, then one run_finished with outcome='finished'.
         started = recv_push(sock, "run_started")

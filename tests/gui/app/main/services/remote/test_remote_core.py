@@ -45,8 +45,10 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import WaveformCfgFactory
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
+from ._helpers import call as _raw_call
 from ._helpers import call_mcp_with_qt as _call_mcp_with_qt
 from ._helpers import mcp_client as _mcp_client
+from ._helpers import observe_run_inputs
 
 # Poll real socket workers while delivering owner-thread Qt events.
 pytestmark = pytest.mark.uses_wall_clock
@@ -61,7 +63,7 @@ def _make_ctx() -> ExpContext:
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),
-        soccfg=MagicMock(),
+        soccfg=make_mock_soccfg(),
         res_name="fake_res",
         result_dir="/tmp/zcu_result",
         database_path="/tmp/zcu_db/fake_chip/fake_qubit",
@@ -657,8 +659,13 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
         assert "cfg" in call(
             "rpc_call", {"method": "soc.info", "params": {"include_cfg": True}}
         )
-        # The creation receipt establishes tab existence; no tab.snapshot
-        # round-trip is needed before an agent-started run on the new tab.
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         started = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
         )
@@ -682,6 +689,13 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
         )
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            fx,
+            tab_id,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         handle = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
         )["handle"]
@@ -705,6 +719,13 @@ def test_restarted_gui_requires_new_full_reads_before_running(
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": first_tab}})
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            first,
+            first_tab,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         old_handle = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": first_tab}}
         )["handle"]
@@ -734,6 +755,13 @@ def test_restarted_gui_requires_new_full_reads_before_running(
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": second_tab}})
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        observe_run_inputs(
+            second,
+            second_tab,
+            lambda method, params: call(
+                "rpc_call", {"method": method, "params": params}
+            ),
+        )
         new_handle = call(
             "rpc_call", {"method": "tab.run_start", "params": {"tab_id": second_tab}}
         )["handle"]
@@ -996,6 +1024,9 @@ def test_run_start_then_running_tab_then_finishes(fx):
             sock, {"id": "1", "method": "tab.new", "params": {"adapter_name": "fake"}}
         )
         tab_id = _recv_response(sock)["result"]["tab_id"]
+        observe_run_inputs(
+            fx, tab_id, lambda method, params: _raw_call(sock, method, params)["result"]
+        )
 
         _send(
             sock, {"id": "2", "method": "tab.run_start", "params": {"tab_id": tab_id}}

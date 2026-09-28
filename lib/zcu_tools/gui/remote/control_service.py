@@ -341,7 +341,9 @@ class RemoteControlServiceBase:
             handler_params = validate_params(spec.params, req.params)
         else:
             handler_params = req.params
-        self._dispatch_on_owner(link, req.id, req.method, spec, handler_params)
+        self._dispatch_on_owner(
+            link, req.id, req.method, spec, handler_params, request_params=req.params
+        )
 
     # ------------------------------------------------------------------
     # events.* state-owning handlers
@@ -396,7 +398,9 @@ class RemoteControlServiceBase:
     # Dispatch onto the State owner thread (marshal + off-main + policy seams)
     # ------------------------------------------------------------------
 
-    def _dispatch_on_owner(self, link: ClientLink, rid, method, spec, params) -> None:
+    def _dispatch_on_owner(
+        self, link: ClientLink, rid, method, spec, params, *, request_params
+    ) -> None:
         holder: dict[str, object] = {}
         bus = self._get_bus()
         ctx = _ctx(link)
@@ -441,7 +445,7 @@ class RemoteControlServiceBase:
                             if isinstance(observed, dict) and not abandoned:
                                 try:
                                     holder["rollback"] = self._owner_success(
-                                        ctx, method, params, observed, before
+                                        ctx, method, request_params, observed, before
                                     )
                                 except Exception as exc:  # dispatch boundary
                                     logger.exception(

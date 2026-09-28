@@ -38,6 +38,7 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 
 def make_ctx() -> ExpContext:
@@ -45,13 +46,30 @@ def make_ctx() -> ExpContext:
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),
-        soccfg=MagicMock(),
+        soccfg=make_mock_soccfg(),
         res_name="fake_res",
         result_dir="/tmp/zcu_result",
         database_path="/tmp/zcu_db/fake_chip/fake_qubit",
         active_label="ctx001",
         readiness=ContextReadiness.ACTIVE,
     )
+
+
+def observe_run_inputs(
+    fx, tab_id: str, invoke: Callable[[str, dict[str, Any]], object]
+) -> None:
+    """Prepare the headless form owner and explicitly read each run dependency."""
+    if fx.ctrl.editor_id_for_owner(tab_id) is None:
+        fx.ctrl.open_seeded_cfg_editor(
+            fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
+        )
+    for method, params in (
+        ("tab.snapshot", {"tab_id": tab_id}),
+        ("tab.get_cfg", {"tab_id": tab_id}),
+        ("soc.info", {"include_cfg": True}),
+        ("device.list", {}),
+    ):
+        invoke(method, params)
 
 
 def make_view() -> MagicMock:

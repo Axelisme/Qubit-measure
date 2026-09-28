@@ -78,17 +78,6 @@ class MeasureClient:
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.tools[name]["handler"](arguments)
 
-    def observe_versions(self, versions: dict[str, int]) -> None:
-        self.transport.replies["resources.versions"] = {
-            "ok": True,
-            "result": {"versions": versions},
-        }
-        # Seed a prior caller observation; the tests exercise subsequent RPCs.
-        self.context.session.ensure_connected()
-        self.context.session.last_seen_versions.clear()
-        self.context.session.last_seen_versions.update(versions)
-        self.transport.sent.clear()
-
 
 def make_client(
     tmp_path: Path,

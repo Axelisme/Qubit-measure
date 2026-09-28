@@ -113,24 +113,21 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
         not isinstance(item, str) or item not in valid for item in include
     ):
         raise ValueError(f"include must be a list of {sorted(valid)}")
-    snap = _tab_snapshot(ctx, tab)
-    interaction = snap["interaction"]
     result: dict[str, Any] = {}
+    snap = None
+    if "summary" in include or "artifacts" in include:
+        snap = _tab_snapshot(ctx, tab)
+        result["operation_state"] = snap
     if "summary" in include:
+        assert snap is not None
+        interaction = snap["interaction"]
         state = {
             "running": bool(interaction["is_running"]),
             "analyzing": bool(interaction["is_analyzing"]),
             "has_result": bool(interaction["has_run_result"]),
             "has_analysis": bool(interaction["has_analyze_result"]),
-            "has_post": False,
+            "has_post": bool(interaction["has_post_analyze_result"]),
         }
-        if interaction["has_analyze_result"]:
-            state["has_post"] = (
-                ctx.session.read_internal(
-                    "tab.get_post_analyze_result", {"tab_id": tab}
-                )["summary"]
-                is not None
-            )
         result["summary"] = {
             "experiment": snap["adapter_name"],
             "state": state,
@@ -168,6 +165,7 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
                 else {"summary": summary, "figure": _figure(ctx, tab, pane)}
             )
     if "artifacts" in include:
+        assert snap is not None
         paths = snap.get("save_paths") or {}
         result["artifacts"] = [
             {"key": key, "kind": kind, "default_path": paths.get(path_key)}
@@ -190,7 +188,7 @@ def tab_live(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
     has_result = bool(snap["interaction"]["has_run_result"])
     running = bool(snap["interaction"]["is_running"])
     if not running and not has_result:
-        return {"running": False, "reason": "no_run"}
+        return {"running": False, "reason": "no_run", "operation_state": snap}
     progress: list[dict[str, Any]] = []
     eta: float | None = None
     elapsed: float | None = None
@@ -214,6 +212,7 @@ def tab_live(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
                     eta = max(estimates)
                 break
     return {
+        "operation_state": snap,
         "running": running,
         "progress": progress,
         "elapsed_s": elapsed,
