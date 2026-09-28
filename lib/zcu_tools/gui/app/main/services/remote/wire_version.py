@@ -109,7 +109,8 @@ from __future__ import annotations
 # v66: GUI-owned seen guards replace wire expectations/receipts; snapshots expose
 # operation state and tab.open_file owns new-tab loading with cfg backfill.
 # v67: shared cfg aggregate edits and application-owned sequential library edits.
-WIRE_VERSION = 67
+# v68: analysis starts expose effective params, interactive mode and invalidation facts.
+WIRE_VERSION = 68
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -155,4 +156,5 @@ WIRE_VERSION = 67
 # v97: project cached device fields without driver reads during setup.
 # v98: own per-connection observations and new-tab load/failure cleanup in GUI.
 # v99: own ordered library commits and preserve cfg batch failure categories.
-GUI_VERSION = 99
+# v100: validate analysis params and follow run/edit/analyze through explicit view commands.
+GUI_VERSION = 100

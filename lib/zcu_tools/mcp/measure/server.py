@@ -45,7 +45,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
 # v89: forward GUI-owned guard requests once and expose observed operation state.
 # v90: fixed cfg/library tools use shared drafts and report partial library edits.
-MCP_VERSION = 90
+# v91: run and analyze tools share GUI operations, bounded waits and complete results.
+MCP_VERSION = 91
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
