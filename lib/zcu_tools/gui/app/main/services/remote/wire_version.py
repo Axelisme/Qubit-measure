@@ -106,7 +106,9 @@ from __future__ import annotations
 # fields and cached raw/resolved/error state, instead of settable-only values.
 # v64: predictor.calibrate exposes the shared single-point bias correction.
 # v65: device.snapshot includes State-cached field specifications during setup.
-WIRE_VERSION = 65
+# v66: GUI-owned seen guards replace wire expectations/receipts; snapshots expose
+# operation state and tab.open_file owns new-tab loading with cfg backfill.
+WIRE_VERSION = 66
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -150,4 +152,5 @@ WIRE_VERSION = 65
 # v95: bound per-client outbound bytes, including the in-flight frame.
 # v96: predictor.calibrate routes through the shared PredictorControlPort.
 # v97: project cached device fields without driver reads during setup.
-GUI_VERSION = 97
+# v98: own per-connection observations and new-tab load/failure cleanup in GUI.
+GUI_VERSION = 98

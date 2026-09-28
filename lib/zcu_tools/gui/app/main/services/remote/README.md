@@ -125,9 +125,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 65`, `GUI_VERSION = 97`, and
-`MCP_VERSION = 88` (defined in `zcu_tools.mcp.measure.server`). WIRE 65
-adds State-cached device fields to snapshots during setup. WIRE 64 exposes
+Current measure-gui values are `WIRE_VERSION = 66`, `GUI_VERSION = 98`, and
+`MCP_VERSION = 89` (defined in `zcu_tools.mcp.measure.server`). WIRE 66 moves
+seen guards into the GUI, removes wire expectations and write receipts, exposes
+operation state in snapshots, and adds `tab.open_file`. GUI 98 owns new-tab
+loading and failure cleanup; MCP 89 forwards once without version bookkeeping.
+WIRE 65 adds State-cached device fields to snapshots during setup. WIRE 64 exposes
 predictor calibration; GUI 96 routes it through the shared predictor port.
 GUI 93 removes
 Run's context-content dependency after freezing cfg and device inputs; tab cfg,
