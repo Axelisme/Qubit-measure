@@ -22,7 +22,14 @@ from .binding.draft import CfgDraft
 from .binding.observation import CfgNodeObservation
 from .binding.ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 from .lowering import RangeFactory
-from .model import CfgSchema, DirectValue, EvalValue
+from .model import (
+    CfgNodeSpec,
+    CfgSchema,
+    CfgSectionSpec,
+    DirectValue,
+    EvalValue,
+    ReferenceSpec,
+)
 from .resolved import lower_resolved_cfg
 
 CfgPath: TypeAlias = tuple[str, ...]
@@ -117,6 +124,9 @@ class CfgRef:
 class CfgEdit:
     path: CfgPath
     value: CfgInput
+
+    def __post_init__(self) -> None:
+        _validate_path(self.path)
 
 
 class CfgStatus(str, Enum):
@@ -228,6 +238,7 @@ class CfgResource:
         self._notifying = 0
         self._subscribers: dict[object, Callable[[CfgObservation], None]] = {}
         schema = deepcopy(defaults())
+        _validate_definition(schema.spec)
         self._spec = deepcopy(schema.spec)
         self._draft, basis = self._prepare(schema)
         self._observation = self._observe_draft(
@@ -255,6 +266,7 @@ class CfgResource:
         from ._capture import ExpressionCapture
         from ._node_write import write_node
 
+        edits = _validate_edits(edits)
         self._check_command(expected_revision)
         source = self._resolution()
         capture = ExpressionCapture(source.read_capture, source.validate_expression)
@@ -265,10 +277,6 @@ class CfgResource:
         try:
             for index, edit in enumerate(edits):
                 try:
-                    if any(not part for part in edit.path):
-                        raise CfgInputError(
-                            CfgInputReason.MALFORMED_INPUT, "invalid path segment"
-                        )
                     write_node(
                         candidate.root, edit.path, deepcopy(edit.value), capture.prepare
                     )
@@ -462,6 +470,43 @@ class CfgResource:
             )
         finally:
             self._notifying -= 1
+
+
+def _validate_path(path: object) -> None:
+    if not isinstance(path, tuple) or any(
+        not isinstance(part, str) or not part for part in path
+    ):
+        raise CfgInputError(
+            CfgInputReason.MALFORMED_INPUT,
+            "path must be a tuple of nonempty string segments",
+        )
+
+
+def _validate_edits(edits: object) -> tuple[CfgEdit, ...]:
+    if not isinstance(edits, tuple) or any(
+        not isinstance(edit, CfgEdit) for edit in edits
+    ):
+        raise CfgInputError(
+            CfgInputReason.MALFORMED_INPUT, "edits must be a tuple of CfgEdit"
+        )
+    return edits
+
+
+def _validate_field_name(key: object) -> None:
+    if not isinstance(key, str) or not key or key.startswith("__"):
+        raise ValueError(
+            f"Cfg definition has an invalid or reserved field name: {key!r}"
+        )
+
+
+def _validate_definition(spec: CfgNodeSpec) -> None:
+    if isinstance(spec, CfgSectionSpec):
+        for key, child in spec.fields.items():
+            _validate_field_name(key)
+            _validate_definition(child)
+    elif isinstance(spec, ReferenceSpec):
+        for shape in spec.allowed:
+            _validate_definition(shape)
 
 
 def _diagnostics(tree: CfgNodeObservation, path: CfgPath = ()):

@@ -2,10 +2,13 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from itertools import permutations
 
 import pytest
 from zcu_tools.gui.cfg.binding.ports import ResolvedReference
 from zcu_tools.gui.cfg.model import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -546,3 +549,132 @@ def test_unavailable_projection_drops_linked_cache_and_derived_range_result() ->
     recovered = resource.refresh(changed.ref.revision)
     assert recovered.status is CfgStatus.VALID
     assert recovered.tree.children["ref"].children["x"].value == DirectValue(7.0)
+
+
+@pytest.mark.parametrize("path", ["a", ["a"], ("",), (1,), (None,)])
+def test_edit_rejects_malformed_python_path(path) -> None:
+    with pytest.raises(CfgInputError) as caught:
+        CfgEdit(path, 2.0)
+    assert caught.value.reason is CfgInputReason.MALFORMED_INPUT
+
+
+@pytest.mark.parametrize("edits", [None, [], [CfgEdit(("a",), 2.0)], (None,)])
+def test_edit_rejects_malformed_batch_without_reading_sources(edits) -> None:
+    sources = Sources()
+    resource = make_resource(sources)
+    before = resource.observe()
+    reads = sources.reads
+    with pytest.raises(CfgInputError) as caught:
+        resource.edit(before.ref.revision, edits)
+    assert caught.value.reason is CfgInputReason.MALFORMED_INPUT
+    assert resource.observe() == before
+    assert sources.reads == reads
+
+
+@pytest.mark.parametrize("revision", [True, -1, 0.0, "0"])
+def test_invalid_revision_never_reads_sources_or_publishes(revision) -> None:
+    sources = Sources()
+    resource = make_resource(sources)
+    before = resource.observe()
+    reads = sources.reads
+    with pytest.raises(CfgInputError) as caught:
+        resource.edit(revision, ())
+    assert caught.value.reason is CfgInputReason.MALFORMED_INPUT
+    assert resource.observe() == before
+    assert sources.reads == reads
+
+
+@pytest.mark.parametrize("key", ["", "__expr", "__ref", 1])
+@pytest.mark.parametrize("nested", [False, True])
+def test_definition_rejects_unaddressable_or_reserved_keys(key, nested: bool) -> None:
+    shape = CfgSectionSpec(fields={key: ScalarSpec("A", float)})
+    spec = (
+        CfgSectionSpec(fields={"ref": ReferenceSpec("test", [shape])})
+        if nested
+        else shape
+    )
+    sources = Sources()
+    with pytest.raises(ValueError, match="field name"):
+        CfgResource(
+            lambda: CfgSchema(spec, CfgSectionValue({})),
+            resolution=sources.read,
+            make_range=make_range,
+        )
+    assert sources.reads == 0
+
+
+@pytest.mark.parametrize("failure_call", [1, 2])
+def test_unexpected_capture_validator_fault_preserves_publication(
+    failure_call: int,
+) -> None:
+    sources = ExpressionSources()
+    calls = 0
+    defect = RuntimeError("validator defect")
+
+    def validate(expression: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == failure_call:
+            raise defect
+        validate_scalar_expr(expression)
+
+    resource = CfgResource(
+        defaults,
+        resolution=lambda: replace(sources.read(), validate_expression=validate),
+        make_range=make_range,
+    )
+    before = resource.observe()
+    with pytest.raises(RuntimeError) as caught:
+        resource.edit(
+            before.ref.revision, (CfgEdit(("a",), EvalValue("$device.value")),)
+        )
+    assert caught.value is defect
+    assert resource.observe() == before
+
+
+@pytest.mark.parametrize("centered", [False, True])
+@pytest.mark.parametrize("order", list(permutations((0, 1, 2))))
+def test_whole_range_uses_new_geometry_before_step(centered: bool, order) -> None:
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    value = CenteredSweepValue(1.0, 2.0, 3) if centered else SweepValue(0.0, 2.0, 3)
+    pairs = (
+        [("center", 10.0), ("span", 8.0), ("step", 2.0)]
+        if centered
+        else [("start", 6.0), ("stop", 14.0), ("step", 2.0)]
+    )
+    resource = CfgResource(
+        lambda: CfgSchema(
+            CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
+        ),
+        resolution=Sources().read,
+        make_range=make_range,
+    )
+    changed = resource.edit(
+        resource.observe().ref.revision,
+        (CfgEdit(("range",), dict(pairs[index] for index in order)),),
+    )
+    assert changed.status is CfgStatus.VALID
+    accepted = resource.accept(changed.ref.revision)
+    assert accepted.values["range"] == {"start": 6.0, "stop": 14.0, "expts": 5}
+    observed = changed.tree.children["range"].value
+    assert isinstance(observed, (SweepValue, CenteredSweepValue))
+    assert observed.step == 2.0
+
+
+@pytest.mark.parametrize(
+    "payload", [{"expts": 5, "step": 2.0}, {"center": 8.0}, {"unknown": 1.0}]
+)
+def test_whole_range_rejection_is_atomic(payload) -> None:
+    sources = Sources()
+    schema = defaults()
+    schema.spec.fields["range"] = CenteredSweepSpec(locked_center=1.0)
+    schema.value.fields["range"] = CenteredSweepValue(1.0, 2.0, 3)
+    resource = CfgResource(
+        lambda: schema, resolution=sources.read, make_range=make_range
+    )
+    before = resource.observe()
+    with pytest.raises(CfgInputError):
+        resource.edit(
+            before.ref.revision, (CfgEdit(("a",), 9.0), CfgEdit(("range",), payload))
+        )
+    assert resource.observe() == before

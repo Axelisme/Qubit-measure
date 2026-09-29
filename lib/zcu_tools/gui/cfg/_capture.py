@@ -5,6 +5,8 @@ import math
 import tokenize
 from collections.abc import Callable
 
+from zcu_tools.gui.expected_error import InvalidInputError
+
 from .resource import (
     CfgInputError,
     CfgInputReason,
@@ -32,12 +34,12 @@ class ExpressionCapture:
         skeleton = _substitute(expression, spans, lambda name: "(0)")
         try:
             self._validate(skeleton)
-        except RuntimeError as exc:
+        except InvalidInputError as exc:
             raise CfgInputError(CfgInputReason.CAPTURE_SYNTAX, str(exc)) from exc
         prepared = _substitute(expression, spans, self._literal)
         try:
             self._validate(prepared)
-        except RuntimeError as exc:
+        except InvalidInputError as exc:
             raise CfgInputError(CfgInputReason.INVALID_VALUE, str(exc)) from exc
         return prepared
 

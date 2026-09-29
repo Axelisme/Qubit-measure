@@ -146,8 +146,9 @@ def _write_range(
             raise CfgInputError(
                 CfgInputReason.INVALID_VALUE, "range cannot specify both expts and step"
             )
-        for key, child in value.items():
-            _write_range(node, (key,), child, prepare)
+        # Derive the point count from the new geometry, not mapping order.
+        for key in sorted(value, key=lambda key: key in {"expts", "step"}):
+            _write_range(node, (key,), value[key], prepare)
         return
     if len(path) != 1:
         raise CfgInputError(CfgInputReason.UNKNOWN_PATH, "range paths have one segment")
