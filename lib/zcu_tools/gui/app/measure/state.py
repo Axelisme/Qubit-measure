@@ -607,7 +607,7 @@ class State(SessionState):
             tracker.observe(
                 ArtifactKind.DATA,
                 result=tab.run.result,
-                has_figure=False,
+                figure=None,
                 path=tab.effective_data_path(self.session_env),
                 comment=tab.save.comment,
             )
@@ -618,7 +618,7 @@ class State(SessionState):
                 tracker.observe(
                     ArtifactKind.ANALYSIS,
                     result=tab.analysis.result,
-                    has_figure=tab.analysis.figure is not None,
+                    figure=tab.analysis.figure,
                     path=tab.effective_analysis_image_path(self.session_env),
                 )
             )
@@ -627,7 +627,7 @@ class State(SessionState):
                 tracker.observe(
                     ArtifactKind.POST_ANALYSIS,
                     result=tab.post_analysis.result,
-                    has_figure=tab.post_analysis.figure is not None,
+                    figure=tab.post_analysis.figure,
                     path=tab.effective_post_analysis_image_path(self.session_env),
                 )
             )

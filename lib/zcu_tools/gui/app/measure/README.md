@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-29 — Setup 開啟入口與 project settings 名稱
+**Last updated:** 2026-09-29 — 圖形保存成功歷史
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -356,6 +356,11 @@ snapshot；同一opaque draft另擁有per-item applied state，只有成功write
 selection本身不改狀態，retarget或內容修改會重設；同kind items不得指向重複destination，
 避免batch覆寫卻誤標applied。狀態不跨draft/process持久化，也不提供
 concurrent-write detection或apply-conflict policy。
+
+Analysis/Post 圖形保存只記錄目前 result／Figure 產物是否曾成功保存，不追蹤
+artist、視圖或目的地的 dirty 變更。新產物從未保存開始；舊產物晚到的保存完成
+不將新產物標成已保存。再次匯出失敗保留先前成功紀錄。DATA 仍追蹤原有
+result、path 與 comment 的保存 signature。
 
 Analysis/Post result services prepare proposals, figures and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear
