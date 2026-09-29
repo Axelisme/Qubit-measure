@@ -6,7 +6,7 @@ import IPython.display
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from ipympl.backend_nbagg import Canvas, Toolbar
+from ipympl.backend_nbagg import Canvas, FigureManager, Toolbar
 from ipywidgets import Widget
 from matplotlib.figure import Figure
 from zcu_tools.notebook.plotting import NotebookPlotHost
@@ -57,6 +57,12 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
 ) -> None:
     rendered: list[list[float]] = []
     draw = Canvas.draw
+    draw_idle = Canvas.draw_idle
+    refreshed: list[Canvas] = []
+
+    def record_refresh(canvas: Canvas) -> None:
+        draw_idle(canvas)
+        refreshed.append(canvas)
 
     def record_draw(canvas: Canvas) -> None:
         draw(canvas)
@@ -65,6 +71,7 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
         )
 
     monkeypatch.setattr(Canvas, "draw", record_draw)
+    monkeypatch.setattr(Canvas, "draw_idle", record_refresh)
     create, published = notebook_plots
     before = plt.get_fignums()
     backend = plt.get_backend()
@@ -75,7 +82,9 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
 
     live = plots.liveplot_1d("live", "x", "y")
     assert published == [plots["live"].canvas]
+    refreshed.clear()
     live.update(np.array([1.0, 2.0]), np.array([5.0, 6.0]))
+    assert refreshed == [plots["live"].canvas]
     plots.finish()
     plots.finish()
 
@@ -138,6 +147,49 @@ def test_failed_display_propagates_and_diagnostic_release_closes_widgets(
     output = BytesIO()
     plots["live"].savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG")
+
+
+@pytest.mark.parametrize("stage", ["canvas", "toolbar"])
+def test_manager_failure_releases_acquired_widgets_and_restores_savefig(
+    stage: str,
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create, published = notebook_plots
+    other = create()
+    other.subplots("retained")
+    other.finish()
+    retained = published[0]
+    acquired: list[Canvas] = []
+    error = RuntimeError("manager construction failed")
+
+    def fail_manager(canvas: Canvas, num: int) -> FigureManager:
+        acquired.append(canvas)
+        if stage == "toolbar":
+            FigureManager(canvas, num)
+        raise error
+
+    monkeypatch.setattr("ipympl.backend_nbagg.FigureManager", fail_manager)
+    plots = create()
+    with pytest.raises(RuntimeError, match="manager construction failed") as exc:
+        plots.liveplot_1d("live", "x", "y")
+    assert exc.value is error
+    canvas = acquired[0]
+    assert canvas.comm is None
+    assert canvas.layout.comm is None
+    if stage == "toolbar":
+        assert isinstance(canvas.toolbar, Toolbar)
+        assert canvas.toolbar.comm is None
+        assert canvas.toolbar.layout.comm is None
+    assert plots["live"].canvas is not canvas
+    assert plots["live"].canvas.manager is None
+    plots.finish(present=False)
+    plots.release()
+    output = BytesIO()
+    plots["live"].savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+    assert retained.comm is not None
+    assert other["retained"].canvas is retained
 
 
 def test_host_rejects_other_manager_without_moving_canvas(

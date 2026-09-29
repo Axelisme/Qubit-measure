@@ -7,7 +7,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
-    from ipympl.backend_nbagg import Canvas, FigureManager, Toolbar
+    from ipympl.backend_nbagg import Canvas, FigureManager
 
 _T = TypeVar("_T")
 
@@ -37,7 +37,12 @@ class NotebookPlotHost:
 
         # Construct directly: pyplot/Gcf registration would redisplay at cell end.
         canvas = Canvas(figure)
-        manager = FigureManager(canvas, num=0)
+        try:
+            manager = FigureManager(canvas, num=0)
+        except Exception:
+            # Release acquired widgets without downgrading the original failure.
+            _release_canvas(canvas)
+            raise
         self._managers[figure] = manager
         # Retain the manager even if publishing fails, so release can clean up.
         display(canvas)
@@ -55,12 +60,19 @@ class NotebookPlotHost:
         manager = self._managers.get(figure)
         if manager is None:
             return
-        # Matplotlib types only the bases of these concrete ipympl widgets.
-        toolbar = cast("Toolbar", manager.toolbar)
-        canvas = cast("Canvas", manager.canvas)
+        # Matplotlib types only the base of this concrete ipympl canvas.
+        _release_canvas(cast("Canvas", manager.canvas))
+        del self._managers[figure]
+
+
+def _release_canvas(canvas: "Canvas") -> None:
+    from ipympl.backend_nbagg import Toolbar
+
+    # A failed manager constructor may not have installed a widget toolbar yet.
+    toolbar = canvas.toolbar
+    if isinstance(toolbar, Toolbar):
         toolbar.layout.close()
         toolbar.close()
-        canvas.layout.close()
-        manager.destroy()
-        FigureCanvasAgg(figure)
-        del self._managers[figure]
+    canvas.layout.close()
+    canvas.close()
+    FigureCanvasAgg(canvas.figure)
