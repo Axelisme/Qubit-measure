@@ -7,6 +7,7 @@ from io import BytesIO
 import numpy as np
 import pytest
 from matplotlib.axes import Axes
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
@@ -135,6 +136,44 @@ def test_two_plot_hosts_keep_ownership_and_release_independent(hosts) -> None:
     assert get_figure_container(second["live"]) is containers[1]
     second.release()
     assert stacks[1].count() == 1
+
+
+def test_clearing_container_keeps_figures_saveable_and_representable(
+    qapp, hosts
+) -> None:
+    stacks, containers, adapters = hosts
+    plots = Plots(adapters[0])
+    first, ax = plots.subplots("first")
+    ax.plot([0, 1], [2, 3])
+    second, ax = plots.subplots("second")
+    ax.plot([0, 1], [4, 5])
+    plots.finish()
+    other = Plots(adapters[1])
+    other.liveplot_1d("live", "x", "y")
+    other.finish()
+    replacement_canvas = FigureCanvasAgg(second)
+
+    containers[0].clear_dynamic_canvases()
+    qapp.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    assert stacks[0].count() == 1
+    assert stacks[0].currentIndex() == 0
+    assert stacks[1].count() == 2
+    assert second.canvas is replacement_canvas
+    assert get_figure_container(other["live"]) is containers[1]
+    for figure in (first, second):
+        assert get_figure_container(figure) is None
+        output = BytesIO()
+        figure.savefig(output, format="png")
+        assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+
+    adapters[0].present(first)
+    adapters[0].refresh(first, final=True)
+    assert get_figure_container(first) is containers[0]
+    assert stacks[0].currentWidget() is first.canvas
+    plots.release()
+    other.release()
+    assert stacks[0].count() == stacks[1].count() == 1
 
 
 def test_qt_diagnostic_finish_does_not_attach_regular_figure(hosts) -> None:

@@ -13,6 +13,8 @@ thread first (the canvas thread-affinity invariant — see ``host.ensure_host``)
 
 from __future__ import annotations
 
+from matplotlib.backend_bases import FigureCanvasBase
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QStackedWidget, QWidget  # type: ignore[attr-defined]
 
@@ -48,6 +50,7 @@ class FigureContainer:
         self._stack.setCurrentWidget(canvas)
 
     def clear_dynamic_canvases(self) -> None:
+        """Remove presentation while keeping retained Figures saveable."""
         while self._stack.count() > 1:
             widget = self._stack.widget(self._stack.count() - 1)
             if widget is None:
@@ -56,5 +59,7 @@ class FigureContainer:
             figure = getattr(widget, "figure", None)
             if isinstance(figure, Figure):
                 _host.drop_from_registry(figure)
+                if isinstance(widget, FigureCanvasBase) and figure.canvas is widget:
+                    FigureCanvasAgg(figure)
             widget.deleteLater()
         self._stack.setCurrentWidget(self._placeholder)
