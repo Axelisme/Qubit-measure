@@ -814,7 +814,7 @@ class SectionField(CfgField):
     ) -> None:
         super().__init__(spec)
         if initial_val is not None:
-            _validate_section_keys(spec, initial_val)
+            validate_section_keys(spec, initial_val)
         self._evaluate_expression = evaluate_expression
         self._provide_options = provide_options
         self._references = references
@@ -861,7 +861,7 @@ class SectionField(CfgField):
             raise TypeError(
                 f"SectionField expects CfgSectionValue, got {type(value).__name__}"
             )
-        _validate_section_keys(self.spec, value)
+        validate_section_keys(self.spec, value)
         self._preflight(value)
         previous_value = self.get_value()
         self._updating = True
@@ -929,7 +929,7 @@ class SectionField(CfgField):
         self._set_valid(all(child.is_valid() for child in self.fields.values()))
 
 
-def _validate_section_keys(
+def validate_section_keys(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
     *,
@@ -947,13 +947,13 @@ def _validate_section_keys(
             child_value, CfgSectionValue
         ):
             child_path = f"{path}.{key}" if path else key
-            _validate_section_keys(child_spec, child_value, path=child_path)
+            validate_section_keys(child_spec, child_value, path=child_path)
         elif isinstance(child_spec, ReferenceSpec) and isinstance(
             child_value, ReferenceValue
         ):
             child_path = f"{path}.{key}" if path else key
             chosen_spec = select_ref_value_spec(child_spec, child_value)
-            _validate_section_keys(
+            validate_section_keys(
                 chosen_spec,
                 child_value.value,
                 path=child_path,

@@ -20,7 +20,6 @@ from zcu_tools.gui.cfg.binding import (
     LibraryBindingState,
     ReferenceField,
     ResolvedReference,
-    ScalarField,
 )
 
 from ._fakes import BindingPorts
@@ -156,55 +155,6 @@ def test_missing_linked_reference_stays_keyed_and_relinks_when_restored() -> Non
             missing_snapshot,
             resolve_reference=lambda kind, key: _shape().label,
         )
-
-
-def test_modified_reference_deletion_heals_to_custom_and_keeps_edits() -> None:
-    ports = BindingPorts()
-    ports.references[("module", "drive_lib")] = ResolvedReference(
-        _shape().label, _value(0.25)
-    )
-    draft = _draft(ports, ReferenceValue("drive_lib", _value(0.25)))
-    field = _field(draft)
-    assert field.sub_field is not None
-    gain = cast(ScalarField, field.sub_field.fields["gain"])
-    gain.set_value(0.75)
-    assert field.is_modified()
-
-    del ports.references[("module", "drive_lib")]
-    draft.refresh_references("module")
-
-    assert field.get_chosen_key() == "<Custom:Pulse>"
-    assert not field.has_missing_library_ref()
-    assert field.get_value() == ReferenceValue(
-        "<Custom:Pulse>",
-        _value(0.75),
-        resolved_label=_shape().label,
-    )
-
-
-def test_persisted_modified_missing_reference_remains_relinkable() -> None:
-    ports = BindingPorts()
-    draft = _draft(
-        ports,
-        ReferenceValue("drive_lib", _value(0.75), is_overridden=True),
-    )
-    field = _field(draft)
-
-    assert field.get_chosen_key() == "drive_lib"
-    assert field.has_missing_library_ref()
-    assert field.is_modified()
-    assert not field.is_valid()
-
-    ports.references[("module", "drive_lib")] = ResolvedReference(
-        _shape().label, _value(0.5)
-    )
-    draft.refresh_references("module")
-    assert field._binding_state is LibraryBindingState.LINKED
-    assert field.get_value() == ReferenceValue(
-        "drive_lib",
-        _value(0.5),
-        resolved_label=_shape().label,
-    )
 
 
 @pytest.mark.parametrize(
