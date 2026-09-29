@@ -63,7 +63,12 @@ from zcu_tools.experiment.v2.lookback import (
     LookbackExp,
     LookbackModuleCfg,
 )
-from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Exp, GEModuleCfg
+from zcu_tools.experiment.v2.singleshot.ge import (
+    GE_Cfg,
+    GE_Exp,
+    GEAnalyzeOptions,
+    GEModuleCfg,
+)
 from zcu_tools.experiment.v2.singleshot.t1 import t1 as singleshot_t1
 from zcu_tools.experiment.v2.singleshot.t1 import t1_with_tone as singleshot_t1_tone
 from zcu_tools.experiment.v2.singleshot.t1 import (
@@ -967,7 +972,7 @@ def _run_ge(
     """Run GE_Exp end to end on a low-snr sim soc; return the recovered analysis.
 
     Returns ``(fidelity, populations, g_center, e_center)`` from
-    ``GE_Exp.analyze(backend='pca')``.  ``snr`` is lowered (the DEFAULT snr=300
+    ``GE_Exp.analyze(..., GEAnalyzeOptions(backend='pca'))``.  ``snr`` is lowered (the DEFAULT snr=300
     fully separates the blobs so the fidelity is trivially ~1); a small snr makes
     the |g>/|e> blobs overlap so the discrimination fidelity is meaningful.
     """
@@ -994,9 +999,13 @@ def _run_ge(
         ),
     )
     exp = GE_Exp()
-    result = exp.run(soc, soccfg, cfg)
-    fid, pops, fit, _fig = exp.analyze(result, backend="pca")
-    return fid, pops, fit["g_center"], fit["e_center"]
+    run_plots = Plots(NonPresentingHost())
+    result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
+    run_plots.finish()
+    fit_plots = Plots(NonPresentingHost())
+    fit = exp.analyze(result, GEAnalyzeOptions(backend="pca"), plots=fit_plots)
+    fit_plots.finish()
+    return fit.fidelity, fit.init_pops, fit.g_center, fit.e_center
 
 
 class _RecordingProgressBar(BaseProgressBar):

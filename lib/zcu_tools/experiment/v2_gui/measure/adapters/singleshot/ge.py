@@ -3,13 +3,15 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias, cast
-
-import numpy as np
-from matplotlib.figure import Figure
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
-from zcu_tools.experiment.v2.singleshot.ge import GE_Result
+from zcu_tools.experiment.v2.singleshot.ge import (
+    GE_Result,
+    GEAnalysis,
+    GEAnalyzeOptions,
+    GEPostAnalyzeOptions,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -33,6 +35,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 
+if TYPE_CHECKING:
+    from zcu_tools.plotting.plots import Plots
+
 GERunResult: TypeAlias = GE_Result
 
 
@@ -51,44 +56,19 @@ class GEAnalyzeParams:
     ] = None
 
 
-@dataclass
-class GEAnalyzeResult(AnalyzeResultBase):
-    initial_state: Literal["ground", "excited"]
-    # ``fidelity`` and ``ge_s`` are plain floats (writeback-safe). ``g_center`` /
-    # ``e_center`` are complex — kept here for downstream post-analysis use, but
-    # skipped from ``to_summary_dict`` automatically (complex is not JSON-safe).
-    fidelity: float
-    theta: float
-    threshold: float
-    ge_s: float
-    g_center: complex
-    e_center: complex
-    init_pops: list[list[float]]
-    figure: Figure
+@dataclass(frozen=True)
+class GEAnalyzeResult(GEAnalysis, AnalyzeResultBase):
+    """Fit calibration, with a JSON-safe GUI projection of the core result."""
 
-    def validate_calibration(self) -> None:
-        populations = np.asarray(self.init_pops, dtype=np.float64)
-        scalars = [
-            self.fidelity,
-            self.theta,
-            self.threshold,
-            self.ge_s,
-            self.g_center,
-            self.e_center,
-        ]
-        if (
-            not np.isfinite(scalars).all()
-            or not 0.0 <= self.fidelity <= 1.0
-            or self.ge_s <= 0
-            or np.isclose(self.g_center, self.e_center)
-            or populations.shape != (2, 2)
-            or not np.isfinite(populations).all()
-            or np.any(populations < 0)
-            or np.any(populations.sum(axis=1) > 1 + 1e-12)
-        ):
-            raise ValueError(
-                "Invalid GE calibration: check centers, width and populations"
-            )
+    def to_summary_dict(self) -> dict[str, object]:
+        return {
+            "initial_state": self.initial_state,
+            "fidelity": self.fidelity,
+            "theta": self.theta,
+            "threshold": self.threshold,
+            "ge_s": self.ge_s,
+            "init_pops": self.init_pops.tolist(),
+        }
 
 
 @dataclass
@@ -96,11 +76,10 @@ class GEPostAnalyzeParams:
     """The GE confusion diagnostic has no independent operator parameters."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class GEPostAnalyzeResult(PostAnalyzeResultBase):
     ge_radius: float
     confusion: list[list[float]]
-    figure: Figure
 
 
 class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
@@ -172,28 +151,29 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         )
 
     def analyze(
-        self, req: AnalyzeRequest[GERunResult, GEAnalyzeParams]
+        self, req: AnalyzeRequest[GERunResult, GEAnalyzeParams], *, plots: Plots
     ) -> GEAnalyzeResult:
         params = req.analyze_params
-        exp = GE_Exp()
-        fidelity, pops, fit_result, fig = exp.analyze(
+        analysis = GE_Exp().analyze(
             req.run_result,
-            initial_state=params.initial_state,
-            backend=params.backend,
-            logscale=params.logscale,
-            align_t1=params.align_t1,
-            length_ratio=params.length_ratio,
+            GEAnalyzeOptions(
+                initial_state=params.initial_state,
+                backend=params.backend,
+                logscale=params.logscale,
+                align_t1=params.align_t1,
+                length_ratio=params.length_ratio,
+            ),
+            plots=plots,
         )
         return GEAnalyzeResult(
-            initial_state=params.initial_state,
-            fidelity=fidelity,
-            theta=fit_result["theta"],
-            threshold=fit_result["threshold"],
-            ge_s=fit_result["s"],
-            g_center=fit_result["g_center"],
-            e_center=fit_result["e_center"],
-            init_pops=pops.tolist(),
-            figure=fig,
+            initial_state=analysis.initial_state,
+            fidelity=analysis.fidelity,
+            theta=analysis.theta,
+            threshold=analysis.threshold,
+            ge_s=analysis.ge_s,
+            g_center=analysis.g_center,
+            e_center=analysis.e_center,
+            init_pops=analysis.init_pops,
         )
 
     def get_post_analyze_params(
@@ -205,31 +185,15 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     def post_analyze(
         self,
         req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> GEPostAnalyzeResult:
-        primary = req.analyze_result
-        primary.validate_calibration()
-        exp = GE_Exp()
-        confusion = exp.calc_confusion_matrix(
-            np.asarray(primary.init_pops, dtype=np.float64),
-            primary.g_center,
-            primary.e_center,
-            primary.ge_s,
-            radius=None,
-            result=req.run_result,
-            consider_other=False,
-            initial_state=primary.initial_state,
-        )
-        figure = exp.plot_confusion_matrix(
-            confusion,
-            primary.g_center,
-            primary.e_center,
-            result=req.run_result,
-            initial_state=primary.initial_state,
+        analysis = GE_Exp().post_analyze(
+            req.run_result, req.analyze_result, GEPostAnalyzeOptions(), plots=plots
         )
         return GEPostAnalyzeResult(
-            ge_radius=confusion.radius,
-            confusion=confusion.matrix.tolist(),
-            figure=figure,
+            ge_radius=analysis.confusion.radius,
+            confusion=analysis.confusion.matrix.tolist(),
         )
 
     def get_writeback_items(
