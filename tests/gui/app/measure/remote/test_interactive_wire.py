@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import socket
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -84,7 +84,13 @@ def mounted_fx(qapp):
     qapp.processEvents()
 
 
-def _start_mounted(fx: InteractiveFixture, window: MainWindow, adapter: str):
+def _start_mounted(
+    fx: InteractiveFixture,
+    window: MainWindow,
+    adapter: str,
+    *,
+    analyze_params: FluxPickParams | None = None,
+):
     tab_id = fx.ctrl.new_tab(adapter)
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
@@ -96,7 +102,9 @@ def _start_mounted(fx: InteractiveFixture, window: MainWindow, adapter: str):
     fx.state.get_tab(tab_id).run.result = SimpleNamespace(
         signals=signals, values=devs, freqs=freqs
     )
-    token = fx.ctrl.run_analyze_control.analyze(tab_id, FluxPickParams())
+    token = fx.ctrl.run_analyze_control.analyze(
+        tab_id, FluxPickParams() if analyze_params is None else analyze_params
+    )
     tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
     widget = tab_widget.interactive_frontend()
     assert isinstance(widget, FluxPickFrontend)
@@ -109,10 +117,11 @@ def _start(fx, *, background=None):
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
     plots = Plots(NonPresentingHost())
+    analyze_params = FluxPickParams()
     plugin = make_flux_pick_plugin(
         AnalyzeRequest(
             run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
-            analyze_params=object(),
+            analyze_params=analyze_params,
             md=MetaDict(),
             ml=ModuleLibrary(),
             predictor=None,
@@ -124,7 +133,11 @@ def _start(fx, *, background=None):
     # Set up a real AnalyzeService operation; RPC interactions below always go
     # through the shipped socket and RunAnalyzeControlFacet, not a handler stub.
     token = fx.ctrl._analyze_svc.start_plugin(
-        AnalyzePermit(tab_id=tab_id), plugin, QtOwnerScheduler(), plots=plots
+        AnalyzePermit(tab_id=tab_id),
+        plugin,
+        QtOwnerScheduler(),
+        analyze_params_instance=analyze_params,
+        plots=plots,
     )
     fx.view.interactive_presentation.return_value = None
     return tab_id, token, plugin
@@ -490,6 +503,65 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         assert window.interactive_presentation(tab_id) is None
     finally:
         bridge.disconnect()
+
+
+@dataclass
+class TaggedFluxPickParams(FluxPickParams):
+    label: str
+
+
+@pytest.mark.parametrize("terminal", ["done", "cancel"])
+def test_interactive_submitted_params_replace_previous_pane_only_on_done(
+    mounted_fx, terminal: str
+) -> None:
+    fx, window = mounted_fx
+    previous_params = TaggedFluxPickParams(label="previous request")
+    tab_id, previous_token, _ = _start_mounted(
+        fx, window, "onetone/flux_dep", analyze_params=previous_params
+    )
+    with open_client(fx.service.port) as sock:
+        assert _interact(sock, tab_id, {"command": "done"})["ok"] is True
+        assert (
+            _rpc(
+                sock,
+                "operation.await",
+                {"operation_id": previous_token, "timeout": 0.1},
+            )["result"]["status"]
+            == "finished"
+        )
+        previous = fx.state.get_tab(tab_id).analysis
+        old_params = previous.params
+        old_result = previous.result
+        old_plots = previous.plots
+        assert old_params is previous_params
+        assert old_result is not None
+        assert old_plots is not None
+
+        submitted = TaggedFluxPickParams(label="new request")
+        token = fx.ctrl.run_analyze_control.analyze(tab_id, submitted)
+        pending = fx.state.get_tab(tab_id).analysis
+        assert pending.params is old_params
+        assert pending.result is old_result
+        assert pending.plots is old_plots
+
+        if terminal == "done":
+            assert _interact(sock, tab_id, {"command": "done"})["ok"] is True
+            committed = fx.state.get_tab(tab_id).analysis
+            assert committed.params is submitted
+            assert committed.result is not old_result
+            assert committed.plots is not old_plots
+        else:
+            assert (
+                _rpc(sock, "analyze.cancel", {"tab_id": tab_id})["result"]["cancelled"]
+                is True
+            )
+            cancelled = fx.state.get_tab(tab_id).analysis
+            assert cancelled.params is old_params
+            assert cancelled.result is old_result
+            assert cancelled.plots is old_plots
+        assert _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+            "result"
+        ]["status"] == ("finished" if terminal == "done" else "cancelled")
 
 
 def test_mcp_done_writeback_save_and_close_share_the_gui_result(

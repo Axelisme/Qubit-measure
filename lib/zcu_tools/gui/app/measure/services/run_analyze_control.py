@@ -255,7 +255,11 @@ class RunAnalyzeControlFacet:
             if self._run_background is not None:
                 plugin.bind_background(self._run_background)
             token = self._analyze.start_plugin(
-                permit, plugin, self._owner_scheduler, plots=plots
+                permit,
+                plugin,
+                self._owner_scheduler,
+                analyze_params_instance=analyze_params_instance,
+                plots=plots,
             )
         except Exception:
             try:
@@ -266,7 +270,6 @@ class RunAnalyzeControlFacet:
                 )
             raise
         try:
-            self._tab.update_tab_analyze_param_instance(tab_id, analyze_params_instance)
             active = self._analyze.get_interactive(tab_id)
             if active is None:
                 raise RuntimeError("interactive operation has no service-owned session")

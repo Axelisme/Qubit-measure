@@ -152,6 +152,7 @@ class AnalyzeService(_StagedAnalyzeService):
         plugin: PluginDefinition[Any, Any],
         owner: OwnerScheduler,
         *,
+        analyze_params_instance: object,
         plots: Plots,
     ) -> int:
         """Capture operation inputs and register one service-owned session."""
@@ -164,7 +165,7 @@ class AnalyzeService(_StagedAnalyzeService):
             run_result=tab.run.result,
             context=ctx,
             adapter=tab.adapter,
-            params=tab.analysis.params,
+            params=analyze_params_instance,
             plots=plots,
         )
         session = plugin.open(owner)

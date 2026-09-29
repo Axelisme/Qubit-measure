@@ -351,7 +351,11 @@ def test_framework_session_drives_committed_result_and_one_terminal_operation(qa
     )
 
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     active = svc.get_interactive("tab1")
     assert active is not None and active.plugin is plugin
@@ -382,7 +386,11 @@ def test_unavailable_finish_keeps_session_active_and_cancel_discards_late_done(q
 
     plugin = PluginDefinition("pick", 0, (), require_pick, lambda position: MagicMock())
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     active = svc.get_interactive("tab1")
     assert active is not None
@@ -410,7 +418,11 @@ def test_result_build_failure_settles_failed_without_reopening_input(qapp):
 
     plugin = PluginDefinition("pick", 1, (), lambda position: None, fail_result)
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     active = svc.get_interactive("tab1")
     assert active is not None
@@ -442,7 +454,11 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
         lambda value: MagicMock(value=value),
     )
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     active = svc.get_interactive("tab1")
     assert active is not None
@@ -475,10 +491,18 @@ def test_concurrent_plugin_tabs_keep_independent_sessions_and_handles(qapp):
     )
     owner = ManualOwnerScheduler()
     first = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, owner, plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        owner,
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     second = svc.start_plugin(
-        AnalyzePermit(tab_id="tab2"), plugin, owner, plots=_plots()
+        AnalyzePermit(tab_id="tab2"),
+        plugin,
+        owner,
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     tab1 = svc.get_interactive("tab1")
     tab2 = svc.get_interactive("tab2")
@@ -507,7 +531,11 @@ def test_start_plugin_rejects_busy_tab(qapp):
 
     with pytest.raises(FailedPreconditionError, match="busy"):
         svc.start_plugin(
-            AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+            AnalyzePermit(tab_id="tab1"),
+            plugin,
+            ManualOwnerScheduler(),
+            analyze_params_instance="submitted",
+            plots=_plots(),
         )
     assert svc.get_interactive("tab1") is None
 
@@ -528,7 +556,11 @@ def test_interactive_start_and_finish_keep_captured_operation_origin(
     )
     with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
         token = svc.start_plugin(
-            AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+            AnalyzePermit(tab_id="tab1"),
+            plugin,
+            ManualOwnerScheduler(),
+            analyze_params_instance="submitted",
+            plots=_plots(),
         )
     svc.finish_plugin("tab1")
 
@@ -557,7 +589,11 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):
         "pick", 0, (), lambda _state: None, lambda state: MagicMock()
     )
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     assert state.get_tab("tab1").is_analyzing is True
 
@@ -618,7 +654,11 @@ def test_cancel_interactive_is_idempotent(qapp):
         "pick", 0, (), lambda _state: None, lambda state: MagicMock()
     )
     svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
 
     assert svc.cancel_interactive("tab1") is True
@@ -635,7 +675,11 @@ def test_finish_after_cancel_interactive_is_inert(qapp):
         "pick", 0, (), lambda _state: None, lambda state: MagicMock()
     )
     svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
     )
     svc.cancel_interactive("tab1")
     assert svc.finish_plugin("tab1") is False

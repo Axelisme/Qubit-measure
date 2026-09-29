@@ -148,9 +148,18 @@ class RecordingAnalyze:
         plugin: PluginDefinition[Any, Any],
         owner: ManualOwnerScheduler,
         *,
+        analyze_params_instance: object,
         plots: Plots,
     ) -> int:
-        self._log.add("analyze", "start_plugin", permit, plugin, owner, plots)
+        self._log.add(
+            "analyze",
+            "start_plugin",
+            permit,
+            plugin,
+            owner,
+            analyze_params_instance,
+            plots,
+        )
         self.active = ActiveInteractive(plugin, plugin.open(owner), plots)
         return 23
 
@@ -375,12 +384,12 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "state",
         "adapter",
         "analyze",
-        "tab",
         "analyze",
         "host",
         "adapter",
     ]
     assert log.calls[5].method == "start_plugin"
+    assert log.calls[5].args[3] == "params"
 
 
 def test_interactive_mount_failure_unmounts_and_cancels_operation() -> None:
