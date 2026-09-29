@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-30 — Scalar presentation input seam
+**Last updated:** 2026-09-30 — Scalar and range presentation input seams
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -210,7 +210,10 @@ experiment policy。
 shared Qt leaf同時集中scalar input的write/connect dispatch與純`QWidget`→PNG encoding；
 app仍擁有visibility、target lookup、main-thread marshal與remote wire policy。
 `ScalarInputWidget`只顯示已發布的scalar value/options並提交輸入，不解析數字或求值；
-`ScalarWidget`將既有binding field連到同一presentation。此接縫尚未改變tab的cfg owner。
+`ScalarWidget`將既有binding field連到同一presentation。
+`SweepInputWidget`與`CenteredSweepInputWidget`同樣只提交edge輸入、顯示publication；
+Points／Step同步仍由cfg owner計算。既有range binding widgets共用這些presentation。
+這些接縫尚未改變tab的cfg owner。
 
 Sweep renderers use one balanced two-column Range/Sampling grammar: `SweepWidget` places Start/Stop in the first row and Points/Step in the second, while `CenteredSweepWidget` places Center/Span in the first row and Points/Step in the second. The displayed Points label is presentation-only for the canonical `expts` value; field update methods continue to own synchronization and preserve validation, decoration, snapshot, lowering, and persistence behavior.
 

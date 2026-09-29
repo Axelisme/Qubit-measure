@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
-from typing import Any, cast
-
-logger = logging.getLogger(__name__)
+from typing import Any, Literal, cast
 
 from qtpy.QtCore import QSize, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QDoubleValidator, QIntValidator  # type: ignore[attr-defined]
@@ -25,9 +22,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     DirectValue,
     EvalValue,
     ScalarSpec,
+    SweepSpec,
+    SweepValue,
     default_value_for_type,
 )
 from zcu_tools.gui.cfg.binding import (
@@ -89,6 +90,7 @@ def make_value_widget(
     type_: type,
     default: Any,
     choices: list[object] | None,
+    *,
     editable: bool = True,
     decimals: int | None = None,
     optional: bool = False,
@@ -161,9 +163,7 @@ def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
         return type_(txt) if type_ is not str else txt
     if isinstance(w, QCheckBox):
         return w.isChecked()
-    if isinstance(w, QSpinBox):
-        return w.value()
-    if isinstance(w, TrimDoubleSpinBox):
+    if isinstance(w, (QSpinBox, TrimDoubleSpinBox)):
         return w.value()
     if isinstance(w, QLineEdit):
         return type_(w.text())
@@ -222,7 +222,12 @@ def connect_committed_value_widget(
 def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     """Build an input widget from a ScalarSpec and initial value."""
     return make_value_widget(
-        spec.type, value, spec.choices, spec.editable, spec.decimals, spec.optional
+        spec.type,
+        value,
+        spec.choices,
+        editable=spec.editable,
+        decimals=spec.decimals,
+        optional=spec.optional,
     )
 
 
@@ -542,9 +547,9 @@ class ScalarInputWidget(QWidget):
                     self._spec.type,
                     raw,
                     choices,
-                    self._spec.editable,
-                    self._spec.decimals,
-                    self._spec.optional,
+                    editable=self._spec.editable,
+                    decimals=self._spec.decimals,
+                    optional=self._spec.optional,
                 )
             self._layout.addWidget(self._input, stretch=1)
             self._connect_direct_input()
@@ -684,42 +689,71 @@ class ScalarWidget(ScalarInputWidget):
         self.display(value, options=self._field.available_options())
 
     def _write_input(self, value: DirectValue | EvalValue) -> None:
-        if isinstance(value, DirectValue) and value.raw is not None:
-            self._field.set_text(value.raw)
-        else:
-            self._field.set_value(value)
+        _write_scalar_input(self._field, value)
 
 
-class SweepWidget(BaseLiveWidget):
+def _range_scalar_value(
+    value: float | DirectValue | EvalValue,
+) -> DirectValue | EvalValue:
+    return value if isinstance(value, (DirectValue, EvalValue)) else DirectValue(value)
+
+
+def _write_scalar_input(field: ScalarField, value: DirectValue | EvalValue) -> None:
+    if isinstance(value, DirectValue) and value.raw is not None:
+        field.set_text(value.raw)
+    else:
+        field.set_value(value)
+
+
+def _range_input_text(value: DirectValue | EvalValue) -> str:
+    if not isinstance(value, DirectValue) or value.raw is None:
+        raise TypeError("Range sampling input requires raw direct text")
+    return value.raw
+
+
+class SweepInputWidget(QWidget):
     """Inline 2x2 input for start/stop/points/step with synchronized updates."""
 
     def __init__(
         self,
-        field: SweepField,
+        spec: SweepSpec,
+        value: SweepValue,
         parent: QWidget | None = None,
         *,
-        path: str = "",
-        decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
-        | None = None,
+        submit: Callable[
+            [Literal["start", "stop", "expts", "step"], DirectValue | EvalValue], None
+        ],
+        edge_decorations: tuple[
+            FieldDecorationProtocol | None, FieldDecorationProtocol | None
+        ] = (None, None),
         text_input_enhancer: TextInputEnhancer | None = None,
     ) -> None:
-        super().__init__(field, parent)
+        super().__init__(parent)
+        self._submit = submit
         self._updating = False
 
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        sv = field.get_value()
+        edge_spec = ScalarSpec(
+            spec.label, float, editable=spec.editable, decimals=spec.decimals
+        )
 
-        self._start_widget = ScalarWidget(
-            field.start_field,
+        self._start_widget = ScalarInputWidget(
+            edge_spec,
+            _range_scalar_value(value.start),
             self,
+            options=None,
+            submit=lambda value: self._submit("start", value),
             text_input_enhancer=text_input_enhancer,
         )
-        self._stop_widget = ScalarWidget(
-            field.stop_field,
+        self._stop_widget = ScalarInputWidget(
+            edge_spec,
+            _range_scalar_value(value.stop),
             self,
+            options=None,
+            submit=lambda value: self._submit("stop", value),
             text_input_enhancer=text_input_enhancer,
         )
 
@@ -730,13 +764,8 @@ class SweepWidget(BaseLiveWidget):
         self._step.textChanged.connect(self._on_step_changed)
         self._step_label = QLabel("step")
 
-        enabled = field.spec.editable
-        start_decoration = _edge_decoration(
-            path, "start", field.start_field, decoration_for_path
-        )
-        stop_decoration = _edge_decoration(
-            path, "stop", field.stop_field, decoration_for_path
-        )
+        enabled = spec.editable
+        start_decoration, stop_decoration = edge_decorations
         self._start_widget.setEnabled(enabled and decoration_enabled(start_decoration))
         self._stop_widget.setEnabled(enabled and decoration_enabled(stop_decoration))
         self._expts.setEnabled(enabled)
@@ -758,56 +787,65 @@ class SweepWidget(BaseLiveWidget):
             0,
         )
 
-        self._on_model_changed(sv)
-        field.on_change.connect(self._on_model_changed)
-
-    def teardown(self) -> None:
-        field = cast(SweepField, self._field)
-        field.on_change.disconnect(self._on_model_changed)
-        self._start_widget.teardown()
-        self._stop_widget.teardown()
+        self.display(value)
 
     def _on_expts_changed(self, text: str) -> None:
         if not self._updating:
-            cast(SweepField, self._field).set_text("expts", text)
+            self._submit("expts", DirectValue(None, raw=text))
 
     def _on_step_changed(self, text: str) -> None:
         if not self._updating:
-            cast(SweepField, self._field).set_text("step", text)
+            self._submit("step", DirectValue(None, raw=text))
 
-    def _on_model_changed(self, val: Any) -> None:
+    def display(self, val: SweepValue) -> None:
+        """Render the published range without normalizing or resubmitting it."""
         if self._updating:
             return
         self._updating = True
         try:
+            self._start_widget.display(_range_scalar_value(val.start), options=None)
+            self._stop_widget.display(_range_scalar_value(val.stop), options=None)
             _render_range_input(self._expts, self._points_label, "points", val.expts)
             _render_range_input(self._step, self._step_label, "step", val.step)
         finally:
             self._updating = False
 
 
-class CenteredSweepWidget(BaseLiveWidget):
+class CenteredSweepInputWidget(QWidget):
     """Inline 2x2 input for center/span/points/step with synchronized updates."""
 
     def __init__(
         self,
-        field: CenteredSweepField,
+        spec: CenteredSweepSpec,
+        value: CenteredSweepValue,
         parent: QWidget | None = None,
         *,
+        submit: Callable[
+            [Literal["center", "span", "expts", "step"], DirectValue | EvalValue], None
+        ],
         text_input_enhancer: TextInputEnhancer | None = None,
     ) -> None:
-        super().__init__(field, parent)
+        super().__init__(parent)
+        self._submit = submit
         self._updating = False
 
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        sv = field.get_value()
+        center_spec = ScalarSpec(
+            spec.label,
+            float,
+            editable=spec.editable and spec.center_editable,
+            decimals=spec.decimals,
+        )
 
-        self._center_widget = ScalarWidget(
-            field.center_field,
+        self._center_widget = ScalarInputWidget(
+            center_spec,
+            _range_scalar_value(value.center),
             self,
+            options=None,
+            submit=lambda value: self._submit("center", value),
             text_input_enhancer=text_input_enhancer,
         )
 
@@ -821,14 +859,14 @@ class CenteredSweepWidget(BaseLiveWidget):
         self._step.textChanged.connect(self._on_step_changed)
         self._step_label = QLabel("step")
 
-        enabled = field.spec.editable
-        self._center_widget.setEnabled(enabled and field.spec.center_editable)
+        enabled = spec.editable
+        self._center_widget.setEnabled(enabled and spec.center_editable)
         self._span.setEnabled(enabled)
         self._expts.setEnabled(enabled)
         self._step.setEnabled(enabled)
 
-        center_label = QLabel(_centered_sweep_label("center", field.spec.center_badge))
-        center_tooltip = field.spec.center_tooltip or field.spec.tooltip
+        center_label = QLabel(_centered_sweep_label("center", spec.center_badge))
+        center_tooltip = spec.center_tooltip or spec.tooltip
         if center_tooltip:
             center_label.setToolTip(center_tooltip)
             self._center_widget.setToolTip(center_tooltip)
@@ -846,36 +884,125 @@ class CenteredSweepWidget(BaseLiveWidget):
             0,
         )
 
-        self._on_model_changed(sv)
-        field.on_change.connect(self._on_model_changed)
-
-    def teardown(self) -> None:
-        field = cast(CenteredSweepField, self._field)
-        field.on_change.disconnect(self._on_model_changed)
-        self._center_widget.teardown()
+        self.display(value)
 
     def _on_span_changed(self, text: str) -> None:
         if not self._updating:
-            cast(CenteredSweepField, self._field).set_text("span", text)
+            self._submit("span", DirectValue(None, raw=text))
 
     def _on_expts_changed(self, text: str) -> None:
         if not self._updating:
-            cast(CenteredSweepField, self._field).set_text("expts", text)
+            self._submit("expts", DirectValue(None, raw=text))
 
     def _on_step_changed(self, text: str) -> None:
         if not self._updating:
-            cast(CenteredSweepField, self._field).set_text("step", text)
+            self._submit("step", DirectValue(None, raw=text))
 
-    def _on_model_changed(self, val: Any) -> None:
+    def display(self, val: CenteredSweepValue) -> None:
+        """Render the published range without normalizing or resubmitting it."""
         if self._updating:
             return
         self._updating = True
         try:
+            self._center_widget.display(_range_scalar_value(val.center), options=None)
             _render_range_input(self._span, self._span_label, "span", val.span)
             _render_range_input(self._expts, self._points_label, "points", val.expts)
             _render_range_input(self._step, self._step_label, "step", val.step)
         finally:
             self._updating = False
+
+
+class SweepWidget(SweepInputWidget):
+    """Connect a caller-owned binding field to the range presentation."""
+
+    def __init__(
+        self,
+        field: SweepField,
+        parent: QWidget | None = None,
+        *,
+        path: str = "",
+        decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
+        | None = None,
+        text_input_enhancer: TextInputEnhancer | None = None,
+    ) -> None:
+        self._field = field
+        super().__init__(
+            field.spec,
+            field.get_value(),
+            parent,
+            submit=self._write_input,
+            edge_decorations=(
+                _edge_decoration(path, "start", field.start_field, decoration_for_path),
+                _edge_decoration(path, "stop", field.stop_field, decoration_for_path),
+            ),
+            text_input_enhancer=text_input_enhancer,
+        )
+        field.on_change.connect(self.display)
+
+    @property
+    def field(self) -> CfgField:
+        return self._field
+
+    def teardown(self) -> None:
+        self._field.on_change.disconnect(self.display)
+
+    def refresh_section(self, path: str) -> bool:
+        del path
+        return False
+
+    def _write_input(
+        self,
+        edge: Literal["start", "stop", "expts", "step"],
+        value: DirectValue | EvalValue,
+    ) -> None:
+        if edge == "start":
+            _write_scalar_input(self._field.start_field, value)
+        elif edge == "stop":
+            _write_scalar_input(self._field.stop_field, value)
+        else:
+            self._field.set_text(edge, _range_input_text(value))
+
+
+class CenteredSweepWidget(CenteredSweepInputWidget):
+    """Connect a caller-owned binding field to the centered range presentation."""
+
+    def __init__(
+        self,
+        field: CenteredSweepField,
+        parent: QWidget | None = None,
+        *,
+        text_input_enhancer: TextInputEnhancer | None = None,
+    ) -> None:
+        self._field = field
+        super().__init__(
+            field.spec,
+            field.get_value(),
+            parent,
+            submit=self._write_input,
+            text_input_enhancer=text_input_enhancer,
+        )
+        field.on_change.connect(self.display)
+
+    @property
+    def field(self) -> CfgField:
+        return self._field
+
+    def teardown(self) -> None:
+        self._field.on_change.disconnect(self.display)
+
+    def refresh_section(self, path: str) -> bool:
+        del path
+        return False
+
+    def _write_input(
+        self,
+        edge: Literal["center", "span", "expts", "step"],
+        value: DirectValue | EvalValue,
+    ) -> None:
+        if edge == "center":
+            _write_scalar_input(self._field.center_field, value)
+        else:
+            self._field.set_text(edge, _range_input_text(value))
 
 
 def _centered_sweep_label(text: str, badge: str) -> str:
