@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-29 — 圖形保存成功歷史
+**Last updated:** 2026-09-30 — Save All 未保存項選取
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -128,8 +128,12 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
   Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
   都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
-  Save All由SaveControl/SaveService選擇可存項目，依analysis→post→data順序執行，
-  使用單一operation並Fast Fail，不回滾已完成的存檔。Qt按鈕不再編排各項存檔。
+  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。
+  同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
+  `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時
+  Save All 停用，明確單項匯出仍可再次保存。修改圖形目的地不取消已保存狀態。
+  SaveService 依 analysis→post→data 順序，以單一 operation 執行並 Fast Fail，
+  不回滾已完成的存檔；再次 Save All 省略成功項。Qt 按鈕不編排各項存檔。
   AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
   Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
   GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前

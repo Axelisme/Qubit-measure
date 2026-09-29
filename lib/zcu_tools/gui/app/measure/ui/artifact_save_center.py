@@ -543,7 +543,7 @@ class ArtifactSaveCenter(QWidget):
         self.save_all_button.setEnabled(
             idle
             and has_active
-            and any(self._snapshots[k].is_saveable for k in self._artifacts)
+            and any(self._snapshots[k].needs_save for k in self._artifacts)
         )
 
     # -- helpers for tests --------------------------------------------

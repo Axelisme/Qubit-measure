@@ -149,6 +149,93 @@ def test_save_all_selects_only_saveable_artifacts(analysis_saveable: bool) -> No
     assert log.calls[-1].args[-1] == "existing draft"
 
 
+def test_save_all_retry_skips_successes_and_stops_when_everything_is_saved() -> None:
+    facet, log, state, _tab, _save, _bus, _notices = _facet()
+    state.artifacts = tuple(
+        replace(a, status=SaveStatus.SAVED)
+        if a.kind is not ArtifactKind.POST_ANALYSIS
+        else a
+        for a in state.artifacts
+    )
+    submission = facet.save_artifacts("tab-1")
+    assert tuple(d.kind for d in submission.destinations) == (
+        ArtifactKind.POST_ANALYSIS,
+    )
+    state.artifacts = tuple(
+        replace(a, status=SaveStatus.SAVED) for a in state.artifacts
+    )
+    with pytest.raises(FailedPreconditionError, match="nonempty unique"):
+        facet.save_artifacts("tab-1")
+    assert sum(entry.method == "start_save_artifacts" for entry in log.calls) == 1
+
+
+def test_explicit_subset_can_export_a_saved_image() -> None:
+    facet, _log, state, _tab, _save, _bus, _notices = _facet()
+    state.artifacts = tuple(
+        replace(a, status=SaveStatus.SAVED) for a in state.artifacts
+    )
+    submission = facet.save_artifacts("tab-1", artifacts=(ArtifactKind.ANALYSIS,))
+    assert tuple(d.kind for d in submission.destinations) == (ArtifactKind.ANALYSIS,)
+
+
+@pytest.mark.parametrize("status", [SaveStatus.NOT_SAVED, SaveStatus.UNSAVED_CHANGES])
+def test_save_all_includes_unsaved_or_changed_data(status: SaveStatus) -> None:
+    facet, _log, state, _tab, _save, _bus, _notices = _facet()
+    state.artifacts = tuple(
+        replace(a, status=status if a.kind is ArtifactKind.DATA else SaveStatus.SAVED)
+        for a in state.artifacts
+    )
+    submission = facet.save_artifacts("tab-1")
+    assert tuple(d.kind for d in submission.destinations) == (ArtifactKind.DATA,)
+
+
+@pytest.mark.parametrize(
+    "path,comment,changed",
+    [
+        ("changed.h5", None, True),
+        (None, "new comment", True),
+        (None, "", True),
+        ("data.out", None, False),
+        (None, "existing draft", False),
+    ],
+)
+def test_save_all_previews_data_drafts_before_selecting_saved_data(
+    path: str | None, comment: str | None, changed: bool
+) -> None:
+    facet, log, state, tab, _save, bus, _notices = _facet()
+    state.artifacts = tuple(
+        replace(a, status=SaveStatus.SAVED) for a in state.artifacts
+    )
+    paths = {ArtifactKind.DATA: path} if path is not None else None
+    if changed:
+        submission = facet.save_artifacts("tab-1", paths=paths, comment=comment)
+        assert tuple(d.kind for d in submission.destinations) == (ArtifactKind.DATA,)
+        assert state.comment == (comment if comment is not None else "existing draft")
+    else:
+        with pytest.raises(FailedPreconditionError, match="nonempty unique"):
+            facet.save_artifacts("tab-1", paths=paths, comment=comment)
+        assert state.comment == "existing draft"
+        assert tab.data_path == "default.h5"
+        assert not bus.payloads
+        assert not any(entry.target == "save" for entry in log.calls)
+
+
+def test_saved_image_path_override_requires_explicit_selection() -> None:
+    facet, log, state, tab, _save, bus, _notices = _facet()
+    state.artifacts = tuple(
+        replace(a, status=SaveStatus.SAVED) if a.kind is not ArtifactKind.DATA else a
+        for a in state.artifacts
+    )
+    with pytest.raises(FailedPreconditionError, match="must name selected artifacts"):
+        facet.save_artifacts(
+            "tab-1", paths={ArtifactKind.ANALYSIS: "new.png"}, comment="new"
+        )
+    assert tab.analysis_image_path == "default.png"
+    assert state.comment == "existing draft"
+    assert not bus.payloads
+    assert not any(entry.target == "save" for entry in log.calls)
+
+
 def test_explicit_save_subset_commits_paths_and_comment_before_submission() -> None:
     facet, log, state, tab, _save, bus, _notices = _facet()
     submission = facet.save_artifacts(

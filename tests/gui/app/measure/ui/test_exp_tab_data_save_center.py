@@ -666,9 +666,30 @@ def test_save_all_disabled_when_no_result(exp_tab_factory):
     tab.update_interaction_state(snap_some)
     assert tab._save_center.is_save_all_enabled() is True
 
-    # ---------------------------------------------------------------------------
-    # A5 Load Data gates
-    # ---------------------------------------------------------------------------
+    saved = _snapshot(
+        "tab-1",
+        has_run=True,
+        has_analysis=True,
+        post_cap=True,
+        load_cap=True,
+        data_status=SaveStatus.SAVED,
+        analysis_status=SaveStatus.SAVED,
+    )
+    tab.update_interaction_state(saved)
+    assert tab._save_center.is_save_all_enabled() is False
+    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is True
+    changed = _snapshot(
+        "tab-1",
+        has_run=True,
+        has_analysis=True,
+        post_cap=True,
+        load_cap=True,
+        data_status=SaveStatus.UNSAVED_CHANGES,
+        analysis_status=SaveStatus.SAVED,
+    )
+    tab.update_interaction_state(changed)
+    assert tab._save_center.is_save_all_enabled() is True
     tab.deleteLater()
     _require_qapp().processEvents()
 

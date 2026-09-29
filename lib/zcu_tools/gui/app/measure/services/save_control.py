@@ -108,16 +108,32 @@ class SaveControlFacet:
         permit = self._guard.acquire_save_permit(tab_id)
         self._require_tab_idle(tab_id)
         available = {a.kind: a for a in self._state.get_artifact_snapshots(tab_id)}
-        selected = (
-            tuple(kind for kind, a in available.items() if a.is_saveable)
-            if artifacts is None
-            else artifacts
-        )
+        overrides = paths if paths is not None else {}
+        if artifacts is None:
+            data_draft_changed = (
+                ArtifactKind.DATA in overrides
+                and overrides[ArtifactKind.DATA]
+                != available[ArtifactKind.DATA].default_path
+            ) or (
+                comment is not None
+                and comment != self._state.get_tab(tab_id).save.comment
+            )
+            selected = tuple(
+                kind
+                for kind, artifact in available.items()
+                if artifact.needs_save
+                or (
+                    kind is ArtifactKind.DATA
+                    and artifact.is_saveable
+                    and data_draft_changed
+                )
+            )
+        else:
+            selected = artifacts
         if not selected or len(set(selected)) != len(selected):
             raise FailedPreconditionError(
                 "Save requires a nonempty unique artifact set"
             )
-        overrides = paths if paths is not None else {}
         if set(overrides) - set(selected):
             raise FailedPreconditionError("Save paths must name selected artifacts")
         destinations = []

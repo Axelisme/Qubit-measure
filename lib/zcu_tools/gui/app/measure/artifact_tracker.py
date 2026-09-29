@@ -32,6 +32,13 @@ class ArtifactSnapshot:
     last_saved_path: str | None
     is_saveable: bool
 
+    @property
+    def needs_save(self) -> bool:
+        return self.is_saveable and self.status in (
+            SaveStatus.NOT_SAVED,
+            SaveStatus.UNSAVED_CHANGES,
+        )
+
 
 @dataclass(slots=True)
 class _ArtifactRecord:
