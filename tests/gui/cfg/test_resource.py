@@ -1,7 +1,7 @@
 """Behavior of the public cfg editing and acceptance capabilities."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 from zcu_tools.gui.cfg.binding.ports import ResolvedReference
@@ -11,7 +11,11 @@ from zcu_tools.gui.cfg.model import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
+    SweepSpec,
+    SweepValue,
 )
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
@@ -260,11 +264,21 @@ class ExpressionSources:
     names: dict[str, object] = field(default_factory=lambda: {"offset": 1.0})
     revision: int = 0
     capture_reads: list[str] = field(default_factory=list)
+    fail_read: bool = False
+    fail_evaluation: bool = False
 
     def read(self) -> CfgResolution:
+        if self.fail_read:
+            raise RuntimeError("source snapshot failure")
         captured = dict(self.captured)
         md = MetaDict()
         md.update(self.names)
+        fail_evaluation = self.fail_evaluation
+
+        def evaluate(expression: str) -> int | float | complex:
+            if fail_evaluation:
+                raise RuntimeError("resolver defect")
+            return evaluate_scalar_expr(expression, md)
 
         def capture(name: str) -> object:
             self.capture_reads.append(name)
@@ -272,7 +286,7 @@ class ExpressionSources:
 
         return CfgResolution(
             (SourceRevision("snapshot", CfgRevision(self.revision)),),
-            lambda expression: evaluate_scalar_expr(expression, md),
+            evaluate,
             lambda source_id: (),
             EmptyReferences(),
             capture,
@@ -431,3 +445,104 @@ def test_capture_token_boundaries_and_missing_dynamic_name(captured_resource) ->
     changed = resource.refresh(changed.ref.revision)
     assert resource.accept(changed.ref.revision).values["a"] == 9.0
     assert sources.capture_reads == ["device.value"]
+
+
+@pytest.mark.parametrize("fault", ["source", "resolver"])
+def test_refresh_fault_publishes_unavailable_without_old_resolution(
+    captured_resource, fault: str
+) -> None:
+    resource, sources = captured_resource
+    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("offset")),))
+    seen: list[CfgStatus] = []
+    resource.watch(lambda observation: seen.append(observation.status))
+    sources.fail_read = fault == "source"
+    sources.fail_evaluation = fault == "resolver"
+    sources.revision += 1
+    unavailable = resource.refresh(before.ref.revision)
+    assert unavailable.ref.revision == before.ref.revision + 1
+    assert unavailable.status is CfgStatus.UNAVAILABLE
+    assert unavailable.diagnostics[0].reason == (
+        "source_failure" if fault == "source" else "resolution_failure"
+    )
+    value = unavailable.tree.children["a"].value
+    assert isinstance(value, EvalValue)
+    assert value.expr == "offset"
+    assert value.resolved is None
+    assert not unavailable.tree.valid
+    assert not unavailable.tree.children["a"].valid
+    with pytest.raises(CfgPreconditionError, match="not valid"):
+        resource.accept(unavailable.ref.revision)
+    assert seen == [CfgStatus.VALID, CfgStatus.UNAVAILABLE]
+    old_value = before.tree.children["a"].value
+    assert isinstance(old_value, EvalValue)
+    assert old_value.resolved == 1.0
+    sources.fail_read = False
+    sources.fail_evaluation = False
+    sources.names["offset"] = 8.0
+    recovered = resource.refresh(unavailable.ref.revision)
+    assert resource.accept(recovered.ref.revision).values["a"] == 8.0
+    assert seen[-1] is CfgStatus.VALID
+
+
+def test_unexpected_edit_evaluation_fault_is_not_invalid_input(
+    captured_resource,
+) -> None:
+    resource, sources = captured_resource
+    before = resource.observe()
+    sources.fail_evaluation = True
+    with pytest.raises(RuntimeError, match="resolver defect"):
+        resource.edit(before.ref.revision, (CfgEdit(("a",), EvalValue("offset")),))
+    assert resource.observe() == before
+
+
+def test_unavailable_projection_drops_linked_cache_and_derived_range_result() -> None:
+    shape = CfgSectionSpec(fields={"x": ScalarSpec("X", float)}, label="Shape")
+
+    class References:
+        def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
+            return ("entry",)
+
+        def resolve(self, kind: str, key: str) -> ResolvedReference:
+            return ResolvedReference("Shape", CfgSectionValue({"x": DirectValue(7.0)}))
+
+    def create_defaults() -> CfgSchema:
+        return CfgSchema(
+            CfgSectionSpec(
+                fields={"ref": ReferenceSpec("test", [shape]), "sweep": SweepSpec()}
+            ),
+            CfgSectionValue(
+                fields={
+                    "ref": ReferenceValue(
+                        "entry", CfgSectionValue({"x": DirectValue(7.0)})
+                    ),
+                    "sweep": SweepValue(EvalValue("frequency"), 3.0, 2),
+                }
+            ),
+        )
+
+    sources = Sources()
+    resource = CfgResource(
+        create_defaults,
+        resolution=lambda: replace(sources.read(), references=References()),
+        make_range=make_range,
+    )
+    before = resource.observe()
+    assert before.status is CfgStatus.VALID
+    sources.fail = True
+    changed = resource.refresh(before.ref.revision)
+    ref = changed.tree.children["ref"]
+    assert ref.children == {}
+    assert isinstance(ref.value, ReferenceValue)
+    assert ref.value.chosen_key == "entry"
+    assert ref.value.value.fields == {}
+    assert ref.value.resolved_label is None
+    sweep = changed.tree.children["sweep"].value
+    assert isinstance(sweep, SweepValue)
+    assert isinstance(sweep.start, EvalValue)
+    assert sweep.start.expr == "frequency"
+    assert sweep.start.resolved is None
+    assert sweep.step == DirectValue(None)
+    sources.fail = False
+    recovered = resource.refresh(changed.ref.revision)
+    assert recovered.status is CfgStatus.VALID
+    assert recovered.tree.children["ref"].children["x"].value == DirectValue(7.0)

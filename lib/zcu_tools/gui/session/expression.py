@@ -14,8 +14,15 @@ from typing import TYPE_CHECKING
 
 from simpleeval import DEFAULT_OPERATORS, InvalidExpression, SimpleEval, safe_power
 
+from zcu_tools.gui.expected_error import InvalidInputError
+
 if TYPE_CHECKING:
     from zcu_tools.resources.context import MetaDict
+
+
+class ExpressionError(InvalidInputError):
+    """An expression is invalid, unlike a failure of its source provider."""
+
 
 Scalar = int | float | complex
 _MAX_TEXT = 4096
@@ -76,11 +83,13 @@ def evaluate_numeric_expr(expr: str, md: MetaDict) -> float:
     """Evaluate a real-valued expression for device and real-only inputs."""
     value = evaluate_scalar_expr(expr, md)
     if isinstance(value, complex):
-        raise RuntimeError("Expression must resolve to a real number")
+        raise ExpressionError("Expression must resolve to a real number")
     try:
         return float(value)
     except OverflowError as exc:
-        raise RuntimeError("Expression result exceeds the real number range") from exc
+        raise ExpressionError(
+            "Expression result exceeds the real number range"
+        ) from exc
 
 
 def evaluate_scalar_expr(expr: str, md: MetaDict) -> Scalar:
@@ -98,14 +107,14 @@ def evaluate_scalar_expr(expr: str, md: MetaDict) -> Scalar:
     def lookup(node: ast.Name) -> Scalar:
         if node.id in _FUNCTIONS:
             _require_unshadowed(node.id, md)
-            raise RuntimeError(f"Function {node.id!r} must be called")
+            raise ExpressionError(f"Function {node.id!r} must be called")
         if node.id in _CONSTANTS:
             _require_unshadowed(node.id, md)
             return _CONSTANTS[node.id]
         try:
             value = getattr(md, node.id)
         except AttributeError as exc:
-            raise RuntimeError(
+            raise ExpressionError(
                 f"Variable {node.id!r} is not defined in MetaDict"
             ) from exc
         return _number(value, f"MetaDict variable {node.id!r}")
@@ -122,7 +131,7 @@ def evaluate_scalar_expr(expr: str, md: MetaDict) -> Scalar:
     try:
         result = evaluator.eval(expr, previously_parsed=tree.body)
     except InvalidExpression as exc:
-        raise RuntimeError(str(exc)) from exc
+        raise ExpressionError(str(exc)) from exc
     return _number(result, "Expression result")
 
 
@@ -142,29 +151,31 @@ def coerce_eval_result(value: float, type_: type) -> int | float:
         return float(value)
     if type_ is int:
         if not float(value).is_integer():
-            raise RuntimeError(f"Expression result {value!r} is not an integer")
+            raise ExpressionError(f"Expression result {value!r} is not an integer")
         return int(value)
-    raise RuntimeError(f"Eval mode only supports int or float, got {type_!r}")
+    raise ExpressionError(f"Eval mode only supports int or float, got {type_!r}")
 
 
 def _parse_expression(expr: str) -> ast.Expression:
     if not expr.strip():
-        raise RuntimeError("Expression must not be empty")
+        raise ExpressionError("Expression must not be empty")
     if len(expr) > _MAX_TEXT:
-        raise RuntimeError("Expression exceeds the text length limit")
+        raise ExpressionError("Expression exceeds the text length limit")
     try:
         tree = ast.parse(expr, mode="eval")
     except (SyntaxError, RecursionError) as exc:
-        raise RuntimeError(f"Invalid expression syntax: {expr!r}") from exc
+        raise ExpressionError(f"Invalid expression syntax: {expr!r}") from exc
     pending: list[tuple[ast.AST, int]] = [(tree, 0)]
     count = 0
     while pending:
         node, depth = pending.pop()
         count += 1
         if count > _MAX_NODES or depth > _MAX_DEPTH:
-            raise RuntimeError("Expression exceeds the syntax complexity limit")
+            raise ExpressionError("Expression exceeds the syntax complexity limit")
         if not isinstance(node, _ALLOWED_NODES):
-            raise RuntimeError(f"Unsupported expression syntax: {type(node).__name__}")
+            raise ExpressionError(
+                f"Unsupported expression syntax: {type(node).__name__}"
+            )
         if isinstance(node, ast.Constant):
             _number(node.value, "Expression constant")
         if isinstance(node, ast.Call) and (
@@ -172,7 +183,7 @@ def _parse_expression(expr: str) -> ast.Expression:
             or node.func.id not in _FUNCTIONS
             or node.keywords
         ):
-            raise RuntimeError("Unsupported expression syntax: function call")
+            raise ExpressionError("Unsupported expression syntax: function call")
         pending.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
     return tree
 
@@ -182,19 +193,19 @@ def _require_unshadowed(name: str, md: MetaDict) -> None:
         getattr(md, name)
     except AttributeError:
         return
-    raise RuntimeError(
+    raise ExpressionError(
         f"MetaDict name {name!r} conflicts with a reserved expression name"
     )
 
 
 def _number(value: object, label: str) -> Scalar:
     if isinstance(value, bool) or not isinstance(value, (int, float, complex)):
-        raise RuntimeError(f"{label} is not numeric")
+        raise ExpressionError(f"{label} is not numeric")
     if isinstance(value, int):
         if value.bit_length() > _MAX_INTEGER_BITS:
-            raise RuntimeError(f"{label} exceeds the integer size limit")
+            raise ExpressionError(f"{label} exceeds the integer size limit")
     elif not (math.isfinite(value.real) and math.isfinite(value.imag)):
-        raise RuntimeError(f"{label} must be finite")
+        raise ExpressionError(f"{label} must be finite")
     return value
 
 
@@ -203,7 +214,7 @@ def _checked(function: Callable[..., object]) -> Callable[..., Scalar]:
         try:
             result = function(*args)
         except (ArithmeticError, TypeError, ValueError) as exc:
-            raise RuntimeError(f"Expression arithmetic failed: {exc}") from exc
+            raise ExpressionError(f"Expression arithmetic failed: {exc}") from exc
         return _number(result, "Expression result")
 
     return call
@@ -211,12 +222,12 @@ def _checked(function: Callable[..., object]) -> Callable[..., Scalar]:
 
 def _power(base: Scalar, exponent: Scalar) -> Scalar:
     if abs(exponent) > _MAX_EXPONENT:
-        raise RuntimeError("Expression exceeds the exponent limit")
+        raise ExpressionError("Expression exceeds the exponent limit")
     if (
         isinstance(base, int)
         and isinstance(exponent, int)
         and exponent > 0
         and max(0, abs(base).bit_length() - 1) * exponent > _MAX_INTEGER_BITS
     ):
-        raise RuntimeError("Expression exceeds the integer size limit")
+        raise ExpressionError("Expression exceeds the integer size limit")
     return _number(safe_power(base, exponent), "Power result")

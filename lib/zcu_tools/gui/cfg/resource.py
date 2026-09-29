@@ -258,8 +258,9 @@ class CfgResource:
         self._check_command(expected_revision)
         source = self._resolution()
         capture = ExpressionCapture(source.read_capture, source.validate_expression)
+        failures: list[Exception] = []
         candidate, basis = self._prepare(
-            deepcopy(self._draft.snapshot()), source=source
+            deepcopy(self._draft.snapshot()), source=source, failures=failures
         )
         try:
             for index, edit in enumerate(edits):
@@ -279,6 +280,8 @@ class CfgResource:
                     raise CfgPreconditionError(
                         exc.reason, str(exc), path=edit.path, edit_index=index
                     ) from exc
+            if failures:
+                raise failures[0]
             observation = self._next_observation(candidate, basis)
         except BaseException:
             candidate.close()
@@ -300,12 +303,21 @@ class CfgResource:
 
     def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
         self._check_command(expected_revision)
-        candidate, basis = self._prepare(deepcopy(self._draft.snapshot()))
+        source: CfgResolution | None = None
+        candidate: CfgDraft | None = None
         try:
+            source = self._resolution()
+            candidate, basis = self._prepare(
+                deepcopy(self._draft.snapshot()), source=source
+            )
             observation = self._next_observation(candidate, basis)
-        except BaseException:
-            candidate.close()
-            raise
+        except Exception as exc:
+            if candidate is not None:
+                candidate.close()
+            logging.getLogger(__name__).exception(
+                "Cfg refresh failed; publishing Unavailable"
+            )
+            return self._publish_unavailable(exc, source)
         return self._publish(candidate, observation)
 
     def accept(self, expected_revision: CfgRevision) -> AcceptedConfig:
@@ -353,15 +365,35 @@ class CfgResource:
             )
 
     def _prepare(
-        self, schema: CfgSchema, *, source: CfgResolution | None = None
+        self,
+        schema: CfgSchema,
+        *,
+        source: CfgResolution | None = None,
+        failures: list[Exception] | None = None,
     ) -> tuple[CfgDraft, SourceBasis]:
         source = self._resolution() if source is None else source
+        failures = [] if failures is None else failures
+
+        def evaluate(expression: str) -> int | float | complex:
+            try:
+                return source.evaluate_expression(expression)
+            except InvalidInputError:
+                raise
+            except Exception as exc:
+                # Binding caches display errors. Preserve unexpected failures for
+                # the command owner instead of publishing them as invalid input.
+                failures.append(exc)
+                raise
+
         draft = CfgDraft(
             schema,
-            evaluate_expression=source.evaluate_expression,
+            evaluate_expression=evaluate,
             provide_options=source.provide_options,
             references=source.references,
         )
+        if failures:
+            draft.close()
+            raise failures[0]
         return draft, source.source_basis
 
     def _next_observation(self, draft: CfgDraft, basis: SourceBasis) -> CfgObservation:
@@ -387,10 +419,38 @@ class CfgResource:
         self._draft = candidate
         self._observation = observation
         previous.close()
+        self._notify()
+        return deepcopy(observation)
+
+    def _publish_unavailable(
+        self, failure: Exception, source: CfgResolution | None
+    ) -> CfgObservation:
+        from ._unavailable import unavailable_tree
+
+        observation = CfgObservation(
+            replace(
+                self._observation.ref,
+                revision=CfgRevision(self._observation.ref.revision + 1),
+            ),
+            CfgStatus.UNAVAILABLE,
+            unavailable_tree(self._draft.observe()),
+            () if source is None else source.source_basis,
+            (
+                CfgDiagnostic(
+                    (),
+                    "source_failure" if source is None else "resolution_failure",
+                    str(failure),
+                ),
+            ),
+        )
+        self._observation = observation
+        self._notify()
+        return deepcopy(observation)
+
+    def _notify(self) -> None:
         for token, callback in tuple(self._subscribers.items()):
             if token in self._subscribers:
                 self._deliver(callback)
-        return deepcopy(observation)
 
     def _deliver(self, callback: Callable[[CfgObservation], None]) -> None:
         self._notifying += 1
