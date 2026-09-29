@@ -218,23 +218,19 @@ def test_registry_evicts_gc_collected_figure(qapp):
     from matplotlib.figure import Figure
     from zcu_tools.gui.plotting.host import _fig_container_registry
 
-    # The registry is a module global shared across tests, so measure the delta
-    # rather than the absolute count.
-    baseline = len(_fig_container_registry)
-
     container = _make_container()
     fig = Figure()
     _fig_container_registry[fig] = container
     assert get_figure_container(fig) is container
-    assert len(_fig_container_registry) == baseline + 1
 
+    figure_id = id(fig)
     fig_ref = weakref.ref(fig)
     del fig
     gc.collect()
 
     assert fig_ref() is None, "figure was not GC'd; test cannot prove weak eviction"
-    # The weak key evicted exactly the collected figure's entry.
-    assert len(_fig_container_registry) == baseline
+    # Other weak entries may also expire during GC; only this figure is ours.
+    assert figure_id not in dump_plot_state().attached_figure_ids
 
 
 def test_new_figure_does_not_detach_other_container(qapp):

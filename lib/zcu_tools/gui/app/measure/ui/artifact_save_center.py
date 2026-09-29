@@ -138,16 +138,14 @@ class ArtifactSaveCenter(QWidget):
         self.load_button = QPushButton("Load Data")
         self.load_button.setFixedHeight(36)
         self.load_button.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Fixed,  # type: ignore[attr-defined]
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.save_all_button = _FocusPreservingSaveAllButton(
             self._capture_data_editor_state, self._restore_data_editor_state
         )
         self.save_all_button.setFixedHeight(36)
         self.save_all_button.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Fixed,  # type: ignore[attr-defined]
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.save_all_button.setDefault(True)
         if self._has_load:
@@ -214,8 +212,7 @@ class ArtifactSaveCenter(QWidget):
             self._comment_edit.setPlaceholderText("Optional comment…")
             self._comment_edit.setFixedHeight(60)
             self._comment_edit.setSizePolicy(
-                QSizePolicy.Expanding,
-                QSizePolicy.Fixed,  # type: ignore[attr-defined]
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
             layout.addWidget(self._comment_edit)
         return container
