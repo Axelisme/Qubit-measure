@@ -219,7 +219,9 @@ class CfgResource:
     Only app composition receives this concrete owner. Frontends receive its
     CfgEditing capability; run owners receive CfgAcceptance. All calls are
     synchronous on the same owner sequence. ``defaults`` executes only at
-    creation/reset and must return the same definition throughout this lifetime.
+    fresh creation/reset and must return the same definition throughout this
+    lifetime. Restore supplies ``initial`` instead of executing defaults. Input
+    snapshots and replacement belong only to the concrete application owner.
     """
 
     def __init__(
@@ -228,6 +230,7 @@ class CfgResource:
         *,
         resolution: Callable[[], CfgResolution],
         make_range: RangeFactory,
+        initial: CfgSchema | None = None,
         mutation_allowed: Callable[[], bool] = lambda: True,
     ) -> None:
         self._defaults = defaults
@@ -237,7 +240,7 @@ class CfgResource:
         self._closed = False
         self._notifying = 0
         self._subscribers: dict[object, Callable[[CfgObservation], None]] = {}
-        schema = deepcopy(defaults())
+        schema = deepcopy(defaults() if initial is None else initial)
         _validate_definition(schema.spec)
         self._spec = deepcopy(schema.spec)
         self._inputs = deepcopy(schema)
@@ -289,11 +292,25 @@ class CfgResource:
             raise
         return self._publish(candidate, observation, editor.schema)
 
+    def snapshot_inputs(self) -> CfgSchema:
+        """Detach input state for the owning persistence/load flow, without refresh."""
+        self._require_open()
+        return deepcopy(self._inputs)
+
+    def replace_inputs(
+        self, expected_revision: CfgRevision, schema: CfgSchema
+    ) -> CfgObservation:
+        """Atomically install same-definition inputs from an owning load flow."""
+        self._check_command(expected_revision)
+        return self._replace_inputs(deepcopy(schema))
+
     def reset(self, expected_revision: CfgRevision) -> CfgObservation:
         self._check_command(expected_revision)
-        schema = deepcopy(self._defaults())
+        return self._replace_inputs(deepcopy(self._defaults()))
+
+    def _replace_inputs(self, schema: CfgSchema) -> CfgObservation:
         if schema.spec != self._spec:
-            raise RuntimeError("defaults changed the resource definition")
+            raise RuntimeError("replacement changed the resource definition")
         candidate, basis = self._prepare(deepcopy(schema))
         try:
             observation = self._next_observation(candidate, basis)

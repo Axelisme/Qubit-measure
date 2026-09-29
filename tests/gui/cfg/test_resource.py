@@ -95,6 +95,112 @@ def make_resource(sources: Sources | None = None) -> CfgResource:
     return CfgResource(defaults, resolution=source.read, make_range=make_range)
 
 
+def test_restore_skips_defaults_until_reset_and_detaches_input_snapshot() -> None:
+    calls: list[str] = []
+
+    def fresh_defaults() -> CfgSchema:
+        calls.append("defaults")
+        return defaults()
+
+    initial = defaults()
+    initial.value.fields["a"] = DirectValue(7.0)
+    source = Sources()
+    resource = CfgResource(
+        fresh_defaults, initial=initial, resolution=source.read, make_range=make_range
+    )
+    before = resource.observe()
+    initial.value.fields["a"] = DirectValue(99.0)
+    assert resource.accept(before.ref.revision).values["a"] == 7.0
+    reads = source.reads
+    snapshot = resource.snapshot_inputs()
+    snapshot.value.fields["a"] = DirectValue(99.0)
+    assert resource.snapshot_inputs().value.fields["a"] == DirectValue(7.0)
+    assert source.reads == reads
+    assert calls == []
+    reset = resource.reset(before.ref.revision)
+    assert reset.ref.cfg_id == before.ref.cfg_id
+    assert resource.accept(reset.ref.revision).values["a"] == 1.0
+    assert calls == ["defaults"]
+
+
+def test_owner_replacement_publishes_incomplete_input_once_without_new_identity() -> (
+    None
+):
+    resource = make_resource()
+    before = resource.observe()
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    schema = defaults()
+    schema.value.fields["a"] = DirectValue(None, raw="-")
+    changed = resource.replace_inputs(before.ref.revision, schema)
+    assert changed.status is CfgStatus.INVALID
+    assert changed.ref.cfg_id == before.ref.cfg_id
+    assert changed.ref.revision == before.ref.revision + 1
+    assert len(seen) == 2
+    schema.value.fields["a"] = DirectValue(9.0)
+    assert resource.snapshot_inputs().value.fields["a"] == DirectValue(None, raw="-")
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.accept(changed.ref.revision)
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+
+
+@pytest.mark.parametrize("fault", ["definition", "source"])
+def test_owner_replacement_failure_preserves_publication_and_inputs(fault: str) -> None:
+    source = Sources()
+    resource = make_resource(source)
+    before = resource.observe()
+    inputs = resource.snapshot_inputs()
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    candidate = defaults()
+    candidate.value.fields["a"] = DirectValue(8.0)
+    if fault == "definition":
+        candidate.spec = CfgSectionSpec(fields={"a": ScalarSpec("Different", float)})
+    else:
+        source.fail = True
+    with pytest.raises(RuntimeError, match="definition|source snapshot failure"):
+        resource.replace_inputs(before.ref.revision, candidate)
+    assert resource.observe() == before
+    assert resource.snapshot_inputs() == inputs
+    assert len(seen) == 1
+
+
+def test_owner_replacement_obeys_revision_busy_reentry_and_revocation() -> None:
+    allowed = True
+    resource = CfgResource(
+        defaults,
+        resolution=Sources().read,
+        make_range=make_range,
+        mutation_allowed=lambda: allowed,
+    )
+    before = resource.observe()
+    with pytest.raises(CfgStaleError):
+        resource.replace_inputs(CfgRevision(before.ref.revision + 1), defaults())
+    allowed = False
+    with pytest.raises(CfgPreconditionError) as busy:
+        resource.replace_inputs(before.ref.revision, defaults())
+    assert busy.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
+    allowed = True
+    errors: list[CfgPreconditionReason] = []
+
+    def reenter(observation: CfgObservation) -> None:
+        with pytest.raises(CfgPreconditionError) as caught:
+            resource.replace_inputs(observation.ref.revision, defaults())
+        errors.append(caught.value.reason)
+
+    unsubscribe = resource.watch(reenter)
+    assert errors == [CfgPreconditionReason.REENTRANT_MUTATION]
+    unsubscribe()
+    resource.revoke()
+    for operation in (
+        resource.snapshot_inputs,
+        lambda: resource.replace_inputs(before.ref.revision, defaults()),
+    ):
+        with pytest.raises(CfgPreconditionError) as gone:
+            operation()
+        assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
+
+
 def test_batch_is_atomic_and_literal_path_is_not_split() -> None:
     resource = make_resource()
     before = resource.observe()
