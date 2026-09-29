@@ -64,6 +64,7 @@ def _failing_reference_spec(*, optional: bool = False) -> ReferenceSpec:
         ],
         label="Failure probe",
         optional=optional,
+        discriminator="type",
     )
 
 

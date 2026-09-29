@@ -8,7 +8,7 @@ from typing import Any, Self, TypeAlias
 
 def default_value_for_type(type_: type) -> object:
     defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
-    return defaults.get(type_, None)
+    return defaults.get(type_)
 
 
 def require_finite_scalar(value: float | complex) -> None:
@@ -174,12 +174,26 @@ class ReferenceSpec:
     allowed: list[CfgSectionSpec]
     label: str = "Reference"
     optional: bool = False
+    discriminator: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if not self.kind:
             raise RuntimeError("ReferenceSpec.kind must be non-empty")
         if not self.allowed:
             raise RuntimeError("ReferenceSpec.allowed must be non-empty")
+        if self.discriminator is not None:
+            values: list[object] = []
+            for shape in self.allowed:
+                literal = shape.fields.get(self.discriminator)
+                if not isinstance(literal, LiteralSpec):
+                    raise ValueError(
+                        "Reference discriminator must name a literal in every shape"
+                    )
+                if literal.value in values:
+                    raise ValueError(
+                        "Reference discriminator must uniquely identify each shape"
+                    )
+                values.append(literal.value)
 
     def lock_literal(self, path: str, value: object) -> Self:
         """Lock a leaf of this ref's allowed shapes (path is relative to the
@@ -208,28 +222,6 @@ class ReferenceSpec:
                 f"shape of ReferenceSpec (allowed: {allowed_labels})"
             )
         return replace(self, allowed=new_allowed)
-
-
-def _reference_discriminator_key(spec: ReferenceSpec) -> str | None:
-    """Return the unique literal field that distinguishes all allowed shapes."""
-    first = spec.allowed[0]
-    common_keys = set(first.fields)
-    for allowed in spec.allowed[1:]:
-        common_keys.intersection_update(allowed.fields)
-    for key in first.fields:
-        if key not in common_keys:
-            continue
-        leaves = [allowed.fields[key] for allowed in spec.allowed]
-        if not all(isinstance(leaf, LiteralSpec) for leaf in leaves):
-            continue
-        values = [leaf.value for leaf in leaves if isinstance(leaf, LiteralSpec)]
-        if all(
-            value != other
-            for idx, value in enumerate(values)
-            for other in values[idx + 1 :]
-        ):
-            return key
-    return None
 
 
 @dataclass(frozen=True)

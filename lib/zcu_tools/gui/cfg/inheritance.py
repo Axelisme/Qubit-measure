@@ -16,7 +16,6 @@ from .model import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    _reference_discriminator_key,
     default_value_for_type,
 )
 from .reference_key import make_custom_reference_key, parse_custom_reference_key
@@ -75,8 +74,8 @@ def select_ref_value_spec(
     """Return the caller-allowed spec matching a ref value's concrete shape.
 
     Custom refs are selected by their ``<Custom:label>`` key. Linked refs are
-    selected by the value tree's discriminator (``type`` for modules, ``style``
-    for waveforms), so a library value can be projected onto an adapter-local
+    selected by the discriminator declared by the domain in ReferenceSpec,
+    so a library value can be projected onto an adapter-local
     spec that carries extra ``LiteralSpec`` locks.
     """
     chosen = ref_val.chosen_key
@@ -93,7 +92,7 @@ def select_ref_value_spec(
             f"Unknown custom reference label {label!r}; allowed labels: {allowed}"
         )
 
-    disc_key = _reference_discriminator_key(ref_spec)
+    disc_key = ref_spec.discriminator
     disc_label = disc_key or "discriminator"
     discriminator = _section_discriminator(ref_val.value, disc_key)
     if discriminator is None:

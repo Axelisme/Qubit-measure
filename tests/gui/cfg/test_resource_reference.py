@@ -217,7 +217,11 @@ def test_later_edit_uses_shape_selected_by_earlier_relink() -> None:
         }
     )
     schema = CfgSchema(
-        CfgSectionSpec(fields={"ref": ReferenceSpec("module", [first, second])}),
+        CfgSectionSpec(
+            fields={
+                "ref": ReferenceSpec("module", [first, second], discriminator="type")
+            }
+        ),
         CfgSectionValue({"ref": ReferenceValue("first", first_value)}),
     )
     resource = CfgResource(
@@ -231,4 +235,51 @@ def test_later_edit_uses_shape_selected_by_earlier_relink() -> None:
     )
     assert resource.accept(changed.ref.revision).values == {
         "ref": {"type": "second", "y": 8.0}
+    }
+
+
+def test_override_shape_uses_declared_discriminator_not_other_literals() -> None:
+    first = CfgSectionSpec(
+        fields={
+            "decoration": LiteralSpec("red"),
+            "variant": LiteralSpec("one"),
+            "x": ScalarSpec("X", float),
+        },
+        label="First",
+    )
+    second = CfgSectionSpec(
+        fields={
+            "decoration": LiteralSpec("blue"),
+            "variant": LiteralSpec("two"),
+            "y": ScalarSpec("Y", float),
+        },
+        label="Second",
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(
+            fields={
+                "ref": ReferenceSpec("test", [first, second], discriminator="variant")
+            }
+        ),
+        CfgSectionValue(
+            {
+                "ref": ReferenceValue(
+                    "unavailable",
+                    CfgSectionValue(
+                        {"variant": DirectValue("two"), "y": DirectValue(4.0)}
+                    ),
+                    is_overridden=True,
+                )
+            }
+        ),
+    )
+    resource = CfgResource(
+        lambda: schema,
+        resolution=Catalog().snapshot,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    observation = resource.observe()
+    assert observation.status is CfgStatus.VALID
+    assert resource.accept(observation.ref.revision).values == {
+        "ref": {"decoration": "blue", "variant": "two", "y": 4.0}
     }

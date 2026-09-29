@@ -28,7 +28,6 @@ from .model import (
     ScalarValue,
     SweepSpec,
     SweepValue,
-    _reference_discriminator_key,
 )
 from .reference_key import parse_custom_reference_key
 
@@ -161,7 +160,7 @@ def _node_value_to_raw(
         )
     if isinstance(spec, ReferenceSpec):
         assert isinstance(value, ReferenceValue)
-        disc_key = _reference_discriminator_key(spec)
+        disc_key = spec.discriminator
         return {
             "__kind": f"{spec.kind}_ref",
             "chosen_key": value.chosen_key,
@@ -337,7 +336,7 @@ def _ref_value_from_raw(
     ):
         chosen_key = raw["chosen_key"]
         raw_value = raw["value"]
-        disc_key = _reference_discriminator_key(spec)
+        disc_key = spec.discriminator
         value_spec = _select_allowed_spec(
             spec,
             chosen_key,
@@ -407,7 +406,7 @@ def _select_allowed_spec(
     # shape need not even carry one).
     if len(spec.allowed) == 1:
         return spec.allowed[0]
-    disc_key = _reference_discriminator_key(spec)
+    disc_key = spec.discriminator
     disc_label = disc_key or "discriminator"
     for allowed_spec in spec.allowed:
         leaf = allowed_spec.fields.get(disc_label)
