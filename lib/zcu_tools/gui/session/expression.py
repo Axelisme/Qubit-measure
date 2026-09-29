@@ -126,6 +126,15 @@ def evaluate_scalar_expr(expr: str, md: MetaDict) -> Scalar:
     return _number(result, "Expression result")
 
 
+def validate_scalar_expr(expr: str) -> None:
+    """Check expression grammar and limits without reading variable sources.
+
+    Capture preparation uses this before accessing any marked reference. Missing
+    variables and arithmetic/domain errors belong to evaluation, not validation.
+    """
+    _parse_expression(expr)
+
+
 def coerce_eval_result(value: float, type_: type) -> int | float:
     """Coerce an evaluated float to the target scalar type without surprises."""
     _number(value, "Expression result")

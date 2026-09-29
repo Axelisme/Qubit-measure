@@ -27,6 +27,8 @@ from zcu_tools.gui.cfg.resource import (
     CfgStatus,
     SourceRevision,
 )
+from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
+from zcu_tools.resources.context import MetaDict
 
 
 class EmptyReferences:
@@ -62,6 +64,8 @@ class Sources:
             evaluate,
             lambda source_id: (),
             EmptyReferences(),
+            values.__getitem__,
+            validate_scalar_expr,
         )
 
 
@@ -248,3 +252,182 @@ def test_revocation_invalidates_handles_and_never_reuses_identity() -> None:
             action()
         assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
     assert make_resource().observe().ref.cfg_id != before.ref.cfg_id
+
+
+@dataclass
+class ExpressionSources:
+    captured: dict[str, object] = field(default_factory=lambda: {"device.value": -2})
+    names: dict[str, object] = field(default_factory=lambda: {"offset": 1.0})
+    revision: int = 0
+    capture_reads: list[str] = field(default_factory=list)
+
+    def read(self) -> CfgResolution:
+        captured = dict(self.captured)
+        md = MetaDict()
+        md.update(self.names)
+
+        def capture(name: str) -> object:
+            self.capture_reads.append(name)
+            return captured[name]
+
+        return CfgResolution(
+            (SourceRevision("snapshot", CfgRevision(self.revision)),),
+            lambda expression: evaluate_scalar_expr(expression, md),
+            lambda source_id: (),
+            EmptyReferences(),
+            capture,
+            validate_scalar_expr,
+        )
+
+
+def expression_defaults() -> CfgSchema:
+    schema = defaults()
+    schema.spec.fields["z"] = ScalarSpec("Complex", complex)
+    schema.value.fields["z"] = DirectValue(0j)
+    schema.spec.fields["flags"] = ScalarSpec("Flags", int)
+    schema.value.fields["flags"] = DirectValue(0)
+    return schema
+
+
+@pytest.fixture
+def captured_resource() -> tuple[CfgResource, ExpressionSources]:
+    sources = ExpressionSources()
+    resource = CfgResource(
+        expression_defaults,
+        resolution=sources.read,
+        make_range=make_range,
+    )
+    return resource, sources
+
+
+def test_capture_groups_negative_power_and_keeps_dynamic_dependencies(
+    captured_resource,
+) -> None:
+    resource, sources = captured_resource
+    changed = resource.edit(
+        CfgRevision(0), (CfgEdit(("a",), EvalValue("$device.value ** 2 + offset")),)
+    )
+    assert resource.accept(changed.ref.revision).values["a"] == 5.0
+    value = changed.tree.children["a"].value
+    assert isinstance(value, EvalValue)
+    assert value.expr == "(-2) ** 2 + offset"
+    sources.captured["device.value"] = 100
+    sources.names["offset"] = 3.0
+    sources.revision += 1
+    refreshed = resource.refresh(changed.ref.revision)
+    assert resource.accept(refreshed.ref.revision).values["a"] == 7.0
+    assert sources.capture_reads == ["device.value"]
+
+
+def test_capture_uses_real_functions_complex_and_integer_semantics(
+    captured_resource,
+) -> None:
+    resource, sources = captured_resource
+    sources.captured.update({"z": 1 + 1j, "flags": 6, "angle": 0.0})
+    changed = resource.edit(
+        CfgRevision(0),
+        (
+            CfgEdit(("z",), EvalValue("$z * $z")),
+            CfgEdit(("flags",), EvalValue("$flags ^ 3")),
+            CfgEdit(("a",), EvalValue("cos($angle) + log(e)")),
+        ),
+    )
+    values = resource.accept(changed.ref.revision).values
+    assert values["z"] == 2j
+    assert values["flags"] == 5
+    assert values["a"] == 2.0
+    assert sources.capture_reads.count("z") == 1
+    assert isinstance(changed.tree.children["flags"].value, EvalValue)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "$",
+        "$device.value +",
+        "$device.",
+        "$device.value[0]",
+        "$device.value()",
+        "$ device",
+        "$device.value @ 2",
+    ],
+)
+def test_invalid_capture_structure_rejects_batch_before_reading_sources(
+    captured_resource, expression: str
+) -> None:
+    resource, sources = captured_resource
+    before = resource.observe()
+    with pytest.raises(CfgInputError, match=".") as caught:
+        resource.edit(
+            before.ref.revision,
+            (
+                CfgEdit(("literal.dot",), 10.0),
+                CfgEdit(("a",), EvalValue(expression)),
+            ),
+        )
+    assert caught.value.reason is CfgInputReason.CAPTURE_SYNTAX
+    assert caught.value.edit_index == 1
+    assert resource.observe() == before
+    assert sources.capture_reads == []
+
+
+def test_capture_missing_source_rejects_without_publishing_prefix(
+    captured_resource,
+) -> None:
+    resource, _ = captured_resource
+    before = resource.observe()
+    with pytest.raises(CfgPreconditionError, match="unavailable") as caught:
+        resource.edit(
+            before.ref.revision,
+            (
+                CfgEdit(("a",), 10.0),
+                CfgEdit(("literal.dot",), EvalValue("$missing")),
+            ),
+        )
+    assert caught.value.reason is CfgPreconditionReason.CAPTURE_UNAVAILABLE
+    assert caught.value.path == ("literal.dot",)
+    assert caught.value.edit_index == 1
+    assert resource.observe() == before
+
+
+@pytest.mark.parametrize(
+    "value", [True, "text", None, float("inf"), complex(1, float("nan"))]
+)
+def test_capture_rejects_non_literal_values(captured_resource, value: object) -> None:
+    resource, sources = captured_resource
+    sources.captured["device.value"] = value
+    with pytest.raises(CfgInputError, match="numeric|finite") as caught:
+        resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("$device.value")),))
+    assert caught.value.reason is CfgInputReason.INVALID_VALUE
+    assert resource.observe().ref.revision == 0
+
+
+@pytest.mark.parametrize("expression", ["'$device.value'", "sin(", "offset +"])
+def test_without_capture_tokens_incomplete_or_invalid_expression_is_saved(
+    captured_resource, expression: str
+) -> None:
+    resource, sources = captured_resource
+    changed = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue(expression)),))
+    assert changed.status is CfgStatus.INVALID
+    value = changed.tree.children["a"].value
+    assert isinstance(value, EvalValue)
+    assert value.expr == expression
+    assert sources.capture_reads == []
+
+
+def test_capture_token_boundaries_and_missing_dynamic_name(captured_resource) -> None:
+    resource, sources = captured_resource
+    sources.names["device_value"] = 10.0
+    changed = resource.edit(
+        CfgRevision(0),
+        (CfgEdit(("a",), EvalValue("$device.value + device_value + missing")),),
+    )
+    assert changed.status is CfgStatus.INVALID
+    value = changed.tree.children["a"].value
+    assert isinstance(value, EvalValue)
+    assert value.expr == "(-2) + device_value + missing"
+    sources.names["missing"] = 1.0
+    sources.captured["device.value"] = 99
+    changed = resource.refresh(changed.ref.revision)
+    assert resource.accept(changed.ref.revision).values["a"] == 9.0
+    assert sources.capture_reads == ["device.value"]

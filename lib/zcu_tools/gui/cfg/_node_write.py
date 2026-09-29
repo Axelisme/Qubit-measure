@@ -1,6 +1,6 @@
 """Candidate-only node writes; never mutate a published draft."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from .binding.fields import (
     CenteredSweepField,
@@ -16,42 +16,48 @@ from .model import DirectValue, EvalValue
 from .resource import CfgInput, CfgInputError, CfgInputReason, CfgPath
 
 
-def write_node(node: CfgField, path: CfgPath, value: CfgInput) -> None:
+def write_node(
+    node: CfgField, path: CfgPath, value: CfgInput, prepare: Callable[[str], str]
+) -> None:
     if isinstance(node, LiteralField) or (
         isinstance(node, (ScalarField, SweepField, CenteredSweepField))
         and not node.spec.editable
     ):
         raise CfgInputError(CfgInputReason.READONLY, "node is readonly")
     if isinstance(node, ReferenceField):
-        _write_reference(node, path, value)
+        _write_reference(node, path, value, prepare)
     elif isinstance(node, SectionField):
-        _write_section(node, path, value)
+        _write_section(node, path, value, prepare)
     elif isinstance(node, (SweepField, CenteredSweepField)):
-        _write_range(node, path, value)
+        _write_range(node, path, value, prepare)
     elif isinstance(node, ScalarField) and not path:
-        _write_scalar(node, value)
+        _write_scalar(node, value, prepare)
     else:
         raise CfgInputError(
             CfgInputReason.UNKNOWN_PATH, "path does not name a writable node"
         )
 
 
-def _write_section(node: SectionField, path: CfgPath, value: CfgInput) -> None:
+def _write_section(
+    node: SectionField, path: CfgPath, value: CfgInput, prepare: Callable[[str], str]
+) -> None:
     if path:
         key, *rest = path
         if key not in node.fields:
             raise CfgInputError(CfgInputReason.UNKNOWN_PATH, f"unknown field {key!r}")
-        write_node(node.fields[key], tuple(rest), value)
+        write_node(node.fields[key], tuple(rest), value, prepare)
         return
     if not isinstance(value, Mapping):
         raise CfgInputError(
             CfgInputReason.INVALID_VALUE, "section input must be a mapping"
         )
     for key, child in value.items():
-        _write_section(node, (key,), child)
+        _write_section(node, (key,), child, prepare)
 
 
-def _write_scalar(node: ScalarField, value: CfgInput) -> None:
+def _write_scalar(
+    node: ScalarField, value: CfgInput, prepare: Callable[[str], str]
+) -> None:
     # Carrier caches and diagnostics must not bypass target parsing/validation.
     clean = decode_input(encode_input(value))
     if isinstance(clean, EvalValue):
@@ -62,11 +68,7 @@ def _write_scalar(node: ScalarField, value: CfgInput) -> None:
             raise CfgInputError(
                 CfgInputReason.UNSUPPORTED_MODE, "expression mode is unsupported"
             )
-        if "$" in clean.expr:
-            raise CfgInputError(
-                CfgInputReason.CAPTURE_SYNTAX, "capture requires expression preparation"
-            )
-        node.set_value(clean)
+        node.set_value(EvalValue(prepare(clean.expr)))
     elif isinstance(clean, DirectValue) and clean.raw is not None:
         if node.spec.type not in (int, float, complex, str):
             raise CfgInputError(
@@ -80,7 +82,9 @@ def _write_scalar(node: ScalarField, value: CfgInput) -> None:
             raise CfgInputError(CfgInputReason.INVALID_VALUE, str(exc)) from exc
 
 
-def _write_reference(node: ReferenceField, path: CfgPath, value: CfgInput) -> None:
+def _write_reference(
+    node: ReferenceField, path: CfgPath, value: CfgInput, prepare: Callable[[str], str]
+) -> None:
     if path == ("__ref",):
         _relink(node, value)
         return
@@ -98,13 +102,13 @@ def _write_reference(node: ReferenceField, path: CfgPath, value: CfgInput) -> No
             _relink(node, value["__ref"])
         for key, child in value.items():
             if key != "__ref":
-                _write_reference(node, (key,), child)
+                _write_reference(node, (key,), child, prepare)
         return
     if not node.is_enabled or node.sub_field is None:
         raise CfgInputError(
             CfgInputReason.UNKNOWN_PATH, "reference has no active children"
         )
-    write_node(node.sub_field, path, value)
+    write_node(node.sub_field, path, value, prepare)
 
 
 def _relink(node: ReferenceField, value: CfgInput) -> None:
@@ -128,7 +132,10 @@ def _relink(node: ReferenceField, value: CfgInput) -> None:
 
 
 def _write_range(
-    node: SweepField | CenteredSweepField, path: CfgPath, value: CfgInput
+    node: SweepField | CenteredSweepField,
+    path: CfgPath,
+    value: CfgInput,
+    prepare: Callable[[str], str],
 ) -> None:
     if not path:
         if not isinstance(value, Mapping):
@@ -140,17 +147,19 @@ def _write_range(
                 CfgInputReason.INVALID_VALUE, "range cannot specify both expts and step"
             )
         for key, child in value.items():
-            _write_range(node, (key,), child)
+            _write_range(node, (key,), child, prepare)
         return
     if len(path) != 1:
         raise CfgInputError(CfgInputReason.UNKNOWN_PATH, "range paths have one segment")
     key = path[0]
     if isinstance(node, SweepField) and key in {"start", "stop"}:
-        write_node(node.start_field if key == "start" else node.stop_field, (), value)
+        write_node(
+            node.start_field if key == "start" else node.stop_field, (), value, prepare
+        )
     elif isinstance(node, CenteredSweepField) and key == "center":
         if not node.spec.center_editable or node.spec.locked_center is not None:
             raise CfgInputError(CfgInputReason.READONLY, "center is readonly")
-        write_node(node.center_field, (), value)
+        write_node(node.center_field, (), value, prepare)
     else:
         _write_range_control(node, key, value)
 

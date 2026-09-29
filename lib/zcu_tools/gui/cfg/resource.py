@@ -199,6 +199,8 @@ class CfgResolution:
     evaluate_expression: ExpressionEvaluator
     provide_options: OptionProvider
     references: ReferenceCatalog
+    read_capture: Callable[[str], object]
+    validate_expression: Callable[[str], None]
 
 
 class CfgResource:
@@ -250,10 +252,15 @@ class CfgResource:
     def edit(
         self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
     ) -> CfgObservation:
+        from ._capture import ExpressionCapture
         from ._node_write import write_node
 
         self._check_command(expected_revision)
-        candidate, basis = self._prepare(deepcopy(self._draft.snapshot()))
+        source = self._resolution()
+        capture = ExpressionCapture(source.read_capture, source.validate_expression)
+        candidate, basis = self._prepare(
+            deepcopy(self._draft.snapshot()), source=source
+        )
         try:
             for index, edit in enumerate(edits):
                 try:
@@ -261,9 +268,15 @@ class CfgResource:
                         raise CfgInputError(
                             CfgInputReason.MALFORMED_INPUT, "invalid path segment"
                         )
-                    write_node(candidate.root, edit.path, deepcopy(edit.value))
+                    write_node(
+                        candidate.root, edit.path, deepcopy(edit.value), capture.prepare
+                    )
                 except CfgInputError as exc:
                     raise CfgInputError(
+                        exc.reason, str(exc), path=edit.path, edit_index=index
+                    ) from exc
+                except CfgPreconditionError as exc:
+                    raise CfgPreconditionError(
                         exc.reason, str(exc), path=edit.path, edit_index=index
                     ) from exc
             observation = self._next_observation(candidate, basis)
@@ -339,8 +352,10 @@ class CfgResource:
                 CfgPreconditionReason.MUTATION_BLOCKED, "cfg editing is blocked"
             )
 
-    def _prepare(self, schema: CfgSchema) -> tuple[CfgDraft, SourceBasis]:
-        source = self._resolution()
+    def _prepare(
+        self, schema: CfgSchema, *, source: CfgResolution | None = None
+    ) -> tuple[CfgDraft, SourceBasis]:
+        source = self._resolution() if source is None else source
         draft = CfgDraft(
             schema,
             evaluate_expression=source.evaluate_expression,
