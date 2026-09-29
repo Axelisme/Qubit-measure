@@ -1,13 +1,8 @@
-"""Experiment interface (Protocol) + base implementation (ADR-0063).
+"""Experiment persistence and interfaces during the explicit-result migration.
 
-``AbsExperiment`` provides the common, signature-identical persistence pair
-(``save``/``load``) driven by a per-experiment ``AXES_SPEC`` (native labber_io
-axes-list, load = exact inverse of save). ``run``/``analyze`` stay
-per-experiment. Two decorators DRY the ``last_result`` bookkeeping:
-
-- ``@record_result`` (run/load): cache the returned Result on ``last_result``.
-- ``@retrieve_result`` (analyze/save): resolve a ``result=None`` argument from
-  ``last_result``.
+``PersistableExperiment`` maps an explicit Result through ``AXES_SPEC`` without
+keeping operation state. ``AbsExperiment``, ``ExperimentProtocol`` and the result
+bookkeeping decorators still serve experiments whose callers have not migrated.
 """
 
 from __future__ import annotations
@@ -16,6 +11,7 @@ import os
 from collections.abc import Callable
 from functools import wraps
 from inspect import signature
+from pathlib import Path
 from typing import (
     Any,
     ClassVar,
@@ -88,11 +84,11 @@ def retrieve_result(
 
 @runtime_checkable
 class ExperimentProtocol(Protocol[T_Result, T_Config_contra]):
-    """Structural contract every experiment satisfies.
+    """Pre-migration structural contract for stateful experiment callers.
 
-    Open by design — experiments may add methods (e.g. ``calc_confusion_matrix``).
-    ``run``/``analyze`` keyword surfaces are per-experiment and intentionally not
-    pinned; ``save``/``load`` are provided by ``AbsExperiment``.
+    Experiments may add methods (e.g. ``calc_confusion_matrix``).
+    ``run``/``analyze`` keyword surfaces are per-experiment. Migrated cores use
+    explicit Results instead of this protocol's cached-result contract.
 
     ``T_Config_contra`` is contravariant: it appears only in input (``cfg``)
     position, so an experiment over a wider cfg satisfies a protocol over a
@@ -139,8 +135,13 @@ class AbsExperiment(Generic[T_Result, T_Config]):
         self.last_result: T_Result | None = None
 
 
-class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
-    """Opt-in base: native-labber save/load via ``AXES_SPEC``."""
+class PersistableExperiment(Generic[T_Result, T_Config]):
+    """Stateless canonical save/load via ``AXES_SPEC``.
+
+    Callers choose the Result and destination explicitly. Loading returns a new
+    Result without changing this instance. Callers also own path reservation;
+    an existing destination is rejected rather than overwritten.
+    """
 
     #: per-experiment persistence declaration; required for save()/load().
     AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = None
@@ -204,14 +205,13 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
                 f"expected {expected_shape}"
             )
 
-    @retrieve_result
     def save(
         self,
-        filepath: str,
-        result: T_Result | None = None,
+        result: T_Result,
+        destination: Path,
+        *,
         comment: str | None = None,
         tag: str | None = None,
-        *,
         server_ip: str | None = None,
         port: int = 4999,
     ) -> None:
@@ -221,7 +221,6 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
         )
         from zcu_tools.experiment.utils import make_comment
 
-        assert result is not None, "no result found"
         spec = self._spec()
 
         cfg = getattr(result, "cfg_snapshot")
@@ -236,16 +235,15 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
         z = (spec.z.label, spec.z.unit, np.asarray(getattr(result, spec.z.field_name)))
 
         saved_path = save_labber_data(
-            filepath, z=z, axes=axes, comment=comment, tags=tag or spec.tag
+            str(destination), z=z, axes=axes, comment=comment, tags=tag or spec.tag
         )
         if server_ip is not None:
             upload_to_server(saved_path, server_ip, port)
             os.remove(saved_path)
 
-    @record_result
     def load(
         self,
-        filepath: str,
+        source: Path,
         *,
         server_ip: str | None = None,
         port: int = 4999,
@@ -255,7 +253,8 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
 
         spec = self._spec()
 
-        if server_ip is not None and not os.path.exists(filepath):
+        filepath = str(source)
+        if server_ip is not None and not source.exists():
             download_from_server(filepath, server_ip, port)
 
         ld = load_labber_data(filepath)

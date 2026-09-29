@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
@@ -129,13 +130,13 @@ def test_roundtrip_2d_inner_first(tmp_path: Any) -> None:
     result = _Result2D(freqs=freqs, lengths=lengths, signals=signals, cfg_snapshot=cfg)
 
     exp = _Exp2D()
-    base = os.path.join(str(tmp_path), "scan2d")
-    exp.save(base, result)
+    base = tmp_path / "scan2d"
+    exp.save(result, base)
 
     path = _saved_path(tmp_path, "scan2d")
     assert os.path.exists(path)
 
-    loaded = exp.load(path)
+    loaded = exp.load(Path(path))
 
     # axis values round-trip within scale tolerance (memory units restored)
     np.testing.assert_allclose(loaded.freqs, freqs, rtol=0, atol=1e-6)
@@ -157,9 +158,6 @@ def test_roundtrip_2d_inner_first(tmp_path: Any) -> None:
     assert loaded.cfg_snapshot.name == "twotone-len"
     assert loaded.cfg_snapshot.reps == 512
 
-    # last_result bookkeeping (@record_result on load)
-    assert exp.last_result is loaded
-
 
 def test_save_applies_scale_on_disk(tmp_path: Any) -> None:
     """Disk values carry the SI scale (Hz / s), proving load divides it back."""
@@ -172,7 +170,7 @@ def test_save_applies_scale_on_disk(tmp_path: Any) -> None:
     result = _Result2D(freqs, lengths, signals, cfg)
 
     exp = _Exp2D()
-    exp.save(os.path.join(str(tmp_path), "scaled"), result)
+    exp.save(result, tmp_path / "scaled")
     ld = load_labber_data(_saved_path(tmp_path, "scaled"))
 
     # on disk the inner axis is in Hz (MHz * 1e6), outer in s (us * 1e-6)
@@ -194,9 +192,9 @@ def test_roundtrip_1d(tmp_path: Any) -> None:
 
     result = _Result1D(freqs=freqs, signals=signals, cfg_snapshot=_TinyCfg(reps=7))
     exp = _Exp1D()
-    exp.save(os.path.join(str(tmp_path), "scan1d"), result)
+    exp.save(result, tmp_path / "scan1d")
 
-    loaded = exp.load(_saved_path(tmp_path, "scan1d"))
+    loaded = exp.load(Path(_saved_path(tmp_path, "scan1d")))
 
     np.testing.assert_allclose(loaded.freqs, freqs, rtol=0, atol=1e-6)
     assert loaded.signals.shape == (len(freqs),)
@@ -215,11 +213,11 @@ def test_experiment_save_rejects_existing_exact_path(tmp_path: Any) -> None:
     signals = np.ones(2, dtype=np.complex128)
     result = _Result1D(freqs=freqs, signals=signals, cfg_snapshot=_TinyCfg(reps=3))
     exp = _Exp1D()
-    base = os.path.join(str(tmp_path), "scan1d")
+    base = tmp_path / "scan1d"
 
-    exp.save(base, result)
+    exp.save(result, base)
     with pytest.raises(FileExistsError):
-        exp.save(base, result)
+        exp.save(result, base)
 
     assert os.path.exists(_saved_path(tmp_path, "scan1d"))
     assert not os.path.exists(os.path.join(str(tmp_path), "scan1d_1.hdf5"))
@@ -237,7 +235,7 @@ def test_real_z_roundtrip_does_not_warn_on_complex_container(tmp_path: Any) -> N
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        loaded = _Exp1DReal().load(path)
+        loaded = _Exp1DReal().load(Path(path))
 
     assert caught == []
     assert loaded.signals.dtype == np.float64
@@ -259,7 +257,55 @@ def test_real_z_load_rejects_nonzero_imaginary_component(
     )
 
     with pytest.raises(ValueError, match="z channel.*imaginary component"):
-        _Exp1DReal().load(path)
+        _Exp1DReal().load(Path(path))
+
+
+def test_save_uses_explicit_result_after_loading_another(tmp_path: Path) -> None:
+    exp = _Exp1D()
+    first = _Result1D(
+        np.array([4000.0, 5000.0]),
+        np.array([1.0 + 2.0j, 3.0 + 4.0j]),
+        _TinyCfg(name="first"),
+    )
+    second = _Result1D(
+        np.array([6000.0, 7000.0]),
+        np.array([5.0 + 6.0j, 7.0 + 8.0j]),
+        _TinyCfg(name="second"),
+    )
+    exp.save(second, tmp_path / "second.hdf5")
+    loaded_second = exp.load(tmp_path / "second.hdf5")
+    exp.save(first, tmp_path / "first.hdf5")
+    loaded_first = exp.load(tmp_path / "first.hdf5")
+
+    np.testing.assert_array_equal(loaded_first.signals, first.signals)
+    np.testing.assert_array_equal(loaded_first.freqs, first.freqs)
+    np.testing.assert_array_equal(loaded_second.signals, second.signals)
+    assert loaded_first.cfg_snapshot is not None
+    assert loaded_first.cfg_snapshot.name == "first"
+    assert loaded_second.cfg_snapshot is not None
+    assert loaded_second.cfg_snapshot.name == "second"
+
+
+@pytest.mark.parametrize("tag", [None, "custom/t1"])
+def test_save_preserves_comment_and_tag(tmp_path: Path, tag: str | None) -> None:
+    from zcu_tools.datafile import load_labber_data
+    from zcu_tools.experiment.utils import parse_comment
+
+    result = _Result1D(
+        np.array([4000.0, 5000.0]),
+        np.ones(2, dtype=np.complex128),
+        _TinyCfg(reps=17),
+    )
+    path = tmp_path / "metadata.hdf5"
+    _Exp1D().save(result, path, comment="T1 observation", tag=tag)
+    data = load_labber_data(str(path))
+    cfg, comment, timestamp = parse_comment(data.comment)
+
+    assert cfg is not None
+    assert cfg["reps"] == 17
+    assert comment == "T1 observation"
+    assert timestamp is not None
+    assert data.tags == [tag or "test/roundtrip1d"]
 
 
 def test_save_fast_fails_on_shape_mismatch(tmp_path: Any) -> None:
@@ -280,7 +326,7 @@ def test_save_fast_fails_on_shape_mismatch(tmp_path: Any) -> None:
     exp = _Exp2D()
 
     with pytest.raises(ValueError):
-        exp.save(os.path.join(str(tmp_path), "bad"), result)
+        exp.save(result, tmp_path / "bad")
 
 
 def test_save_fast_fails_without_cfg_snapshot(tmp_path: Any) -> None:
@@ -292,7 +338,7 @@ def test_save_fast_fails_without_cfg_snapshot(tmp_path: Any) -> None:
     )
     exp = _Exp1D()
     with pytest.raises(ValueError):
-        exp.save(os.path.join(str(tmp_path), "nocfg"), result)
+        exp.save(result, tmp_path / "nocfg")
 
 
 @pytest.mark.parametrize(
@@ -322,7 +368,7 @@ def test_load_rejects_wrong_axis_metadata(
     save_labber_data(path, z=("S21", "", signals), axes=axes)
 
     with pytest.raises(ValueError, match=match):
-        _Exp2D().load(path)
+        _Exp2D().load(Path(path))
 
 
 @pytest.mark.parametrize(
@@ -348,7 +394,7 @@ def test_load_rejects_wrong_z_channel_metadata(
     )
 
     with pytest.raises(ValueError, match=match):
-        _Exp2D().load(path)
+        _Exp2D().load(Path(path))
 
 
 def test_load_rejects_wrong_z_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -366,4 +412,4 @@ def test_load_rejects_wrong_z_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     with pytest.raises(ValueError, match="z shape"):
-        _Exp2D().load("fake.hdf5")
+        _Exp2D().load(Path("fake.hdf5"))
