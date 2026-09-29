@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -97,6 +97,22 @@ class LinePlot:
         self._host.call(lambda: self._host.refresh(self._figure))
 
 
+class HeatmapLinePlot:
+    """Update a named 2D heatmap and its most recent scan lines on one owner."""
+
+    def update(
+        self,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        signals: NDArray[np.float64],
+        title: str | None = None,
+        *,
+        refresh: bool = True,
+    ) -> None:
+        """Validate and copy producer data before dispatching artist mutation."""
+        raise NotImplementedError("2D liveplot implementation pending")
+
+
 class Plots(FigureCollection):
     """One producer's plotting lifetime, shared by frontend adapters.
 
@@ -142,6 +158,20 @@ class Plots(FigureCollection):
             return viewer
 
         return self._host.call(create)
+
+    def liveplot_2d_with_line(  # noqa: PLR0913 - keep scan/axis choices explicit
+        self,
+        name: str,
+        xlabel: str,
+        ylabel: str,
+        *,
+        line_axis: Literal[0, 1] = 1,
+        num_lines: int = 1,
+        title: str | None = None,
+        uniform: bool = True,
+    ) -> HeatmapLinePlot:
+        """Present a named, owner-updated 2D heatmap with recent scan lines."""
+        raise NotImplementedError("2D liveplot implementation pending")
 
     def finish(self, *, present: bool = True) -> FigureCollection:
         if self._finished:

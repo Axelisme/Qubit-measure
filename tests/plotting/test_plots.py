@@ -3,7 +3,7 @@ from __future__ import annotations
 import gc
 from collections.abc import Callable
 from io import BytesIO
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 
 import numpy as np
 import pytest
@@ -174,4 +174,110 @@ def test_live_name_conflict_does_not_present_another_figure() -> None:
         plots.liveplot_1d("same", "x", "y")
     assert host.presented == []
     assert plots["same"] is figure
+    plots.finish()
+
+
+def test_heatmap_line_plot_keeps_partial_scan_lines_and_native_figure() -> None:
+    plots = Plots(NonPresentingHost())
+    viewer = plots.liveplot_2d_with_line(
+        "measurement", "Flux device value", "Frequency (MHz)", num_lines=2
+    )
+    values = np.array([0.0, 1.0, 2.0])
+    freqs = np.array([10.0, 20.0])
+    data = np.array([[1.0, 2.0], [3.0, 4.0], [np.nan, np.nan]])
+    viewer.update(values, freqs, data, "last completed scan")
+    values[:] = 99
+    freqs[:] = 99
+    data[:] = 99
+    figure = plots.finish()["measurement"]
+    heatmap, recent = figure.axes
+    np.testing.assert_allclose(
+        np.asarray(heatmap.images[0].get_array()),
+        [[1.0, 3.0, np.nan], [2.0, 4.0, np.nan]],
+        equal_nan=True,
+    )
+    np.testing.assert_array_equal(recent.lines[0].get_ydata(), [1.0, 2.0])
+    np.testing.assert_array_equal(recent.lines[1].get_ydata(), [3.0, 4.0])
+    np.testing.assert_array_equal(recent.lines[1].get_xdata(), [10.0, 20.0])
+    assert heatmap.get_title() == "last completed scan"
+    plots.release()
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+    with pytest.raises(RuntimeError, match="finished"):
+        viewer.update(values, freqs, data)
+
+
+def test_2d_update_copies_all_arrays_before_owner_dispatch_and_refreshes_on_finish() -> (
+    None
+):
+    host = RecordingHost()
+    plots = Plots(host)
+    viewer = plots.liveplot_2d_with_line("scan", "x", "y")
+    figure = plots["scan"]
+    assert host.presented == [figure]
+    xs, ys = np.array([0.0, 1.0]), np.array([10.0, 20.0])
+    data = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    def mutate_source() -> None:
+        xs[:] = 99
+        ys[:] = 99
+        data[:] = 99
+
+    host.before_call = mutate_source
+    viewer.update(xs, ys, data, refresh=False)
+    heatmap, recent = figure.axes
+    np.testing.assert_array_equal(
+        np.asarray(heatmap.images[0].get_array()), [[1.0, 3.0], [2.0, 4.0]]
+    )
+    np.testing.assert_array_equal(recent.lines[0].get_xdata(), [10.0, 20.0])
+    np.testing.assert_array_equal(recent.lines[0].get_ydata(), [3.0, 4.0])
+    assert host.refreshed == []
+    assert plots.finish() is plots
+    assert host.refreshed == [(figure, True)]
+    plots.release()
+    assert host.released == [figure]
+
+
+def test_nonuniform_2d_column_lines_and_invalid_update_preserve_artists() -> None:
+    plots = Plots(NonPresentingHost())
+    viewer = plots.liveplot_2d_with_line(
+        "nonuniform", "x", "y", line_axis=0, num_lines=2, uniform=False
+    )
+    xs, ys = np.array([0.0, 1.0, 5.0]), np.array([10.0, 13.0])
+    data = np.array([[1.0, 2.0], [3.0, np.nan], [5.0, np.nan]])
+    viewer.update(xs, ys, data)
+    heatmap, recent = plots["nonuniform"].axes
+    original = np.asarray(heatmap.images[0].get_array()).copy()
+    np.testing.assert_array_equal(recent.lines[0].get_ydata(), [1.0, 3.0, 5.0])
+    np.testing.assert_allclose(
+        np.asarray(recent.lines[1].get_ydata()), [2.0, np.nan, np.nan], equal_nan=True
+    )
+    np.testing.assert_array_equal(recent.lines[1].get_xdata(), xs)
+    for bad_xs, bad_data in (
+        (xs, np.ones((1, 3))),
+        (np.array([], dtype=float), data),
+        (xs, np.ones((3, 2), dtype=complex)),
+    ):
+        with pytest.raises(ValueError, match="real-valued|non-empty|shape"):
+            viewer.update(bad_xs, ys, bad_data)
+    np.testing.assert_allclose(
+        np.asarray(heatmap.images[0].get_array()), original, equal_nan=True
+    )
+    plots.finish()
+
+
+def test_invalid_2d_factory_options_or_duplicate_name_never_present() -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+    with pytest.raises(ValueError, match="Line count"):
+        plots.liveplot_2d_with_line("scan", "x", "y", num_lines=0)
+    with pytest.raises(ValueError, match="line_axis"):
+        plots.liveplot_2d_with_line("scan", "x", "y", line_axis=cast(Any, 2))
+    assert list(plots) == []
+    existing, _ = plots.subplots("scan")
+    with pytest.raises(ValueError, match="already belongs"):
+        plots.liveplot_2d_with_line("scan", "x", "y")
+    assert host.presented == []
+    assert plots["scan"] is existing
     plots.finish()
