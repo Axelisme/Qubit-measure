@@ -17,10 +17,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.gui.session.persistence import PersistenceError
-from zcu_tools.gui.session.services.startup import (
+from zcu_tools.gui.session.services.project_settings import (
     PersistedDeviceEntry as PersistedDeviceEntry,  # noqa: F401  (re-export)
 )
-from zcu_tools.gui.session.services.startup import (
+from zcu_tools.gui.session.services.project_settings import (
     PersistedStartup,
 )
 from zcu_tools.gui.session.state import (

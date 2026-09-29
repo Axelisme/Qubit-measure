@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
+from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
@@ -28,7 +28,7 @@ class DummyPostParams:
 
 def make_ctrl():
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None

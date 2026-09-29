@@ -57,7 +57,7 @@ def h_context_use(
     if not ctx.has_project():
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            "No project applied yet; use rpc_call(method='startup.apply', params=...) first.",
+            "No project applied yet; use rpc_call(method='project.apply', params=...) first.",
             reason="no_project",
         )
     label = str(params["label"])
@@ -89,7 +89,7 @@ def h_context_new(
     if not ctx.has_project():
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            "No project applied yet; use rpc_call(method='startup.apply', params=...) first.",
+            "No project applied yet; use rpc_call(method='project.apply', params=...) first.",
             reason="no_project",
         )
     label = params.get("label")

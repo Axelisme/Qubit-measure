@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.remote.handlers.arb_waveform import (
 )
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     h_device_connect,
-    h_startup_apply,
+    h_project_apply,
 )
 from zcu_tools.gui.app.measure.remote.handlers.context import (
     h_context_md_del_attr,
@@ -379,19 +379,27 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
 
 def test_dialog_screenshot_expected_errors_use_producer_taxonomy() -> None:
     render_view = MagicMock()
-    adapter = SimpleNamespace(render_view=render_view)
+    adapter = cast(Any, SimpleNamespace(render_view=render_view))
 
-    assert _remote_error(
-        lambda: h_dialog_screenshot(cast(Any, adapter), {"name": "unknown"})
-    ) == (ErrorCode.INVALID_PARAMS, "unknown dialog name: 'unknown'", "", None)
+    assert _remote_error(lambda: h_dialog_screenshot(adapter, {"name": "unknown"})) == (
+        ErrorCode.INVALID_PARAMS,
+        "unknown dialog name: 'unknown'",
+        "",
+        None,
+    )
+    # The retired startup dialog identity is not an alias for setup.
+    assert _remote_error(lambda: h_dialog_screenshot(adapter, {"name": "startup"})) == (
+        ErrorCode.INVALID_PARAMS,
+        "unknown dialog name: 'startup'",
+        "",
+        None,
+    )
     render_view.take_dialog_screenshot.assert_not_called()
 
     render_view.take_dialog_screenshot.side_effect = FailedPreconditionError(
         "dialog 'setup' is not open"
     )
-    assert _remote_error(
-        lambda: h_dialog_screenshot(cast(Any, adapter), {"name": "setup"})
-    ) == (
+    assert _remote_error(lambda: h_dialog_screenshot(adapter, {"name": "setup"})) == (
         ErrorCode.PRECONDITION_FAILED,
         "dialog 'setup' is not open",
         "",
@@ -420,13 +428,13 @@ def test_result_scope_projection_uses_category_not_reason_prefix(
     code: ErrorCode,
 ) -> None:
     ctrl = MagicMock()
-    ctrl.apply_startup_project.side_effect = ResultScopeError(
+    ctrl.apply_project.side_effect = ResultScopeError(
         "scope failure", category=category, reason_code=reason
     )
     adapter = SimpleNamespace(ctrl=ctrl)
 
     actual = _remote_error(
-        lambda: h_startup_apply(
+        lambda: h_project_apply(
             cast(Any, adapter),
             {
                 "chip_name": "chip",

@@ -300,7 +300,7 @@ class ExpTabWidget(QWidget):
         content_row.addWidget(splitter, stretch=1)
 
         self._splitter = splitter
-        self._splitter_left_saved = ctrl.get_persisted_startup().left_panel_width
+        self._splitter_left_saved = ctrl.get_left_panel_width()
         self._left_panel_collapsed = False
         self._splitter.splitterMoved.connect(self._on_splitter_moved)
 

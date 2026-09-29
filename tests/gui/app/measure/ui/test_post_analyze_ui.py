@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
+from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -48,7 +48,7 @@ class _EmptyPostParams:
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     return ctrl
 
 

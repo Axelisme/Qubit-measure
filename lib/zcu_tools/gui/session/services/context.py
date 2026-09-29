@@ -161,10 +161,10 @@ class ContextService:
         return self._io.has_project
 
     def has_context(self) -> bool:
-        """True when any valid context exists (startup DRAFT or file-backed ACTIVE)."""
+        """True when any valid context exists (in-memory DRAFT or file-backed ACTIVE)."""
         return self._state.session_env.has_context()
 
-    def has_startup_context(self) -> bool:
+    def has_draft_context(self) -> bool:
         return self._state.session_env.is_draft()
 
     def is_active_context(self) -> bool:
@@ -216,7 +216,7 @@ class ContextService:
         logger.info("setup_project: result_dir=%r", result_dir)
         self._io.setup(result_dir)
 
-    def set_startup_context(
+    def set_project_context(
         self,
         md: Any,
         ml: Any,
@@ -227,7 +227,7 @@ class ContextService:
         database_path: str = "",
     ) -> None:
         logger.info(
-            "set_startup_context: chip=%r qub=%r res=%r result_dir=%r db=%r",
+            "set_project_context: chip=%r qub=%r res=%r result_dir=%r db=%r",
             chip_name,
             qub_name,
             res_name,

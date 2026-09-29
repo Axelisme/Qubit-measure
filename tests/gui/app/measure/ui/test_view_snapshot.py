@@ -214,9 +214,9 @@ def test_open_dialogs_come_from_named_dialog_facade() -> None:
     shell = _make_snapshot_shell(
         state_tab_ids=["tab-A"],
         tab_widgets={"tab-A": object()},
-        open_dialogs=[DialogName.PREDICTOR, DialogName.STARTUP],
+        open_dialogs=[DialogName.PREDICTOR, DialogName.SETUP],
     )
 
     snap = _snapshot(shell)
 
-    assert snap["open_dialogs"] == ["predictor", "startup"]
+    assert snap["open_dialogs"] == ["predictor", "setup"]

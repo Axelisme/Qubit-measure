@@ -525,9 +525,9 @@ class MainWindow(QMainWindow):
     # --- inspect (non-modal context inspector) ---
 
     def _on_setup_clicked(self) -> None:
-        self.open_setup_dialog(startup_mode=False)
+        self.open_setup_dialog()
 
-    def open_setup_dialog(self, *, startup_mode: bool = False) -> None:
+    def open_setup_dialog(self) -> None:
         from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
         if self._raise_existing_dialog("setup") is not None:
@@ -536,7 +536,7 @@ class MainWindow(QMainWindow):
         # Non-blocking open() keeps the Qt event loop (and the control socket)
         # alive while the dialog is visible. WA_DeleteOnClose + instance ref
         # prevent premature GC; finished clears the ref and refreshes state.
-        dlg = SetupDialog(self._ctrl.setup_control, self, startup_mode=startup_mode)
+        dlg = SetupDialog(self._ctrl.setup_control, self)
 
         def _on_finished(_status: int) -> None:
             self._refresh_session_dependents()

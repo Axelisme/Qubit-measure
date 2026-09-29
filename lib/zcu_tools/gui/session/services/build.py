@@ -5,7 +5,7 @@ the async-operation handles, the off-main executor, the progress hub, the projec
 IO adapter, the event bus, the state) and this builds the session services
 (connection / context / device) on top. Each app then constructs its own
 experiment-surface services around the returned bundle (measure:
-``build_app_services`` adds tabs / run / analyze / save / startup / cfg_editor;
+``build_app_services`` adds tabs / run / analyze / save / cfg_editor;
 autofluxdep will add its node-sweep surface).
 
 The app injects concrete infrastructure through the session *ports*
@@ -28,7 +28,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
 from zcu_tools.gui.session.services.predictor import PredictorService
-from zcu_tools.gui.session.services.startup import StartupService
+from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.setup_control import SetupControlFacet
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.progress import ProgressService
-    from zcu_tools.gui.session.services.startup import ResolvedStartupProject
+    from zcu_tools.gui.session.services.project_settings import ResolvedProject
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.gui.session.state import SessionState
 
@@ -67,7 +67,7 @@ class SessionServices:
     device: DeviceService
     device_control: DeviceControlPort
     setup_control: SetupControlPort
-    startup: StartupService
+    settings: ProjectSettingsService
     values: ValueLookup
     value_sources: ValueSourceBinder
 
@@ -85,7 +85,7 @@ def build_session_services(
     project_root: str = "",
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
-    on_project_applied: Callable[[ResolvedStartupProject], None] | None = None,
+    on_project_applied: Callable[[ResolvedProject], None] | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -119,12 +119,14 @@ def build_session_services(
     context_control = ContextControlFacet(context=context, device=device)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
-    # StartupService bridges the two session services it commands through their
-    # ports (context bootstrap + remembered-device registration) + State prefs.
-    startup = StartupService(context, device, state, ResultScopeManager(project_root))
+    # ProjectSettingsService bridges the two session services it commands through
+    # their ports (project context + remembered-device registration) + State prefs.
+    settings = ProjectSettingsService(
+        context, device, state, ResultScopeManager(project_root)
+    )
     setup_control = SetupControlFacet(
         bus=bus,
-        startup=startup,
+        settings=settings,
         context=context_control,
         connection=soc_connection,
         device=device_control,
@@ -146,7 +148,7 @@ def build_session_services(
         device=device,
         device_control=device_control,
         setup_control=setup_control,
-        startup=startup,
+        settings=settings,
         values=value_registry,
         value_sources=value_sources,
     )

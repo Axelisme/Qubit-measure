@@ -67,8 +67,8 @@ def _run_headless_smoke() -> None:
     from zcu_tools.gui.session.state import (
         DeviceState,
         DeviceStatus,
+        SessionPreferences,
         SessionState,
-        StartupPrefs,
     )
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -215,7 +215,7 @@ def _run_headless_smoke() -> None:
         terminal_threads.append(threading.get_ident())
         if not result.ok or result.result != "cancelled":
             raise AssertionError(f"unexpected cancel result: {result!r}")
-        state.set_startup_prefs(StartupPrefs(chip_name="cancelled"))
+        state.set_preferences(SessionPreferences(chip_name="cancelled"))
         settle(OperationOutcome("cancelled"))
 
     cancel_token = runner.begin(
@@ -245,7 +245,7 @@ def _run_headless_smoke() -> None:
     assert cancel_outcome is not None and cancel_outcome.status == "cancelled"
     awaited = handles.await_outcome(cancel_token, timeout=0.0)
     assert awaited is not None and awaited.feedback == "headless stop"
-    assert state.startup_prefs.chip_name == "cancelled"
+    assert state.preferences.chip_name == "cancelled"
     assert progress.bars_for_operation(cancel_token) == ()
     assert gate.snapshot() == ()
     assert handles.live_count() == 0

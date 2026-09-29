@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-29 — app-local remote layout
+**Last updated:** 2026-09-29 — project.apply wire method
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 71`, `GUI_VERSION = 103`, and
-`MCP_VERSION = 95` (defined in `zcu_tools.mcp.measure.server`). MCP 95 finalizes
+Current measure-gui values are `WIRE_VERSION = 72`, `GUI_VERSION = 104`, and
+`MCP_VERSION = 96` (defined in `zcu_tools.mcp.measure.server`). WIRE 72 renames the
+project wire method `startup.apply` to `project.apply` with the same params and
+result. GUI 104 opens one Setup dialog identity for launch and toolbar; MCP 96
+makes the `project` tool apply through `project.apply`. MCP 95 finalizes
 shared-state workflow and interactive concurrency guidance. WIRE 71 exposes
 shared interactive plugin commands and terminal replies. GUI 103 owns interactive
 sessions and command view follow; MCP 94 adds the fixed `tab_interact` tool.
@@ -225,7 +228,7 @@ reports `cleanup_failed`. Existing-tab `tab.load_data` keeps its stricter guards
 
 The wire surface is grouped by ownership:
 
-- `startup.*` / `result_scope.*`：project and result-scope setup.
+- `project.*` / `result_scope.*`：project apply/read and result-scope discovery.
 - `context.*`：MetaDict / ModuleLibrary / active context operations through
   `ContextControlPort`; role-catalog create/list stays on the app controller.
 - `soc.*`：mock or remote SoC connection.

@@ -1,20 +1,15 @@
-"""Dialog naming + factory contract for RemoteControlAdapter.
+"""Dialog naming contract shared by the measure window and remote screenshots.
 
-``DialogName`` is the wire enum a remote caller uses with
-``dialog.open`` / ``dialog.close`` / ``dialog.list_open``. ``MainWindow``
-owns the registry (``self._open_dialogs``) and the per-name factory that
-builds or reuses a ``QDialog`` when the remote (or a UI click) asks to open
-one.
+``DialogName`` is the wire enum a remote caller passes to ``dialog.screenshot``
+and the key ``MainWindow.open_dialog`` uses for its named-dialog registry.
+``MainDialogRegistry`` owns the per-name factory that builds or reuses a
+``QDialog`` for a toolbar click or the app's ``after_show`` hook.
 
 All dialogs are opened **non-modal** (``dlg.open()``) so that the Qt event
 loop keeps pumping while the dialog is visible — this is mandatory for
 remote-driven flows where a follow-up RPC must still be dispatchable.
 Most dialogs use ``WA_DeleteOnClose`` + ``finished`` cleanup; expensive
 persistent dialogs can instead hide on close and stay cached in the registry.
-
-The ``STARTUP`` factory is registered late by ``gui/app.py``
-because the startup dialog construction needs ``startup_mode=True`` and is
-typically opened by the application bootstrap, not by an explicit click.
 """
 
 from __future__ import annotations
@@ -32,7 +27,6 @@ class DialogName(str, Enum):
     PREDICTOR = "predictor"
     INSPECT = "inspect"
     ARB_WAVEFORM = "arb_waveform"
-    STARTUP = "startup"
 
 
 def parse_dialog_name(value: object) -> DialogName:

@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QWidget
-from zcu_tools.gui.app.measure.services import PersistedStartup
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -17,7 +16,7 @@ def _tab() -> ExpTabWidget:
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
     return ExpTabWidget("tab-1", ctrl, caps)
 

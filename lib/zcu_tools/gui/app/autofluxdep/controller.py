@@ -140,10 +140,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.services.startup import (
-        ResolvedStartupProject,
-        StartupProjectRequest,
-    )
+    from zcu_tools.gui.session.services.project_settings import ResolvedProject
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
 logger = logging.getLogger(__name__)
@@ -232,7 +229,7 @@ class Controller(SessionControllerMixin):
 
         # --- session-core infrastructure (this app owns its gate + executor) ---
         # autofluxdep composes the shared session services (connection / context /
-        # device / startup) by injecting its own concrete infra through the session
+        # device / settings) by injecting its own concrete infra through the session
         # ports (ADR-0066, session-core extraction decision 3): an app-local
         # OperationGate (conflict policy) + the shared BackgroundRunner (no figure
         # routing) alongside the shared OperationHandles / ProgressService /
@@ -266,7 +263,7 @@ class Controller(SessionControllerMixin):
             io_manager=self._io_manager,
             runner=self._runner,
             project_root=self._project_root,
-            on_project_applied=self._on_startup_project_applied,
+            on_project_applied=self._on_project_applied,
         )
         self._session = session
         self._soc_svc = session.soc_connection
@@ -288,7 +285,7 @@ class Controller(SessionControllerMixin):
         self._setup_control = GuardedSetupControl(
             session.setup_control, self._require_session_mutable
         )
-        self._startup_svc = session.startup
+        self._settings_svc = session.settings
 
     # --- read-only accessors for the UI ---
 
@@ -428,7 +425,7 @@ class Controller(SessionControllerMixin):
             for node in self._state.nodes
         )
         return AppPersistedState(
-            startup=self._startup_svc.capture_startup(
+            startup=self._settings_svc.capture_settings(
                 left_panel_width=DEFAULT_LEFT_PANEL_WIDTH
             ),
             workflow=PersistedWorkflow(nodes=nodes),
@@ -482,7 +479,7 @@ class Controller(SessionControllerMixin):
         rejected: list[RestoreIssue] = []
         predictor_issue: RestoreIssue | None = None
         restored_predictor = False
-        self._startup_svc.restore_startup(state.startup)
+        self._settings_svc.restore_settings(state.startup)
         self._state.replace_nodes([])
 
         try:
@@ -627,18 +624,12 @@ class Controller(SessionControllerMixin):
         if self.is_paused:
             raise RuntimeError(f"autofluxdep {subject} is locked while a run is paused")
 
-    # -- setup dialog: project / startup --
-    # apply_startup_project diverges (autofluxdep returns bool; measure returns the
-    # resolved-project dict per WIRE-48) so it stays a per-app override. get_bus /
-    # get_project_root also stay per-app (app EventBus subtype / app state). Every
+    # -- setup dialog: project --
+    # The setup dialog applies a project through ``setup_control`` (guarded against
+    # run/paused, reacting through ``_on_project_applied``). get_bus /
+    # get_project_root stay per-app (app EventBus subtype / app state). Every
     # other setup-controller forward lives in SessionControllerMixin.
-    def apply_startup_project(self, req: StartupProjectRequest) -> bool:
-        self._require_workflow_editable()
-        resolved = self._startup_svc.apply_project(req)
-        self._on_startup_project_applied(resolved)
-        return True
-
-    def _on_startup_project_applied(self, project: ResolvedStartupProject) -> None:
+    def _on_project_applied(self, project: ResolvedProject) -> None:
         self._state.set_project(
             ProjectInfo(
                 chip_name=project.chip_name,
@@ -650,9 +641,7 @@ class Controller(SessionControllerMixin):
         )
         self._try_auto_load_predictor_from_params(project)
 
-    def _try_auto_load_predictor_from_params(
-        self, project: ResolvedStartupProject
-    ) -> None:
+    def _try_auto_load_predictor_from_params(self, project: ResolvedProject) -> None:
         params_path = Path(project.params_path)
         if not params_path.is_file():
             logger.debug(

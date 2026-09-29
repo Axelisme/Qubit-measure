@@ -35,7 +35,7 @@ RegistryFactory = Callable[
 
 
 def _make_empty_ctx() -> SessionEnv:
-    """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
+    """Minimal initial context: real empty MetaDict/ModuleLibrary, no file sync."""
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -117,31 +117,13 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         ctrl.restore_all(load=not self._clean)
 
     def after_show(self, assembly: GuiAssembly) -> None:
-        ctrl = assembly.controller
-        assert _is_controller(ctrl)
+        from zcu_tools.gui.app.measure.remote.dialogs import DialogName
+
         parent = assembly.window
         assert _is_main_window(parent)
-        _show_startup_dialog(ctrl, parent=parent)
-
-
-def _show_startup_dialog(ctrl: Controller, parent: MainWindow) -> None:
-    """Show the bootstrap startup dialog non-modally.
-
-    Non-modal is required so the Qt event loop keeps pumping while the
-    dialog is visible — this is what lets ``RemoteControlAdapter`` accept
-    further RPCs (e.g. ``dialog.close STARTUP``) while a remote agent is
-    driving onboarding. The dialog registers in ``window._open_dialogs``
-    so it shows up in ``dialog.list_open`` queries.
-    """
-    from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-
-    from zcu_tools.gui.app.measure.remote.dialogs import DialogName
-    from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-
-    dlg = SetupDialog(ctrl.setup_control, parent=parent, startup_mode=True)
-    dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-    parent.register_dialog(DialogName.STARTUP, dlg)
-    dlg.open()
+        # The same Setup a toolbar click opens: non-modal so the Qt event loop
+        # (and the remote control socket) keeps pumping while it is visible.
+        parent.open_dialog(DialogName.SETUP)
 
 
 def _is_controller(value: object) -> TypeGuard[Controller]:

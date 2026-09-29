@@ -21,7 +21,7 @@ def project(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
         params = {
             wire: arguments[name] for name, wire in names.items() if name in arguments
         }
-        result = ctx.send_gui_rpc("startup.apply", params)
+        result = ctx.send_gui_rpc("project.apply", params)
     else:
         result = ctx.session.read_internal("project.info", {})
     return {

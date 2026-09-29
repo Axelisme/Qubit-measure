@@ -9,22 +9,27 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.result_scope import ResultScope
 from zcu_tools.gui.session.services.connection import ConnectMockRequest
 from zcu_tools.gui.session.services.device import DeviceEntry
-from zcu_tools.gui.session.services.startup import (
-    PersistedStartup,
-    ResolvedStartupProject,
-    StartupConnectionRequest,
-    StartupProjectRequest,
+from zcu_tools.gui.session.services.project_settings import (
+    ConnectionPreferences,
+    ProjectRequest,
+    ResolvedProject,
+    SetupPreferences,
 )
 from zcu_tools.gui.session.setup_control import SetupControlFacet
 
 from tests.gui._control_fakes import CallLog, RecordedCall, RecordingSignal, call
 
 
-class RecordingStartup:
+class RecordingSettings:
     def __init__(self, log: CallLog) -> None:
         self._log = log
-        self.persisted = PersistedStartup(
-            chip_name="chip", qub_name="qub", res_name="res"
+        self.preferences = SetupPreferences(
+            chip_name="chip",
+            qub_name="qub",
+            res_name="res",
+            scope_id="/tmp/result/chip/qub",
+            ip="10.0.0.2",
+            port=7000,
         )
         self.scope = ResultScope(
             scope_id="/tmp/result/chip/qub",
@@ -34,7 +39,7 @@ class RecordingStartup:
             params_path="/tmp/result/chip/qub/params.json",
             source="discovered",
         )
-        self.resolved = ResolvedStartupProject(
+        self.resolved = ResolvedProject(
             chip_name="chip",
             qub_name="qub",
             res_name="res",
@@ -44,20 +49,20 @@ class RecordingStartup:
             scope_id="/tmp/result/chip/qub",
         )
 
-    def get_persisted(self) -> PersistedStartup:
-        self._log.add("startup", "get_persisted")
-        return self.persisted
+    def get_setup_preferences(self) -> SetupPreferences:
+        self._log.add("settings", "get_setup_preferences")
+        return self.preferences
 
     def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        self._log.add("startup", "list_result_scopes", refresh=refresh)
+        self._log.add("settings", "list_result_scopes", refresh=refresh)
         return (self.scope,)
 
-    def apply_project(self, req: StartupProjectRequest) -> ResolvedStartupProject:
-        self._log.add("startup", "apply_project", req)
+    def apply_project(self, req: ProjectRequest) -> ResolvedProject:
+        self._log.add("settings", "apply_project", req)
         return self.resolved
 
-    def remember_connection(self, req: StartupConnectionRequest) -> None:
-        self._log.add("startup", "remember_connection", req)
+    def remember_connection(self, prefs: ConnectionPreferences) -> None:
+        self._log.add("settings", "remember_connection", prefs)
 
 
 class RecordingContext:
@@ -123,18 +128,18 @@ class RecordingDevice:
 
 def _facet(
     *,
-    on_project_applied: Callable[[ResolvedStartupProject], None] | None = None,
+    on_project_applied: Callable[[ResolvedProject], None] | None = None,
 ) -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnection]:
     log = CallLog()
     bus = BaseEventBus()
-    startup = RecordingStartup(log)
+    settings = RecordingSettings(log)
     context = RecordingContext(log)
     connection = RecordingConnection(log)
     device = RecordingDevice(log)
     return (
         SetupControlFacet(
             bus=bus,
-            startup=cast(Any, startup),
+            settings=cast(Any, settings),
             context=cast(Any, context),
             connection=cast(Any, connection),
             device=cast(Any, device),
@@ -148,16 +153,23 @@ def _facet(
 
 def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None:
     facet, log, bus, _connection = _facet()
-    req = StartupProjectRequest("chip", "qub", "res")
-    conn_req = StartupConnectionRequest(ip="127.0.0.1", port=8887)
+    req = ProjectRequest("chip", "qub", "res")
+    conn_req = ConnectionPreferences(ip="127.0.0.1", port=8887)
     connect_req = ConnectMockRequest()
 
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
         (
-            "get_persisted_startup",
-            facet.get_persisted_startup,
-            PersistedStartup(chip_name="chip", qub_name="qub", res_name="res"),
-            call("startup", "get_persisted"),
+            "get_setup_preferences",
+            facet.get_setup_preferences,
+            SetupPreferences(
+                chip_name="chip",
+                qub_name="qub",
+                res_name="res",
+                scope_id="/tmp/result/chip/qub",
+                ip="10.0.0.2",
+                port=7000,
+            ),
+            call("settings", "get_setup_preferences"),
         ),
         (
             "list_result_scopes",
@@ -172,13 +184,13 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
                     source="discovered",
                 ),
             ),
-            call("startup", "list_result_scopes", refresh=False),
+            call("settings", "list_result_scopes", refresh=False),
         ),
         (
-            "apply_startup_project",
-            lambda: facet.apply_startup_project(req),
+            "apply_project",
+            lambda: facet.apply_project(req),
             True,
-            call("startup", "apply_project", req),
+            call("settings", "apply_project", req),
         ),
         (
             "use_context",
@@ -211,10 +223,10 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
             call("connection", "start_connect", connect_req),
         ),
         (
-            "remember_startup_connection",
-            lambda: facet.remember_startup_connection(conn_req),
+            "remember_connection",
+            lambda: facet.remember_connection(conn_req),
             None,
-            call("startup", "remember_connection", conn_req),
+            call("settings", "remember_connection", conn_req),
         ),
         (
             "get_soccfg",
@@ -244,13 +256,13 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
 
 
 def test_setup_control_project_applied_hook_receives_resolved_project() -> None:
-    seen: list[ResolvedStartupProject] = []
+    seen: list[ResolvedProject] = []
     facet, log, _bus, _connection = _facet(on_project_applied=seen.append)
-    req = StartupProjectRequest("chip", "qub", "res")
+    req = ProjectRequest("chip", "qub", "res")
 
-    assert facet.apply_startup_project(req) is True
+    assert facet.apply_project(req) is True
 
-    assert log.calls == [call("startup", "apply_project", req)]
+    assert log.calls == [call("settings", "apply_project", req)]
     assert len(seen) == 1
     assert seen[0].params_path == "/tmp/result/chip/qub/params.json"
 

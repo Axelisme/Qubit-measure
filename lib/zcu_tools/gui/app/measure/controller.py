@@ -52,8 +52,8 @@ from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
     PersistenceError,
+    ProjectRequest,
     RestoreReport,
-    StartupProjectRequest,
     TabSnapshot,
     build_app_services,
 )
@@ -201,7 +201,6 @@ class RenderView(Protocol):
     def open_dialog(self, name: DialogName) -> None: ...
     def close_dialog(self, name: DialogName) -> None: ...
     def list_open_dialogs(self) -> list[DialogName]: ...
-    def register_dialog(self, name: DialogName, dialog: Any) -> None: ...
     def request_shutdown(self) -> None: ...
     def open_notify_prompt(self, token: int, message: str, timeout: float) -> None:
         """Open a non-modal NotifyUserDialog for the given token / message.
@@ -231,7 +230,7 @@ class Controller(SessionControllerMixin):
 
     The identical shared controller forwards live in SessionControllerMixin
     (read through the _*_svc accessors assigned in __init__); only the methods whose
-    body diverges from autofluxdep are kept here (apply_startup_project /
+    body diverges from autofluxdep are kept here (apply_project /
     get_project_root / get_bus, plus everything app-specific). Shared setup,
     context / inspect, and value-md-ml consumers use their own control facets
     instead of this facade.
@@ -341,7 +340,7 @@ class Controller(SessionControllerMixin):
         self._writeback_svc = services.writeback
         self._writeback_control = services.writeback_control
         self._workspace_svc = services.workspace
-        self._startup_svc = services.startup
+        self._settings_svc = services.settings
         self._cfg_editor_svc = services.cfg_editor
         self._arb_waveform_svc = services.arb_waveform
         # Notify prompt registry (Stage 4b): independent of OperationHandles;
@@ -569,20 +568,20 @@ class Controller(SessionControllerMixin):
 
     def capture_persisted_state(self) -> AppPersistedState:
         """Snapshot the whole app state into a memento (no disk). Composes the
-        startup prefs + device projection + view's left-panel width and the live
-        tabs into one immutable ``AppPersistedState``."""
-        startup = self._startup_svc.capture_startup(
+        remembered settings + device projection + view's left-panel width and the
+        live tabs into one immutable ``AppPersistedState``."""
+        settings = self._settings_svc.capture_settings(
             left_panel_width=self._capture_left_panel_width()
         )
         session = self._workspace_svc.capture_session()
-        return AppPersistedState(startup=startup, session=session)
+        return AppPersistedState(startup=settings, session=session)
 
     def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
-        """Dispatch a memento back to the sub-owners: seed startup prefs +
+        """Dispatch a memento back to the sub-owners: seed remembered settings +
         register remembered devices, then rebuild tabs. Returns the session's
         per-tab restore report (presented to the user by ``restore_all``)."""
         with self._bus.origin(EventOrigin(kind="system")):
-            self._startup_svc.restore_startup(state.startup)
+            self._settings_svc.restore_settings(state.startup)
             report = self._workspace_svc.apply_session(state.session)
             self._present_restore_report(report)
             return report
@@ -652,8 +651,8 @@ class Controller(SessionControllerMixin):
     def has_context(self) -> bool:
         return self._ctx_svc.has_context()
 
-    def has_startup_context(self) -> bool:
-        return self._ctx_svc.has_startup_context()
+    def has_draft_context(self) -> bool:
+        return self._ctx_svc.has_draft_context()
 
     def has_active_context(self) -> bool:
         return self._ctx_svc.is_active_context()
@@ -980,14 +979,14 @@ class Controller(SessionControllerMixin):
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
-    def apply_startup_project(self, req: StartupProjectRequest) -> dict[str, str]:
+    def apply_project(self, req: ProjectRequest) -> dict[str, str]:
         # Applies the project to the active context AND records it as the
         # remembered prefs (in State); persisted to disk only at close.
-        # apply_project always mutates and either succeeds or raises (no no-op
-        # outcome), so we echo the resolved project rather than a bool.
-        # StartupService owns result-scope resolution so callers cannot inject
-        # arbitrary result/database paths.
-        return self._startup_svc.apply_project(req).as_wire_dict()
+        # An unchanged project is a no-op inside the service; a failure raises.
+        # Either way we echo the resolved project rather than a bool.
+        # ProjectSettingsService owns result-scope resolution so callers cannot
+        # inject arbitrary result/database paths.
+        return self._settings_svc.apply_project(req).as_wire_dict()
 
     def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None:
         self._ctx_svc.apply_ml_writes(
@@ -1284,12 +1283,12 @@ class Controller(SessionControllerMixin):
         return self._notify_handles.await_result(token, timeout)
 
     # ------------------------------------------------------------------
-    # Startup application workflow (StartupService)
+    # Project root and settings
     # ------------------------------------------------------------------
 
     def get_project_root(self) -> str:
         """The base directory default result/database paths are anchored under
-        (the repo root, injected by the entry script). Setup dialog + startup RPC
+        (the repo root, injected by the entry script). Setup dialog + project RPC
         derive defaults through ``derive_project_paths`` against this, NOT cwd, so
         a .bat launcher that cd's into scripts/ still scopes under the repo root."""
         return self._project_root

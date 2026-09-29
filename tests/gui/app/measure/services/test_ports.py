@@ -3,9 +3,9 @@
 implementing the port, with no ContextManager / files involved.
 
 (Persistence is no longer a store-port: the PersistenceCaretaker is a Driven
-Adapter owning disk I/O directly, and StartupService is stateless against State.
+Adapter owning disk I/O directly, and ProjectSettingsService is stateless against State.
 See tests/gui/app/measure/services/test_caretaker.py and
-tests/gui/session/services/test_startup.py.)
+tests/gui/session/services/test_project_settings.py.)
 """
 
 from __future__ import annotations

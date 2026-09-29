@@ -51,7 +51,6 @@ from .main_window_toolbar import MainWindowToolbar
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
-    from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
 
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.services import TabSnapshot
@@ -438,10 +437,10 @@ class MainWindow(QMainWindow):
             # file-backed flux context is active
             self._ctx_label.setText(label)
             self._ctx_label.setStyleSheet("")
-        elif self._ctrl.has_startup_context():
-            # startup context (in-memory, no file sync)
+        elif self._ctrl.has_draft_context():
+            # draft context (in-memory, no file sync)
             self._ctx_label.setText(
-                "Startup context (in-memory) — set up project for persistence"
+                "Draft context (in-memory) — set up project for persistence"
             )
             self._ctx_label.setStyleSheet("color: blue;")
         elif self._ctrl.has_project():
@@ -942,17 +941,6 @@ class MainWindow(QMainWindow):
     def list_open_dialogs(self) -> list[DialogName]:
         """Return dialogs that are currently visible on screen."""
         return self._dialog_registry.visible_names()
-
-    def register_dialog(self, name: DialogName, dialog: QDialog) -> None:
-        """Register a dialog that was constructed outside ``open_dialog``.
-
-        ``app.py`` uses this for the bootstrap startup dialog so the remote
-        ``dialog.list_open`` query and ``dialog.close STARTUP`` work
-        uniformly. The caller is responsible for ``setAttribute
-        (WA_DeleteOnClose)`` and for ``open()`` / ``show()`` — this helper
-        only wires the registry cleanup on ``finished``.
-        """
-        self._dialog_registry.register(name, dialog)
 
     # ------------------------------------------------------------------
     # Remote view query helpers

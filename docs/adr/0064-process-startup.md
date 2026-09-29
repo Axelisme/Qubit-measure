@@ -12,7 +12,7 @@ Launcher 擁有 CLI 解析與程序入口，把每次啟動的選項交給 share
 
 App 宣告固定的 process requirements，並提供 app-specific composition。`gui.runtime` 協調共用的 logging、Qt application、process-wide plotting setup、remote adapter 啟停與程序返回碼；app 組裝 controller、window、domain services 與自己的 remote adapter。Runtime 不決定 remote method、guard 或 app state。
 
-Runtime 提供 app lifecycle 接點並控制啟動順序，app 在接點內處理自己的 startup workflow，包括需要時顯示 setup dialog。Composition 決定建立與注入哪些模組；有界的 startup coordination 決定啟動情境的觸發、順序與分支，透過既有 owner interface 執行，不接管 State、service 或 registry 的寫入權威。這不要求每個流程另建 Coordinator class。Mock setup 屬 session 能力的流程，不限定由 startup 觸發；此處不規定 mock ready、rollback 或 retry 政策。
+Runtime 提供 app lifecycle 接點並控制啟動順序，app 在接點內處理自己的 startup workflow，包括需要時顯示 setup dialog。Composition 決定建立與注入哪些模組；有界的 startup coordination 決定啟動情境的觸發、順序與分支，透過既有 owner interface 執行，不接管 State、service 或 registry 的寫入權威。Dialog 與 control port 不接收 app phase：app 的接點只決定何時呼叫既有入口，啟動時開啟的 Setup 與使用者手動開啟的是同一個 dialog 身分與同一個實例，還原的偏好只預填。這不要求每個流程另建 Coordinator class。Mock setup 屬 session 能力的流程，不限定由 startup 觸發；此處不規定 mock ready、rollback 或 retry 政策。
 
 Runtime 統籌 process-wide plotting 選擇；backend、host 與繪圖鎖等機制由 plotting owner 維護。Transport 擁有連線機制，app 擁有 remote capabilities 與 policy；runtime 只協調 adapter 的啟停。停止 socket 或結束 Qt event loop 不代表 domain operation 已完成清理；operation 的取消與資源釋放由其 owner 負責。
 

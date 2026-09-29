@@ -75,10 +75,10 @@ def h_soc_connect(
     return {"soc": {"description": info["description"], "is_mock": info["is_mock"]}}
 
 
-def h_startup_apply(
+def h_project_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.startup import StartupProjectRequest
+    from zcu_tools.gui.session.services.project_settings import ProjectRequest
 
     # The handler runs on the GUI owner thread: read current identity, resolve
     # omitted fields and apply the result in this single RPC, never from MCP.
@@ -104,13 +104,11 @@ def h_startup_apply(
     if scope_id_raw is not None:
         scope_id = str(scope_id_raw)
     elif current is not None and (chip, qub) == (current.chip_name, current.qub_name):
-        scope_id = adapter.ctrl.get_persisted_startup().scope_id or None
+        scope_id = adapter.ctrl.setup_control.get_setup_preferences().scope_id or None
     else:
         scope_id = None
-    req = StartupProjectRequest(
-        chip_name=chip, qub_name=qub, res_name=res, scope_id=scope_id
-    )
-    return adapter.ctrl.apply_startup_project(req)
+    req = ProjectRequest(chip_name=chip, qub_name=qub, res_name=res, scope_id=scope_id)
+    return adapter.ctrl.apply_project(req)
 
 
 def h_device_connect(

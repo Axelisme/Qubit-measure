@@ -106,8 +106,13 @@ _Avoid_: permit, operation handle
 
 **SessionEnv**:
 GUI session 目前生效的實驗 context 與 live 連線資源。
-它與重啟後用來預填畫面的 startup preference 不同。
-_Avoid_: persisted startup preference, complete app state
+它與預填 Setup 的 Session Preference 不同。
+_Avoid_: persisted session preference, complete app state
+
+**Session Preference**:
+GUI 記住、用來預填 Setup 的 project 名稱、result scope 與連線位址。
+它不表示 project 已套用或儀器已連線，也與目前生效的 SessionEnv 分開。
+_Avoid_: startup preference
 
 ## Example Dialogue
 

@@ -18,12 +18,12 @@ if TYPE_CHECKING:
         SoCConnectionService,
     )
     from zcu_tools.gui.session.services.device import DeviceEntry
-    from zcu_tools.gui.session.services.startup import (
-        PersistedStartup,
-        ResolvedStartupProject,
-        StartupConnectionRequest,
-        StartupProjectRequest,
-        StartupService,
+    from zcu_tools.gui.session.services.project_settings import (
+        ConnectionPreferences,
+        ProjectRequest,
+        ProjectSettingsService,
+        ResolvedProject,
+        SetupPreferences,
     )
     from zcu_tools.gui.session.types import SocCfgHandle
 
@@ -32,11 +32,11 @@ class SetupControlPort(Protocol):
     """Project/context/connection surface for the shared setup dialog."""
 
     def get_bus(self) -> BaseEventBus: ...
-    def get_persisted_startup(self) -> PersistedStartup: ...
+    def get_setup_preferences(self) -> SetupPreferences: ...
     def list_result_scopes(
         self, *, refresh: bool = False
     ) -> tuple[ResultScope, ...]: ...
-    def apply_startup_project(self, req: StartupProjectRequest) -> bool: ...
+    def apply_project(self, req: ProjectRequest) -> bool: ...
 
     def use_context(self, label: str) -> None: ...
     def new_context(
@@ -53,7 +53,7 @@ class SetupControlPort(Protocol):
         on_finished: Callable[[], None],
         on_failed: Callable[[str], None],
     ) -> None: ...
-    def remember_startup_connection(self, req: StartupConnectionRequest) -> None: ...
+    def remember_connection(self, prefs: ConnectionPreferences) -> None: ...
     def get_soccfg(self) -> SocCfgHandle | None: ...
 
     def list_devices(self) -> list[DeviceEntry]: ...
@@ -67,14 +67,14 @@ class SetupControlFacet:
         self,
         *,
         bus: BaseEventBus,
-        startup: StartupService,
+        settings: ProjectSettingsService,
         context: ContextControlPort,
         connection: SoCConnectionService,
         device: DeviceControlPort,
-        on_project_applied: Callable[[ResolvedStartupProject], None] | None = None,
+        on_project_applied: Callable[[ResolvedProject], None] | None = None,
     ) -> None:
         self._bus = bus
-        self._startup = startup
+        self._settings = settings
         self._context = context
         self._connection = connection
         self._device = device
@@ -84,14 +84,14 @@ class SetupControlFacet:
     def get_bus(self) -> BaseEventBus:
         return self._bus
 
-    def get_persisted_startup(self) -> PersistedStartup:
-        return self._startup.get_persisted()
+    def get_setup_preferences(self) -> SetupPreferences:
+        return self._settings.get_setup_preferences()
 
     def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        return self._startup.list_result_scopes(refresh=refresh)
+        return self._settings.list_result_scopes(refresh=refresh)
 
-    def apply_startup_project(self, req: StartupProjectRequest) -> bool:
-        resolved = self._startup.apply_project(req)
+    def apply_project(self, req: ProjectRequest) -> bool:
+        resolved = self._settings.apply_project(req)
         if self._on_project_applied is not None:
             self._on_project_applied(resolved)
         return True
@@ -133,8 +133,8 @@ class SetupControlFacet:
             self._bus, ConnectionFinishedPayload, dispatch
         )
 
-    def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
-        self._startup.remember_connection(req)
+    def remember_connection(self, prefs: ConnectionPreferences) -> None:
+        self._settings.remember_connection(prefs)
 
     def get_soccfg(self) -> SocCfgHandle | None:
         return self._connection.get_soccfg()

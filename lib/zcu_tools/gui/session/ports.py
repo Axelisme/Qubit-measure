@@ -217,7 +217,8 @@ class DriverFactoryPort(Protocol):
 class DeviceMemoryInfo:
     """A remembered (memory-only) device's identity — the element type of
     ``RememberedDevicePort.register_remembered_devices``. Lives in the seam so both
-    the device service and startup depend on it here, not on each other's module.
+    the device service and project settings depend on it here, not on each other's
+    module.
     """
 
     type_name: str
@@ -227,10 +228,10 @@ class DeviceMemoryInfo:
 
 @runtime_checkable
 class RememberedDevicePort(Protocol):
-    """Remembered-device registration as used by ``StartupService.restore_devices``.
+    """Remembered-device registration as used by ``ProjectSettingsService.restore_settings``.
 
-    The one device command startup issues; depends on the port, not the concrete
-    ``DeviceService``.
+    The one device command settings restore issues; depends on the port, not the
+    concrete ``DeviceService``.
     """
 
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None: ...
@@ -276,14 +277,14 @@ class ContextReadPort(Protocol):
 
 
 @runtime_checkable
-class StartupContextPort(Protocol):
-    """Context bootstrap commands as used by ``StartupService``.
+class ProjectContextPort(Protocol):
+    """Project context commands as used by ``ProjectSettingsService``.
 
-    ``StartupService`` orchestrates project startup (one-way command into the
+    ``ProjectSettingsService`` applies a project (one-way command into the
     context); it depends on this port, not the concrete ``ContextService``.
     """
 
-    def set_startup_context(
+    def set_project_context(
         self,
         md: object,
         ml: object,

@@ -85,6 +85,6 @@ def test_coerce_no_context_falls_back_to_new_key_path():
     state = State(
         SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    # No startup context — service should treat key as new and accept scalars.
+    # No project context — service should treat key as new and accept scalars.
     svc = ContextService(state, IOManager(), EventBus())
     assert svc.coerce_md_value("anything", "42") == 42

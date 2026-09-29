@@ -95,7 +95,6 @@ def make_view() -> MagicMock:
     view.open_dialog = MagicMock(side_effect=_open_dialog)
     view.close_dialog = MagicMock(side_effect=_close_dialog)
     view.list_open_dialogs = MagicMock(side_effect=lambda: list(view._open_dialogs))
-    view.register_dialog = MagicMock()
     view.get_view_snapshot = MagicMock(
         return_value={
             "active_tab_id": None,

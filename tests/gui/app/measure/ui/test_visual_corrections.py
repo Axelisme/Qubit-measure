@@ -20,7 +20,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
+from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.cfg import (
@@ -53,7 +53,7 @@ _CANDIDATE_PASTELS = ("#e2ebf6", "#e3f0e6", "#f4e9d2", "#eadff1", "#dceeee")
 
 def make_ctrl():
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None

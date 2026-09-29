@@ -37,8 +37,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
-        "startup.apply",
-        "connection_device:h_startup_apply",
+        "project.apply",
+        "connection_device:h_project_apply",
         MethodSpec(
             30.0,
             "Atomically update project chip / qubit / resonator names; omitted names "

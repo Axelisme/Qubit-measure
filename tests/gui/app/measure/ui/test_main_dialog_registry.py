@@ -17,7 +17,8 @@ class _FactoryRegistry(MainDialogRegistry):
     def __init__(
         self, parent: QWidget, factory: Callable[[DialogName], QDialog]
     ) -> None:
-        super().__init__(MagicMock(), parent=parent, dialog_refs=DialogRefStore())
+        self.refs = DialogRefStore()
+        super().__init__(MagicMock(), parent=parent, dialog_refs=self.refs)
         self._factory = factory
 
     def _build_dialog(self, name: DialogName) -> QDialog:
@@ -126,28 +127,34 @@ def test_nonpersistent_dialog_close_clears_registry(qapp) -> None:
     assert registry.visible_names() == []
 
 
-def test_register_dialog_tracks_visible_only_and_cleans_on_finish(qapp) -> None:
+def test_open_setup_again_raises_the_existing_dialog_until_it_closes(qapp) -> None:
     parent = QWidget()
-    registry = MainDialogRegistry(
-        MagicMock(), parent=parent, dialog_refs=DialogRefStore()
-    )
-    visible = cast(QDialog, _TransientDialog())
-    hidden = cast(QDialog, _TransientDialog())
+    created: list[QDialog] = []
 
-    registry.register(DialogName.STARTUP, visible)
-    registry.register(DialogName.SETUP, hidden)
-    visible.open()
+    def build_dialog(name: DialogName) -> QDialog:
+        assert name is DialogName.SETUP
+        dialog = cast(QDialog, _TransientDialog())
+        created.append(dialog)
+        return dialog
+
+    registry = _FactoryRegistry(parent, build_dialog)
+
+    registry.open(DialogName.SETUP)
+    registry.open(DialogName.SETUP)
     qapp.processEvents()
 
-    assert registry.visible_names() == [DialogName.STARTUP]
+    assert len(created) == 1
+    assert registry.visible_names() == [DialogName.SETUP]
 
-    visible.reject()
+    registry.close(DialogName.SETUP)
+    qapp.processEvents()
+    registry.open(DialogName.SETUP)
     qapp.processEvents()
 
-    assert registry.dialog(DialogName.STARTUP) is None
-    assert registry.dialog(DialogName.SETUP) is hidden
-    assert registry.visible_names() == []
-    hidden.reject()
+    assert len(created) == 2
+    assert registry.dialog(DialogName.SETUP) is created[1]
+    assert registry.visible_names() == [DialogName.SETUP]
+    registry.close(DialogName.SETUP)
     qapp.processEvents()
 
 
@@ -162,7 +169,7 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
 
     registry = _FactoryRegistry(parent, build_dialog)
     stale = cast(QDialog, _DestroyedDialog())
-    registry.register(DialogName.SETUP, stale)
+    registry.refs.retain_named(DialogName.SETUP, stale, on_released=lambda: None)
 
     registry.open(DialogName.SETUP)
     qapp.processEvents()
@@ -171,24 +178,6 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
     assert created[0].isVisible() is True
     registry.close(DialogName.SETUP)
     qapp.processEvents()
-
-
-def test_register_replaces_existing_dialog_without_old_cleanup_removing_new(
-    qapp,
-) -> None:
-    parent = QWidget()
-    registry = MainDialogRegistry(
-        MagicMock(), parent=parent, dialog_refs=DialogRefStore()
-    )
-    old = cast(QDialog, _PersistentDialog())
-    new = cast(QDialog, _PersistentDialog())
-
-    registry.register(DialogName.SETUP, old)
-    registry.register(DialogName.SETUP, new)
-    cast(_PersistentDialog, old).finished.emit(0)
-
-    assert registry.dialog(DialogName.SETUP) is new
-    cast(_PersistentDialog, new).finished.emit(0)
 
 
 def test_predictor_dialog_factory_injects_predictor_and_device_facets(qapp) -> None:

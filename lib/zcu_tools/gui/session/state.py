@@ -1,7 +1,7 @@
 """SessionState — the session-core slice of GUI app state.
 
 Holds what every measurement-session app shares: the active ``SessionEnv``, the
-multi-device set (``DeviceState`` keyed by name), the remembered startup prefs,
+multi-device set (``DeviceState`` keyed by name), the remembered preferences,
 and the optimistic-concurrency ``VersionTable`` (a single shared table — each app
 adds its own experiment-surface keys to the same table, decision 6). An app's
 own ``State`` subclasses this and adds its experiment slice (measure: tabs; a
@@ -54,7 +54,7 @@ class DeviceState:
     State owns this; DeviceService holds only the live driver (in
     GlobalDeviceManager), the worker threads and the progress model. ``info`` is
     a ``BaseDeviceInfo`` value snapshot (not a live driver) and so lives here.
-    ``remember`` is the persistent flag that drives the startup persistence
+    ``remember`` is the persistent flag that drives the settings persistence
     projection — it is no longer a transient connect-request attribute.
 
     There is deliberately no ``progress`` field: setup progress is live
@@ -97,13 +97,13 @@ DEFAULT_LEFT_PANEL_WIDTH = 500
 
 
 @dataclass
-class StartupPrefs:
-    """Remembered startup preferences — the *prefill* values, distinct from the
+class SessionPreferences:
+    """Remembered session preferences — the *prefill* values, distinct from the
     active ``SessionEnv``.
 
     These are what the setup dialog prefills and what persistence projects to
     disk; they are NOT the live connection/active-project state. Because the
-    instrument never auto-connects on launch, there is no need to distinguish
+    instrument never auto-connects, there is no need to distinguish
     "currently connected to" from "remembered" — apply/connect just update these
     prefill values at write-time, and restore writes them back without applying
     a context. Mutable (State holds live mutable objects); a value-only block, so
@@ -123,15 +123,15 @@ class StartupPrefs:
 
 class SessionState:
     """Passive session-core state — the active context, the device set, the
-    remembered startup prefs, and the shared version table. App ``State``
+    remembered preferences, and the shared version table. App ``State``
     subclasses add their experiment-surface slice + version keys."""
 
     def __init__(self, ctx: SessionEnv) -> None:
         self._owner_guard = OwnerThreadGuard()
         self.session_env: SessionEnv = ctx
-        # Remembered startup prefs (prefill values), distinct from session_env.
-        # StartupService writes at apply/connect; PersistenceCaretaker projects.
-        self.startup_prefs: StartupPrefs = StartupPrefs()
+        # Remembered preferences (prefill values), distinct from session_env.
+        # ProjectSettingsService writes at apply/connect; PersistenceCaretaker projects.
+        self.preferences: SessionPreferences = SessionPreferences()
         # Device state SSOT. DeviceService writes here (on the Qt main thread,
         # at its terminal slots) and holds only the live driver / worker / progress.
         self.devices: dict[str, DeviceState] = {}
@@ -159,10 +159,10 @@ class SessionState:
         self._assert_owner()
         self.session_env = ctx
 
-    def set_startup_prefs(self, prefs: StartupPrefs) -> None:
-        """Replace remembered startup preferences on the owner thread."""
+    def set_preferences(self, prefs: SessionPreferences) -> None:
+        """Replace remembered preferences on the owner thread."""
         self._assert_owner()
-        self.startup_prefs = prefs
+        self.preferences = prefs
 
     # ------------------------------------------------------------------
     # Device state (DeviceService writes these on the Qt main thread).
