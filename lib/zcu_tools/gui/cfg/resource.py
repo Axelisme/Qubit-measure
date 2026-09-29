@@ -188,6 +188,10 @@ class CfgEditing(Protocol):
         self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
     ) -> CfgObservation: ...
 
+    def select_custom_reference(
+        self, expected_revision: CfgRevision, path: CfgPath, label: str
+    ) -> CfgObservation: ...
+
     def reset(self, expected_revision: CfgRevision) -> CfgObservation: ...
 
     def refresh(self, expected_revision: CfgRevision) -> CfgObservation: ...
@@ -284,13 +288,42 @@ class CfgResource:
                 raise CfgPreconditionError(
                     exc.reason, str(exc), path=edit.path, edit_index=index
                 ) from exc
-        candidate, basis = self._prepare(deepcopy(editor.schema), source=source)
+        return self._commit_inputs(editor.schema, source)
+
+    def select_custom_reference(
+        self, expected_revision: CfgRevision, path: CfgPath, label: str
+    ) -> CfgObservation:
+        """Atomically select Custom with best-effort inheritance from this revision.
+
+        This is an explicit selection command, not incomplete ordinary edit
+        admission. It uses the cached published contents, so detaching a linked
+        reference does not require resolving its old source again.
+        """
+        from ._input_edit import InputEditor
+        from .inheritance import detach_input_tree
+
+        _validate_path(path)
+        self._check_command(expected_revision)
+        source = self._resolution()
+        published = self._draft.snapshot()
+        published.value = detach_input_tree(published.value)
+        editor = InputEditor(published, source)
+        try:
+            editor.select_custom_reference(path, label)
+        except CfgInputError as exc:
+            raise CfgInputError(exc.reason, str(exc), path=path) from exc
+        return self._commit_inputs(editor.schema, source)
+
+    def _commit_inputs(
+        self, inputs: CfgSchema, source: CfgResolution
+    ) -> CfgObservation:
+        candidate, basis = self._prepare(deepcopy(inputs), source=source)
         try:
             observation = self._next_observation(candidate, basis)
         except BaseException:
             candidate.close()
             raise
-        return self._publish(candidate, observation, editor.schema)
+        return self._publish(candidate, observation, inputs)
 
     def snapshot_inputs(self) -> CfgSchema:
         """Detach input state for the owning persistence/load flow, without refresh."""

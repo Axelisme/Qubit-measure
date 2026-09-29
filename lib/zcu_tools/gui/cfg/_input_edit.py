@@ -12,6 +12,7 @@ from .binding.range import CenteredSweepEditor, SweepEditor
 from .edit_codec import decode_input, encode_input
 from .inheritance import (
     align_locked_literals,
+    inherit_from,
     make_default_value,
     select_ref_value_spec,
 )
@@ -59,6 +60,80 @@ class InputEditor:
         value = self._write(self.schema.spec, self.schema.value, edit.path, edit.value)
         assert isinstance(value, CfgSectionValue)
         self.schema.value = value
+
+    def select_custom_reference(self, path: CfgPath, label: str) -> None:
+        """Build a complete Custom choice from the published input snapshot."""
+        if not path:
+            raise CfgInputError(
+                CfgInputReason.UNKNOWN_PATH, "path must name a reference"
+            )
+        if not isinstance(label, str) or not label:  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE, "Custom label is required"
+            )
+        value = self._choose_custom(self.schema.spec, self.schema.value, path, label)
+        if not isinstance(value, CfgSectionValue):
+            raise RuntimeError("Custom choice did not produce a root section")
+        self.schema.value = value
+
+    def _choose_custom(
+        self,
+        spec: CfgNodeSpec,
+        current: CfgNodeValue | None,
+        path: CfgPath,
+        label: str,
+    ) -> CfgNodeValue | None:
+        if path:
+            if isinstance(spec, CfgSectionSpec):
+                if not isinstance(current, CfgSectionValue):
+                    raise CfgInputError(
+                        CfgInputReason.UNKNOWN_PATH, "section is absent"
+                    )
+                key, *rest = path
+                if key not in spec.fields:
+                    raise CfgInputError(
+                        CfgInputReason.UNKNOWN_PATH, f"unknown field {key!r}"
+                    )
+                fields = dict(current.fields)
+                fields[key] = self._choose_custom(
+                    spec.fields[key], fields.get(key), tuple(rest), label
+                )
+                return CfgSectionValue(fields)
+            if isinstance(spec, ReferenceSpec) and isinstance(current, ReferenceValue):
+                shape = select_ref_value_spec(spec, current)
+                value = self._choose_custom(shape, current.value, path, label)
+                if not isinstance(value, CfgSectionValue):
+                    raise RuntimeError(
+                        "Custom choice did not produce reference contents"
+                    )
+                return replace(
+                    current,
+                    value=value,
+                    is_overridden=True,
+                    resolved_label=None,
+                    error=None,
+                )
+            raise CfgInputError(
+                CfgInputReason.UNKNOWN_PATH, "reference path has no active children"
+            )
+
+        if not isinstance(spec, ReferenceSpec):
+            raise CfgInputError(
+                CfgInputReason.UNSUPPORTED_MODE, "node is not a reference"
+            )
+        shape = next(
+            (allowed for allowed in spec.allowed if allowed.label == label), None
+        )
+        if shape is None:
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE, f"unknown Custom label {label!r}"
+            )
+        if isinstance(current, ReferenceValue):
+            old_shape = select_ref_value_spec(spec, current)
+            contents = inherit_from(current.value, old_shape, shape)
+        else:
+            contents = make_default_value(shape)
+        return ReferenceValue(make_custom_reference_key(label), contents)
 
     def _write(
         self,

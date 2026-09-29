@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import logging
+from copy import deepcopy
+from dataclasses import replace
 
 from .model import (
     CenteredSweepSpec,
     CenteredSweepValue,
+    CfgNodeSpec,
     CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
@@ -20,7 +22,14 @@ from .model import (
 )
 from .reference_key import make_custom_reference_key, parse_custom_reference_key
 
-logger = logging.getLogger(__name__)
+
+def _default_reference(spec: ReferenceSpec) -> ReferenceValue | None:
+    if spec.optional:
+        return None
+    first = spec.allowed[0]
+    return ReferenceValue(
+        make_custom_reference_key(first.label or "Custom"), make_default_value(first)
+    )
 
 
 def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
@@ -50,15 +59,8 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
         elif isinstance(node_spec, CenteredSweepSpec):
             fields[key] = CenteredSweepValue(center=0.5, span=1.0, expts=11, step=0.1)
         elif isinstance(node_spec, ReferenceSpec):
-            if node_spec.optional:
-                fields[key] = None  # optional ref defaults to disabled (ADR-0010)
-            else:
-                first = node_spec.allowed[0]
-                label = first.label or "Custom"
-                fields[key] = ReferenceValue(
-                    make_custom_reference_key(label), make_default_value(first)
-                )
-        elif isinstance(node_spec, CfgSectionSpec):
+            fields[key] = _default_reference(node_spec)
+        elif isinstance(node_spec, CfgSectionSpec):  # pyright: ignore[reportUnnecessaryIsInstance]
             fields[key] = make_default_value(node_spec)
         else:
             raise TypeError(
@@ -154,16 +156,113 @@ def _section_discriminator(value: CfgSectionValue, key: str | None) -> object:
     return getattr(leaf, "value", None)
 
 
+def _input_scalar(value: DirectValue | EvalValue) -> DirectValue | EvalValue:
+    if isinstance(value, EvalValue):
+        return EvalValue(value.expr)
+    return replace(value, validation_error=None)
+
+
+def detach_input_tree(value: CfgSectionValue) -> CfgSectionValue:
+    """Keep user input and linkage, not aliases or the old resolution cache."""
+    candidate = deepcopy(value)
+
+    def clear_cache(node: CfgNodeValue | None) -> CfgNodeValue | None:
+        if isinstance(node, CfgSectionValue):
+            node.fields = {
+                key: clear_cache(child) for key, child in node.fields.items()
+            }
+        elif isinstance(node, ReferenceValue):
+            node.resolved_label = None
+            node.error = None
+            clear_cache(node.value)
+        elif isinstance(node, (DirectValue, EvalValue)):
+            return _input_scalar(node)
+        elif isinstance(node, (SweepValue, CenteredSweepValue)):
+            # These are the only scalar carriers inside either range type.
+            for name in ("start", "stop", "center", "span", "expts", "step"):
+                part = getattr(node, name, None)
+                if isinstance(part, (DirectValue, EvalValue)):
+                    setattr(node, name, _input_scalar(part))
+        return node
+
+    clear_cache(candidate)
+    return candidate
+
+
+def _inherit_reference(
+    old_spec: CfgNodeSpec | None,
+    old_value: CfgNodeValue | None,
+    new_spec: ReferenceSpec,
+    *,
+    old_disabled: bool,
+) -> ReferenceValue | None:
+    if not isinstance(old_spec, ReferenceSpec) or old_spec.kind != new_spec.kind:
+        return _default_reference(new_spec)
+    if old_value is None and old_disabled and new_spec.optional:
+        return None  # preserve an explicitly disabled optional reference
+    if not isinstance(old_value, ReferenceValue):
+        return _default_reference(new_spec)
+    old_shape = select_ref_value_spec(old_spec, old_value)
+    try:
+        new_shape = select_ref_value_spec(new_spec, old_value)
+    except RuntimeError:
+        # The new allowed set cannot represent this nested choice.
+        return _default_reference(new_spec)
+    return ReferenceValue(
+        old_value.chosen_key,
+        inherit_from(old_value.value, old_shape, new_shape),
+        is_overridden=old_value.is_overridden,
+    )
+
+
+def _inherit_scalar(
+    old_spec: CfgNodeSpec | None,
+    old_value: CfgNodeValue | None,
+    new_spec: ScalarSpec,
+) -> DirectValue | EvalValue:
+    if (
+        isinstance(old_spec, ScalarSpec)
+        and old_spec.type is new_spec.type
+        and isinstance(old_value, (DirectValue, EvalValue))
+    ):
+        return old_value
+    if new_spec.required or new_spec.optional:
+        return DirectValue(None)
+    if new_spec.choices:
+        return DirectValue(new_spec.choices[0])
+    return DirectValue(default_value_for_type(new_spec.type))
+
+
+def _inherit_range(
+    old_spec: CfgNodeSpec | None,
+    old_value: CfgNodeValue | None,
+    new_spec: SweepSpec | CenteredSweepSpec,
+) -> SweepValue | CenteredSweepValue:
+    if isinstance(new_spec, SweepSpec):
+        if isinstance(old_spec, SweepSpec) and isinstance(old_value, SweepValue):
+            return SweepValue(
+                old_value.start, old_value.stop, old_value.expts, old_value.step
+            )
+        return SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
+    if isinstance(old_spec, CenteredSweepSpec) and isinstance(
+        old_value, CenteredSweepValue
+    ):
+        return CenteredSweepValue(
+            old_value.center, old_value.span, old_value.expts, old_value.step
+        )
+    return CenteredSweepValue(center=0.5, span=1.0, expts=11, step=0.1)
+
+
 def inherit_from(
     old_val: CfgSectionValue,
     old_spec: CfgSectionSpec,
     new_spec: CfgSectionSpec,
 ) -> CfgSectionValue:
-    """Build a new CfgSectionValue from new_spec, inheriting old_val where compatible."""
+    """Build detached input for new_spec, inheriting compatible old input."""
     if new_spec.inherit_hook is not None:
-        result = new_spec.inherit_hook(old_val, old_spec)
+        result = new_spec.inherit_hook(deepcopy(old_val), old_spec)
         if result is not None:
-            return result
+            return detach_input_tree(result)
 
     new_fields: dict[str, CfgNodeValue | None] = {}
 
@@ -176,79 +275,25 @@ def inherit_from(
             continue
 
         if isinstance(new_node_spec, ScalarSpec):
-            if (
-                isinstance(old_node_spec, ScalarSpec)
-                and old_node_spec.type is new_node_spec.type
-                and isinstance(old_node_val, (DirectValue, EvalValue))
-            ):
-                new_fields[key] = old_node_val
-            elif new_node_spec.required or new_node_spec.optional:
-                new_fields[key] = DirectValue(value=None)  # unset (ADR-0010)
-            elif new_node_spec.choices:
-                new_fields[key] = DirectValue(new_node_spec.choices[0])
-            else:
-                new_fields[key] = DirectValue(
-                    default_value_for_type(new_node_spec.type)
-                )
+            new_fields[key] = _inherit_scalar(
+                old_node_spec, old_node_val, new_node_spec
+            )
             continue
 
-        if isinstance(new_node_spec, SweepSpec):
-            if isinstance(old_node_spec, SweepSpec) and isinstance(
-                old_node_val, SweepValue
-            ):
-                new_fields[key] = SweepValue(
-                    old_node_val.start,
-                    old_node_val.stop,
-                    old_node_val.expts,
-                    old_node_val.step,
-                )
-            else:
-                new_fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
-            continue
-
-        if isinstance(new_node_spec, CenteredSweepSpec):
-            if isinstance(old_node_spec, CenteredSweepSpec) and isinstance(
-                old_node_val, CenteredSweepValue
-            ):
-                new_fields[key] = CenteredSweepValue(
-                    old_node_val.center,
-                    old_node_val.span,
-                    old_node_val.expts,
-                    old_node_val.step,
-                )
-            else:
-                new_fields[key] = CenteredSweepValue(
-                    center=0.5, span=1.0, expts=11, step=0.1
-                )
+        if isinstance(new_node_spec, (SweepSpec, CenteredSweepSpec)):
+            new_fields[key] = _inherit_range(old_node_spec, old_node_val, new_node_spec)
             continue
 
         if isinstance(new_node_spec, ReferenceSpec):
-            if (
-                isinstance(old_node_spec, ReferenceSpec)
-                and old_node_spec.kind == new_node_spec.kind
-                and isinstance(old_node_val, ReferenceValue)
-            ):
-                new_fields[key] = ReferenceValue(
-                    old_node_val.chosen_key, old_node_val.value
-                )
-            elif (
-                isinstance(old_node_spec, ReferenceSpec)
-                and old_node_spec.kind == new_node_spec.kind
-                and key in old_val.fields
-                and old_node_val is None
-            ):
-                new_fields[key] = None  # inherit the disabled state (ADR-0010)
-            elif new_node_spec.optional:
-                new_fields[key] = None  # optional ref defaults to disabled
-            else:
-                first = new_node_spec.allowed[0]
-                label = first.label or "Custom"
-                new_fields[key] = ReferenceValue(
-                    make_custom_reference_key(label), make_default_value(first)
-                )
+            new_fields[key] = _inherit_reference(
+                old_node_spec,
+                old_node_val,
+                new_node_spec,
+                old_disabled=key in old_val.fields,
+            )
             continue
 
-        if isinstance(new_node_spec, CfgSectionSpec):
+        if isinstance(new_node_spec, CfgSectionSpec):  # pyright: ignore[reportUnnecessaryIsInstance]
             if isinstance(old_node_spec, CfgSectionSpec) and isinstance(
                 old_node_val, CfgSectionValue
             ):
@@ -259,4 +304,4 @@ def inherit_from(
                 new_fields[key] = make_default_value(new_node_spec)
             continue
 
-    return CfgSectionValue(fields=new_fields)
+    return detach_input_tree(CfgSectionValue(fields=new_fields))

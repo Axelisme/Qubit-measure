@@ -1,10 +1,11 @@
 """Reference editing and source dependency behavior through CfgResource."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 
 import pytest
+from zcu_tools.experiment.cfg_editing.catalog import PROGRAM_SHAPES, ProgramSpecPolicy
 from zcu_tools.gui.cfg.binding.ports import ResolvedReference
 from zcu_tools.gui.cfg.model import (
     CfgSchema,
@@ -22,8 +23,10 @@ from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgInput,
     CfgInputError,
+    CfgPreconditionError,
     CfgResolution,
     CfgResource,
+    CfgRevision,
     CfgStatus,
 )
 from zcu_tools.gui.session.expression import validate_scalar_expr
@@ -348,6 +351,293 @@ def complete_second_input() -> dict[str, CfgInput]:
         "child": {"x": 4.0},
         "range": {"step": 2.0, "start": 6.0, "stop": 14.0},
     }
+
+
+def _waveform_resource(
+    *,
+    initial_style: str = "gauss",
+    catalog: Catalog | None = None,
+    chosen_key: str | None = None,
+    value: CfgSectionValue | None = None,
+    resolution: Callable[[], CfgResolution] | None = None,
+) -> CfgResource:
+    policy = ProgramSpecPolicy()
+    allowed = [shape.make_spec(policy) for shape in PROGRAM_SHAPES.waveforms()]
+    old = PROGRAM_SHAPES.waveform(initial_style).make_spec(policy)
+    initial = (
+        value
+        if value is not None
+        else CfgSectionValue(
+            {
+                "style": DirectValue(initial_style),
+                "length": DirectValue(0.8),
+                "sigma": DirectValue(0.2),
+            }
+        )
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(
+            fields={"ref": ReferenceSpec("waveform", allowed, discriminator="style")}
+        ),
+        CfgSectionValue(
+            {"ref": ReferenceValue(chosen_key or f"<Custom:{old.label}>", initial)}
+        ),
+    )
+    return CfgResource(
+        lambda: schema,
+        resolution=resolution or (catalog or Catalog()).snapshot,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+
+
+def test_select_custom_waveform_inherits_compatible_values_only() -> None:
+    resource = _waveform_resource()
+    before = resource.observe()
+
+    changed = resource.select_custom_reference(before.ref.revision, ("ref",), "DRAG")
+
+    selected = changed.tree.children["ref"].value
+    assert isinstance(selected, ReferenceValue)
+    assert selected.chosen_key == "<Custom:DRAG>"
+    assert selected.value.fields == {
+        "style": DirectValue("drag"),
+        "length": DirectValue(0.8),
+        "sigma": DirectValue(0.2),
+        "delta": DirectValue(0.0),
+        "alpha": DirectValue(0.0),
+    }
+    assert changed.ref.revision == before.ref.revision + 1
+    assert resource.accept(changed.ref.revision).values["ref"] == {
+        "style": "drag",
+        "length": 0.8,
+        "sigma": 0.2,
+        "delta": 0.0,
+        "alpha": 0.0,
+    }
+    arb = resource.select_custom_reference(changed.ref.revision, ("ref",), "Arb")
+    restored = resource.select_custom_reference(arb.ref.revision, ("ref",), "Gauss")
+    gauss = restored.tree.children["ref"].value
+    assert isinstance(gauss, ReferenceValue)
+    assert gauss.value.fields["length"] == DirectValue(0.0)
+
+
+def test_select_custom_re_resolves_inherited_expression() -> None:
+    sources = {"duration": 0.8}
+    catalog = Catalog()
+
+    def resolution() -> CfgResolution:
+        snapshot = dict(sources)
+        return CfgResolution(
+            (),
+            lambda expression: snapshot[expression],
+            lambda source_id: (),
+            catalog.snapshot().references,
+            lambda name: 0.0,
+            validate_scalar_expr,
+        )
+
+    resource = _waveform_resource(
+        value=CfgSectionValue(
+            {
+                "style": DirectValue("gauss"),
+                "length": EvalValue("duration", resolved=99.0),
+                "sigma": DirectValue(0.2),
+            }
+        ),
+        resolution=resolution,
+    )
+    before = resource.observe()
+    length = before.tree.children["ref"].children["length"].value
+    assert isinstance(length, EvalValue) and length.resolved == 0.8
+
+    sources["duration"] = 1.4
+    changed = resource.select_custom_reference(before.ref.revision, ("ref",), "DRAG")
+
+    length = changed.tree.children["ref"].children["length"].value
+    assert isinstance(length, EvalValue)
+    assert length.expr == "duration"
+    assert length.resolved == 1.4
+    assert resource.accept(changed.ref.revision).values["ref"] == {
+        "style": "drag",
+        "length": 1.4,
+        "sigma": 0.2,
+        "delta": 0.0,
+        "alpha": 0.0,
+    }
+
+
+def test_select_custom_preserves_invalid_inherited_input() -> None:
+    resource = _waveform_resource()
+    invalid = resource.edit(
+        resource.observe().ref.revision,
+        (CfgEdit(("ref", "length"), DirectValue(None, raw="-")),),
+    )
+    assert invalid.status is CfgStatus.INVALID
+
+    switched = resource.select_custom_reference(invalid.ref.revision, ("ref",), "DRAG")
+
+    assert switched.status is CfgStatus.INVALID
+    length = switched.tree.children["ref"].children["length"].value
+    assert isinstance(length, DirectValue)
+    assert length.raw == "-" and length.error is not None
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(switched.ref.revision)
+
+
+def _nested_waveform_resource() -> tuple[CfgResource, Catalog]:
+    rise = CfgSectionValue(
+        {
+            "style": DirectValue("gauss"),
+            "length": DirectValue(0.4),
+            "sigma": DirectValue(0.1),
+        }
+    )
+    parent = CfgSectionValue(
+        {
+            "style": DirectValue("flat_top"),
+            "length": DirectValue(1.0),
+            "raise_waveform": ReferenceValue("rise", rise),
+        }
+    )
+    catalog = Catalog(
+        {
+            "parent": ResolvedReference("FlatTop", parent),
+            "rise": ResolvedReference("Gauss", rise),
+        }
+    )
+    return _waveform_resource(
+        initial_style="flat_top", catalog=catalog, chosen_key="parent", value=parent
+    ), catalog
+
+
+def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
+    resource, catalog = _nested_waveform_resource()
+    parent = deepcopy(catalog.entries["parent"].value)
+    assert isinstance(parent, CfgSectionValue)
+    parent.fields["length"] = DirectValue(1.6)
+    catalog.entries["parent"] = ResolvedReference("FlatTop", parent)
+    current = resource.refresh(resource.observe().ref.revision)
+    published = resource.accept(current.ref.revision).values["ref"]
+    assert isinstance(published, dict) and published["length"] == 1.6
+    catalog.failed_keys = frozenset({"parent"})
+    catalog.lookups.clear()
+
+    switched = resource.select_custom_reference(
+        current.ref.revision, ("ref",), "FlatTop"
+    )
+
+    selected = switched.tree.children["ref"].value
+    assert isinstance(selected, ReferenceValue)
+    assert selected.chosen_key == "<Custom:FlatTop>"
+    published = resource.accept(switched.ref.revision).values["ref"]
+    assert isinstance(published, dict) and published["length"] == 1.6
+    nested = selected.value.fields["raise_waveform"]
+    assert isinstance(nested, ReferenceValue)
+    assert nested.chosen_key == "rise" and not nested.is_overridden
+    assert "parent" not in catalog.lookups
+    rise = deepcopy(catalog.entries["rise"].value)
+    assert isinstance(rise, CfgSectionValue)
+    rise.fields["length"] = DirectValue(0.7)
+    catalog.entries["rise"] = ResolvedReference("Gauss", rise)
+    refreshed = resource.refresh(switched.ref.revision)
+    values = resource.accept(refreshed.ref.revision).values["ref"]
+    assert isinstance(values, dict)
+    assert values["length"] == 1.6
+    nested_values = values["raise_waveform"]
+    assert isinstance(nested_values, dict) and nested_values["length"] == 0.7
+    assert "parent" not in catalog.lookups
+
+
+def test_select_custom_nested_waveform_detaches_only_edited_layers() -> None:
+    resource, catalog = _nested_waveform_resource()
+    current = resource.observe()
+
+    changed = resource.select_custom_reference(
+        current.ref.revision, ("ref", "raise_waveform"), "DRAG"
+    )
+
+    parent = changed.tree.children["ref"].value
+    assert isinstance(parent, ReferenceValue) and parent.is_overridden
+    nested = parent.value.fields["raise_waveform"]
+    assert isinstance(nested, ReferenceValue)
+    assert nested.chosen_key == "<Custom:DRAG>"
+    assert nested.value.fields["length"] == DirectValue(0.4)
+    assert nested.value.fields["sigma"] == DirectValue(0.1)
+    catalog.failed_keys = frozenset({"parent", "rise"})
+    catalog.lookups.clear()
+    refreshed = resource.refresh(changed.ref.revision)
+    assert refreshed.status is CfgStatus.VALID
+    assert catalog.lookups == []
+
+
+def test_select_custom_preserves_nested_override_without_old_source() -> None:
+    resource, catalog = _nested_waveform_resource()
+    edited = resource.edit(
+        resource.observe().ref.revision,
+        (CfgEdit(("ref", "raise_waveform", "length"), 0.6),),
+    )
+    catalog.failed_keys = frozenset({"parent", "rise"})
+    catalog.lookups.clear()
+
+    switched = resource.select_custom_reference(
+        edited.ref.revision, ("ref",), "FlatTop"
+    )
+
+    selected = switched.tree.children["ref"].value
+    assert isinstance(selected, ReferenceValue)
+    nested = selected.value.fields["raise_waveform"]
+    assert isinstance(nested, ReferenceValue)
+    assert nested.chosen_key == "rise" and nested.is_overridden
+    assert catalog.lookups == []
+    values = resource.accept(switched.ref.revision).values["ref"]
+    assert isinstance(values, dict)
+    nested_values = values["raise_waveform"]
+    assert isinstance(nested_values, dict) and nested_values["length"] == 0.6
+
+
+def test_select_custom_preparation_failure_preserves_publication() -> None:
+    resource, catalog = _nested_waveform_resource()
+    before = resource.observe()
+    catalog.failed_keys = frozenset({"rise"})
+
+    with pytest.raises(RuntimeError, match="reference resolver defect"):
+        resource.select_custom_reference(before.ref.revision, ("ref",), "FlatTop")
+
+    assert resource.observe() == before
+
+
+def test_select_custom_notifies_once_and_rejects_reentrant_selection() -> None:
+    resource = _waveform_resource()
+    seen: list[int] = []
+
+    def subscriber(observation) -> None:
+        seen.append(observation.ref.revision)
+        with pytest.raises(CfgPreconditionError):
+            resource.select_custom_reference(observation.ref.revision, ("ref",), "DRAG")
+
+    unsubscribe = resource.watch(subscriber)
+    changed = resource.select_custom_reference(
+        resource.observe().ref.revision, ("ref",), "DRAG"
+    )
+    assert seen == [0, 1]
+    assert resource.observe() == changed
+    unsubscribe()
+
+
+def test_select_custom_rejects_invalid_choice_without_publishing(
+    switchable_resource: CfgResource,
+) -> None:
+    resource = switchable_resource
+    before = resource.observe()
+    for path, label in (((), "Second"), (("missing",), "Second"), (("ref",), "Other")):
+        with pytest.raises(CfgInputError):
+            resource.select_custom_reference(before.ref.revision, path, label)
+        assert resource.observe() == before
+    with pytest.raises(CfgPreconditionError):
+        resource.select_custom_reference(
+            CfgRevision(before.ref.revision + 1), ("ref",), "Second"
+        )
+    assert resource.observe() == before
 
 
 def test_complete_shape_switch_uses_new_inputs_and_existing_range_owner(

@@ -34,13 +34,13 @@ Whole subtree 是局部輸入覆寫，省略欄位保留。領域原本允許的
 
 ### Custom reference 的 best-effort 繼承
 
-切換至 Custom 時，共用 cfg 邏輯先依新 definition 建立完整候選，並 best-effort 繼承相容的既有輸入，再一次提交、解析、驗證與發布。這保留切換 waveform 後不用重填 length 的操作方式，不讓 Qt 擁有第二套繼承規則。
+切換至 Custom 時，`CfgEditing.select_custom_reference(expected_revision, path, label)` 明確表達選擇意圖。共用 cfg owner 以該 revision 已發布的內容先依新 definition 建立完整候選，並 best-effort 繼承相容的既有輸入，再一次解析、驗證與發布。從 Library 解除連結不須重新解析被解除的舊 key。這保留切換 waveform 後不用重填 length 的操作方式，不讓 Qt 擁有第二套繼承規則，也不把 nested linkage／override 編碼為普通 edit 的資料欄位。
 
 同名、同型別欄位可繼承。不相容或新增的欄位使用新型別初始值；新型別沒有的欄位捨棄。style 等固定欄位一律使用新 definition。不猜欄位名稱、不做單位或自動型別轉換，也不新增每型別歷史 cache。例如 Gauss → Arb → Gauss 不保證找回原 length，因為 Arb 沒有此欄位。
 
 Expression 保留輸入式，由新候選正常解析，不直接信任舊解析結果。繼承後未通過值驗證時發布 Invalid，不偷偷替換成另一個值。同型別由 Library 改成 Custom 保留目前內容，只解除本層 linkage；nested reference 與 expression 保留自己的依賴。候選與舊值隔離 mutable alias，nested reference 的 linkage／override 資訊不能在複製時遺失。
 
-建立完整候選與接收 edit 是兩個責任。普通 edit 仍拒絕不完整的跨型別輸入，MCP 不因 GUI 的切換便利性而獲得隱含繼承或補值。準備或提交的非預期故障仍保留舊 publication，best-effort 不是吞掉任意例外的許可。不為這項功能建立通用 migration framework。
+明確的選擇命令與接收普通 edit 是兩個責任。Custom 選擇使用與 edit 相同的 revision、mutation block 和通知重入防護。普通 edit 仍拒絕不完整的跨型別輸入，MCP 不因 GUI 的切換便利性而獲得隱含繼承或補值。準備或提交的非預期故障仍保留舊 publication，best-effort 不是吞掉任意例外的許可。不為這項功能建立通用 migration framework。
 
 ### 同步候選與一次發布
 
