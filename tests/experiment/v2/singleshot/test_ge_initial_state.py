@@ -29,7 +29,7 @@ def test_ge_initial_state_keeps_fit_and_post_calibration_consistent(
     post_results = []
     post_titles = []
     for initial_state in ("ground", "excited"):
-        state = cast(Literal["ground", "excited"], initial_state)
+        state = initial_state
         raw = signals.copy() if state == "ground" else signals[::-1].copy()
         before = raw.copy()
         result = GE_Result(raw, np.arange(6000), np.array([0, 1]))

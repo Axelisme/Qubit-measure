@@ -6,14 +6,19 @@ from typing import Any, cast
 import numpy as np
 import pytest
 from zcu_tools.experiment.context import QickContext
-from zcu_tools.experiment.v2.singleshot.ge import GE_Exp as GECore
 from zcu_tools.experiment.v2.singleshot.ge import (
+    GE_Cfg,
     GE_Result,
     GEAnalysis,
     GEAnalyzeOptions,
+    GEModuleCfg,
 )
+from zcu_tools.experiment.v2.singleshot.ge import GE_Exp as GECore
 from zcu_tools.notebook.experiments import GEExp
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
 def make_result() -> GE_Result:
@@ -24,7 +29,36 @@ def make_result() -> GE_Result:
         + 0.2 * (rng.normal(size=excited.shape) + 1j * rng.normal(size=excited.shape)),
         dtype=np.complex128,
     )
-    return GE_Result(signals, np.arange(6000), np.array([0, 1]))
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.2,
+        freq=7000.0,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    )
+    cfg = GE_Cfg(
+        reps=1,
+        rounds=1,
+        shots=6000,
+        modules=GEModuleCfg(
+            probe_pulse=PulseCfg(
+                ch=0,
+                nqz=1,
+                gain=0.5,
+                freq=4000.0,
+                phase=0.0,
+                waveform=ConstWaveformCfg(length=1.0),
+            ),
+            readout=PulseReadoutCfg(
+                pulse_cfg=pulse,
+                ro_cfg=DirectReadoutCfg(
+                    ro_ch=0, ro_length=1.0, ro_freq=7000.0, trig_offset=0.0
+                ),
+            ),
+        ),
+    )
+    return GE_Result(signals, np.arange(6000), np.array([0, 1]), cfg)
 
 
 def test_post_uses_adopted_fit_source_and_keeps_prior_figures(tmp_path: Path) -> None:
@@ -52,6 +86,35 @@ def test_post_uses_adopted_fit_source_and_keeps_prior_figures(tmp_path: Path) ->
     exp.post_analysis_plots["post"].savefig(tmp_path / "post.png")
     assert (tmp_path / "fit.png").stat().st_size > 0
     assert (tmp_path / "post.png").stat().st_size > 0
+
+
+def test_canonical_save_load_replaces_latest_and_preserves_retained_figures(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.hdf5"
+    GECore().save(make_result(), source)
+    exp = GEExp(present=False)
+    loaded = exp.load(source)
+    assert exp.last_result is loaded
+    exp.analyze(length_ratio=0.01)
+    exp.post_analyze()
+    old_fit, old_post = exp.analysis_plots, exp.post_analysis_plots
+
+    destination = tmp_path / "saved.hdf5"
+    exp.save(destination, comment="GE notebook")
+    replaced = exp.load(destination)
+    assert exp.last_result is replaced
+    assert exp.analysis is None
+    assert exp.post_analysis is None
+    np.testing.assert_array_equal(replaced.signals, loaded.signals)
+    np.testing.assert_array_equal(replaced.prepared_states, [0, 1])
+    with pytest.raises(FileNotFoundError):
+        exp.load(tmp_path / "missing.hdf5")
+    assert exp.last_result is replaced
+    old_fit["fit"].savefig(tmp_path / "old-fit.png")
+    old_post["post"].savefig(tmp_path / "old-post.png")
+    assert (tmp_path / "old-fit.png").stat().st_size > 0
+    assert (tmp_path / "old-post.png").stat().st_size > 0
 
 
 def test_failed_analysis_preserves_records_and_successful_run_clears_them(
