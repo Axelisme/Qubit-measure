@@ -7,6 +7,7 @@ from typing import Any, TypeVar, cast
 
 import numpy as np
 import pytest
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -232,6 +233,7 @@ def test_2d_update_copies_all_arrays_before_owner_dispatch_and_refreshes_on_fini
     )
     np.testing.assert_array_equal(recent.lines[0].get_xdata(), [10.0, 20.0])
     np.testing.assert_array_equal(recent.lines[0].get_ydata(), [3.0, 4.0])
+    assert heatmap.images[0].get_extent() == pytest.approx((-0.5, 1.5, 5.0, 25.0))
     assert host.refreshed == []
     assert plots.finish() is plots
     assert host.refreshed == [(figure, True)]
@@ -240,20 +242,39 @@ def test_2d_update_copies_all_arrays_before_owner_dispatch_and_refreshes_on_fini
 
 
 def test_nonuniform_2d_column_lines_and_invalid_update_preserve_artists() -> None:
-    plots = Plots(NonPresentingHost())
+    host = RecordingHost()
+    plots = Plots(host)
     viewer = plots.liveplot_2d_with_line(
         "nonuniform", "x", "y", line_axis=0, num_lines=2, uniform=False
     )
     xs, ys = np.array([0.0, 1.0, 5.0]), np.array([10.0, 13.0])
     data = np.array([[1.0, 2.0], [3.0, np.nan], [5.0, np.nan]])
     viewer.update(xs, ys, data)
-    heatmap, recent = plots["nonuniform"].axes
+    figure = plots["nonuniform"]
+    heatmap, recent = figure.axes
     original = np.asarray(heatmap.images[0].get_array()).copy()
     np.testing.assert_array_equal(recent.lines[0].get_ydata(), [1.0, 3.0, 5.0])
     np.testing.assert_allclose(
         np.asarray(recent.lines[1].get_ydata()), [2.0, np.nan, np.nan], equal_nan=True
     )
     np.testing.assert_array_equal(recent.lines[1].get_xdata(), xs)
+
+    # At x=3.5 the nearest nonuniform column is x=5; equal-width cells
+    # would still display the x=1 column. Observe the rendered heatmap.
+    canvas = figure.canvas
+    assert isinstance(canvas, FigureCanvasAgg)
+    canvas.draw()
+    rgba = np.asarray(canvas.buffer_rgba())
+
+    def color_at(x: float) -> tuple[int, ...]:
+        px, py = heatmap.transData.transform((x, 10.0))
+        return tuple(int(v) for v in rgba[rgba.shape[0] - 1 - int(py), int(px), :3])
+
+    assert color_at(2.0) != color_at(3.5)
+    assert color_at(3.5) == color_at(4.6)
+
+    attempted_calls: list[bool] = []
+    host.before_call = lambda: attempted_calls.append(True)
     for bad_xs, bad_data in (
         (xs, np.ones((1, 3))),
         (np.array([], dtype=float), data),
@@ -261,10 +282,19 @@ def test_nonuniform_2d_column_lines_and_invalid_update_preserve_artists() -> Non
     ):
         with pytest.raises(ValueError, match="real-valued|non-empty|shape"):
             viewer.update(bad_xs, ys, bad_data)
+    assert attempted_calls == []
     np.testing.assert_allclose(
         np.asarray(heatmap.images[0].get_array()), original, equal_nan=True
     )
+    np.testing.assert_array_equal(recent.lines[0].get_ydata(), [1.0, 3.0, 5.0])
+    np.testing.assert_allclose(
+        np.asarray(recent.lines[1].get_ydata()), [2.0, np.nan, np.nan], equal_nan=True
+    )
     plots.finish()
+    plots.release()
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_invalid_2d_factory_options_or_duplicate_name_never_present() -> None:

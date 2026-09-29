@@ -9,6 +9,7 @@ import pytest
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
@@ -112,6 +113,70 @@ def test_worker_live_artists_run_on_owner_and_regular_figures_wait(
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
     output = BytesIO()
     plots["measurement"].savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_worker_2d_heatmap_and_lines_mutate_on_qt_owner_and_remain_saveable(
+    qapp, hosts, monkeypatch
+) -> None:
+    stacks, containers, adapters = hosts
+    owner_id = threading.get_ident()
+    created_on: list[int] = []
+    image_updated_on: list[int] = []
+    line_updated_on: list[int] = []
+    original_imshow = Axes.imshow
+    original_image_set_data = AxesImage.set_data
+    original_line_set_data = Line2D.set_data
+    plots = Plots(adapters[0])
+
+    def observed_imshow(self, *args, **kwargs):
+        created_on.append(threading.get_ident())
+        return original_imshow(self, *args, **kwargs)
+
+    def observed_image_set_data(self, *args, **kwargs):
+        if "heatmap" in plots and self in plots["heatmap"].axes[0].images:
+            image_updated_on.append(threading.get_ident())
+        return original_image_set_data(self, *args, **kwargs)
+
+    def observed_line_set_data(self, *args, **kwargs):
+        if "heatmap" in plots and self in plots["heatmap"].axes[1].lines:
+            line_updated_on.append(threading.get_ident())
+        return original_line_set_data(self, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "imshow", observed_imshow)
+    monkeypatch.setattr(AxesImage, "set_data", observed_image_set_data)
+    monkeypatch.setattr(Line2D, "set_data", observed_line_set_data)
+
+    def work() -> int:
+        viewer = plots.liveplot_2d_with_line(
+            "heatmap", "Flux", "Frequency", num_lines=2
+        )
+        viewer.update(
+            np.array([0.0, 1.0]),
+            np.array([10.0, 20.0]),
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            refresh=False,
+        )
+        plots.finish()
+        return threading.get_ident()
+
+    assert _run_worker(qapp, work) != owner_id
+    assert created_on and set(created_on) == {owner_id}
+    assert image_updated_on and set(image_updated_on) == {owner_id}
+    assert line_updated_on and set(line_updated_on) == {owner_id}
+    figure = plots["heatmap"]
+    assert stacks[0].count() == 2
+    assert get_figure_container(figure) is containers[0]
+    np.testing.assert_array_equal(
+        np.asarray(figure.axes[0].images[0].get_array()), [[1.0, 3.0], [2.0, 4.0]]
+    )
+    np.testing.assert_array_equal(figure.axes[1].lines[1].get_ydata(), [3.0, 4.0])
+    plots.release()
+    assert stacks[0].count() == 1
+    qapp.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    output = BytesIO()
+    figure.savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
 
 
