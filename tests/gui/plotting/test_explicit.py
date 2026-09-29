@@ -151,7 +151,8 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     other = Plots(adapters[1])
     other.liveplot_1d("live", "x", "y")
     other.finish()
-    replacement_canvas = FigureCanvasAgg(second)
+    assert get_figure_container(first) is containers[0]
+    assert get_figure_container(second) is containers[0]
 
     containers[0].clear_dynamic_canvases()
     qapp.processEvents()
@@ -159,7 +160,6 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     assert stacks[0].count() == 1
     assert stacks[0].currentIndex() == 0
     assert stacks[1].count() == 2
-    assert second.canvas is replacement_canvas
     assert get_figure_container(other["live"]) is containers[1]
     for figure in (first, second):
         assert get_figure_container(figure) is None
@@ -174,6 +174,26 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     plots.release()
     other.release()
     assert stacks[0].count() == stacks[1].count() == 1
+
+
+def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> None:
+    stacks, containers, adapters = hosts
+    plots = Plots(adapters[0])
+    figure, ax = plots.subplots("replaced")
+    ax.plot([0, 1], [2, 3])
+    plots.finish()
+    replacement_canvas = FigureCanvasAgg(figure)
+
+    containers[0].clear_dynamic_canvases()
+    qapp.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    assert figure.canvas is replacement_canvas
+    assert get_figure_container(figure) is None
+    assert stacks[0].count() == 1
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+    plots.release()
 
 
 def test_qt_diagnostic_finish_does_not_attach_regular_figure(hosts) -> None:
