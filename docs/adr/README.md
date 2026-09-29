@@ -18,7 +18,7 @@
 
 ## Cfg / Value Model
 
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：Qt-free 編輯機制、實驗側 conversion、app 資源 owner 與 frontend／使用邊界的現況；未落實的核准目標見 [Cfg draft](draft/cfg-editing-boundaries.md)。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：Qt-free 編輯機制、Custom reference 的 best-effort 繼承、實驗側 conversion、app 資源 owner 與 frontend／使用邊界的現況；未落實的核准目標見 [Cfg draft](draft/cfg-editing-boundaries.md) 與 [resource draft](draft/cfg-resource-contract.md)。
 - [0008 — Measure CfgEditor session](0008-cfg-editor-session.md)：measure headless session 與 opaque writeback 的局部契約仍有效；其中 tab auto-commit／雙樹不是共用目標。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec／Value 和角色預設的局部契約，概要見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)。
 - [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：完整 Value tree 與停用表示的局部契約。

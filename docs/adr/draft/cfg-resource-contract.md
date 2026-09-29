@@ -30,7 +30,17 @@ Edit 接收有序的 path／value 清單。Path 使用名稱序列，root 為空
 
 一般資料欄位不得以 __ 開頭。Editing codec 使用 __complex、__text、__expr；reference 的 __ref 表示 relink 或停用。普通 ref 仍是資料名稱。型別由 definition 或領域既有 discriminator 決定，不增加 __shape registry。Codec 只解碼意圖，target definition 才決定是否允許該模式。
 
-Whole subtree 是局部輸入覆寫，省略欄位保留。領域原本允許的型別切換要求完整新輸入，不混舊欄位。Relink 加 children 先換來源再套內容，不依 dictionary 順序。__ref=null 加 children 拒絕。修改 linked 內容解除沿修改路徑的相應來源連結，其他 siblings 不受影響。
+Whole subtree 是局部輸入覆寫，省略欄位保留。領域原本允許的型別切換要求完整新輸入，edit 不根據省略欄位暗中混入舊值或補 defaults。Custom 切換在提交前建立完整候選的繼承政策見下一節。Relink 加 children 先換來源再套內容，不依 dictionary 順序。__ref=null 加 children 拒絕。修改 linked 內容解除沿修改路徑的相應來源連結，其他 siblings 不受影響。
+
+### Custom reference 的 best-effort 繼承
+
+切換至 Custom 時，共用 cfg 邏輯先依新 definition 建立完整候選，並 best-effort 繼承相容的既有輸入，再一次提交、解析、驗證與發布。這保留切換 waveform 後不用重填 length 的操作方式，不讓 Qt 擁有第二套繼承規則。
+
+同名、同型別欄位可繼承。不相容或新增的欄位使用新型別初始值；新型別沒有的欄位捨棄。style 等固定欄位一律使用新 definition。不猜欄位名稱、不做單位或自動型別轉換，也不新增每型別歷史 cache。例如 Gauss → Arb → Gauss 不保證找回原 length，因為 Arb 沒有此欄位。
+
+Expression 保留輸入式，由新候選正常解析，不直接信任舊解析結果。繼承後未通過值驗證時發布 Invalid，不偷偷替換成另一個值。同型別由 Library 改成 Custom 保留目前內容，只解除本層 linkage；nested reference 與 expression 保留自己的依賴。候選與舊值隔離 mutable alias，nested reference 的 linkage／override 資訊不能在複製時遺失。
+
+建立完整候選與接收 edit 是兩個責任。普通 edit 仍拒絕不完整的跨型別輸入，MCP 不因 GUI 的切換便利性而獲得隱含繼承或補值。準備或提交的非預期故障仍保留舊 publication，best-effort 不是吞掉任意例外的許可。不為這項功能建立通用 migration framework。
 
 ### 同步候選與一次發布
 
@@ -84,7 +94,7 @@ Explicit revision 讓跨連線 caller 可以明確指定依據，代價是 calle
 
 ## 轉正條件
 
-透過公開 cfg interface 驗證 batch 原子性、版本、Invalid／Unavailable、watch 順序、通知隔離、alias 隔離及固定 accept。透過 source publication 驗證多 cfg 一致性。透過真實 request/reply 驗證讀寫同一 authority、版本衝突與錯誤映射。
+透過公開 cfg interface 驗證 batch 原子性、版本、Invalid／Unavailable、watch 順序、通知隔離、alias 隔離及固定 accept。Custom 切換另驗證 waveform 共同欄位繼承、新型別固定值、不相容欄位的初始值、expression 保留與重新解析、nested reference 狀態，以及失敗不改舊 publication。透過 source publication 驗證多 cfg 一致性。透過真實 request/reply 驗證讀寫同一 authority、版本衝突與錯誤映射。
 
 Run、Qt 與 MCP 完成各自接線後，在共同 tree 驗證同一資源及固定執行資料。Owner、型別重複、私有存取、resolver 外部依賴與 method 宣告用直接 review。重構涉及的型別／lint 負面指標作 best-effort 清理，剩餘問題列明原因；不豁免必要契約或關閉規則。
 

@@ -16,6 +16,14 @@ status: accepted
 
 session source owner 以唯讀 lookup 提供小量跨來源值，只有 composition 與來源 owner 註冊 provider；device lookup 讀 cached observation，不輪詢硬體。來源 owner 通知外部變更，measure editor service 對其 draft 觸發 expression／reference／option refresh；widget 不擁有其生命週期。Autofluxdep 目前由開啟的 node form 對其局部 draft 處理刷新事件，未開啟 form 時沒有等價的 placement-owned refresh。Linked ref、EvalValue 和 resolve-once 的現行差別是：linked ref 保留 key 與內嵌內容，可在 refresh 時更新投影；EvalValue 保存 expression 及解析結果；`ValueRef` 或 fresh seed 在輸入時讀取一次，保存普通 direct 值，不跟隨來源。現行 overridden reference 在部分 missing-key 路徑會轉成 custom key，且 lowering 仍查原 linked key；不能將核准的「override 解除此層來源依賴」當作現況。refresh／failure／relink 及指定 revision 使用的目標契約見 [cfg draft](draft/cfg-editing-boundaries.md)。
 
+## Custom reference 的繼承目的
+
+切換至 Custom reference 時，保留相容的既有輸入是刻意的操作便利性，不是遷移期間的相容補丁。切換 waveform 後，使用者不必重填 length 等共同參數。例如 Gauss 和 DRAG 的 length、sigma 都是相同型別與單位的欄位，現有共用 cfg 繼承邏輯可保留它們，style 則使用新型別的固定值。新型別沒有的舊欄位不帶入，新欄位使用其初始值。
+
+繼承採 best-effort，不保證所有設定都能保留。現有 binding 在建立新內容時使用這項共用能力，Qt 不另寫繼承規則。它不代表結果必然符合量測條件，也不是依 waveform 型別保存歷史設定的功能。
+
+Resource 遷移需要將繼承放在完整候選的準備階段，再依原子 edit 契約提交，不能沿用舊 mutable field 的逐步寫入作為發布方式。Expression、alias 隔離及普通 edit 不隱含補值的目標邊界見 [resource draft](draft/cfg-resource-contract.md#custom-reference-的-best-effort-繼承)，此處不宣稱接線已完成。
+
 ## 取捨與相鄰責任
 
 單一通用資料機制減少兩個 app 對 path、codec 和 lowering 的重複實作，代價是每個 app 必須提供窄 port 並管理自己的資源。通用 renderer 不取得 runtime policy，也不強制 Autofluxdep 使用 measure service。當前 app 的編輯與使用時機尚未完全一致；此篇不把 UI auto-commit、使用時 live 解析或 batch 成功前綴提升為未來跨 app 的規則。
