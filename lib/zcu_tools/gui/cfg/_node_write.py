@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 
+from ._complete_input import require_complete_input, select_input_shape
 from .binding.fields import (
     CenteredSweepField,
     CfgField,
@@ -100,15 +101,51 @@ def _write_reference(
                     "disabled reference cannot have children",
                 )
             _relink(node, value["__ref"])
-        for key, child in value.items():
-            if key != "__ref":
-                _write_reference(node, (key,), child, prepare)
+            if len(value) == 1:
+                return
+        _write_reference_contents(node, value, prepare)
         return
-    if not node.is_enabled or node.sub_field is None:
+    if not node.is_enabled or node.sub_field is None or node.has_missing_library_ref():
         raise CfgInputError(
             CfgInputReason.UNKNOWN_PATH, "reference has no active children"
         )
     write_node(node.sub_field, path, value, prepare)
+    node.detach()
+
+
+def _write_reference_contents(
+    node: ReferenceField, value: Mapping[str, CfgInput], prepare: Callable[[str], str]
+) -> None:
+    discriminator = node.spec.discriminator
+    current = node.sub_field.spec if node.sub_field is not None else None
+    available = (
+        node.is_enabled and current is not None and not node.has_missing_library_ref()
+    )
+    shape = (
+        select_input_shape(node.spec, value)
+        if discriminator in value or not available
+        else current
+    )
+    assert shape is not None
+    contents = {
+        key: child
+        for key, child in value.items()
+        if key not in ("__ref", discriminator)
+    }
+    if shape != current or not available:
+        if "__ref" in value:
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE,
+                "discriminator does not match the selected reference",
+            )
+        require_complete_input(shape, contents)
+        node.replace_inline(
+            shape, lambda section: write_node(section, (), contents, prepare)
+        )
+        return
+    for key, child in contents.items():
+        _write_reference(node, (key,), child, prepare)
+    node.detach()
 
 
 def _relink(node: ReferenceField, value: CfgInput) -> None:

@@ -11,13 +11,16 @@ from zcu_tools.gui.cfg.model import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     LiteralSpec,
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
+    SweepSpec,
 )
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
+    CfgInput,
     CfgInputError,
     CfgResolution,
     CfgResource,
@@ -134,6 +137,22 @@ def test_linked_refresh_uses_new_catalog_value(reference_resource) -> None:
     assert resource.accept(changed.ref.revision).ref == changed.ref
 
 
+@pytest.mark.parametrize(
+    "edit",
+    [CfgEdit(("ref", "x"), 1.0), CfgEdit(("ref",), {"x": 1.0}), CfgEdit(("ref",), {})],
+)
+def test_same_value_content_write_detaches_from_source(
+    reference_resource, edit: CfgEdit
+) -> None:
+    resource, catalog = reference_resource
+    changed = resource.edit(resource.observe().ref.revision, (edit,))
+    catalog.entries["first"] = entry(20.0)
+    catalog.lookups.clear()
+    refreshed = resource.refresh(changed.ref.revision)
+    assert resource.accept(refreshed.ref.revision).values["ref"] == {"x": 1.0}
+    assert "first" not in catalog.lookups
+
+
 def test_override_no_longer_resolves_original_key(reference_resource) -> None:
     resource, catalog = reference_resource
     changed = resource.edit(
@@ -154,7 +173,10 @@ def test_override_no_longer_resolves_original_key(reference_resource) -> None:
     assert resource.accept(relinked.ref.revision).values["ref"] == {"x": 20.0}
 
 
-def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link() -> None:
+@pytest.mark.parametrize("written", [1.0, 7.0])
+def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link(
+    written: float,
+) -> None:
     leaf = CfgSectionSpec(fields={"x": ScalarSpec("X", float)}, label="Shape")
     parent = CfgSectionSpec(
         fields={name: ReferenceSpec("test", [leaf]) for name in ("left", "right")},
@@ -183,7 +205,7 @@ def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link() -> None:
         make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("parent", "left", "x"), 7.0),)
+        resource.observe().ref.revision, (CfgEdit(("parent", "left", "x"), written),)
     )
     del catalog.entries["parent"]
     del catalog.entries["left"]
@@ -192,7 +214,7 @@ def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link() -> None:
     refreshed = resource.refresh(changed.ref.revision)
     assert refreshed.status is CfgStatus.VALID
     assert resource.accept(refreshed.ref.revision).values == {
-        "parent": {"left": {"x": 7.0}, "right": {"x": 20.0}}
+        "parent": {"left": {"x": written}, "right": {"x": 20.0}}
     }
     assert set(catalog.lookups) == {"right"}
 
@@ -236,6 +258,234 @@ def test_later_edit_uses_shape_selected_by_earlier_relink() -> None:
     assert resource.accept(changed.ref.revision).values == {
         "ref": {"type": "second", "y": 8.0}
     }
+    with pytest.raises(CfgInputError):
+        resource.edit(
+            changed.ref.revision,
+            (CfgEdit(("ref",), {"__ref": "second", "type": "first", "x": 9.0}),),
+        )
+    assert resource.observe() == changed
+
+
+@pytest.fixture
+def switchable_resource() -> CfgResource:
+    first = CfgSectionSpec(
+        fields={"type": LiteralSpec("first"), "old": ScalarSpec("Old", float)},
+        label="First",
+    )
+    child = CfgSectionSpec(fields={"x": ScalarSpec("X", float)}, label="Child")
+    second = CfgSectionSpec(
+        fields={
+            "type": LiteralSpec("second"),
+            "fixed": LiteralSpec("locked"),
+            "number": ScalarSpec("Number", float),
+            "optional": ScalarSpec("Optional", float, optional=True),
+            "child": ReferenceSpec("test", [child]),
+            "range": SweepSpec(),
+        },
+        label="Second",
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(
+            fields={"ref": ReferenceSpec("test", [first, second], discriminator="type")}
+        ),
+        CfgSectionValue(
+            {
+                "ref": ReferenceValue(
+                    "<Custom:First>",
+                    CfgSectionValue(
+                        {"type": DirectValue("first"), "old": DirectValue(99.0)}
+                    ),
+                )
+            }
+        ),
+    )
+    return CfgResource(
+        lambda: schema,
+        resolution=Catalog(
+            {
+                "child": ResolvedReference(
+                    "Child", CfgSectionValue({"x": DirectValue(2.0)})
+                )
+            }
+        ).snapshot,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+
+
+def complete_second_input() -> dict[str, CfgInput]:
+    return {
+        "type": "second",
+        "number": 3.0,
+        "optional": None,
+        "child": {"x": 4.0},
+        "range": {"step": 2.0, "start": 6.0, "stop": 14.0},
+    }
+
+
+def test_complete_shape_switch_uses_new_inputs_and_existing_range_owner(
+    switchable_resource: CfgResource,
+) -> None:
+    resource = switchable_resource
+    changed = resource.edit(
+        resource.observe().ref.revision, (CfgEdit(("ref",), complete_second_input()),)
+    )
+    assert changed.status is CfgStatus.VALID
+    assert resource.accept(changed.ref.revision).values == {
+        "ref": {
+            "type": "second",
+            "fixed": "locked",
+            "number": 3.0,
+            "child": {"x": 4.0},
+            "range": (6.0, 14.0, 5),
+        }
+    }
+
+
+@pytest.mark.parametrize("missing", ["number", "optional", "child", "range"])
+def test_shape_switch_does_not_fill_missing_input_defaults(
+    switchable_resource: CfgResource, missing: str
+) -> None:
+    resource = switchable_resource
+    before = resource.observe()
+    payload = complete_second_input()
+    del payload[missing]
+    with pytest.raises(CfgInputError):
+        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+    assert resource.observe() == before
+
+
+@pytest.mark.parametrize(
+    "replacement", [{}, {"start": 6.0, "stop": 14.0}, {"start": 6.0, "step": 2.0}]
+)
+def test_shape_switch_requires_complete_nested_range(
+    switchable_resource: CfgResource, replacement
+) -> None:
+    resource = switchable_resource
+    before = resource.observe()
+    payload = complete_second_input()
+    payload["range"] = replacement
+    with pytest.raises(CfgInputError):
+        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+    assert resource.observe() == before
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"type": "unknown"},
+        {"type": "second", "child": {}},
+        {"type": "second", "child": {"x": 4.0}, "unknown": 1.0},
+    ],
+)
+def test_invalid_shape_payload_preserves_publication(
+    switchable_resource: CfgResource, payload
+) -> None:
+    resource = switchable_resource
+    before = resource.observe()
+    full = complete_second_input()
+    full.update(payload)
+    with pytest.raises(CfgInputError):
+        resource.edit(before.ref.revision, (CfgEdit(("ref",), full),))
+    assert resource.observe() == before
+
+
+def test_shape_switch_preserves_expression_and_nested_link_input(
+    switchable_resource: CfgResource,
+) -> None:
+    resource = switchable_resource
+    payload = complete_second_input()
+    payload["number"] = EvalValue("dynamic")
+    payload["child"] = {"__ref": "child"}
+    changed = resource.edit(
+        resource.observe().ref.revision, (CfgEdit(("ref",), payload),)
+    )
+    ref = changed.tree.children["ref"]
+    number = ref.children["number"].value
+    child = ref.children["child"].value
+    assert isinstance(number, EvalValue)
+    assert number.expr == "dynamic"
+    assert isinstance(child, ReferenceValue)
+    assert child.chosen_key == "child"
+    assert not child.is_overridden
+
+
+@pytest.mark.parametrize("unavailable", ["disabled", "missing"])
+def test_complete_single_shape_input_rebuilds_unavailable_reference(
+    reference_resource, unavailable: str
+) -> None:
+    resource, catalog = reference_resource
+    current = resource.observe()
+    if unavailable == "disabled":
+        current = resource.edit(
+            current.ref.revision, (CfgEdit(("ref", "__ref"), None),)
+        )
+    else:
+        del catalog.entries["first"]
+        current = resource.refresh(current.ref.revision)
+    changed = resource.edit(current.ref.revision, (CfgEdit(("ref",), {"x": 7.0}),))
+    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
+    refreshed = resource.refresh(changed.ref.revision)
+    assert refreshed.status is CfgStatus.VALID
+
+
+def test_shape_switch_accepts_complete_but_unfinished_text(
+    switchable_resource: CfgResource,
+) -> None:
+    resource = switchable_resource
+    payload = complete_second_input()
+    payload["number"] = DirectValue(None, raw="-")
+    changed = resource.edit(
+        resource.observe().ref.revision, (CfgEdit(("ref",), payload),)
+    )
+    assert changed.status is CfgStatus.INVALID
+    number = changed.tree.children["ref"].children["number"].value
+    assert isinstance(number, DirectValue)
+    assert number.raw == "-"
+
+
+def test_missing_reference_does_not_offer_stale_children_for_partial_edit(
+    reference_resource,
+) -> None:
+    resource, catalog = reference_resource
+    del catalog.entries["first"]
+    before = resource.refresh(resource.observe().ref.revision)
+    with pytest.raises(CfgInputError):
+        resource.edit(before.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+    assert resource.observe() == before
+
+
+def test_discriminator_is_only_writable_as_aggregate_selection(
+    switchable_resource: CfgResource,
+) -> None:
+    resource = switchable_resource
+    before = resource.observe()
+    with pytest.raises(CfgInputError):
+        resource.edit(before.ref.revision, (CfgEdit(("ref", "type"), "second"),))
+    payload = complete_second_input()
+    payload["fixed"] = "locked"
+    with pytest.raises(CfgInputError):
+        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+    assert resource.observe() == before
+
+
+@pytest.mark.parametrize("payload", [{}, {"number": 3.0}])
+def test_complete_input_never_fabricates_readonly_values(payload) -> None:
+    shape = CfgSectionSpec(
+        fields={"number": ScalarSpec("Number", float, editable=False)}, label="Readonly"
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"ref": ReferenceSpec("test", [shape], optional=True)}),
+        CfgSectionValue({"ref": None}),
+    )
+    resource = CfgResource(
+        lambda: schema,
+        resolution=Catalog().snapshot,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    before = resource.observe()
+    with pytest.raises(CfgInputError):
+        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+    assert resource.observe() == before
 
 
 def test_override_shape_uses_declared_discriminator_not_other_literals() -> None:
