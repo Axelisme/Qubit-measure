@@ -2461,6 +2461,15 @@ wheels = [
 ]
 
 [[package]]
+name = "simpleeval"
+version = "1.0.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/3e/25326f373871a34e78cac231c0d3c18a0a5c3a80aa4813b50b9f26a5d460/simpleeval-1.0.8.tar.gz", hash = "sha256:b417f869c11f2de034eb919820a825f35d12ce99f63a43971947ce73679eb9ba", size = 31846, upload-time = "2026-09-12T10:16:08.103Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/33/d1ecd9f4f5f272b36ad7b268e307ba0a59c109d8ad134a231cda780baac9/simpleeval-1.0.8-py3-none-any.whl", hash = "sha256:c9c4ff42879ebf0c05f6562cb81031869948916be343bcc950b81fcc081fe9ce", size = 18925, upload-time = "2026-09-12T10:16:06.862Z" },
+]
+
+[[package]]
 name = "simplejson"
 version = "4.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2726,6 +2735,7 @@ dependencies = [
     { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "pydantic" },
+    { name = "simpleeval" },
     { name = "sympy" },
     { name = "tqdm" },
     { name = "typing-extensions" },
@@ -2926,6 +2936,7 @@ requires-dist = [
     { name = "scikit-optimize", marker = "extra == 'client'" },
     { name = "scipy", marker = "extra == 'client'" },
     { name = "scqubits", marker = "extra == 'client'" },
+    { name = "simpleeval", specifier = ">=1.0,<2" },
     { name = "sympy" },
     { name = "threadpoolctl", marker = "extra == 'client'" },
     { name = "tqdm" },
