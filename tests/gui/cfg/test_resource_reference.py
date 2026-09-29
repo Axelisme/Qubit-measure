@@ -624,6 +624,31 @@ def test_select_custom_notifies_once_and_rejects_reentrant_selection() -> None:
     unsubscribe()
 
 
+def test_select_custom_uses_default_label_for_unnamed_shape() -> None:
+    shape = CfgSectionSpec(fields={"x": ScalarSpec("X", float)})
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"ref": ReferenceSpec("test", [shape])}),
+        CfgSectionValue(
+            {
+                "ref": ReferenceValue(
+                    "<Custom:Custom>", CfgSectionValue({"x": DirectValue(7.0)})
+                )
+            }
+        ),
+    )
+    resource = CfgResource(
+        lambda: schema,
+        resolution=Catalog().snapshot,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+
+    changed = resource.select_custom_reference(
+        resource.observe().ref.revision, ("ref",), "Custom"
+    )
+
+    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
+
+
 def test_select_custom_rejects_invalid_choice_without_publishing(
     switchable_resource: CfgResource,
 ) -> None:

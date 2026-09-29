@@ -2,50 +2,41 @@
 
 from __future__ import annotations
 
-import logging
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any
 
-logger = logging.getLogger(__name__)
-
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from zcu_tools.gui.cfg import (
-    is_custom_reference_key,
-)
-from zcu_tools.gui.cfg.binding import (
-    CenteredSweepField,
-    ReferenceField,
-    SectionField,
-    SweepField,
-)
+from zcu_tools.gui.cfg import ReferenceSpec, ReferenceValue, make_custom_reference_key
+from zcu_tools.gui.cfg.binding import ReferenceField
 
-from ..decoration import FieldDecorationProtocol
-from ..registry import FieldRenderContext, FieldWidgetProtocol
-from .common import BaseLiveWidget
+from ..registry import FieldRenderContext
 from .reference_shared import (
-    apply_reference_validity,
-    handle_reference_combo_change,
-    refresh_missing_hint,
-    refresh_reference_combo,
+    NONE_KEY,
+    CustomReferenceSelection,
+    ReferenceSelection,
+    display_missing_hint,
+    display_reference_combo,
+    display_reference_validity,
+    selected_reference,
 )
 
 
-class _CollapsibleSection(QWidget):
+class _CollapsibleSection(QWidget):  # pyright: ignore[reportUnusedClass] - measure imports it
     """Internal helper for collapsible headers."""
 
     def __init__(
         self,
         label: str,
+        *,
         collapsible: bool = True,
         collapsed: bool = False,
         no_header: bool = False,
@@ -97,17 +88,10 @@ class _CollapsibleSection(QWidget):
         if collapsed:
             self._body.setVisible(False)
 
-    def _on_toggle(self, checked: bool) -> None:
+    def _on_toggle(self, checked: bool) -> None:  # noqa: FBT001 - Qt signal
         if self._toggle_btn:
             self._toggle_btn.setText("▼" if checked else "▶")
         self._body.setVisible(checked)
-
-    def set_invalid(self, invalid: bool) -> None:
-        style = "color: red;" if invalid else ""
-        if self._header_label is not None:
-            self._header_label.setStyleSheet(style)
-        if self._toggle_btn is not None:
-            self._toggle_btn.setStyleSheet(style)
 
 
 # SectionWidget removed: sole tree (TreeCfgWidget) owns all section/subtree
@@ -115,12 +99,79 @@ class _CollapsibleSection(QWidget):
 # (e.g., feedback panel) and is decoupled from cfg form path.
 
 
-class ReferenceWidget(BaseLiveWidget):
-    """Reference editor for sole tree: combo + missing hint only.
+class ReferenceInputWidget(QWidget):
+    """Show a published reference choice and submit selection intent only.
 
-    All section/subtree structure is owned by TreeCfgWidget (shape elision);
-    this widget never creates a SectionWidget or sub_container.
+    Tree/form owners render the children; this header never owns a cfg subtree.
     """
+
+    _NONE_KEY = NONE_KEY
+
+    def __init__(
+        self,
+        spec: ReferenceSpec,
+        value: ReferenceValue | None,
+        parent: QWidget | None = None,
+        *,
+        library_keys: tuple[str, ...],
+        valid: bool,
+        submit: Callable[[ReferenceSelection], None],
+    ) -> None:
+        super().__init__(parent)
+        self._spec = spec
+        self._value = value
+        self._library_keys = library_keys
+        self._valid = valid
+        self._submit = submit
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(4)
+        self._combo = QComboBox()
+        self._combo.setMinimumWidth(20)
+        self._combo.currentIndexChanged.connect(self._on_combo_changed)
+        header.addWidget(self._combo, stretch=1)
+        layout.addLayout(header)
+        self._missing_ref_hint = QLabel()
+        self._missing_ref_hint.setObjectName("missingRefHint")
+        self._missing_ref_hint.setStyleSheet("color: #b00020; font-size: 11px;")
+        self._missing_ref_hint.setVisible(False)
+        layout.addWidget(self._missing_ref_hint)
+        self.display(value, library_keys=library_keys, valid=valid)
+
+    def display(
+        self,
+        value: ReferenceValue | None,
+        *,
+        library_keys: tuple[str, ...],
+        valid: bool,
+    ) -> None:
+        """Apply owner publication without submitting a choice."""
+        self._value = value
+        self._library_keys = library_keys
+        self._valid = valid
+        display_reference_combo(self._combo, self._spec, value, library_keys)
+        display_missing_hint(self._missing_ref_hint, value)
+        display_reference_validity(self._combo, valid=valid)
+
+    def _on_combo_changed(self, index: int) -> None:
+        choice = selected_reference(self._combo.itemData(index))
+        try:
+            self._submit(choice)
+        except Exception:
+            # Rejecting a selection leaves the owner unchanged; restore the
+            # last publication rather than keeping an optimistic combo choice.
+            self.display(
+                self._value, library_keys=self._library_keys, valid=self._valid
+            )
+            raise
+
+
+class ReferenceWidget(ReferenceInputWidget):
+    """Connect the shared reference header to an existing binding-owned form."""
 
     def __init__(
         self,
@@ -129,66 +180,50 @@ class ReferenceWidget(BaseLiveWidget):
         context: FieldRenderContext,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(field, parent)
+        self._field = field
         self._context = context
         self._path = context.path
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(4)
-
-        self._combo = QComboBox()
-        self._refresh_combo_items()
-        self._combo.setMinimumWidth(20)
-        self._combo.currentIndexChanged.connect(self._on_combo_changed)
-        header.addWidget(self._combo, stretch=1)
-        layout.addLayout(header)
-
-        self._missing_ref_hint = QLabel()
-        self._missing_ref_hint.setObjectName("missingRefHint")
-        self._missing_ref_hint.setStyleSheet("color: #b00020; font-size: 11px;")
-        self._missing_ref_hint.setVisible(False)
-        layout.addWidget(self._missing_ref_hint)
-
-        self._refresh_missing_ref_hint()
-
-        # Reactive sync
+        super().__init__(
+            field.spec,
+            field.get_value(),
+            parent,
+            library_keys=field.available_keys(),
+            valid=field.is_valid(),
+            submit=self._write_input,
+        )
         field.on_change.connect(self._on_model_changed)
         field.on_validity_changed.connect(self._on_validity_changed)
-        self._on_validity_changed(field.is_valid())
 
-    _NONE_KEY = "<None>"
+    @property
+    def field(self) -> ReferenceField:
+        return self._field
 
-    def _refresh_combo_items(self) -> None:
-        refresh_reference_combo(self._combo, cast(ReferenceField, self._field))
-
-    def _on_combo_changed(self, index: int) -> None:
-        key = self._combo.itemData(index)
-        field = cast(ReferenceField, self._field)
-        handle_reference_combo_change(field, key)
+    def _write_input(self, choice: ReferenceSelection) -> None:
+        field = self._field
+        if choice is None:
+            field.set_enabled(False)
+            return
+        if field.spec.optional and not field.is_enabled:
+            field.set_enabled(True)
+        if isinstance(choice, CustomReferenceSelection):
+            field.set_chosen_key(make_custom_reference_key(choice.label))
+        else:
+            field.set_chosen_key(choice)
 
     def _on_model_changed(self, *_: Any) -> None:
-        self._refresh_combo_items()
-        self._refresh_missing_ref_hint()
+        self._on_validity_changed(self._field.is_valid())
 
-    def _refresh_missing_ref_hint(self) -> None:
-        refresh_missing_hint(self._missing_ref_hint, cast(ReferenceField, self._field))
+    def _on_validity_changed(self, valid: bool) -> None:  # noqa: FBT001 - field callback
+        self.display(
+            self._field.get_value(),
+            library_keys=self._field.available_keys(),
+            valid=valid,
+        )
 
     def refresh_section(self, path: str) -> bool:
-        # Section/subtree owned solely by TreeCfgWidget; reference header has no section to refresh.
         del path
         return False
 
     def teardown(self) -> None:
-        field = cast(ReferenceField, self._field)
-        field.on_change.disconnect(self._on_model_changed)
-        field.on_validity_changed.disconnect(self._on_validity_changed)
-
-    def _on_validity_changed(self, valid: bool) -> None:
-        field = cast(ReferenceField, self._field)
-        apply_reference_validity(self._combo, None, field, valid)
-        self._refresh_missing_ref_hint()
+        self._field.on_change.disconnect(self._on_model_changed)
+        self._field.on_validity_changed.disconnect(self._on_validity_changed)

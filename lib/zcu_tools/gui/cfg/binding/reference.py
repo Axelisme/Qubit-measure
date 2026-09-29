@@ -86,7 +86,7 @@ class ReferenceField(CfgField):
             init_overridden = initial_val.is_overridden
         else:
             first_label = spec.allowed[0].label
-            self._chosen_key = make_custom_reference_key(first_label)
+            self._chosen_key = make_custom_reference_key(first_label or "Custom")
             initial_section = None
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
@@ -148,7 +148,7 @@ class ReferenceField(CfgField):
             self._commit_rebuild(prepared)
             self.on_change.emit()
 
-    def set_enabled(self, enabled: bool) -> None:
+    def set_enabled(self, enabled: bool) -> None:  # noqa: FBT001 - binding API
         self._require_open()
         if not self.spec.optional:
             return
@@ -370,7 +370,7 @@ class ReferenceField(CfgField):
             raise RuntimeError(str(exc)) from exc
         if label is not None:
             for spec in self.spec.allowed:
-                if spec.label == label:
+                if (spec.label or "Custom") == label:
                     return spec, None
             raise RuntimeError(f"Unknown custom reference label: {label!r}")
 

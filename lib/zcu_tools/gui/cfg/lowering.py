@@ -315,7 +315,7 @@ def _select_reference_spec(
         raise RuntimeError(str(exc)) from exc
     if label is not None:
         for spec in ref_spec.allowed:
-            if spec.label == label:
+            if (spec.label or "Custom") == label:
                 return spec
         allowed = ", ".join(spec.label for spec in ref_spec.allowed)
         raise RuntimeError(

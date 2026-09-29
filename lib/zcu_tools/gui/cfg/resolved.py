@@ -55,7 +55,7 @@ def _freeze_value(value: CfgNodeValue | None, path: str) -> CfgNodeValue | None:
         if value.resolved_label is None:
             raise RuntimeError(f"Config field '{path}' reference is unresolved")
         # Shape selection is per node, not a cache keyed by library identity.
-        value.chosen_key = make_custom_reference_key(value.resolved_label)
+        value.chosen_key = make_custom_reference_key(value.resolved_label or "Custom")
         _freeze_value(value.value, path)
         return value
     if isinstance(value, SweepValue):

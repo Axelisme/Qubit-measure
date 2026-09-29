@@ -122,7 +122,12 @@ class InputEditor:
                 CfgInputReason.UNSUPPORTED_MODE, "node is not a reference"
             )
         shape = next(
-            (allowed for allowed in spec.allowed if allowed.label == label), None
+            (
+                allowed
+                for allowed in spec.allowed
+                if (allowed.label or "Custom") == label
+            ),
+            None,
         )
         if shape is None:
             raise CfgInputError(
@@ -317,7 +322,7 @@ class InputEditor:
                         selected, make_default_value(selected), (), contents
                     )
                     return ReferenceValue(
-                        make_custom_reference_key(selected.label),
+                        make_custom_reference_key(selected.label or "Custom"),
                         fresh,
                         resolved_label=selected.label,
                     )
