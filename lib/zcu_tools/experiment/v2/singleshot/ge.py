@@ -3,11 +3,10 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -17,13 +16,13 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
+from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
@@ -190,6 +189,64 @@ class GE_Result:
 
 
 @dataclass(frozen=True)
+class GEAnalyzeOptions:
+    initial_state: Literal["ground", "excited"] = "ground"
+    backend: Literal["pca", "center"] = "pca"
+    logscale: bool = False
+    align_t1: bool = True
+    length_ratio: float | None = None
+    angle: float | None = None
+
+
+GE_ANALYZE_DEFAULTS = GEAnalyzeOptions()
+
+
+@dataclass(frozen=True)
+class GEAnalysis:
+    initial_state: Literal["ground", "excited"]
+    fidelity: float
+    theta: float
+    threshold: float
+    ge_s: float
+    g_center: complex
+    e_center: complex
+    init_pops: NDArray[np.float64]
+
+    def validate_calibration(self) -> None:
+        populations = np.asarray(self.init_pops, dtype=np.float64)
+        scalars = [
+            self.fidelity,
+            self.theta,
+            self.threshold,
+            self.ge_s,
+            self.g_center,
+            self.e_center,
+        ]
+        if (
+            not np.isfinite(scalars).all()
+            or not 0.0 <= self.fidelity <= 1.0
+            or self.ge_s <= 0
+            or np.isclose(self.g_center, self.e_center)
+            or populations.shape != (2, 2)
+            or not np.isfinite(populations).all()
+            or np.any(populations < 0)
+            or np.any(populations.sum(axis=1) > 1 + 1e-12)
+        ):
+            raise ValueError(
+                "Invalid GE calibration: check centers, width and populations"
+            )
+
+
+@dataclass(frozen=True)
+class GEPostAnalyzeOptions:
+    radius: float | None = None
+    consider_other: bool = False
+
+
+GE_POST_ANALYZE_DEFAULTS = GEPostAnalyzeOptions()
+
+
+@dataclass(frozen=True)
 class GEConfusionResult:
     radius: float
     matrix: NDArray[np.float64]
@@ -197,6 +254,11 @@ class GEConfusionResult:
     g_classification: tuple[float, float, float]
     e_classification: tuple[float, float, float]
     condition_number: float
+
+
+@dataclass(frozen=True)
+class GEPostAnalysis:
+    confusion: GEConfusionResult
 
 
 class GEModuleCfg(ConfigBase):
@@ -235,9 +297,9 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         tag="singleshot/ge",
     )
 
-    @record_result
-    def run(self, soc, soccfg, cfg: GE_Cfg) -> GE_Result:
-        cfg = deepcopy(cfg)
+    def run(self, config: GE_Cfg, *, context: QickContext) -> GE_Result:
+        soc, soccfg = context.soc, context.soccfg
+        cfg = deepcopy(config)
         setup_devices(cfg, progress=True)
 
         # Validate and setup configuration
@@ -279,51 +341,74 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             cfg_snapshot=cfg,
         )
 
-    @retrieve_result
     def analyze(
+        self, result: GE_Result, options: GEAnalyzeOptions, *, plots: Plots
+    ) -> GEAnalysis:
+        """Fit probe-off/on shots, recording a named fit figure in this operation."""
+        # Acquisition order is always probe off/on; fit in physical g/e order.
+        signals = ge_signals_by_state(result.signals, options.initial_state)
+        if options.backend not in ("pca", "center"):
+            raise ValueError(f"Unknown backend: {options.backend}")
+        fidelity, init_pops, fit = singleshot_ge_analysis(
+            signals,
+            angle=options.angle,
+            backend=options.backend,
+            logscale=options.logscale,
+            align_t1=options.align_t1,
+            length_ratio=options.length_ratio,
+            plots=plots,
+        )
+        analysis = GEAnalysis(
+            initial_state=options.initial_state,
+            fidelity=fidelity,
+            theta=fit["theta"],
+            threshold=fit["threshold"],
+            ge_s=fit["s"],
+            g_center=fit["g_center"],
+            e_center=fit["e_center"],
+            init_pops=init_pops,
+        )
+        analysis.validate_calibration()
+        return analysis
+
+    def post_analyze(
         self,
-        result: GE_Result | None = None,
-        backend: Literal["center", "regression", "pca"] = "pca",
-        initial_state: Literal["ground", "excited"] = "ground",
-        **kwargs,
-    ) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
-        """Analyze with populations ordered by predominant g/e preparation.
+        result: GE_Result,
+        primary: GEAnalysis,
+        options: GEPostAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> GEPostAnalysis:
+        """Classify shots with the adopted primary calibration; do not refit."""
+        primary.validate_calibration()
+        g_signals, e_signals = ge_signals_by_state(
+            result.signals, primary.initial_state
+        )
+        signals = (g_signals, e_signals)
+        confusion = self._calc_confusion_matrix(signals, primary, options)
+        self._plot_confusion_matrix(confusion, signals, primary, plots)
+        return GEPostAnalysis(confusion=confusion)
 
-        ``initial_state`` labels the state before the probe, after reset/init.
-        Pass the same state to subsequent confusion calculation and plotting.
-        """
-        assert result is not None, "no result found"
-
-        signals = ge_signals_by_state(result.signals, initial_state)
-
-        return singleshot_ge_analysis(signals, backend=backend, **kwargs)
-
-    @retrieve_result
-    def calc_confusion_matrix(
+    def _calc_confusion_matrix(
         self,
-        init_pops: NDArray[np.float64],
-        g_center: complex,
-        e_center: complex,
-        sigma: float,
-        radius: float | None = None,
-        result: GE_Result | None = None,
-        consider_other: bool = True,
-        initial_state: Literal["ground", "excited"] = "ground",
+        signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+        primary: GEAnalysis,
+        options: GEPostAnalyzeOptions,
     ) -> GEConfusionResult:
-        assert result is not None, "no result found"
+        g_signals, e_signals = signals
+        g_center, e_center = primary.g_center, primary.e_center
+        init_matrix = make_init_matrix(primary.init_pops)
 
-        g_signals, e_signals = ge_signals_by_state(result.signals, initial_state)
-        init_matrix = make_init_matrix(init_pops)
-
+        radius = options.radius
         if radius is None:
             radius = optimize_ge_radius(
                 g_signals,
                 e_signals,
                 g_center,
                 e_center,
-                init_pops,
-                sigma,
-                consider_other=consider_other,
+                primary.init_pops,
+                primary.ge_s,
+                consider_other=options.consider_other,
             )
 
         gg_mask, ge_mask, go_mask = classify_result(
@@ -357,19 +442,19 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             condition_number=float(np.linalg.cond(matrix)),
         )
 
-    @retrieve_result
-    def plot_confusion_matrix(
+    def _plot_confusion_matrix(
         self,
         confusion: GEConfusionResult,
-        g_center: complex,
-        e_center: complex,
-        result: GE_Result | None = None,
-        initial_state: Literal["ground", "excited"] = "ground",
-    ) -> Figure:
-        assert result is not None, "no result found"
-
-        g_signals, e_signals = ge_signals_by_state(result.signals, initial_state)
-        fig, ((ax1, ax4), (ax2, ax3)) = plt.subplots(2, 2, figsize=(8, 8))
+        signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+        primary: GEAnalysis,
+        plots: Plots,
+    ) -> None:
+        g_signals, e_signals = signals
+        g_center, e_center = primary.g_center, primary.e_center
+        fig, raw_axes = plots.subplots("post", nrows=2, ncols=2, figsize=(8, 8))
+        ((ax1, ax4), (ax2, ax3)) = cast(
+            "tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes
+        )
 
         g_label = r"$|0\rangle$"
         e_label = r"$|1\rangle$"
@@ -388,7 +473,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         ax1.set_xlabel("")
 
         im = ax4.imshow(confusion.init_matrix, cmap="Blues", vmin=0, vmax=1)
-        fig.colorbar(im, ax=ax4)
+        fig.colorbar(im, cax=ax4.inset_axes((1.04, 0, 0.06, 1)))
         for i in range(confusion.init_matrix.shape[0]):
             for j in range(confusion.init_matrix.shape[1]):
                 val = confusion.init_matrix[i, j]
@@ -410,7 +495,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         ax4.set_title("Initial Populations")
 
         im = ax3.imshow(confusion.matrix, cmap="Blues", vmin=0, vmax=1)
-        fig.colorbar(im, ax=ax3)
+        fig.colorbar(im, cax=ax3.inset_axes((1.04, 0, 0.06, 1)))
         for i in range(confusion.matrix.shape[0]):
             for j in range(confusion.matrix.shape[1]):
                 val = confusion.matrix[i, j]
@@ -430,5 +515,3 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         ax3.set_xlabel("Measured State")
         ax3.set_ylabel("Actual State")
         ax3.set_title(f"Confusion Matrix (cond: {confusion.condition_number:.1f})")
-
-        return fig

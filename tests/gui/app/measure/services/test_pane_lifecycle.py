@@ -5,7 +5,15 @@ from io import BytesIO
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from zcu_tools.experiment.v2.singleshot.ge import GE_Result
+from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
+    GEAdapter,
+    GEAnalyzeParams,
+    GEAnalyzeResult,
+    GEPostAnalyzeResult,
+)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -21,6 +29,7 @@ from zcu_tools.gui.app.measure.services.guard import (
     LoadPermit,
 )
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
+from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
     Session,
@@ -336,6 +345,96 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     assert state.get_tab(tab_id).post_analysis.result is None
     assert old_primary_draft in writeback.torn_down
     assert old_post_draft in writeback.torn_down
+
+
+def _ge_source_with_excited_initial_state() -> GE_Result:
+    rng = np.random.default_rng(83)
+    excited = rng.random((2, 6000)) < np.array([0.1, 0.9])[:, None]
+    signals = np.asarray(
+        np.where(excited, 1 + 0.4j, -1 - 0.4j)
+        + 0.2 * (rng.normal(size=excited.shape) + 1j * rng.normal(size=excited.shape)),
+        dtype=np.complex128,
+    )
+    # Probe-off/on rows are reversed for a predominantly excited initial state.
+    return GE_Result(signals[::-1].copy(), np.arange(6000), np.array([0, 1]))
+
+
+def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks() -> None:
+    state, tab_id, _fake, ctx = _state()
+    adapter = GEAdapter()
+    state.get_tab(tab_id).adapter = adapter
+    state.update_tab_result(tab_id, _ge_source_with_excited_initial_state())
+    bus, writeback = EventBus(), _Writeback()
+    primary_service, primary_bg = _analyze_service(state, writeback, bus)
+    params = GEAnalyzeParams(initial_state="excited", length_ratio=0.01)
+    fit_plots = Plots(NonPresentingHost())
+    primary_service.start_analyze(AnalyzePermit(tab_id), params, plots=fit_plots)
+    primary_bg.on_done(primary_bg.work())
+
+    tab = state.get_tab(tab_id)
+    primary = tab.analysis.result
+    assert isinstance(primary, GEAnalyzeResult)
+    assert primary.initial_state == "excited"
+    assert tab.analysis.plots is fit_plots
+    assert tuple(fit_plots) == ("fit",)
+    assert {item.target_name for item in writeback.created[-1].items} == {
+        "fid",
+        "ge_s",
+        "g_center",
+        "e_center",
+    }
+    # The post operation must use the adopted primary, not the later form edit.
+    params.initial_state = "ground"
+    post_params = adapter.get_post_analyze_params(primary, ctx)
+    post_bg = _Bg()
+    post_handles = OperationHandles()
+    post_runner = OperationRunner(
+        MagicMock(),
+        post_handles,
+        ProgressService(DirectProgressTransport()),
+        post_bg,
+        bus,
+    )
+    post_service = PostAnalyzeService(
+        state, post_runner, bus, post_handles, cast(Any, writeback)
+    )
+    post_plots = Plots(NonPresentingHost())
+    post_service.start_post_analyze(tab_id, post_params, plots=post_plots)
+    post_bg.on_done(post_bg.work())
+
+    post = tab.post_analysis.result
+    assert isinstance(post, GEPostAnalyzeResult)
+    np.testing.assert_allclose(post.confusion, np.eye(3), atol=0.06)
+    assert tab.post_analysis.plots is post_plots
+    assert tuple(post_plots) == ("post",)
+    assert {item.target_name for item in writeback.created[-1].items} == {
+        "ge_radius",
+        "confusion_matrix",
+    }
+    snapshot = TabService(state, MagicMock(), cast(Any, writeback)).get_snapshot(tab_id)
+    assert snapshot.analysis is not None and snapshot.post_analysis is not None
+    assert snapshot.analysis.figures is fit_plots
+    assert snapshot.post_analysis.figures is post_plots
+    assert snapshot.paths is not None
+    assert "fit" in snapshot.paths.analysis_images
+    assert "post" in snapshot.paths.post_analysis_images
+    assert {item.key for item in snapshot.artifacts} >= {
+        ArtifactKey(ArtifactKind.ANALYSIS, "fit"),
+        ArtifactKey(ArtifactKind.POST_ANALYSIS, "post"),
+    }
+
+    new_fit = Plots(NonPresentingHost())
+    primary_service.start_analyze(
+        AnalyzePermit(tab_id), GEAnalyzeParams(initial_state="excited"), plots=new_fit
+    )
+    primary_bg.on_done(primary_bg.work())
+    assert tab.post_analysis.result is None
+    assert tab.post_analysis.plots is None
+    old_fit, old_post = BytesIO(), BytesIO()
+    fit_plots["fit"].savefig(old_fit, format="png")
+    post_plots["post"].savefig(old_post, format="png")
+    assert old_fit.getvalue().startswith(b"\x89PNG")
+    assert old_post.getvalue().startswith(b"\x89PNG")
 
 
 def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
