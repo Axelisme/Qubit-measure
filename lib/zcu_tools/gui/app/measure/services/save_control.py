@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.figure_export import resolve_figure_path
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .ports import SaveDestination
@@ -175,7 +174,9 @@ class SaveControlFacet:
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no image path configured"
             )
-        resolved = resolve_figure_path(path)
+        resolved = resolve_artifact_destinations(
+            (SaveDestination(key=key, path=path),)
+        )[0].path
         if image_path is not None:
             self._tab.update_tab_image_path_override(tab_id, key, image_path)
             self._bus.emit(

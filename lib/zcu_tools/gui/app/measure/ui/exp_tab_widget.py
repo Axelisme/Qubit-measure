@@ -871,7 +871,7 @@ class ExpTabWidget(QWidget):
         self._analysis_selector.hide()
         self._analysis_stack.addWidget(widget)
         self._analysis_stack.setCurrentWidget(widget)
-        self._right_stack.setCurrentWidget(self._analysis_stack)
+        self._right_stack.setCurrentWidget(self._analysis_panel_right)
 
     def interactive_frontend(self) -> InteractiveFrontend | None:
         """Return only the currently mounted interactive analysis presentation."""

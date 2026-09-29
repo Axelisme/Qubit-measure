@@ -488,6 +488,37 @@ def test_image_save_rejects_empty_path_without_mutating_draft(
 
 
 @pytest.mark.parametrize("post", [False, True])
+def test_single_image_invalid_name_with_override_does_not_commit_draft(
+    post: bool, tmp_path: Path
+) -> None:
+    facet, log, state, tab, _save, bus, notifications = _facet()
+    kind = ArtifactKind.POST_ANALYSIS if post else ArtifactKind.ANALYSIS
+    key = ArtifactKey(kind, "\ud800")
+    state.artifacts = tuple(
+        replace(artifact, key=key, default_path=None)
+        if artifact.key.kind is kind
+        else artifact
+        for artifact in state.artifacts
+    )
+    original_artifacts = state.artifacts
+    path = tmp_path / "chosen.png"
+
+    with pytest.raises(FailedPreconditionError, match="UTF-8"):
+        facet.save_image("tab-1", key, str(path))
+
+    assert state.artifacts == original_artifacts
+    assert tab.analysis_image_path == "analysis.out"
+    assert tab.post_analysis_image_path == "post_analysis.out"
+    assert bus.payloads == []
+    assert notifications == []
+    assert not path.exists()
+    assert all(
+        entry.method not in {"save_image_sync", "update_tab_image_path_override"}
+        for entry in log.calls
+    )
+
+
+@pytest.mark.parametrize("post", [False, True])
 def test_image_save_failure_keeps_explicit_draft_without_success_notification(
     post: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:

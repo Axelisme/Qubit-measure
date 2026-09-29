@@ -7,7 +7,7 @@ import socket
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import numpy as np
@@ -90,6 +90,7 @@ def _start_mounted(
     adapter: str,
     *,
     analyze_params: FluxPickParams | None = None,
+    pane: Literal["run", "data"] | None = None,
 ):
     tab_id = fx.ctrl.new_tab(adapter)
     devs = np.linspace(-5.0, 5.0, 60)
@@ -102,10 +103,12 @@ def _start_mounted(
     fx.state.get_tab(tab_id).run.result = SimpleNamespace(
         signals=signals, values=devs, freqs=freqs
     )
+    tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
+    if pane is not None:
+        tab_widget.select_pane(pane)
     token = fx.ctrl.run_analyze_control.analyze(
         tab_id, FluxPickParams() if analyze_params is None else analyze_params
     )
-    tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
     widget = tab_widget.interactive_frontend()
     assert isinstance(widget, FluxPickFrontend)
     return tab_id, token, widget
@@ -447,6 +450,29 @@ def test_cancel_during_remote_alignment_ignores_late_delivery(fx) -> None:
             ]["status"]
             == "cancelled"
         )
+
+
+@pytest.mark.parametrize("pane", ["run", "data"])
+@pytest.mark.parametrize("terminal", ["done", "cancel"])
+def test_controller_interactive_mount_is_visible_from_run_or_data(
+    mounted_fx, qapp, pane: Literal["run", "data"], terminal: str
+) -> None:
+    fx, window = mounted_fx
+    tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep", pane=pane)
+    qapp.processEvents()
+    assert widget.isVisibleTo(window)
+    with open_client(fx.service.port) as sock:
+        if terminal == "done":
+            assert _interact(sock, tab_id, {"command": "done"})["ok"] is True
+        else:
+            assert (
+                _rpc(sock, "analyze.cancel", {"tab_id": tab_id})["result"]["cancelled"]
+                is True
+            )
+        assert _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+            "result"
+        ]["status"] == ("finished" if terminal == "done" else "cancelled")
+    assert window.interactive_presentation(tab_id) is None
 
 
 @pytest.mark.parametrize("terminal", ["done", "cancel"])
