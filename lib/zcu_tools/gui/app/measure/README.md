@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-30 — 固定 cfg source snapshot
+**Last updated:** 2026-09-30 — Headless tab cfg ownership seam
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -426,6 +426,8 @@ factory組成三個窄ports；adapter package不import或forward shared cfg publ
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
+`services.tab_cfg.TabCfgResources` 管理 tab 到 cfg resource 的身份關聯。建立失敗不留下關聯，retire 先撤銷舊 handle，再移除關聯；lookup 直接回傳 resource-bound editing，不轉送命令。此 headless 接縫已有測試，但 production TabService／Qt writer 尚未接入，不能視為完成遷移。
+
 `MeasureCfgBindings.snapshot` 將 metadata、library 與 options 複製成一次命令使用的固定 view；bare capture 使用同一 metadata，dotted capture 只讀 owner 注入的已發布快取值。Owner 負責配對 source basis，snapshot 不保留 live provider 或讀取硬體。這個接縫已建立，tab resource 接線尚未完成。
 
 `MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
