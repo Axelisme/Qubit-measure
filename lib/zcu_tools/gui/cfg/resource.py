@@ -8,15 +8,22 @@ revocation, and the allocation of the narrower editing/acceptance capabilities.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol, TypeAlias
+from uuid import uuid4
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
+from .binding.draft import CfgDraft
 from .binding.observation import CfgNodeObservation
-from .model import DirectValue, EvalValue
+from .binding.ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
+from .lowering import RangeFactory
+from .model import CfgSchema, DirectValue, EvalValue
+from .resolved import lower_resolved_cfg
 
 CfgPath: TypeAlias = tuple[str, ...]
 CfgInput: TypeAlias = (
@@ -178,3 +185,216 @@ class CfgEditing(Protocol):
 
 class CfgAcceptance(Protocol):
     def accept(self, expected_revision: CfgRevision) -> AcceptedConfig: ...
+
+
+@dataclass(frozen=True)
+class CfgResolution:
+    """One command's stable, already-published source view (never live I/O).
+
+    Composition binds these ports to detached source snapshots. A new view is
+    acquired for a command, not for observe, watch, or acceptance.
+    """
+
+    source_basis: SourceBasis
+    evaluate_expression: ExpressionEvaluator
+    provide_options: OptionProvider
+    references: ReferenceCatalog
+
+
+class CfgResource:
+    """Single owner for a private candidate tree and detached publications.
+
+    Only app composition receives this concrete owner. Frontends receive its
+    CfgEditing capability; run owners receive CfgAcceptance. All calls are
+    synchronous on the same owner sequence. ``defaults`` executes only at
+    creation/reset and must return the same definition throughout this lifetime.
+    """
+
+    def __init__(
+        self,
+        defaults: Callable[[], CfgSchema],
+        *,
+        resolution: Callable[[], CfgResolution],
+        make_range: RangeFactory,
+        mutation_allowed: Callable[[], bool] = lambda: True,
+    ) -> None:
+        self._defaults = defaults
+        self._resolution = resolution
+        self._make_range = make_range
+        self._mutation_allowed = mutation_allowed
+        self._closed = False
+        self._notifying = 0
+        self._subscribers: dict[object, Callable[[CfgObservation], None]] = {}
+        schema = deepcopy(defaults())
+        self._spec = deepcopy(schema.spec)
+        self._draft, basis = self._prepare(schema)
+        self._observation = self._observe_draft(
+            self._draft, CfgRef(CfgId(uuid4().hex), CfgRevision(0)), basis
+        )
+
+    def observe(self) -> CfgObservation:
+        self._require_open()
+        return deepcopy(self._observation)
+
+    def watch(self, callback: Callable[[CfgObservation], None]) -> Callable[[], None]:
+        self._require_open()
+        token = object()
+        self._subscribers[token] = callback
+        self._deliver(callback)
+
+        def unsubscribe() -> None:
+            self._subscribers.pop(token, None)
+
+        return unsubscribe
+
+    def edit(
+        self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
+    ) -> CfgObservation:
+        from ._node_write import write_node
+
+        self._check_command(expected_revision)
+        candidate, basis = self._prepare(deepcopy(self._draft.snapshot()))
+        try:
+            for index, edit in enumerate(edits):
+                try:
+                    if any(not part for part in edit.path):
+                        raise CfgInputError(
+                            CfgInputReason.MALFORMED_INPUT, "invalid path segment"
+                        )
+                    write_node(candidate.root, edit.path, deepcopy(edit.value))
+                except CfgInputError as exc:
+                    raise CfgInputError(
+                        exc.reason, str(exc), path=edit.path, edit_index=index
+                    ) from exc
+            observation = self._next_observation(candidate, basis)
+        except BaseException:
+            candidate.close()
+            raise
+        return self._publish(candidate, observation)
+
+    def reset(self, expected_revision: CfgRevision) -> CfgObservation:
+        self._check_command(expected_revision)
+        schema = deepcopy(self._defaults())
+        if schema.spec != self._spec:
+            raise RuntimeError("defaults changed the resource definition")
+        candidate, basis = self._prepare(schema)
+        try:
+            observation = self._next_observation(candidate, basis)
+        except BaseException:
+            candidate.close()
+            raise
+        return self._publish(candidate, observation)
+
+    def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
+        self._check_command(expected_revision)
+        candidate, basis = self._prepare(deepcopy(self._draft.snapshot()))
+        try:
+            observation = self._next_observation(candidate, basis)
+        except BaseException:
+            candidate.close()
+            raise
+        return self._publish(candidate, observation)
+
+    def accept(self, expected_revision: CfgRevision) -> AcceptedConfig:
+        self._check_command(expected_revision, editing=False)
+        if self._observation.status is not CfgStatus.VALID:
+            raise CfgPreconditionError(
+                CfgPreconditionReason.NOT_VALID, "cfg is not valid"
+            )
+        values = lower_resolved_cfg(self._draft.snapshot(), make_range=self._make_range)
+        return AcceptedConfig(
+            self._observation.ref, self._observation.source_basis, deepcopy(values)
+        )
+
+    def revoke(self) -> None:
+        if self._closed:
+            return
+        self._require_not_notifying()
+        self._closed = True
+        self._subscribers.clear()
+        self._draft.close()
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise CfgPreconditionError(
+                CfgPreconditionReason.RESOURCE_GONE, "cfg resource is revoked"
+            )
+
+    def _require_not_notifying(self) -> None:
+        if self._notifying:
+            raise CfgPreconditionError(
+                CfgPreconditionReason.REENTRANT_MUTATION,
+                "cfg mutation and acceptance are forbidden during notification",
+            )
+
+    def _check_command(self, expected: CfgRevision, *, editing: bool = True) -> None:
+        self._require_open()
+        expected = CfgRevision(expected)
+        actual = self._observation.ref
+        if expected != actual.revision:
+            raise CfgStaleError(CfgRef(actual.cfg_id, expected), actual)
+        self._require_not_notifying()
+        if editing and not self._mutation_allowed():
+            raise CfgPreconditionError(
+                CfgPreconditionReason.MUTATION_BLOCKED, "cfg editing is blocked"
+            )
+
+    def _prepare(self, schema: CfgSchema) -> tuple[CfgDraft, SourceBasis]:
+        source = self._resolution()
+        draft = CfgDraft(
+            schema,
+            evaluate_expression=source.evaluate_expression,
+            provide_options=source.provide_options,
+            references=source.references,
+        )
+        return draft, source.source_basis
+
+    def _next_observation(self, draft: CfgDraft, basis: SourceBasis) -> CfgObservation:
+        ref = replace(
+            self._observation.ref,
+            revision=CfgRevision(self._observation.ref.revision + 1),
+        )
+        return self._observe_draft(draft, ref, basis)
+
+    @staticmethod
+    def _observe_draft(
+        draft: CfgDraft, ref: CfgRef, basis: SourceBasis
+    ) -> CfgObservation:
+        tree = draft.observe()
+        diagnostics = tuple(_diagnostics(tree))
+        status = CfgStatus.VALID if tree.valid else CfgStatus.INVALID
+        return CfgObservation(ref, status, tree, basis, diagnostics)
+
+    def _publish(
+        self, candidate: CfgDraft, observation: CfgObservation
+    ) -> CfgObservation:
+        previous = self._draft
+        self._draft = candidate
+        self._observation = observation
+        previous.close()
+        for token, callback in tuple(self._subscribers.items()):
+            if token in self._subscribers:
+                self._deliver(callback)
+        return deepcopy(observation)
+
+    def _deliver(self, callback: Callable[[CfgObservation], None]) -> None:
+        self._notifying += 1
+        try:
+            callback(deepcopy(self._observation))
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Cfg subscriber failed after publication"
+            )
+        finally:
+            self._notifying -= 1
+
+
+def _diagnostics(tree: CfgNodeObservation, path: CfgPath = ()):
+    if not tree.valid and not tree.children:
+        value = tree.value
+        message = "input is incomplete or invalid"
+        if isinstance(value, (DirectValue, EvalValue)):
+            message = value.error or value.validation_error or message
+        yield CfgDiagnostic(path, "invalid_input", message)
+    for key, child in tree.children.items():
+        yield from _diagnostics(child, (*path, key))
