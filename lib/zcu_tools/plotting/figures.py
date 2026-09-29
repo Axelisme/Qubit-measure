@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from threading import RLock
+from typing import Any, Literal, cast, overload
 from weakref import ReferenceType, WeakKeyDictionary, ref
 
+import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
 # Neither side roots an operation, even if a figure callback refers to its owner.
 _owners: WeakKeyDictionary[Figure, ReferenceType[FigureCollection]] = (
@@ -66,6 +71,73 @@ class FigureCollection(Mapping[str, Figure]):
                 raise RuntimeError("Cannot add a figure to a sealed collection")
             self._figures[name] = figure
             _owners[figure] = ref(self)
+
+    @overload
+    def subplots(
+        self,
+        name: str,
+        *,
+        nrows: Literal[1] = 1,
+        ncols: Literal[1] = 1,
+        sharex: bool | Literal["none", "all", "row", "col"] = False,
+        sharey: bool | Literal["none", "all", "row", "col"] = False,
+        squeeze: Literal[True] = True,
+        subplot_kw: dict[str, Any] | None = None,
+        gridspec_kw: dict[str, Any] | None = None,
+        **figure_kwargs: Any,
+    ) -> tuple[Figure, Axes]: ...
+
+    @overload
+    def subplots(
+        self,
+        name: str,
+        *,
+        nrows: int = 1,
+        ncols: int = 1,
+        sharex: bool | Literal["none", "all", "row", "col"] = False,
+        sharey: bool | Literal["none", "all", "row", "col"] = False,
+        squeeze: bool = True,
+        subplot_kw: dict[str, Any] | None = None,
+        gridspec_kw: dict[str, Any] | None = None,
+        **figure_kwargs: Any,
+    ) -> tuple[Figure, Axes | NDArray[np.object_]]: ...
+
+    def subplots(  # noqa: PLR0913 - preserve native Matplotlib subplot options
+        self,
+        name: str,
+        *,
+        nrows: int = 1,
+        ncols: int = 1,
+        sharex: bool | Literal["none", "all", "row", "col"] = False,
+        sharey: bool | Literal["none", "all", "row", "col"] = False,
+        squeeze: bool = True,
+        subplot_kw: dict[str, Any] | None = None,
+        gridspec_kw: dict[str, Any] | None = None,
+        **figure_kwargs: Any,
+    ) -> tuple[Figure, Axes | NDArray[np.object_]]:
+        """Build and register native subplots without opening a presentation.
+
+        Shape, shared axes and styling follow Figure.subplots/Figure. The Agg
+        canvas makes the figure saveable without choosing a process-wide backend
+        or registering a pyplot manager. An adapter can attach its own canvas
+        after the producing operation completes.
+        """
+        figure = Figure(**figure_kwargs)
+        FigureCanvasAgg(figure)
+        axes = cast(
+            "Axes | NDArray[np.object_]",
+            figure.subplots(
+                nrows=nrows,
+                ncols=ncols,
+                sharex=sharex,
+                sharey=sharey,
+                squeeze=squeeze,
+                subplot_kw=subplot_kw,
+                gridspec_kw=gridspec_kw,
+            ),
+        )
+        self.adopt(name, figure)
+        return figure, axes
 
     def seal(self) -> None:
         """Stop accepting new figures while retaining native figure references."""

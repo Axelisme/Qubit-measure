@@ -5,7 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from weakref import ref
 
+import matplotlib
+import numpy as np
 import pytest
+from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from zcu_tools.plotting.figures import FigureCollection
 
@@ -14,6 +18,53 @@ from zcu_tools.plotting.figures import FigureCollection
 def collect_figure_cycles():
     yield
     gc.collect()
+
+
+def test_subplots_are_native_registered_and_saveable_without_presentation() -> None:
+    figures = FigureCollection()
+    managers = plt.get_fignums()
+    backend = matplotlib.get_backend()
+    figure, ax = figures.subplots("fit", figsize=(4, 3), dpi=80)
+    assert isinstance(ax, Axes)
+    assert ax.figure is figure
+    assert figures["fit"] is figure
+    ax.plot([0, 1], [1, 0])
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+    assert tuple(figure.get_size_inches()) == (4, 3)
+    assert plt.get_fignums() == managers
+    assert matplotlib.get_backend() == backend
+
+
+def test_subplots_preserve_native_array_shape_and_shared_axes() -> None:
+    figures = FigureCollection()
+    figure, axes = figures.subplots("panels", nrows=2, ncols=2, sharex="col")
+    assert isinstance(axes, np.ndarray)
+    assert axes.shape == (2, 2)
+    top, bottom = axes[0, 0], axes[1, 0]
+    assert isinstance(top, Axes)
+    assert isinstance(bottom, Axes)
+    assert top.get_shared_x_axes().joined(top, bottom)
+    for ax in axes.flat:
+        assert isinstance(ax, Axes)
+        assert ax.figure is figure
+    _, unsqueezed = figures.subplots("single", squeeze=False)
+    assert isinstance(unsqueezed, np.ndarray)
+    assert unsqueezed.shape == (1, 1)
+
+
+def test_subplots_conflict_and_seal_leave_existing_figure_unchanged() -> None:
+    figures = FigureCollection()
+    figure, ax = figures.subplots("fit")
+    ax.set_title("original")
+    with pytest.raises(ValueError, match="already belongs"):
+        figures.subplots("fit")
+    figures.seal()
+    with pytest.raises(RuntimeError, match="sealed"):
+        figures.subplots("new")
+    assert dict(figures) == {"fit": figure}
+    assert ax.get_title() == "original"
 
 
 def test_named_figures_preserve_order_identity_and_idempotence() -> None:
