@@ -15,25 +15,44 @@ from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,
     ConnectRemoteRequest,
 )
-from zcu_tools.gui.session.services.startup import (
-    PersistedStartup,
-    StartupConnectionRequest,
-    StartupProjectRequest,
+from zcu_tools.gui.session.services.project_settings import (
+    ConnectionPreferences,
+    ProjectRequest,
+    SetupPreferences,
 )
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
 
+def _prefs(
+    *,
+    chip_name: str = "",
+    qub_name: str = "",
+    res_name: str = "",
+    scope_id: str = "",
+    ip: str = "192.168.10.1",
+    port: int = 8887,
+) -> SetupPreferences:
+    return SetupPreferences(
+        chip_name=chip_name,
+        qub_name=qub_name,
+        res_name=res_name,
+        scope_id=scope_id,
+        ip=ip,
+        port=port,
+    )
+
+
 def _make_ctrl(**overrides: object) -> MagicMock:
     ctrl = MagicMock()
-    # SetupControlPort.get_persisted_startup is non-Optional (a default
-    # PersistedStartup when nothing is remembered), so the double honours that
-    # contract rather than returning None.
-    ctrl.get_persisted_startup.return_value = PersistedStartup()
+    # SetupControlPort.get_setup_preferences is non-Optional (defaults when
+    # nothing is remembered), so the double honours that contract rather than
+    # returning None.
+    ctrl.get_setup_preferences.return_value = _prefs()
     ctrl.list_devices.return_value = []
     ctrl.get_context_labels.return_value = []
     ctrl.get_active_context_label.return_value = None
     ctrl.get_soccfg.return_value = None
-    ctrl.apply_startup_project.return_value = True
+    ctrl.apply_project.return_value = True
     ctrl.get_project_root.return_value = "/tmp"
     ctrl.list_result_scopes.return_value = ()
     manager = ResultScopeManager("/tmp")
@@ -102,7 +121,7 @@ def test_setup_dialog_project_scope_names_and_apply_share_group(qapp):
     assert "Database path:" not in rows
 
 
-def test_setup_dialog_apply_startup_context(qapp):
+def test_setup_dialog_apply_project(qapp):
     ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
 
@@ -110,10 +129,10 @@ def test_setup_dialog_apply_startup_context(qapp):
     dialog._qub_edit.setText("Q1")
     dialog._res_edit.setText("R1")
 
-    dialog._on_apply_startup_clicked()
+    dialog._on_apply_clicked()
 
-    ctrl.apply_startup_project.assert_called_once_with(
-        StartupProjectRequest(
+    ctrl.apply_project.assert_called_once_with(
+        ProjectRequest(
             chip_name="Q1_Chip",
             qub_name="Q1",
             res_name="R1",
@@ -152,7 +171,7 @@ def test_setup_dialog_prefills_persisted_scope_id_without_side_effects(qapp):
         params_path="/tmp/result/Q4_2D/Q2/params.json",
         source="discovered",
     )
-    prefs = PersistedStartup(
+    prefs = _prefs(
         chip_name="Q4_2D",
         qub_name="Q2",
         res_name="R2",
@@ -160,7 +179,7 @@ def test_setup_dialog_prefills_persisted_scope_id_without_side_effects(qapp):
         ip="10.0.0.2",
         port=7777,
     )
-    ctrl = _make_ctrl(get_persisted_startup=prefs, list_result_scopes=(scope,))
+    ctrl = _make_ctrl(get_setup_preferences=prefs, list_result_scopes=(scope,))
 
     dialog = SetupDialog(ctrl)
 
@@ -170,8 +189,8 @@ def test_setup_dialog_prefills_persisted_scope_id_without_side_effects(qapp):
     assert dialog._res_edit.text() == "R2"
     assert dialog._ip_edit.text() == "10.0.0.2"
     assert dialog._port_spin.value() == 7777
-    ctrl.apply_startup_project.assert_not_called()
-    ctrl.remember_startup_connection.assert_not_called()
+    ctrl.apply_project.assert_not_called()
+    ctrl.remember_connection.assert_not_called()
     ctrl.start_connect.assert_not_called()
 
 
@@ -184,32 +203,32 @@ def test_setup_dialog_missing_persisted_scope_falls_back_without_side_effects(qa
         params_path="/tmp/result/Q5_2D/Q1/params.json",
         source="discovered",
     )
-    prefs = PersistedStartup(
+    prefs = _prefs(
         chip_name="Q5_2D",
         qub_name="Q1",
         res_name="R1",
         scope_id="/tmp/result/missing/scope",
     )
-    ctrl = _make_ctrl(get_persisted_startup=prefs, list_result_scopes=(scope,))
+    ctrl = _make_ctrl(get_setup_preferences=prefs, list_result_scopes=(scope,))
 
     dialog = SetupDialog(ctrl)
 
     assert dialog._scope_combo.currentData() == scope.scope_id
     assert dialog._chip_edit.text() == "Q5_2D"
     assert dialog._qub_edit.text() == "Q1"
-    ctrl.apply_startup_project.assert_not_called()
-    ctrl.remember_startup_connection.assert_not_called()
+    ctrl.apply_project.assert_not_called()
+    ctrl.remember_connection.assert_not_called()
     ctrl.start_connect.assert_not_called()
 
 
 def test_setup_dialog_does_not_render_success_when_project_apply_fails(qapp):
     ctrl = _make_ctrl()
-    ctrl.apply_startup_project.return_value = False
+    ctrl.apply_project.return_value = False
     dialog = SetupDialog(ctrl)
 
-    dialog._on_apply_startup_clicked()
+    dialog._on_apply_clicked()
 
-    assert "Startup context applied" not in dialog._project_status.text()
+    assert "Project applied" not in dialog._project_status.text()
 
 
 def test_setup_dialog_switch_context(qapp):
@@ -280,8 +299,8 @@ def test_setup_dialog_connect_remote_dispatches_request(qapp):
     assert isinstance(req, ConnectRemoteRequest)
     assert req.ip == "10.0.0.1"
     assert req.port == 7000
-    ctrl.remember_startup_connection.assert_called_once_with(
-        StartupConnectionRequest(ip="10.0.0.1", port=7000)
+    ctrl.remember_connection.assert_called_once_with(
+        ConnectionPreferences(ip="10.0.0.1", port=7000)
     )
 
 
@@ -300,17 +319,17 @@ def test_setup_dialog_connect_failure_signal_updates_status(qapp):
 
 def test_setup_dialog_reseed_on_reshow_clears_stale_draft(qapp):
     """Regression: re-raising a dialog with an un-applied draft must reset to
-    the current State (startup_prefs), not retain the typed-but-not-applied value.
+    the current State (preferences), not retain the typed-but-not-applied value.
 
     Scenario: open dialog (shows chip="Q5_2D") → user types "DRAFT" without
     applying → dialog is re-shown (simulated by calling showEvent directly, as
     open_dialog does raise_()+show()) → chip field reverts to "Q5_2D".
     """
-    prefs = PersistedStartup(chip_name="Q5_2D", qub_name="Q1", res_name="R1")
-    ctrl = _make_ctrl(get_persisted_startup=prefs)
+    prefs = _prefs(chip_name="Q5_2D", qub_name="Q1", res_name="R1")
+    ctrl = _make_ctrl(get_setup_preferences=prefs)
 
     dialog = SetupDialog(ctrl)
-    # after init: chip_edit should reflect the persisted prefs
+    # after init: chip_edit should reflect the remembered preferences
     assert dialog._chip_edit.text() == "Q5_2D"
 
     # user types a draft — no apply

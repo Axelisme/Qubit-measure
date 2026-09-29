@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-29 — cfg form snapshot coalescing
+**Last updated:** 2026-09-29 — Setup 去除 startup 特化
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -152,7 +152,7 @@ runtime applies plot policy.
 
 `ResultScopeManager` scans `result/**/params.json` under the project root and
 treats each hit as a selectable result scope. Measurement-session setup dialogs
-(measure/autofluxdep) use that scope to apply startup context; analysis dialogs
+(measure/autofluxdep) use that scope to apply a project; analysis dialogs
 (fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
 dropdown picker only, leaving typed paths and Browse flows available.
 Measurement-session discovery is snapshot-cached: ordinary dialog reopen/apply

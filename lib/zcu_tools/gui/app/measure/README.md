@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-29 — 局部術語與文件 owner 分流
+**Last updated:** 2026-09-29 — Setup 開啟入口與 project settings 名稱
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -47,8 +47,10 @@ GUI owner thread 比對每條連線的 seen 與目前資源版本；
 GUI 事件與 service 協作見 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)，
 wire guard 與 off-owner await 見 [Remote README](remote/README.md)。
 
-`AppPersistedState` 是 startup preference 與 session 的選擇性投影，
-不是整個 State 的序列化。`startup_prefs` 保存下次預填值；restore
+`AppPersistedState` 是記住的 session preference 與 session 的選擇性投影
+（磁碟 slice 沿用 `startup` 名稱），不是整個 State 的序列化。
+`State.preferences` 保存下次預填值，面板寬度由 `Controller.get_left_panel_width()`
+提供；restore
 不自動連接 SoC 或套用 active context。`WorkspaceService` 處理 session
 capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
 處理單檔 I/O，不認識 State／cfg。關閉等待的 timeout 並不證明 cleanup
@@ -173,7 +175,7 @@ Shared layers:
   啟用Arb choices、readout inheritance與完整7+6 materializable catalog。
 - `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
   instance-owned frozen exact renderer registry。
-- `zcu_tools.gui.session`：context、SoC、device、startup、predictor、operation
+- `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
 - `zcu_tools.gui.plotting`：matplotlib backend、figure routing、host/container/export
@@ -184,11 +186,13 @@ Shared layers:
 
 `MeasureGuiBehavior` is the process-runtime behavior for the shared
 `gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
-persistence caretaker, startup dialog, and the app-local `RemoteControlAdapter`
+persistence caretaker, and the app-local `RemoteControlAdapter`
 without owning process policy such as logging, matplotlib backend selection,
 `QApplication`, control option construction, or exit-code handling. The
 standalone launcher is the process entrypoint; this module does not expose a
-second `run_app` path.
+second `run_app` path. After the window is shown, `after_show` opens the same
+Setup dialog through `MainWindow.open_dialog`, so a toolbar click focuses that
+instance instead of building another.
 
 The launcher still owns the experiment-adapter composition boundary by passing a
 registry factory into `MeasureGuiBehavior`; the factory imports
@@ -573,9 +577,9 @@ pane figure details stay internal to `MainWindowEventCoordinator`. The wire even
 name and payload are not the internal fact enum. Context/value/md/ml RPC handlers use
 the controller-exposed `ContextControlPort` facet; device RPC handlers use
 `DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers
-use `PredictorControlPort` for predictor load/query/compute. SoC/startup
-handlers remain on the app controller façade because they span project setup and
-connection policy rather than a single session-control domain.
+use `PredictorControlPort` for predictor load/query/compute. SoC and
+`project.apply` handlers remain on the app controller façade because they span
+project setup and connection policy rather than a single session-control domain.
 
 `zcu_tools.mcp.measure` is the agent-facing bridge: fixed tool declarations,
 short waits and live catalog. The GUI remote adapter owns per-connection seen

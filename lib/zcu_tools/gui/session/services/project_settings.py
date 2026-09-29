@@ -1,13 +1,13 @@
-"""StartupService — session startup context + remembered-prefs capture/restore.
+"""ProjectSettingsService — project apply + remembered settings capture/restore.
 
-Owns the session-core startup concern: bootstrap the active context from a
-project (chip/qub/res + paths), remember the prefill prefs + the remembered-device
+Owns the session-core project settings concern: apply a project (chip/qub/res +
+paths) to the active context, remember the prefill values + the remembered-device
 set, and project them to / from the persistence memento (``PersistedStartup``).
 It is the session half of the persistence split (P-c): the *session* memento
 slice lives here; an app combines it with its own experiment slice (measure:
 ``AppPersistedState`` wraps this + ``PersistedSession``).
 
-App-agnostic: depends on the session ports (``StartupContextPort`` /
+App-agnostic: depends on the session ports (``ProjectContextPort`` /
 ``RememberedDevicePort``) + ``SessionState``; no disk I/O (the app's Caretaker
 owns that), no event bus.
 """
@@ -22,20 +22,21 @@ from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.gui.result_scope import ProjectPaths, ResultScope, ResultScopeManager
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
-from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, StartupPrefs
+from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, SessionPreferences
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.ports import RememberedDevicePort, StartupContextPort
+    from zcu_tools.gui.session.ports import ProjectContextPort, RememberedDevicePort
     from zcu_tools.gui.session.state import SessionState
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Session persistence memento slice (P-c): the startup prefs + remembered devices.
+# Session persistence memento slice (P-c): the remembered settings + devices.
 # Pydantic v2 frozen models — the app's Caretaker writes/reads them as part of its
-# combined on-disk snapshot; pure data, no I/O.
+# combined on-disk snapshot; pure data, no I/O. The slice keeps its on-disk name
+# ``startup`` (``AppPersistedState.startup``) so existing files stay readable.
 # ---------------------------------------------------------------------------
 
 
@@ -74,7 +75,7 @@ def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str,
     moment this is called, so restore paths (which re-derive) always land in the
     current day's folder rather than a stale persisted one.
 
-    Both the setup dialog and the mock/RPC startup helpers derive through here so
+    Both the setup dialog and the mock/RPC project helpers derive through here so
     the chip/qub (and date) segments are joined in exactly ONE place —
     ``apply_project`` must not re-scope. ``root`` is the base dir (e.g. cwd)."""
     paths = ResultScopeManager(root).derive_paths(chip_name, qub_name)
@@ -82,7 +83,7 @@ def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str,
 
 
 @dataclass(frozen=True)
-class StartupProjectRequest:
+class ProjectRequest:
     chip_name: str
     qub_name: str
     res_name: str
@@ -90,11 +91,11 @@ class StartupProjectRequest:
 
     def __post_init__(self) -> None:
         if not self.chip_name or not self.qub_name or not self.res_name:
-            raise ValueError("Startup project names must be non-empty")
+            raise ValueError("Project names must be non-empty")
 
 
 @dataclass(frozen=True)
-class ResolvedStartupProject:
+class ResolvedProject:
     chip_name: str
     qub_name: str
     res_name: str
@@ -116,21 +117,37 @@ class ResolvedStartupProject:
 
 
 @dataclass(frozen=True)
-class StartupConnectionRequest:
+class SetupPreferences:
+    """What the setup dialog prefills — not the active project or connection.
+
+    A narrow read model: the setup dialog neither sees the persistence memento nor
+    the remembered devices / panel width it carries.
+    """
+
+    chip_name: str
+    qub_name: str
+    res_name: str
+    scope_id: str
+    ip: str
+    port: int
+
+
+@dataclass(frozen=True)
+class ConnectionPreferences:
     ip: str
     port: int
 
     def __post_init__(self) -> None:
         if not self.ip:
-            raise ValueError("Startup connection IP must be non-empty")
+            raise ValueError("Connection IP must be non-empty")
         if not 1 <= self.port <= 65535:
-            raise ValueError("Startup connection port must be in range 1..65535")
+            raise ValueError("Connection port must be in range 1..65535")
 
 
-class StartupService:
-    """Own startup context construction + startup-prefs capture/restore.
+class ProjectSettingsService:
+    """Own project apply + remembered-settings capture/restore.
 
-    Stateless app service: the remembered prefs live in ``State.startup_prefs``,
+    Stateless app service: the remembered prefs live in ``State.preferences``,
     not here. Apply/connect update those prefs at write-time; capture projects
     them (+ device set from State) into a memento; restore writes them back and
     registers remembered devices. No disk I/O (the PersistenceCaretaker owns it),
@@ -139,7 +156,7 @@ class StartupService:
 
     def __init__(
         self,
-        context: StartupContextPort,
+        context: ProjectContextPort,
         devices: RememberedDevicePort,
         state: SessionState,
         result_scopes: ResultScopeManager,
@@ -149,9 +166,21 @@ class StartupService:
         self._state = state
         self._result_scopes = result_scopes
 
-    def get_persisted(self) -> PersistedStartup:
-        """The current remembered prefs (for the setup dialog's prefill)."""
-        return self._project_prefs_to_startup()
+    def get_setup_preferences(self) -> SetupPreferences:
+        """The remembered values the setup dialog prefills (not the active project)."""
+        prefs = self._state.preferences
+        return SetupPreferences(
+            chip_name=prefs.chip_name,
+            qub_name=prefs.qub_name,
+            res_name=prefs.res_name,
+            scope_id=prefs.scope_id,
+            ip=prefs.ip,
+            port=prefs.port,
+        )
+
+    def get_left_panel_width(self) -> int:
+        """The remembered left-panel width (seeded by restore, read by new tabs)."""
+        return self._state.preferences.left_panel_width
 
     def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
         return self._result_scopes.list_scopes(refresh=refresh)
@@ -165,14 +194,14 @@ class StartupService:
     def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
         return self._result_scopes.derive_paths(chip_name, qub_name)
 
-    def apply_project(self, req: StartupProjectRequest) -> ResolvedStartupProject:
+    def apply_project(self, req: ProjectRequest) -> ResolvedProject:
         scope = self._result_scopes.ensure_scope(
             chip_name=req.chip_name,
             qub_name=req.qub_name,
             scope_id=req.scope_id,
         )
         paths = self._result_scopes.derive_paths(req.chip_name, req.qub_name)
-        resolved = ResolvedStartupProject(
+        resolved = ResolvedProject(
             chip_name=req.chip_name,
             qub_name=req.qub_name,
             res_name=req.res_name,
@@ -182,7 +211,7 @@ class StartupService:
             scope_id=scope.scope_id,
         )
         current = self._state.session_env
-        prefs = self._state.startup_prefs
+        prefs = self._state.preferences
         if (
             (current.chip_name, current.qub_name, current.res_name)
             == (resolved.chip_name, resolved.qub_name, resolved.res_name)
@@ -191,7 +220,7 @@ class StartupService:
             and prefs.scope_id == resolved.scope_id
         ):
             return resolved
-        self._context.set_startup_context(
+        self._context.set_project_context(
             MetaDict(),
             ModuleLibrary(),
             resolved.chip_name,
@@ -202,7 +231,7 @@ class StartupService:
         )
         self._context.setup_project(resolved.result_dir)
         # Remember the just-applied project as the prefill values (write-time).
-        prefs = self._state.startup_prefs
+        prefs = self._state.preferences
         prefs.chip_name = resolved.chip_name
         prefs.qub_name = resolved.qub_name
         prefs.res_name = resolved.res_name
@@ -211,12 +240,12 @@ class StartupService:
         prefs.database_path = resolved.database_path
         return resolved
 
-    def remember_connection(self, req: StartupConnectionRequest) -> None:
-        prefs = self._state.startup_prefs
+    def remember_connection(self, req: ConnectionPreferences) -> None:
+        prefs = self._state.preferences
         prefs.ip = req.ip
         prefs.port = req.port
 
-    def capture_startup(self, *, left_panel_width: int) -> PersistedStartup:
+    def capture_settings(self, *, left_panel_width: int) -> PersistedStartup:
         """Project the remembered prefs (+ current remember-device set from
         State) into a memento. The device set is re-derived here (deferred to
         flush time — replaces the old DEVICE_CHANGED eager projection)."""
@@ -227,7 +256,7 @@ class StartupService:
             for dev in self._state.list_devices()
             if dev.remember
         )
-        prefs = self._state.startup_prefs
+        prefs = self._state.preferences
         return PersistedStartup(
             chip_name=prefs.chip_name,
             qub_name=prefs.qub_name,
@@ -241,12 +270,12 @@ class StartupService:
             left_panel_width=left_panel_width,
         )
 
-    def restore_startup(self, data: PersistedStartup) -> None:
+    def restore_settings(self, data: PersistedStartup) -> None:
         """Seed the remembered prefs from the memento + register remembered
-        devices. Project is NOT auto-applied to the active context (the user
+        devices. The project is NOT applied to the active context (the user
         applies it via the setup dialog) — the instrument never auto-connects."""
-        self._state.set_startup_prefs(
-            StartupPrefs(
+        self._state.set_preferences(
+            SessionPreferences(
                 chip_name=data.chip_name,
                 qub_name=data.qub_name,
                 res_name=data.res_name,
@@ -267,18 +296,4 @@ class StartupService:
                 )
                 for entry in data.devices
             ]
-        )
-
-    def _project_prefs_to_startup(self) -> PersistedStartup:
-        prefs = self._state.startup_prefs
-        return PersistedStartup(
-            chip_name=prefs.chip_name,
-            qub_name=prefs.qub_name,
-            res_name=prefs.res_name,
-            scope_id=prefs.scope_id,
-            result_dir=prefs.result_dir,
-            database_path=prefs.database_path,
-            ip=prefs.ip,
-            port=prefs.port,
-            left_panel_width=prefs.left_panel_width,
         )

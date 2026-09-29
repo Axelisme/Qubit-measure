@@ -20,10 +20,10 @@ from zcu_tools.gui.session.state import (
     DeviceStatus as DeviceStatus,  # noqa: F401  (re-export)
 )
 from zcu_tools.gui.session.state import (
-    SessionState,
+    SessionPreferences as SessionPreferences,  # noqa: F401  (re-export)
 )
 from zcu_tools.gui.session.state import (
-    StartupPrefs as StartupPrefs,  # noqa: F401  (re-export)
+    SessionState,
 )
 from zcu_tools.gui.session.types import SessionEnv
 
@@ -234,7 +234,7 @@ class TabInteractionState:
 class State(SessionState):
     """Passive GUI state container shared by Controller and domain services.
 
-    Extends ``SessionState`` (active context + device set + startup prefs + the
+    Extends ``SessionState`` (active context + device set + preferences + the
     shared version table) with measure-gui's experiment surface: the tabs and
     their run/analyze/save lifecycle. Tab version keys (``tab:<id>...``) bump the
     same shared table as the inherited session keys (decision 6).

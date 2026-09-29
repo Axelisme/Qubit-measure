@@ -49,8 +49,8 @@ class ProjectInfo:
 class AutoFluxDepState(SessionState):
     """Mutable working set: the workflow the user is assembling + run resources.
 
-    Extends ``SessionState`` (the active ``SessionEnv`` + device set + startup
-    prefs + the shared ``VersionTable``) with autofluxdep's experiment slice: the
+    Extends ``SessionState`` (the active ``SessionEnv`` + device set +
+    preferences + the shared ``VersionTable``) with autofluxdep's experiment slice: the
     ordered Node placements, the flux sweep, the (transitional) Setup resources,
     and the per-Node run Results. Workflow version keys bump the same shared table
     as the inherited session keys (decision 6).

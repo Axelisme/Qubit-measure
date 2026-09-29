@@ -15,7 +15,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.gui.session.services.startup import StartupService
+from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 
 from .analyze import AnalyzeService
 from .arb_waveform import ArbWaveformService
@@ -101,7 +101,7 @@ class AppServices:
     writeback: WritebackService
     writeback_control: WritebackControlPort
     workspace: WorkspaceService
-    startup: StartupService
+    settings: ProjectSettingsService
     cfg_editor: CfgEditorService
     arb_waveform: ArbWaveformService
 
@@ -267,7 +267,7 @@ def build_app_services(
         writeback=writeback,
         writeback_control=writeback_control,
         workspace=workspace,
-        startup=session.startup,
+        settings=session.settings,
         cfg_editor=cfg_editor,
         arb_waveform=arb_waveform,
     )

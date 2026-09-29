@@ -5,7 +5,7 @@ core). ``AutoFluxDepGuiBehavior`` adds the Qt MainWindow behind the shared
 process runtime.
 
 The app composes the shared session services (connection / context / device /
-startup) and uses the shared setup / device / predictor dialogs; the run drives
+settings) and uses the shared setup / device / predictor dialogs; the run drives
 the orchestrator over the node graph, each node building its run cfg from the
 active context and acquiring through either the selected hardware path or MockSoc.
 """
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 def _make_empty_ctx():
-    """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
+    """Minimal initial context: real empty MetaDict/ModuleLibrary, no file sync."""
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -110,7 +110,7 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
     def after_show(self, assembly: GuiAssembly) -> None:
         parent = assembly.window
         assert _is_main_window(parent)
-        _show_startup_dialog(parent=parent)
+        parent.open_setup_dialog()
 
 
 def _repo_root() -> str:
@@ -122,14 +122,3 @@ def _is_main_window(value: object) -> TypeGuard[MainWindow]:
     from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
     return isinstance(value, MainWindow)
-
-
-def _show_startup_dialog(parent: MainWindow) -> None:
-    """Open the setup dialog non-modally on first launch.
-
-    Mirrors ``zcu_tools.gui.app.measure.app._show_startup_dialog``.  Non-modal is
-    required so the Qt event loop keeps pumping while the dialog is visible —
-    this lets background session operations (mock-soc connect, device setup)
-    complete without deadlocking.
-    """
-    parent.open_setup_dialog(startup_mode=True)

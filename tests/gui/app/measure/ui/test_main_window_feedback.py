@@ -6,7 +6,6 @@ from typing import cast
 from unittest.mock import MagicMock
 
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.services import PersistedStartup
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 
@@ -29,7 +28,7 @@ def _gate_window(
     del qapp
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     ctrl.active_operation_count.return_value = op_count
     ctrl.has_agent_connected.return_value = agent_connected
     ctrl.can_cancel_active_operation.return_value = False

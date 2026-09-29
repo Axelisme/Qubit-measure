@@ -755,7 +755,7 @@ def test_inspect_dialog_is_read_only_while_run_is_paused(app):
 def test_run_start_closes_setup_and_keeps_devices_read_only(app):
     _ctrl, win = app
 
-    win.open_setup_dialog(startup_mode=False)
+    win.open_setup_dialog()
     win._on_devices_clicked()
     assert win._dialog_refs.get("setup") is not None
     devices = cast(Any, win._dialog_refs.get("devices"))

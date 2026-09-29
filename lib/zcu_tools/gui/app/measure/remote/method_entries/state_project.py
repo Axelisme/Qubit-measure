@@ -94,7 +94,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             10.0,
             "List discovered result scopes from result/**/params.json. Each scope "
             "carries {scope_id, chip_name, qub_name, result_dir, params_path, source}; "
-            "startup.apply may pass a returned scope_id to use an existing non-generated "
+            "project.apply may pass a returned scope_id to use an existing non-generated "
             "scope. Existing params.json files are migrated in place to schema v1 "
             "project identity when needed; this read never creates new params.json files.",
         ),

@@ -259,7 +259,7 @@ invariant failure不被降級；unexpected dispatch測試另確認controller err
 `tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
 view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
-`tests/gui/app/measure/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
+`tests/gui/app/measure/remote/test_remote_mcp_toolchain.py`保留GUI project/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
 Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
 script flags 用直接 review，不納入 pytest。

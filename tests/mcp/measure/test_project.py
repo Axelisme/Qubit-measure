@@ -21,7 +21,7 @@ def test_project_read_and_partial_update_use_one_gui_owner_request(
                 "result_dir": "result/chip-a/q1",
                 "database_path": "Database/chip-a/q1",
             }
-        if method == "startup.apply":
+        if method == "project.apply":
             assert params == {"chip_name": "chip-b"}
             return {
                 "chip_name": "chip-b",
@@ -49,8 +49,10 @@ def test_project_read_and_partial_update_use_one_gui_owner_request(
         "result_dir": "result/chip-b/q1",
         "database_path": "Database/chip-b/q1",
     }
-    assert ("startup.apply", {"chip_name": "chip-b"}) in client.transport.sent
-    assert all(method != "startup.get" for method, _ in client.transport.sent)
+    assert ("project.apply", {"chip_name": "chip-b"}) in client.transport.sent
+    # The update is one GUI owner request: only the explicit read above asked
+    # for project.info, so the tool never reads the project to merge it itself.
+    assert [method for method, _ in client.transport.sent].count("project.info") == 1
 
 
 def test_project_no_project_errors_without_implicit_defaults(tmp_path: Path) -> None:
@@ -63,7 +65,7 @@ def test_project_no_project_errors_without_implicit_defaults(tmp_path: Path) -> 
             "message": "No project applied",
         },
     }
-    client.transport.replies["startup.apply"] = {
+    client.transport.replies["project.apply"] = {
         "ok": False,
         "error": {
             "code": "invalid_params",
@@ -77,4 +79,4 @@ def test_project_no_project_errors_without_implicit_defaults(tmp_path: Path) -> 
         client.call("project", {})
     with pytest.raises(GuiRpcError, match="required"):
         client.call("project", {"chip": "only-chip"})
-    assert ("startup.apply", {"chip_name": "only-chip"}) in client.transport.sent
+    assert ("project.apply", {"chip_name": "only-chip"}) in client.transport.sent

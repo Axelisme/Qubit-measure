@@ -24,7 +24,7 @@ from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_save_image
-from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
+from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
@@ -47,7 +47,7 @@ def _require_qapp() -> QApplication:
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None

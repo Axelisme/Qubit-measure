@@ -90,7 +90,7 @@ class SessionEnv:
     # -- readiness predicates (the context answers about itself) -----------
 
     def has_context(self) -> bool:
-        """Any valid context exists (startup DRAFT or file-backed ACTIVE)."""
+        """Any valid context exists (in-memory DRAFT or file-backed ACTIVE)."""
         return self.readiness is not ContextReadiness.EMPTY
 
     def is_draft(self) -> bool:

@@ -1148,7 +1148,7 @@ def test_editor_set_field_blocked_while_owning_tab_runs(fx):
 # ---------------------------------------------------------------------------
 
 
-def test_startup_apply_resolves_generated_scope_under_project_root(qapp, tmp_path):  # noqa: ARG001
+def test_project_apply_resolves_generated_scope_under_project_root(qapp, tmp_path):  # noqa: ARG001
     """Omitting scope_id uses the generated per-qubit result scope under the
     injected project root, not cwd. The RPC returns the resolved paths."""
     import os
@@ -1163,7 +1163,7 @@ def test_startup_apply_resolves_generated_scope_under_project_root(qapp, tmp_pat
         try:
             resp = call(
                 sock,
-                "startup.apply",
+                "project.apply",
                 {"chip_name": "C", "qub_name": "Q", "res_name": "R"},
             )
             assert resp["ok"] is True

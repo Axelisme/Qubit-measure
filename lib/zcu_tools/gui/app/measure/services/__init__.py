@@ -18,10 +18,10 @@ if TYPE_CHECKING:
         SetupDeviceRequest,
     )
     from zcu_tools.gui.session.services.predictor import PredictorService
-    from zcu_tools.gui.session.services.startup import (
-        StartupConnectionRequest,
-        StartupProjectRequest,
-        StartupService,
+    from zcu_tools.gui.session.services.project_settings import (
+        ConnectionPreferences,
+        ProjectRequest,
+        ProjectSettingsService,
     )
 
     from .analyze import AnalyzeService
@@ -112,9 +112,9 @@ __all__ = [
     "PersistenceError",
     "APP_STATE_VERSION",
     "DEFAULT_LEFT_PANEL_WIDTH",
-    "StartupConnectionRequest",
-    "StartupProjectRequest",
-    "StartupService",
+    "ConnectionPreferences",
+    "ProjectRequest",
+    "ProjectSettingsService",
     "TabService",
     "TabSnapshot",
     "PathResourceSnapshot",
@@ -171,9 +171,9 @@ _EXPORT_MODULES: dict[str, str] = {
     "PersistenceError": ".persistence_types",
     "APP_STATE_VERSION": ".persistence_types",
     "DEFAULT_LEFT_PANEL_WIDTH": ".persistence_types",
-    "StartupConnectionRequest": "zcu_tools.gui.session.services.startup",
-    "StartupProjectRequest": "zcu_tools.gui.session.services.startup",
-    "StartupService": "zcu_tools.gui.session.services.startup",
+    "ConnectionPreferences": "zcu_tools.gui.session.services.project_settings",
+    "ProjectRequest": "zcu_tools.gui.session.services.project_settings",
+    "ProjectSettingsService": "zcu_tools.gui.session.services.project_settings",
     "TabService": ".tab",
     "TabSnapshot": ".tab",
     "PathResourceSnapshot": ".ports",

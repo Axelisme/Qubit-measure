@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-29 — app-local remote layout
+**Last updated:** 2026-09-29 — project.apply wire method
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -225,7 +225,7 @@ reports `cleanup_failed`. Existing-tab `tab.load_data` keeps its stricter guards
 
 The wire surface is grouped by ownership:
 
-- `startup.*` / `result_scope.*`：project and result-scope setup.
+- `project.*` / `result_scope.*`：project apply/read and result-scope discovery.
 - `context.*`：MetaDict / ModuleLibrary / active context operations through
   `ContextControlPort`; role-catalog create/list stays on the app controller.
 - `soc.*`：mock or remote SoC connection.

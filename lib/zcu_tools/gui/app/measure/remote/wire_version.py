@@ -113,7 +113,8 @@ from __future__ import annotations
 # v69: writeback exposes complete previews and identity-preserving batch results.
 # v70: artifact snapshots, batch save operations and guarded close/shutdown replies.
 # v71: shared interactive plugin discovery, commands and terminal operation replies.
-WIRE_VERSION = 71
+# v72: project.apply replaces startup.apply with the same params and result.
+WIRE_VERSION = 72
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -163,4 +164,5 @@ WIRE_VERSION = 71
 # v101: apply explicit writeback items through shared drafts and follow their pane.
 # v102: shared artifact tracking, ordered saves and actual output path reporting.
 # v103: service-owned interactive sessions and best-effort command view follow.
-GUI_VERSION = 103
+# v104: one Setup dialog identity; project.apply and general project settings names.
+GUI_VERSION = 104

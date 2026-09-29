@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 from zcu_tools.gui.app.measure.ui.main_dialog_registry import MainDialogRegistry
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets import DialogRefStore
 
 from tests.gui.app.measure._reload_fakes import Loader
@@ -44,8 +45,12 @@ def test_arb_waveform_named_dialog_captures_only_while_open(qapp) -> None:
         registry.take_screenshot(DialogName.ARB_WAVEFORM)
 
 
+def _visible_setup_dialogs(window: MainWindow) -> list[SetupDialog]:
+    return [dialog for dialog in window.findChildren(SetupDialog) if dialog.isVisible()]
+
+
 @pytest.mark.uses_wall_clock
-@pytest.mark.parametrize("opening", ["startup", "toolbar"])
+@pytest.mark.parametrize("opening", ["launch", "toolbar_focus", "toolbar_reopen"])
 def test_setup_screenshot_uses_visible_gui_dialog_through_mcp(
     qapp: QApplication, tmp_path: Path, opening: str
 ) -> None:
@@ -75,9 +80,12 @@ def test_setup_screenshot_uses_visible_gui_dialog_through_mcp(
         port = remote.start()
         behavior.after_show(assembly)
         qapp.processEvents()
-        if opening == "toolbar":
-            window.close_dialog(DialogName.STARTUP)
-            qapp.processEvents()
+        launched = _visible_setup_dialogs(window)
+        assert len(launched) == 1
+        if opening != "launch":
+            if opening == "toolbar_reopen":
+                window.close_dialog(DialogName.SETUP)
+                qapp.processEvents()
             setup = next(
                 button
                 for button in window.findChildren(QPushButton)
@@ -85,7 +93,10 @@ def test_setup_screenshot_uses_visible_gui_dialog_through_mcp(
             )
             setup.click()
             qapp.processEvents()
-        expected = [DialogName.STARTUP if opening == "startup" else DialogName.SETUP]
+            if opening == "toolbar_focus":
+                assert _visible_setup_dialogs(window) == launched
+        assert len(_visible_setup_dialogs(window)) == 1
+        expected = [DialogName.SETUP]
         assert window.list_open_dialogs() == expected
 
         bridge, invoke = mcp_client(port, tmp_path)

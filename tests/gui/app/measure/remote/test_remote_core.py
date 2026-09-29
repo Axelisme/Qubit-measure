@@ -186,7 +186,7 @@ def test_invalid_typed_request_rejected(fx):
             sock,
             {
                 "id": "2",
-                "method": "startup.apply",
+                "method": "project.apply",
                 "params": {
                     "chip_name": 42,
                     "qub_name": "Q1",

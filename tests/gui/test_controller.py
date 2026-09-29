@@ -35,8 +35,8 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import (
-    StartupConnectionRequest,
-    StartupProjectRequest,
+    ConnectionPreferences,
+    ProjectRequest,
 )
 from zcu_tools.gui.app.measure.services import (
     create_persistence_caretaker as PersistenceCaretaker,
@@ -197,7 +197,7 @@ def _make_figure_container() -> FigureContainer:
 
 def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
     """The entry script injects the repo root; the Controller exposes it so the
-    setup dialog / startup RPC anchor default paths there instead of cwd (the
+    setup dialog / project RPC anchor default paths there instead of cwd (the
     .bat launcher cd's into scripts/, so cwd is the wrong base)."""
     injected = str(tmp_path / "repo_root")
     fixture = ControllerFixture(cache_dir=tmp_path, project_root=injected)
@@ -689,12 +689,12 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
 
 
 def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
-    """Persistence is now a State projection (StartupService subscribes to
+    """Persistence is now a State projection (ProjectSettingsService subscribes to
     DEVICE_CHANGED). The Controller's connect handler must not itself coordinate
     persistence — it only presents UI feedback."""
     driver = FakeDevice()
     cf.ctrl._dev_svc._driver_factory = lambda _type, _address: driver
-    cf.ctrl._startup_svc = MagicMock()
+    cf.ctrl._settings_svc = MagicMock()
     connected: list[object] = []
     errors: list[str] = []
     on_device_connected(cf.ctrl._dev_svc, connected.append)
@@ -708,8 +708,8 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
     assert _wait_for(lambda: bool(connected or errors))
     assert not errors
 
-    # Controller no longer reaches into StartupService for device persistence.
-    assert not cf.ctrl._startup_svc.method_calls
+    # Controller no longer reaches into ProjectSettingsService for device persistence.
+    assert not cf.ctrl._settings_svc.method_calls
     # On terminal success the device is committed to State as CONNECTED.
     dev = cf.state.get_device("flux")
     assert dev is not None and dev.status is DeviceStatus.CONNECTED
@@ -907,11 +907,9 @@ def test_persist_then_restore_app_state(tmp_path):
     tab_id = cf.ctrl.new_tab("fake")
     schema = _default_fake_schema(cf.state.session_env)
     cf.ctrl.update_tab_cfg(tab_id, schema)
-    resolved = cf.ctrl.apply_startup_project(
-        StartupProjectRequest("chip", "qub", "res")
-    )
-    cf.ctrl.remember_startup_connection(
-        StartupConnectionRequest(ip="10.0.0.2", port=7000)
+    resolved = cf.ctrl.apply_project(ProjectRequest("chip", "qub", "res"))
+    cf.ctrl.setup_control.remember_connection(
+        ConnectionPreferences(ip="10.0.0.2", port=7000)
     )
     cf.ctrl.persist_all()
 
@@ -921,12 +919,12 @@ def test_persist_then_restore_app_state(tmp_path):
     assert len(cf_restored.state.tabs) == 1
     restored_tab = next(iter(cf_restored.state.tabs.values()))
     assert restored_tab.adapter_name == "fake"
-    # startup prefs round-tripped (prefill values; project not auto-applied).
-    startup = cf_restored.ctrl.get_persisted_startup()
-    assert startup.chip_name == "chip"
-    assert startup.scope_id == resolved["scope_id"]
-    assert startup.ip == "10.0.0.2"
-    assert startup.port == 7000
+    # remembered settings round-tripped (prefill values; project not auto-applied).
+    prefs = cf_restored.ctrl.setup_control.get_setup_preferences()
+    assert prefs.chip_name == "chip"
+    assert prefs.scope_id == resolved["scope_id"]
+    assert prefs.ip == "10.0.0.2"
+    assert prefs.port == 7000
     assert cf_restored.state.session_env.result_dir == "/tmp/zcu_result"
 
 

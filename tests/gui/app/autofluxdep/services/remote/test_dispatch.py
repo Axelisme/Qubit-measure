@@ -33,7 +33,7 @@ from zcu_tools.gui.app.autofluxdep.services.remote.read_model import (
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
-from zcu_tools.gui.session.services.startup import StartupProjectRequest
+from zcu_tools.gui.session.services.project_settings import ProjectRequest
 from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 
 from ..._helpers import set_node_cfg_knobs
@@ -189,9 +189,7 @@ def test_setup_control_apply_updates_project_info_and_loads_predictor(tmp_path):
     params_path = _write_fluxdep_params(tmp_path)
     adapter = _StubAdapter(build_core(project_root=str(tmp_path)))
 
-    assert adapter.ctrl.setup_control.apply_startup_project(
-        StartupProjectRequest("ChipA", "Q1", "R1")
-    )
+    assert adapter.ctrl.setup_control.apply_project(ProjectRequest("ChipA", "Q1", "R1"))
 
     info = _call(adapter, "project.info", {})
     assert info["chip_name"] == "ChipA"

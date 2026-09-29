@@ -27,12 +27,12 @@ def test_context_service_injects_value_lookup_without_context_bump() -> None:
     assert state.version.get("context") == before
 
 
-def test_startup_context_preserves_injected_value_lookup() -> None:
+def test_project_context_preserves_injected_value_lookup() -> None:
     state = _state()
     registry = ValueRegistry()
     svc = ContextService(state, MagicMock(), MagicMock(), values=registry)
 
-    svc.set_startup_context(MagicMock(), MagicMock(), "C", "Q", "R", "/res", "/db")
+    svc.set_project_context(MagicMock(), MagicMock(), "C", "Q", "R", "/res", "/db")
 
     assert state.session_env.values is registry
     assert state.session_env.readiness is ContextReadiness.DRAFT

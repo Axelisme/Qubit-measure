@@ -39,10 +39,10 @@ if TYPE_CHECKING:
         PredictMatrixCurveResult,
         SetModelParamsRequest,
     )
-    from zcu_tools.gui.session.services.startup import (
-        PersistedStartup,
-        StartupConnectionRequest,
-        StartupProjectRequest,
+    from zcu_tools.gui.session.services.project_settings import (
+        ConnectionPreferences,
+        ProjectRequest,
+        SetupPreferences,
     )
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.gui.session.types import SocCfgHandle
@@ -63,15 +63,15 @@ class GuardedSetupControl:
     def get_bus(self) -> BaseEventBus:
         return self._inner.get_bus()
 
-    def get_persisted_startup(self) -> PersistedStartup:
-        return self._inner.get_persisted_startup()
+    def get_setup_preferences(self) -> SetupPreferences:
+        return self._inner.get_setup_preferences()
 
     def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
         return self._inner.list_result_scopes(refresh=refresh)
 
-    def apply_startup_project(self, req: StartupProjectRequest) -> bool:
+    def apply_project(self, req: ProjectRequest) -> bool:
         self._guard("setup")
-        return self._inner.apply_startup_project(req)
+        return self._inner.apply_project(req)
 
     def use_context(self, label: str) -> None:
         self._guard("setup")
@@ -102,9 +102,9 @@ class GuardedSetupControl:
     ) -> None:
         self._inner.bind_connection_outcome(on_finished, on_failed)
 
-    def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
+    def remember_connection(self, prefs: ConnectionPreferences) -> None:
         self._guard("setup")
-        self._inner.remember_startup_connection(req)
+        self._inner.remember_connection(prefs)
 
     def get_soccfg(self) -> SocCfgHandle | None:
         return self._inner.get_soccfg()

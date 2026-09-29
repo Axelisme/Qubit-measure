@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
-from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
+from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -28,7 +28,7 @@ from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     return ctrl
 
 
@@ -701,7 +701,6 @@ def test_main_window_tab_actions_forward_to_private_handlers(qapp, monkeypatch):
 
 
 def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
-    from qtpy.QtWidgets import QDialog
     from zcu_tools.gui.app.measure.remote.dialogs import DialogName
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -717,15 +716,12 @@ def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
     window.open_dialog(DialogName.PREDICTOR)
     assert window.list_open_dialogs() == [DialogName.PREDICTOR]
 
-    dialog = QDialog(window)
-    window.register_dialog(DialogName.STARTUP, dialog)
-    assert window.take_dialog_screenshot(DialogName.STARTUP) == b"png"
+    assert window.take_dialog_screenshot(DialogName.SETUP) == b"png"
 
     registry.close.assert_called_once_with(DialogName.PREDICTOR)
     registry.open.assert_called_once_with(DialogName.PREDICTOR)
     registry.visible_names.assert_called_once_with()
-    registry.register.assert_called_once_with(DialogName.STARTUP, dialog)
-    registry.take_screenshot.assert_called_once_with(DialogName.STARTUP)
+    registry.take_screenshot.assert_called_once_with(DialogName.SETUP)
 
 
 def test_show_error_dialog_retains_until_close(qapp):
@@ -1275,7 +1271,7 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
 def _editor_wiring_ctrl() -> MagicMock:
     """Mock ctrl that supplies measure cfg binding ports for a real attach()."""
     ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.get_left_panel_width.return_value = 500
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_current_md.return_value = MagicMock()
     ctrl.get_current_ml.return_value = MagicMock()

@@ -45,7 +45,7 @@ def test_context_service_has_context():
 
     svc = ContextService(state, io_mock, MagicMock())
     assert svc.has_context()
-    assert svc.has_startup_context()
+    assert svc.has_draft_context()
     assert not svc.is_active_context()
 
 
@@ -68,7 +68,7 @@ def test_context_service_get_flux_dir():
     assert svc.get_flux_dir() == expected
 
 
-def test_context_service_set_startup_context():
+def test_context_service_set_project_context():
     state = State(
         SessionEnv(
             md=MagicMock(),
@@ -88,7 +88,7 @@ def test_context_service_set_startup_context():
     md = MagicMock()
     ml = MagicMock()
 
-    svc.set_startup_context(
+    svc.set_project_context(
         md,
         ml,
         chip_name="C1",
@@ -98,7 +98,7 @@ def test_context_service_set_startup_context():
         database_path="/db",
     )
 
-    assert svc.has_startup_context()
+    assert svc.has_draft_context()
     assert state.session_env.chip_name == "C1"
     assert state.session_env.result_dir == "/res"
     assert state.session_env.active_label == ""
@@ -124,7 +124,7 @@ def test_context_service_use_context():
 
     svc = ContextService(state, io_mock, bus)
 
-    # We must have a baseline result_dir in the startup context for use_context to inherit
+    # We must have a baseline result_dir in the draft context for use_context to inherit
     state.session_env = dataclasses.replace(state.session_env, result_dir="/base")
     old_ctx = state.session_env
     ctx_version_before = state.version.get("context")
@@ -177,7 +177,7 @@ def test_context_service_new_context():
 
 
 def test_context_service_readiness_transitions_drive_has_context_queries():
-    """has_context / has_startup_context / is_active_context all derive from readiness."""
+    """has_context / has_draft_context / is_active_context all derive from readiness."""
     state = State(
         SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
@@ -187,13 +187,13 @@ def test_context_service_readiness_transitions_drive_has_context_queries():
 
     # EMPTY
     assert not svc.has_context()
-    assert not svc.has_startup_context()
+    assert not svc.has_draft_context()
     assert not svc.is_active_context()
 
     # DRAFT
-    svc.set_startup_context(MagicMock(), MagicMock(), "C", "Q", "R", "/res", "/db")
+    svc.set_project_context(MagicMock(), MagicMock(), "C", "Q", "R", "/res", "/db")
     assert svc.has_context()
-    assert svc.has_startup_context()
+    assert svc.has_draft_context()
     assert not svc.is_active_context()
 
     # ACTIVE
@@ -202,7 +202,7 @@ def test_context_service_readiness_transitions_drive_has_context_queries():
     )
     svc.use_context("flux_1.0_A")
     assert svc.has_context()
-    assert not svc.has_startup_context()
+    assert not svc.has_draft_context()
     assert svc.is_active_context()
 
 

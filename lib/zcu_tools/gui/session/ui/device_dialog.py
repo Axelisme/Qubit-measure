@@ -716,7 +716,7 @@ class DeviceDialog(QDialog):
             # Remove from memory entirely — won't appear after restart
             self._dev.forget_device(name)
         else:
-            # Disconnect only — keep in startup memory so it reappears as gray on next launch
+            # Disconnect only — keep as a remembered device so it reappears as gray on next launch
             self._dev.start_disconnect_device(DisconnectDeviceRequest(name=name))
 
     def _on_refresh_clicked(self) -> None:

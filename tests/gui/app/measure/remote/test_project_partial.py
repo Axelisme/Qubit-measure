@@ -50,14 +50,14 @@ def test_project_partial_update_and_invalid_scope_preserve_shared_state(
     sock = open_client(fx.service.port)
     try:
         assert call(sock, "project.info")["error"]["reason"] == "no_project"
-        missing = call(sock, "startup.apply", {"chip_name": "chip-a"})
+        missing = call(sock, "project.apply", {"chip_name": "chip-a"})
         assert missing["ok"] is False
         assert missing["error"]["reason"] == "missing_project_fields"
         assert call(sock, "project.info")["error"]["reason"] == "no_project"
 
         first = call(
             sock,
-            "startup.apply",
+            "project.apply",
             {"chip_name": "chip-a", "qub_name": "q1", "res_name": "res"},
         )
         assert first["ok"] is True
@@ -67,14 +67,14 @@ def test_project_partial_update_and_invalid_scope_preserve_shared_state(
         label = created["result"]["label"]
         assert call(sock, "context.active")["result"]["label"] == label
 
-        same = call(sock, "startup.apply", {"chip_name": "chip-a"})
+        same = call(sock, "project.apply", {"chip_name": "chip-a"})
         assert same["ok"] is True
         assert same["result"]["scope_id"] == original_scope
         assert call(sock, "context.active")["result"]["label"] == label
 
         invalid = call(
             sock,
-            "startup.apply",
+            "project.apply",
             {"chip_name": "chip-b", "scope_id": original_scope},
         )
         assert invalid["ok"] is False
@@ -82,7 +82,7 @@ def test_project_partial_update_and_invalid_scope_preserve_shared_state(
         assert call(sock, "project.info")["result"]["chip_name"] == "chip-a"
         assert call(sock, "context.active")["result"]["label"] == label
 
-        changed = call(sock, "startup.apply", {"chip_name": "chip-b"})
+        changed = call(sock, "project.apply", {"chip_name": "chip-b"})
         assert changed["ok"] is True
         assert changed["result"]["chip_name"] == "chip-b"
         assert changed["result"]["qub_name"] == "q1"
@@ -92,7 +92,7 @@ def test_project_partial_update_and_invalid_scope_preserve_shared_state(
         assert call(sock, "project.info")["result"]["chip_name"] == "chip-b"
 
         restored = call(
-            sock, "startup.apply", {"chip_name": "chip-a", "scope_id": original_scope}
+            sock, "project.apply", {"chip_name": "chip-a", "scope_id": original_scope}
         )
         assert restored["ok"] is True
         assert label in call(sock, "context.labels")["result"]["labels"]

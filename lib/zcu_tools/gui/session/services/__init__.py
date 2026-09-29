@@ -1,5 +1,5 @@
 """Session-core services — the measurement-session application services shared by
-the GUI apps (connection / device / context / startup).
+the GUI apps (connection / device / context / settings).
 
 App-agnostic: these depend only on the session value types/events/state and on
 narrow ports (``gui/session/ports``) that each app's composition root fills with

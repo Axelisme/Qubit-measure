@@ -90,15 +90,6 @@ class MainDialogRegistry:
             from .arb_waveform_dialog import ArbWaveformDialog
 
             return ArbWaveformDialog(self._ctrl, parent=self._parent)
-        if name is DialogName.STARTUP:
-            # STARTUP dialogs need startup_mode=True and are usually opened by
-            # application bootstrap, but the registry factory still supports a
-            # fresh instance after the bootstrap dialog has closed.
-            from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-
-            return SetupDialog(
-                self._ctrl.setup_control, parent=self._parent, startup_mode=True
-            )
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
     def open(self, name: DialogName) -> None:
@@ -148,27 +139,11 @@ class MainDialogRegistry:
         """Return the registered dialog object, visible or hidden."""
         return self._dialog(name)
 
-    def register(self, name: DialogName, dialog: QDialog) -> None:
-        """Register a dialog constructed outside the registry factory."""
-        self._dialog_refs.discard(name)
-        self._dialog_names.setdefault(name, None)
-        self._dialog_refs.retain_named(
-            name,
-            dialog,
-            on_released=lambda n=name: self._dialog_names.pop(n, None),
-        )
-
     def take_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""
-        names = (
-            (DialogName.SETUP, DialogName.STARTUP)
-            if dialog_name is DialogName.SETUP
-            else (dialog_name,)
-        )
-        for name in names:
-            dialog = self._dialog(name)
-            if dialog is not None and dialog.isVisible():
-                return widget_to_png_bytes(dialog, subject=f"{name.value!r} dialog")
+        dialog = self._dialog(dialog_name)
+        if dialog is not None and dialog.isVisible():
+            return widget_to_png_bytes(dialog, subject=f"{dialog_name.value!r} dialog")
         raise FailedPreconditionError(
             f"dialog {dialog_name.value!r} is not currently open"
         )
