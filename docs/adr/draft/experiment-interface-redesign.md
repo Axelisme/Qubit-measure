@@ -1,6 +1,6 @@
 # 實驗核心、前端包裝與具名圖形產物
 
-**狀態：** 設計方向已核准，尚未實作。本文是 ADR 草案，不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。未定細節列於末節。
+**狀態：** 設計方向已核准，端到端遷移尚未完成。本文是 ADR 草案，不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。未定細節列於末節。
 
 ## 問題
 
@@ -63,7 +63,9 @@ Notebook run／load 正常返回後更新 last_result 並清空目前分析；�
 
 保留 explicit catalog、v2／v2_gui 分離，以及單檔／package 並存。框架不要求固定內部檔名，不靠掃描或 import 副作用發現實驗。
 
-本次遷移涵蓋一般 T1、singleshot/ge、onetone/flux_dep 與必要的 GUI 多圖接線。其他實驗核心、executor、動畫不因這項決策全面遷移。未遷移 adapter 的既有單圖輸出需在明確接縫轉換，不能反射猜測新舊格式。
+最終範圍是所有實驗及其 Notebook／GUI caller，不以現有 GUI catalog 為上限。先以一般 T1、singleshot/ge、onetone/flux_dep 驗證同步、post 與互動分析，再分批遷移其餘實驗及必要的共用 helper。
+
+過渡期間允許尚未遷移的實驗因舊契約而報錯，不為了保持它們可用而加入 pyplot 相容層。報錯須對應到未遷移項目，不能忽略已遷移路徑的 regression，也不能把過渡狀態當成最終交付。這不授權重寫 executor 或動畫框架，既有 acquisition、排程與硬體鎖機制保持。
 
 ## 取捨
 
@@ -72,10 +74,11 @@ Notebook run／load 正常返回後更新 last_result 並清空目前分析；�
 - Notebook 專屬類保留少量扁平參數映射，換取熟悉入口與型別提示；不以通用 adapter 或動態簽名消除此映射。
 - 不呈現仍建圖，保留實作一致性與保存能力，接受建圖及 artist 更新成本。
 - 不以單一同步方法統一互動 session；通用繪圖不保證自動提供互動輸入。
+- 接受未遷移實驗在中間階段報錯，避免維護第二套繪圖或分析協議；代價是必須逐項追蹤遷移與驗證，不能只用三個標準實驗通過推定整批完成。
 
 ## 七項核准政策與待落實接縫
 
-下列政策已核准，但尚未實作。末節列出精確接線與驗證義務，不能將政策核准視為執行期保證。
+下列政策已核准，部分共用繪圖與保存能力已落實，但完整 caller 遷移尚未完成。末節列出接線與驗證義務，不能將政策核准或底層能力通過視為端到端保證。
 
 ### G1：一般圖與 liveplot
 
@@ -113,13 +116,21 @@ Notebook 互動分析直接使用 Notebook widget，不增加前端可用性 pre
 
 ### G7：未遷移 adapters
 
-GUI application 統一使用純數值結果與 plots。未遷移 FIT adapters 明確 adopt 原核心返回的圖；兩個 interactive adapters 的共同 plugin／frontend 接線一併轉成 session-owned 圖集合。三個新核心的 concrete GUI adapters 明確轉接 run／save／load，不探測新舊簽名，也不遷移其他核心。不新增反射或永久雙協議 fallback。
+GUI application 統一使用純數值結果與 plots。三個標準實驗的 concrete adapters 先接入新核心，其他實驗與 adapters 隨後分期遷移，不要求每個中間階段都維持舊 caller 可用。Interactive plugin／frontend 使用 session-owned 圖集合，不探測新舊簽名，不新增反射或雙協議 fallback。
 
-目前 catalog 為 46 項，其中 41 FIT、2 INTERACTIVE、3 NONE。三個指定核心對應 3 項 adapter；剩餘 39 FIT 與 1 INTERACTIVE 仍需必要的 GUI 圖形接線，3 NONE 需核對共用型別。這是共用 GUI 多圖的影響面，不把 twotone/flux_dep 誤列為 onetone 的第二個核心。
+完整清單須包含未出現在 GUI catalog 的實驗、組合量測 caller 與必要 helper。共用基底、fake 和支援框架需另外分類，不以 class 數量代替公開實驗清單。每項都需對應遷移範圍與驗證證據。
+
+### 舊自訂 backend 退場
+
+三個標準實驗與其餘實驗／GUI caller 接入 explicit factory／host 後，移除專案自訂的 pyplot routing backend，以及只服務它的 routing／scope 和設定。不以離屏 pyplot scope 延長舊核心的使用期。
+
+退場包含共享 backend 的相關 GUI caller，例如 measure 與 fluxdep search，不能只刪除 backend 檔案而留下必要路徑未接線。這不是移除 Matplotlib rendering：原生 Figure／Axes、Qt canvas、Agg 與 ipympl 仍負責實際繪製。
+
+共享 runtime 的 backend 選擇、host 初始化、shutdown handling 與 mathtext lock／prewarm 要分別核對。移除舊路由職責，保留或整理仍必要的容器、owner scheduling、attach／detach 及 rendering 初始化。
 
 ## 實作前仍需細化
 
-- GUI 多圖檔名的精確格式、State／SaveService／截圖接線，以及未遷移 adapter 的明確轉換位置。
+- GUI 多圖檔名的精確格式、State／SaveService／截圖接線，以及各批 adapter／核心遷移的責任與驗證範圍。
 - 完成後取圖、保留參照與釋放呈現的具體介面，以及名稱或接管衝突拒絕後的 owner 完整性。
 - Notebook inline／widget 的顯示與 close、GUI worker／canvas 更新、最後 refresh 及失敗收尾。
 - GE primary 替換後的 post 關係，以及 Notebook 互動完成後取得結果的方法名。細化不得新增 G5 已排除的 Notebook 晚到發布限制。
@@ -128,6 +139,8 @@ GUI application 統一使用純數值結果與 plots。未遷移 FIT adapters �
 
 ## 轉正為現況的條件
 
-完成三個實驗的 Notebook／GUI 接線，以及 G1–G7 的具體契約與驗證。以公開 seam 驗證 cfg snapshot、typed analysis、primary／post 來源、互動 Done／Cancel、具名多圖與保存失敗；以直接審閱確認責任、依賴與匯出。
+先完成三個標準實驗的 Notebook／GUI 接線與 G1–G7 契約驗證，再以完整清單逐項確認其他實驗及必要 caller 已遷移。以公開 seam 驗證 cfg snapshot、typed analysis、primary／post 來源、互動 Done／Cancel、具名多圖與保存失敗；以直接審閱確認責任、依賴與匯出。
+
+舊自訂 backend 退場須有適用 GUI caller 的行為證據。刪除路由與專用測試後，仍須驗證新 host 的呈現、刷新、失敗與釋放行為；不新增「舊檔案不存在」的測試，也不以刪檔結果作為替代成功的證明。
 
 不得用一般 T1 通過推定 interactive 或 post-analysis 已驗收。Notebook inline／widget 顯示與 Qt thread 接合需有對應觀察，不以數值測試代替。驗證完成後才將已落實部分寫入現行 ADR 與 module README。
