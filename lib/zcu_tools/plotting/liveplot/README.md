@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.liveplot` 模組重點筆記
 
-**Last updated:** 2026-09-27 — measure app path rename
+**Last updated:** 2026-09-29 — backend 依賴延後載入
 
 供 Notebook、experiment runtime 與註冊 backend 的 GUI 使用的即時 matplotlib 繪圖能力。Plotter 以各自的 typed `update()` 增量更新 segment，再透過 active backend 刷新 figure；frontend 的選擇不由 plotter 偵測。家族定位見 [plotting/README.md](../README.md)。
 
@@ -16,7 +16,7 @@
      1. 經 `set_liveplot_backend(backend)`（ContextVar context manager，per-task）註冊者 —— GUI run worker 用它註冊自己的 Qt backend。
      2. `set_default_liveplot_backend(backend)` 設的 process-wide 預設。
      3. 都沒有時，依 matplotlib backend 名稱兜底（名稱含 `nbagg` 或 `widget` → `JupyterBackend`，其餘 → `FallbackBackend`）。
-   - 內建 backend（純 matplotlib，**零 gui/Qt 認知**）：`JupyterBackend`（notebook display）、`FallbackBackend`（`plt.subplots` / `draw_idle`）。
+   - 內建 backend（純 matplotlib，**零 gui/Qt 認知**）：`JupyterBackend`（notebook display）、`FallbackBackend`（`plt.subplots` / `draw_idle`）。pyplot 與 Notebook display 依賴在相應操作執行時才載入；匯入 segment 不初始化 pyplot，也不要求安裝 IPython。
    - 對外統一入口（皆 dispatch 到 `active_backend()`）：`make_plot_frame` / `instant_plot` / `refresh_figure` / `close_figure`。
    - GUI 的 backend（`QtLivePlotBackend`）**住在 `gui/app/measure/driven/`、不在 liveplot**：它靠註冊進來，故合法認識 gui（`plot_host`），依賴方向 gui → liveplot。它的 `make_plot_frame` 走 `plt.subplots`（被 GUI custom mpl backend 攔截、attach 進 `FigureContainer`），與裸 `plt.subplots()` 及 analysis figure 同一條渲染路徑；`refresh` marshalling 到主線程；`instant_plot`/`close` no-op（figure 建圖當下已 attach、生命週期歸 container）。
    - `jupyter` 另保留 module-level `instant_plot` / `grab_frame_with_instant_plot`（notebook 動畫特例直接 import 用）。

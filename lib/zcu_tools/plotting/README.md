@@ -15,7 +15,8 @@ canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換�
 呈現、保存政策或 Matplotlib thread safety。
 `plots.Plots` 在此集合上提供明確 `PlotHost` 與 typed 1D liveplot。一般圖在
 `finish()` 時呈現，liveplot 立即呈現；update 先驗證與複製資料，再同步送到 host
-owner 修改 artists。不呈現 host 仍建圖、更新 artists 並支援原生 savefig。
+owner 修改 artists。不呈現 host 仍建圖、更新 artists 並支援原生 savefig。匯入明確 plots 不初始化
+pyplot 或 Notebook display；非呈現操作只需基本依賴，不決定 GUI backend。
 Caller 停止 producer 後才 finish；完成後拒絕新 typed update，另以 release 釋放
 呈現，不銷毀原 Figure。失敗時可 finish(present=False) 保留普通診斷圖而不呈現。
 GUI host 在 gui/plotting，shared plotting 不依賴 Qt。2D/scatter、Notebook display 與
