@@ -348,6 +348,34 @@ def test_busy_policy_is_owned_by_resource_and_acceptance_is_separate() -> None:
     assert resource.accept(before.ref.revision).values["a"] == 1.0
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_source_refresh_is_not_blocked_by_manual_edit_policy(failed: bool) -> None:
+    sources = Sources()
+    schema = defaults()
+    schema.value.fields["a"] = EvalValue("frequency")
+    resource = CfgResource(
+        defaults,
+        initial=schema,
+        resolution=sources.read,
+        make_range=make_range,
+        mutation_allowed=lambda: False,
+    )
+    before = resource.observe()
+    accepted = resource.accept(before.ref.revision)
+    sources.values["frequency"] = 7.0
+    sources.revision += 1
+    sources.fail = failed
+    changed = resource.refresh(before.ref.revision)
+    assert changed.ref.revision == before.ref.revision + 1
+    assert changed.status is (CfgStatus.UNAVAILABLE if failed else CfgStatus.VALID)
+    assert accepted.values["a"] == 2.0
+    if not failed:
+        assert resource.accept(changed.ref.revision).values["a"] == 7.0
+    with pytest.raises(CfgPreconditionError) as blocked:
+        resource.edit(changed.ref.revision, ())
+    assert blocked.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
+
+
 def test_revocation_invalidates_handles_and_never_reuses_identity() -> None:
     resource = make_resource()
     before = resource.observe()

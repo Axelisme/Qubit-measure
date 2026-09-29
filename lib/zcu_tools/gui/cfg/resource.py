@@ -320,7 +320,7 @@ class CfgResource:
         return self._publish(candidate, observation, schema)
 
     def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
-        self._check_command(expected_revision)
+        self._check_command(expected_revision, editing=False)
         source: CfgResolution | None = None
         candidate: CfgDraft | None = None
         try:
