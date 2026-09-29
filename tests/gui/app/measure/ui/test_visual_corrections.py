@@ -35,7 +35,7 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget, TreeCfgWidget
 from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS, _branch_color
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
 def _luminance(hex_color: str) -> float:
@@ -85,17 +85,17 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
     analysis_snap = AnalysisPaneSnapshot(
         params=MagicMock(),
         result=object(),
-        figure=Figure(),
+        figures=ready_figures(Figure()),
         writeback_items=(),
-        image_path=image,
+        image_paths={"fit": image},
         has_writeback_draft=False,
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=None,
         result=None,
-        figure=None,
+        figures=None,
         writeback_items=(),
-        image_path=image,
+        image_paths={},
         has_writeback_draft=False,
     )
     spec = CfgSectionSpec(
@@ -133,7 +133,7 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         post_analysis=post_snap,
         save=SavePaneSnapshot(data_path=data_path),
         paths=TabPathsSnapshot(
-            data=data_path, analysis_image=image, post_analysis_image=image
+            data=data_path, analysis_images={"fit": image}, post_analysis_images={}
         ),
     )
     return with_artifacts(snapshot)

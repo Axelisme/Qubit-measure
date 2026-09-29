@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
     FluxDepExp,
@@ -51,6 +49,7 @@ if TYPE_CHECKING:
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
+    from zcu_tools.plotting.plots import Plots
 
 OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 
@@ -173,21 +172,26 @@ class OneToneFluxDepAdapter(
     # -- interactive analysis: user picks the half/integer flux lines ----------
 
     def make_interactive_plugin(
-        self, req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams]
+        self,
+        req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams],
+        *,
+        plots: Plots,
     ) -> PluginDefinition[Any, Any]:
         # One-tone resonator spectra have uninformative phase.
-        return make_flux_pick_plugin(req, force_magnitude=True)
+        return make_flux_pick_plugin(req, force_magnitude=True, plots=plots)
 
     def make_interactive_frontend(
         self,
         plugin: PluginDefinition[Any, Any],
         session: Session[Any],
         env: InteractiveFrontendEnv,
-        request_finish: Callable[[Figure], bool],
+        request_finish: Callable[[], bool],
         request_cancel: Callable[[], bool],
+        *,
+        plots: Plots,
     ) -> InteractiveFrontend:
         return make_flux_pick_frontend(
-            plugin, session, env, request_finish, request_cancel
+            plugin, session, env, request_finish, request_cancel, plots=plots
         )
 
     def get_writeback_items(

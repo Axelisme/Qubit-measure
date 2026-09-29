@@ -22,7 +22,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
-    PathResourceSnapshot,
     PostAnalysisPaneSnapshot,
     TabSnapshot,
 )
@@ -61,17 +60,17 @@ def _snapshot(
     ana = AnalysisPaneSnapshot(
         params=None,
         result=object(),
-        figure=None,
+        figures=None,
         writeback_items=tuple(items),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
         has_writeback_draft=has_writeback_draft,
     )
     post = PostAnalysisPaneSnapshot(
         params=None,
         result=None,
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
     )
     return TabSnapshot(
         adapter_name="fake",

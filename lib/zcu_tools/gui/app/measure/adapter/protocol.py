@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from zcu_tools.gui.cfg import CfgSchema
+
+if TYPE_CHECKING:
+    from zcu_tools.plotting.plots import Plots
 
 from .interactive import InteractivePluginProvider
 from .types import (
@@ -79,7 +82,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Validate adapter-specific run constraints before opening an operation."""
         ...
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> Any:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots) -> Any:
         """Execute detached resolved inputs; never resolve from live context."""
         ...
 
@@ -87,7 +90,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Load a canonical result file and return its run-result object."""
         ...
 
-    def analyze(self, req: AnalyzeRequest[Any, Any]) -> Any:
+    def analyze(self, req: AnalyzeRequest[Any, Any], *, plots: Plots) -> Any:
         """Run analysis on a completed run result."""
         ...
 
@@ -100,7 +103,9 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Build the post-analysis param instance presented to the user."""
         ...
 
-    def post_analyze(self, req: PostAnalyzeRequest[Any, Any, Any]) -> Any:
+    def post_analyze(
+        self, req: PostAnalyzeRequest[Any, Any, Any], *, plots: Plots
+    ) -> Any:
         """Run the second-layer analysis on the primary analyze result."""
         ...
 

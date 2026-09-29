@@ -24,6 +24,7 @@ from zcu_tools.experiment.v2_gui.measure.adapters.twotone.flux_dep import (
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -41,7 +42,8 @@ def _request(md: MetaDict | None = None):
 
 
 def test_plugin_typed_actions_and_commands_share_committed_state():
-    plugin = make_flux_pick_plugin(_request(), force_magnitude=True)
+    plots = Plots(NonPresentingHost())
+    plugin = make_flux_pick_plugin(_request(), force_magnitude=True, plots=plots)
     session = plugin.open(ManualOwnerScheduler())
     start = session.snapshot()
     assert start.magnitude_only is True
@@ -72,32 +74,40 @@ def test_plugin_typed_actions_and_commands_share_committed_state():
     assert isinstance(result, FluxPickResult)
     assert result.flx_half == swapped.flux_half
     assert result.flx_period == 2 * abs(swapped.flux_int - swapped.flux_half)
-    assert result.figure is None
+    assert tuple(plots) == ("pick",)
+    assert isinstance(plots["pick"], Figure)
+    plots.finish()
+    plots.release()
 
 
 def test_equal_seed_cannot_finish_until_a_valid_line_is_committed() -> None:
     md = MetaDict()
     md.flx_half = md.flx_int = 0.0
-    plugin = make_flux_pick_plugin(_request(md), force_magnitude=True)
+    plots = Plots(NonPresentingHost())
+    plugin = make_flux_pick_plugin(_request(md), force_magnitude=True, plots=plots)
     session = plugin.open(ManualOwnerScheduler())
     with pytest.raises(FailedPreconditionError, match="separat"):
         plugin.finish(session)
     assert session.snapshot().flux_half == session.snapshot().flux_int
     plugin.execute_command(session, "move_line", {"role": "half", "position": 1.0})
     assert plugin.finish(session).flx_period > 0.0
+    assert tuple(plots) == ("pick",)
+    plots.finish()
+    plots.release()
 
 
 @pytest.mark.parametrize(
     ("adapter_type", "magnitude_only"),
     [(OneToneFluxDepAdapter, True), (TwoToneFluxDepAdapter, False)],
 )
-def test_both_adapters_seed_projection_and_attach_frontend_figure(
+def test_both_adapters_seed_projection_and_publish_named_result_figure(
     adapter_type, magnitude_only: bool
 ):
     md = MetaDict()
     md.flx_half = 0.0
     md.flx_int = 2.0
-    plugin = adapter_type().make_interactive_plugin(_request(md))
+    plots = Plots(NonPresentingHost())
+    plugin = adapter_type().make_interactive_plugin(_request(md), plots=plots)
     assert isinstance(plugin, FluxPickPlugin)
     session = plugin.open(ManualOwnerScheduler())
     state = session.snapshot()
@@ -110,11 +120,13 @@ def test_both_adapters_seed_projection_and_attach_frontend_figure(
         "swap_lines",
         "auto_align",
     ]
-    figure = Figure()
-    result = plugin.finish(session, figure)
-    assert result.figure is figure
+    result = plugin.finish(session)
+    assert tuple(plots) == ("pick",)
+    assert isinstance(plots["pick"], Figure)
     assert result.to_summary_dict() == {
         "flx_half": state.flux_half,
         "flx_int": state.flux_int,
         "flx_period": 2 * abs(state.flux_int - state.flux_half),
     }
+    plots.finish()
+    plots.release()

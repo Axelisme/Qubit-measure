@@ -18,6 +18,7 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 def _empty_schema() -> CfgSchema:
@@ -58,11 +59,17 @@ def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
     tab.run.result = stale_result
     tab.run.source_path = "/tmp/old.hdf5"
     tab.analysis.result = object()
-    tab.analysis.figure = Figure()
+    analysis_plots = Plots(NonPresentingHost())
+    analysis_plots.adopt("fit", Figure())
+    analysis_plots.finish()
+    tab.analysis.plots = analysis_plots
     tab.analysis.params = NoAnalyzeParams()
     tab.analysis.writeback_draft = MagicMock(is_active=True)
     tab.post_analysis.result = object()
-    tab.post_analysis.figure = Figure()
+    post_plots = Plots(NonPresentingHost())
+    post_plots.adopt("fit", Figure())
+    post_plots.finish()
+    tab.post_analysis.plots = post_plots
     tab.post_analysis.params = object()
     tab.post_analysis.writeback_draft = MagicMock(is_active=True)
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
@@ -74,10 +81,10 @@ def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
     assert tab.run.result is loaded
     assert tab.run.source_path == "/tmp/new.hdf5"
     assert tab.analysis.result is None
-    assert tab.analysis.figure is None
+    assert tab.analysis.plots is None
     assert tab.analysis.params is None
     assert tab.post_analysis.result is None
-    assert tab.post_analysis.figure is None
+    assert tab.post_analysis.plots is None
     assert tab.post_analysis.params is None
     assert tab.analysis.writeback_draft is None
     assert tab.post_analysis.writeback_draft is None

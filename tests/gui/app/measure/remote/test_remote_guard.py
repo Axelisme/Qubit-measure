@@ -433,8 +433,8 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
             "tab_save",
             {
                 "tab": tab_id,
-                "artifacts": ["analysis"],
-                "paths": {"analysis": str(image)},
+                "artifacts": ["analysis:fit"],
+                "paths": {"analysis:fit": str(image)},
             },
         )
         if "op" in saved:
@@ -442,7 +442,7 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
                 call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
             )
         else:
-            assert saved["saved"] == {"analysis": str(image)}
+            assert saved["saved"] == {"analysis:fit": str(image)}
         assert image.read_bytes().startswith(b"\x89PNG")
         assert call("tab_close", {"tab": tab_id, "discard_unsaved": True}) == {
             "closed": tab_id
@@ -517,8 +517,8 @@ def test_tab_run_busy_and_cancel_keep_the_gui_partial_result(
     release = threading.Event()
     original_run = FakeAdapter.run
 
-    def held_run(self, request, schema):
-        result = original_run(self, request, schema)
+    def held_run(self, request, schema, *, plots):
+        result = original_run(self, request, schema, plots=plots)
         entered.set()
         if not release.wait(4):
             raise TimeoutError("fake run release was not signalled")

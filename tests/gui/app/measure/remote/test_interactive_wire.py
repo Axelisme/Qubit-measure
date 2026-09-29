@@ -26,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from ._helpers import Fixture, mcp_client, open_client, recv_response, send
@@ -107,6 +108,7 @@ def _start(fx, *, background=None):
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
+    plots = Plots(NonPresentingHost())
     plugin = make_flux_pick_plugin(
         AnalyzeRequest(
             run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
@@ -116,12 +118,13 @@ def _start(fx, *, background=None):
             predictor=None,
         ),
         force_magnitude=True,
+        plots=plots,
     )
     plugin.bind_background(background or fx.ctrl.run_background)
     # Set up a real AnalyzeService operation; RPC interactions below always go
     # through the shipped socket and RunAnalyzeControlFacet, not a handler stub.
     token = fx.ctrl._analyze_svc.start_plugin(
-        AnalyzePermit(tab_id=tab_id), plugin, QtOwnerScheduler()
+        AnalyzePermit(tab_id=tab_id), plugin, QtOwnerScheduler(), plots=plots
     )
     fx.view.interactive_presentation.return_value = None
     return tab_id, token, plugin
@@ -194,7 +197,9 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         committed = _interact(sock, tab_id)["result"]["state"]
         done = _interact(sock, tab_id, {"command": "done"})
         assert done["result"]["state"] == committed
-        assert done["result"]["figure"] is None
+        assert base64.b64decode(done["result"]["figure"]["png_b64"]).startswith(
+            b"\x89PNG"
+        )
         assert fx.ctrl.get_tab_analyze_result(tab_id).flx_half == pytest.approx(
             committed["flux_half"]
         )
@@ -281,12 +286,14 @@ def test_equal_line_command_rejects_without_changing_session_or_operation(fx) ->
 
 def test_live_frontend_preview_remote_commit_and_done_share_result(fx, qapp) -> None:
     tab_id, token, plugin = _start(fx)
-    session = fx.ctrl.run_analyze_control.get_interactive(tab_id).session
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    session = active.session
     widget = FluxPickFrontend(
         plugin,
         session,
         fx.ctrl,
-        lambda figure: fx.ctrl.run_analyze_control.finish_interactive(tab_id, figure),
+        lambda: fx.ctrl.run_analyze_control.finish_interactive(tab_id),
         lambda: fx.ctrl.run_analyze_control.cancel_analyze(tab_id),
     )
     fx.widgets.append(widget)
@@ -340,7 +347,7 @@ def test_live_frontend_preview_remote_commit_and_done_share_result(fx, qapp) -> 
         assert base64.b64decode(done["figure"]["png_b64"]).startswith(b"\x89PNG")
         result = fx.ctrl.get_tab_analyze_result(tab_id)
         assert result.flx_half == pytest.approx(after_gui["flux_half"])
-        assert result.figure is widget.figure
+        assert fx.state.get_tab(tab_id).analysis.plots["pick"] is not widget.figure
         assert (
             _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
                 "result"
@@ -354,12 +361,14 @@ def test_auto_align_busy_failure_and_terminal_delivery_use_same_command(
 ) -> None:
     deferred = DeferredBackground()
     tab_id, token, plugin = _start(fx, background=deferred.run_background)
-    session = fx.ctrl.run_analyze_control.get_interactive(tab_id).session
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    session = active.session
     widget = FluxPickFrontend(
         plugin,
         session,
         fx.ctrl,
-        lambda figure: fx.ctrl.run_analyze_control.finish_interactive(tab_id, figure),
+        lambda: fx.ctrl.run_analyze_control.finish_interactive(tab_id),
         lambda: fx.ctrl.run_analyze_control.cancel_analyze(tab_id),
     )
     fx.widgets.append(widget)
@@ -463,7 +472,9 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             )
             assert result["state"] == changed["state"]
             assert Path(result["figure"]).read_bytes().startswith(b"\x89PNG")
-            assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+            committed = fx.state.get_tab(tab_id).analysis.plots
+            assert committed is not None
+            assert committed["pick"] is not widget.figure
         else:
             call("cancel", {"op": op})
         status = "finished" if terminal == "done" else "cancelled"
@@ -490,7 +501,9 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
     try:
         call("connect", {"port": fx.service.port})
         done = call("tab_interact", {"tab": tab_id, "payload": {"command": "done"}})
-        assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+        committed = fx.state.get_tab(tab_id).analysis.plots
+        assert committed is not None
+        assert committed["pick"] is not widget.figure
         call("tab_get", {"tab": tab_id, "include": ["summary"]})
         preview = call("writeback", {"tab": tab_id})
         expected = {
@@ -517,8 +530,8 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             "tab_save",
             {
                 "tab": tab_id,
-                "artifacts": ["analysis"],
-                "paths": {"analysis": str(image)},
+                "artifacts": ["analysis:pick"],
+                "paths": {"analysis:pick": str(image)},
             },
         )
         if "op" in saved:
@@ -526,12 +539,12 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
                 call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
             )
         else:
-            assert saved["saved"] == {"analysis": str(image)}
+            assert saved["saved"] == {"analysis:pick": str(image)}
         assert image.read_bytes().startswith(b"\x89PNG")
         artifacts = call("tab_get", {"tab": tab_id, "include": ["artifacts"]})[
             "artifacts"
         ]
-        analysis = next(item for item in artifacts if item["key"] == "analysis")
+        analysis = next(item for item in artifacts if item["key"] == "analysis:pick")
         assert analysis["status"] == "saved"
         assert analysis["last_saved_path"] == str(image)
         assert call("tab_close", {"tab": tab_id, "discard_unsaved": True}) == {
@@ -609,11 +622,16 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert done["ok"] is True
         assert done["result"]["state"] == original
         assert done["result"]["preview_active"] is False
-        assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+        committed = fx.state.get_tab(tab_id).analysis.plots
+        assert committed is not None
+        assert committed["pick"] is not widget.figure
         assert window.interactive_presentation(tab_id) is None
         qapp.processEvents()
         tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - locate the tested view
-        assert tab_widget.get_current_figure_for_pane("analysis") is widget.figure
+        assert (
+            tab_widget.get_current_figure_for_pane("analysis")
+            is fx.state.get_tab(tab_id).analysis.plots["pick"]
+        )
         assert (
             _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
                 "result"

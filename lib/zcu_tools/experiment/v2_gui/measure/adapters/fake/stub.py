@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, TypeAlias, cast
+from pathlib import Path
+from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -31,6 +30,7 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 
 @dataclass(frozen=True)
@@ -53,8 +53,18 @@ class FakeExp(AbsExperiment[FakeResult, FakeExpCfg]):
         signals = rng.normal(0.0, cfg.noise_scale, size=11)
         return FakeResult(data=signals)
 
-    def save(self, filepath: str, result: FakeResult | None = None) -> None:
-        pass
+    def save(
+        self,
+        result: FakeResult,
+        destination: Path,
+        *,
+        comment: str | None = None,
+        tag: str | None = None,
+        server_ip: str | None = None,
+        port: int = 4999,
+    ) -> None:
+        """The no-hardware harness intentionally leaves data persistence inert."""
+        _ = result, destination, comment, tag, server_ip, port
 
 
 FakeRunResult: TypeAlias = FakeResult
@@ -63,7 +73,6 @@ FakeRunResult: TypeAlias = FakeResult
 @dataclass
 class FakeAnalyzeResult(AnalyzeResultBase):
     peak: float
-    figure: Figure
 
 
 @dataclass
@@ -124,19 +133,21 @@ class FakeAdapter(
             sweep=raw_cfg["sweep"],
         )
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeRunResult:
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+    ) -> FakeRunResult:
+        del plots  # This stub has no live Run presentation.
         cfg = self.build_exp_cfg(raw_cfg, req)
         return FakeExp().run(cfg)
 
     def analyze(
-        self, req: AnalyzeRequest[FakeRunResult, FakeAnalyzeParams]
+        self, req: AnalyzeRequest[FakeRunResult, FakeAnalyzeParams], *, plots: Plots
     ) -> FakeAnalyzeResult:
         threshold = req.analyze_params.threshold
         data = req.run_result.data
 
         peak = float(np.max(np.abs(data)))
-        fig = Figure()
-        ax = cast(Axes, fig.subplots())
+        _, ax = plots.subplots("fit")
         xs = np.arange(len(data))
         ax.plot(xs, data, label="signal")
         if peak > threshold:
@@ -147,7 +158,7 @@ class FakeAdapter(
         )
         ax.set_title("FakeAdapter analysis")
         ax.legend()
-        return FakeAnalyzeResult(peak=peak, figure=fig)
+        return FakeAnalyzeResult(peak=peak)
 
     def get_writeback_items(
         self, req: WritebackRequest[FakeRunResult, FakeAnalyzeResult]

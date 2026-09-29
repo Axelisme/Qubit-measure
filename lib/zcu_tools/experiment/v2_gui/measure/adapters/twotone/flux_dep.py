@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
 from zcu_tools.experiment.v2.twotone.fluxdep import (
     FreqFluxCfg,
     FreqFluxExp,
@@ -44,6 +42,7 @@ if TYPE_CHECKING:
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
+    from zcu_tools.plotting.plots import Plots
 
 FluxDepRunResult: TypeAlias = FreqFluxResult
 
@@ -151,21 +150,23 @@ class FluxDepAdapter(
         )
 
     def make_interactive_plugin(
-        self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams]
+        self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams], *, plots: Plots
     ) -> PluginDefinition[Any, Any]:
         # Two-tone spectra may carry useful phase information.
-        return make_flux_pick_plugin(req, force_magnitude=False)
+        return make_flux_pick_plugin(req, force_magnitude=False, plots=plots)
 
     def make_interactive_frontend(
         self,
         plugin: PluginDefinition[Any, Any],
         session: Session[Any],
         env: InteractiveFrontendEnv,
-        request_finish: Callable[[Figure], bool],
+        request_finish: Callable[[], bool],
         request_cancel: Callable[[], bool],
+        *,
+        plots: Plots,
     ) -> InteractiveFrontend:
         return make_flux_pick_frontend(
-            plugin, session, env, request_finish, request_cancel
+            plugin, session, env, request_finish, request_cancel, plots=plots
         )
 
     def get_writeback_items(

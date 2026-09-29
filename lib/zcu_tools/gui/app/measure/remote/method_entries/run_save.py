@@ -115,7 +115,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Start one non-cancellable save operation over selected artifacts. "
-            "Keys are data, analysis and post; all selects saveable artifacts. "
+            "Keys are data, analysis:<name> and post:<name>; all selects unsaved artifacts. "
             "Explicit paths/comment update the shared drafts. Returns operation_id "
             "and reserved destinations, not proof of completion. Read artifacts "
             "after terminal failure for partial successes.",
@@ -153,13 +153,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_image",
         MethodSpec(
             30.0,
-            "Save a pane's canonical image file (analysis|post_analysis only; run "
-            "has no canonical image). Requires (tab_id, subtab_id) with closed "
-            "values analysis|post_analysis. Explicit image_path updates the GUI "
+            "Save one named canonical image (analysis|post_analysis only; run "
+            "has no canonical image). Requires tab_id, subtab_id and figure_name. "
+            "The pane is analysis|post_analysis. Explicit image_path updates the GUI "
             "draft before saving; omission keeps the draft, and an empty path is rejected.",
             (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),
+                _str("figure_name", "Name of the figure in that pane"),
                 _str_opt("image_path", "Override image path"),
             ),
         ),

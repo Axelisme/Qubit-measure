@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,8 @@ from qtpy.QtWidgets import QWidget
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+
+from tests.gui.app.measure.ui._artifact_snapshots import ready_figures
 
 
 def _tab() -> ExpTabWidget:
@@ -34,8 +37,8 @@ def test_result_focus_and_panel_width_are_owned_by_tab(qapp) -> None:
 def test_prepare_run_container_clears_run_and_downstream_figures(qapp) -> None:
     tab = _tab()
     tab.show_run_figure(Figure())
-    tab.show_analysis_figure(Figure())
-    tab.show_post_analysis_figure(Figure())
+    tab.show_analysis_figures(ready_figures(Figure()))
+    tab.show_post_analysis_figures(ready_figures(Figure()))
 
     container = tab.prepare_run_container()
 
@@ -109,7 +112,7 @@ def test_interactive_setup_failure_clears_stale_figure_and_cleans_widget(
     qapp, monkeypatch, failure_stage: str
 ) -> None:
     window, tab, _ctrl = _window_with_tab()
-    tab.show_analysis_figure(Figure())
+    tab.show_analysis_figures(ready_figures(Figure()))
     captured = tab.get_analysis_container()
     widget = _Interactive()
     if failure_stage == "mount":
@@ -161,11 +164,17 @@ def test_mounted_interactive_view_exposes_figure_and_discardable_preview(qapp) -
 def test_interactive_success_restores_committed_figure_in_analysis_pane(qapp) -> None:
     window, tab, ctrl = _window_with_tab()
     widget = _Interactive()
-    committed_figure = widget.figure
-    ctrl.get_tab_analyze_result.return_value = MagicMock(figure=committed_figure)
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+
+    committed_figure = Figure()
+    ctrl.get_tab_snapshot.return_value = SimpleNamespace(
+        analysis=SimpleNamespace(figures=ready_figures(committed_figure)),
+        capabilities=AdapterCapabilities(analysis=AnalysisMode.FIT),
+    )
 
     window.mount_interactive_analysis("tab-1", lambda _env: widget)
     window.unmount_interactive_analysis("tab-1", restore_result=True)
 
     assert widget.stopped is True
     assert tab.get_current_figure_for_pane("analysis") is committed_figure
+    assert committed_figure is not widget.figure

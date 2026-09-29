@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
@@ -24,7 +24,6 @@ _SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
     ArtifactKind.ANALYSIS: "Save image failed",
     ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
 }
-from zcu_tools.gui.plotting import set_shutting_down
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 
@@ -92,11 +91,8 @@ class _MainWindowTabActions:
     def save_data(self, tab_id: str) -> None:
         self._window._on_save_data_clicked(tab_id)
 
-    def save_image(self, tab_id: str) -> None:
-        self._window._on_save_image_clicked(tab_id)
-
-    def save_post_image(self, tab_id: str) -> None:
-        self._window._on_post_save_image_clicked(tab_id)
+    def save_image(self, tab_id: str, key: ArtifactKey) -> None:
+        self._window._on_save_image_clicked(tab_id, key)
 
     def save_all(self, tab_id: str) -> None:
         self._window._on_save_all_clicked(tab_id)
@@ -346,10 +342,14 @@ class MainWindow(QMainWindow):
         assert current.paths is not None
         assert current.capabilities is not None
         tab_w.set_data_path(current.paths.data.path or "")
-        if current.capabilities.analysis is not AnalysisMode.NONE:
-            tab_w.set_analysis_image_path(current.paths.analysis_image.path or "")
-        if current.capabilities.post_analysis:
-            tab_w.set_post_image_path(current.paths.post_analysis_image.path or "")
+        for name, path in current.paths.analysis_images.items():
+            tab_w.set_image_path(
+                ArtifactKey(ArtifactKind.ANALYSIS, name), path.path or ""
+            )
+        for name, path in current.paths.post_analysis_images.items():
+            tab_w.set_image_path(
+                ArtifactKey(ArtifactKind.POST_ANALYSIS, name), path.path or ""
+            )
 
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -362,9 +362,7 @@ class MainWindow(QMainWindow):
         assert current.capabilities is not None
         if current.capabilities.analysis is AnalysisMode.NONE:
             return
-        figure = current.analysis.figure
-        if figure is not None:
-            self.show_analysis_image(tab_id, figure)
+        tab_w.show_analysis_figures(current.analysis.figures)
 
     def refresh_tab_post_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -377,11 +375,7 @@ class MainWindow(QMainWindow):
         assert current.capabilities is not None
         if not current.capabilities.post_analysis:
             return
-        post_figure = current.post_analysis.figure
-        if post_figure is None:
-            tab_w.clear_post_figure()
-        else:
-            self.show_post_analysis_image(tab_id, post_figure)
+        tab_w.show_post_analysis_figures(current.post_analysis.figures)
 
     def clear_tab_plot(self, tab_id: str) -> None:
         """Clear stale canvases after loading content with no analysis figure."""
@@ -548,10 +542,7 @@ class MainWindow(QMainWindow):
             widget.teardown()
         tab_w.unmount_interactive_widgets(InteractiveFrontend)
         if restore_result:
-            result = self._ctrl.get_tab_analyze_result(tab_id)
-            figure = getattr(result, "figure", None)
-            if figure is not None:
-                self.show_analysis_image(tab_id, figure)
+            self.refresh_tab_figure(tab_id)
 
     def current_left_panel_width(self) -> int:
         """RenderHost impl: the active tab's left-panel width (the single
@@ -578,20 +569,6 @@ class MainWindow(QMainWindow):
 
     def show_error_dialog(self, title: str, message: str) -> None:
         self._dialog_presenter.critical(self, title, message)
-
-    def show_analysis_image(self, tab_id: str, fig: Any) -> None:
-        logger.debug("show_analysis_image: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        tab_w.show_analysis_figure(fig)
-
-    def show_post_analysis_image(self, tab_id: str, fig: Any) -> None:
-        logger.debug("show_post_analysis_image: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        tab_w.show_post_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
@@ -885,26 +862,14 @@ class MainWindow(QMainWindow):
             lambda: self._ctrl.save_data(tab_id, path, comment=comment),
         )
 
-    def _on_save_image_clicked(self, tab_id: str) -> None:
-        logger.info("_on_save_image_clicked: tab_id=%r", tab_id)
+    def _on_save_image_clicked(self, tab_id: str, key: ArtifactKey) -> None:
+        logger.info("_on_save_image_clicked: tab_id=%r key=%r", tab_id, key)
         tab_w = self._resolve_tab_widget(tab_id, "_on_save_image_clicked")
         if tab_w is None:
             return
-        path = tab_w.get_image_path()
+        path = tab_w.get_image_path(key) or None
         self._dispatch_artifact_save(
-            tab_w, ArtifactKind.ANALYSIS, lambda: self._ctrl.save_image(tab_id, path)
-        )
-
-    def _on_post_save_image_clicked(self, tab_id: str) -> None:
-        logger.info("_on_post_save_image_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_post_save_image_clicked")
-        if tab_w is None:
-            return
-        path = tab_w.get_post_image_path()
-        self._dispatch_artifact_save(
-            tab_w,
-            ArtifactKind.POST_ANALYSIS,
-            lambda: self._ctrl.save_post_image(tab_id, path),
+            tab_w, key.kind, lambda: self._ctrl.save_image(tab_id, key, path)
         )
 
     def _on_save_all_clicked(self, tab_id: str) -> None:
@@ -1003,23 +968,23 @@ class MainWindow(QMainWindow):
                 raise FailedPreconditionError(
                     f"tab {tab_id!r} does not support analysis"
                 )
-            fig = snap.analysis.figure if snap.analysis is not None else None
+            fig = tab_w.get_current_figure_for_pane("analysis")
             if fig is None:
                 raise FailedPreconditionError(
-                    f"tab {tab_id!r} analysis has no figure yet"
+                    f"tab {tab_id!r} analysis has no selected figure yet"
                 )
-            return render_figure_png(fig)  # type: ignore[arg-type]
+            return render_figure_png(fig)
         # post_analysis
         if not snap.capabilities.post_analysis:
             raise FailedPreconditionError(
                 f"tab {tab_id!r} does not support post_analysis"
             )
-        fig = snap.post_analysis.figure if snap.post_analysis is not None else None
+        fig = tab_w.get_current_figure_for_pane("post_analysis")
         if fig is None:
             raise FailedPreconditionError(
-                f"tab {tab_id!r} post_analysis has no figure yet"
+                f"tab {tab_id!r} post_analysis has no selected figure yet"
             )
-        return render_figure_png(fig)  # type: ignore[arg-type]
+        return render_figure_png(fig)
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""
@@ -1186,7 +1151,8 @@ class MainWindow(QMainWindow):
         self._closing = True
         self._cleanup_bus_subscriptions()
         self._ctrl.persist_all()
-        set_shutting_down(True)
+        # The application marks the plot host shutting down on aboutToQuit,
+        # not when one window closes while the Qt event loop remains available.
         # Tear down remote control before the Qt main loop exits so any in-flight
         # RPC sees a clean shutdown (timeout / EPIPE) rather than a dead Controller.
         remote = getattr(self, "remote_control_service", None)

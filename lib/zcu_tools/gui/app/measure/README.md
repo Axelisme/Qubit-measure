@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-30 — Save All 未保存項選取
+**Last updated:** 2026-09-30 — GUI 具名圖與逐圖保存
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -123,8 +123,8 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   presentation without selecting a subtab; Analysis remains an explicit user
   selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
-  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現各artifact的
-  status、saveability與草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
+  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現DATA與目前每張
+  具名圖的status、saveability與路徑草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
   `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
   Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
   都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
@@ -132,7 +132,7 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
   `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時
   Save All 停用，明確單項匯出仍可再次保存。修改圖形目的地不取消已保存狀態。
-  SaveService 依 analysis→post→data 順序，以單一 operation 執行並 Fast Fail，
+  SaveService 依 analysis逐圖→post逐圖→data 順序，以單一 operation 執行並 Fast Fail，
   不回滾已完成的存檔；再次 Save All 省略成功項。Qt 按鈕不編排各項存檔。
   AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
   Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
@@ -350,23 +350,23 @@ The Guard and LoadService both enforce the adapter's import-validated
 ### Pane-owned lifecycle
 
 `Session` is the aggregate root and its fixed pane carriers are the resource owners:
-Run stores only the run result/source, Analysis and Post-Analysis each store params,
-result, canonical figure and an opaque writeback draft (with S2 baseline snapshot),
-and Save stores the data-path override. Analysis and Post-Analysis image-path
-overserides are independent resources; the read model projects data, analysis-image
-and post-analysis-image paths separately. Run live figures remain view-only and
+Run stores only the run result/source. Analysis and Post-Analysis each store params,
+result, a named `Plots` collection and an opaque writeback draft (with S2 baseline
+snapshot). Save stores the data-path override. Each image path override belongs to
+one `(stage, figure_name)` key; the read model projects DATA and current named
+images separately. Run live figures remain view-only and
 are not stored in State. Writeback baseline is a display-only draft-creation
 snapshot；同一opaque draft另擁有per-item applied state，只有成功write包含的items才標記applied，
 selection本身不改狀態，retarget或內容修改會重設；同kind items不得指向重複destination，
 避免batch覆寫卻誤標applied。狀態不跨draft/process持久化，也不提供
 concurrent-write detection或apply-conflict policy。
 
-Analysis/Post 圖形保存只記錄目前 result／Figure 產物是否曾成功保存，不追蹤
-artist、視圖或目的地的 dirty 變更。新產物從未保存開始；舊產物晚到的保存完成
-不將新產物標成已保存。再次匯出失敗保留先前成功紀錄。DATA 仍追蹤原有
+Analysis/Post 逐圖記錄目前 result／Figure 產物是否曾成功保存，不追蹤
+artist、視圖或目的地的 dirty 變更。新圖從未保存開始；舊圖晚到的保存完成
+只更新提交時捕捉的record，不將同名新圖標成已保存。再次匯出失敗保留先前成功紀錄。DATA 仍追蹤原有
 result、path 與 comment 的保存 signature。
 
-Analysis/Post result services prepare proposals, figures and drafts before calling one
+Analysis/Post result services prepare proposals, named plots and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear
 down retired drafts only after commit and never roll back a committed pane when cleanup
 fails. A failed proposal/editor build leaves the previous canonical pane intact.
@@ -562,9 +562,11 @@ Progress is operation-scoped:
   progress view does not keep an operation pending.
 - Agent polling reads by operation id.
 
-Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib
-figures attach to the active `FigureContainer` through routing context; refresh,
-activate, and close resolve through the figure registry. Figure export uses fixed
+已遷移的adapter在每次run/analyze操作中接收明確的`Plots`；Qt host綁定該pane的
+`FigureContainer`，普通Figure在完成後呈現，liveplot的artist工作交給owner thread。
+舊adapter仍可能使用`gui.plotting`的pyplot routing backend，直到全部實驗遷移完成。
+關閉視窗不會將plot host設為全域shutdown；Qt runtime在`aboutToQuit`處理該狀態。
+Figure export uses fixed
 logical sizes so outputs do not depend on window size: saved images use a 12×9 inch
 4:3 canvas at 150 DPI；Data Preview沿用同一logical canvas並以約53.33 DPI產生
 640×480 WYSIWYG raster；agent screenshots維持6.4×4.8 inch at 100 DPI。
@@ -645,8 +647,8 @@ analysis-result/writeback terminal path. Cancellation, setup failure and result
 failure retire the session and settle that same operation. Neither the service
 nor generic remote dispatch interprets flux-line keys.
 
-INTERACTIVE adapters expose `make_interactive_plugin(req)` and
-`make_interactive_frontend(plugin, session, env, request_finish, request_cancel)`.
+已遷移的INTERACTIVE adapters以明確的`plots=`建立plugin與frontend。
+未遷移adapter不使用舊簽名fallback。
 `RunAnalyzeControlFacet` starts the session before mounting; `MainWindow`
 mounts/unmounts the plugin-owned `InteractiveFrontend` in the Analysis pane.
 Failed finish validation keeps the widget editable; a valid finish unmounts it
@@ -655,8 +657,8 @@ The frontend owns artists, pointer selection, preview and timers. For measure fl
 picking, the first left click selects a line, pointer movement without a pressed
 button previews locally, and the second valid left click commits against the
 latest session snapshot. Release does not commit; external commits cancel preview.
-The Qt-free plugin can execute commands and finish without a widget, though
-that path does not promise a figure. `tab.interact` runs on the owner loop via the
+Qt-free plugin不依賴widget執行command，Done從已提交的session建立數值結果及
+具名圖。Frontend的preview不算結果圖。 `tab.interact` runs on the owner loop via the
 same `RunAnalyzeControlFacet` and session: reads project committed state and
 plugin-declared commands; writes validate each command's ParamSpec before its
 typed action. The View supplies an optional live PNG and `preview_active` as

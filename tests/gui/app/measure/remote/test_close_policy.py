@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKey,
     ArtifactKind,
     ArtifactSnapshot,
     SaveStatus,
@@ -23,6 +24,10 @@ def fx(qapp):
     fixture.stop()
 
 
+def _key(kind: ArtifactKind) -> ArtifactKey:
+    return ArtifactKey(kind, None if kind is ArtifactKind.DATA else "fit")
+
+
 @pytest.mark.parametrize("method", ["tab.close", "app.shutdown"])
 @pytest.mark.parametrize("kind", list(ArtifactKind))
 @pytest.mark.parametrize("status", [SaveStatus.NOT_SAVED, SaveStatus.UNSAVED_CHANGES])
@@ -33,7 +38,7 @@ def test_remote_close_requires_discard_for_each_unsaved_artifact(
     params = {"tab_id": tab_id} if method == "tab.close" else {}
     snapshot = fx.service.tab_control.get_tab_snapshot(tab_id)
     unsaved = replace(
-        snapshot, artifacts=(ArtifactSnapshot(kind, status, None, None, False),)
+        snapshot, artifacts=(ArtifactSnapshot(_key(kind), status, None, None, False),)
     )
     sock = open_client(fx.service.port)
     try:
@@ -45,8 +50,8 @@ def test_remote_close_requires_discard_for_each_unsaved_artifact(
             assert reply["error"]["reason"] == "unsaved"
             keys = {
                 ArtifactKind.DATA: "data",
-                ArtifactKind.ANALYSIS: "analysis",
-                ArtifactKind.POST_ANALYSIS: "post",
+                ArtifactKind.ANALYSIS: "analysis:fit",
+                ArtifactKind.POST_ANALYSIS: "post:fit",
             }
             assert reply["error"]["data"]["unsaved"] == [
                 {"tab": tab_id, "artifacts": [keys[kind]]}
@@ -107,7 +112,7 @@ def test_shutdown_collects_all_unsaved_tabs_and_checks_busy_first(fx):
         tab: replace(
             fx.service.tab_control.get_tab_snapshot(tab),
             artifacts=tuple(
-                ArtifactSnapshot(kind, status, None, None, False)
+                ArtifactSnapshot(_key(kind), status, None, None, False)
                 for kind, status in states
             ),
         )
@@ -144,7 +149,7 @@ def test_shutdown_collects_all_unsaved_tabs_and_checks_busy_first(fx):
             assert unsaved["error"]["reason"] == "unsaved"
             assert unsaved["error"]["data"]["unsaved"] == [
                 {"tab": first, "artifacts": ["data"]},
-                {"tab": second, "artifacts": ["analysis", "post"]},
+                {"tab": second, "artifacts": ["analysis:fit", "post:fit"]},
             ]
             fx.view.request_shutdown.assert_not_called()
             assert fx.ctrl.has_tab(first) and fx.ctrl.has_tab(second)

@@ -30,6 +30,7 @@ from zcu_tools.gui.cfg import (
     ReferenceSpec,
     ScalarSpec,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
@@ -71,20 +72,23 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
     data_path = PathResourceSnapshot(override=None, path="/tmp/data.hdf5")
     image = PathResourceSnapshot(override=None, path="/tmp/img.png")
     run_snap = RunPaneSnapshot(result=object(), source_path=None)
+    plots = Plots(NonPresentingHost())
+    plots.adopt("fit", Figure())
+    plots.finish()
     analysis_snap = AnalysisPaneSnapshot(
         params=MagicMock(),
         result=object(),
-        figure=Figure(),
+        figures=plots,
         writeback_items=(),
-        image_path=image,
+        image_paths={"fit": image},
         has_writeback_draft=False,
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=None,
         result=None,
-        figure=None,
+        figures=None,
         writeback_items=(),
-        image_path=image,
+        image_paths={},
         has_writeback_draft=False,
     )
     # cfg schema dummy
@@ -122,7 +126,7 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         post_analysis=post_snap,
         save=SavePaneSnapshot(data_path=data_path),
         paths=TabPathsSnapshot(
-            data=data_path, analysis_image=image, post_analysis_image=image
+            data=data_path, analysis_images={"fit": image}, post_analysis_images={}
         ),
     )
     return with_artifacts(snapshot)

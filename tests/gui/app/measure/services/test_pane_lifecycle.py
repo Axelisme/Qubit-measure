@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -12,6 +13,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SavePaths,
     SessionEnv,
 )
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import (
     AnalyzePermit,
@@ -30,6 +32,7 @@ from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -114,23 +117,33 @@ def test_snapshot_exposes_independent_panes_and_paths() -> None:
     state, tab_id, adapter, _ctx = _state()
     primary = object()
     post = object()
+    primary_plots = Plots(NonPresentingHost())
+    primary_plots.subplots("fit")
+    primary_plots.finish()
+    post_plots = Plots(NonPresentingHost())
+    post_plots.subplots("fit")
+    post_plots.finish()
     state.replace_analysis_pane(
         tab_id,
         result=primary,
-        figure="primary-figure",  # type: ignore[arg-type]
+        plots=primary_plots,
         params="primary-params",
         writeback_draft="primary-draft",
     )
     state.replace_post_analysis_pane(
         tab_id,
         result=post,
-        figure="post-figure",  # type: ignore[arg-type]
+        plots=post_plots,
         params="post-params",
         writeback_draft="post-draft",
     )
     state.update_tab_data_path_override(tab_id, "/custom/data.h5")
-    state.update_tab_analysis_image_path_override(tab_id, "/custom/a.png")
-    state.update_tab_post_analysis_image_path_override(tab_id, "/custom/p.png")
+    state.update_tab_image_path_override(
+        tab_id, ArtifactKey(ArtifactKind.ANALYSIS, "fit"), "/custom/a.png"
+    )
+    state.update_tab_image_path_override(
+        tab_id, ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"), "/custom/p.png"
+    )
 
     # Final contract: TabService composes pane-owned drafts via preview_draft.
     primary_draft = MagicMock()
@@ -155,9 +168,77 @@ def test_snapshot_exposes_independent_panes_and_paths() -> None:
     assert snapshot.post_analysis.writeback_items == ("post-item",)
     assert snapshot.paths is not None
     assert snapshot.paths.data.path == "/custom/data.h5"
-    assert snapshot.paths.analysis_image.path == "/custom/a.png"
-    assert snapshot.paths.post_analysis_image.path == "/custom/p.png"
+    assert snapshot.paths.analysis_images["fit"].path == "/custom/a.png"
+    assert snapshot.paths.post_analysis_images["fit"].path == "/custom/p.png"
     assert adapter.make_save_paths.call_count == 0
+
+
+def test_named_panes_project_paths_and_retire_original_collections() -> None:
+    state, tab_id, _adapter, _ctx = _state()
+    original = Plots(NonPresentingHost())
+    old_figure, _ = original.subplots("old")
+    original.finish()
+    state.replace_analysis_pane(tab_id, result="original", plots=original)
+    replacement = Plots(NonPresentingHost())
+    first, _ = replacement.subplots("fit")
+    second, _ = replacement.subplots("diagnostic")
+    replacement.finish()
+    retired = state.replace_analysis_pane(tab_id, result="updated", plots=replacement)
+    assert retired.plots == (original,)
+    retired.plots[0].release()
+    png = BytesIO()
+    old_figure.savefig(png, format="png")
+    assert png.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+
+    post = Plots(NonPresentingHost())
+    post_figure, _ = post.subplots("fit")
+    post.finish()
+    state.replace_post_analysis_pane(tab_id, result="post", plots=post)
+    fit = ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    diagnostic = ArtifactKey(ArtifactKind.ANALYSIS, "diagnostic")
+    post_fit = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
+    state.update_tab_image_path_override(tab_id, diagnostic, "/custom/diagnostic.png")
+    snapshot = TabService(state, MagicMock(), MagicMock()).get_snapshot(tab_id)
+    assert snapshot.analysis is not None and snapshot.analysis.figures is replacement
+    assert snapshot.post_analysis is not None and snapshot.post_analysis.figures is post
+    assert snapshot.analysis.figures is not None
+    assert snapshot.post_analysis.figures is not None
+    assert snapshot.analysis.figures["fit"] is first
+    assert snapshot.analysis.figures["diagnostic"] is second
+    assert snapshot.post_analysis.figures["fit"] is post_figure
+    assert snapshot.paths is not None
+    assert (
+        snapshot.paths.analysis_images["fit"].path == "/result/base__analysis__fit.png"
+    )
+    assert snapshot.paths.analysis_images["diagnostic"].path == "/custom/diagnostic.png"
+    assert (
+        snapshot.paths.post_analysis_images["fit"].path == "/result/base__post__fit.png"
+    )
+    assert [item.key for item in snapshot.artifacts] == [
+        ArtifactKey(ArtifactKind.DATA),
+        fit,
+        diagnostic,
+        post_fit,
+    ]
+
+    newer = Plots(NonPresentingHost())
+    newer.subplots("fit")
+    newer.finish()
+    detached = state.replace_analysis_pane(tab_id, result="newest", plots=newer)
+    assert detached.plots == (replacement, post)
+    assert state.get_tab(tab_id).post_analysis.plots is None
+    current = TabService(state, MagicMock(), MagicMock()).get_snapshot(tab_id)
+    assert current.paths is not None
+    assert tuple(current.paths.analysis_images) == ("fit",)
+    assert (
+        current.paths.analysis_images["fit"].path == "/result/base__analysis__fit.png"
+    )
+    assert [item.key for item in current.artifacts] == [
+        ArtifactKey(ArtifactKind.DATA),
+        fit,
+    ]
+    with pytest.raises(KeyError, match="No current image artifact"):
+        state.update_tab_image_path_override(tab_id, diagnostic, "stale.png")
 
 
 def test_primary_swap_returns_all_retired_dependents_and_invalidates_post() -> None:
@@ -166,33 +247,45 @@ def test_primary_swap_returns_all_retired_dependents_and_invalidates_post() -> N
     old_post = object()
     old_primary_draft = object()
     old_post_draft = object()
+    old_primary_plots = Plots(NonPresentingHost())
+    old_primary_plots.subplots("fit")
+    old_primary_plots.finish()
+    old_post_plots = Plots(NonPresentingHost())
+    old_post_plots.subplots("fit")
+    old_post_plots.finish()
+    new_plots = Plots(NonPresentingHost())
+    new_plots.subplots("fit")
+    new_plots.finish()
     state.replace_analysis_pane(
         tab_id,
         result=old_primary,
-        figure="old-primary",  # type: ignore[arg-type]
+        plots=old_primary_plots,
         writeback_draft=old_primary_draft,
     )
     state.replace_post_analysis_pane(
         tab_id,
         result=old_post,
-        figure="old-post",  # type: ignore[arg-type]
+        plots=old_post_plots,
         writeback_draft=old_post_draft,
     )
 
     retired = state.replace_analysis_pane(
         tab_id,
         result="new-primary",
-        figure="new-primary-figure",  # type: ignore[arg-type]
+        plots=new_plots,
         writeback_draft="new-primary-draft",
     )
 
     tab = state.get_tab(tab_id)
     assert retired.analysis.result is old_primary
+    assert retired.analysis.plots is old_primary_plots
     assert retired.analysis.writeback_draft is old_primary_draft
     assert retired.post_analysis.result is old_post
+    assert retired.post_analysis.plots is old_post_plots
     assert retired.post_analysis.writeback_draft is old_post_draft
     assert retired.writeback_drafts == (old_primary_draft, old_post_draft)
     assert tab.analysis.result == "new-primary"
+    assert tab.analysis.plots is new_plots
     assert tab.analysis.writeback_draft == "new-primary-draft"
     assert tab.post_analysis.result is None
     assert tab.post_analysis.writeback_draft is None
@@ -200,10 +293,10 @@ def test_primary_swap_returns_all_retired_dependents_and_invalidates_post() -> N
 
 def test_post_swap_does_not_replace_primary() -> None:
     state, tab_id, _adapter, _ctx = _state()
-    state.replace_analysis_pane(tab_id, result="primary", figure=None)
+    state.replace_analysis_pane(tab_id, result="primary", plots=None)
     primary_pane = state.get_tab(tab_id).analysis
 
-    state.replace_post_analysis_pane(tab_id, result="post", figure=None)
+    state.replace_post_analysis_pane(tab_id, result="post", plots=None)
 
     tab = state.get_tab(tab_id)
     assert tab.analysis is primary_pane
@@ -216,26 +309,30 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     old_primary_draft = _Draft(())
     old_post_draft = _Draft(())
     state.replace_analysis_pane(
-        tab_id, result="old-primary", figure=None, writeback_draft=old_primary_draft
+        tab_id, result="old-primary", plots=None, writeback_draft=old_primary_draft
     )
     state.replace_post_analysis_pane(
-        tab_id, result="old-post", figure=None, writeback_draft=old_post_draft
+        tab_id, result="old-post", plots=None, writeback_draft=old_post_draft
     )
     adapter.get_writeback_items.return_value = [MetaDictWriteback("new", "new", 1.0)]
     writeback = _Writeback()
     service, bg = _analyze_service(state, writeback)
-    service.start_analyze(AnalyzePermit(tab_id), "params")
+    plots = Plots(NonPresentingHost())
+    plots.subplots("fit")
+    service.start_analyze(AnalyzePermit(tab_id), "params", plots=plots)
 
     new_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     state.set_context(new_ctx)
     state.get_tab(tab_id).run.result = "changed-after-start"
-    result = MagicMock(figure=None)
+    result = object()
     bg.on_done(result)
 
     request = adapter.get_writeback_items.call_args.args[0]
     assert request.run_result == "run"
     assert request.ctx is ctx
     assert state.get_tab(tab_id).analysis.result is result
+    assert state.get_tab(tab_id).analysis.plots is plots
+    assert tuple(plots) == ("fit",)
     assert state.get_tab(tab_id).post_analysis.result is None
     assert old_primary_draft in writeback.torn_down
     assert old_post_draft in writeback.torn_down
@@ -244,14 +341,16 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
 def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
     state, tab_id, adapter, _ctx = _state()
     adapter.get_writeback_items.return_value = []
-    state.replace_analysis_pane(tab_id, result="old-primary", figure=None)
-    state.replace_post_analysis_pane(tab_id, result="old-post", figure=None)
+    state.replace_analysis_pane(tab_id, result="old-primary", plots=None)
+    state.replace_post_analysis_pane(tab_id, result="old-post", plots=None)
     writeback = _Writeback()
     writeback.fail_create = True
     service, bg = _analyze_service(state, writeback)
-    service.start_analyze(AnalyzePermit(tab_id), "params")
+    plots = Plots(NonPresentingHost())
+    plots.subplots("fit")
+    service.start_analyze(AnalyzePermit(tab_id), "params", plots=plots)
 
-    bg.on_done(MagicMock(figure=None))
+    bg.on_done(object())
 
     tab = state.get_tab(tab_id)
     assert tab.analysis.result == "old-primary"
@@ -264,22 +363,25 @@ def test_retired_teardown_failure_does_not_roll_back_committed_pane() -> None:
     old_primary_draft = _Draft(())
     old_post_draft = _Draft(())
     state.replace_analysis_pane(
-        tab_id, result="old-primary", figure=None, writeback_draft=old_primary_draft
+        tab_id, result="old-primary", plots=None, writeback_draft=old_primary_draft
     )
     state.replace_post_analysis_pane(
-        tab_id, result="old-post", figure=None, writeback_draft=old_post_draft
+        tab_id, result="old-post", plots=None, writeback_draft=old_post_draft
     )
     adapter.get_writeback_items.return_value = []
     writeback = _Writeback()
     writeback.fail_teardown = True
     service, bg = _analyze_service(state, writeback)
-    service.start_analyze(AnalyzePermit(tab_id), "params")
-    new_result = MagicMock(figure=None)
+    plots = Plots(NonPresentingHost())
+    plots.subplots("diagnostic")
+    service.start_analyze(AnalyzePermit(tab_id), "params", plots=plots)
+    new_result = object()
 
     bg.on_done(new_result)
 
     tab = state.get_tab(tab_id)
     assert tab.analysis.result is new_result
+    assert tab.analysis.plots is plots
     assert tab.analysis.writeback_draft is writeback.created[-1]
     assert tab.post_analysis.result is None
     assert tab.post_analysis.writeback_draft is None

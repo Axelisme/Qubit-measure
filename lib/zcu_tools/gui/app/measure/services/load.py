@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .guard import LoadPermit
+from .plot_lifecycle import release_retired_plots
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import RetiredPaneResources, State
@@ -176,3 +177,4 @@ class LoadService:
                 self._writeback.teardown_draft(draft)
             except Exception:
                 logger.exception("retired load draft teardown failed")
+        release_retired_plots(retired)

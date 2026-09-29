@@ -164,7 +164,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         TabSnapshot,
     )
@@ -181,16 +180,16 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     ana = AnalysisPaneSnapshot(
         params=None,
         result=object(),
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
     )
     post = PostAnalysisPaneSnapshot(
         params=None,
         result=None,
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
     )
     snap = TabSnapshot(
         adapter_name="fake",
@@ -234,7 +233,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities as Caps2
     from zcu_tools.gui.app.measure.adapter import AnalysisMode as AM2
     from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot as APS2
-    from zcu_tools.gui.app.measure.services.ports import PathResourceSnapshot as PRS2
     from zcu_tools.gui.app.measure.services.ports import (
         PostAnalysisPaneSnapshot as PAPS2,
     )
@@ -247,16 +245,16 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     ana2 = APS2(
         params=None,
         result=object(),
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PRS2(override=None, path=None),
+        image_paths={},
     )
     post2 = PAPS2(
         params=None,
         result=None,
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PRS2(override=None, path=None),
+        image_paths={},
     )
     snap2 = TS2(
         adapter_name="fake",

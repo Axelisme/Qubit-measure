@@ -165,7 +165,6 @@ def test_figure_runtime_error_escapes_handler_unchanged() -> None:
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         TabSnapshot,
     )
@@ -182,16 +181,16 @@ def test_figure_runtime_error_escapes_handler_unchanged() -> None:
     ana = AnalysisPaneSnapshot(
         params=None,
         result=object(),
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
     )
     post = PostAnalysisPaneSnapshot(
         params=None,
         result=None,
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
     )
     snap = TabSnapshot(
         adapter_name="fake",
@@ -231,7 +230,6 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities as Caps3
     from zcu_tools.gui.app.measure.adapter import AnalysisMode as AM3
     from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot as APS3
-    from zcu_tools.gui.app.measure.services.ports import PathResourceSnapshot as PRS3
     from zcu_tools.gui.app.measure.services.ports import (
         PostAnalysisPaneSnapshot as PAPS3,
     )
@@ -244,16 +242,16 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
     ana3 = APS3(
         params=None,
         result=object(),
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PRS3(override=None, path=None),
+        image_paths={},
     )
     post3 = PAPS3(
         params=None,
         result=None,
-        figure=None,
+        figures=None,
         writeback_items=tuple(),
-        image_path=PRS3(override=None, path=None),
+        image_paths={},
     )
     snap3 = TS3(
         adapter_name="fake",

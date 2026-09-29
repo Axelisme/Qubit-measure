@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — measure branch relocation
+**Last updated:** 2026-09-30 — 顯式Plots與T1遷移
 
 # measure experiment adapters
 
@@ -27,9 +27,12 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 - Reload experiments 會重建 concrete adapters 及 family helpers，但保留 `base.py` 與 `_support/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
-`run(req, raw_cfg)` 使用 Guard 已凍結的 resolved cfg，不重讀 live md/ml。
-`RunRequest` 只提供 SoC handles 與 detached device snapshot；Base assembler
-以此 snapshot 和 `ml=None` 建立 experiment cfg。自訂 builder 若委派 Base，
+已遷移adapter的`run(req, raw_cfg, *, plots)`使用Guard凍結的resolved cfg，
+`analyze(req, *, plots)`將圖寫入本次具名Plots，不把Figure塞入數值結果。
+T1已將GUI呼叫接到Notebook共用的無跨次狀態core；其餘adapter逐項遷移，
+舊簽名在過渡期可能報錯，framework不提供pyplot或簽名fallback。
+`RunRequest`只提供SoC handles與detached device snapshot；Base assembler
+以此snapshot和`ml=None`建立experiment cfg。自訂builder若委派Base，
 須宣告 `ExpCfg_cls`；domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。
 Analyze 與 writeback 保持各自的 context 契約。
 

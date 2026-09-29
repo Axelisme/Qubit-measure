@@ -59,6 +59,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -91,6 +92,10 @@ def _make_state(
         Session(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
     )
     return state, tab_id, adapter
+
+
+def _plots() -> Plots:
+    return Plots(NonPresentingHost())
 
 
 def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
@@ -217,7 +222,7 @@ def test_run_started_and_terminal_events_keep_operation_origin(
     )
 
     with svc._bus.origin(origin):  # type: ignore[attr-defined]
-        token = svc.start_run(_make_permit(state, tab_id, adapter))
+        token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
     assert bg.last_on_done is not None
     bg.last_on_done(object())
 
@@ -248,7 +253,7 @@ def test_start_run_acquires_lease_and_submits_to_bg():
     state, tab_id, adapter = _make_state()
     svc, gate, bg, _ = _make_run_service(state)
 
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # bg.submit was called (work captured in _FakeBg)
     assert bg.last_work is not None
@@ -269,13 +274,17 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     svc, gate, bg, _ = _make_run_service(state)
     result = object()
     adapter.run.return_value = result
+    plots = _plots()
 
-    svc.start_run(permit)
+    svc.start_run(permit, plots=plots)
     schema.value.fields["gain"] = DirectValue(0.75)
     bg.run_work()
 
-    adapter.run.assert_called_once_with(permit.request, {"gain": 0.25})
+    adapter.run.assert_called_once_with(permit.request, {"gain": 0.25}, plots=plots)
     assert state.get_tab(tab_id).run.result is result
+    # Run plots are view-only; the canonical run pane owns only the result.
+    assert state.get_tab(tab_id).analysis.plots is None
+    assert state.get_tab(tab_id).post_analysis.plots is None
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
 
@@ -286,7 +295,7 @@ def test_start_run_rejects_when_tab_busy():
     svc, gate, bg, _ = _make_run_service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
-        svc.start_run(_make_permit(state, tab_id, adapter))
+        svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
@@ -299,7 +308,7 @@ def test_start_run_releases_lease_when_submit_raises():
     svc, gate, bg, _ = _make_run_service(state, fail_submit=True)
 
     with pytest.raises(RuntimeError, match="worker boom"):
-        svc.start_run(_make_permit(state, tab_id, adapter))
+        svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert not gate.has_active(OperationKind.RUN)
     assert not state.is_tab_running(tab_id)
@@ -327,7 +336,7 @@ def _last_run_finished_payload(bus_emit: MagicMock):
 def test_run_finished_emits_outcome_finished():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # Trigger on_done without cancel → finished
     assert bg.last_on_done is not None
@@ -342,10 +351,37 @@ def test_run_finished_emits_outcome_finished():
     )
 
 
+@pytest.mark.parametrize("cancel_requested", [False, True])
+def test_result_commit_failure_settles_run_as_failed(
+    monkeypatch, cancel_requested: bool
+) -> None:
+    state, tab_id, adapter = _make_state()
+    svc, _gate, bg, handles = _make_run_service(state)
+    plots = _plots()
+    plots.subplots("trace")
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=plots)
+    monkeypatch.setattr(
+        state,
+        "update_tab_result",
+        MagicMock(side_effect=RuntimeError("commit refused")),
+    )
+    if cancel_requested:
+        assert svc.cancel_run()
+    assert bg.last_on_done is not None
+    bg.last_on_done(object())
+
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error == "commit refused"
+    assert svc.active_token is None
+    assert not state.is_tab_running(tab_id)
+    assert state.get_tab(tab_id).run.result is None
+
+
 def test_run_failed_emits_outcome_failed_with_message():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
@@ -358,7 +394,7 @@ def test_run_failed_emits_outcome_failed_with_message():
 def test_schedule_failure_reports_failed_not_cancelled():
     state, tab_id, adapter = _make_state()
 
-    def run_with_schedule_failure(*_args: Any) -> object:
+    def run_with_schedule_failure(*_args: Any, **_kwargs: Any) -> object:
         with Schedule(ProgramV2Cfg(), SignalBuffer((1,), dtype=np.float64)) as sched:
             _ = (
                 sched.prog_builder(
@@ -373,7 +409,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
     adapter.run.side_effect = run_with_schedule_failure
     svc, _gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_permit(state, tab_id, adapter))
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     bg.run_work()
 
@@ -391,7 +427,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
 def test_cancel_run_sets_operation_stop_event():
     state, tab_id, adapter = _make_state()
     svc, gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_permit(state, tab_id, adapter))
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert handles.poll(token) is None  # still pending before cancel
     svc.cancel_run()
@@ -406,7 +442,7 @@ def test_cancel_run_stops_experiment_setup_devices_before_first_device():
     cfg = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.1)
     GlobalDeviceManager.register_device("run-dev", dev)
 
-    def run_setup_devices(*_args: Any) -> object:
+    def run_setup_devices(*_args: Any, **_kwargs: Any) -> object:
         exp_cfg = ExpCfgModel(dev={"run-dev": cfg})
         setup_devices(exp_cfg, progress=False)
         return object()
@@ -414,7 +450,7 @@ def test_cancel_run_stops_experiment_setup_devices_before_first_device():
     try:
         adapter.run.side_effect = run_setup_devices
         svc, _gate, bg, handles = _make_run_service(state)
-        token = svc.start_run(_make_permit(state, tab_id, adapter))
+        token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
         svc.cancel_run()
         bg.run_work()
 
@@ -430,7 +466,7 @@ def test_cancel_run_stops_experiment_setup_devices_before_first_device():
 def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # Simulate: cancel sets stop_event, then worker returns partial result
     svc.cancel_run()
@@ -447,7 +483,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
 def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # Simulate: cancel + worker errors
     svc.cancel_run()
@@ -463,7 +499,7 @@ def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
 def test_bg_done_without_cancel_reports_finished():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
     result = object()
 
     assert bg.last_on_done is not None
@@ -477,7 +513,7 @@ def test_bg_done_without_cancel_reports_finished():
 def test_bg_done_after_cancel_reports_cancelled_with_partial():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     svc.cancel_run()  # sets the captured stop_event
     partial = object()
@@ -493,7 +529,7 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
     state, tab_id, adapter = _make_state()
     partial = object()
 
-    def run_after_retry_reset(*_args: Any) -> object:
+    def run_after_retry_reset(*_args: Any, **_kwargs: Any) -> object:
         stop = current_stop_signal()
         assert stop is not None
         stop.clear_stop()
@@ -501,7 +537,7 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
 
     adapter.run.side_effect = run_after_retry_reset
     svc, _gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_permit(state, tab_id, adapter))
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     svc.cancel_run()
     bg.run_work()
@@ -517,7 +553,7 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
 def test_bg_error_without_cancel_reports_failed():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
@@ -530,7 +566,7 @@ def test_bg_error_without_cancel_reports_failed():
 def test_bg_error_after_cancel_reports_cancelled_without_result():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     svc.cancel_run()
     assert bg.last_on_error is not None

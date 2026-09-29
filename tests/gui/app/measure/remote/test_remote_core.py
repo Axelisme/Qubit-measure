@@ -412,9 +412,10 @@ def test_run_start_then_running_tab_then_finishes(fx):
         assert tab_snapshot["interaction"]["has_run_result"] is True
         assert set(tab_snapshot["save_paths"]) == {
             "data_path",
-            "analysis_image_path",
-            "post_analysis_image_path",
+            "analysis_images",
+            "post_analysis_images",
         }
-        assert "image_path" not in tab_snapshot["save_paths"]
+        assert tab_snapshot["save_paths"]["analysis_images"] == {}
+        assert tab_snapshot["save_paths"]["post_analysis_images"] == {}
     finally:
         sock.close()

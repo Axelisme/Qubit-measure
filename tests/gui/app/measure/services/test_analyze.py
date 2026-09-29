@@ -11,11 +11,25 @@ Tests drive terminal paths by capturing bg.last_on_done / on_error.
 from __future__ import annotations
 
 from collections.abc import Callable
+from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from matplotlib.figure import Figure
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Result
+from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain.t1 import (
+    T1Adapter,
+    T1AnalyzeParams,
+    T1AnalyzeResult,
+)
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKey,
+    ArtifactKind,
+    SaveStatus,
+)
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -34,10 +48,15 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
+
+
+def _plots() -> Plots:
+    return Plots(NonPresentingHost())
 
 
 def _make_state(tab_id: str = "tab1") -> State:
@@ -64,6 +83,7 @@ class _FakeBg:
 
     def __init__(self, *, fail_submit: bool = False) -> None:
         self._fail_submit = fail_submit
+        self.last_work: Callable[[], Any] | None = None
         self.last_on_done: Callable[[Any], None] | None = None
         self.last_on_error: Callable[[Exception], None] | None = None
         self.submit_count = 0
@@ -79,6 +99,7 @@ class _FakeBg:
         if self._fail_submit:
             raise RuntimeError("submit boom")
         self.submit_count += 1
+        self.last_work = work
         self.last_on_done = on_done
         self.last_on_error = on_error
 
@@ -120,7 +141,9 @@ def test_start_analyze_submits_to_bg(qapp):
     bus = EventBus()
     svc, bg = _make_service(state, bus)
 
-    svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
+    svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
+    )
 
     assert bg.submit_count == 1
     assert state.get_tab("tab1").is_analyzing is True
@@ -133,17 +156,23 @@ def test_start_analyze_emits_interaction_event(qapp):
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
 
     svc, _ = _make_service(state, bus)
-    svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
+    svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
+    )
 
     assert received == [TabInteractionFact.PRIMARY_ANALYZE_STARTED]
 
 
 def test_start_analyze_submit_rejection_emits_restore_fact(qapp):
     state = _make_state()
-    old_figure = MagicMock()
-    old_post_figure = MagicMock()
-    state.get_tab("tab1").analysis.figure = old_figure
-    state.get_tab("tab1").post_analysis.figure = old_post_figure
+    old_plots = _plots()
+    old_plots.adopt("fit", Figure())
+    old_plots.finish()
+    old_post_plots = _plots()
+    old_post_plots.adopt("fit", Figure())
+    old_post_plots.finish()
+    state.update_tab_analyze("tab1", object(), old_plots)
+    state.update_tab_post_analyze("tab1", object(), old_post_plots)
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
@@ -151,35 +180,74 @@ def test_start_analyze_submit_rejection_emits_restore_fact(qapp):
 
     with pytest.raises(RuntimeError, match="submit boom"):
         svc.start_analyze(
-            AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+            AnalyzePermit(tab_id="tab1"),
+            analyze_params_instance=object(),
+            plots=_plots(),
         )
 
     assert received == [TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED]
-    assert state.get_tab("tab1").analysis.figure is old_figure
-    assert state.get_tab("tab1").post_analysis.figure is old_post_figure
+    assert state.get_tab("tab1").analysis.plots is old_plots
+    assert state.get_tab("tab1").post_analysis.plots is old_post_plots
     assert state.get_tab("tab1").is_analyzing is False
 
 
-def test_start_analyze_work_thunk_captures_figure_container(qapp):
-    # The figure_container is captured in the work thunk's closure via
-    # ``figure_ambient`` (ADR-0066). Verify submit receives a single thunk
-    # (no OffMainScopes arg).
+def test_start_analyze_passes_operation_plots_to_worker_adapter(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
-    container = MagicMock()
+    plots = _plots()
 
     svc.start_analyze(
-        AnalyzePermit(tab_id="tab1"),
-        analyze_params_instance=object(),
-        figure_container=container,
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=plots
     )
 
-    assert bg.submit_count == 1  # submitted, work is a closure with figure_container
+    assert bg.submit_count == 1
+    assert bg.last_work is not None
+    result = bg.last_work()
+    adapter = state.get_tab("tab1").adapter
+    adapter.analyze.assert_called_once()
+    assert adapter.analyze.call_args.kwargs == {"plots": plots}
+    assert result is adapter.analyze.return_value
 
 
 # ---------------------------------------------------------------------------
 # start_analyze — busy tab rejection
 # ---------------------------------------------------------------------------
+
+
+def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(qapp) -> None:
+    state = _make_state()
+    tab = state.get_tab("tab1")
+    tab.adapter = T1Adapter()
+    times = np.linspace(0, 100, 101)
+    signals = (0.2 + 0.8 * np.exp(-times / 20)).astype(np.complex128)
+    state.update_tab_result("tab1", T1Result(times, signals))
+    handles = OperationHandles()
+    service, bg = _make_service(state, EventBus(), handles=handles)
+    plots = _plots()
+    token = service.start_analyze(
+        AnalyzePermit(tab_id="tab1"), T1AnalyzeParams(skip=3), plots=plots
+    )
+    assert bg.last_work is not None and bg.last_on_done is not None
+    bg.last_on_done(bg.last_work())
+
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+    pane = state.get_tab("tab1").analysis
+    assert isinstance(pane.result, T1AnalyzeResult)
+    assert pane.result.t1 == pytest.approx(20, rel=0.01)
+    assert pane.plots is plots
+    assert tuple(plots) == ("fit",)
+    images = [
+        item
+        for item in state.get_artifact_snapshots("tab1")
+        if item.key == ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    ]
+    assert len(images) == 1 and images[0].status is SaveStatus.NOT_SAVED
+    assert images[0].is_saveable
+    output = BytesIO()
+    plots["fit"].savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+    plots.release()
 
 
 def test_start_analyze_rejects_busy_tab(qapp):
@@ -189,7 +257,9 @@ def test_start_analyze_rejects_busy_tab(qapp):
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
         svc.start_analyze(
-            AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+            AnalyzePermit(tab_id="tab1"),
+            analyze_params_instance=object(),
+            plots=_plots(),
         )
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
@@ -207,11 +277,10 @@ def test_on_analyze_finished_updates_state(qapp):
     svc, bg = _make_service(state, bus)
 
     token = svc.start_analyze(
-        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
     )
 
-    fake_result = MagicMock()
-    fake_result.figure = MagicMock()
+    fake_result = object()
 
     finished_signals: list = []
     bus.subscribe(
@@ -245,10 +314,11 @@ def test_on_analyze_finished_emits_interaction_event(qapp):
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, bg = _make_service(state, bus)
 
-    svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
+    svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
+    )
 
-    fake_result = MagicMock()
-    fake_result.figure = None
+    fake_result = object()
     assert bg.last_on_done is not None
     bg.last_on_done(fake_result)
 
@@ -277,11 +347,11 @@ def test_framework_session_drives_committed_result_and_one_terminal_operation(qa
         0,
         (),
         require_pick,
-        lambda position: MagicMock(position=position, figure=None),
+        lambda position: MagicMock(position=position),
     )
 
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
     )
     active = svc.get_interactive("tab1")
     assert active is not None and active.plugin is plugin
@@ -312,7 +382,7 @@ def test_unavailable_finish_keeps_session_active_and_cancel_discards_late_done(q
 
     plugin = PluginDefinition("pick", 0, (), require_pick, lambda position: MagicMock())
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
     )
     active = svc.get_interactive("tab1")
     assert active is not None
@@ -340,7 +410,7 @@ def test_result_build_failure_settles_failed_without_reopening_input(qapp):
 
     plugin = PluginDefinition("pick", 1, (), lambda position: None, fail_result)
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
     )
     active = svc.get_interactive("tab1")
     assert active is not None
@@ -356,8 +426,11 @@ def test_result_build_failure_settles_failed_without_reopening_input(qapp):
 
 def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     state = _make_state()
-    previous = MagicMock(figure=MagicMock())
-    state.update_tab_analyze("tab1", previous, previous.figure)
+    previous = MagicMock()
+    previous_plots = _plots()
+    previous_plots.adopt("fit", Figure())
+    previous_plots.finish()
+    state.update_tab_analyze("tab1", previous, previous_plots)
     handles = OperationHandles()
     bus = EventBus()
     svc, _ = _make_service(state, bus, handles=handles)
@@ -366,10 +439,10 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
         2,
         (),
         lambda _state: None,
-        lambda value: MagicMock(figure=None, value=value),
+        lambda value: MagicMock(value=value),
     )
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
     )
     active = svc.get_interactive("tab1")
     assert active is not None
@@ -382,7 +455,7 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
     assert state.get_tab("tab1").analysis.result is previous
-    assert state.get_tab("tab1").analysis.figure is previous.figure
+    assert state.get_tab("tab1").analysis.plots is previous_plots
     assert not state.get_tab("tab1").is_analyzing
     assert svc.get_interactive("tab1") is None
     with pytest.raises(FailedPreconditionError):
@@ -398,11 +471,15 @@ def test_concurrent_plugin_tabs_keep_independent_sessions_and_handles(qapp):
         0,
         (),
         lambda _state: None,
-        lambda position: MagicMock(position=position, figure=None),
+        lambda position: MagicMock(position=position),
     )
     owner = ManualOwnerScheduler()
-    first = svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, owner)
-    second = svc.start_plugin(AnalyzePermit(tab_id="tab2"), plugin, owner)
+    first = svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, owner, plots=_plots()
+    )
+    second = svc.start_plugin(
+        AnalyzePermit(tab_id="tab2"), plugin, owner, plots=_plots()
+    )
     tab1 = svc.get_interactive("tab1")
     tab2 = svc.get_interactive("tab2")
     assert tab1 is not None and tab2 is not None
@@ -429,7 +506,9 @@ def test_start_plugin_rejects_busy_tab(qapp):
     plugin = PluginDefinition("pick", 0, (), lambda _state: None, lambda state: state)
 
     with pytest.raises(FailedPreconditionError, match="busy"):
-        svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler())
+        svc.start_plugin(
+            AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+        )
     assert svc.get_interactive("tab1") is None
 
 
@@ -445,11 +524,11 @@ def test_interactive_start_and_finish_keep_captured_operation_origin(
         lambda payload, meta: observed.append((payload.fact, meta)),
     )
     plugin = PluginDefinition(
-        "pick", 2, (), lambda _state: None, lambda state: MagicMock(figure=None)
+        "pick", 2, (), lambda _state: None, lambda state: MagicMock()
     )
     with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
         token = svc.start_plugin(
-            AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+            AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
         )
     svc.finish_plugin("tab1")
 
@@ -475,10 +554,10 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):
     handles = OperationHandles()
     svc, _ = _make_service(state, bus, handles=handles)
     plugin = PluginDefinition(
-        "pick", 0, (), lambda _state: None, lambda state: MagicMock(figure=None)
+        "pick", 0, (), lambda _state: None, lambda state: MagicMock()
     )
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
     )
     assert state.get_tab("tab1").is_analyzing is True
 
@@ -521,7 +600,7 @@ def test_cancel_interactive_does_not_touch_fit_analyze(qapp):
 
     # A worker-backed FIT analyze is in flight (its callback will settle it later).
     token = svc.start_analyze(
-        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
     )
     assert bg.submit_count == 1
 
@@ -536,9 +615,11 @@ def test_cancel_interactive_is_idempotent(qapp):
     state = _make_state()
     svc, _ = _make_service(state, EventBus())
     plugin = PluginDefinition(
-        "pick", 0, (), lambda _state: None, lambda state: MagicMock(figure=None)
+        "pick", 0, (), lambda _state: None, lambda state: MagicMock()
     )
-    svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler())
+    svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+    )
 
     assert svc.cancel_interactive("tab1") is True
     # A second cancel finds nothing in flight -> graceful no-op.
@@ -551,9 +632,11 @@ def test_finish_after_cancel_interactive_is_inert(qapp):
     state = _make_state()
     svc, _ = _make_service(state, EventBus())
     plugin = PluginDefinition(
-        "pick", 0, (), lambda _state: None, lambda state: MagicMock(figure=None)
+        "pick", 0, (), lambda _state: None, lambda state: MagicMock()
     )
-    svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler())
+    svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler(), plots=_plots()
+    )
     svc.cancel_interactive("tab1")
     assert svc.finish_plugin("tab1") is False
     assert state.get_tab("tab1").analysis.result is None
@@ -571,7 +654,7 @@ def test_background_analyze_failure_resets_state(qapp):
     svc, bg = _make_service(state, bus)
 
     token = svc.start_analyze(
-        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
     )
     assert state.get_tab("tab1").is_analyzing is True
 
@@ -595,7 +678,9 @@ def test_background_analyze_failure_emits_interaction_event(qapp):
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, bg = _make_service(state, bus)
 
-    svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
+    svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
+    )
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("oops"))
 
@@ -616,13 +701,13 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     handles = svc._handles
 
     token1 = svc.start_analyze(
-        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
     )
     # Save tab1's on_done before tab2 overwrites it in the bg stub
     on_done_1 = bg.last_on_done
 
     token2 = svc.start_analyze(
-        AnalyzePermit(tab_id="tab2"), analyze_params_instance=object()
+        AnalyzePermit(tab_id="tab2"), analyze_params_instance=object(), plots=_plots()
     )
     on_done_2 = bg.last_on_done
 
@@ -633,8 +718,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert handles.live_count() == 2
 
     # Finish tab1 only: its token settles, tab2's stays live.
-    r1 = MagicMock()
-    r1.figure = None
+    r1 = object()
     assert on_done_1 is not None
     on_done_1(r1)
 
@@ -646,8 +730,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert handles.live_count() == 1
 
     # Finish tab2: its own (later) token settles.
-    r2 = MagicMock()
-    r2.figure = None
+    r2 = object()
     assert on_done_2 is not None
     on_done_2(r2)
 
@@ -668,7 +751,7 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):
     handles = svc._handles
 
     token = svc.start_analyze(
-        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=object(), plots=_plots()
     )
 
     # Make the service-side post-processing raise (writeback compute blows up).
@@ -680,8 +763,7 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):
     failed: list = []
     on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
-    result = MagicMock()
-    result.figure = None
+    result = object()
     # Must not raise out of the slot (would crash Qt).
     assert bg.last_on_done is not None
     bg.last_on_done(result)

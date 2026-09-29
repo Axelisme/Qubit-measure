@@ -33,7 +33,7 @@ def test_save_submits_once_and_reports_only_terminal_success(
     client.transport.replies["operation.await"] = {"ok": True, "result": terminal}
     arguments = {
         "tab": "tab-a",
-        "artifacts": ["analysis", "data"],
+        "artifacts": ["analysis:fit", "data"],
         "paths": {"data": str(tmp_path / "data.hdf5")},
         "comment": "sample",
     }

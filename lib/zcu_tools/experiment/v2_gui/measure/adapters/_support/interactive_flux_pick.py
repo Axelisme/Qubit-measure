@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from matplotlib.figure import Figure
-
 from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
 
 
@@ -19,4 +17,3 @@ class FluxPickResult(AnalyzeResultBase):
     flx_half: float
     flx_int: float
     flx_period: float
-    figure: Figure | None = None

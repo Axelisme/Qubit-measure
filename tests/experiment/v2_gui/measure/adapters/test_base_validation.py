@@ -273,7 +273,7 @@ def test_intermediate_base_implementation_counts_as_implemented() -> None:
         pass
 
     assert _ChildAdapter.capabilities.analysis is AnalysisMode.FIT
-    assert _ChildAdapter().analyze(object()).figure is None
+    assert isinstance(_ChildAdapter().analyze(object()), NoAnalysisResult)
 
 
 def test_intermediate_base_forbidden_implementation_is_detected() -> None:

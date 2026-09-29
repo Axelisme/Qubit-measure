@@ -25,6 +25,7 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -215,6 +216,7 @@ def test_adapter_run_rejects_invalid_calibration_before_device_io(
         adapter.run(
             RunRequest(soc=None, soccfg=None, device_snapshot={}),
             schema_to_raw_dict(schema, ctx.md, ctx.ml),
+            plots=Plots(NonPresentingHost()),
         )
 
 

@@ -9,7 +9,12 @@ import pytest
 from matplotlib import rc_context
 from matplotlib.figure import Figure
 from qtpy.QtCore import QEventLoop, QTimer
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.measure.adapter import SavePaths
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKey,
+    ArtifactKind,
+    SaveStatus,
+)
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
@@ -33,6 +38,7 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 def _make_figure() -> MagicMock:
@@ -41,6 +47,17 @@ def _make_figure() -> MagicMock:
     figure = MagicMock()
     figure.get_size_inches.return_value = (6.0, 4.0)
     return figure
+
+
+def _plots_for(figure: Figure | MagicMock, name: str = "fit") -> Plots:
+    plots = Plots(NonPresentingHost())
+    plots.adopt(name, figure)
+    plots.finish()
+    return plots
+
+
+def _key(kind: ArtifactKind) -> ArtifactKey:
+    return ArtifactKey(kind, "fit" if kind is not ArtifactKind.DATA else None)
 
 
 def _assert_saved_fixed_size(figure: MagicMock, image_path: str) -> None:
@@ -58,6 +75,7 @@ def _make_service(
 ) -> tuple[SaveService, State, MagicMock]:
     state = State(MagicMock())
     adapter = MagicMock()
+    adapter.make_save_paths.return_value = SavePaths("/db/data.h5", "/result/base.png")
     state.add_tab(
         "tab",
         Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock()),
@@ -119,13 +137,14 @@ def _await_artifact_completion(bus, handles, token):
 def batch_save_service(qapp):
     state = State(MagicMock())
     adapter = MagicMock()
+    adapter.make_save_paths.return_value = SavePaths("/db/data.h5", "/result/base.png")
     state.add_tab(
         "tab", Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock())
     )
     state.update_tab_result("tab", object())
     primary, post = _make_figure(), _make_figure()
-    state.update_tab_analyze("tab", object(), primary)
-    state.update_tab_post_analyze("tab", object(), post)
+    state.update_tab_analyze("tab", object(), _plots_for(primary))
+    state.update_tab_post_analyze("tab", object(), _plots_for(post))
     handles, bus, gate = OperationHandles(), EventBus(), MagicMock()
     background = BackgroundRunner()
     service = SaveService(
@@ -178,7 +197,8 @@ def test_save_artifacts_runs_in_order_and_preserves_partial_success(
 
     adapter.save.side_effect = data_export
     destinations = tuple(
-        SaveDestination(kind, str(tmp_path / f"{kind.value}.dat")) for kind in requested
+        SaveDestination(_key(kind), str(tmp_path / f"{kind.value}.dat"))
+        for kind in requested
     )
     observed = []
     submission = service.start_save_artifacts(SavePermit("tab"), destinations)
@@ -204,15 +224,77 @@ def test_save_artifacts_runs_in_order_and_preserves_partial_success(
     if ArtifactKind.DATA in requested and not fails:
         expected.append(ArtifactKind.DATA)
     assert calls == expected
-    artifacts = {a.kind: a for a in state.get_artifact_snapshots("tab")}
-    assert artifacts[ArtifactKind.ANALYSIS].last_saved_path == str(
+    artifacts = {a.key: a for a in state.get_artifact_snapshots("tab")}
+    assert artifacts[_key(ArtifactKind.ANALYSIS)].last_saved_path == str(
         tmp_path / "analysis.dat"
     )
-    assert artifacts[ArtifactKind.POST_ANALYSIS].last_saved_path == (
+    assert artifacts[_key(ArtifactKind.POST_ANALYSIS)].last_saved_path == (
         None if fails else str(tmp_path / "post_analysis.dat")
     )
-    assert (artifacts[ArtifactKind.DATA].last_saved_path is not None) == (
+    assert (artifacts[_key(ArtifactKind.DATA)].last_saved_path is not None) == (
         ArtifactKind.DATA in requested and not fails
+    )
+
+
+def test_two_named_images_preserve_partial_success_and_retry_only_failed_name(
+    batch_save_service, tmp_path: Path
+) -> None:
+    service, state, _adapter, _previous, _post, handles, bus, _gate = batch_save_service
+    first, second = _make_figure(), _make_figure()
+    plots = Plots(NonPresentingHost())
+    plots.adopt("fit", first)
+    plots.adopt("diagnostic", second)
+    plots.finish()
+    state.update_tab_analyze("tab", object(), plots)
+    fit_path = str(tmp_path / "fit.png")
+    diagnostic_path = str(tmp_path / "diagnostic.png")
+    first.savefig.side_effect = lambda path, **_kwargs: Path(path).write_bytes(b"fit")
+    second.savefig.side_effect = OSError("diagnostic export failed")
+    submission = service.start_save_artifacts(
+        SavePermit("tab"),
+        (
+            SaveDestination(ArtifactKey(ArtifactKind.ANALYSIS, "fit"), fit_path),
+            SaveDestination(
+                ArtifactKey(ArtifactKind.ANALYSIS, "diagnostic"), diagnostic_path
+            ),
+        ),
+    )
+    outcome = _await_artifact_completion(bus, handles, submission.operation_id)
+    assert outcome.status == "failed"
+    snapshots = {item.key: item for item in state.get_artifact_snapshots("tab")}
+    assert (
+        snapshots[ArtifactKey(ArtifactKind.ANALYSIS, "fit")].status is SaveStatus.SAVED
+    )
+    assert (
+        snapshots[ArtifactKey(ArtifactKind.ANALYSIS, "diagnostic")].status
+        is SaveStatus.NOT_SAVED
+    )
+    assert Path(fit_path).read_bytes() == b"fit"
+
+    second.savefig.side_effect = lambda path, **_kwargs: Path(path).write_bytes(
+        b"diagnostic"
+    )
+    retry = service.start_save_artifacts(
+        SavePermit("tab"),
+        (
+            SaveDestination(
+                ArtifactKey(ArtifactKind.ANALYSIS, "diagnostic"), diagnostic_path
+            ),
+        ),
+    )
+    assert (
+        _await_artifact_completion(bus, handles, retry.operation_id).status
+        == "finished"
+    )
+    first.savefig.assert_called_once()
+    assert second.savefig.call_count == 2
+    snapshots = {item.key: item for item in state.get_artifact_snapshots("tab")}
+    assert (
+        snapshots[ArtifactKey(ArtifactKind.ANALYSIS, "fit")].status is SaveStatus.SAVED
+    )
+    assert (
+        snapshots[ArtifactKey(ArtifactKind.ANALYSIS, "diagnostic")].status
+        is SaveStatus.SAVED
     )
 
 
@@ -225,12 +307,13 @@ def test_batch_rejects_colliding_actual_paths_before_writing(
     service, state, adapter, primary, post, handles, _bus, _gate = batch_save_service
     if data_collision:
         target = tmp_path / "shared_1.hdf5"
-        other = SaveDestination(ArtifactKind.DATA, str(tmp_path / "shared.hdf5"))
+        other = SaveDestination(_key(ArtifactKind.DATA), str(tmp_path / "shared.hdf5"))
     else:
         target = tmp_path / "shared.png"
         target.write_bytes(b"existing image")
         other = SaveDestination(
-            ArtifactKind.POST_ANALYSIS, str(tmp_path / "sub" / ".." / "shared.png")
+            _key(ArtifactKind.POST_ANALYSIS),
+            str(tmp_path / "sub" / ".." / "shared.png"),
         )
     before = state.get_artifact_snapshots("tab")
     with pytest.raises(FailedPreconditionError, match="distinct"):
@@ -238,7 +321,7 @@ def test_batch_rejects_colliding_actual_paths_before_writing(
             SavePermit("tab"),
             (
                 SaveDestination(
-                    ArtifactKind.ANALYSIS,
+                    _key(ArtifactKind.ANALYSIS),
                     str(target.with_suffix("") if extensionless else target),
                 ),
                 other,
@@ -263,12 +346,13 @@ def test_batch_extensionless_image_reports_existing_output(
     service, state, _adapter, _primary, _post, handles, bus, _gate = batch_save_service
     figure = Figure()
     figure.subplots().plot([0, 1], [1, 0])
-    state.update_tab_analyze("tab", object(), figure)
+    state.update_tab_analyze("tab", object(), _plots_for(figure))
     draft_path = str(tmp_path / "figure")
-    state.update_tab_analysis_image_path_override("tab", draft_path)
+    state.update_tab_image_path_override("tab", _key(ArtifactKind.ANALYSIS), draft_path)
     with rc_context({"savefig.format": image_format}):
         submission = service.start_save_artifacts(
-            SavePermit("tab"), (SaveDestination(ArtifactKind.ANALYSIS, draft_path),)
+            SavePermit("tab"),
+            (SaveDestination(_key(ArtifactKind.ANALYSIS), draft_path),),
         )
         outcome = _await_artifact_completion(bus, handles, submission.operation_id)
     assert outcome.status == "finished"
@@ -277,7 +361,7 @@ def test_batch_extensionless_image_reports_existing_output(
     artifact = next(
         a
         for a in state.get_artifact_snapshots("tab")
-        if a.kind is ArtifactKind.ANALYSIS
+        if a.key == _key(ArtifactKind.ANALYSIS)
     )
     assert artifact.last_saved_path == str(expected)
     assert artifact.status is SaveStatus.SAVED
@@ -295,14 +379,14 @@ def test_sync_image_service_records_actual_extensionless_path(
     figure = Figure()
     figure.subplots().plot([0, 1], [1, 0])
     if kind is ArtifactKind.ANALYSIS:
-        state.update_tab_analyze("tab", object(), figure)
-        save = service.save_image_sync
+        state.update_tab_analyze("tab", object(), _plots_for(figure))
     else:
-        state.update_tab_post_analyze("tab", object(), figure)
-        save = service.save_post_image_sync
+        state.update_tab_post_analyze("tab", object(), _plots_for(figure))
     with rc_context({"savefig.format": "png"}):
-        save(SavePermit("tab"), str(tmp_path / "figure"))
-    artifact = next(a for a in state.get_artifact_snapshots("tab") if a.kind is kind)
+        service.save_image_sync(SavePermit("tab"), _key(kind), str(tmp_path / "figure"))
+    artifact = next(
+        a for a in state.get_artifact_snapshots("tab") if a.key == _key(kind)
+    )
     expected = tmp_path / "figure.png"
     assert artifact.last_saved_path == str(expected)
     assert artifact.status is SaveStatus.SAVED
@@ -316,14 +400,16 @@ def test_batch_save_keeps_submission_signature_when_later_drafts_change(
     data_path = str(tmp_path / "data.hdf5")
     post_path = str(tmp_path / "post.png")
     state.update_tab_data_path_override("tab", data_path)
-    state.update_tab_post_analysis_image_path_override("tab", post_path)
+    state.update_tab_image_path_override(
+        "tab", _key(ArtifactKind.POST_ANALYSIS), post_path
+    )
     state.update_tab_comment("tab", "submitted")
 
     def export_primary(path, **_kwargs) -> None:
         Path(path).write_bytes(b"primary")
         state.update_tab_data_path_override("tab", str(tmp_path / "new-data.hdf5"))
-        state.update_tab_post_analysis_image_path_override(
-            "tab", str(tmp_path / "new-post.png")
+        state.update_tab_image_path_override(
+            "tab", _key(ArtifactKind.POST_ANALYSIS), str(tmp_path / "new-post.png")
         )
         state.update_tab_comment("tab", "edited during export")
         state.get_artifact_snapshots("tab")
@@ -334,21 +420,21 @@ def test_batch_save_keeps_submission_signature_when_later_drafts_change(
     submission = service.start_save_artifacts(
         SavePermit("tab"),
         (
-            SaveDestination(ArtifactKind.ANALYSIS, str(tmp_path / "primary.png")),
-            SaveDestination(ArtifactKind.POST_ANALYSIS, post_path),
-            SaveDestination(ArtifactKind.DATA, data_path),
+            SaveDestination(_key(ArtifactKind.ANALYSIS), str(tmp_path / "primary.png")),
+            SaveDestination(_key(ArtifactKind.POST_ANALYSIS), post_path),
+            SaveDestination(_key(ArtifactKind.DATA), data_path),
         ),
         comment="submitted",
     )
     outcome = _await_artifact_completion(bus, handles, submission.operation_id)
     assert outcome.status == "finished"
-    artifacts = {a.kind: a for a in state.get_artifact_snapshots("tab")}
-    assert artifacts[ArtifactKind.DATA].status is SaveStatus.UNSAVED_CHANGES
-    assert artifacts[ArtifactKind.POST_ANALYSIS].status is SaveStatus.SAVED
-    actual_data = artifacts[ArtifactKind.DATA].last_saved_path
+    artifacts = {a.key: a for a in state.get_artifact_snapshots("tab")}
+    assert artifacts[_key(ArtifactKind.DATA)].status is SaveStatus.UNSAVED_CHANGES
+    assert artifacts[_key(ArtifactKind.POST_ANALYSIS)].status is SaveStatus.SAVED
+    actual_data = artifacts[_key(ArtifactKind.DATA)].last_saved_path
     assert actual_data is not None
     assert Path(actual_data).read_text() == "submitted"
-    assert artifacts[ArtifactKind.POST_ANALYSIS].last_saved_path == post_path
+    assert artifacts[_key(ArtifactKind.POST_ANALYSIS)].last_saved_path == post_path
     assert Path(post_path).read_bytes() == b"post"
     assert not (tmp_path / "new-post.png").exists()
     assert not (tmp_path / "new-data.hdf5").exists()
@@ -364,7 +450,7 @@ def test_batch_exports_captured_post_figure_when_replaced_before_export(
 
     def export_primary(path, **_kwargs) -> None:
         Path(path).write_bytes(b"primary")
-        state.update_tab_post_analyze("tab", object(), replacement)
+        state.update_tab_post_analyze("tab", object(), _plots_for(replacement))
         state.get_artifact_snapshots("tab")
 
     primary.savefig.side_effect = export_primary
@@ -375,18 +461,18 @@ def test_batch_exports_captured_post_figure_when_replaced_before_export(
     submission = service.start_save_artifacts(
         SavePermit("tab"),
         (
-            SaveDestination(ArtifactKind.ANALYSIS, primary_path),
-            SaveDestination(ArtifactKind.POST_ANALYSIS, post_path),
+            SaveDestination(_key(ArtifactKind.ANALYSIS), primary_path),
+            SaveDestination(_key(ArtifactKind.POST_ANALYSIS), post_path),
         ),
     )
     outcome = _await_artifact_completion(bus, handles, submission.operation_id)
     assert outcome.status == "finished"
     assert Path(post_path).read_bytes() == b"old post"
     replacement.savefig.assert_not_called()
-    snapshots = {a.kind: a for a in state.get_artifact_snapshots("tab")}
-    assert snapshots[ArtifactKind.ANALYSIS].status is SaveStatus.SAVED
-    assert snapshots[ArtifactKind.POST_ANALYSIS].status is SaveStatus.NOT_SAVED
-    assert snapshots[ArtifactKind.POST_ANALYSIS].last_saved_path is None
+    snapshots = {a.key: a for a in state.get_artifact_snapshots("tab")}
+    assert snapshots[_key(ArtifactKind.ANALYSIS)].status is SaveStatus.SAVED
+    assert snapshots[_key(ArtifactKind.POST_ANALYSIS)].status is SaveStatus.NOT_SAVED
+    assert snapshots[_key(ArtifactKind.POST_ANALYSIS)].last_saved_path is None
 
 
 def test_batch_later_parent_failure_preserves_earlier_saved_image(
@@ -400,17 +486,17 @@ def test_batch_later_parent_failure_preserves_earlier_saved_image(
     submission = service.start_save_artifacts(
         SavePermit("tab"),
         (
-            SaveDestination(ArtifactKind.ANALYSIS, image_path),
-            SaveDestination(ArtifactKind.DATA, str(parent_file / "data.hdf5")),
+            SaveDestination(_key(ArtifactKind.ANALYSIS), image_path),
+            SaveDestination(_key(ArtifactKind.DATA), str(parent_file / "data.hdf5")),
         ),
     )
     outcome = _await_artifact_completion(bus, handles, submission.operation_id)
     assert outcome.status == "failed"
-    artifacts = {a.kind: a for a in state.get_artifact_snapshots("tab")}
-    assert artifacts[ArtifactKind.ANALYSIS].status is SaveStatus.SAVED
-    assert artifacts[ArtifactKind.ANALYSIS].last_saved_path == image_path
+    artifacts = {a.key: a for a in state.get_artifact_snapshots("tab")}
+    assert artifacts[_key(ArtifactKind.ANALYSIS)].status is SaveStatus.SAVED
+    assert artifacts[_key(ArtifactKind.ANALYSIS)].last_saved_path == image_path
     assert Path(image_path).read_bytes() == b"primary"
-    assert artifacts[ArtifactKind.DATA].last_saved_path is None
+    assert artifacts[_key(ArtifactKind.DATA)].last_saved_path is None
     assert not state.is_tab_busy("tab")
     adapter.save.assert_not_called()
     assert parent_file.read_text() == "keep"
@@ -430,7 +516,7 @@ def test_artifact_save_submit_failure_settles_before_completion(tmp_path: Path) 
     with pytest.raises(RuntimeError, match="cannot submit"):
         service.start_save_artifacts(
             SavePermit("tab"),
-            (SaveDestination(ArtifactKind.DATA, str(tmp_path / "data")),),
+            (SaveDestination(_key(ArtifactKind.DATA), str(tmp_path / "data")),),
         )
     assert observed == [("cannot submit", 0, False)]
     assert service.active_save_operations() == ()
@@ -590,10 +676,12 @@ def test_save_image_creates_parent_at_command_boundary(
 ) -> None:
     svc, state, _ = _make_service()
     figure = _make_figure()
-    state.get_tab("tab").analysis.figure = figure
+    state.update_tab_analyze("tab", object(), _plots_for(figure))
     image_path = tmp_path / "images" / "plot.png"
 
-    svc.save_image_sync(SavePermit(tab_id="tab"), str(image_path))
+    svc.save_image_sync(
+        SavePermit(tab_id="tab"), _key(ArtifactKind.ANALYSIS), str(image_path)
+    )
 
     assert image_path.parent.is_dir()
     _assert_saved_fixed_size(figure, str(image_path))
@@ -601,7 +689,7 @@ def test_save_image_creates_parent_at_command_boundary(
 
 @pytest.mark.parametrize(
     "entrypoint",
-    ("start_save_data", "save_image_sync", "save_post_image_sync"),
+    ("start_save_data", "analysis", "post_analysis"),
 )
 def test_save_entrypoints_reject_busy_tab_before_side_effects(
     qapp,
@@ -610,9 +698,9 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
 ) -> None:
     svc, state, bg = _make_service()
     figure = _make_figure()
-    tab = state.get_tab("tab")
-    tab.analysis.figure = figure
-    tab.post_analysis.figure = figure
+    state.update_tab_analyze("tab", object(), _plots_for(figure))
+    post_figure = _make_figure()
+    state.update_tab_post_analyze("tab", object(), _plots_for(post_figure))
     state.set_tab_analyzing("tab", True)
     permit = SavePermit(tab_id="tab")
     data_path = str(tmp_path / "data" / "measurement")
@@ -621,13 +709,17 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
     with pytest.raises(FailedPreconditionError, match="busy"):
         if entrypoint == "start_save_data":
             svc.start_save_data(permit, data_path)
-        elif entrypoint == "save_image_sync":
-            svc.save_image_sync(permit, image_path)
         else:
-            svc.save_post_image_sync(permit, image_path)
+            kind = (
+                ArtifactKind.ANALYSIS
+                if entrypoint == "analysis"
+                else ArtifactKind.POST_ANALYSIS
+            )
+            svc.save_image_sync(permit, _key(kind), image_path)
 
     bg.submit.assert_not_called()
     figure.savefig.assert_not_called()
+    post_figure.savefig.assert_not_called()
     assert not (tmp_path / "data").exists()
     assert not (tmp_path / "images").exists()
 
@@ -690,7 +782,7 @@ def test_data_save_terminal_reports_actual_path_without_rewriting_draft(
     bg.submit.call_args.kwargs["on_done"](None)
 
     saved = state.get_artifact_snapshots("tab")[0]
-    assert saved.kind is ArtifactKind.DATA
+    assert saved.key == _key(ArtifactKind.DATA)
     assert saved.status is SaveStatus.SAVED
     assert saved.default_path == draft_path
     assert saved.last_saved_path == actual_path
@@ -725,65 +817,63 @@ def test_image_save_success_and_failure_share_state_without_undoing_data(
 ) -> None:
     svc, state, _ = _make_service()
     figure = _make_figure()
-    state.update_tab_analyze("tab", object(), figure)
+    state.update_tab_analyze("tab", object(), _plots_for(figure))
     image_path = str(tmp_path / "analysis.png")
-    state.update_tab_analysis_image_path_override("tab", image_path)
+    state.update_tab_image_path_override("tab", _key(ArtifactKind.ANALYSIS), image_path)
 
-    svc.save_image_sync(SavePermit(tab_id="tab"), image_path)
+    svc.save_image_sync(
+        SavePermit(tab_id="tab"), _key(ArtifactKind.ANALYSIS), image_path
+    )
 
-    snapshots = {item.kind: item for item in state.get_artifact_snapshots("tab")}
-    assert snapshots[ArtifactKind.DATA].status is SaveStatus.NOT_SAVED
-    assert snapshots[ArtifactKind.ANALYSIS].status is SaveStatus.SAVED
-    assert snapshots[ArtifactKind.ANALYSIS].last_saved_path == image_path
+    snapshots = {item.key: item for item in state.get_artifact_snapshots("tab")}
+    assert snapshots[_key(ArtifactKind.DATA)].status is SaveStatus.NOT_SAVED
+    assert snapshots[_key(ArtifactKind.ANALYSIS)].status is SaveStatus.SAVED
+    assert snapshots[_key(ArtifactKind.ANALYSIS)].last_saved_path == image_path
 
     next_path = str(tmp_path / "next.png")
-    state.update_tab_analysis_image_path_override("tab", next_path)
+    state.update_tab_image_path_override("tab", _key(ArtifactKind.ANALYSIS), next_path)
     figure.savefig.side_effect = OSError("disk full")
     with pytest.raises(OSError, match="disk full"):
-        svc.save_image_sync(SavePermit(tab_id="tab"), next_path)
+        svc.save_image_sync(
+            SavePermit(tab_id="tab"), _key(ArtifactKind.ANALYSIS), next_path
+        )
 
-    after_failure = {item.kind: item for item in state.get_artifact_snapshots("tab")}
-    assert after_failure[ArtifactKind.ANALYSIS].status is SaveStatus.SAVED
-    assert after_failure[ArtifactKind.ANALYSIS].last_saved_path == image_path
-    assert after_failure[ArtifactKind.DATA].status is SaveStatus.NOT_SAVED
+    after_failure = {item.key: item for item in state.get_artifact_snapshots("tab")}
+    assert after_failure[_key(ArtifactKind.ANALYSIS)].status is SaveStatus.SAVED
+    assert after_failure[_key(ArtifactKind.ANALYSIS)].last_saved_path == image_path
+    assert after_failure[_key(ArtifactKind.DATA)].status is SaveStatus.NOT_SAVED
 
 
 @pytest.mark.parametrize("kind", [ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS])
-@pytest.mark.parametrize("replacement", ["result", "figure"])
 def test_image_save_history_survives_edits_but_not_replacement(
-    batch_save_service, tmp_path: Path, kind: ArtifactKind, replacement: str
+    batch_save_service, tmp_path: Path, kind: ArtifactKind
 ) -> None:
     service, state, *_ = batch_save_service
-    if kind is ArtifactKind.ANALYSIS:
-        publish = state.update_tab_analyze
-        set_path = state.update_tab_analysis_image_path_override
-        save = service.save_image_sync
-    else:
-        publish = state.update_tab_post_analyze
-        set_path = state.update_tab_post_analysis_image_path_override
-        save = service.save_post_image_sync
+    publish = (
+        state.update_tab_analyze
+        if kind is ArtifactKind.ANALYSIS
+        else state.update_tab_post_analyze
+    )
     result = object()
     figure = Figure()
     ax = figure.subplots()
     ax.plot([0, 1], [1, 0])
-    publish("tab", result, figure)
+    publish("tab", result, _plots_for(figure))
     path = str(tmp_path / "saved.png")
-    save(SavePermit("tab"), path)
+    service.save_image_sync(SavePermit("tab"), _key(kind), path)
     assert Path(path).stat().st_size > 0
 
     ax.set_title("edited after saving")
     ax.set_xlim(0, 2)
-    set_path("tab", str(tmp_path / "another.png"))
-    saved = next(a for a in state.get_artifact_snapshots("tab") if a.kind is kind)
+    state.update_tab_image_path_override(
+        "tab", _key(kind), str(tmp_path / "another.png")
+    )
+    saved = next(a for a in state.get_artifact_snapshots("tab") if a.key == _key(kind))
     assert saved.status is SaveStatus.SAVED
     assert saved.last_saved_path == path
 
-    publish(
-        "tab",
-        object() if replacement == "result" else result,
-        Figure() if replacement == "figure" else figure,
-    )
-    fresh = next(a for a in state.get_artifact_snapshots("tab") if a.kind is kind)
+    publish("tab", result, _plots_for(Figure()))
+    fresh = next(a for a in state.get_artifact_snapshots("tab") if a.key == _key(kind))
     assert fresh.status is SaveStatus.NOT_SAVED
     assert fresh.last_saved_path is None
     assert fresh.is_saveable
@@ -795,15 +885,14 @@ def test_first_failed_image_save_remains_unsaved(
 ) -> None:
     service, state, _adapter, primary, post, *_ = batch_save_service
     figure = primary if kind is ArtifactKind.ANALYSIS else post
-    save = (
-        service.save_image_sync
-        if kind is ArtifactKind.ANALYSIS
-        else service.save_post_image_sync
-    )
     figure.savefig.side_effect = OSError("disk full")
     with pytest.raises(OSError, match="disk full"):
-        save(SavePermit("tab"), str(tmp_path / "failed.png"))
-    snapshot = next(a for a in state.get_artifact_snapshots("tab") if a.kind is kind)
+        service.save_image_sync(
+            SavePermit("tab"), _key(kind), str(tmp_path / "failed.png")
+        )
+    snapshot = next(
+        a for a in state.get_artifact_snapshots("tab") if a.key == _key(kind)
+    )
     assert snapshot.status is SaveStatus.NOT_SAVED
     assert snapshot.last_saved_path is None
 
@@ -813,28 +902,24 @@ def test_image_save_completion_does_not_mark_replacement_saved(
     batch_save_service, tmp_path: Path, kind: ArtifactKind
 ) -> None:
     service, state, _adapter, primary, post, *_ = batch_save_service
-    if kind is ArtifactKind.ANALYSIS:
-        figure, publish, save = (
-            primary,
-            state.update_tab_analyze,
-            service.save_image_sync,
-        )
-    else:
-        figure, publish, save = (
-            post,
-            state.update_tab_post_analyze,
-            service.save_post_image_sync,
-        )
+    figure = primary if kind is ArtifactKind.ANALYSIS else post
+    publish = (
+        state.update_tab_analyze
+        if kind is ArtifactKind.ANALYSIS
+        else state.update_tab_post_analyze
+    )
 
     def export(path, **_kwargs) -> None:
         Path(path).write_bytes(b"old image")
-        publish("tab", object(), Figure())
+        publish("tab", object(), _plots_for(Figure()))
         state.get_artifact_snapshots("tab")
 
     figure.savefig.side_effect = export
     path = str(tmp_path / "old.png")
-    save(SavePermit("tab"), path)
+    service.save_image_sync(SavePermit("tab"), _key(kind), path)
     assert Path(path).read_bytes() == b"old image"
-    snapshot = next(a for a in state.get_artifact_snapshots("tab") if a.kind is kind)
+    snapshot = next(
+        a for a in state.get_artifact_snapshots("tab") if a.key == _key(kind)
+    )
     assert snapshot.status is SaveStatus.NOT_SAVED
     assert snapshot.last_saved_path is None

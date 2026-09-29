@@ -31,13 +31,13 @@ class _Cfg(ExpCfgModel):
 
 @dataclass(frozen=True)
 class _LoadedResult:
-    path: str
+    path: Path
 
 
 class _LoadExp:
-    last_path: ClassVar[str | None] = None
+    last_path: ClassVar[Path | None] = None
 
-    def load(self, filepath: str) -> _LoadedResult:
+    def load(self, filepath: Path) -> _LoadedResult:
         type(self).last_path = filepath
         return _LoadedResult(path=filepath)
 
@@ -57,7 +57,7 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedResult, NoAnalysisResult, NoAnalyzeP
 
 
 class _InvalidCanonicalExp:
-    def load(self, filepath: str) -> _LoadedResult:
+    def load(self, filepath: Path) -> _LoadedResult:
         raise ValueError(f"invalid canonical data: {filepath}")
 
 
@@ -86,7 +86,7 @@ class _InternalTypeErrorExp:
     def __init__(self) -> None:
         raise TypeError("constructor bug")
 
-    def load(self, filepath: str) -> _LoadedResult:
+    def load(self, filepath: Path) -> _LoadedResult:
         return _LoadedResult(path=filepath)
 
 
@@ -101,8 +101,8 @@ def _request(path: str = "/tmp/result.hdf5") -> LoadDataRequest:
 def test_base_adapter_load_calls_canonical_experiment_load() -> None:
     result = _LoadAdapter().load(_request("/tmp/canonical.hdf5"))
 
-    assert result == _LoadedResult(path="/tmp/canonical.hdf5")
-    assert _LoadExp.last_path == "/tmp/canonical.hdf5"
+    assert result == _LoadedResult(path=Path("/tmp/canonical.hdf5"))
+    assert _LoadExp.last_path == Path("/tmp/canonical.hdf5")
 
 
 def test_base_adapter_load_preserves_canonical_validation_error() -> None:
