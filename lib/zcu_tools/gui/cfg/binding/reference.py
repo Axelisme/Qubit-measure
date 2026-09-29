@@ -240,8 +240,19 @@ class ReferenceField(CfgField):
         ):
             if kind is None or kind == self.spec.kind:
                 new_keys = self._load_available_keys()
-                if new_keys != self._available_keys:
-                    self._available_keys = new_keys
+                changed = new_keys != self._available_keys
+                self._available_keys = new_keys
+                if (
+                    self._binding_state is LibraryBindingState.MODIFIED
+                    and self._chosen_key not in new_keys
+                    and self.sub_field is not None
+                ):
+                    self._chosen_key = make_custom_reference_key(
+                        self.sub_field.spec.label
+                    )
+                    self._binding_state = LibraryBindingState.CUSTOM
+                    changed = True
+                if changed:
                     self.on_change.emit()
             if self.sub_field:
                 self.sub_field.refresh_references(kind)
