@@ -7,6 +7,22 @@ import pytest
 import zcu_tools.gui.app.measure.cfg_binding as binding_module
 from zcu_tools.experiment.cfg_editing import ProgramShape, UnknownProgramShapeError
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    ScalarSpec,
+)
+from zcu_tools.gui.cfg.resource import (
+    CfgEdit,
+    CfgPreconditionError,
+    CfgPreconditionReason,
+    CfgResource,
+    CfgRevision,
+    SourceRevision,
+)
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -30,6 +46,89 @@ def _pulse() -> dict[str, object]:
         "pre_delay": 0.0,
         "post_delay": 0.0,
     }
+
+
+def test_measure_snapshot_detaches_metadata_options_and_captures() -> None:
+    bindings, host = _bindings()
+    md = host.get_current_md.return_value
+    md.update(offset=2.0)
+    captures = {"device.flux.value": 0.2}
+    basis = (
+        SourceRevision("context", CfgRevision(3)),
+        SourceRevision("device:flux", CfgRevision(4)),
+    )
+    frozen = bindings.snapshot(basis, captured_values=captures)
+    md.update(offset=9.0)
+    captures["device.flux.value"] = 0.7
+    host.list_device_names.return_value.append("later")
+    host.list_arb_waveforms.return_value.clear()
+
+    assert frozen.source_basis == basis
+    assert frozen.evaluate_expression("offset * 2") == 4.0
+    assert frozen.read_capture("offset") == 2.0
+    assert frozen.read_capture("device.flux.value") == 0.2
+    assert frozen.provide_options("devices") == ("flux",)
+    assert frozen.provide_options("arb_waveforms") == ("asset",)
+    host.read_value_source.assert_not_called()
+    newer = bindings.snapshot(basis, captured_values=captures)
+    assert newer.evaluate_expression("offset * 2") == 18.0
+    assert newer.read_capture("device.flux.value") == 0.7
+
+
+def test_measure_snapshot_missing_capture_is_precondition_failure() -> None:
+    bindings, host = _bindings()
+    frozen = bindings.snapshot((), captured_values={})
+    for name in ("missing", "device.flux.value"):
+        with pytest.raises(CfgPreconditionError) as caught:
+            frozen.read_capture(name)
+        assert caught.value.reason is CfgPreconditionReason.CAPTURE_UNAVAILABLE
+    host.read_value_source.assert_not_called()
+    with pytest.raises(RuntimeError, match="Unsupported measure cfg option source"):
+        frozen.provide_options("unknown")
+
+
+def test_measure_snapshot_catalog_isolated_from_live_and_returned_values() -> None:
+    ml = ModuleLibrary()
+    ml.modules["drive"] = cast(Any, _pulse())
+    bindings, _ = _bindings(ml)
+    frozen = bindings.snapshot((), captured_values={})
+    ml.modules.clear()
+    assert frozen.references.keys("module", frozenset({"Pulse"})) == ("drive",)
+    first = frozen.references.resolve("module", "drive")
+    assert first is not None and first.value is not None
+    original = first.value.fields["freq"]
+    assert original == DirectValue(5000.0)
+    first.value.fields["freq"] = DirectValue(1.0)
+    again = frozen.references.resolve("module", "drive")
+    assert again is not None and again.value is not None
+    assert again.value.fields["freq"] == original
+    assert bindings.resolve("module", "drive") is None
+
+
+def test_measure_resource_preserves_capture_and_refreshes_dynamic_metadata() -> None:
+    bindings, host = _bindings()
+    md = host.get_current_md.return_value
+    md.update(offset=2.0)
+    captures = {"device.flux.value": 0.2}
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
+        CfgSectionValue({"value": DirectValue(0.0)}),
+    )
+    resource = CfgResource(
+        lambda: schema,
+        resolution=lambda: bindings.snapshot((), captured_values=captures),
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    changed = resource.edit(
+        resource.observe().ref.revision,
+        (CfgEdit(("value",), EvalValue("$device.flux.value + offset")),),
+    )
+    assert resource.accept(changed.ref.revision).values["value"] == pytest.approx(2.2)
+    captures["device.flux.value"] = 0.7
+    md.update(offset=5.0)
+    refreshed = resource.refresh(changed.ref.revision)
+    assert resource.accept(refreshed.ref.revision).values["value"] == pytest.approx(5.2)
+    host.read_value_source.assert_not_called()
 
 
 def test_measure_option_provider_owns_device_and_arb_catalogs() -> None:

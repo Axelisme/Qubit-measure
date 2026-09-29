@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from typing import Protocol, cast
 
 from zcu_tools.experiment.cfg_editing import ProgramCfgKind, program_shape_for_input
@@ -11,7 +12,13 @@ from zcu_tools.gui.cfg import (
     DirectValue,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
-from zcu_tools.gui.session.expression import evaluate_scalar_expr
+from zcu_tools.gui.cfg.resource import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+    CfgResolution,
+    SourceBasis,
+)
+from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,
 )
@@ -51,6 +58,56 @@ class MeasureCfgBindings:
     def __init__(self, host: MeasureCfgBindingHost) -> None:
         self._host = host
 
+    def snapshot(
+        self,
+        source_basis: SourceBasis,
+        *,
+        captured_values: Mapping[str, object],
+    ) -> CfgResolution:
+        """Freeze published local data on the owner sequence, never read hardware.
+
+        The caller supplies matching provenance and cached dotted capture values.
+        Bare capture names use the same metadata snapshot as dynamic expressions.
+        No live provider is retained by the returned resolution.
+        """
+        md = self._host.get_current_md().clone(readonly=True)
+        references = _SnapshotReferences(self._host.get_current_ml().clone())
+        options = {
+            _DEVICES_SOURCE: tuple(self._host.list_device_names()),
+            _ARB_WAVEFORMS_SOURCE: tuple(self._host.list_arb_waveforms()),
+        }
+        captures = deepcopy(dict(captured_values))
+        metadata = dict(md.items())
+
+        def evaluate(expression: str) -> int | float | complex:
+            return evaluate_scalar_expr(expression, md)
+
+        def provide_options(source_id: str) -> Sequence[object]:
+            if source_id not in options:
+                raise RuntimeError(
+                    f"Unsupported measure cfg option source {source_id!r}"
+                )
+            return options[source_id]
+
+        def read_capture(name: str) -> object:
+            if "." not in name and name in metadata:
+                return deepcopy(metadata[name])
+            if "." in name and name in captures:
+                return deepcopy(captures[name])
+            raise CfgPreconditionError(
+                CfgPreconditionReason.CAPTURE_UNAVAILABLE,
+                f"Capture source {name!r} is unavailable",
+            )
+
+        return CfgResolution(
+            source_basis,
+            evaluate,
+            provide_options,
+            references,
+            read_capture,
+            validate_scalar_expr,
+        )
+
     def new_draft(self, schema: CfgSchema) -> CfgDraft:
         return CfgDraft(
             schema,
@@ -70,22 +127,10 @@ class MeasureCfgBindings:
         raise RuntimeError(f"Unsupported measure cfg option source {source_id!r}")
 
     def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
-        store, catalog_kind = self._store(kind)
-        compatible: list[str] = []
-        for key, value in store.items():
-            shape = program_shape_for_input(catalog_kind, value)
-            if shape.label in allowed_labels:
-                compatible.append(key)
-        return tuple(sorted(compatible))
+        return _reference_keys(self._host.get_current_ml(), kind, allowed_labels)
 
     def resolve(self, kind: str, key: str) -> ResolvedReference | None:
-        store, _ = self._store(kind)
-        if key not in store:
-            return None
-        value = store[key]
-        converter = self._converter(kind)
-        spec, section_value = converter(value)
-        return ResolvedReference(label=spec.label, value=section_value)
+        return _resolve_reference(self._host.get_current_ml(), kind, key)
 
     def resolve_value_ref(self, ref: ValueRef, target_type: type) -> DirectValue:
         try:
@@ -105,18 +150,50 @@ class MeasureCfgBindings:
         _, value = self._host.read_value_source(ref.key, target_type_name)
         return DirectValue(value)
 
-    def _store(self, kind: str) -> tuple[Mapping[str, object], ProgramCfgKind]:
-        ml = self._host.get_current_ml()
-        if kind == "module":
-            return ml.modules, "module"
-        if kind == "waveform":
-            return ml.waveforms, "waveform"
-        raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
 
-    @staticmethod
-    def _converter(kind: str) -> _ReferenceConverter:
-        if kind == "module":
-            return cast(_ReferenceConverter, module_cfg_to_value)
-        if kind == "waveform":
-            return cast(_ReferenceConverter, waveform_cfg_to_value)
-        raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
+class _SnapshotReferences:
+    def __init__(self, library: ModuleLibrary) -> None:
+        self._library = library
+
+    def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
+        return _reference_keys(self._library, kind, allowed_labels)
+
+    def resolve(self, kind: str, key: str) -> ResolvedReference | None:
+        return _resolve_reference(self._library, kind, key)
+
+
+def _reference_store(
+    library: ModuleLibrary, kind: str
+) -> tuple[Mapping[str, object], ProgramCfgKind]:
+    if kind == "module":
+        return library.modules, "module"
+    if kind == "waveform":
+        return library.waveforms, "waveform"
+    raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
+
+
+def _reference_keys(
+    library: ModuleLibrary, kind: str, allowed_labels: frozenset[str]
+) -> tuple[str, ...]:
+    store, catalog_kind = _reference_store(library, kind)
+    return tuple(
+        sorted(
+            key
+            for key, value in store.items()
+            if program_shape_for_input(catalog_kind, value).label in allowed_labels
+        )
+    )
+
+
+def _resolve_reference(
+    library: ModuleLibrary, kind: str, key: str
+) -> ResolvedReference | None:
+    store, _ = _reference_store(library, kind)
+    if key not in store:
+        return None
+    converter = cast(
+        _ReferenceConverter,
+        module_cfg_to_value if kind == "module" else waveform_cfg_to_value,
+    )
+    spec, value = converter(deepcopy(store[key]))
+    return ResolvedReference(label=spec.label, value=value)

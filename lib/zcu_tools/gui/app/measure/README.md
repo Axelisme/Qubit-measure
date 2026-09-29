@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-29 — Setup 開啟入口與 project settings 名稱
+**Last updated:** 2026-09-30 — 固定 cfg source snapshot
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -426,6 +426,8 @@ factory組成三個窄ports；adapter package不import或forward shared cfg publ
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
+`MeasureCfgBindings.snapshot` 將 metadata、library 與 options 複製成一次命令使用的固定 view；bare capture 使用同一 metadata，dotted capture 只讀 owner 注入的已發布快取值。Owner 負責配對 source basis，snapshot 不保留 live provider 或讀取硬體。這個接縫已建立，tab resource 接線尚未完成。
+
 `MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
 dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些
 app-local policy。device selector是required string `ScalarSpec`，wire value維持`DirectValue(str)`。
