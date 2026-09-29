@@ -73,37 +73,56 @@ Notebook run／load 正常返回後更新 last_result 並清空目前分析；�
 - 不呈現仍建圖，保留實作一致性與保存能力，接受建圖及 artist 更新成本。
 - 不以單一同步方法統一互動 session；通用繪圖不保證自動提供互動輸入。
 
-## 七項待落實接縫
+## 七項核准政策與待落實接縫
 
-| 編號 | 缺口 | 方案需回答 |
-| --- | --- | --- |
-| G1 | 明確 GUI factory | 如何接入 canvas，如何序列化 worker artist 修改與 GUI draw，而不依賴 ambient scope |
-| G2 | 圖形生命週期 | 最後 refresh、Notebook 自動顯示、失敗清理及返回後保存 |
-| G3 | 名稱與接管 | 同名、同圖多名、跨活躍 owner adopt 的拒絕／轉移規則 |
-| G4 | 多圖保存 | 安全命名、集合版本、部分失敗與重試，不假稱跨檔原子提交 |
-| G5 | 晚到結果 | 來源 generation／request identity 如何防止舊 session 或 post 覆寫目前分析 |
-| G6 | 無互動前端 | 無呈現時如何明確拒絕互動啟動，或接受明確 selection，不以 seed 偽造完成 |
-| G7 | 未遷移 adapters | 單圖與舊核心簽名如何在明確接縫轉換，不引入探測 fallback |
+下列政策已核准，但尚未實作。末節列出精確接線與驗證義務，不能將政策核准視為執行期保證。
 
-### 調查方案，尚待細節確認
+### G1：一般圖與 liveplot
 
-G1 建議將一般圖與 liveplot 分開接線。一般 Figure 由 worker 獨占建立與修改，先具名登記，完成後才在 GUI owner attach。Liveplot 由 GUI owner 持有 artists，worker 的 typed update 傳遞獨立資料，由 owner 執行共用 segment 更新與 draw。這不要求實驗寫前端分支，但 active liveplot 不保證 worker 任意直接修改原生 artists 安全。若必須支援任意 mutation，需評估 worker-owned Agg frame 等不同呈現方案，不能只加 draw lock 就宣稱解決。
+一般 subplots 立即建立並具名登記，GUI 於函數完成後呈現。Liveplot 立即呈現，worker 透過 typed update 傳遞資料，GUI owner 更新 artists。Worker 不任意直接修改 active live Figure／Axes。實驗不需寫前端分支，也不能以 draw lock 取代這項執行緒契約。
 
-G2 建議停止 producer、處理已接受的最後 refresh、封存圖集合、釋放呈現資源分開。取消請求不立即封存；既有 partial 正常返回仍可呈現最後資料。封存後保留的 Figure 不由下一次操作清空。Notebook 以明確 canvas／display 避開 pyplot 的自動顯示清單；不呈現使用非互動 canvas。close 是否影響 widget 與保存依 backend 而定，不全面禁止 close，也不使用全域 close("all") 清理別人的圖。外部 Figure 的 adopt 需處理原 manager，不能承諾撤回已顯示內容。
+### G2：圖形生命週期
 
-G3 建議一名一圖：同名同物件重複 adopt 等冪，同名異物件及同物件異名拒絕；跨 owner 不偷移 canvas。所有檢查在 attach 前完成。第一版不新增 transfer 或 alias 入口；舊圖可由原集合保存，跨操作呈現可由資料重畫。這些是待凍結的名稱／所有權政策。
+停止 producer、最後有效 refresh、保留 Figure 與釋放呈現資源分開處理。取消請求不立即銷毀圖，既有 partial 正常返回仍可呈現最後資料。新操作不關閉使用者持有的舊圖。
 
-G4 建議以 stage 與圖名形成 ArtifactKey，逐項記錄 captured generation／path 的保存狀態。SaveService 固定本次集合、Figure 參照與目的地，沿 owner-thread export 接縫保存；前項成功、後項失敗時保留成功項，不宣稱整組已保存。重試應能只選未完成項，避免重送已成功 DATA 而重新產生路徑。命名建議一律包含 stage 與圖名，並在 I/O 前驗證安全路徑與名稱碰撞；確切格式及是否將一般 Save All 改為 dirty-only 仍待確認。不承諾跨檔原子保存，不把單圖 Save 推定為覆蓋原始資料的授權。
+Notebook backend adapter 處理顯示與 close，避免 cell 結束重複顯示，並提供明確釋放呈現資源的方式。close 對 widget 與保存的影響需依 backend 核對，不使用全域 close("all") 清理別人的圖。外部 Figure 的 adopt 不能撤回已發生的顯示副作用。
 
-G5 的候選方案沿用 GUI 的 token／版本及 owner-loop；Notebook 以局部 generation 記錄接受資格。舊控制物件可保存自己的最終結果，但不回寫新的目前分析。是否禁止重疊操作仍需凍結。
+### G3：名稱與接管
 
-G6 的候選方案由前端在互動啟動前檢查能力，無前端則拒絕；純領域 finalization 可以接受明確 selection。這不新增無頭互動 workflow，也不把 display=False 當作自動 Done。
+操作內一名一圖。同名同 Figure 重複 adopt 等冪，同名異圖及同圖異名拒絕。已由其他操作持有的 Figure 拒絕接管，不偷移 canvas。第一版不提供 transfer 或 alias。舊圖由原集合保存，跨操作重畫使用資料。
 
-G7 建議 GUI application 統一使用純資料結果與 request／session 所持有的 plots。未遷移 FIT adapters 在自身分析方法中明確 adopt 原核心返回的圖；兩個 interactive adapters 的共同 plugin／frontend 接線一併轉成 session-owned 圖集合。三個新核心的 concrete GUI adapters 明確轉接 run／save／load，不探測 BaseAdapter 的新舊簽名，也不遷移其他核心。不要新增 extract_legacy_figures 作為永久第二套輸出協議。
+### G4：多圖保存
+
+保存狀態逐圖追蹤，以 stage 與圖名命名，單圖也遵守相同規則。保存前固定本次集合、版本與目的地，在 I/O 前檢查安全路徑與名稱碰撞。
+
+部分失敗保留成功項，不宣稱整組已保存，也不承諾跨檔原子保存。Save All 只保存未保存或 dirty 項，Retry 只重試未完成項。明確再次匯出另行表達，retry 不構成覆寫原始資料的授權。
+
+### G5：晚到結果
+
+Notebook 不新增 generation／request identity 的發布限制。較早啟動的互動或分析較晚完成時，允許覆蓋目前分析，操作順序由使用者負責。該次數值、來源 Result、實際 options 與圖集合仍須成組發布，不能混用不同操作的資料。
+
+既有 GUI busy、operation token 與已取消 session 的生命週期規則不變。這項裁決不重新定義 run 中斷，也不刪除 GUI 的既有保護。
+
+### G6：Notebook 互動前端
+
+Notebook 互動分析直接使用 Notebook widget，不增加前端可用性 preflight 或 backend 偵測。建立或使用 widget 的實際錯誤正常傳遞，不自動降級到 inline、無頭分析或自動 Done。
+
+同步分析的不呈現繪圖模式維持不變。它不是無頭互動工作流。
+
+### G7：未遷移 adapters
+
+GUI application 統一使用純數值結果與 plots。未遷移 FIT adapters 明確 adopt 原核心返回的圖；兩個 interactive adapters 的共同 plugin／frontend 接線一併轉成 session-owned 圖集合。三個新核心的 concrete GUI adapters 明確轉接 run／save／load，不探測新舊簽名，也不遷移其他核心。不新增反射或永久雙協議 fallback。
 
 目前 catalog 為 46 項，其中 41 FIT、2 INTERACTIVE、3 NONE。三個指定核心對應 3 項 adapter；剩餘 39 FIT 與 1 INTERACTIVE 仍需必要的 GUI 圖形接線，3 NONE 需核對共用型別。這是共用 GUI 多圖的影響面，不把 twotone/flux_dep 誤列為 onetone 的第二個核心。
 
-上述細節為調查方案，不是已生效保證。現有 Notebook close 與 GUI bridge 限制仍見 [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 和 [GUI plotting](../../../lib/zcu_tools/gui/plotting/README.md)。
+## 實作前仍需細化
+
+- GUI 多圖檔名的精確格式、State／SaveService／截圖接線，以及未遷移 adapter 的明確轉換位置。
+- 完成後取圖、保留參照與釋放呈現的具體介面，以及名稱或接管衝突拒絕後的 owner 完整性。
+- Notebook inline／widget 的顯示與 close、GUI worker／canvas 更新、最後 refresh 及失敗收尾。
+- GE primary 替換後的 post 關係，以及 Notebook 互動完成後取得結果的方法名。細化不得新增 G5 已排除的 Notebook 晚到發布限制。
+
+現有 Notebook close 與 GUI bridge 限制仍見 [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 和 [GUI plotting](../../../lib/zcu_tools/gui/plotting/README.md)。本草案不聲稱已完成執行期驗證。
 
 ## 轉正為現況的條件
 
