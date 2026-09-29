@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.utils.process import find_rotate_angle
 
 from .base import GE_FitResult, fitting_ge_and_plot
@@ -21,6 +21,6 @@ def get_rotate_angle(
 
 
 def fit_ge_by_pca(
-    signals: NDArray[np.complex128], **kwargs
-) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
-    return fitting_ge_and_plot(signals, get_rotate_angle, **kwargs)
+    signals: NDArray[np.complex128], *, plots: Plots, **kwargs
+) -> tuple[float, NDArray[np.float64], GE_FitResult]:
+    return fitting_ge_and_plot(signals, get_rotate_angle, plots=plots, **kwargs)

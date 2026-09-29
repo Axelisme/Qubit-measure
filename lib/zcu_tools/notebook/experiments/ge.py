@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.v2.singleshot.ge import (
     GE_ANALYZE_DEFAULTS,
     GE_POST_ANALYZE_DEFAULTS,
@@ -75,7 +76,21 @@ class GEExp:
         return self._post_analysis.plots
 
     def run(self, soc: Any, soccfg: Any, cfg: GE_Cfg) -> GE_Result:
-        raise NotImplementedError("GE Notebook run implementation pending")
+        plots = Plots(self._host)
+        try:
+            result = self._core.run(cfg, context=QickContext(soc, soccfg, plots))
+            plots.finish()
+        except BaseException:
+            try:
+                plots.finish(present=False)
+            finally:
+                plots.release()
+            raise
+        self.last_result = result
+        self.run_plots = plots
+        self._analysis = None
+        self._post_analysis = None
+        return result
 
     def analyze(  # noqa: PLR0913 - Notebook flattens confirmed GE FIT options
         self,
@@ -88,7 +103,30 @@ class GEExp:
         length_ratio: float | None = GE_ANALYZE_DEFAULTS.length_ratio,
         angle: float | None = GE_ANALYZE_DEFAULTS.angle,
     ) -> GEAnalysis:
-        raise NotImplementedError("GE Notebook FIT implementation pending")
+        source = self.last_result if result is None else result
+        if source is None:
+            raise ValueError("No GE result to analyze")
+        options = GEAnalyzeOptions(
+            initial_state=initial_state,
+            backend=backend,
+            logscale=logscale,
+            align_t1=align_t1,
+            length_ratio=length_ratio,
+            angle=angle,
+        )
+        plots = Plots(self._host)
+        try:
+            analysis = self._core.analyze(source, options, plots=plots)
+            plots.finish()
+        except BaseException:
+            try:
+                plots.finish(present=False)
+            finally:
+                plots.release()
+            raise
+        self._analysis = GEAnalysisRecord(source, options, analysis, plots)
+        self._post_analysis = None
+        return analysis
 
     def post_analyze(
         self,
@@ -96,7 +134,31 @@ class GEExp:
         radius: float | None = GE_POST_ANALYZE_DEFAULTS.radius,
         consider_other: bool = GE_POST_ANALYZE_DEFAULTS.consider_other,
     ) -> GEPostAnalysis:
-        raise NotImplementedError("GE Notebook post implementation pending")
+        primary_record = self._analysis
+        if primary_record is None:
+            raise ValueError("No GE analysis to post analyze")
+        options = GEPostAnalyzeOptions(radius=radius, consider_other=consider_other)
+        plots = Plots(self._host)
+        try:
+            analysis = self._core.post_analyze(
+                primary_record.source, primary_record.result, options, plots=plots
+            )
+            plots.finish()
+        except BaseException:
+            try:
+                plots.finish(present=False)
+            finally:
+                plots.release()
+            raise
+        self._post_analysis = GEPostAnalysisRecord(
+            primary_record.source,
+            primary_record.result,
+            primary_record.options,
+            options,
+            analysis,
+            plots,
+        )
+        return analysis
 
     def save(
         self,

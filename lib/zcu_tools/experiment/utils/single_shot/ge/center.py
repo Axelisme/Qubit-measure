@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy import float64
 from numpy.typing import NDArray
+
+from zcu_tools.plotting.plots import Plots
 
 from .base import GE_FitResult, fitting_ge_and_plot
 
@@ -23,6 +24,6 @@ def get_rotate_angle(
 
 
 def fit_ge_by_center(
-    signals: NDArray[np.complex128], **kwargs
-) -> tuple[float, NDArray[float64], GE_FitResult, Figure]:
-    return fitting_ge_and_plot(signals, get_rotate_angle, **kwargs)
+    signals: NDArray[np.complex128], *, plots: Plots, **kwargs
+) -> tuple[float, NDArray[float64], GE_FitResult]:
+    return fitting_ge_and_plot(signals, get_rotate_angle, plots=plots, **kwargs)
