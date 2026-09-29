@@ -354,6 +354,41 @@ def test_batch_save_keeps_submission_signature_when_later_drafts_change(
     assert not (tmp_path / "new-data.hdf5").exists()
 
 
+def test_batch_exports_captured_post_figure_when_replaced_before_export(
+    batch_save_service, tmp_path: Path
+) -> None:
+    service, state, _adapter, primary, post, handles, bus, _gate = batch_save_service
+    replacement = _make_figure()
+    primary_path = str(tmp_path / "primary.png")
+    post_path = str(tmp_path / "post.png")
+
+    def export_primary(path, **_kwargs) -> None:
+        Path(path).write_bytes(b"primary")
+        state.update_tab_post_analyze("tab", object(), replacement)
+        state.get_artifact_snapshots("tab")
+
+    primary.savefig.side_effect = export_primary
+    post.savefig.side_effect = lambda path, **kw: Path(path).write_bytes(b"old post")
+    replacement.savefig.side_effect = lambda path, **kw: Path(path).write_bytes(
+        b"new post"
+    )
+    submission = service.start_save_artifacts(
+        SavePermit("tab"),
+        (
+            SaveDestination(ArtifactKind.ANALYSIS, primary_path),
+            SaveDestination(ArtifactKind.POST_ANALYSIS, post_path),
+        ),
+    )
+    outcome = _await_artifact_completion(bus, handles, submission.operation_id)
+    assert outcome.status == "finished"
+    assert Path(post_path).read_bytes() == b"old post"
+    replacement.savefig.assert_not_called()
+    snapshots = {a.kind: a for a in state.get_artifact_snapshots("tab")}
+    assert snapshots[ArtifactKind.ANALYSIS].status is SaveStatus.SAVED
+    assert snapshots[ArtifactKind.POST_ANALYSIS].status is SaveStatus.NOT_SAVED
+    assert snapshots[ArtifactKind.POST_ANALYSIS].last_saved_path is None
+
+
 def test_batch_later_parent_failure_preserves_earlier_saved_image(
     batch_save_service, tmp_path: Path
 ) -> None:

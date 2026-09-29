@@ -39,6 +39,8 @@ from .ports import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import OwnerScheduler
@@ -168,6 +170,10 @@ class SaveService:
         adapter = tab.adapter
         tracker = tab.artifacts
         owner = self._owner_scheduler
+        figures = {
+            ArtifactKind.ANALYSIS: tab.analysis.figure,
+            ArtifactKind.POST_ANALYSIS: tab.post_analysis.figure,
+        }
 
         def work(_factory: object) -> None:
             for destination in destinations:
@@ -180,7 +186,7 @@ class SaveService:
                 else:
                     owner.call(
                         lambda d=destination: self._export_image(
-                            tab_id, d, capture_signature=False
+                            tab_id, d, figure=figures[d.kind], capture_signature=False
                         )
                     )
 
@@ -270,14 +276,10 @@ class SaveService:
         tab_id: str,
         destination: SaveDestination,
         *,
+        figure: Figure | None,
         capture_signature: bool = True,
     ) -> None:
         tab = self._state.get_tab(tab_id)
-        figure = (
-            tab.analysis.figure
-            if destination.kind is ArtifactKind.ANALYSIS
-            else tab.post_analysis.figure
-        )
         if figure is None:
             label = (
                 "post-analysis figure"
@@ -303,6 +305,7 @@ class SaveService:
         self._export_image(
             tab_id,
             SaveDestination(ArtifactKind.ANALYSIS, resolve_figure_path(image_path)),
+            figure=self._state.get_tab(tab_id).analysis.figure,
         )
 
     def save_post_image_sync(self, permit: SavePermit, image_path: str) -> None:
@@ -315,6 +318,7 @@ class SaveService:
             SaveDestination(
                 ArtifactKind.POST_ANALYSIS, resolve_figure_path(image_path)
             ),
+            figure=self._state.get_tab(tab_id).post_analysis.figure,
         )
 
     def _require_tab_idle(self, tab_id: str) -> None:
