@@ -428,7 +428,7 @@ Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `Refe
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
 `services.tab_cfg.TabCfgResources` 管理 tab 到 cfg resource 的身份關聯。建立失敗不留下關聯，retire 先撤銷舊 handle，再移除關聯；lookup 直接回傳 resource-bound editing，不轉送命令。此 headless 接縫已有測試，但 production TabService／Qt writer 尚未接入，不能視為完成遷移。
 
-`MeasureCfgBindings.snapshot` 將 metadata、library 與 options 複製成一次命令使用的固定 view；bare capture 使用同一 metadata，dotted capture 只讀 owner 注入的已發布快取值。Owner 負責配對 source basis，snapshot 不保留 live provider 或讀取硬體。這個接縫已建立，tab resource 接線尚未完成。
+`MeasureCfgBindings.snapshot` 將 metadata、library 與 options 複製成一次命令使用的固定 view；bare capture 使用同一 metadata，dotted capture 只讀 owner 注入的已發布快取值。`snapshot_from_state`以context、device set及每個已註冊device的版本建立basis，device刪除再建立仍由set版本區分；捕捉值由caller提供已發布快取，不枚舉任意provider或讀硬體。這些接縫已建立，tab resource在production的source/cache owner與writer接線仍未完成。
 
 `MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
 dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些

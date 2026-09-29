@@ -16,9 +16,12 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
     CfgResolution,
+    CfgRevision,
     SourceBasis,
+    SourceRevision,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
+from zcu_tools.gui.session.state import DEVICE_SET_VERSION_KEY, SessionState
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,
 )
@@ -110,6 +113,35 @@ class MeasureCfgBindings:
             read_capture,
             validate_scalar_expr,
         )
+
+    def snapshot_from_state(
+        self,
+        state: SessionState,
+        *,
+        captured_values: Mapping[str, object],
+    ) -> CfgResolution:
+        """Bind the content snapshot to context and device-set provenance.
+
+        The set key disambiguates removal and re-creation when a per-device
+        revision starts over. Captures must already be published cache values;
+        this method never queries a value provider or live instrument.
+        """
+        versions = state.version.snapshot()
+        basis: SourceBasis = (
+            SourceRevision("context", CfgRevision(versions.get("context", 0))),
+            SourceRevision(
+                DEVICE_SET_VERSION_KEY,
+                CfgRevision(versions.get(DEVICE_SET_VERSION_KEY, 0)),
+            ),
+            *(
+                SourceRevision(
+                    f"device:{device.name}",
+                    CfgRevision(versions.get(f"device:{device.name}", 0)),
+                )
+                for device in state.list_devices()
+            ),
+        )
+        return self.snapshot(basis, captured_values=captured_values)
 
     def new_draft(self, schema: CfgSchema) -> CfgDraft:
         return CfgDraft(

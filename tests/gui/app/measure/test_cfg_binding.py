@@ -7,6 +7,12 @@ import pytest
 import zcu_tools.gui.app.measure.cfg_binding as binding_module
 from zcu_tools.experiment.cfg_editing import ProgramShape, UnknownProgramShapeError
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.state import (
+    DEVICE_SET_VERSION_KEY,
+    DeviceState,
+    DeviceStatus,
+    State,
+)
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -73,6 +79,43 @@ def test_measure_snapshot_detaches_metadata_options_and_captures() -> None:
     newer = bindings.snapshot(basis, captured_values=captures)
     assert newer.evaluate_expression("offset * 2") == 18.0
     assert newer.read_capture("device.flux.value") == 0.7
+
+
+def test_source_snapshot_tracks_context_and_device_set_aba_without_live_reads() -> None:
+    bindings, host = _bindings()
+    state = State(MagicMock())
+    captures = {"device.flux.value": 0.2}
+    first = bindings.snapshot_from_state(state, captured_values=captures)
+    assert first.source_basis == (
+        SourceRevision("context", CfgRevision(0)),
+        SourceRevision(DEVICE_SET_VERSION_KEY, CfgRevision(0)),
+    )
+
+    state.version.bump("context")
+    device = DeviceState(
+        name="flux",
+        type_name="YOKOGS200",
+        address="addr",
+        status=DeviceStatus.CONNECTED,
+        remember=False,
+        info=None,
+    )
+    state.put_device(device)
+    second = bindings.snapshot_from_state(state, captured_values=captures)
+    assert second.source_basis == (
+        SourceRevision("context", CfgRevision(1)),
+        SourceRevision(DEVICE_SET_VERSION_KEY, CfgRevision(1)),
+        SourceRevision("device:flux", CfgRevision(1)),
+    )
+    captures["device.flux.value"] = 0.7
+    assert second.read_capture("device.flux.value") == 0.2
+    state.remove_device("flux")
+    state.put_device(device)
+    recreated = bindings.snapshot_from_state(state, captured_values=captures)
+    assert recreated.source_basis[-1] == second.source_basis[-1]
+    assert recreated.source_basis != second.source_basis
+    assert recreated.read_capture("device.flux.value") == 0.7
+    host.read_value_source.assert_not_called()
 
 
 def test_measure_snapshot_missing_capture_is_precondition_failure() -> None:
