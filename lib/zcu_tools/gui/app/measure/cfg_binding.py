@@ -29,6 +29,7 @@ from zcu_tools.gui.session.value_lookup import (
     name_from_type,
 )
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.content import snapshot_context_contents
 
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
@@ -70,8 +71,10 @@ class MeasureCfgBindings:
         Bare capture names use the same metadata snapshot as dynamic expressions.
         No live provider is retained by the returned resolution.
         """
-        md = self._host.get_current_md().clone(readonly=True)
-        references = _SnapshotReferences(self._host.get_current_ml().clone())
+        md, ml = snapshot_context_contents(
+            self._host.get_current_md(), self._host.get_current_ml()
+        )
+        references = _SnapshotReferences(ml)
         options = {
             _DEVICES_SOURCE: tuple(self._host.list_device_names()),
             _ARB_WAVEFORMS_SOURCE: tuple(self._host.list_arb_waveforms()),

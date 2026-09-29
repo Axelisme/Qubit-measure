@@ -1,10 +1,16 @@
 # `zcu_tools.resources.context` — named experiment work contexts
 
-**Last updated:** 2026-09-27 — resource owner split
+**Last updated:** 2026-09-30 — memory-only context publication
 
 Context 是綁定特定參數資源的具名實驗工作 scope；同一 context 預期具有相同的環境與實驗語意。儀器值只是命名便利，名稱可以是任意合法字串。Context 不會自動監控實驗環境。
 
 ---
+
+## 記憶體內容與檔案同步
+
+`MetaDict.snapshot()` 與 `ModuleLibrary.snapshot()` 只複製目前記憶體，產出無檔案路徑的候選，不呼叫 mtime sync。`clone()` 仍沿用檔案同步行為，不能當作已發布記憶體的純快照。
+
+`content.replace_context_contents()` 在權限檢查與深複製全部成功後，透過 stores 的 `swap_contents()` 安裝候選。它保留 live store 的物件身份與路徑，不讀寫檔案。Caller 在同一 owner sequence 更新版本與通知，再依政策保存；本模組不提供跨檔交易或自動重試。
 
 ## `MetaDict`（`metadict.py`）
 

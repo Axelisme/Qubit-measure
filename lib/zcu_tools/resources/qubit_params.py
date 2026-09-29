@@ -650,7 +650,7 @@ class QubitParams(SyncFile):
         self.sync()
 
     def _sync_before_write(self, *, require_existing: bool) -> None:
-        self._check_can_write()
+        self.require_writable()
         if require_existing:
             self._sync_existing()
         elif self._path is None or self._path.exists():

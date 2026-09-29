@@ -12,7 +12,7 @@ GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner �
 
 `gui.session` 供 measure 和 autofluxdep 共用 context、SoC、device、操作機制與 dialog 所需的窄 control facets。兩個 app 各自組裝 `SessionServices`，注入背景執行與 operation gate；app 決定自己的 RUN policy、workflow 和呈現。Session 不反向 import 具體 app。Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（套用 project、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 project 已套用或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
 
-可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影；寫入交給對應 owner。成功提交後，owner 依操作發布版本或變更通知。`ContextService` 是 md／ml 內容的寫入權威，measure 的 cfg lowering policy 經注入的 callback 配合這條寫入路徑，Writeback 不直接改 md／ml。`apply_ml_writes()` 會依序直接修改 live md／ml，全部 lowering、register 與可選的 dump 完成後才 bump `context` version 並 emit 變更事件；後項失敗時，前項修改可能留在 live content，卻沒有這次 batch 的 version bump 或事件。這不是已發布的完整提交；尚待實作的無失敗前綴 Apply 見 [Cfg 編輯 draft](draft/cfg-editing-boundaries.md#observationrun-與-apply)。
+可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影；寫入交給對應 owner。成功提交後，owner 依操作發布版本或變更通知。`ContextService` 是 md／ml 內容的寫入權威，measure 的 cfg lowering policy 經注入的 callback 配合這條寫入路徑，Writeback 不直接改 md／ml。`apply_ml_writes()` 先在 memory-only md／ml 候選完成全部 lowering 與 register；後項使用前項候選結果，準備失敗不修改 live content。成功後保留 stores 的物件身份與路徑，一次安裝完整內容、bump `context` version 並 emit 變更事件，再執行既有同步／dump。儲存失敗明確回報設定已套用但儲存失敗，不回滾已提交內容，也不新增重試、未保存狀態管理或跨檔交易。Selected Apply 的版本接受與其他尚待整合義務見 [Cfg 編輯 draft](draft/cfg-editing-boundaries.md#observationrun-與-apply)。
 
 Device 的可觀察狀態在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作；remembered device 的磁碟保存由 Persistence owner 從已提交狀態選擇性投影。State 是否供多方觀察與資料是否重啟後保存是兩個問題。Live SoC handle 可屬 session environment 而不落盤，worker、lease 和 driver 的控制權也不因有人需要觀察其狀態而交給 State。
 

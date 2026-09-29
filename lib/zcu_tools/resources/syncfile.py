@@ -87,7 +87,8 @@ class SyncFile(ABC):
     @abstractmethod
     def _dump(self, path: str) -> None: ...
 
-    def _check_can_write(self) -> None:
+    def require_writable(self) -> None:
+        """Reject a write before callers modify or persist any content."""
         if self._readonly:
             raise RuntimeError(f"{self.__class__.__name__} is read-only")
 
@@ -106,7 +107,7 @@ class SyncFile(ABC):
 
     def dump(self) -> None:
         assert self._path is not None
-        self._check_can_write()
+        self.require_writable()
         self._dump(str(self._path))
         self.update_modify_time()
         self._dirty = False

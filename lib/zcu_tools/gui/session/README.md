@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-29 — 共用 simpleeval expression 引擎
+**Last updated:** 2026-09-30 — Context Apply 候選與儲存邊界
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -6,6 +6,8 @@
 app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep 共用這層。
+
+`ContextService.apply_ml_writes` 在無檔案路徑的 md/ml 候選完成全部準備；後項可讀前項候選結果，但不修改 live store。成功後一次安裝內容、增加 context 版本並通知，再執行既有同步／存檔。儲存失敗記錄並回報「已套用，但儲存失敗」，不回滾、不重試，也不追蹤額外未保存狀態。
 
 ## Context、session environment 與 Run snapshot
 

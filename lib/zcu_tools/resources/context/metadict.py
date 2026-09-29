@@ -112,6 +112,20 @@ class MetaDict(SyncFile):
 
         return md
 
+    def snapshot(self) -> Self:
+        """Copy current memory without loading or saving the backing file."""
+        result = self.__class__()
+        result._data = deepcopy(self._data)
+        return result
+
+    def swap_contents(self, candidate: MetaDict) -> None:
+        """Exchange prepared memory only; keep each store's identity and path."""
+        self.require_writable()
+        candidate.require_writable()
+        self._data, candidate._data = candidate._data, self._data
+        self._dirty = True
+        candidate._dirty = True
+
     def _load(self, path: str) -> None:
         try:
             with open(path, "r", encoding="utf-8") as f:
