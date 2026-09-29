@@ -2665,8 +2665,11 @@ md.q_f
 
 ## T1
 
+一般 T1 使用實驗專屬 Notebook 入口。它直接呈現 widget，不需切換全域 Matplotlib backend。`uniform` 屬於量測設定，隨結果保存。
+
 ```python
-%matplotlib widget
+from zcu_tools.notebook.experiments import T1Exp
+
 exp_cfg = {
     "modules": {
         # "reset": "reset_bath",
@@ -2686,16 +2689,18 @@ exp_cfg = {
     # "relax_delay": 5 * md.t1,  # us
     # "sweep": make_sweep(0.01, 10.1, 101),
     "sweep": make_sweep(0.01, 5 * md.t1, 51),
+    "uniform": False,
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T1Cfg, reps=1000, rounds=100)
 
-t1_exp = ze.twotone.time_domain.T1Exp()
-_ = t1_exp.run(soc, soccfg, cfg, uniform=False)
+t1_exp = T1Exp()
+_ = t1_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-%matplotlib inline
-md.t1, md.t1err, fig = t1_exp.analyze(dual_exp=False, skip=1)
+analysis = t1_exp.analyze(dual_exp=False, skip=1)
+md.t1, md.t1err = analysis.t1, analysis.t1_err
+fig = t1_exp.analysis_plots["fit"]
 md.t1
 ```
 

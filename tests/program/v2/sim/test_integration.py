@@ -57,6 +57,7 @@ matplotlib.use("Agg")
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.v2.lookback import (
     LookbackCfg,
     LookbackExp,
@@ -87,6 +88,7 @@ from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+    T1AnalyzeOptions,
     T1Cfg,
     T1Exp,
     T1ModuleCfg,
@@ -107,6 +109,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
 from zcu_tools.experiment.v2.utils import sweep2array, t1_delay_axis
 from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -396,8 +399,22 @@ def test_t1_recovers_t1(uniform: bool) -> None:
     cfg = _t1_cfg(length_sweep)
 
     exp = T1Exp()
-    result = exp.run(soc, soccfg, cfg, uniform=uniform)
-    t1, _t1err, _fig = exp.analyze(result)
+    cfg.uniform = uniform
+    original_cfg = cfg.model_copy(deep=True)
+    run_plots = Plots(NonPresentingHost())
+    result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
+    run_plots.finish()
+    fit_plots = Plots(NonPresentingHost())
+    analysis = exp.analyze(result, T1AnalyzeOptions(), plots=fit_plots)
+    fit_plots.finish()
+    t1 = analysis.t1
+    assert cfg == original_cfg
+    assert result.cfg_snapshot is not cfg
+    assert isinstance(result.cfg_snapshot, T1Cfg)
+    assert result.cfg_snapshot.uniform is uniform
+    np.testing.assert_array_equal(
+        run_plots["measurement"].axes[0].lines[0].get_xdata(), result.times
+    )
 
     if uniform:
         expected_times = sweep2array(length_sweep, "time", {"soccfg": soccfg})
@@ -420,12 +437,59 @@ def test_t1_recovers_t1(uniform: bool) -> None:
     assert t1 == pytest.approx(_SIM.T1, rel=0.05)
 
 
+def test_t1_interrupted_acquire_returns_partial_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _t1_cfg(SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29))
+    plots = Plots(NonPresentingHost())
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2.runtime.schedule.ModularProgramV2.acquire", interrupt
+    )
+    result = T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+    plots.finish()
+    assert result.signals.shape == result.times.shape == (30,)
+    assert np.all(np.isnan(result.signals))
+    assert isinstance(result.cfg_snapshot, T1Cfg)
+    assert result.cfg_snapshot.uniform is True
+    plots.release()
+
+
+def test_t1_setup_failure_leaves_caller_config_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _t1_cfg(SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29))
+    original = cfg.model_copy(deep=True)
+    plots = Plots(NonPresentingHost())
+
+    def fail_setup(config: T1Cfg, *, progress: bool) -> None:
+        config.reps = 999
+        raise RuntimeError("setup failed")
+
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2.twotone.time_domain.t1.setup_devices", fail_setup
+    )
+    with pytest.raises(RuntimeError, match="setup failed"):
+        T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+    plots.finish(present=False)
+    assert cfg == original
+    plots.release()
+
+
 def test_t1_nonuniform_preserves_direct_delay_list() -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     direct_times = [0.0, 0.7, 4.3, 17.2, 80.0]
     cfg = _t1_cfg(direct_times)
 
-    result = T1Exp().run(soc, soccfg, cfg, uniform=False)
+    cfg.uniform = False
+    plots = Plots(NonPresentingHost())
+    result = T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+    plots.finish()
 
     expected_times = _quantized_times(soccfg, direct_times)
     np.testing.assert_array_equal(result.times, expected_times)

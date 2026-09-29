@@ -1,7 +1,10 @@
 from .cpmg import CPMG_Cfg, CPMG_Exp
 from .t1 import (
+    T1_ANALYZE_DEFAULTS,
     ScanT1WithToneCfg,
     ScanT1WithToneExp,
+    T1Analysis,
+    T1AnalyzeOptions,
     T1Cfg,
     T1Exp,
     T1WithToneCfg,
@@ -17,6 +20,9 @@ __all__ = [
     # t1
     "T1Exp",
     "T1Cfg",
+    "T1AnalyzeOptions",
+    "T1Analysis",
+    "T1_ANALYZE_DEFAULTS",
     "T1WithToneExp",
     "T1WithToneCfg",
     "ScanT1WithToneExp",

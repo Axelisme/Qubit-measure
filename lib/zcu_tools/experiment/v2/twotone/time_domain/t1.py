@@ -25,6 +25,7 @@ from zcu_tools.experiment import (
     retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import (
@@ -32,6 +33,7 @@ from zcu_tools.experiment.v2.utils import (
     sweep2array,
 )
 from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2DwithLine
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
@@ -73,6 +75,24 @@ class T1SweepCfg(ConfigBase):
 class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1ModuleCfg
     sweep: T1SweepCfg
+    uniform: bool = True
+
+
+@dataclass(frozen=True)
+class T1AnalyzeOptions:
+    dual_exp: bool = False
+    skip: int = 0
+
+
+T1_ANALYZE_DEFAULTS = T1AnalyzeOptions()
+
+
+@dataclass(frozen=True)
+class T1Analysis:
+    t1: float
+    t1_err: float
+    t1b: float | None = None
+    t1b_err: float | None = None
 
 
 class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
@@ -96,7 +116,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         soc,
         soccfg,
         cfg: T1Cfg,
-        acquire_kwargs: dict[str, Any] | None = None,
+        plots: Plots,
     ) -> T1Result:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -108,35 +128,33 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         length_cycles = delay_table.cycles
         lengths = delay_table.times_us
 
-        with LivePlot1D("Time (us)", "Amplitude") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
+        viewer = plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        LoadValue(
-                            "load_t1_delay",
-                            values=list(length_cycles),
-                            idx_reg="length_idx",
-                            val_reg="t1_delay_cycle",
-                            auto_compress=False,
-                        ),
-                        Reset("reset", modules.reset),
-                        Pulse("pi_pulse", modules.pi_pulse),
-                        DelayAuto("t1_delay", t="t1_delay_cycle"),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length_idx", len(length_cycles))
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    LoadValue(
+                        "load_t1_delay",
+                        values=list(length_cycles),
+                        idx_reg="length_idx",
+                        val_reg="t1_delay_cycle",
+                        auto_compress=False,
+                    ),
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    DelayAuto("t1_delay", t="t1_delay_cycle"),
+                    Readout("readout", modules.readout),
                 )
+                .declare_sweep("length_idx", len(length_cycles))
+                .build_and_acquire()
+            )
 
         return T1Result(
             times=lengths, signals=signals_buffer.array, cfg_snapshot=original_cfg
@@ -147,96 +165,78 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         soc,
         soccfg,
         cfg: T1Cfg,
-        acquire_kwargs: dict[str, Any] | None = None,
+        plots: Plots,
     ) -> T1Result:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
 
-        with LivePlot1D(
-            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
-                length_sweep = cfg.sweep.length
-                assert isinstance(length_sweep, SweepCfg), (
-                    "uniform mode requires SweepCfg"
-                )
-                length_param = sweep2param("length", length_sweep)
+        viewer = plots.liveplot_1d(
+            "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+        )
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            length_sweep = cfg.sweep.length
+            if not isinstance(length_sweep, SweepCfg):
+                raise ValueError("uniform mode requires SweepCfg")
+            length_param = sweep2param("length", length_sweep)
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("pi_pulse", modules.pi_pulse),
-                        Delay("t1_delay", length_param),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Delay("t1_delay", length_param),
+                    Readout("readout", modules.readout),
                 )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire()
+            )
 
         return T1Result(
             times=lengths, signals=signals_buffer.array, cfg_snapshot=original_cfg
         )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: T1Cfg,
-        *,
-        uniform: bool = True,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> T1Result:
-        if uniform:
-            return self._run_uniform(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
-        else:
-            return self._run_non_uniform(
-                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
-            )
+    def run(self, config: T1Cfg, *, context: QickContext) -> T1Result:
+        cfg = deepcopy(config)
+        if cfg.uniform:
+            if not isinstance(cfg.sweep.length, SweepCfg):
+                raise ValueError("uniform mode requires SweepCfg")
+            return self._run_uniform(context.soc, context.soccfg, cfg, context.plots)
+        return self._run_non_uniform(context.soc, context.soccfg, cfg, context.plots)
 
-    @retrieve_result
     def analyze(
         self,
-        result: T1Result | None = None,
+        result: T1Result,
+        options: T1AnalyzeOptions,
         *,
-        dual_exp: bool = False,
-        skip: int = 0,
-    ) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
-
-        xs, signals = result.times, result.signals
-
-        xs = xs[skip:]
-        signals = signals[skip:]
+        plots: Plots,
+    ) -> T1Analysis:
+        xs = result.times[options.skip :]
+        signals = result.signals[options.skip :]
 
         real_signals = rotate2real(signals).real
 
-        if dual_exp:
+        if options.dual_exp:
             t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
             t1b = 0.0
             t1berr = 0.0
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit")
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
 
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
-        if dual_exp:
+        if options.dual_exp:
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
             ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
             title = f"$T_1$ = {t1_str}, " + r"$T_{1b}$ = " + f"{t1b_str}"
@@ -250,7 +250,12 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
         fig.tight_layout()
 
-        return t1, t1err, fig
+        return T1Analysis(
+            t1=float(t1),
+            t1_err=float(t1err),
+            t1b=float(t1b) if options.dual_exp else None,
+            t1b_err=float(t1berr) if options.dual_exp else None,
+        )
 
 
 class T1WithToneModuleCfg(ConfigBase):

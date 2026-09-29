@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-09-30 — 明確 Notebook plot host
+**Last updated:** 2026-09-30 — T1 實驗便利入口
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -12,6 +12,7 @@
 - [design](analysis/design/README.md)：評估模型參數、設計需求與候選組合，並分析 HFSS sweep 資料。
 - [mist](analysis/mist/tool.py)：提供能量摺疊、不連續處理與碰撞遮罩的計算工具。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。
+- [`experiments/t1.py`](experiments/t1.py)：一般 T1 的實驗專屬便利類，從 `zcu_tools.notebook.experiments` 匯入 `T1Exp`。預設使用 widget host，`present=False` 仍建圖並可保存。每次操作建立新的 plots，成功後成組更新來源、options、數值與圖；分析舊 Result 不替換 last_result。Run／load 成功清空目前分析引用，失敗保留舊紀錄；使用者持有的旧圖不因新操作而關閉。
 - [`utils.py`](utils.py)：提供 sweep、圖檔保存與設備資訊等 Notebook 輔助函式。
 - [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。
 
@@ -20,8 +21,8 @@
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。已有 manager 的 Figure
 不能由另一 host 接管。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
 呼叫 `Plots.release()` 才釋放 canvas／toolbar，原 Figure 仍可 `savefig`。直接建立
-widget 而不登記 pyplot manager，避免 cell 結束時額外自動呈現。此 host 尚未接入
-既有實驗 convenience 或互動分析入口；它不取代那些入口的狀態與分析契約。
+widget 而不登記 pyplot manager，避免 cell 結束時額外自動呈現。一般 T1 convenience 使用此 host；其他實驗與互動分析入口仍待遷移。Host 不取代
+那些入口的狀態與分析契約。
 
 共用原始頻譜型別與座標整理位於 [`analysis/spectrum.py`](../analysis/spectrum.py)。Fluxdep 的共用 transition 型別、轉換及頻譜集合 I/O 位於 [`analysis/fluxdep`](../analysis/fluxdep/README.md) 的 `models.py`、`io.py`。共用 database search 位於 [`analysis/fluxdep/search.py`](../analysis/fluxdep/search.py)；Notebook 保留 `search_in_database` 組合入口與 `fit_spectrum` 微調。診斷圖由 [`plotting/fluxdep`](../plotting/fluxdep/README.md) 建立。
 

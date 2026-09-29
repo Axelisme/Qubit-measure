@@ -1,12 +1,18 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-09-29 — 父層實驗契約移至 experiment README
+**Last updated:** 2026-09-30 — 一般 T1 explicit core
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
 一般實驗以 [runtime](runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。`autofluxdep`、`overnight` 的 executor 使用同一 runtime 的 `ResultTree` 與 `MultiMeasurementExecutor`；runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
 
 ---
+
+## 一般 T1 的核心入口
+
+`twotone.time_domain.T1Exp` 使用無跨次狀態的 `run(config, *, context)` 和 `analyze(result, options, *, plots)`。`T1Cfg.uniform` 隨 cfg snapshot 保存；`T1AnalyzeOptions` 明確提供 skip 與 dual_exp，`T1Analysis` 只含數值。Run 建立具名 measurement liveplot，分析建立 fit 圖；caller 負責操作結束後 finish 及釋放呈現，不以新操作關閉舊圖。
+
+Notebook 便利入口在 `zcu_tools.notebook.experiments.T1Exp`，不由核心 namespace 轉接。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用一般 T1。T1WithTone／ScanT1WithTone 不因同檔案而視為已遷移。
 
 ## 目錄佈局
 
