@@ -120,6 +120,33 @@ class _TreeBranchStyle(QProxyStyle):
         painter.restore()
 
 
+def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
+    """Create the shared dense tree viewport and keep its branch style alive."""
+    tree = QTreeWidget()
+    tree.setObjectName("cfgTree")
+    tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
+    tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+    tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+    tree.setHeaderHidden(True)
+    tree.setColumnCount(2)
+    tree.setRootIsDecorated(False)
+    tree.setIndentation(_INDENTATION_PX)
+    tree.setAlternatingRowColors(False)
+    tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)  # type: ignore[attr-defined]
+    tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
+    font = tree.font()
+    font.setPixelSize(_TREE_FONT_SIZE_PX)
+    tree.setFont(font)
+    style = _TreeBranchStyle()
+    style.setParent(tree)
+    tree.setStyle(style)
+    header = tree.header()
+    assert header is not None
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # type: ignore[attr-defined]
+    header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+    return tree, style
+
+
 # choice_visible_keys, is_hidden, decorated_label now imported from presentation (single source)
 
 
@@ -147,34 +174,9 @@ class TreeCfgWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         # A2: viewport follows available panel height — tree expands, no fixed threshold
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
-        self._tree = QTreeWidget()
-        self._tree.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )  # type: ignore[attr-defined]
-        self._tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-        self._tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+        self._tree, self._branch_style = make_dense_cfg_tree()
         layout.addWidget(self._tree, stretch=1)
-
-        self._tree.setObjectName("cfgTree")
-        self._tree.setHeaderHidden(True)
-        self._tree.setColumnCount(2)
-        self._tree.setRootIsDecorated(False)
-        self._tree.setIndentation(_INDENTATION_PX)
-        self._tree.setAlternatingRowColors(False)
-        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)  # type: ignore[attr-defined]
-        self._tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
-        # 13 px field text per spec; use pixel-size font to avoid masking the branch proxy.
-        font = self._tree.font()
-        font.setPixelSize(_TREE_FONT_SIZE_PX)
-        self._tree.setFont(font)
-        self.setFont(font)
-        self._branch_style = _TreeBranchStyle()
-        self._branch_style.setParent(self._tree)
-        self._tree.setStyle(self._branch_style)
-        header = self._tree.header()
-        assert header is not None
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # type: ignore[attr-defined]
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+        self.setFont(self._tree.font())
 
         self._path_to_item: dict[str, QTreeWidgetItem] = {}
         self._item_depth: dict[int, int] = {}  # id(item) -> depth
