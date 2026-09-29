@@ -240,6 +240,7 @@ class CfgResource:
         schema = deepcopy(defaults())
         _validate_definition(schema.spec)
         self._spec = deepcopy(schema.spec)
+        self._inputs = deepcopy(schema)
         self._draft, basis = self._prepare(schema)
         self._observation = self._observe_draft(
             self._draft, CfgRef(CfgId(uuid4().hex), CfgRevision(0)), basis
@@ -263,51 +264,43 @@ class CfgResource:
     def edit(
         self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
     ) -> CfgObservation:
-        from ._capture import ExpressionCapture
-        from ._node_write import write_node
+        from ._input_edit import InputEditor
 
         edits = _validate_edits(edits)
         self._check_command(expected_revision)
         source = self._resolution()
-        capture = ExpressionCapture(source.read_capture, source.validate_expression)
-        failures: list[Exception] = []
-        candidate, basis = self._prepare(
-            deepcopy(self._draft.snapshot()), source=source, failures=failures
-        )
+        editor = InputEditor(self._inputs, source)
+        for index, edit in enumerate(edits):
+            try:
+                editor.apply(edit)
+            except CfgInputError as exc:
+                raise CfgInputError(
+                    exc.reason, str(exc), path=edit.path, edit_index=index
+                ) from exc
+            except CfgPreconditionError as exc:
+                raise CfgPreconditionError(
+                    exc.reason, str(exc), path=edit.path, edit_index=index
+                ) from exc
+        candidate, basis = self._prepare(deepcopy(editor.schema), source=source)
         try:
-            for index, edit in enumerate(edits):
-                try:
-                    write_node(
-                        candidate.root, edit.path, deepcopy(edit.value), capture.prepare
-                    )
-                except CfgInputError as exc:
-                    raise CfgInputError(
-                        exc.reason, str(exc), path=edit.path, edit_index=index
-                    ) from exc
-                except CfgPreconditionError as exc:
-                    raise CfgPreconditionError(
-                        exc.reason, str(exc), path=edit.path, edit_index=index
-                    ) from exc
-            if failures:
-                raise failures[0]
             observation = self._next_observation(candidate, basis)
         except BaseException:
             candidate.close()
             raise
-        return self._publish(candidate, observation)
+        return self._publish(candidate, observation, editor.schema)
 
     def reset(self, expected_revision: CfgRevision) -> CfgObservation:
         self._check_command(expected_revision)
         schema = deepcopy(self._defaults())
         if schema.spec != self._spec:
             raise RuntimeError("defaults changed the resource definition")
-        candidate, basis = self._prepare(schema)
+        candidate, basis = self._prepare(deepcopy(schema))
         try:
             observation = self._next_observation(candidate, basis)
         except BaseException:
             candidate.close()
             raise
-        return self._publish(candidate, observation)
+        return self._publish(candidate, observation, schema)
 
     def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
         self._check_command(expected_revision)
@@ -315,9 +308,7 @@ class CfgResource:
         candidate: CfgDraft | None = None
         try:
             source = self._resolution()
-            candidate, basis = self._prepare(
-                deepcopy(self._draft.snapshot()), source=source
-            )
+            candidate, basis = self._prepare(deepcopy(self._inputs), source=source)
             observation = self._next_observation(candidate, basis)
         except Exception as exc:
             if candidate is not None:
@@ -377,10 +368,9 @@ class CfgResource:
         schema: CfgSchema,
         *,
         source: CfgResolution | None = None,
-        failures: list[Exception] | None = None,
     ) -> tuple[CfgDraft, SourceBasis]:
         source = self._resolution() if source is None else source
-        failures = [] if failures is None else failures
+        failures: list[Exception] = []
 
         def evaluate(expression: str) -> int | float | complex:
             try:
@@ -421,9 +411,14 @@ class CfgResource:
         return CfgObservation(ref, status, tree, basis, diagnostics)
 
     def _publish(
-        self, candidate: CfgDraft, observation: CfgObservation
+        self,
+        candidate: CfgDraft,
+        observation: CfgObservation,
+        inputs: CfgSchema | None = None,
     ) -> CfgObservation:
         previous = self._draft
+        if inputs is not None:
+            self._inputs = inputs
         self._draft = candidate
         self._observation = observation
         previous.close()

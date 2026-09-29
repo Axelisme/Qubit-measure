@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import cast
@@ -219,35 +218,6 @@ class ReferenceField(CfgField):
             chosen_resolution=resolved,
         )
         self._commit_rebuild(prepared)
-        self.on_change.emit()
-
-    def replace_inline(
-        self, shape: CfgSectionSpec, write: Callable[[SectionField], None]
-    ) -> None:
-        """Build independent contents and install them only after the writer succeeds."""
-        self._require_open()
-        if shape not in self.spec.allowed:
-            raise ValueError("Inline shape is not allowed by this reference")
-        replacement = SectionField(
-            shape,
-            evaluate_expression=self._evaluate_expression,
-            provide_options=self._provide_options,
-            references=self._references,
-        )
-        try:
-            write(replacement)
-        except BaseException:
-            replacement.teardown()
-            raise
-        self._commit_rebuild(
-            _PreparedRebuild(
-                chosen_key=make_custom_reference_key(shape.label),
-                binding_state=LibraryBindingState.CUSTOM,
-                missing_library_ref=False,
-                is_enabled=True,
-                sub_field=replacement,
-            )
-        )
         self.on_change.emit()
 
     def refresh_expressions(self) -> None:

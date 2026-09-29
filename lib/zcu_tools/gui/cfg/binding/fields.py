@@ -4,6 +4,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import replace
 from typing import Literal, cast
 
@@ -24,9 +25,9 @@ from ..model import (
     ScalarValue,
     SweepSpec,
     SweepValue,
-    require_finite_scalar,
     resolved_direct_number,
 )
+from ..scalar import coerce_scalar_result, parse_scalar_text, validate_direct_scalar
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 from .range import CenteredSweepEditor, SweepEditor
 
@@ -46,10 +47,8 @@ class CallbackList:
             self._callbacks.append(callback)
 
     def disconnect(self, callback: Callable[..., None]) -> None:
-        try:
+        with suppress(ValueError):
             self._callbacks.remove(callback)
-        except ValueError:
-            pass
 
     def clear(self) -> None:
         self._callbacks.clear()
@@ -108,20 +107,6 @@ class CfgField(ABC):
             raise RuntimeError(f"{type(self).__name__} is closed")
 
 
-def _parse_direct_text(spec: ScalarSpec, text: str) -> DirectValue:
-    if spec.type not in (int, float, complex, str):
-        raise TypeError(f"Text input is unsupported for {spec.type.__name__}")
-    if not text.strip() and (spec.optional or spec.type is not str):
-        return DirectValue(None, raw=text)
-    try:
-        parsed = spec.type(text.strip() if spec.optional else text)
-        if isinstance(parsed, (float, complex)):
-            require_finite_scalar(parsed)
-    except ValueError as exc:
-        return DirectValue(None, raw=text, error=str(exc))
-    return DirectValue(parsed, raw=text)
-
-
 class ScalarField(CfgField):
     spec: ScalarSpec
 
@@ -140,7 +125,7 @@ class ScalarField(CfgField):
         else:
             self._value = DirectValue(initial_val)
         if isinstance(self._value, DirectValue):
-            self._validate_direct_value(self._value)
+            validate_direct_scalar(self.spec, self._value)
 
         self._dynamic_options: tuple[object, ...] | None = None
         if spec.choices_source:
@@ -160,7 +145,7 @@ class ScalarField(CfgField):
         else:
             new_value = DirectValue(value)
         if isinstance(new_value, DirectValue):
-            self._validate_direct_value(new_value)
+            validate_direct_scalar(self.spec, new_value)
         if isinstance(new_value, EvalValue):
             new_value = self._resolved_eval_value(new_value)
 
@@ -174,7 +159,7 @@ class ScalarField(CfgField):
         if isinstance(value, EvalValue):
             prepared = self._resolved_eval_value(value)
         else:
-            self._validate_direct_value(value)
+            validate_direct_scalar(self.spec, value)
             prepared = value
         previous = self._value
         committed = False
@@ -201,19 +186,7 @@ class ScalarField(CfgField):
     def set_text(self, text: str) -> None:
         """Store direct input text and its parse result, including invalid input."""
         self._require_open()
-        self.set_value(_parse_direct_text(self.spec, text))
-
-    def _validate_direct_value(self, value: DirectValue) -> None:
-        raw = value.value
-        if raw is None:
-            return
-        if type(raw) is not self.spec.type:
-            raise TypeError(
-                f"ScalarField {self.spec.label!r} expects "
-                f"{self.spec.type.__name__}, got {type(raw).__name__}"
-            )
-        if isinstance(raw, (float, complex)):
-            require_finite_scalar(raw)
+        self.set_value(parse_scalar_text(self.spec, text))
 
     def available_options(self) -> tuple[object, ...] | None:
         self._require_open()
@@ -261,7 +234,7 @@ class ScalarField(CfgField):
     def _resolved_eval_value(self, value: EvalValue) -> EvalValue:
         try:
             raw = self._evaluate_expression(value.expr)
-            resolved = _coerce_eval_result(raw, self.spec.type)
+            resolved = coerce_scalar_result(raw, self.spec.type)
         except Exception as exc:
             return replace(value, resolved=None, error=str(exc))
         return replace(value, resolved=resolved, error=None)
@@ -295,28 +268,6 @@ class ScalarField(CfgField):
             validation_error = f"Value {raw!r} is not an available option"
         self._value = replace(self._value, validation_error=validation_error)
         self._set_valid(valid)
-
-
-def _coerce_eval_result(
-    value: int | float | complex, type_: type
-) -> int | float | complex:
-    if isinstance(value, bool):
-        raise RuntimeError("Expression evaluator returned bool instead of a number")
-    if type_ is complex:
-        result = complex(value)
-        require_finite_scalar(result)
-        return result
-    if isinstance(value, complex):
-        raise RuntimeError("Complex expression result cannot target a real field")
-    if type_ is float:
-        result = float(value)
-        require_finite_scalar(result)
-        return result
-    if type_ is int:
-        if not float(value).is_integer():
-            raise RuntimeError(f"Expression result {value!r} is not an integer")
-        return int(value)
-    raise RuntimeError(f"Eval mode only supports int, float or complex, got {type_!r}")
 
 
 class LiteralField(CfgField):
@@ -473,7 +424,7 @@ class SweepField(CfgField):
             type_ = float
         else:
             raise ValueError(f"Unknown sweep input: {edge!r}")
-        value = _parse_direct_text(ScalarSpec(f"Sweep {edge}", type_), text)
+        value = parse_scalar_text(ScalarSpec(f"Sweep {edge}", type_), text)
         current = self.get_value()
         try:
             candidate = edit(current, value)
@@ -665,7 +616,7 @@ class CenteredSweepField(CfgField):
             edit = CenteredSweepEditor.update_step
         else:
             raise ValueError(f"Unknown centered sweep input: {edge!r}")
-        value = _parse_direct_text(ScalarSpec(f"Sweep {edge}", type_), text)
+        value = parse_scalar_text(ScalarSpec(f"Sweep {edge}", type_), text)
         current = self.get_value()
         try:
             candidate = edit(current, value)

@@ -36,6 +36,8 @@ Whole subtree 是局部輸入覆寫，省略欄位保留。領域原本允許的
 
 Cfg resolver 只消費本地已發布來源，不做外部 I/O、不輪詢硬體、不處理 GUI events。Edit 在未發布候選上依序處理全部意圖，全部可接受才發布一次。成功同值命令也推進 revision。沒有成功前綴，沒有 Pending 或背景解析 completion。
 
+Cfg owner 以獨立 input tree 為權威。先修改輸入，再解析修改完成後仍存在的內容；不先重建會自動求值的舊 field tree。完整 override 不依賴被取代的舊 source key，舊 expression 即將被取代時不求值。Partial reference write 或 range step 計算若需要現有內容，才依同一固定 source basis 取得必要資料。Binding 可以承擔最終解析，但不能藉 constructor／setter 同時控制 input mutation。
+
 合法但未完成的輸入可發布 Invalid。必要來源未就緒或故障為 Unavailable。Edit／Reset 的非預期準備故障保留原 observation；source refresh 失敗則發布 Unavailable，不能繼續把舊值當 Valid。
 
 同來源影響多個 cfg 時，先完成來源與所有受影響 cfg 的一致發布，再通知。個別 cfg 故障不撤銷新來源或其他 cfg。通知期間允許 read，拒絕 mutation、Run start 與 close，不隱含排隊。Subscriber 故障送診斷，不回滾已提交命令。
@@ -73,6 +75,8 @@ Library editor／writeback 不因使用同一舊 service 就改成 tab 契約。
 ## 取捨
 
 同步解析省去排程、取消與晚到結果處理，代價是來源取得必須在 cfg resolver 外完成。未來若需要昂貴解析，必須另作架構決策，不能悄悄加入 Pending。
+
+Input-first 將輸入意圖與解析副作用分開，代價是 node writer 不能直接重用會求值的 field setter。Scalar parsing 與 range 算法抽成共用純規則，避免另建一份 grammar。不建立 dependency graph；只有來源依據一致且有實際效能需求時才另行考慮結果快取。
 
 單一 cfg authority 讓 UI 和 remote 得到相同結果，代價是不能讓舊 mutable binding 與新 owner 同時寫入。遷移必須交代所有 writer，而不是只替換 remote handler。
 

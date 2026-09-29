@@ -269,6 +269,7 @@ class ExpressionSources:
     capture_reads: list[str] = field(default_factory=list)
     fail_read: bool = False
     fail_evaluation: bool = False
+    evaluation_reads: list[str] = field(default_factory=list)
 
     def read(self) -> CfgResolution:
         if self.fail_read:
@@ -279,6 +280,7 @@ class ExpressionSources:
         fail_evaluation = self.fail_evaluation
 
         def evaluate(expression: str) -> int | float | complex:
+            self.evaluation_reads.append(expression)
             if fail_evaluation:
                 raise RuntimeError("resolver defect")
             return evaluate_scalar_expr(expression, md)
@@ -485,6 +487,104 @@ def test_refresh_fault_publishes_unavailable_without_old_resolution(
     recovered = resource.refresh(unavailable.ref.revision)
     assert resource.accept(recovered.ref.revision).values["a"] == 8.0
     assert seen[-1] is CfgStatus.VALID
+
+
+@pytest.mark.parametrize("centered", [False, True])
+@pytest.mark.parametrize("step_first", [False, True])
+def test_separate_range_edits_preserve_command_order(
+    centered: bool, step_first: bool
+) -> None:
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    value = CenteredSweepValue(1.0, 2.0, 3) if centered else SweepValue(0.0, 2.0, 3)
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
+    )
+    resource = CfgResource(
+        lambda: schema, resolution=Sources().read, make_range=make_range
+    )
+    step = CfgEdit(("range", "step"), 0.5)
+    geometry = CfgEdit(("range", "span" if centered else "stop"), 4.0)
+    edits = (step, geometry) if step_first else (geometry, step)
+    changed = resource.edit(resource.observe().ref.revision, edits)
+    assert resource.accept(changed.ref.revision).values["range"] == {
+        "start": -1.0 if centered else 0.0,
+        "stop": 3.0 if centered else 4.0,
+        "expts": 5 if step_first else 9,
+    }
+
+
+def test_range_intent_preserves_unexpected_source_fault() -> None:
+    sources = Sources()
+    broken = False
+    defect = ValueError("range source defect")
+
+    def resolution() -> CfgResolution:
+        fail = broken
+        source = sources.read()
+
+        def evaluate(expression: str) -> int | float | complex:
+            if fail:
+                raise defect
+            return source.evaluate_expression(expression)
+
+        return replace(source, evaluate_expression=evaluate)
+
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"range": SweepSpec()}),
+        CfgSectionValue({"range": SweepValue(EvalValue("frequency"), 6.0, 3)}),
+    )
+    resource = CfgResource(lambda: schema, resolution=resolution, make_range=make_range)
+    before = resource.observe()
+    broken = True
+    with pytest.raises(ValueError, match="range source defect") as caught:
+        resource.edit(before.ref.revision, (CfgEdit(("range", "step"), 1.0),))
+    assert caught.value is defect
+    assert resource.observe() == before
+
+
+def test_replacing_failed_expression_does_not_evaluate_old_input(
+    captured_resource,
+) -> None:
+    resource, sources = captured_resource
+    changed = resource.edit(
+        resource.observe().ref.revision, (CfgEdit(("a",), EvalValue("offset")),)
+    )
+    sources.fail_evaluation = True
+    unavailable = resource.refresh(changed.ref.revision)
+    assert unavailable.status is CfgStatus.UNAVAILABLE
+    sources.evaluation_reads.clear()
+    recovered = resource.edit(unavailable.ref.revision, (CfgEdit(("a",), 7.0),))
+    assert recovered.status is CfgStatus.VALID
+    assert resource.accept(recovered.ref.revision).values["a"] == 7.0
+    assert sources.evaluation_reads == []
+
+
+def test_replaced_intermediate_expression_is_not_evaluated(captured_resource) -> None:
+    resource, sources = captured_resource
+    sources.fail_evaluation = True
+    changed = resource.edit(
+        resource.observe().ref.revision,
+        (
+            CfgEdit(("a",), EvalValue("offset")),
+            CfgEdit(("a",), 7.0),
+        ),
+    )
+    assert changed.status is CfgStatus.VALID
+    assert resource.accept(changed.ref.revision).values["a"] == 7.0
+    assert sources.evaluation_reads == []
+
+
+def test_retained_expression_uses_new_source_basis(captured_resource) -> None:
+    resource, sources = captured_resource
+    changed = resource.edit(
+        resource.observe().ref.revision, (CfgEdit(("a",), EvalValue("offset * 2")),)
+    )
+    assert resource.accept(changed.ref.revision).values["a"] == 2.0
+    sources.names["offset"] = 6.0
+    sources.revision += 1
+    newer = resource.edit(changed.ref.revision, (CfgEdit(("literal.dot",), 7.0),))
+    assert resource.accept(newer.ref.revision).values["a"] == 12.0
+    assert newer.source_basis[0].revision == sources.revision
 
 
 def test_unexpected_edit_evaluation_fault_is_not_invalid_input(

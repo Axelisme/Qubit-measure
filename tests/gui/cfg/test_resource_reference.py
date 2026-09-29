@@ -33,6 +33,7 @@ from zcu_tools.gui.session.expression import validate_scalar_expr
 class Catalog:
     entries: dict[str, ResolvedReference] = field(default_factory=dict)
     lookups: list[str] = field(default_factory=list)
+    failed_keys: frozenset[str] = frozenset()
 
     def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
         return tuple(
@@ -41,10 +42,12 @@ class Catalog:
 
     def resolve(self, kind: str, key: str) -> ResolvedReference | None:
         self.lookups.append(key)
+        if key in self.failed_keys:
+            raise RuntimeError("reference resolver defect")
         return self.entries.get(key)
 
     def snapshot(self) -> CfgResolution:
-        frozen = Catalog(deepcopy(self.entries), self.lookups)
+        frozen = Catalog(deepcopy(self.entries), self.lookups, self.failed_keys)
         return CfgResolution(
             (),
             lambda expression: 0.0,
@@ -125,6 +128,31 @@ def test_disabled_reference_can_be_relinked(reference_resource) -> None:
         disabled.ref.revision, (CfgEdit(("ref", "__ref"), "second"),)
     )
     assert resource.accept(enabled.ref.revision).values["ref"] == {"x": 2.0}
+
+
+def test_complete_override_recovers_without_resolving_failed_old_key(
+    reference_resource,
+) -> None:
+    resource, catalog = reference_resource
+    catalog.failed_keys = frozenset({"first"})
+    unavailable = resource.refresh(resource.observe().ref.revision)
+    assert unavailable.status is CfgStatus.UNAVAILABLE
+    catalog.lookups.clear()
+    changed = resource.edit(unavailable.ref.revision, (CfgEdit(("ref",), {"x": 7.0}),))
+    assert changed.status is CfgStatus.VALID
+    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
+    assert "first" not in catalog.lookups
+
+
+def test_partial_override_cannot_recover_by_using_failed_key_cache(
+    reference_resource,
+) -> None:
+    resource, catalog = reference_resource
+    catalog.failed_keys = frozenset({"first"})
+    unavailable = resource.refresh(resource.observe().ref.revision)
+    with pytest.raises(RuntimeError, match="reference resolver defect"):
+        resource.edit(unavailable.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+    assert resource.observe() == unavailable
 
 
 def test_linked_refresh_uses_new_catalog_value(reference_resource) -> None:
