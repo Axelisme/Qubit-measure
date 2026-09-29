@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.services.predictor import (
@@ -25,7 +25,7 @@ from zcu_tools.gui.session.services.predictor import (
 
 def _make_svc() -> PredictorService:
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     return PredictorService(state, EventBus())
 
@@ -38,7 +38,7 @@ def _inject_fake_predictor(svc: PredictorService) -> MagicMock:
     fake.flux_period = 1.0
     # params must be a 3-tuple for calculate_energy_vs_flux (not called in these tests)
     fake.params = (1.0, 0.5, 0.5)
-    ctx = svc._state.exp_context
+    ctx = svc._state.session_env
     svc._state.set_context(dataclasses.replace(ctx, predictor=fake))
     return fake
 
@@ -52,7 +52,7 @@ def test_predictor_load_clear_does_not_bump_context_version():
     svc = _make_svc()
     ctx_before = svc._state.version.get("context")
     fake = MagicMock()
-    svc._state.set_context(dataclasses.replace(svc._state.exp_context, predictor=fake))
+    svc._state.set_context(dataclasses.replace(svc._state.session_env, predictor=fake))
     svc.clear_predictor()
     # predictor is not a guarded resource; swapping it must not bump context.
     assert svc._state.version.get("context") == ctx_before
@@ -79,7 +79,7 @@ def test_clear_predictor_resets_state():
     # Inject a fake predictor without going through load_predictor.
     fake = MagicMock()
     fake.flux_bias = 0.3
-    svc._state.set_context(dataclasses.replace(svc._state.exp_context, predictor=fake))
+    svc._state.set_context(dataclasses.replace(svc._state.session_env, predictor=fake))
     svc._predictor_path = "/fake/path.json"
 
     svc.clear_predictor()
@@ -360,7 +360,11 @@ def test_calibrate_flux_bias_invalid_transition_raises():
 
 def _write_params_json(path, *, with_fluxdep: bool = True) -> None:
     if with_fluxdep:
-        from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+        from zcu_tools.resources.qubit_params import (
+            FluxDepFit,
+            ParamsProject,
+            QubitParams,
+        )
 
         params = QubitParams(path)
         params.ensure_project(ParamsProject("fake_qubit", "fake_qubit"))
@@ -375,7 +379,7 @@ def _write_params_json(path, *, with_fluxdep: bool = True) -> None:
             )
         )
     else:
-        from zcu_tools.meta_tool import ParamsProject, QubitParams
+        from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 
         QubitParams(path).ensure_project(ParamsProject("fake_qubit", "fake_qubit"))
 
@@ -429,7 +433,7 @@ def _make_real_predictor() -> object:
 def _inject_real_predictor(svc: PredictorService) -> object:
     """Replace the fake predictor in svc state with a real FluxoniumPredictor."""
     predictor = _make_real_predictor()
-    ctx = svc._state.exp_context
+    ctx = svc._state.session_env
     svc._state.set_context(dataclasses.replace(ctx, predictor=predictor))
     return predictor
 

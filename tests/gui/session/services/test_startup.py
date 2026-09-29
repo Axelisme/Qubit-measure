@@ -3,18 +3,18 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.services.persistence_types import (
+from zcu_tools.gui.app.measure.services.persistence_types import (
     PersistedDeviceEntry,
     PersistedStartup,
 )
-from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus, State
+from zcu_tools.gui.app.measure.state import DeviceState, DeviceStatus, State
 from zcu_tools.gui.result_scope import ResultScopeManager
 from zcu_tools.gui.session.services.startup import (
     StartupConnectionRequest,
     StartupProjectRequest,
     StartupService,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _make_service(tmp_path) -> tuple[StartupService, MagicMock, MagicMock, State]:

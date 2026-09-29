@@ -5,7 +5,7 @@ status: accepted
 # 0046 — Shared cfg lowering ports
 
 **狀態：** accepted（2026-07-10）。
-**關聯：** [[0011]]、[[0043]]、[[0045]]、[[0051]]。
+**關聯：** [[0011]]、[[0062]]、[[0045]]、[[0051]]。
 
 ## 背景
 
@@ -55,7 +55,7 @@ validation_error、缺少 resolved 值或 shape metadata 均拒絕，不靠 raw 
 補解析。來源 schema 的 chosen key、raw、metadata 不變；range controls 不重新建構或推導。
 這是對明確 resolved snapshot 的操作，不取代 editor commit／Autofluxdep 的 live contract。
 
-`gui.cfg` 不 import `gui.app.*`、`experiment.*`、`meta_tool.*`、Qt、`notebook`或`device`，
+`gui.cfg` 不 import `gui.app.*`、`experiment.*`、`resources.*`、Qt、`notebook`或`device`，
 也不提供 `LoweringEnv`、process-global resolver registry或 environment lookup。
 
 measure adapter保留 `validate_schema(schema, ml)` 與
@@ -71,7 +71,7 @@ closed catalog辨識所有合法 measure module discriminator，使合法但不�
 missing/relink semantics保持不變。
 
 `NodeCfgSchema.logical_paths`、generation persistence、`OverridePlan`、Qt form/live model與
-node builders不屬於本決策，維持 [[0043]] dataflow。
+node builders不屬於本決策，維持 [[0062]] dataflow。
 
 ## 後果
 

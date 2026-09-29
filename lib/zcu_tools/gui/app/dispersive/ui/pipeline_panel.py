@@ -20,7 +20,7 @@ The heavy work (preprocess, predict, auto-tune) runs off-main via the shared
 ``BackgroundRunner`` (pool strategy), calling only the pure ``compute_*`` /
 ``predict_*`` / ``auto_tune`` controller methods and returning plain data; the
 runner's ``on_done`` callback — on the Qt main thread — records State and draws the
-figure (the worker never touches Qt widgets or pyplot, per ADR-0017). The figures
+figure (the worker never touches Qt widgets or pyplot, per ADR-0067). The figures
 live on local ``FigureCanvasQTAgg`` widgets in the tabs.
 """
 
@@ -45,6 +45,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.services.viz import (
     SampleArtists,
@@ -56,7 +57,6 @@ from zcu_tools.gui.app.dispersive.services.viz import (
     update_bare_line,
     update_sample_dots,
 )
-from zcu_tools.gui.app.dispersive.state import PreprocessResult
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 

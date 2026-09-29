@@ -1,0 +1,115 @@
+"""Shared building blocks for the per-role default factories.
+
+These are the primitives every role default uses to assemble a value tree:
+in-place field patchers, a trig-offset builder, and library-lookup selectors.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from zcu_tools.gui.cfg import (
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    ReferenceValue,
+    ScalarValue,
+)
+
+from ..ctx_helpers import md_has_key
+from .module_defaults import (
+    NamedModuleValue,
+    select_named_module_value,
+    select_named_waveform_value,
+)
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
+
+__all__ = [
+    "select_named_module_value",
+    "select_named_waveform_value",
+    "NamedModuleValue",
+    "patch_pulse_fields",
+    "patch_ro_cfg_fields",
+    "make_trig_offset",
+]
+
+
+def patch_pulse_fields(
+    value: CfgSectionValue,
+    *,
+    freq: float | ScalarValue,
+    ch: int | ScalarValue,
+    gain: float | ScalarValue,
+    length: float | ScalarValue,
+) -> None:
+    """Patch a pulse CfgSectionValue (flat fields) in-place with sensible values.
+
+    Every field accepts a raw scalar (wrapped in DirectValue) or an already-built
+    DirectValue/EvalValue — so a field may be a live md expression (e.g. a
+    best_ro_* readout seed) as readily as a literal constant.
+    """
+    waveform_ref = value.fields.get("waveform")
+    if isinstance(waveform_ref, ReferenceValue):
+        waveform_ref.value.fields["length"] = (
+            length
+            if isinstance(length, (DirectValue, EvalValue))
+            else DirectValue(length)
+        )
+
+    value.fields["ch"] = (
+        ch if isinstance(ch, (DirectValue, EvalValue)) else DirectValue(ch)
+    )
+    value.fields["nqz"] = DirectValue(2)
+    value.fields["freq"] = (
+        freq if isinstance(freq, (DirectValue, EvalValue)) else DirectValue(freq)
+    )
+    value.fields["gain"] = (
+        gain if isinstance(gain, (DirectValue, EvalValue)) else DirectValue(gain)
+    )
+
+
+def patch_ro_cfg_fields(
+    value: CfgSectionValue,
+    *,
+    ro_freq: float | ScalarValue,
+    ro_ch: int | ScalarValue,
+    trig_offset: float | ScalarValue,
+    ro_length: float | ScalarValue = 0.9,
+) -> None:
+    """Patch a DirectReadout CfgSectionValue in-place with sensible values."""
+    value.fields["ro_freq"] = (
+        ro_freq
+        if isinstance(ro_freq, (DirectValue, EvalValue))
+        else DirectValue(ro_freq)
+    )
+    value.fields["ro_ch"] = (
+        ro_ch if isinstance(ro_ch, (DirectValue, EvalValue)) else DirectValue(ro_ch)
+    )
+    value.fields["ro_length"] = (
+        ro_length
+        if isinstance(ro_length, (DirectValue, EvalValue))
+        else DirectValue(ro_length)
+    )
+    value.fields["trig_offset"] = (
+        trig_offset
+        if isinstance(trig_offset, (DirectValue, EvalValue))
+        else DirectValue(trig_offset)
+    )
+
+
+def make_trig_offset(
+    ctx: SessionEnv,
+    *,
+    trig_expr: str,
+    trig_fallback: float,
+) -> ScalarValue:
+    """Build a trig_offset ScalarValue: EvalValue if timeFly exists, else DirectValue.
+
+    When ``timeFly`` is present the EvalValue carries only ``trig_expr``; lowering
+    resolves it against md at render time.
+    """
+    if md_has_key(ctx, "timeFly"):
+        return EvalValue(expr=trig_expr)
+    return DirectValue(trig_fallback)

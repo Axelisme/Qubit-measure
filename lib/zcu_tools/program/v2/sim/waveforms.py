@@ -85,7 +85,7 @@ def arb_waveform_abs_at(
     asset is represented by ``abs(I + jQ)``.
     """
 
-    from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
+    from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
     idata_raw, qdata_raw, time_raw = ArbWaveformDatabase.get(wav.data)
     idata = np.asarray(idata_raw, dtype=np.float64)

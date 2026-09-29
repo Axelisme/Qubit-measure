@@ -17,9 +17,9 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
-from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
@@ -562,7 +562,7 @@ def test_create_run_session_clones_ml_for_cfg_snapshots_and_module_source(
     tmp_path, monkeypatch
 ):
     ctrl = build_core(project=_project(tmp_path))
-    original_ml = ctrl.state.exp_context.ml
+    original_ml = ctrl.state.session_env.ml
     original_ml.register_module(
         drive=PulseCfg(
             waveform=ConstWaveformCfg(length=0.1),
@@ -614,7 +614,7 @@ def test_ml_module_source_returns_none_on_absent():
     # ModuleLibrary.get_module raises — the adapter start_run threads in must
     # bridge that so an absent module dep falls back instead of crashing the run.
     from zcu_tools.gui.app.autofluxdep.services.run_setup import MlModuleSource
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     source = MlModuleSource(ModuleLibrary())
     assert source.get_module("not_a_module") is None  # must not raise

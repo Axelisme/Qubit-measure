@@ -4,6 +4,8 @@ status: accepted
 
 # 0050 — Canonical cfg binding paths
 
+> 現行定位：binding grammar 仍有效；batch 成功前綴是現況，不代表已落實核准的 atomic edit batch。目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，跨 owner 分工見 [[0065]]。
+
 ## Context
 
 Cfg mutation and listing previously used a second field-subtype grammar in the
@@ -51,7 +53,7 @@ sequential so a reference switch can expose the next path. Only a shape target
 materializes path sets, once before the first shape edit and once after success.
 The sorted response is the final net diff, so A→B→A is empty. Failure preserves
 successful prefix edits, re-raises the original typed failure, and performs no
-after diff. Per-edit version bumps and [[0049]] lazy subscriber payloads remain;
+after diff. Per-edit version bumps and [[0068]] lazy subscriber payloads remain;
 this decision does not implement snapshot coalescing.
 
 ## Consequences
@@ -61,4 +63,4 @@ this decision does not implement snapshot coalescing.
 - Agents copy listing paths verbatim and receive actionable legacy hints.
 - Batch listing cost is independent of edit count unless shape changes.
 
-This extends [[0008]], [[0013]], [[0014]], [[0045]], and [[0046]].
+This extends [[0008]], [[0045]], and [[0046]]; the remote boundary is [[0068]].

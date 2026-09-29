@@ -1,0 +1,280 @@
+from __future__ import annotations
+
+import dataclasses
+from dataclasses import dataclass
+from typing import Annotated, Literal, get_type_hints
+
+import pytest
+from zcu_tools.gui.app.measure.adapter import ParamMeta
+from zcu_tools.gui.app.measure.adapter.analyze_params import (
+    _resolve_field_info,
+    describe_analyze_params,
+    reconstruct_params,
+)
+
+
+def test_resolve_bool_field():
+    @dataclass
+    class P:
+        flag: bool
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    bare, choices, label, decimals, optional = _resolve_field_info(field, hints)
+
+    assert bare is bool
+    assert choices is None
+    assert label == "flag"
+    assert decimals is None
+    assert optional is False
+
+
+@pytest.mark.parametrize("experiment", ["ge", "len_rabi", "amp_rabi"])
+def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> None:
+    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.amp_rabi import (
+        SsAmpRabiAnalyzeParams,
+    )
+    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
+        GEAnalyzeParams,
+    )
+    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.len_rabi import (
+        SsLenRabiAnalyzeParams,
+    )
+
+    cls = {
+        "ge": GEAnalyzeParams,
+        "len_rabi": SsLenRabiAnalyzeParams,
+        "amp_rabi": SsAmpRabiAnalyzeParams,
+    }[experiment]
+    spec = next(
+        field
+        for field in describe_analyze_params(cls)
+        if field["name"] == "initial_state"
+    )
+    assert spec == {
+        "name": "initial_state",
+        "type": "str",
+        "label": "Initial State",
+        "choices": ["ground", "excited"],
+        "default": "ground",
+    }
+    values = dataclasses.asdict(cls())
+    values["initial_state"] = "excited"
+    assert reconstruct_params(cls, values).initial_state == "excited"
+    values["initial_state"] = "unknown"
+    with pytest.raises(RuntimeError, match="must be one of"):
+        reconstruct_params(cls, values)
+
+
+def test_resolve_literal_field():
+    @dataclass
+    class P:
+        mode: Annotated[Literal["a", "b"], ParamMeta(label="Mode")]
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    bare, choices, label, decimals, optional = _resolve_field_info(field, hints)
+
+    assert bare is str
+    assert choices == ["a", "b"]
+    assert label == "Mode"
+    assert decimals is None
+    assert optional is False
+
+
+def test_reconstruct_params_basic():
+    @dataclass
+    class P:
+        x: float
+        flag: bool
+
+    result = reconstruct_params(P, {"x": 1.5, "flag": True})
+
+    assert result == P(x=1.5, flag=True)
+
+
+def test_reconstruct_params_extra_key_raises():
+    @dataclass
+    class P:
+        x: float
+
+    with pytest.raises(RuntimeError, match="Unknown analyze params"):
+        reconstruct_params(P, {"x": 1.0, "extra": 99})
+
+
+def test_reconstruct_params_rejects_bool_as_int():
+    @dataclass
+    class P:
+        x: int
+
+    with pytest.raises(RuntimeError, match="expects int"):
+        reconstruct_params(P, {"x": True})
+
+
+def test_mixed_literal_types_raise():
+    @dataclass
+    class P:
+        mode: Literal["a", 1]
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    with pytest.raises(TypeError, match="one type"):
+        _resolve_field_info(field, hints)
+
+
+def test_unsupported_annotation_raises(qapp):  # noqa: ARG001
+    @dataclass
+    class P:
+        val: list
+
+    from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
+
+    form = AnalyzeFormWidget()
+    with pytest.raises(TypeError, match="Unsupported analyze parameter annotation"):
+        form.populate(P(val=[]))
+
+
+# --- optional analyze params (Optional[T]) ---------------------------------
+
+
+def test_resolve_optional_field():
+    @dataclass
+    class P:
+        t0: float | None = None
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    bare, choices, _label, _decimals, optional = _resolve_field_info(field, hints)
+
+    assert bare is float  # the None is stripped, T resolved
+    assert choices is None
+    assert optional is True
+
+
+def test_resolve_optional_annotated_keeps_meta():
+    @dataclass
+    class P:
+        t0: Annotated[float | None, ParamMeta(label="T0")] = None
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    bare, _choices, label, _decimals, optional = _resolve_field_info(field, hints)
+
+    assert bare is float
+    assert optional is True
+    assert label == "T0"
+
+
+def test_non_optional_union_rejected():
+    @dataclass
+    class P:
+        x: int | str
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    with pytest.raises(TypeError, match="only Optional"):
+        _resolve_field_info(field, hints)
+
+
+def test_describe_marks_optional_with_default_none():
+    @dataclass
+    class P:
+        t0: Annotated[float | None, ParamMeta(label="T0")] = None
+
+    assert describe_analyze_params(P) == [
+        {
+            "name": "t0",
+            "type": "float",
+            "label": "T0",
+            "optional": True,
+            "default": None,
+        }
+    ]
+
+
+def test_reconstruct_optional_none_passes_through():
+    @dataclass
+    class P:
+        t0: float | None = None
+
+    assert reconstruct_params(P, {"t0": None}) == P(t0=None)
+
+
+def test_reconstruct_optional_value_is_coerced():
+    @dataclass
+    class P:
+        t0: float | None = None
+
+    assert reconstruct_params(P, {"t0": 2}) == P(t0=2.0)
+
+
+# --- PEP 604 (X | None / A | B) annotation compatibility ------------------
+# These tests use PEP 604 union syntax, which produces types.UnionType at
+# runtime (not typing.Union).  They must behave identically to the
+# Optional[T]/Union[A,B] equivalents above.  See Item 1 of Phase 5 Step 0:
+# the guard `get_origin(...) is typing.Union` silently misses types.UnionType.
+
+
+def test_resolve_pep604_optional_field():
+    """float | None annotation must be treated as Optional[float]."""
+
+    @dataclass
+    class P:
+        t0: float | None = None
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    bare, choices, _label, _decimals, optional = _resolve_field_info(field, hints)
+
+    assert bare is float
+    assert choices is None
+    assert optional is True
+
+
+def test_resolve_pep604_optional_annotated_keeps_meta():
+    """Annotated[float | None, ParamMeta(...)] preserves meta and strips None."""
+
+    @dataclass
+    class P:
+        t0: Annotated[float | None, ParamMeta(label="T0")] = None
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    bare, _choices, label, _decimals, optional = _resolve_field_info(field, hints)
+
+    assert bare is float
+    assert optional is True
+    assert label == "T0"
+
+
+def test_pep604_non_optional_union_rejected():
+    """int | str (two non-None types) must still raise for unsupported Union."""
+
+    @dataclass
+    class P:
+        x: int | str
+
+    hints = get_type_hints(P, include_extras=True)
+    field = dataclasses.fields(P)[0]
+    with pytest.raises(TypeError, match="only Optional"):
+        _resolve_field_info(field, hints)
+
+
+def test_reconstruct_pep604_optional_none_passes_through():
+    """reconstruct_params must pass None through for float | None fields."""
+
+    @dataclass
+    class P:
+        t0: float | None = None
+
+    assert reconstruct_params(P, {"t0": None}) == P(t0=None)
+
+
+def test_reconstruct_pep604_optional_value_is_coerced():
+    """reconstruct_params must coerce a raw int to float for float | None."""
+
+    @dataclass
+    class P:
+        t0: float | None = None
+
+    assert reconstruct_params(P, {"t0": 2}) == P(t0=2.0)

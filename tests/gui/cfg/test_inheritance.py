@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main.specs import (
+from zcu_tools.gui.app.measure.specs import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
 )

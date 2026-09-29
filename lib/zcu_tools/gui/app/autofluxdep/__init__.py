@@ -10,11 +10,11 @@ sweeps flux × the user-ordered providers, replacing the old ``cfg_maker`` lambd
 
 - ``nodes.builder``    — Builder / Node / PlacedNode + the RunEnv curried in
 - ``nodes.spec``       — Dependency / ModuleDep declaration vocabulary
-- ``experiments``      — user-editable measurement Builders + ordered catalog
+- ``zcu_tools.experiment.v2_gui.autofluxdep`` — the concrete measurement Builders,
+  ordered catalog and their ``_support`` (outside this app; composed in here)
 - ``nodes.predictor``  — a Service Builder (pure-compute Node)
 - ``orchestrator``     — runner-free flux × provider sweep + requirement resolution
 - ``state`` / ``event_bus`` / ``controller`` / ``app`` — composition root + façade
 
-See ``.agent_state/plans/tool_gui/autofluxdep_gui_assessment.md`` for the full plan and
-``CONTEXT.md`` for the Builder/Node/Service/Result/Plotter glossary.
+See ``README.md`` for the local Builder/Node/Result/Plotter design.
 """

@@ -27,15 +27,17 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import minimize_scalar
 
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.qubit_params import (
+    QubitParams,
+)
+from zcu_tools.resources.sample_table import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
-    DeviceValueUnit,
     FLUX_COLUMN,
     FLUX_INT_COLUMN,
     FLUX_PERIOD_COLUMN,
-    QubitParams,
     SAMPLE_COORDINATE_COLUMNS,
+    DeviceValueUnit,
     SampleFluxFrame,
     SampleFluxResolution,
     resolve_sample_flux,

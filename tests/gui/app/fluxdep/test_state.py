@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.state import (
     PROJECT_VERSION_KEY,
     SELECTION_VERSION_KEY,
@@ -15,7 +17,6 @@ from zcu_tools.gui.app.fluxdep.state import (
     spectrum_version_key,
 )
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
 
 def _empty_points() -> PointsData:
@@ -210,7 +211,7 @@ def test_project_info_root_dir_anchors_derived_defaults():
 
     # root_dir (the repo root, injected by the entry script) anchors the derived
     # defaults there instead of leaving them relative to cwd — the .bat-launcher
-    # fix: a launcher that cd's into script/ must not scope defaults under script/.
+    # fix: a launcher that cd's into scripts/ must not scope defaults under scripts/.
     root = os.path.join(os.sep, "repo")
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1", root_dir=root)
     assert p.result_dir == os.path.join(root, "result", "Q5_2D", "Q1")
@@ -230,8 +231,8 @@ def test_project_info_empty_root_dir_keeps_relative_default():
 
 
 def test_set_fit_params_bumps_and_clears_result():
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
     from zcu_tools.gui.app.fluxdep.state import FIT_VERSION_KEY
-    from zcu_tools.notebook.persistance import TransitionDict
 
     st = FluxDepState()
     st.set_fit_result((5.0, 1.0, 0.5))  # a stale result
@@ -275,8 +276,8 @@ def test_default_transitions_is_basic_preset():
 
 
 def test_transitions_need_r_f():
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
     from zcu_tools.gui.app.fluxdep.state import transitions_need_r_f
-    from zcu_tools.notebook.persistance import TransitionDict
 
     assert transitions_need_r_f(TransitionDict({"red side": [(0, 1)]}))
     assert transitions_need_r_f(TransitionDict({"blue side": [(0, 1)]}))
@@ -287,8 +288,8 @@ def test_transitions_need_r_f():
 
 
 def test_transitions_need_sample_f():
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
     from zcu_tools.gui.app.fluxdep.state import transitions_need_sample_f
-    from zcu_tools.notebook.persistance import TransitionDict
 
     assert transitions_need_sample_f(TransitionDict({"mirror": [(0, 1)]}))
     assert transitions_need_sample_f(TransitionDict({"mirror blue": [(0, 1)]}))
@@ -296,8 +297,8 @@ def test_transitions_need_sample_f():
 
 
 def test_transitions_with_freqs_injects_only_set():
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
     from zcu_tools.gui.app.fluxdep.state import transitions_with_freqs
-    from zcu_tools.notebook.persistance import TransitionDict
 
     base = TransitionDict({"mirror": [(0, 1)]})
     # only sample_f set → only sample_f key added; r_f stays absent

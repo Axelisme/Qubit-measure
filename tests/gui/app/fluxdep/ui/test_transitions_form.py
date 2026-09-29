@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import (
     PRESETS,
     TransitionsForm,
     format_pairs,
     parse_pairs,
 )
-from zcu_tools.notebook.persistance import TransitionDict
 
 # --- pure parse/format -----------------------------------------------------
 

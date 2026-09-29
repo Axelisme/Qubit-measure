@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import SpectrumResult
 from zcu_tools.notebook.analysis.fluxdep.interactive import point_select
 from zcu_tools.notebook.analysis.fluxdep.interactive.point_select import (
     InteractiveSelector,
 )
-from zcu_tools.notebook.persistance import SpectrumResult
 
 
 def _spectrum_result() -> SpectrumResult:

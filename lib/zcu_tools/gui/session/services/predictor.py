@@ -1,6 +1,6 @@
 """PredictorService — FluxoniumPredictor loading and frequency prediction.
 
-Owns the ``exp_context.predictor`` write seam (set_context + PredictorChangedPayload)
+Owns the ``session_env.predictor`` write seam (set_context + PredictorChangedPayload)
 and all synchronous prediction computation. This is pure computation: no Qt signals,
 no operation runner, no exclusion gate. Errors surface as PredictorLoadError /
 PredictorNotLoaded for the caller to translate.
@@ -18,7 +18,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.events import PredictorChangedPayload
-from zcu_tools.meta_tool import QubitParams, QubitParamsError
+from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction
 
@@ -175,7 +175,7 @@ def read_fluxdep_fit_params(path: str) -> SetModelParamsRequest:
 
 
 class PredictorService:
-    """Owns the exp_context.predictor write seam and all prediction computation.
+    """Owns the session_env.predictor write seam and all prediction computation.
 
     Pure class (not QObject): emits PredictorChangedPayload via the EventBus,
     has no Qt signals. Predictor load and predict_freq are synchronous; they raise
@@ -196,7 +196,7 @@ class PredictorService:
     # ------------------------------------------------------------------
 
     def get_predictor(self) -> FluxoniumPredictor | None:
-        return self._state.exp_context.predictor
+        return self._state.session_env.predictor
 
     def get_predictor_info(self) -> dict | None:
         """Return metadata about the current predictor, or None if not loaded.
@@ -207,7 +207,7 @@ class PredictorService:
         (predictor.params is the (EJ, EC, EL) GHz tuple) let the dialog read the
         active model back into its editable fields.
         """
-        predictor = self._state.exp_context.predictor
+        predictor = self._state.session_env.predictor
         if predictor is None:
             return None
         ej, ec, el = predictor.params
@@ -236,7 +236,7 @@ class PredictorService:
         except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
             raise PredictorLoadError(f"Failed to load predictor: {exc}") from exc
         self._predictor_path = req.path
-        new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
+        new_ctx = dataclasses.replace(self._state.session_env, predictor=predictor)
         self._state.set_context(new_ctx)
         self._bus.emit(PredictorChangedPayload())
 
@@ -279,14 +279,14 @@ class PredictorService:
         """
         logger.info("install_predictor: %s", type(predictor).__name__)
         self._predictor_path = None
-        new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
+        new_ctx = dataclasses.replace(self._state.session_env, predictor=predictor)
         self._state.set_context(new_ctx)
         self._bus.emit(PredictorChangedPayload())
 
     def clear_predictor(self) -> None:
         logger.info("clear_predictor")
         self._predictor_path = None
-        new_ctx = dataclasses.replace(self._state.exp_context, predictor=None)
+        new_ctx = dataclasses.replace(self._state.session_env, predictor=None)
         self._state.set_context(new_ctx)
         self._bus.emit(PredictorChangedPayload())
 
@@ -294,7 +294,7 @@ class PredictorService:
         self, req: CalibrateFluxBiasRequest
     ) -> CalibrateFluxBiasResult:
         """Compute and install a flux-bias correction from one measured point."""
-        predictor = self._state.exp_context.predictor
+        predictor = self._state.session_env.predictor
         if predictor is None:
             raise PredictorNotLoaded("No predictor loaded — load one first")
         frm, to = req.transition
@@ -320,7 +320,7 @@ class PredictorService:
             predictor.flux_period,
             flux_bias,
         )
-        new_ctx = dataclasses.replace(self._state.exp_context, predictor=calibrated)
+        new_ctx = dataclasses.replace(self._state.session_env, predictor=calibrated)
         self._state.set_context(new_ctx)
         self._bus.emit(PredictorChangedPayload())
         logger.info(
@@ -337,7 +337,7 @@ class PredictorService:
     # ------------------------------------------------------------------
 
     def predict_freq(self, req: PredictFreqRequest) -> float:
-        predictor = self._state.exp_context.predictor
+        predictor = self._state.session_env.predictor
         if predictor is None:
             raise PredictorNotLoaded("No predictor loaded — load one first")
         return float(predictor.predict_freq(req.value, transition=req.transition))
@@ -347,9 +347,9 @@ class PredictorService:
 
         Uses FluxoniumPrediction so all transitions share a single diagonalisation
         sweep — O(n_values) eigensolves rather than O(n_transitions * n_values).
-        The value→flux affine is owned by the simulate-layer engine (ADR-0029).
+        The value→flux affine is owned by simulate.fluxonium.prediction.
         """
-        predictor = self._state.exp_context.predictor
+        predictor = self._state.session_env.predictor
         if predictor is None:
             raise PredictorNotLoaded("No predictor loaded — load one first")
         if len(req.transitions) == 0:
@@ -385,7 +385,7 @@ class PredictorService:
         <=1. The engine sets return_dim to max(level)+1 so higher transitions
         (e.g. 0->3) work correctly.
         """
-        predictor = self._state.exp_context.predictor
+        predictor = self._state.session_env.predictor
         if predictor is None:
             raise PredictorNotLoaded("No predictor loaded — load one first")
         if len(req.transitions) == 0:

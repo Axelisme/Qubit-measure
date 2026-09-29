@@ -1,38 +1,38 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.cfg import module_leaf_patches
-from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.dependency_defaults import (
     is_lowerable_pulse_module,
     missing_info_value,
     missing_module_value,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.readout_defaults import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.readout_defaults import (
     seed_readout_freq,
     seed_readout_gain,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
     fixed_sweep_range,
     seed_md_float,
     snapshot_float,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.override_plan import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.override_plan import (
     PULSE_MODULE_LEAF_PATHS,
     READOUT_FALLBACK_LEAF_PATHS,
     NodeOverridePlan,
     pulse_module_patches,
     readout_module_patches,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.timing import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.timing import (
     pop_sweep_range,
     pop_sweep_ranges,
 )
+from zcu_tools.gui.app.autofluxdep.cfg import module_leaf_patches
 from zcu_tools.gui.cfg import SweepValue
-from zcu_tools.gui.session.types import ExpContext
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _pulse_module() -> dict[str, object]:
@@ -101,7 +101,7 @@ def test_snapshot_and_fixed_sweep_helpers():
 def test_seed_helpers_use_md_or_fallback():
     md = MetaDict()
     md.update({"t1": 12.5, "r_f": 6123.0})
-    ctx = ExpContext(md=md, ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=md, ml=ModuleLibrary(), soc=None, soccfg=None)
 
     assert seed_md_float(ctx, "t1", 10.0) == 12.5
     assert seed_md_float(ctx, "missing", 10.0) == 10.0

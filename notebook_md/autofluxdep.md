@@ -28,8 +28,8 @@ from pydantic import TypeAdapter
 import zcu_tools.experiment.v2.autofluxdep as zefd
 import zcu_tools.program.v2 as zp
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.meta_tool import ExperimentManager
-from zcu_tools.utils.datasaver import create_datafolder
+from zcu_tools.resources.context import ContextManager
+from zcu_tools.datafile import create_datafolder
 from zcu_tools.notebook.utils import (
     make_sweep,
     reconnect_devices,
@@ -49,14 +49,14 @@ database_path = create_datafolder(
     name=os.path.join(chip_name, qub_name),
 )
 
-em = ExperimentManager(os.path.join(result_dir, "exps"))
+em = ContextManager(os.path.join(result_dir, "exps"))
 ml, md = em.use_flux(label="051115_2.000mA", readonly=True)
 ```
 
 # Connect ZCU216
 
 ```python
-from zcu_tools.remote import make_soc_proxy
+from zcu_tools.qick_remote import make_soc_proxy
 
 soc, soccfg = make_soc_proxy("192.168.10.179", 8887)
 print(soccfg)

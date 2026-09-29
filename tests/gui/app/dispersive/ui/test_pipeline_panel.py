@@ -11,15 +11,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import zcu_tools.simulate.fluxonium.prediction as prediction_mod
+from zcu_tools.analysis.dispersive.models import PreprocessResult
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     FluxoniumInputs,
     OnetoneEntry,
-    PreprocessResult,
 )
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import SpectrumData
 
 
 def _stub(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):

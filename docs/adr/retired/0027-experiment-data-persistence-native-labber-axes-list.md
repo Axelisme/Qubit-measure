@@ -1,0 +1,91 @@
+> 狀態：已退役（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [datafile](../../../lib/zcu_tools/datafile/README.md) 與 [experiment](../../../lib/zcu_tools/experiment/README.md)。以下保留歷史正文。
+
+---
+status: accepted
+---
+
+# 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec + grouped experiment dataset
+
+**狀態：** accepted。Experiment data 使用 labber_io 原生 axes-list、typed axes spec 與 canonical single-file／grouped `.hdf5` save/load；experiment 與 GUI loader 不轉換 legacy artifacts。先前提供的離線 converter、CLI 與暫時 GUI fallback 已於 2026-09-26 退休。
+**關聯：** 與 [[0015]] 劃清（PersistenceCaretaker 是 GUI app-state 的 Memento 單檔持久化，與此**實驗量測資料**的 HDF5 round-trip 不同層、不同關注點）；save 動作位於實驗 run path 尾端，故與 runner / run-driver 設計相鄰。
+
+**領域語言：** 本 ADR 使用 `docs/CONTEXT.md` 定義的 Experiment Result、Experiment Data File、Dataset Role、Grouped Experiment Dataset 與 Legacy Measurement Artifact。
+
+## 脈絡
+
+此決策提出前，實驗量測資料（onetone/twotone/singleshot/… 的 1D/2D sweep 結果）經 `lib/zcu_tools/utils/datasaver.py` 的 **dict 殼**存取：`save_data` / `load_data` / `save_local_data` / `load_local_data`，以 `x_info` / `y_info` / `z_info` 三個 `{name, unit, values}` dict 為介面。當時這層殼底下是 `lib/zcu_tools/utils/labber_io.py`（純 h5py/numpy 的 Labber Log Browser 格式 reader/writer）。兩個舊 module 均已退休；現行入口是 `zcu_tools.utils.datasaver` package（見決定 1）。
+
+當時的殼洩漏了它的核心不變式——**軸序**：
+- `save_local_data` 收 z 為 `(Ny, Nx)`（外-y、內-x），直送 labber_io。
+- `load_local_data` 卻在 load 時把內兩軸翻成 `(Nx, Ny)`「frequency-major」（`datasaver.py:173-179`），理由是一個 labber_io 自己**根本不使用**的「historical frequency-major contract」。
+
+於是 **save 收 `(Ny,Nx)`、load 回 `(Nx,Ny)`，round-trip 非恒等**。每個 caller 私下補 transpose 來抵銷，且補法**互相矛盾**：ac_stark 系把記憶體 array `.T` 後存、load 直接用；power_dep 系直接存、load 卻 assert `(Ny,Nx)`（load 實際回 `(Nx,Ny)`，非方陣即 fail，且無測試覆蓋——是個 latent bug）。約 38 個 2D caller 各帶一份 ad-hoc 軸序記帳。
+
+同時，約 64 個實驗各自**重抄** save/load 樣板（None-guard → make_comment → save_data；load_data → shape assert → 單位反轉 → parse_comment → validate_or_warn → rebuild last_result），差別只在軸名/unit/scale 與 Cfg 型別——同一個持久化不變式被實作 N 次。
+
+關鍵事實：**labber_io 本身原生就支援 inner-first 的 axes-list + N 維 z**（save 驗 `len(axes)==z.ndim`、load 以 `Step dimensions` attr 重建 hypercube、有通過的 3D round-trip 測試）。軸序慣例**已經住在 labber_io**；擋在中間製造矛盾的只有 datasaver 殼的 load-flip。
+
+## 決定
+
+1. **唯一 public persistence facade = `zcu_tools.utils.datasaver` package**。實驗資料一律從 package root import public API：`save_labber_data` / `load_labber_data` / `save_grouped_labber_data` / `load_grouped_labber_data`、`Axis` / `LabberPayload` / `LabberMetadata` / `LabberData` / `GroupedLabberData` / `DatasetRole`、以及 path / transport helpers。package 內部依責任拆成不帶 underscore prefix 的子模組，例如 `models.py`、`labber.py`、`grouped.py`、`paths.py`、`transport.py`，並由 `__init__.py` re-export 對外需要的介面。feature branch 內一次完成 repo-wide import migration：移除舊 `zcu_tools.utils.labber_io` module 與舊 `zcu_tools.utils.datasaver.py` file，不保留 shim。**刪除** datasaver 的四個 dict 函式（`save_data` / `load_data` / `save_local_data` / `load_local_data`）；不保留相容殼（依 CLAUDE.md「不保留 legacy / 相容性邏輯」）。`zcu_tools.utils.labber_io` 不再是 canonical public import path。
+
+2. **軸序慣例（唯一權威住 labber_io）**：`axes` 以 **inner-first** 排列；`z.shape == tuple(len(ax) for ax in reversed(axes))`，即 **inner 軸恆為 z 的最後一維**。1D `(Nx,)`、2D `(Ny, Nx)`、N 維 `(…, Ny, Nx)`。**load 是 save 的恒等逆**——任何一邊都**不做 caller-side transpose**。`.T` 與「transpose back」在 caller 中絕跡。
+
+3. **per-experiment typed axes-spec**（把實驗資料持久化與 save/load 樣板合為一個 deep module）：每個實驗宣告一份 **typed axes-spec**——軸 `name`/`unit`/`scale`/順序、z channel、哪些是離散狀態軸、SI-on-disk 的單位轉換——由**一個共用 helper** 依此驅動原生 N 維 save/load。axis-order + unit + N 維不變式**只住一處**；per-experiment 的 save/load 樣板消失，實驗只留宣告式 spec。`Axis` / `LabberPayload` / `LabberMetadata` 是資料持久化模型，屬於 `zcu_tools.utils.datasaver`；`AxesSpec` / `ZSpec` 是 experiment Result / Cfg 到資料檔案的 mapping spec，留在 `zcu_tools.experiment.axes_spec`，避免 persistence facade 反向依賴 experiment 概念。grouped extension 遵守同一層次：`zcu_tools.utils.datasaver` / migration tooling 可暴露 generic `GroupedLabberData`（`DatasetRole -> LabberPayload` + one `LabberMetadata`），但 experiment load / analyze path 必須立即轉成 per-experiment typed Result，不把 raw dict 當作 experiment API。`GroupedAxesSpec` / `RoleSpec` 同樣住在 `zcu_tools.experiment.axes_spec`，因為它們描述 Result/Cfg 到 grouped Labber payload 的 mapping，而不是 low-level datasaver model。
+
+4. **One-shot Grouped Experiment Dataset 使用單一 Labber log**。一個 Experiment Result 只有一個 canonical Experiment Data File。CPMG、RO auto-optimize 與 JPA auto-optimize 的 Dataset Roles 必須共享完全相同的 inner-first axes、shape 與 timestamps。writer 在建立目的檔前驗證完整 common-grid contract。canonical grouped v2 只在 root 寫一個 Labber log，共用 step channels，每個 Dataset Role 寫成一個 scalar log channel。`zcu_tools.grouped_dataset_version = 2` 識別格式；ordered `zcu_tools.dataset_roles` 與 `zcu_tools.dataset_role_channels` 明確建立 role-to-channel mapping，不從 physical label 猜 role，也不寫 singular `zcu_tools.dataset_role`。legacy Labber 因此把所有 roles 視為同一組 channel configuration。異質 autofluxdep streaming artifact 不套用 common-grid contract，保留 marker-qualified grouped v1 root/`Log_N` layout 與既有 decoder。
+
+5. **Dataset Role 不是全域 enum，也不折成額外 numeric axis**。Dataset Role 是語意角色，不是 sweep dimension。role namespace 由每個 experiment 的 grouped spec 擁有；底層使用 value object / newtype string 表達 role，驗證 lowercase snake_case、required roles 與 role-to-channel membership，但不建立全域 enum。即使 canonical one-shot roles 共享 grid，把 role 折成 numeric axis 仍會混淆 sweep coordinate 與 result semantics。loader 以 attrs 中的 explicit mapping 做 strict validation。
+
+6. **Data payload 與 metadata 分離**。`LabberPayload` 表達單一 Labber Dataset 的 data channel、axes 與 shape-dependent per-entry timestamps；`LabberMetadata` 表達 Experiment Data File metadata（comment / tags / project / user / creation time 等）。single-file `LabberData` 是 `payload + metadata` 的組合。`GroupedLabberData` 是 `DatasetRole -> LabberPayload` 加上一份 shared `LabberMetadata`，不內嵌多個各自帶 metadata 的 `LabberData`，因此 metadata consistency by construction。
+
+7. **Grouped save 接 role payload mapping，不接 required roles**。`save_grouped_labber_data(path, roles={...}, metadata=...)` 接一份完整 `DatasetRole -> LabberPayload` mapping 與一份 shared `LabberMetadata`；role value 不接受 `LabberData`，caller 若手上是 single `LabberData` 必須明確傳 `data.payload`，避免 saver 隱式丟棄 member metadata。low-level saver 驗證 role 格式、至少一個 role、common-grid axes/shape/timestamps、scalar numeric values，以及 step/log channel labels 全域非空且唯一，通過後才建立目的檔。required roles 是 experiment grouped spec 的 completeness policy；experiment save helper 在呼叫 low-level saver 前驗證 Result 是否產生完整 roles。Grouped Experiment Dataset 的 experiment-facing persistence 使用一級 grouped axes-spec（平行於 single-role `AxesSpec`）：每個 role 以 `RoleSpec` 描述 `role`、axes、z、Result field mapping、dtype 與 disk unit scale，語彙盡量貼近 single-role `AxesSpec`；外層 `GroupedAxesSpec` 擁有 required roles、shared metadata、comment/cfg reconstruction 與 typed Result reconstruction。`RoleSpec` 不提供任意 transform hook；load 時先機械式驗證並還原每個 role 的 axes / z arrays，再由 `GroupedAxesSpec` 的 typed builder hook 把 validated role arrays 組成 Result（例如 RO / JPA auto-optimize 的多 role arrays 重建 `params`）。experiment 不再各自手寫 role payload construction、axis validation、comment parsing 與 typed load reconstruction。
+
+8. **Legacy Measurement Artifact 不在 runtime 轉換**。normal experiment `load()` / analyze 只接受 Complete Experiment Result；`PersistableExperiment` 不保留 `.npz`、舊多檔案格式或舊 metadata label/unit 的 compatibility path。原 experiment converter 與離線 CLI 已退休；runtime/GUI 不以失效的 converter 路徑讀舊檔。未來若需重建資料轉換工具，須另行確定輸入格式與 user-owned 資料的操作授權。
+
+9. **Save path ownership 屬於 caller / runner**。persistence layer 寫入 caller 指定的 exact path，不 silently rename、也不 silently overwrite；若 exact path 已存在，底層 writer fast-fail。需要覆蓋的 CLI / migration flow 必須在 caller layer 以明確 `--overwrite` 或等價流程處理，experiment `save()` 不提供 `overwrite=True` 參數。path reservation helper 保留為 caller 在保留 final path 時使用的 helper，不在 lower-level writer 或 experiment-facing persistence implementation 裡改路徑；helper 名稱使用 `reserve_labber_filepath`，不保留舊 alias，因為語意是「預留一個不覆蓋既有檔案的 final path」而非一般 sanitization。single-role `PersistableExperiment.save()` 與 Grouped Experiment Dataset save 使用同一套 exact-path ownership 規則；GUI / runner / notebook 若需要 unique filename，必須在呼叫 save 前先經 path-reservation adapter 決定 final path。path-reservation adapter 屬於呼叫端的 orchestration layer：GUI save flow 擁有 GUI 的 path reservation；notebook / script 若要避免覆蓋，必須明確呼叫 reservation helper；experiment `save()` 本身只負責 exact-path persistence，不攜帶 naming policy。
+
+10. **異質 workflow collection 使用獨立 streaming layout**。`autofluxdep` 與 `overnight` 的 output 是跨 task / 長時間 workflow 的 heterogeneous measurement collection，不等同於單一 Experiment Result 的 Dataset Roles。marker-qualified autofluxdep streaming artifact 保留 grouped version 1、streaming version 1 與 root/`Log_N` decoder。one-shot grouped v2 writer 不接受這類異質 roles。
+
+11. **強型別 + Fast-Fail**。原生 `Channel` 是 namedtuple、`LabberData.z`/`.x` 為 `Any`；axes-spec 層補上型別化包裝（frozen `Axis` 與型別化結果），save 時驗 `z.shape` 與 axes 不符即 **raise**（不靜默 transpose）。`load_grouped_labber_data(path, required_roles=(...))` 是 normal strict path：缺 role、多未知 role、duplicate role 都 raise。省略 `required_roles` 只供 diagnostic inspection 使用，回傳檔案內所有 roles，但仍驗證 role 格式與 duplicate。experiment loader 一律傳 `required_roles`，不能 implicit load whatever is there。
+
+12. **`load_labber_data` 與 grouped loader 分流**。`load_labber_data` 保持 single `LabberData` 語意，對既有非 grouped 檔案的行為不變，且回傳值包含 payload（data / axes / per-entry timestamps）與 metadata（comment / tags / project / user / creation time 等）；不另設只讀 metadata 的 public loader。只有檔案帶有 `zcu_tools.grouped_dataset_version` marker 時 fast-fail，錯誤訊息指向 `load_grouped_labber_data`。grouped file 不回傳第一個 role，也不沿用既有 multi-log stacking 行為。
+
+13. **遷移 = 增量分批**（非 big-bang）。已完成刪 load-flip（`datasaver.py:173-179`）+ 修 power_dep latent bug + 改 `test_datasaver` 的 2D 斷言成 round-trip 恒等；新 axes-spec 介面就位後，caller 檔分批 phase 遷移。canonical one-shot grouped persistence 釘住 root-only multi-channel round-trip、common-grid pre-validation、strict required roles、diagnostic load explicit opt-in、duplicate / invalid role fast-fail、exact path write 不 silently rename。unmarked grouped v1 是 legacy artifact；runtime loader 明確拒絕並要求 canonical grouped v2 檔案，不自動轉換或改寫。`CPMGExp` grouped roles 固定為 `lengths` 與 `signals`，new save 只寫單一 grouped `.hdf5` Experiment Data File，不再寫 `.npz` 或 `*_length` / `*_signals` side files。CPMG grouped payload 使用 Result 原生方向，不沿用 legacy side file 的 `.T`：axes inner-first 為 `Time Index`、`Number of Pi`，`lengths` / `signals` z shape 均為 `(Ntime, Nlength)`；`lengths` 仍以 SI seconds 寫入。舊 CPMG `.npz` 或 side files 不由 runtime 載入；已退休的離線 converter 不再提供轉換入口。`RabiCheckExp`、`CKP_Exp`、`GE_Exp`、bath reset freq-gain 與 bath reset length slice 證明固定離散軸應進 Result model：`reset_states` / `initial_states` / `prepared_states` / `phases` 是普通 axis 欄位，不是 Dataset Role。舊 `<base>_ground` / `<base>_excited` sidecar 與 legacy GE、bath length 檔案不由 runtime 轉成 canonical single-role HDF5。Grouped axes-spec 第一批只遷移三個現有 grouped Experiment Result：`CPMG_Exp`、RO auto-optimize、JPA auto-optimize；它們覆蓋 two-role result、多 role result、以及 typed builder 重建 `params` 的需要。`autofluxdep` / `overnight` workflow collection 不納入這批，因為它們是 heterogeneous measurement collection，不是單一 Experiment Result 的 grouped roles。
+
+14. **後續 single-role migration 固定採 Result-native disk order，不擴 `ZSpec` z-transform**。尚未遷移的 MIST / T1 類實驗若現有 legacy save 透過 `.T` 或拆 sidecar 方便 Labber 瀏覽，新 canonical file 仍以 Result dataclass 的原生 shape 寫入，並選擇 inner-first axes 使 `z.shape == tuple(len(ax) for ax in reversed(axes))`。`ZSpec` 不加入 per-experiment transpose / z-transform hook；舊 artifacts 的 orientation 不帶進 runtime save/load；repo 不再提供先前的 migration script。
+
+15. **population / state / phase 是 axis，除非資料角色異質**。GE population、prepared state、initial state、tomography phase 這類離散狀態若共享同一 z label / unit / dtype，建模為 single-role N-D dataset 的 axis，不拆成 grouped roles。對只持久化 `g/e` 兩個 population components 的 Result，canonical file 只存 Result 實際欄位中的 `g/e` components；`other = 1 - g - e` 仍是 analysis/display derived value，不成為隱式 persisted channel。`singleshot/len_rabi` 與 `singleshot/mist/{power,freq,pre_freq}` 使用 `population_states=[0, 1]` inner axis 加 sweep outer axis，canonical disk z 保持 Result-native `(Nsweep, 2)`；`singleshot/ac_stark` 與 `singleshot/mist/power_freq` 使用 `population_states=[0, 1]` 加 `freqs` / `gains` sweep axes，canonical disk z 保持 Result-native `(Ngain, Nfreq, 2)`；`singleshot/t1/t1` 與 `singleshot/t1/t1_with_tone` 使用 `population_states=[0, 1]`、`initial_states=[0, 1]` 與 `lengths`，canonical disk z 保持 Result-native `(Nt, 2, 2)`；`singleshot/t1/t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs` / `Sweep Value` axis，canonical disk z 保持 Result-native `(Nx, 2, Nt, 2)`。legacy `(2, Nsweep)` HDF5 與 multi-sidecar z orientation 不在 runtime transpose / stack。`T1WithToneSweepExp` legacy load 的 zero-filled `other` component 是 Legacy Measurement Artifact 行為，不進新 canonical runtime path。
+
+16. **auto-optimize grouped roles 採 typed role split，不延續 mixed-unit `params` role**。`twotone/ro_optimize/auto_optimize.py::AutoOptExp` 的 grouped canonical roles 固定為 `readout_freq`（disk Hz、Result `params[:, 0]` memory MHz）、`readout_gain`（a.u.）、`readout_length`（disk s、memory us）、`snr`（a.u.）。`jpa/jpa_auto_optimize.py::AutoOptimizeExp` 的 grouped canonical roles 固定為 `jpa_flux`（a.u.、identity；generic `set_flux` knob 是 untyped scalar，`a.u.` 是唯一誠實的跨 device canonical unit，數值不縮放）、`jpa_freq`（disk Hz、memory MHz）、`jpa_power`（dBm）、`jpa_phase`（integer phase index）、`snr`（a.u.）。舊 auto grouped file 若 `jpa_flux` role unit 為 `A`（同一 spec 早期版本寫出、數值同樣未縮放），不是 canonical data；strict runtime loader 只接受 `a.u.`，對舊 `A` 不做 compatibility fallback。typed Result boundary 仍可重建既有 `params` arrays 供 analyze 使用；mixed-unit `params` 不作為 grouped Dataset Role。
+
+17. **Legacy converter 已退休**。normal runtime 一律不讀 legacy sidecar / `.npz`；先前遷移期提供的 `script/migrate_experiment_data.py` 及 `experiment.legacy_migration` 已移除。新實驗的 canonical persistence 不以保留舊格式轉換工具為前提；需要離線救回舊資料時另立明確範圍與資料授權，不在 runtime 暗中載入。
+
+18. **Legacy converter coverage 不再是 runtime 交付條件**。原 converter 白名單隨 CLI 一起退休；只驗證目前 canonical save/load 與 typed Result，不把已刪 converter 當成可用的資料升級途徑。
+
+19. **GUI adapter 只載入 canonical result**。`BaseAdapter.load` 呼叫實驗的 strict `exp.load()`；格式不符時直接傳遞原始錯誤，不捕捉後轉成 `/tmp` 檔案。四個 adapter 的 legacy converter id 與共用 fallback 已退休。
+
+## 理由 / 取捨
+
+- **Deletion test**：刪掉 datasaver dict 殼後，複雜度不會散到 38 個 caller，而是**集中**到 `zcu_tools.utils.datasaver` 一個有型別的 facade + 一份共用 axes-spec helper——這是「淺殼變深 module」的 deepening，而非 pass-through 搬家。
+- **軸序只住一處** → 根除「每 caller 自決朝向」的漂移類 bug（含已存在、未測的 power_dep load 斷言錯誤）。新實驗無法再各自引入不一致。
+- **不加 z-transform hook**：表面上能保留舊 Labber 瀏覽 orientation，但會讓每個 experiment 又能私下定義一套 shape 轉換，重建本 ADR 要移除的 caller-side transpose 分歧。Result-native disk order 讓 save/load 不變式單純且可測。
+- **datasaver package 不是舊 datasaver API 復活**：package name 收斂 public imports，但舊 dict API 不回來；內部 Labber on-disk engine 仍是 inner-first / N 維 / 軸序權威，只是從 public `labber_io.py` 收進 facade 內部子模組。
+- **不保留 import shim**：repo 內所有 caller 在 feature branch 一次改到 `zcu_tools.utils.datasaver`。留下 `zcu_tools.utils.labber_io` shim 會讓兩個 public import path 長期並存，與「唯一 public facade」相矛盾。
+- **Axis / AxesSpec 分層**：`Axis` / `LabberPayload` / `LabberMetadata` 描述 persisted data model，可被 low-level saver、grouped saver、tests 與 tooling 共用；`AxesSpec` 描述某個 experiment Result dataclass 如何映射到 persisted data，屬 experiment boundary。把 `AxesSpec` 放進 datasaver 會讓 utils package 依賴 experiment-level concepts。
+- **metadata loader 不另立 public API**：comment / tags / project / user / creation time 屬於 Experiment Data File metadata，`load_labber_data` 的回傳模型已承載；另設 `load_comment` 類 API 會讓 caller 繞過完整資料模型，重建 partial-loading 習慣。
+- **metadata consistency by construction**：single `LabberData` 為 payload + metadata 的 convenience object；grouped model 只允許一份 shared metadata 與多個 role payloads，不存在 member metadata 與 group metadata 不一致的狀態。
+- **grouped save 不自動剝 LabberData**：若 low-level saver 接受 `LabberData` role value 並自動取 payload，member metadata 會被 silent discard；要求 caller 明確傳 `data.payload` 讓 metadata 丟棄成為可見決策。
+- **Grouped Experiment Dataset 取代多檔案 workaround**：多檔案把一個 Experiment Result 拆成 sidecar artifacts，容易讓 path reservation、identity、load completeness 與 analysis handoff 分裂；單一 Experiment Data File 才是 canonical result。
+- **role metadata 與 physical channel label 分離**：legacy Labber 只看到一個 root log 的多個 scalar channels。project loader 依 ordered role-to-channel attrs 重建 Dataset Roles，不把顯示 label 當成 domain identity。
+- **global role enum 被拒絕**：`ground`、`excited`、`phase_max` 等名稱可能跨 experiment 重用，但語意與 required set 屬於各 experiment result。全域 enum 會製造假的 taxonomy；per-experiment spec 才是正確 namespace。
+- **role-as-axis 被拒絕**：Dataset Role 是語意分類，不是 numeric sweep axis。canonical one-shot roles 雖共享 grid，仍各自保留 physical label、unit 與 typed Result field；把 role 編成數字座標會丟失這層語意。
+- **axis-as-role 也被拒絕**：prepared state、initial state、phase、population component 若只是同一測量值的離散維度，把它拆成 sidecars 或 grouped roles 會把一個 homogeneous Result 人為切碎。這類資料應收斂成 single-role N-D dataset。
+- **low-level grouped save 不收 required roles**：low-level persistence primitive 只知道它收到哪些 roles，不知道某個 experiment result 的完整性政策。required roles 留在 experiment grouped spec，避免把 domain completeness 混進 HDF5 writer。
+- **experiment runtime legacy compatibility 被拒絕**：舊 `.npz`、舊多檔案格式或舊 label/unit metadata 是 Legacy Measurement Artifact，不是正常 loading format；已退休的 converter 不在 runtime load path；若未來需重建離線工具，須另界定資料轉換政策。
+- **離線 converter 已退休**：normal experiment `load()` 只接受 canonical Experiment Data File。原 converter 白名單與暫時 GUI adapter fallback 已移除；canonical 格式錯誤由 loader 直接回報。
+- **N 維 folding 不解決 grouped semantics**：`LivePlotData` 與 `save_labber_data` 支援 N 維 data，但 grouped result 的核心問題是多個 Dataset Role 的 identity 與 completeness，不是單一 array 的 rank。
+- **generic container 不外洩到 experiment API**：generic `GroupedLabberData` 對 diagnostic 與 low-level round-trip 測試有用；normal experiment path 若回傳 raw dict，required roles、shape、unit 與 analysis contract 會退回 runtime convention。typed Result 讓完整性與欄位語意在 experiment boundary fast-fail。
+- **single loader 不誤讀 grouped file**：`load_labber_data` 已有多個 production callers，不能破壞既有非 grouped load；但 grouped marker 代表一個 Experiment Result 需要多個 Dataset Role 才完整，single loader 若回傳其中一個 role 或 stack roles 都會產生 silent partial result。
+- **跨模組**（`utils/` + `experiment/`、影響約 75 caller）→ 立 ADR 而非僅模組 README；模組局部速查另補 `lib/zcu_tools/utils/README.md`。
+- **協調風險**：`lib/zcu_tools/utils` 與多個 `experiment/` 路徑當前被另一 session（`codex-wavelet-signal2real`）持 write claim → **實作 phase 須待其釋出或先協調**；本 ADR、慣例釘樁與規劃不受此阻擋，可先行。

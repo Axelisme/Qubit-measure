@@ -30,7 +30,7 @@ _BOOTSTRAP["bootstrap_standalone_server"](
     ),
 )
 
-from zcu_tools.gui.app.main.services.remote.wire_version import (  # noqa: E402
+from zcu_tools.gui.app.measure.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 from zcu_tools.mcp.core.bridge import (  # noqa: E402

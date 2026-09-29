@@ -413,7 +413,7 @@ def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
     ``QTimer.singleShot``, so we drive it through the controller's public connect
     API and pump a ``QEventLoop`` until the outcome signal fires (the same pattern
     measure-gui's tests use). The autouse ``qapp`` fixture has already created the
-    QApplication. On return, ``ctrl.state.exp_context.soc`` is the MockSoc and
+    QApplication. On return, ``ctrl.state.session_env.soc`` is the MockSoc and
     ``has_setup`` is true.
 
     FLUX-AWARE-MOCK: a mock connect also fires the shared MockFluxProvisioner,
@@ -627,7 +627,7 @@ def make_measurement_builder(name: str) -> Builder:
     auto-follow) without a real experiment's acquire — the run path under test is
     the UI's, not the physics. Provides nothing (UI tests don't assert deps)."""
     import numpy as np
-    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
         QubitFreqResult,
         Sweep1DResult,
     )
@@ -694,7 +694,7 @@ def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any)
     """
     from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
-    ctx = ctrl.state.exp_context
+    ctx = ctrl.state.session_env
     return RunEnv(
         flux=flux,
         flux_idx=flux_idx,

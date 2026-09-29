@@ -11,7 +11,7 @@ QT_PACKAGES = frozenset({"qtpy", "PyQt6", "PySide6"})
 KNOWN_QT_DEBT = frozenset(
     {
         # batch 3: isolate application bootstrap Qt ownership.
-        Path("app/main/app.py"),
+        Path("app/measure/app.py"),
         # batch 3: isolate autofluxdep controller Qt ownership.
         Path("app/autofluxdep/controller.py"),
     }

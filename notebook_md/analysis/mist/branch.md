@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 
 %autoreload 2
-from zcu_tools.meta_tool import MetaDict, QubitParams
+from zcu_tools.resources.context import MetaDict
+from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.simulate import mA2flx
 from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,

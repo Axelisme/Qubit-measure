@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 
 import numpy as np
+from zcu_tools.analysis.dispersive.models import PreprocessResult
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.dispersive.state import (
     DEFAULT_BARE_RF,
     FIT_VERSION_KEY,
@@ -14,11 +16,9 @@ from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     FluxoniumInputs,
     OnetoneEntry,
-    PreprocessResult,
     VersionTable,
 )
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import SpectrumData
 
 
 def _make_onetone(name: str = "r1") -> OnetoneEntry:
@@ -79,7 +79,7 @@ def test_project_info_empty_names_fall_back_to_placeholders():
 def test_project_info_root_dir_anchors_derived_defaults():
     # root_dir (the repo root, injected by the entry script) anchors the derived
     # defaults there instead of leaving them relative to cwd — the .bat-launcher
-    # fix: a launcher that cd's into script/ must not scope defaults under script/.
+    # fix: a launcher that cd's into scripts/ must not scope defaults under scripts/.
     root = os.path.join(os.sep, "repo")
     p = ProjectInfo(chip_name="ChipA", qub_name="Q1", root_dir=root)
     assert p.result_dir == os.path.join(root, "result", "ChipA", "Q1")

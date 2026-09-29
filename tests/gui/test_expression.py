@@ -6,7 +6,7 @@ from zcu_tools.gui.session.expression import (
     evaluate_numeric_expr,
     evaluate_scalar_expr,
 )
-from zcu_tools.meta_tool import MetaDict
+from zcu_tools.resources.context import MetaDict
 
 
 def test_complex_scalar_expression_preserves_real_only_numeric_boundary():

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
-from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.project import ProjectInfo
 
 
@@ -35,7 +35,7 @@ def test_measure_state_rejects_foreign_thread_mutation() -> None:
 
     assert isinstance(error, RuntimeError)
     assert str(error) == "State mutation must run on its owner thread"
-    assert state.exp_context is original
+    assert state.session_env is original
 
 
 def test_autoflux_state_rejects_foreign_thread_mutation() -> None:

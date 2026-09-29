@@ -17,32 +17,32 @@ from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
-from zcu_tools.experiment.v2_gui.adapters._support import FluxPickParams
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.measure.registry import register_all
+from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
-    ExpContext,
+    SessionEnv,
 )
-from zcu_tools.gui.app.main.controller import Controller
-from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
-from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
-from zcu_tools.gui.app.main.events.tab import (
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.services import (
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services import (
     StartupConnectionRequest,
     StartupProjectRequest,
 )
-from zcu_tools.gui.app.main.services import (
+from zcu_tools.gui.app.measure.services import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
-from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
-from zcu_tools.gui.app.main.state import DeviceStatus, State
+from zcu_tools.gui.app.measure.services.ports import RestoreIssue, RestoreReport
+from zcu_tools.gui.app.measure.state import DeviceStatus, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
@@ -54,7 +54,7 @@ from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import (
     on_device_connected,
@@ -66,8 +66,8 @@ from tests.gui._completion_helpers import (
 # ---------------------------------------------------------------------------
 
 
-def _make_ctx() -> ExpContext:
-    return ExpContext(
+def _make_ctx() -> SessionEnv:
+    return SessionEnv(
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),  # simulate connected soc
@@ -86,7 +86,7 @@ def _make_view() -> MagicMock:
     view.show_error_dialog = MagicMock()
     view.make_run_container = MagicMock(return_value=None)
 
-    # The Controller fans diagnostics out via notify_diagnostic (ADR-0013);
+    # The Controller fans diagnostics out via notify_diagnostic (ADR-0068);
     # mirror MainWindow's dispatch so tests can assert on show_*.
     def _notify(severity: str, title: str, message: str) -> None:
         if severity == "error":
@@ -150,7 +150,7 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:  # noqa: ARG001
 
 def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
     cf.state.set_context(
-        dataclasses.replace(cf.state.exp_context, md=MetaDict(), ml=ModuleLibrary())
+        dataclasses.replace(cf.state.session_env, md=MetaDict(), ml=ModuleLibrary())
     )
     tab_id = cf.ctrl.new_tab("twotone/flux_dep")
     values = np.linspace(-5.0, 5.0, 60)
@@ -167,7 +167,7 @@ def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
     return tab_id, token
 
 
-def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
+def _default_fake_schema(ctx: SessionEnv) -> CfgSchema:
     return FakeAdapter().make_default_cfg(ctx)
 
 
@@ -198,7 +198,7 @@ def _make_figure_container() -> FigureContainer:
 def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
     """The entry script injects the repo root; the Controller exposes it so the
     setup dialog / startup RPC anchor default paths there instead of cwd (the
-    .bat launcher cd's into script/, so cwd is the wrong base)."""
+    .bat launcher cd's into scripts/, so cwd is the wrong base)."""
     injected = str(tmp_path / "repo_root")
     fixture = ControllerFixture(cache_dir=tmp_path, project_root=injected)
     assert fixture.ctrl.get_project_root() == injected
@@ -275,7 +275,7 @@ def test_cancel_analyze_without_interactive_is_graceful(cf):
 
 # ---------------------------------------------------------------------------
 # send_feedback / cancel_active_operation — user->agent feedback channel
-# (ADR-0025): routes to the active op's OperationChannel; on stop, also
+# (ADR-0066): routes to the active op's OperationChannel; on stop, also
 # runs op-taxonomy cancel teardown (op-taxonomy lives here, not in the View).
 # ---------------------------------------------------------------------------
 
@@ -331,7 +331,7 @@ def test_send_feedback_stop_cancels_interactive_analyze(cf):
 
 
 # ---------------------------------------------------------------------------
-# can_cancel_active_operation (Stage 4a, ADR-0025 §Stop-gating)
+# can_cancel_active_operation (Stage 4a, ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -459,7 +459,7 @@ def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
     cf, tmp_path, monkeypatch
 ):
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
+    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id)
@@ -517,7 +517,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     (whose base impl is a Fast-Fail raise). Regression: previously this raised
     NotImplementedError and surfaced as an error dialog at the end of every run.
     """
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 
     tab_id = cf.ctrl.new_tab("fake")
     no_analysis = MagicMock(spec=FakeAdapter)
@@ -614,7 +614,7 @@ def test_draft_context_rejects_real_run_and_save(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
-            cf.state.exp_context,
+            cf.state.session_env,
             active_label="",
             readiness=ContextReadiness.DRAFT,
         )
@@ -637,7 +637,7 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
-            cf.state.exp_context,
+            cf.state.session_env,
             soc=None,
             soccfg=None,
             active_label="",
@@ -648,7 +648,7 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     adapter = MagicMock()
     # Final contract requires explicit load_data capability; FakeAdapter's
     # default lacks it, so set load_data True for the driving path.
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 
     adapter.capabilities = AdapterCapabilities(requires_soc=False, load_data=True)
     adapter.load.return_value = loaded
@@ -790,7 +790,7 @@ def test_reset_tab_cfg_restores_adapter_default(cf):
 
     returned = cf.ctrl.reset_tab_cfg(tab_id)
 
-    default = _default_fake_schema(cf.state.exp_context)
+    default = _default_fake_schema(cf.state.session_env)
     assert returned.value.fields["reps"] == default.value.fields["reps"]
     # State now holds the returned default, not the mutated draft.
     committed = cf.state.get_tab(tab_id).cfg_schema
@@ -905,7 +905,7 @@ def test_persist_then_restore_app_state(tmp_path):
     capture (flush) on one Controller, restore on a fresh one sharing the dir."""
     cf = ControllerFixture(cache_dir=tmp_path)
     tab_id = cf.ctrl.new_tab("fake")
-    schema = _default_fake_schema(cf.state.exp_context)
+    schema = _default_fake_schema(cf.state.session_env)
     cf.ctrl.update_tab_cfg(tab_id, schema)
     resolved = cf.ctrl.apply_startup_project(
         StartupProjectRequest("chip", "qub", "res")
@@ -927,7 +927,7 @@ def test_persist_then_restore_app_state(tmp_path):
     assert startup.scope_id == resolved["scope_id"]
     assert startup.ip == "10.0.0.2"
     assert startup.port == 7000
-    assert cf_restored.state.exp_context.result_dir == "/tmp/zcu_result"
+    assert cf_restored.state.session_env.result_dir == "/tmp/zcu_result"
 
 
 def test_restore_tab_events_use_system_origin(tmp_path) -> None:
@@ -936,7 +936,7 @@ def test_restore_tab_events_use_system_origin(tmp_path) -> None:
     persisted = source.ctrl.capture_persisted_state()
     restored = ControllerFixture(cache_dir=tmp_path / "restored", mock_emit=False)
     observed: list[EventMeta] = []
-    from zcu_tools.gui.app.main.events.tab import TabAddedPayload
+    from zcu_tools.gui.app.measure.events.tab import TabAddedPayload
 
     restored.bus.subscribe_with_meta(
         TabAddedPayload, lambda _payload, meta: observed.append(meta)
@@ -1035,7 +1035,7 @@ def test_timeout_notify_delivers_to_channel() -> None:
 
 
 def test_await_notify_unknown_token_returns_dismiss() -> None:
-    """Unknown token is treated as already-dismissed (ADR-0025)."""
+    """Unknown token is treated as already-dismissed (ADR-0066)."""
     cf = ControllerFixture()
     result = cf.ctrl.await_notify(99999, timeout=0.1)
     assert result.reason == "dismiss"

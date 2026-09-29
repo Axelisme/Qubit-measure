@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.runner import (
+from zcu_tools.experiment.v2.runtime import (
     MeasurementTask,
     MultiMeasurementExecutor,
     Schedule,

@@ -169,7 +169,7 @@ def test_sweep_control_raw_and_canonical_step_survive_codec_and_lowering():
 def test_complex_direct_value_has_lossless_json_codec_and_typed_lowering() -> None:
     import json
 
-    from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+    from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 
     value = DirectValue(0.123456789123456 + 9.876543219876543j)
     schema = CfgSchema(

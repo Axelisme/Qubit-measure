@@ -31,10 +31,10 @@ if TYPE_CHECKING:
 
 def _make_empty_ctx():
     """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
-    from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.gui.session.types import SessionEnv
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    return SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 
 
 def build_core(
@@ -64,7 +64,10 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
         app_slug="autofluxdep",
         plot_policy=PlotPolicy.AGG_ONLY,
         default_control_port=8768,
-        logging_extra_namespaces=("zcu_tools.program.v2",),
+        logging_extra_namespaces=(
+            "zcu_tools.program.v2",
+            "zcu_tools.experiment.v2_gui.autofluxdep",
+        ),
     )
 
     def __init__(
@@ -124,7 +127,7 @@ def _is_main_window(value: object) -> TypeGuard[MainWindow]:
 def _show_startup_dialog(parent: MainWindow) -> None:
     """Open the setup dialog non-modally on first launch.
 
-    Mirrors ``zcu_tools.gui.app.main.app._show_startup_dialog``.  Non-modal is
+    Mirrors ``zcu_tools.gui.app.measure.app._show_startup_dialog``.  Non-modal is
     required so the Qt event loop keeps pumping while the dialog is visible —
     this lets background session operations (mock-soc connect, device setup)
     complete without deadlocking.

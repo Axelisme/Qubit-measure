@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     US_TO_S,
@@ -21,9 +22,9 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlot1D
+from zcu_tools.plotting.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -36,7 +37,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 

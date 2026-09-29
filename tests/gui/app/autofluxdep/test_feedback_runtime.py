@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.lenrabi import LenRabiBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.feedback import (
     FeedbackRuntime,
     FeedbackSample,

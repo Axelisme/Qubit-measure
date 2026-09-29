@@ -86,7 +86,7 @@ class SoCConnectionService:
     ) -> None:
         self._state = state
         self._bus = bus
-        # Connect composes both leaves (ADR-0019): an Exclusion lease
+        # Connect composes both leaves (ADR-0066): an Exclusion lease
         # (SOC_CONNECT vs run / another connect) + a Handle. A connect has no
         # cancellation point, so cancel_hook=None (§B.3 equivalence).
         self._gate = gate
@@ -101,10 +101,10 @@ class SoCConnectionService:
     # ------------------------------------------------------------------
 
     def has_soc(self) -> bool:
-        return self._state.exp_context.soc is not None
+        return self._state.session_env.soc is not None
 
     def get_soccfg(self) -> SocCfgHandle | None:
-        return self._state.exp_context.soccfg
+        return self._state.session_env.soccfg
 
     def is_mock_soc(self) -> bool:
         """Whether the successful GUI connection is the offline mock board."""
@@ -146,7 +146,7 @@ class SoCConnectionService:
             return make_mock_soc(sim=sim)
         # remote
         try:
-            from zcu_tools.remote import make_soc_proxy
+            from zcu_tools.qick_remote import make_soc_proxy
         except ImportError as exc:
             raise SoCConnectionError(
                 f"Cannot import ZCU client libraries: {exc}. "
@@ -265,7 +265,7 @@ class SoCConnectionService:
     ) -> None:
         is_mock = isinstance(req, ConnectMockRequest)
         logger.info("connect succeeded: mock=%s", is_mock)
-        new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
+        new_ctx = dataclasses.replace(self._state.session_env, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         self._connected_request = req
         # soc is its own resource (a run depends on it independently of context);

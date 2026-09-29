@@ -1,7 +1,7 @@
 """RemoteControlAdapter — autofluxdep-gui's second View (driving adapter).
 
 The RPC face onto the autofluxdep ``Controller``, peer to the Qt ``MainWindow``
-(ADR-0013). autofluxdep is read-only over the wire: it adds no dispatch policy
+(ADR-0068). autofluxdep is read-only over the wire: it adds no dispatch policy
 beyond the shared scaffolding — no version guard, no editor sessions, no off-main
 handlers, a bare main-thread marshal. So this module is just the thin binding of
 :class:`RemoteControlServiceBase` to autofluxdep's domain (its method registry,

@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-28，shared interactive、writeback、artifacts與graceful shutdown
+**Last updated:** 2026-09-29 — reconciled MCP behavior and module layout
 
 # `zcu_tools/mcp/measure/`
 

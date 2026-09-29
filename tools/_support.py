@@ -24,9 +24,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Final
 
-# Where repository Python lives. `script` and `tools` sit at the root; everything
+# Where repository Python lives. `scripts` and `tools` sit at the root; everything
 # else the checks care about is under lib/ or tests/.
-CHECKED_ROOTS: Final = ("lib", "tests", "script", "tools")
+CHECKED_ROOTS: Final = ("lib", "tests", "scripts", "tools")
 
 # Generated or vendored trees. Nothing here is written by hand, so no check has
 # an opinion about it.

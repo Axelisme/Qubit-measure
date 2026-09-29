@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, minimize_scalar
 from scipy.special import expit
 
-from zcu_tools.utils.fitting.singleshot import (
+from zcu_tools.analysis.fitting.singleshot import (
     transition_state_bin_probabilities,
     transition_state_circle_probabilities,
 )

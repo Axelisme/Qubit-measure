@@ -33,8 +33,8 @@ import pandas as pd
 %autoreload 2
 import zcu_tools.notebook.analysis.plot as zp
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
-from zcu_tools.meta_tool import QubitParams
-from zcu_tools.meta_tool.sample_schema import (
+from zcu_tools.resources.qubit_params import QubitParams
+from zcu_tools.resources.sample_table.schema import (
     SampleFluxFrame,
     resolve_sample_flux,
     validate_sample_table_v2,

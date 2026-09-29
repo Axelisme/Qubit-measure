@@ -6,12 +6,12 @@ import os
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.io import load_spectrums
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import load_spectrums
 
 
 def test_export_empty_raises():
@@ -37,7 +37,7 @@ def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):
     result = loaded[name]
     # NOTE: dump_spectrums/load_spectrums do NOT persist the "type" field (a
     # NotRequired key in SpectrumResult) — spec_type is lost on round-trip. This
-    # is existing persistance behaviour, recorded as a known v1 limitation.
+    # is an existing spectrum export limitation, recorded for v1.
     assert result["flux_half"] == 0.0
     assert result["flux_period"] == 2.0
     # points round-trip

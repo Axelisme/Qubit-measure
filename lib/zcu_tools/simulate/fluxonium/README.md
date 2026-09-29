@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-07-22 — Purcell progress control
+**Last updated:** 2026-09-27 — prediction owner
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -62,11 +62,11 @@
 
 ### `prediction.py` — `FluxoniumPrediction` engine
 
-ADR-0029 的 production seam。GUI/session/notebook adapter 只接這層,不各自重寫 prediction policy。
+Prediction policy 由本模組擁有。GUI/session/notebook adapter 使用 engine，不各自重寫 fallback 或 cache identity。
 
 - `PredictionResolution(qub_dim, qub_cutoff, res_dim)` — typed Hilbert-space resolution;GUI adapter 固定用 app default,notebook/tests 可注入。
 - `FluxAffineMap` — value↔flux affine 的單一實作,`flux_period == 0` fast-fail。
-- `FluxoniumPrediction.predict_dispersive(...)` — 包 fast path + scqubits fallback,回傳 `DispersivePredictionResult(lines, backend)`;`used_fallback` 是輕量 provenance,GUI normal path 不需 catch `DressedLabelingError`。
+- `FluxoniumPrediction.predict_dispersive(...)` — 包 fast path + scqubits fallback,回傳 `DispersivePredictionResult(lines, backend)`;`used_fallback` 是輕量 provenance,GUI normal path 不需 catch `DressedLabelingError`；只在 fast dressed labeling 失敗時 fallback，scqubits 或輸入錯誤仍傳給 caller。
 - `FluxoniumPrediction.bind_flux_axis(fluxs)` — 建 `FluxoniumPredictionSession`,axis copy 由 engine 持有,cache key 只含 `(g, bare_rf, return_dim)`;controller 在 params/axis 變化時重建 session。
 - `predict_frequencies_mhz` / `predict_matrix_elements` — session predictor dialog 的批次曲線 helper,共用 engine affine 與一次 sweep 多 transition 的計算。
 
@@ -74,7 +74,7 @@ ADR-0029 的 production seam。GUI/session/notebook adapter 只接這層,不各�
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 
-- 建構: `(params, flux_half, flux_period, flux_bias)`;另可 `FluxoniumPredictor.from_file(result_path, flux_bias)` 經 `meta_tool.QubitParams` 從 `fluxdep_fit` 結果載入，缺少 `fluxdep_fit` 時 raise `ValueError`。
+- 建構: `(params, flux_half, flux_period, flux_bias)`;另可 `FluxoniumPredictor.from_file(result_path, flux_bias)` 經 `resources.qubit_params.QubitParams` 從 `fluxdep_fit` 結果載入，缺少 `fluxdep_fit` 時 raise `ValueError`。
 - 座標轉換: `value_to_flux` / `flux_to_value` 委派 `FluxAffineMap`,使用
   `flux = (value + bias − flux_half)/flux_period + 0.5`。
 - `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。scalar/array 都委派到 `FluxoniumPrediction.predict_frequencies_mhz` 的批次路徑，不保留共享 mutable `Fluxonium` instance；reverse transition 仍回傳帶符號頻差。

@@ -15,7 +15,7 @@ integration:
   EventBus run payloads on the Qt main thread, while ``_RunBridge`` fans those
   payloads into UI signals and keeps ``notify`` row redraws coalesced. A
   main-thread slot then calls ``plotter.update(result, idx)`` — all drawing stays
-  on the main thread (ADR-0017: the worker never touches matplotlib).
+  on the main thread (ADR-0067: the worker never touches matplotlib).
 
 The run acquires against a flux-aware MockSoc (offline) or real hardware; Setup
 builds a MockSoc + FakeDevice + a SimplePredictor.
@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
             return
 
         # The shared predictor dialog loads a FluxoniumPredictor into the active
-        # context; the run reads exp_context.predictor.
+        # context; the run reads session_env.predictor.
         dlg = PredictorDialog(
             self._ctrl.predictor_control,
             self,
@@ -715,7 +715,7 @@ class MainWindow(QMainWindow):
     def _build_plots(self) -> None:
         """Allocate Results + build each provider's Figure / Plotter / canvas.
 
-        Main-thread, Run start. Mirrors CONTEXT.md's Ownership: the main thread
+        Main-thread, Run start. As described in the autofluxdep app README: the main thread
         builds the empty Result containers (via the controller) and the
         UI-owned Plotters/canvases bound to them; the worker then fills rows.
         """
@@ -1167,7 +1167,7 @@ class MainWindow(QMainWindow):
         self._sync_devices_dialog_read_only()
 
     def _refresh_session_status(self) -> None:
-        ctx = self._ctrl.state.exp_context
+        ctx = self._ctrl.state.session_env
         if ctx.is_active() and ctx.active_label:
             ctx_text = ctx.active_label
         elif ctx.has_context():

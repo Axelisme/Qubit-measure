@@ -32,6 +32,7 @@ from qtpy.QtCore import (
     Signal,  # type: ignore[attr-defined]
 )
 
+from zcu_tools.experiment.v2_gui.autofluxdep.catalog import create_placement
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -48,7 +49,6 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
-from zcu_tools.gui.app.autofluxdep.experiments.catalog import create_placement
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
@@ -130,7 +130,7 @@ from zcu_tools.gui.session.services.predictor import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH
-from zcu_tools.meta_tool import QubitParams, QubitParamsError
+from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
@@ -233,7 +233,7 @@ class Controller(SessionControllerMixin):
         # --- session-core infrastructure (this app owns its gate + executor) ---
         # autofluxdep composes the shared session services (connection / context /
         # device / startup) by injecting its own concrete infra through the session
-        # ports (ADR-0019, session-core extraction decision 3): an app-local
+        # ports (ADR-0066, session-core extraction decision 3): an app-local
         # OperationGate (conflict policy) + the shared BackgroundRunner (no figure
         # routing) alongside the shared OperationHandles / ProgressService /
         # IOManager. The progress transport defaults to the Qt marshal so a GUI /
@@ -718,7 +718,7 @@ class Controller(SessionControllerMixin):
             builder=builder,
             name=name,
             overrides=params,
-            default_context=self._state.exp_context,
+            default_context=self._state.session_env,
         )
         self._state.append_node(node)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
@@ -732,7 +732,7 @@ class Controller(SessionControllerMixin):
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
         """
         self._require_workflow_editable()
-        node = create_placement(type_name, ctx=self._state.exp_context)
+        node = create_placement(type_name, ctx=self._state.session_env)
         node.name = self._unique_name(node.name)
         self._state.append_node(node)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
@@ -1053,7 +1053,7 @@ class Controller(SessionControllerMixin):
     def _build_tools(self, providers: list[PlacedNode] | None = None) -> Tools:
         """Build the sweep's run-lived predictor and feedback capabilities.
 
-        ``exp_context.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
+        ``session_env.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
         setup / by PredictorService) or None. A real predictor is wrapped into
         ``FluxoniumPredictorAdapter``; with none loaded we fall back to the
         base-only ``SimplePredictor`` stand-in. Feedback capabilities are built

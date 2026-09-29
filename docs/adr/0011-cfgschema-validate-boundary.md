@@ -18,8 +18,9 @@ choices、LiteralSpec 與 spec 矛盾）能一路通過 lowering 進 exp cfg。
 
 **`validate_schema(schema, ml)` 在「成品邊界」顯式呼叫，強制 value 樹完整且靜態合法。**
 
-`CfgSchema` 由 `zcu_tools.gui.cfg.model` 擁有，只保存 spec/value；validation 與
-linked-reference resolution 位於 measure-owned `gui.app.main.adapter.lowering`（[[0045]]）。
+`CfgSchema` 由 `zcu_tools.gui.cfg.model` 擁有，只保存 spec/value；finished-cfg validation
+位於共用的 `zcu_tools.gui.cfg.lowering`，measure 的 linked-reference resolver 由
+`gui.app.measure.adapter.lowering` 提供（[[0065]]）。
 
 ### validate 的契約（靜態，不需 md）
 

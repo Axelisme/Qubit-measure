@@ -66,15 +66,15 @@ def test_directory_mirroring_a_module_path_passes(tmp_path: Path):
     assert checker.violations(tmp_path) == ()
 
 
-@pytest.mark.parametrize("root", ["script", "tools"])
+@pytest.mark.parametrize("root", ["scripts", "tools"])
 def test_declared_source_roots_resolve_outside_the_library(root: str, tmp_path: Path):
-    """script/ and tools/ sit at the repository root, not under lib/zcu_tools/."""
+    """scripts/ and tools/ sit at the repository root, not under lib/zcu_tools/."""
     _build(tmp_path, test_dirs=(root,), source_dirs=(root,))
 
     assert checker.violations(tmp_path) == ()
 
 
-@pytest.mark.parametrize("root", ["script", "tools"])
+@pytest.mark.parametrize("root", ["scripts", "tools"])
 def test_a_declared_source_root_is_a_mapping_not_an_exemption(
     root: str, tmp_path: Path
 ):

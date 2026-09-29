@@ -8,9 +8,10 @@ matplotlib.use("Agg")
 
 import numpy as np
 from matplotlib.figure import Figure
+from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.services.viz import render_fit_figure
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
 
 def _entry() -> SpectrumEntry:

@@ -18,8 +18,8 @@ orchestrator resolves is identical.
 from __future__ import annotations
 
 import numpy as np
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import (
     Dependency,

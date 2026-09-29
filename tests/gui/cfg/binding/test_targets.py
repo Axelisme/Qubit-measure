@@ -287,14 +287,14 @@ def test_target_kinds_are_nominal() -> None:
 
 
 def test_all_production_measure_schemas_have_unambiguous_target_grammar() -> None:
-    from zcu_tools.experiment.v2_gui.registry import register_all
-    from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.gui.app.main.registry import Registry
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.experiment.v2_gui.measure.registry import register_all
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
+    from zcu_tools.gui.app.measure.registry import Registry
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     registry = Registry()
     register_all(registry)
-    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     ports = BindingPorts()
     ports.options["devices"] = ()
     ports.options["arb_waveforms"] = ()

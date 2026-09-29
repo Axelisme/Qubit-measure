@@ -27,8 +27,8 @@ def test_gui_cfg_import_is_app_experiment_meta_and_qt_clean() -> None:
             or name.startswith("zcu_tools.gui.app.")
             or name == "zcu_tools.experiment"
             or name.startswith("zcu_tools.experiment.")
-            or name == "zcu_tools.meta_tool"
-            or name.startswith("zcu_tools.meta_tool.")
+            or name == "zcu_tools.resources"
+            or name.startswith("zcu_tools.resources.")
             or name == "zcu_tools.notebook"
             or name.startswith("zcu_tools.notebook.")
             or name == "zcu_tools.device"
@@ -62,7 +62,7 @@ def test_gui_cfg_binding_import_is_runtime_and_qt_clean() -> None:
         forbidden = (
             "zcu_tools.gui.app",
             "zcu_tools.experiment",
-            "zcu_tools.meta_tool",
+            "zcu_tools.resources",
             "zcu_tools.gui.event_bus",
             "zcu_tools.gui.session",
             "zcu_tools.notebook",
@@ -92,7 +92,7 @@ def test_gui_cfg_source_has_no_forbidden_runtime_imports() -> None:
     forbidden_prefixes = (
         "zcu_tools.gui.app",
         "zcu_tools.experiment",
-        "zcu_tools.meta_tool",
+        "zcu_tools.resources",
         "zcu_tools.gui.event_bus",
         "zcu_tools.gui.session",
         "zcu_tools.notebook",

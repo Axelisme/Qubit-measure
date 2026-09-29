@@ -5,7 +5,7 @@ status: accepted
 # Value 樹永遠完整 + `None` 統一表「空」（停用 optional ref + 未填 scalar）
 
 **狀態：** accepted（已實作）。
-**關聯：** 承 [[0009]]（spec/value fluent，「要不要畫是 GUI 決策不是 spec 概念」同源延伸）；persistence 格式見 [[0015]]；成品邊界驗證見 [[0011]]。
+**關聯：** 承 [[0009]]（spec/value fluent，「要不要畫是 GUI 決策不是 spec 概念」同源延伸）；persistence 的保存權威與 memento 降級見 [[0063]]；成品邊界驗證見 [[0011]]。
 
 ## 脈絡
 
@@ -60,4 +60,4 @@ materialization直接把disabled ref的`None`放進完整fields。
 - `lowering`：`None` 統一處理（optional 省略 / required raise）；邏輯變簡單。
 - `MeasureCfgDefinition.instantiate(ctx)`與`CfgSchemaAssembler`逐欄同步materialize完整value tree；
   optional disabled ref保留顯式`None` entry，不省略key。
-- persistence 格式微調（scalar 去 is_unset、停用 ref 用 `disabled` marker）：舊檔走 strict fallback（[[0015]]），可接受一次性遷移；屬同 GUI_VERSION 內（無 wire/RPC 語意改動）。
+- persistence 格式微調（scalar 去 is_unset、停用 ref 用 `disabled` marker）：舊檔走 strict fallback（memento 降級規則見 [[0063]]），可接受一次性遷移；屬同 GUI_VERSION 內（無 wire/RPC 語意改動）。

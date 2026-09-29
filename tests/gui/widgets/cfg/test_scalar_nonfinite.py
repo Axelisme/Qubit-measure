@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QLineEdit
-from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,

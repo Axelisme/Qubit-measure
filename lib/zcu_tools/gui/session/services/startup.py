@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict
 from zcu_tools.gui.result_scope import ProjectPaths, ResultScope, ResultScopeManager
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, StartupPrefs
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import RememberedDevicePort, StartupContextPort
@@ -181,7 +181,7 @@ class StartupService:
             params_path=scope.params_path,
             scope_id=scope.scope_id,
         )
-        current = self._state.exp_context
+        current = self._state.session_env
         prefs = self._state.startup_prefs
         if (
             (current.chip_name, current.qub_name, current.res_name)

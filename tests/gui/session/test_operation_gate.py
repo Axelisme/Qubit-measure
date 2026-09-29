@@ -1,4 +1,4 @@
-"""Tests for OperationGate — the Exclusion facet (ADR-0019).
+"""Tests for OperationGate — the Exclusion facet (ADR-0066).
 
 Pure hardware mutual-exclusion keyed by an externally-minted token: the
 fail-fast ``ensure_can_start`` guard, ``register`` / ``release``, and the
@@ -18,10 +18,10 @@ from zcu_tools.gui.app.autofluxdep.operation_gate import (
 from zcu_tools.gui.app.autofluxdep.operation_gate import (
     OperationKind as AutoFluxDepOpKind,
 )
-from zcu_tools.gui.app.main.services.operation_gate import (
+from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate as MeasureOperationGate,
 )
-from zcu_tools.gui.app.main.services.operation_gate import (
+from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind as MeasureOpKind,
 )
 from zcu_tools.gui.event_bus import BaseEventBus

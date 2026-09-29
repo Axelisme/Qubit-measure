@@ -552,7 +552,7 @@ class TestEnvelopeAt:
             )
 
         monkeypatch.setattr(
-            "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get", fake_get
+            "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get", fake_get
         )
 
         cfg = PulseCfg(

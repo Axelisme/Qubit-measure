@@ -38,7 +38,7 @@ def test_launcher_module_is_import_light() -> None:
             "    'PySide6',",
             "    'PyQt5',",
             "    'matplotlib',",
-            "    'zcu_tools.gui.app.main.app',",
+            "    'zcu_tools.gui.app.measure.app',",
             "    'zcu_tools.gui.app.autofluxdep.app',",
             "    'zcu_tools.gui.app.fluxdep.app',",
             "    'zcu_tools.gui.app.dispersive.app',",
@@ -60,7 +60,7 @@ def test_launcher_module_is_import_light() -> None:
 @pytest.mark.parametrize(
     ("module_name", "behavior_name"),
     [
-        ("zcu_tools.gui.app.main.app", "MeasureGuiBehavior"),
+        ("zcu_tools.gui.app.measure.app", "MeasureGuiBehavior"),
         ("zcu_tools.gui.app.autofluxdep.app", "AutoFluxDepGuiBehavior"),
         ("zcu_tools.gui.app.fluxdep.app", "FluxDepGuiBehavior"),
         ("zcu_tools.gui.app.dispersive.app", "DispersiveGuiBehavior"),
@@ -158,9 +158,9 @@ def test_project_info_from_args_preserves_omitted_defaults() -> None:
 @pytest.mark.parametrize(
     ("module_name", "behavior_name", "app_slug", "default_port", "return_code"),
     [
-        ("script.run_fluxdep_gui", "FluxDepGuiBehavior", "fluxdep", 8766, 41),
+        ("scripts.run_fluxdep_gui", "FluxDepGuiBehavior", "fluxdep", 8766, 41),
         (
-            "script.run_dispersive_gui",
+            "scripts.run_dispersive_gui",
             "DispersiveGuiBehavior",
             "dispersive",
             8767,
@@ -249,10 +249,10 @@ def test_launcher_main_delegates_to_gui_runtime(
 @pytest.mark.parametrize(
     "module_name",
     [
-        "script.run_fluxdep_gui",
-        "script.run_dispersive_gui",
-        "script.run_measure_gui",
-        "script.run_autofluxdep_gui",
+        "scripts.run_fluxdep_gui",
+        "scripts.run_dispersive_gui",
+        "scripts.run_measure_gui",
+        "scripts.run_autofluxdep_gui",
     ],
 )
 def test_launcher_main_preserves_no_control_override(
@@ -306,7 +306,7 @@ def test_measure_launcher_main_delegates_to_gui_runtime(
 
     monkeypatch.setattr(runtime, "launch_gui_runtime", fake_launch_gui_runtime)
 
-    launcher = _load_launcher("script.run_measure_gui")
+    launcher = _load_launcher("scripts.run_measure_gui")
     main = cast(Callable[[list[str] | None], int], getattr(launcher, "main"))
     project_root = cast(Path, getattr(launcher, "PROJECT_ROOT"))
     log_file = project_root / "measure-launcher-test.log"
@@ -373,7 +373,7 @@ def test_autofluxdep_launcher_main_delegates_to_gui_runtime(
 
     monkeypatch.setattr(runtime, "launch_gui_runtime", fake_launch_gui_runtime)
 
-    launcher = _load_launcher("script.run_autofluxdep_gui")
+    launcher = _load_launcher("scripts.run_autofluxdep_gui")
     main = cast(Callable[[list[str] | None], int], getattr(launcher, "main"))
     project_root = cast(Path, getattr(launcher, "PROJECT_ROOT"))
     log_file = project_root / "autofluxdep-launcher-test.log"
@@ -398,7 +398,10 @@ def test_autofluxdep_launcher_main_delegates_to_gui_runtime(
     assert behavior_cls.__name__ == "AutoFluxDepGuiBehavior"
     assert behavior_cls.spec.app_slug == "autofluxdep"
     assert behavior_cls.spec.default_control_port == 8768
-    assert behavior_cls.spec.logging_extra_namespaces == ("zcu_tools.program.v2",)
+    assert behavior_cls.spec.logging_extra_namespaces == (
+        "zcu_tools.program.v2",
+        "zcu_tools.experiment.v2_gui.autofluxdep",
+    )
 
     assert options.log_root == project_root
     assert options.to_file is False

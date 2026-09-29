@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from zcu_tools.gui.app.main.services.remote.method_entries import METHOD_ENTRIES
-from zcu_tools.gui.app.main.services.remote.method_entries._registry import (
+from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
+from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     build_agent_catalog,
 )
-from zcu_tools.gui.app.main.services.remote.wire_version import WIRE_VERSION
+from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools

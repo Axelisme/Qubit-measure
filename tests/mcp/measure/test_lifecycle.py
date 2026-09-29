@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from zcu_tools.gui.app.main.services.remote.method_entries import METHOD_ENTRIES
-from zcu_tools.gui.app.main.services.remote.method_entries._registry import (
+from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
+from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     build_agent_catalog,
 )
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError

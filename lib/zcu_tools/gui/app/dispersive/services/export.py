@@ -6,7 +6,11 @@ import logging
 
 from zcu_tools.gui.app.dispersive.services.project import default_params_path
 from zcu_tools.gui.app.dispersive.state import DispersiveState
-from zcu_tools.meta_tool import DispersiveFit, QubitParams, QubitParamsError
+from zcu_tools.resources.qubit_params import (
+    DispersiveFit,
+    QubitParams,
+    QubitParamsError,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,7 @@ jupyter:
 from scqubits.core.fluxonium import Fluxonium
 from scqubits.core.oscillator import Oscillator
 from scqubits.core.hilbert_space import HilbertSpace
-from zcu_tools.meta_tool import QubitParams
+from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 qub_name = "Si001"

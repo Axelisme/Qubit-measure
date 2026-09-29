@@ -1,4 +1,4 @@
-"""Qt background executor for GUI composition roots (ADR-0019, ADR-0053).
+"""Qt background executor for GUI composition roots (ADR-0066, ADR-0053).
 
 One runner owns "run a unit of work off the main thread, optionally inside a
 caller-supplied context manager, and deliver the outcome back on the main

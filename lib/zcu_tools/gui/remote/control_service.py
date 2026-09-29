@@ -1,7 +1,7 @@
 """RemoteControlServiceBase — shared scaffolding for each app's RemoteControlAdapter.
 
 The app-agnostic skeleton of every GUI app's *second View* (driving adapter,
-ADR-0013): the RPC face onto a ``Controller``, peer to the Qt ``MainWindow``.
+ADR-0068): the RPC face onto a ``Controller``, peer to the Qt ``MainWindow``.
 Pure transport — the socket lifecycle, NDJSON framing, the per-client writer, the
 ``wire.version`` / ``auth`` handshakes, and the push fan-out primitive — lives one
 layer down in :class:`NdjsonRpcEndpoint`. This base owns the *dispatch

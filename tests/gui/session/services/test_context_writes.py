@@ -1,4 +1,4 @@
-"""Tests for ContextService ml/md writes — the single write authority (ADR-0006).
+"""Tests for ContextService ml/md writes — the single write authority (ADR-0067).
 
 ml writes go through ``apply_ml_writes``, which registers the entries (lowered by
 the app-injected ``lower_module`` / ``lower_waveform`` callbacks — here the real
@@ -10,13 +10,13 @@ batch. The CfgSchema lowering itself is experiment-coupled and lives app-side
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.cfg_schemas import (
+from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
-from zcu_tools.gui.app.main.services.cfg_lowering import lower_module, lower_waveform
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.services.cfg_lowering import lower_module, lower_waveform
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -25,7 +25,7 @@ from zcu_tools.gui.session.services.context import (
     MlEntryValidationError,
 )
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 _READOUT_RAW = {
     "type": "readout/direct",
@@ -49,7 +49,7 @@ def _waveform_schema(raw: dict) -> CfgSchema:
 
 def _make_svc_with_state() -> tuple[ContextService, State]:
     state = State(
-        ExpContext(
+        SessionEnv(
             md=MetaDict(),
             ml=ModuleLibrary(),
             soc=None,

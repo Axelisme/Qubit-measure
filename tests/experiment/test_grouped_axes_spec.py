@@ -5,6 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import (
+    DatasetRole,
+    LabberPayload,
+    load_grouped_labber_data,
+    save_grouped_labber_data,
+)
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     GroupedAxesSpec,
@@ -14,12 +20,6 @@ from zcu_tools.experiment import (
     RoleZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.utils.datasaver import (
-    DatasetRole,
-    LabberPayload,
-    load_grouped_labber_data,
-    save_grouped_labber_data,
-)
 
 
 class _GroupedCfg(ExpCfgModel):

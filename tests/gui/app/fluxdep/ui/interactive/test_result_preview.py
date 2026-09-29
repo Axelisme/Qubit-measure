@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
+from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
-from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
 
 def _entry() -> SpectrumEntry:

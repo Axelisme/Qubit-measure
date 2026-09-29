@@ -1,4 +1,4 @@
-"""OperationHandles — the async-operation Handle/Cancel facet (ADR-0019).
+"""OperationHandles — the async-operation Handle/Cancel facet (ADR-0066).
 
 Owns the operation *lifecycle*, independent of how the work executes
 (BackgroundRunner) and of hardware *exclusion* (OperationGate). It mints the
@@ -7,13 +7,13 @@ operation token (= ``operation_id``) and exposes the three async verbs over it:
 (async stop request). Settled tokens are retained briefly (LRU) so a late
 waiter still returns.
 
-Cross-thread interaction uses a per-operation ``OperationChannel`` (ADR-0025):
+Cross-thread interaction uses a per-operation ``OperationChannel`` (ADR-0066):
 a single ordered FIFO carrying typed events (Settled / Message / Stop).
 This replaces the ADR-0023 FeedbackInbox + poll-loop await-combine: signal
-ordering is guaranteed by the single queue (race-free by construction), and
+ordering is guaranteed by the single queue (ordered within this channel), and
 ``Queue.get(timeout)`` wakes immediately on enqueue (no 2s poll delay).
 
-Composition (ADR-0019): a hardware op (run / device / connect) takes a handle
+Composition (ADR-0066): a hardware op (run / device / connect) takes a handle
 here AND registers an ``OperationGate`` exclusion under the *same* token; an
 analyze / interactive op takes only a handle (no exclusion). The terminal path
 settles the handle here, then frees the exclusion (if any).
@@ -73,7 +73,7 @@ class OperationOutcome:
 
 @dataclass(frozen=True)
 class AwaitResult:
-    """The result of one ``await_outcome`` call (ADR-0025).
+    """The result of one ``await_outcome`` call (ADR-0066).
 
     ``reason`` distinguishes the three return paths:
     - ``'completed'``: the operation settled (terminal). ``outcome`` is set; a
@@ -100,7 +100,7 @@ class AwaitResult:
 
 
 # ---------------------------------------------------------------------------
-# OperationChannel — per-operation single ordered event queue (ADR-0025)
+# OperationChannel — per-operation single ordered event queue (ADR-0066)
 # ---------------------------------------------------------------------------
 
 # Cancel hook: called by stop() after enqueueing Stop; encapsulates how
@@ -145,14 +145,14 @@ def _join_reasons(a: str | None, b: str | None) -> str | None:
 
 
 class OperationChannel:
-    """Per-operation ordered event FIFO (ADR-0025).
+    """Per-operation ordered event FIFO (ADR-0066).
 
     Producer interface (non-blocking, any thread):
     - ``settle(outcome)`` — set-once terminal; idempotent.
     - ``message(text)`` — nudge; ignored when text is blank.
     - ``stop(reason)`` — enqueue Stop FIRST, then invoke cancel_hook.
       Order is critical: the Settled event from the hook lands after Stop,
-      so the consumer folds reason correctly (see ADR-0025 §stop ordering).
+      so the consumer folds reason correctly (see ADR-0066 ordering).
 
     Consumer interface (single consumer, blocking with timeout):
     - ``consume(timeout)`` — fold events into an AwaitResult.
@@ -174,7 +174,7 @@ class OperationChannel:
 
         Pure read — never triggers the hook; used by
         OperationHandles.has_cancel_hook() to gate the 'Send & Stop' button
-        without any op-kind knowledge in this layer (ADR-0025 §Stop-gating).
+        without any op-kind knowledge in this layer (ADR-0066).
         """
         return self._cancel_hook is not None
 
@@ -227,7 +227,7 @@ class OperationChannel:
         """Block until a returnable event arrives or ``timeout`` elapses.
 
         Events are consumed in strict arrival order — the queue's total order IS
-        the resolution of every race (ADR-0025). One call returns at the first
+        the resolution of every race (ADR-0066). One call returns at the first
         returnable event:
         - ``Settled`` → completed (feedback only when status=='cancelled' and a
           Stop reason was latched).
@@ -304,7 +304,7 @@ class OperationChannel:
 
 
 # ---------------------------------------------------------------------------
-# OperationHandles — channel registry (ADR-0019 / ADR-0025)
+# OperationHandles — channel registry (ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -318,7 +318,7 @@ class _OperationRecord:
 
 class OperationHandles:
     """Async-operation handles keyed by token: create / settle / await / poll /
-    cancel (ADR-0019). Each operation gets its own ``OperationChannel`` (ADR-0025)
+    cancel (ADR-0066). Each operation gets its own ``OperationChannel`` (ADR-0066)
     for cross-thread interaction; no shared FeedbackInbox or poll-loop."""
 
     def __init__(self) -> None:
@@ -378,7 +378,7 @@ class OperationHandles:
         ``_live`` so the token is always reachable in at least one dict — there
         is no window where a concurrent ``await_outcome`` / ``poll`` sees it in
         neither and falls through to the default 'finished' (which would
-        misreport a cancelled/failed terminal). See ADR-0025.
+        misreport a cancelled/failed terminal). See ADR-0066.
         """
         record = self._live.get(token)
         if record is None:
@@ -460,7 +460,7 @@ class OperationHandles:
         - ``None`` is never returned (kept as a contract break note; all callers
           must handle AwaitResult).
 
-        ADR-0025: the channel's consume() method handles all folding logic.
+        ADR-0066: the channel's consume() method handles all folding logic.
         A token with no live or retained channel is treated as already-done.
         """
         # Check live first, then retained.
@@ -509,7 +509,7 @@ class OperationHandles:
 
         Used by Controller.can_cancel_active_operation() to gate the
         'Send & Stop' button without any op-kind knowledge in this layer
-        (ADR-0025 §Stop-gating). Pure read — never triggers the hook.
+        (ADR-0066). Pure read — never triggers the hook.
         """
         record = self._record(token)
         if record is None:

@@ -158,7 +158,7 @@ def launch_bridge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[McpBridge, MagicMock, Mock, Mock]:
     config = _config(tmp_path)
-    script = tmp_path / "script" / config.run_script_name
+    script = tmp_path / "scripts" / config.run_script_name
     script.parent.mkdir()
     script.touch()
     bridge = McpBridge(config)

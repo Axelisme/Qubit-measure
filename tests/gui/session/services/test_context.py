@@ -6,15 +6,15 @@ import dataclasses
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
 from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def test_context_service_has_project():
@@ -22,7 +22,7 @@ def test_context_service_has_project():
     io_mock.has_project = True
 
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     svc = ContextService(state, io_mock, MagicMock())
     assert svc.has_project()
@@ -33,7 +33,7 @@ def test_context_service_has_context():
     io_mock.has_context = False
 
     state = State(
-        ExpContext(
+        SessionEnv(
             md=MagicMock(),
             ml=MagicMock(),
             soc=None,
@@ -54,9 +54,9 @@ def test_context_service_get_flux_dir():
     io_mock.get_active_label.return_value = "flux_1.23_A"
 
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    ctx = ExpContext(
+    ctx = SessionEnv(
         md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="/base/dir"
     )
     state.set_context(ctx)
@@ -70,7 +70,7 @@ def test_context_service_get_flux_dir():
 
 def test_context_service_set_startup_context():
     state = State(
-        ExpContext(
+        SessionEnv(
             md=MagicMock(),
             ml=MagicMock(),
             soc=None,
@@ -99,10 +99,10 @@ def test_context_service_set_startup_context():
     )
 
     assert svc.has_startup_context()
-    assert state.exp_context.chip_name == "C1"
-    assert state.exp_context.result_dir == "/res"
-    assert state.exp_context.active_label == ""
-    assert state.exp_context.readiness is ContextReadiness.DRAFT
+    assert state.session_env.chip_name == "C1"
+    assert state.session_env.result_dir == "/res"
+    assert state.session_env.active_label == ""
+    assert state.session_env.readiness is ContextReadiness.DRAFT
     assert not svc.is_active_context()
     bus.emit.assert_called_once()
     assert bus.emit.call_args[0][0].EVENT == SessionEvent.CONTEXT_SWITCHED
@@ -110,14 +110,14 @@ def test_context_service_set_startup_context():
 
 def test_context_service_use_context():
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     bus = MagicMock()
     io_mock = MagicMock()
 
     mock_md = MagicMock()
     mock_ml = MagicMock()
-    mock_ctx = ExpContext(
+    mock_ctx = SessionEnv(
         md=mock_md, ml=mock_ml, soc=None, soccfg=None, result_dir="/base"
     )
     io_mock.use_context.return_value = mock_ctx
@@ -125,18 +125,18 @@ def test_context_service_use_context():
     svc = ContextService(state, io_mock, bus)
 
     # We must have a baseline result_dir in the startup context for use_context to inherit
-    state.exp_context = dataclasses.replace(state.exp_context, result_dir="/base")
-    old_ctx = state.exp_context
+    state.session_env = dataclasses.replace(state.session_env, result_dir="/base")
+    old_ctx = state.session_env
     ctx_version_before = state.version.get("context")
 
     svc.use_context("flux_1.0_A")
 
     io_mock.use_context.assert_called_with("flux_1.0_A", old_ctx)
-    assert state.exp_context.md == mock_md
-    assert state.exp_context.ml == mock_ml
-    assert state.exp_context.result_dir == "/base"
-    assert state.exp_context.active_label == "flux_1.0_A"
-    assert state.exp_context.readiness is ContextReadiness.ACTIVE
+    assert state.session_env.md == mock_md
+    assert state.session_env.ml == mock_ml
+    assert state.session_env.result_dir == "/base"
+    assert state.session_env.active_label == "flux_1.0_A"
+    assert state.session_env.readiness is ContextReadiness.ACTIVE
     assert svc.is_active_context()
     bus.emit.assert_called_once()
     # Switching context fully swaps md/ml → context version must advance.
@@ -145,7 +145,7 @@ def test_context_service_use_context():
 
 def test_context_service_new_context():
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     bus = MagicMock()
     io_mock = MagicMock()
@@ -153,10 +153,10 @@ def test_context_service_new_context():
     # baseline MD/ML
     base_md = MagicMock()
     base_ml = MagicMock()
-    base_ctx = dataclasses.replace(state.exp_context, md=base_md, ml=base_ml)
-    state.exp_context = base_ctx
+    base_ctx = dataclasses.replace(state.session_env, md=base_md, ml=base_ml)
+    state.session_env = base_ctx
 
-    mock_ctx = ExpContext(
+    mock_ctx = SessionEnv(
         md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="/base"
     )
     io_mock.new_context.return_value = mock_ctx
@@ -172,14 +172,14 @@ def test_context_service_new_context():
     )
     bus.emit.assert_called_once()
     assert bus.emit.call_args[0][0].EVENT == SessionEvent.CONTEXT_SWITCHED
-    assert state.exp_context.active_label == "flux_1.5_V"
-    assert state.exp_context.readiness is ContextReadiness.ACTIVE
+    assert state.session_env.active_label == "flux_1.5_V"
+    assert state.session_env.readiness is ContextReadiness.ACTIVE
 
 
 def test_context_service_readiness_transitions_drive_has_context_queries():
     """has_context / has_startup_context / is_active_context all derive from readiness."""
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     io_mock = MagicMock()
     io_mock.has_context = False
@@ -197,7 +197,7 @@ def test_context_service_readiness_transitions_drive_has_context_queries():
     assert not svc.is_active_context()
 
     # ACTIVE
-    io_mock.use_context.return_value = ExpContext(
+    io_mock.use_context.return_value = SessionEnv(
         md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="/res"
     )
     svc.use_context("flux_1.0_A")
@@ -215,7 +215,7 @@ def _make_active_state() -> tuple[State, ContextService]:
     md = MetaDict()
     ml = ModuleLibrary()
     state = State(
-        ExpContext(
+        SessionEnv(
             md=md,
             ml=ml,
             soc=None,
@@ -250,63 +250,63 @@ def test_create_md_attr_commits_once_and_emits_one_fact():
 
     svc.create_md_attr("new_key", 3.5)
 
-    assert dict(state.exp_context.md.items()) == {"new_key": 3.5}
+    assert dict(state.session_env.md.items()) == {"new_key": 3.5}
     assert state.version.get("context") == before + 1
     assert len(_md_changed_events(svc)) == 1
 
 
 def test_create_md_attr_collision_leaves_md_and_version_unchanged():
     state, svc = _make_active_state()
-    state.exp_context.md.existing = 1
+    state.session_env.md.existing = 1
     svc._bus.reset_mock()  # type: ignore[attr-defined]
     before = state.version.get("context")
 
     with pytest.raises(FailedPreconditionError, match="already has attribute"):
         svc.create_md_attr("existing", 2)
 
-    assert dict(state.exp_context.md.items()) == {"existing": 1}
+    assert dict(state.session_env.md.items()) == {"existing": 1}
     assert state.version.get("context") == before
     svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
 
 
 def test_create_md_attr_invalid_key_leaves_md_and_version_unchanged():
     state, svc = _make_active_state()
-    before_data = dict(state.exp_context.md.items())
+    before_data = dict(state.session_env.md.items())
     before = state.version.get("context")
 
     with pytest.raises(FailedPreconditionError, match="must not be empty"):
         svc.create_md_attr("   ", 2)
 
-    assert dict(state.exp_context.md.items()) == before_data
+    assert dict(state.session_env.md.items()) == before_data
     assert state.version.get("context") == before
     svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
 
 
 def test_rename_md_attr_commits_once_and_emits_one_fact():
     state, svc = _make_active_state()
-    state.exp_context.md.old_key = 3.5
+    state.session_env.md.old_key = 3.5
     before = state.version.get("context")
     svc._bus.reset_mock()  # type: ignore[attr-defined]
 
     svc.rename_md_attr("old_key", "new_key")
 
-    assert dict(state.exp_context.md.items()) == {"new_key": 3.5}
+    assert dict(state.session_env.md.items()) == {"new_key": 3.5}
     assert state.version.get("context") == before + 1
     assert len(_md_changed_events(svc)) == 1
 
 
 def test_rename_md_attr_collision_leaves_md_and_version_unchanged():
     state, svc = _make_active_state()
-    state.exp_context.md.old_key = 3.5
-    state.exp_context.md.existing = 7
-    before_data = dict(state.exp_context.md.items())
+    state.session_env.md.old_key = 3.5
+    state.session_env.md.existing = 7
+    before_data = dict(state.session_env.md.items())
     before = state.version.get("context")
     svc._bus.reset_mock()  # type: ignore[attr-defined]
 
     with pytest.raises(FailedPreconditionError, match="already has attribute"):
         svc.rename_md_attr("old_key", "existing")
 
-    assert dict(state.exp_context.md.items()) == before_data
+    assert dict(state.session_env.md.items()) == before_data
     assert state.version.get("context") == before
     svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
 
@@ -330,18 +330,18 @@ def test_md_set_and_delete_each_emit_one_fact():
 
 def test_del_md_attr_removes_attribute_and_bumps_context():
     state, svc = _make_active_state()
-    state.exp_context.md.r_f = 6000.0
+    state.session_env.md.r_f = 6000.0
     before = state.version.get("context")
 
     svc.del_md_attr("r_f")
 
-    assert not hasattr(state.exp_context.md, "r_f")
+    assert not hasattr(state.session_env.md, "r_f")
     assert state.version.get("context") == before + 1
 
 
 def test_del_md_attr_emits_md_changed():
     state, svc = _make_active_state()
-    state.exp_context.md.r_f = 6000.0
+    state.session_env.md.r_f = 6000.0
     bus: MagicMock = svc._bus  # type: ignore[assignment]
 
     svc.del_md_attr("r_f")
@@ -372,7 +372,7 @@ def test_del_md_attr_missing_is_failed_precondition_without_mutation():
 
 def test_del_ml_module_removes_module_and_bumps_context():
     state, svc = _make_active_state()
-    ml = state.exp_context.ml
+    ml = state.session_env.ml
     fake_module = MagicMock()
     ml.register_module(qub=fake_module)
     before = state.version.get("context")
@@ -385,7 +385,7 @@ def test_del_ml_module_removes_module_and_bumps_context():
 
 def test_del_ml_module_emits_ml_changed():
     state, svc = _make_active_state()
-    ml = state.exp_context.ml
+    ml = state.session_env.ml
     fake_module = MagicMock()
     ml.register_module(qub=fake_module)
     bus: MagicMock = svc._bus  # type: ignore[assignment]
@@ -404,7 +404,7 @@ def test_del_ml_module_emits_ml_changed():
 
 def test_rename_ml_module_moves_key_and_emits_once():
     state, svc = _make_active_state()
-    ml = state.exp_context.ml
+    ml = state.session_env.ml
     fake_module = MagicMock()
     ml.register_module(qub=fake_module)
     bus: MagicMock = svc._bus  # type: ignore[assignment]
@@ -422,7 +422,7 @@ def test_rename_ml_module_moves_key_and_emits_once():
 
 def test_rename_ml_module_clash_fails():
     state, svc = _make_active_state()
-    ml = state.exp_context.ml
+    ml = state.session_env.ml
     ml.register_module(a=MagicMock(), b=MagicMock())
     with pytest.raises(FailedPreconditionError, match="already exists") as exc_info:
         svc.rename_ml_module("a", "b")
@@ -441,7 +441,7 @@ def test_rename_ml_module_missing_fails():
 
 def test_rename_ml_module_empty_name_fails():
     state, svc = _make_active_state()
-    state.exp_context.ml.register_module(qub=MagicMock())
+    state.session_env.ml.register_module(qub=MagicMock())
     with pytest.raises(FailedPreconditionError, match="must not be empty") as exc_info:
         svc.rename_ml_module("qub", "")
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
@@ -450,7 +450,7 @@ def test_rename_ml_module_empty_name_fails():
 
 def test_rename_ml_waveform_moves_key():
     state, svc = _make_active_state()
-    ml = state.exp_context.ml
+    ml = state.session_env.ml
     ml.register_waveform(gauss=MagicMock())
     svc.rename_ml_waveform("gauss", "gauss2")
     assert "gauss" not in ml.waveforms
@@ -464,7 +464,7 @@ def test_rename_ml_waveform_moves_key():
 
 def test_del_ml_waveform_removes_waveform_and_bumps_context():
     state, svc = _make_active_state()
-    ml = state.exp_context.ml
+    ml = state.session_env.ml
     fake_wf = MagicMock()
     ml.register_waveform(gauss=fake_wf)
     before = state.version.get("context")

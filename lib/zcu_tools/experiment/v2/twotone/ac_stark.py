@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -24,13 +25,13 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import (
     round_zcu_gain,
     snr_checker,
     sweep2array,
 )
-from zcu_tools.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     Join,
     ProgramV2Cfg,
@@ -44,7 +45,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
 

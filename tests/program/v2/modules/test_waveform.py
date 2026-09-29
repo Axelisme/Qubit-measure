@@ -123,7 +123,7 @@ def test_arb_waveform_cfg_length_comes_from_data_duration(monkeypatch):
         duration = 2.5
 
     monkeypatch.setattr(
-        "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.inspect",
+        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.inspect",
         lambda key: Info(),
     )
 
@@ -259,7 +259,7 @@ def test_arb_waveform_make_iqdata_and_create(monkeypatch):
     time_raw = np.array([0.0, 1.0, 2.0])
 
     monkeypatch.setattr(
-        "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get",
+        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
         lambda key: (idata_raw, qdata_raw, time_raw),
     )
 
@@ -295,7 +295,7 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
     waveform = ArbWaveformCfg(data="demo").build("arb")
 
     monkeypatch.setattr(
-        "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get",
+        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
         lambda key: (
             np.array([0.0, 1.0, 0.0]),
             None,
@@ -321,7 +321,7 @@ def test_arb_waveform_make_iqdata_uses_full_data_duration(monkeypatch):
     waveform = ArbWaveformCfg(data="long_data").build("arb")
 
     monkeypatch.setattr(
-        "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get",
+        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
         lambda key: (
             np.array([0.0, 1.0, 0.0]),
             None,

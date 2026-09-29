@@ -1,7 +1,7 @@
 """GuiProgressBar — a BaseProgressBar that forwards progress to the Qt main thread.
 
 Installed (via ``use_pbar_factory``) inside the search worker thread so the
-notebook's ``search_in_database`` progress feeds a Qt progress bar. The bar is
+``search_database`` progress feeds a Qt progress bar. The bar is
 created on the worker thread, so it must NOT touch widgets directly — it emits a
 Qt signal (queued connection) whose main-thread slot updates the QProgressBar.
 

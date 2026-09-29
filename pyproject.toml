@@ -136,19 +136,19 @@ max-complexity = 12
 max-args = 6
 
 [tool.ruff.lint.per-file-ignores]
-"script/start_server.py" = ["UP"]
-"lib/zcu_tools/remote/pyro.py" = ["UP"]
+"scripts/start_server.py" = ["UP"]
+"lib/zcu_tools/qick_remote/pyro.py" = ["UP"]
 "__init__.py" = ["F401"]
 # Fixtures legitimately take many parameters and accept ones they only activate;
 # `assert False` (B011) is a normal marker for a branch a test asserts is unreachable.
 "tests/**" = ["PLR0913", "ARG001", "ARG002", "FBT001", "FBT002", "B011"]
 
 [tool.pyright]
-include = ["lib", "tests", "script", "tools"]
+include = ["lib", "tests", "scripts", "tools"]
 executionEnvironments = [
   { root = "lib", extraPaths = ["lib"] },
   { root = "tests", extraPaths = ["lib", "tools", "."] },
-  { root = "script", extraPaths = ["lib"] },
+  { root = "scripts", extraPaths = ["lib"] },
   { root = "tools", extraPaths = ["lib", "tools"] },
 ]
 # strict, minus the rules whose diagnostics are produced by untyped third-party

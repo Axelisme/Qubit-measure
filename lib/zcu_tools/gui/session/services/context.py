@@ -25,7 +25,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueRef,
     resolve_value_ref,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.ports import ProjectIOPort
     from zcu_tools.gui.session.state import SessionState
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
 
 
 class MlEntryValidationError(InvalidInputError):
@@ -146,13 +146,13 @@ class ContextService:
         self._state = state
         self._io = io_manager
         self._bus = bus
-        self._values = values or state.exp_context.values
-        if state.exp_context.values is not self._values:
+        self._values = values or state.session_env.values
+        if state.session_env.values is not self._values:
             # Pure facade injection: this preserves set_context's "no content bump"
             # semantics because md/ml are unchanged.
-            self._state.set_context(self._attach_values(state.exp_context))
+            self._state.set_context(self._attach_values(state.session_env))
 
-    def _attach_values(self, ctx: ExpContext) -> ExpContext:
+    def _attach_values(self, ctx: SessionEnv) -> SessionEnv:
         if ctx.values is self._values:
             return ctx
         return dataclasses.replace(ctx, values=self._values)
@@ -162,14 +162,14 @@ class ContextService:
 
     def has_context(self) -> bool:
         """True when any valid context exists (startup DRAFT or file-backed ACTIVE)."""
-        return self._state.exp_context.has_context()
+        return self._state.session_env.has_context()
 
     def has_startup_context(self) -> bool:
-        return self._state.exp_context.is_draft()
+        return self._state.session_env.is_draft()
 
     def is_active_context(self) -> bool:
         """True only for a file-backed context eligible for run and save."""
-        return self._state.exp_context.is_active()
+        return self._state.session_env.is_active()
 
     def get_active_context_label(self) -> str | None:
         return self._io.get_active_label()
@@ -178,14 +178,14 @@ class ContextService:
         return self._io.list_contexts()
 
     def get_current_md(self) -> MetaDict:
-        return self._state.exp_context.md
+        return self._state.session_env.md
 
     def get_current_ml(self) -> ModuleLibrary:
-        return self._state.exp_context.ml
+        return self._state.session_env.ml
 
-    def get_exp_context(self) -> ExpContext:
-        """The live ExpContext (md + ml + …) — used to seed role templates."""
-        return self._state.exp_context
+    def get_session_env(self) -> SessionEnv:
+        """The live SessionEnv (md + ml + …) — used to seed role templates."""
+        return self._state.session_env
 
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._values.describe()
@@ -206,7 +206,7 @@ class ContextService:
     def get_flux_dir(self) -> str | None:
         import os
 
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         label = self._io.get_active_label()
         if ctx.result_dir and label:
             return os.path.join(ctx.result_dir, "exps", label)
@@ -236,7 +236,7 @@ class ContextService:
         )
         new_ctx = self._attach_values(
             dataclasses.replace(
-                self._state.exp_context,
+                self._state.session_env,
                 md=md,
                 ml=ml,
                 chip_name=chip_name,
@@ -249,7 +249,7 @@ class ContextService:
             )
         )
         self._state.set_context(new_ctx)
-        # md/ml content is fully swapped → bump context (path 3 of 3; see the
+        # md/ml content is fully swapped → bump context (path 2 of 2; see the
         # canonical anchor on ContextService.set_md_attr). set_context itself does
         # not bump, so context-switch callers bump here explicitly.
         self._state.version.bump("context")
@@ -259,7 +259,7 @@ class ContextService:
 
     def use_context(self, label: str) -> None:
         logger.info("use_context: label=%r", label)
-        new_ctx = self._io.use_context(label, self._state.exp_context)
+        new_ctx = self._io.use_context(label, self._state.session_env)
         new_ctx = self._attach_values(
             dataclasses.replace(
                 new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
@@ -304,7 +304,7 @@ class ContextService:
             label,
         )
         new_ctx = self._io.new_context(
-            self._state.exp_context,
+            self._state.session_env,
             value=value,
             unit=unit,
             clone_from=clone_from,
@@ -331,7 +331,7 @@ class ContextService:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
         _validate_md_key(key)
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         snapshot = dict(md.items())
         if key in snapshot:
             raise FailedPreconditionError(f"MetaDict already has attribute {key!r}.")
@@ -346,7 +346,7 @@ class ContextService:
             raise FailedPreconditionError("No experiment context.")
         _validate_md_key(old)
         _validate_md_key(new)
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         snapshot = dict(md.items())
         if old not in snapshot:
             raise FailedPreconditionError(f"MetaDict has no attribute {old!r}.")
@@ -364,17 +364,17 @@ class ContextService:
             _validate_md_key(key)
         except FailedPreconditionError as exc:
             raise InvalidInputError(str(exc), reason_code="invalid_md_key") from exc
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         setattr(md, key, value)
         # Semantic context content change: bump so concurrency guards on
         # ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detect this edit.
         #
-        # CANONICAL ANCHOR — "writing md/ml must bump context" has TWO physical
-        # paths (ADR-0006 collapsed writeback's direct write into path 1):
+        # CANONICAL ANCHOR — "a completed md/ml write bumps context" has TWO physical
+        # paths (ADR-0067 collapsed writeback's direct write into path 1):
         #   1. ContextService writes: create_md_attr / rename_md_attr / set_md_attr /
-        #      del_md_attr / set_ml_*_from_schema / del_ml_* (field-level, each
-        #      bumps+emits) and apply_writes (batch:
-        #      one bump + one emit per kind). Writeback / editor commit / inspect /
+        #      del_md_attr / replace_ml_*_from_schema / del_ml_* (field-level, each
+        #      bumps+emits) and apply_ml_writes (batch: on success one bump +
+        #      one emit per kind; a failed batch leaves an unpublished prefix). Writeback / editor commit / inspect /
         #      create_from_role all route here — the single write authority.
         #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
         # Both bump "context"; only set_context() itself does NOT (pure swap).
@@ -384,7 +384,7 @@ class ContextService:
     def del_md_attr(self, key: str) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         try:
             delattr(md, key)
         except AttributeError as exc:
@@ -393,11 +393,12 @@ class ContextService:
         self._bus.emit(MdChangedPayload(md=md))
 
     # ------------------------------------------------------------------
-    # ml/md content writes — the single write authority (ADR-0006).
+    # ml/md content writes — the single write authority (ADR-0067).
     #
-    # ``apply_ml_writes`` owns the *write transaction*: it sets md attrs +
-    # registers the (lowered) ml entries, then bumps the ``context`` version +
-    # emits at most one MD_CHANGED + one ML_CHANGED. The CfgSchema *lowering* is
+    # ``apply_ml_writes`` owns the *write sequence*: it sets md attrs +
+    # registers the (lowered) ml entries and, once every step succeeds, bumps the
+    # ``context`` version + emits at most one MD_CHANGED + one ML_CHANGED. It does
+    # not roll back a partial failure. The CfgSchema *lowering* is
     # experiment-coupled, so it stays app-side and is injected as the
     # ``lower_module`` / ``lower_waveform`` callbacks (the app's ContextWritePort
     # façade builds them); this keeps ContextService free of the cfg-tree while
@@ -414,20 +415,24 @@ class ContextService:
         lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
         dump: bool,
     ) -> None:
-        """Apply a batch of md/ml content writes atomically (ADR-0006).
+        """Apply md/ml content writes as one batch (ADR-0067).
+
+        This groups version/event publication, not rollback: a later lowering,
+        registration or dump failure leaves earlier live changes in place with
+        no version bump and no event.
 
         ``md`` maps attr → value; ``modules`` / ``waveforms`` map entry name → an
         opaque un-lowered entry (a ``CfgSchema``), lowered here via the injected
         ``lower_module`` / ``lower_waveform`` (app-side; the cfg-tree never enters
         this module). Lowering is interleaved with registration so a later entry
-        sees an earlier one. One ``version.bump("context")`` and at most one
-        MD_CHANGED + one ML_CHANGED (a batch avoids N redundant full-refreshes).
+        sees an earlier one. On success: one ``version.bump("context")`` and at most
+        one MD_CHANGED + one ML_CHANGED (a batch avoids N redundant full-refreshes).
         ``dump`` persists the ml when it has persistence (writeback batch persists;
         a single editor commit does not). Raises MlEntryValidationError (from the
         lowering callback) on a bad entry."""
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         for key, value in md.items():
             setattr(ctx.md, key, value)
         for name, entry in modules.items():
@@ -509,7 +514,7 @@ class ContextService:
         if not old_name or not new_name:
             raise FailedPreconditionError("ModuleLibrary names must not be empty.")
 
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         store = ctx.ml.modules if item_kind == "module" else ctx.ml.waveforms
         if old_name not in store:
             raise FailedPreconditionError(f"No {item_kind} named {old_name!r}.")
@@ -540,7 +545,7 @@ class ContextService:
     def del_ml_module(self, name: str) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         ml.delete_module(name)
         self._state.version.bump("context")
         self._bus.emit(MlChangedPayload(ml=ml))
@@ -559,14 +564,14 @@ class ContextService:
 
         Raises MdValueError on any conversion that cannot be performed safely.
         """
-        existing = self._state.exp_context.md
+        existing = self._state.session_env.md
         current = getattr(existing, key, None) if self.has_context() else None
         return _coerce_scalar(text, current)
 
     def del_ml_waveform(self, name: str) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         ml.delete_waveform(name)
         self._state.version.bump("context")
         self._bus.emit(MlChangedPayload(ml=ml))
@@ -583,7 +588,7 @@ class ContextService:
             raise FailedPreconditionError("No experiment context.")
         if not new:
             raise FailedPreconditionError("New name must not be empty.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         if old not in ml.modules:
             raise FailedPreconditionError(f"No module named {old!r}.")
         if new in ml.modules:
@@ -599,7 +604,7 @@ class ContextService:
             raise FailedPreconditionError("No experiment context.")
         if not new:
             raise FailedPreconditionError("New name must not be empty.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         if old not in ml.waveforms:
             raise FailedPreconditionError(f"No waveform named {old!r}.")
         if new in ml.waveforms:

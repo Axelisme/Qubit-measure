@@ -36,11 +36,11 @@ from scipy.ndimage import gaussian_filter1d
 
 %autoreload 2
 import zcu_tools.notebook.analysis.dispersive as zd
-from zcu_tools.meta_tool import DispersiveFit, QubitParams
+from zcu_tools.resources.qubit_params import DispersiveFit, QubitParams
 from zcu_tools.simulate import value2flux
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
-from zcu_tools.utils.fitting.resonance import (
+from zcu_tools.analysis.fitting.resonance import (
     fit_edelay,
     remove_edelay,
     fit_circle_params,

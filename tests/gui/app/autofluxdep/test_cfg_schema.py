@@ -9,7 +9,7 @@ Three families of test:
    production. Tests assert invariants and derive expected values from production
    schemas/helpers instead of duplicating default tables.
 3. **Seam invariant** — only ``cfg/form.py`` may import
-   ``zcu_tools.gui.app.main`` from inside the autofluxdep package.
+   ``zcu_tools.gui.app.measure`` from inside the autofluxdep package.
 """
 
 from __future__ import annotations
@@ -20,7 +20,34 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-import zcu_tools.gui.app.autofluxdep.experiments._support.utils.schema as node_schema_module
+import zcu_tools.experiment.v2_gui.autofluxdep._support.utils.schema as node_schema_module
+from zcu_tools.experiment.v2_gui.autofluxdep._support.module_aliases import (
+    PI_PULSE_LIBRARY_ALIASES,
+)
+from zcu_tools.experiment.v2_gui.autofluxdep._support.readout_defaults import (
+    seed_readout_freq,
+    seed_readout_gain,
+)
+from zcu_tools.experiment.v2_gui.autofluxdep._support.timing_defaults import (
+    auto_relax_delay_from_t1,
+    auto_stop_sweep_range,
+)
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils import NodeSchemaBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.module_values import (
+    pulse_length,
+    pulse_product,
+)
+from zcu_tools.experiment.v2_gui.autofluxdep.catalog import (
+    builders,
+    create_placement,
+)
+from zcu_tools.experiment.v2_gui.autofluxdep.lenrabi import LenRabiBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.mist import MistBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import RoOptimizeBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
+from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import T2EchoBuilder
+from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePath,
@@ -32,33 +59,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     validate_override_plan_base_cfg,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
-from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
-    PI_PULSE_LIBRARY_ALIASES,
-)
-from zcu_tools.gui.app.autofluxdep.experiments._support.readout_defaults import (
-    seed_readout_freq,
-    seed_readout_gain,
-)
-from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
-    auto_relax_delay_from_t1,
-    auto_stop_sweep_range,
-)
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils import NodeSchemaBuilder
-from zcu_tools.gui.app.autofluxdep.experiments._support.utils.module_values import (
-    pulse_length,
-    pulse_product,
-)
-from zcu_tools.gui.app.autofluxdep.experiments.catalog import (
-    builders,
-    create_placement,
-)
-from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.mist import MistBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
-from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
-from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -81,9 +81,9 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.gui.cfg.tree import read_value_path
-from zcu_tools.gui.session.types import ExpContext
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from ._helpers import (
     NodeFieldSpec,
@@ -131,8 +131,8 @@ def _ml() -> ModuleLibrary:
     return ml
 
 
-def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> ExpContext:
-    return ExpContext(
+def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> SessionEnv:
+    return SessionEnv(
         md=md if md is not None else MetaDict(),
         ml=ml if ml is not None else ModuleLibrary(),
         soc=None,
@@ -2668,7 +2668,7 @@ def test_autoflux_measure_app_imports_are_zero():
             elif isinstance(node, ast.Import):
                 modules.extend(alias.name for alias in node.names)
             for module in modules:
-                if not module.startswith("zcu_tools.gui.app.main"):
+                if not module.startswith("zcu_tools.gui.app.measure"):
                     continue
                 actual.setdefault(py, set()).add(module)
 

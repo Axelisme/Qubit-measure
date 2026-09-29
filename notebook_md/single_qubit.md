@@ -38,16 +38,18 @@ import numpy as np
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
 import zcu_tools.program.v2 as zp
-from zcu_tools.meta_tool import (
-    ExperimentManager,
+from zcu_tools.resources.context import (
+    ContextManager,
     MetaDict,
     ModuleLibrary,
+)
+from zcu_tools.resources.sample_table import (
     SampleTable,
     validate_sample_table_v2,
 )
 from zcu_tools.notebook.utils import dump_device_info, gc_collect, make_sweep, savefig
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.utils.datasaver import create_datafolder, reserve_labber_filepath
+from zcu_tools.datafile import create_datafolder, reserve_labber_filepath
 ```
 
 # Create data/result folder
@@ -64,7 +66,7 @@ database_path = create_datafolder(
     name=os.path.join(chip_name, qub_name),
 )
 
-em = ExperimentManager(os.path.join(result_dir, "exps"))
+em = ContextManager(os.path.join(result_dir, "exps"))
 ml = ModuleLibrary()
 md = MetaDict()
 ```
@@ -72,7 +74,7 @@ md = MetaDict()
 # Connect to zcu216
 
 ```python
-from zcu_tools.remote import make_soc_proxy
+from zcu_tools.qick_remote import make_soc_proxy
 
 soc, soccfg = make_soc_proxy("192.168.10.179", 8887)
 print(soccfg)

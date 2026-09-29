@@ -1,7 +1,7 @@
 """Controller.create_from_role: seed a blank ml entry from a named role,
 md-linked defaults lowered to the md's current values.
 
-Uses a real ExpContext (real MetaDict/ModuleLibrary) + a real RoleCatalog so the
+Uses a real SessionEnv (real MetaDict/ModuleLibrary) + a real RoleCatalog so the
 factory → lowering → ml-register chain is exercised end to end.
 """
 
@@ -10,13 +10,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
-from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
-from zcu_tools.gui.app.main.controller import Controller
-from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
-from zcu_tools.gui.app.main.specs import make_pulse_spec
-from zcu_tools.gui.app.main.state import State
+from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
+from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.measure.specs import make_pulse_spec
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,
@@ -24,7 +24,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _make_ctrl(
@@ -35,7 +35,7 @@ def _make_ctrl(
     md = MetaDict()
     for k, v in md_values.items():
         setattr(md, k, v)
-    ctx = ExpContext(
+    ctx = SessionEnv(
         md=md,
         ml=ModuleLibrary(),
         soc=None,
@@ -131,8 +131,8 @@ def test_create_from_role_uses_value_then_fresh_shape_exactly_once(qapp) -> None
     events.clear()
     made_specs.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
-    get_context = MagicMock(wraps=ctrl.get_exp_context)
-    ctrl.get_exp_context = get_context  # type: ignore[method-assign]
+    get_context = MagicMock(wraps=ctrl.get_session_env)
+    ctrl.get_session_env = get_context  # type: ignore[method-assign]
     ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
 
     ctrl.create_from_role("module", "instrumented", "created")
@@ -154,8 +154,8 @@ def test_create_from_role_value_failure_does_not_call_shape(qapp) -> None:  # no
     events.clear()
 
     ctrl = _make_ctrl({}, catalog=catalog)
-    get_context = MagicMock(wraps=ctrl.get_exp_context)
-    ctrl.get_exp_context = get_context  # type: ignore[method-assign]
+    get_context = MagicMock(wraps=ctrl.get_session_env)
+    ctrl.get_session_env = get_context  # type: ignore[method-assign]
     ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="value failed"):
@@ -174,8 +174,8 @@ def test_create_from_role_shape_failure_occurs_after_value(qapp) -> None:  # noq
     events.clear()
 
     ctrl = _make_ctrl({}, catalog=catalog)
-    get_context = MagicMock(wraps=ctrl.get_exp_context)
-    ctrl.get_exp_context = get_context  # type: ignore[method-assign]
+    get_context = MagicMock(wraps=ctrl.get_session_env)
+    ctrl.get_session_env = get_context  # type: ignore[method-assign]
     ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="shape failed"):
@@ -193,7 +193,7 @@ def test_create_from_role_context_failure_calls_no_factory_or_write(qapp) -> Non
     catalog.register(entry)
     events.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
-    ctrl.get_exp_context = MagicMock(  # type: ignore[method-assign]
+    ctrl.get_session_env = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("context failed")
     )
     ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
@@ -202,7 +202,7 @@ def test_create_from_role_context_failure_calls_no_factory_or_write(qapp) -> Non
         ctrl.create_from_role("module", "instrumented", "created")
 
     assert events == []
-    assert ctrl.get_exp_context.call_count == 1
+    assert ctrl.get_session_env.call_count == 1
     ctrl.set_ml_module_from_schema.assert_not_called()
 
 
@@ -216,8 +216,8 @@ def test_create_from_role_downstream_failure_preserves_factory_counts_and_identi
     events.clear()
     made_specs.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
-    get_context = MagicMock(wraps=ctrl.get_exp_context)
-    ctrl.get_exp_context = get_context  # type: ignore[method-assign]
+    get_context = MagicMock(wraps=ctrl.get_session_env)
+    ctrl.get_session_env = get_context  # type: ignore[method-assign]
     ctrl.set_ml_module_from_schema = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("write failed")
     )
@@ -252,8 +252,8 @@ def test_create_from_role_guards_do_not_call_value_or_shape(
     catalog.register(entry)
     events.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
-    get_context = MagicMock(wraps=ctrl.get_exp_context)
-    ctrl.get_exp_context = get_context  # type: ignore[method-assign]
+    get_context = MagicMock(wraps=ctrl.get_session_env)
+    ctrl.get_session_env = get_context  # type: ignore[method-assign]
     ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match=error):
@@ -271,8 +271,8 @@ def test_create_from_role_name_clash_guard_does_not_call_value_or_shape(qapp) ->
     catalog.register(entry)
     events.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
-    get_context = MagicMock(wraps=ctrl.get_exp_context)
-    ctrl.get_exp_context = get_context  # type: ignore[method-assign]
+    get_context = MagicMock(wraps=ctrl.get_session_env)
+    ctrl.get_session_env = get_context  # type: ignore[method-assign]
     ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
     ctrl.get_current_ml().register_module(existing=_pulse_raw())
 
@@ -334,8 +334,8 @@ def test_item_kind_mismatch_raises(qapp):  # noqa: ARG001
 
 def test_unknown_role_raises(qapp):  # noqa: ARG001
     ctrl = _make_ctrl({})
-    get_context = MagicMock(wraps=ctrl.get_exp_context)
-    ctrl.get_exp_context = get_context  # type: ignore[method-assign]
+    get_context = MagicMock(wraps=ctrl.get_session_env)
+    ctrl.get_session_env = get_context  # type: ignore[method-assign]
     with pytest.raises(KeyError):
         ctrl.create_from_role("module", "no_such_role", "x")
     get_context.assert_not_called()
@@ -348,7 +348,7 @@ def test_empty_name_raises(qapp):  # noqa: ARG001
 
 
 def test_no_catalog_wired_raises(qapp):  # noqa: ARG001
-    ctx = ExpContext(
+    ctx = SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),
         soc=None,

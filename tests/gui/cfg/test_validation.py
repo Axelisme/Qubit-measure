@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter.lowering import (
+from zcu_tools.gui.app.measure.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
 )
@@ -20,7 +20,7 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
 )
-from zcu_tools.meta_tool import MetaDict
+from zcu_tools.resources.context import MetaDict
 
 
 def _schema(

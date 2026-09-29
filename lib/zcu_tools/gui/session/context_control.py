@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.gui.session.services.device import DeviceService
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class ContextControlPort(Protocol):

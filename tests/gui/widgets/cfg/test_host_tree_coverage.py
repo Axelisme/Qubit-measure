@@ -16,9 +16,9 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from tests.gui.app.main.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -37,11 +37,11 @@ def _fake_ctrl():
 
 def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     """measure-gui Run renders through sole tree."""
-    import zcu_tools.gui.app.main.ui.exp_tab_widget as mod
+    import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
-    from zcu_tools.gui.app.main.services.ports import (
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
+    from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
         PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
@@ -49,8 +49,8 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         SavePaneSnapshot,
         TabPathsSnapshot,
     )
-    from zcu_tools.gui.app.main.state import TabInteractionState
-    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
+    from zcu_tools.gui.app.measure.state import TabInteractionState
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 
     # stub _populate_cfg to avoid needing real cfg editor service
     orig = mod.ExpTabWidget._populate_cfg
@@ -72,7 +72,7 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_exp_context.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
+    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
 
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     spec = CfgSectionSpec(
@@ -136,7 +136,7 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     tab = ExpTabWidget("t1", ctrl, caps)
     tab.attach(with_artifacts(snap), MagicMock())
     # Need to populate a real cfg to verify tree – attach a draft directly to cfg_form
-    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.cfg import CfgSchema as CS
 
     ctrl2 = _fake_ctrl()
@@ -181,9 +181,9 @@ def test_autofluxdep_default_and_generation_use_sole_tree(qapp):
 
 def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
     """writeback module/waveform Edit dialog CfgFormWidget is sole tree."""
-    from zcu_tools.gui.app.main.adapter import ModuleWriteback
-    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
+    from zcu_tools.gui.app.measure.adapter import ModuleWriteback
+    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
     from zcu_tools.gui.cfg import (
         CfgSectionSpec,
         CfgSectionValue,
@@ -204,7 +204,7 @@ def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
 
     # Mock controller to return this draft for writeback edit
     ctrl.get_writeback_item_draft_for_pane = MagicMock(return_value=draft)
-    ctrl.get_exp_context.return_value = MagicMock(md=MetaDict(), ml=MagicMock())
+    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=MagicMock())
     # We need to directly test that WritebackWidget creates a CfgFormWidget that is tree
     # The edit dialog creates CfgFormWidget internally; we verify a standalone CfgFormWidget used there is tree
     w = CfgFormWidget()
@@ -216,7 +216,7 @@ def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
 
 def test_module_library_cfg_form_uses_sole_tree(qapp, monkeypatch):
     """ModuleLibrary cfg forms use the shared tree widget."""
-    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.cfg import (
         CfgSectionSpec,
         CfgSectionValue,

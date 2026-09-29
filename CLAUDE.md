@@ -21,7 +21,7 @@ MEASUREMENT agent 是 operator：
 
 `lib/` implementation 不屬於量測證據。MEASUREMENT agent 不讀、不搜尋、不修改或引用其中的實作。
 
-處理 agent launch 或 lifecycle 時讀 [ADR-0024](docs/adr/0024-embedded-agent-session-architecture.md)。外部 CLI 或 MCP workflow 擁有啟動流程，GUI 不提供 launch UI。
+處理 agent launch 或 lifecycle 時讀 [Remote／Transport ADR](docs/adr/0068-remote-transport.md)。外部 CLI 或 MCP workflow 擁有啟動流程，GUI 不提供 launch UI。
 
 MEASUREMENT 只套用本節與語言規則。以下規則屬於 DEVELOPMENT。
 
@@ -66,6 +66,8 @@ uv run --directory <worktree> --no-sync -- <command>
 
 `<lane>/.venv` 由該 lane 專用並隨 worktree 清除。修改 tracked dependency files 後，Orchestrator 先重跑 locked bootstrap，roles 再使用 `--no-sync`。`--no-sync` 不自動修復環境：環境與 lockfile 不符時讓指令失敗，由 Orchestrator 決定是否重跑 bootstrap。本 repo 的 Python 指令不使用 worktree 外的 interpreter。
 
+Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 port 等共享資源。並行工作若會用到同一個 live resource，先安排使用順序，不能因為在不同 lane 就假定互不影響。Worktree 也不帶來硬體操作授權。
+
 完成條件：指定 interpreter 可用；受管理 lane 的 locked bootstrap 成功。
 
 ### 4. 實作與測試
@@ -75,7 +77,7 @@ uv run --directory <worktree> --no-sync -- <command>
 測試遵循以下契約；新增、拆分或搬遷測試前，先讀 [tests/README.md](tests/README.md) 的套件結構、fixture 與搬遷規則，找出既有行為的 owner：
 
 - 測試位於 root `tests/`，檔名使用 `test_*.py`，以 `pytest` 涵蓋本次變更的主要行為與邏輯。
-- 測試目錄的路徑對應被測模組：含 `test_*.py` 的目錄必須對應一個實際存在的模組目錄。對應是模組層級，檔名不受約束。`script` 與 `tools` 對應 repo root 的同名目錄，其餘對應 `lib/zcu_tools/` 之下。`contract` 與 `parity` 為保留名稱，豁免該段及其以下，但其前的路徑前綴仍須對應；新增保留名稱需使用者同意。
+- 測試目錄的路徑對應被測模組：含 `test_*.py` 的目錄必須對應一個實際存在的模組目錄。對應是模組層級，檔名不受約束。`scripts` 與 `tools` 對應 repo root 的同名目錄，其餘對應 `lib/zcu_tools/` 之下。`contract` 與 `parity` 為保留名稱，豁免該段及其以下，但其前的路徑前綴仍須對應；新增保留名稱需使用者同意。
 - 路徑對應以 `tools/check_test_path_correspondence.py` 判定。它目前對既有目錄回報非零；判讀對象是本次改動觸及的路徑，不是總數。
 - 測試保持獨立、可重複、不依賴外部狀態。修改 module-level 集合、cache、registry 等 mutable state 後必須還原；共用狀態者在 module 前後比對，並由 guard 指出污染者。
 - 同一棵 tree 因測試選集或順序得出不同結論時，將該不穩定視為缺陷，不以偶然通過的結果驗收。

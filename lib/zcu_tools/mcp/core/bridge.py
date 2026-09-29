@@ -582,7 +582,7 @@ class McpBridge:
     ) -> str:
         """Fork the GUI subprocess on ``port``, wait until ready, maybe connect.
 
-        ``repo_root`` anchors ``script/<run_script_name>``. ``extra_args`` are
+        ``repo_root`` anchors ``scripts/<run_script_name>``. ``extra_args`` are
         appended to the launch command (apps that need extra flags).
         """
         cfg = self.config
@@ -590,7 +590,7 @@ class McpBridge:
             return f"GUI already running (pid={self._proc.pid})."
 
         python = sys.executable
-        run_gui = repo_root / "script" / cfg.run_script_name
+        run_gui = repo_root / "scripts" / cfg.run_script_name
         if not run_gui.exists():
             raise FileNotFoundError(f"{cfg.run_script_name} not found at {run_gui}")
 

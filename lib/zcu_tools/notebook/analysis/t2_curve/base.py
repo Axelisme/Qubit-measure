@@ -10,13 +10,13 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.meta_tool import T1CurveFit
 from zcu_tools.notebook.analysis.fit_tools import (
     predict_domega_dflux as predict_domega_dflux,
 )
 from zcu_tools.notebook.analysis.fit_tools import (
     predict_f01_mhz as predict_f01_mhz,
 )
+from zcu_tools.resources.qubit_params import T1CurveFit
 from zcu_tools.simulate.fluxonium import (
     calculate_dispersive_vs_flux_fast,
     calculate_eff_t1_vs_flux_fast,

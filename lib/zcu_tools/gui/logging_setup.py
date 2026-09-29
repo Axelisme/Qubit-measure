@@ -1,6 +1,6 @@
 """Shared GUI logging setup (Phase 157).
 
-One place that decides *how* every GUI entry point (the four ``script/run_*_gui``
+One place that decides *how* every GUI entry point (the four ``scripts/run_*_gui``
 launchers) and the measure MCP server configure file logging, so a new sibling
 namespace is never silently left out of the log again.
 

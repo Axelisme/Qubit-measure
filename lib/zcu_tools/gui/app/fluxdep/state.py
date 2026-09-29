@@ -20,9 +20,10 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ def spectrum_version_key(name: str) -> str:
 
 @dataclass
 class SpectrumEntry:
-    """One loaded-and-annotated spectrum (≈ persistance.SpectrumResult + edit state).
+    """One loaded-and-annotated spectrum (≈ analysis.fluxdep.models.SpectrumResult + edit state).
 
     ``flux_half`` / ``flux_int`` / ``flux_period`` are per-spectrum: each spectrum
     is aligned on its own (the values may be *inherited* as an initial guess from
@@ -147,7 +148,7 @@ class FitState:
     """Database-search fit inputs and result (the v2 pipeline tail).
 
     The inputs (``database_path`` / bounds / ``transitions`` / ``r_f`` /
-    ``sample_f``) parameterise ``search_in_database``; the result
+    ``sample_f``) parameterise ``search_database``; the result
     (``params`` = (EJ, EC, EL)) is filled by a search. All of it is a
     process-lifetime singleton on State — one fit per session — so its version
     key (``fit``) is never dropped, only bumped.
