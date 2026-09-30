@@ -39,6 +39,7 @@ class NotebookPlotHost:
         canvas = Canvas(figure)
         try:
             manager = FigureManager(canvas, num=0)
+            _initialize_canvas(canvas)
         except Exception:
             # Release acquired widgets without downgrading the original failure.
             _release_canvas(canvas)
@@ -65,6 +66,20 @@ class NotebookPlotHost:
             _release_canvas(cast("Canvas", manager.canvas))
         finally:
             del self._managers[figure]
+
+
+def _initialize_canvas(canvas: "Canvas") -> None:
+    """Finish the ipympl handshake before a busy cell can defer its requests."""
+    width, height = canvas.figure.get_size_inches()
+    canvas.toolbar_visible = False
+    canvas.header_visible = False
+    canvas.footer_visible = False
+    canvas.layout.width = f"{int(width * canvas.figure.dpi)}px"
+    canvas.layout.height = f"{int(height * canvas.figure.dpi)}px"
+    # This third-party protocol is the verified legacy Notebook initialization.
+    # Keep it at the widget adapter, without importing the retiring routing backend.
+    for message_type in ("refresh", "draw", "send_image_mode", "initialized"):
+        canvas._handle_message(canvas, {"type": message_type}, [])  # pyright: ignore[reportPrivateUsage]
 
 
 def _release_canvas(canvas: "Canvas") -> None:
