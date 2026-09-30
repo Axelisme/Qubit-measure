@@ -134,6 +134,7 @@ class MetaDict(SyncFile):
         """
         prepared = dict(contents)
         self._validate_data_keys(prepared)
+        _reject_reserved_literal_tags(prepared)
         previous = dict(self.items())
         previous_dirty = self._dirty
         try:

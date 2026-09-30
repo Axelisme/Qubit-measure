@@ -88,7 +88,7 @@ class FluxDepFit:
         return (self.EJ, self.EC, self.EL)
 
     def to_json_section(self) -> dict[str, Any]:
-        section = {
+        section: dict[str, Any] = {
             "params": {"EJ": self.EJ, "EC": self.EC, "EL": self.EL},
             "flux_half": self.flux_half,
             "flux_int": self.flux_int,

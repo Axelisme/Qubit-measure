@@ -89,6 +89,31 @@ def _apply(
     )
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"__complex__": [1, 2]},
+        {"__metadict_string__": "literal"},
+        {"nested": [{"__complex__": [1, 2]}]},
+        {"nested": [{"__metadict_string__": "literal"}]},
+    ],
+)
+def test_create_md_attr_rejects_reserved_value_without_publication(bad):
+    bus = EventBus()
+    svc, state = _make_svc_with_state(bus)
+    events: list[object] = []
+    bus.subscribe(MdChangedPayload, events.append)
+    svc.get_current_md().update(stable=1)
+    before = state.version.get("context")
+
+    with pytest.raises(ValueError, match="reserved MetaDict tag"):
+        svc.create_md_attr("bad", bad)
+
+    assert dict(svc.get_current_md().snapshot().items()) == {"stable": 1}
+    assert state.version.get("context") == before
+    assert events == []
+
+
 @pytest.mark.parametrize("failure_stage", ["module", "waveform"])
 def test_failed_late_preparation_keeps_live_context_and_version(failure_stage):
     bus = EventBus()

@@ -33,7 +33,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Literal, ParamSpec, TypeVar, cast
+from typing import Literal, ParamSpec, TypeVar
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -50,7 +50,6 @@ def auto_sync(
                 raise TypeError(
                     f"Expected first argument to be SyncFile, got {args} and {kwargs}"
                 )
-            sync_file = cast(SyncFile, sync_file)
 
             if time in ["read", "write"]:
                 sync_file.sync()

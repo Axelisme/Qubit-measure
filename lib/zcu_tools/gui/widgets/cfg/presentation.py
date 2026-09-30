@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import cast
 
 from qtpy.QtGui import QBrush, QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -84,7 +83,7 @@ def resolve_decoration(
     if resolver is None:
         return None
     try:
-        return cast(FieldDecorationProtocol, resolver(path, field))
+        return resolver(path, field)
     except Exception:
         logger.debug("decoration resolver failed for %r", path, exc_info=True)
         return None

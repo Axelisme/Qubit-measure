@@ -250,7 +250,6 @@ class TreeCfgWidget(QWidget):
         # Reference-elided subtree: rebuild only descendants of the reference item,
         # preserving the reference header, ancestors and unrelated branches.
         if ref_field is not None:
-            sub = ref_field.sub_field
             # Collect descendants under the reference (excludes the reference itself)
             descendant_item_paths = [
                 p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
@@ -296,11 +295,11 @@ class TreeCfgWidget(QWidget):
                         except Exception:
                             pass
                         try:
-                            cast(QWidget, header).setParent(None)
+                            header.setParent(None)
                         except Exception:
                             pass
                         try:
-                            cast(QWidget, header).deleteLater()
+                            header.deleteLater()
                         except Exception:
                             pass
                         try:
@@ -395,11 +394,11 @@ class TreeCfgWidget(QWidget):
                     except Exception:
                         pass
                     try:
-                        cast(QWidget, header).setParent(None)
+                        header.setParent(None)
                     except Exception:
                         pass
                     try:
-                        cast(QWidget, header).deleteLater()
+                        header.deleteLater()
                     except Exception:
                         pass
                     try:
@@ -466,7 +465,7 @@ class TreeCfgWidget(QWidget):
             if not path.startswith(self._path):
                 return None
             if path == self._path:
-                return cast(SectionField, cur)
+                return cur
             remaining = path.removeprefix(self._path + ".")
             parts = remaining.split(".") if remaining else []
         for part in parts:
@@ -565,7 +564,7 @@ class TreeCfgWidget(QWidget):
                 return None, None
             entries.append((key, child_path, child_field))
         if len(entries) == 1 and isinstance(entries[0][2], SectionField):
-            wrapper_field = cast(SectionField, entries[0][2])
+            wrapper_field = entries[0][2]
             wrapper_path = entries[0][1]
             # Do not elide a wrapper that carries observable decoration
             if self._context.decoration_for_path is not None:

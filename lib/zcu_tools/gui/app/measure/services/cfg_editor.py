@@ -14,10 +14,10 @@ Lifetime is governed by ``gc`` (not two session kinds):
 - **gc=True** (``open`` default — the agent builds/edits a ModuleLibrary entry):
   reclaimable on RPC disconnect and bounded by an LRU cap (orphan protection).
   ``commit`` lowers + registers into ModuleLibrary, ``discard`` drops it.
-- **gc=False** (UI-owned: tab cfg / inspect / writeback): only the owner tears it
+- **gc=False** (UI-owned: inspect / writeback): only the owner tears it
   down via ``teardown(editor_id)`` (the owning widget ``detach``es first). Not
   LRU-bounded, not reclaimed on agent disconnect. ``open_seeded`` builds one from
-  an existing ``CfgSchema`` (tab cfg / writeback draft — no ml ``item_kind``, so
+  an existing ``CfgSchema`` (inspect / writeback draft — no ml ``item_kind``, so
   it is teardown-only and rejects ``commit``).
 
 The incremental shape is *required*, not a convenience: ModuleRef/WaveformRef
@@ -25,8 +25,8 @@ key switches rebuild the field sub-tree, so a client cannot send one complete
 raw payload up-front — it must switch the ref, observe the freshly-bound paths,
 then fill them. ``set_field`` returns the net ``removed`` / ``added`` settable
 paths across the whole draft for exactly this reason; a content change that
-keeps the path set unchanged yields no diff, so read ``editor.get`` /
-``tab.get_cfg`` when the new tree is needed.
+keeps the path set unchanged yields no diff, so read ``editor.get`` when the
+new tree is needed. Tab cfg uses a separate ``CfgResource`` contract.
 
 ``EvalValue`` fields (md-reference expressions, e.g. ``r_f - 0.1``) are carried
 on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}``.
@@ -162,10 +162,10 @@ class CfgEditorSession:
     draft: CfgDraft
     resolve_value_ref: ValueRefResolver
     # True: agent-opened, reclaimed by LRU / RPC-disconnect (orphan protection).
-    # False: UI-owned (tab / inspect / writeback) — only the owner tears it down.
+    # False: UI-owned (inspect / writeback) — only the owner tears it down.
     gc: bool
     # the ml entry kind being built ("module"/"waveform"); commit uses it. None
-    # for a seeded session (tab cfg / writeback draft) that is teardown-only.
+    # for a seeded session (inspect / writeback draft) that is teardown-only.
     item_kind: str | None = None
     # Existing ml-entry sessions retain their source name and ModuleLibrary
     # identity so replacement cannot apply a draft to a different live context.

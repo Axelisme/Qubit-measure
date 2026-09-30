@@ -32,6 +32,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgEditing,
     CfgObservation,
+    CfgPath,
     CfgStatus,
 )
 
@@ -50,7 +51,6 @@ from .presentation import active_choice_keys
 from .registry import TextInputEnhancer
 from .structure import make_dense_cfg_tree
 
-CfgPath = tuple[str, ...]
 InputWidget = (
     ScalarInputWidget
     | SweepInputWidget

@@ -188,3 +188,25 @@ def test_validate_data_key_rejects_invalid_names(key):
 
 def test_validate_data_key_returns_user_key():
     assert MetaDict.validate_data_key("gain") == "gain"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"__complex__": [1, 2]},
+        {"__metadict_string__": "literal"},
+        {"nested": [{"__complex__": [1, 2]}]},
+        {"nested": [{"__metadict_string__": "literal"}]},
+    ],
+)
+def test_replace_contents_rejects_reserved_values_before_mutation(tmp_path, bad):
+    path = tmp_path / "meta.json"
+    md = MetaDict(path)
+    md.update({"stable": 1})
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match="reserved MetaDict tag"):
+        md.replace_contents({"first": 2, "bad": bad})
+
+    assert dict(md.snapshot().items()) == {"stable": 1}
+    assert path.read_bytes() == before

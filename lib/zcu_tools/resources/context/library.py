@@ -36,7 +36,7 @@ class ModuleDumper(yaml.SafeDumper):
 
     # --- 邏輯 2：將字典類型的 Value 排到最後 ---
     def represent_dict(self, data) -> MappingNode:
-        data = cast(dict, data)
+        data = cast(dict[object, object], data)
         # 將 dict 拆解為 (key, value)
         items = list(data.items())
 
