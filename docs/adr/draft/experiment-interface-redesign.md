@@ -68,7 +68,7 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 ### 三種分析生命週期
 
 - T1 提供同步 analyze，消費 explicit RunRecord 與 typed options。Notebook 成功後發布 AnalysisRecord；GUI 發布插件定義的 typed 分析輸出、來源與圖。
-- Singleshot GE 核心另提供 post_analyze。Post 消費 adopted primary 的來源與 calibration，不重新 primary fit，不讀未重新分析的 initial_state 表單。Primary／post 各自持有图與 GUI writeback proposal，不要求其他實驗提供空 post 方法。
+- Singleshot GE 核心另提供 post_analyze。Post 消費 adopted primary 的來源與 calibration，不重新 primary fit，不讀未重新分析的 initial_state 表單。Primary／post 各自持有图與 GUI writeback proposal。成功 primary 替換清空目前 post，primary 失敗保留前次成功組。清空引用不關閉使用者持有的舊圖。不要求其他實驗提供空 post 方法。
 - OneTone FluxDep 核心只負責 acquisition 與資料保存／載入，不實作 analyze。GUI adapter／INTERACTIVE plugin 自行分析，Notebook 使用獨立分析工具。重用現有 TwoLinePicker 與 Qt-free 選線規則，不把 Notebook 工具接回 core.analyze 或共用 Adapter 分析。啟動返回不代表成功；Done 驗證及收尾後發布該次成果，Cancel／failure 不取代上一筆成功。Notebook 保留實際 options，GUI 插件仍自行決定成功輸出的欄位。
 
 Notebook run／load 正常返回後更新目前 RunRecord，清空目前分析與圖引用；失敗保留舊紀錄。同步分析成功才成組替換成果，分析舊 RunRecord 不替換目前 run。互動工具綁定自己的來源，晚到完成仍按 G5 發布自身成果，不取最新 run，也不新增 generation gate。清空引用不銷毀使用者持有的舊圖或結果，不新增完整歷史管理。
@@ -155,7 +155,7 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - GUI 多圖檔名的精確格式、State／SaveService／截圖接線，以及各批 adapter／核心遷移的責任與驗證範圍。
 - 完成後取圖、保留參照與釋放呈現的具體介面，以及名稱或接管衝突拒絕後的 owner 完整性。
 - Notebook inline／widget 的顯示與 close、GUI worker／canvas 更新、最後 refresh 及失敗收尾。
-- GE primary 替換後的 post 關係，以及 Notebook 獨立互動工具完成後取得結果的方法名。細化不得新增 G5 已排除的 Notebook 晚到發布限制。
+- GE 共用 post 入口與 record 的 primary 關聯，以及 Notebook 獨立互動工具完成後取得結果的方法名。GE 成功 primary 清空目前 post、失敗保留前次成功組的規則已定，仍需接線與驗證。細化不得新增 G5 已排除的 Notebook 晚到發布限制。
 - RunRecord／AnalysisRecord 的公開型別宣告、同步 bound analyze 的型別限制、純圖容器與 presentation handle 的公開接縫，以及 default／override codec 的正式 observations。
 - T1 tracer-bullet 要有實際 caller、正式 seam tests、可執行 gates 與種子。本文是 contract 文件，不代表這些項目或新產品行為已完成。
 
