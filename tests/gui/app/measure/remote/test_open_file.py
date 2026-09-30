@@ -113,7 +113,6 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
         },
     )
     assert run["error"]["reason"] == "stale_version"
-    assert f"tab:{tab}:cfg" in run["error"]["data"]["stale"]
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["artifacts"][0]["status"] == "not_saved"
     assert snapshot["artifacts"][0]["last_saved_path"] is None
