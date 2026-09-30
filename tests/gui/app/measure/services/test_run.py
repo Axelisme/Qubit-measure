@@ -23,6 +23,8 @@ from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer, current_stop_signal
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeResult
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -297,6 +299,43 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     assert state.get_tab(tab_id).run.result is result
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
+
+
+def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
+    class RecordingSnapshotAdapter(FakeAdapter):
+        def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeResult:
+            # Controlled execution produces an artifact with the real domain cfg builder.
+            return FakeResult(np.empty(0), self.build_exp_cfg(raw_cfg, req))
+
+    state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    adapter = RecordingSnapshotAdapter()
+    state.session_env.md.update(gain=0.25)
+    schema = adapter.make_default_cfg(state.session_env)
+    schema.value.fields["gain"] = EvalValue("gain")
+    cfg = make_cfg(schema, state=state)
+    state.get_tab(tab_id).adapter = adapter
+    state.get_tab(tab_id).cfg = cfg
+    accepted_ref = cfg.observe().ref
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=accepted_ref.revision
+    )
+    accepted_basis = permit.accepted_cfg.source_basis
+    service, _gate, background, _handles = _make_run_service(state)
+
+    service.start_run(permit)
+    state.session_env.md.update(gain=0.75)
+    state.version.bump("context")
+    after = cfg.refresh(cfg.observe().ref.revision)
+    background.run_work()
+
+    result = state.get_tab(tab_id).run.result
+    assert isinstance(result, FakeResult)
+    assert result.cfg_snapshot is not None
+    assert result.cfg_snapshot.gain == 0.25
+    assert permit.accepted_cfg.ref == accepted_ref
+    assert permit.accepted_cfg.source_basis == accepted_basis
+    assert after.ref != accepted_ref
+    assert after.source_basis != accepted_basis
 
 
 def test_start_run_rejects_when_tab_busy():

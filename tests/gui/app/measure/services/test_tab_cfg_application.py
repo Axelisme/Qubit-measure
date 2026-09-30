@@ -1,5 +1,7 @@
 """Production cfg owner wiring without tab widgets or live hardware."""
 
+from unittest.mock import MagicMock
+
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
@@ -17,6 +19,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgObservation,
     CfgPreconditionError,
     CfgPreconditionReason,
+    CfgStaleError,
     CfgStatus,
 )
 from zcu_tools.gui.session.events import DeviceChangedPayload, MdChangedPayload
@@ -65,6 +68,62 @@ def test_headless_lifetime_snapshot_and_single_authority(application: Fixture) -
         application.ctrl.cfg_resources.lookup(recreated).observe().ref.cfg_id
         != before.ref.cfg_id
     )
+
+
+@pytest.mark.parametrize("failure", ["stale", "invalid", "wrong_resource"])
+def test_run_rejects_unaccepted_cfg_without_preflight_or_operation(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    tab_id = application.ctrl.new_tab("cfg-contract")
+    editor = application.ctrl.cfg_resources.lookup(tab_id)
+    expected = editor.observe().ref
+    publication = editor.edit(
+        expected.revision,
+        (
+            CfgEdit(
+                ("gain",),
+                DirectValue(None, raw="unfinished") if failure == "invalid" else 2.0,
+            ),
+        ),
+    )
+    if failure == "invalid":
+        expected = publication.ref
+    elif failure == "wrong_resource":
+        other = application.ctrl.new_tab("cfg-contract")
+        expected = application.ctrl.cfg_resources.lookup(other).observe().ref
+    preflight = MagicMock()
+    monkeypatch.setattr(
+        application.state.get_tab(tab_id).adapter, "validate_run_request", preflight
+    )
+
+    with pytest.raises(CfgPreconditionError) as caught:
+        application.ctrl.start_run(tab_id, expected)
+
+    if failure == "invalid":
+        assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+    else:
+        assert isinstance(caught.value, CfgStaleError)
+        assert caught.value.actual == publication.ref
+    preflight.assert_not_called()
+    assert application.ctrl.run_analyze_control.active_tab_operations() == ()
+    assert application.ctrl.get_running_tab_id() is None
+    assert editor.observe().ref == publication.ref
+
+
+def test_definition_failure_does_not_publish_a_partial_tab(
+    application: Fixture,
+) -> None:
+    class BrokenAdapter(SchemaAdapter):
+        def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+            raise RuntimeError("definition failed")
+
+    tab_id = application.ctrl.new_tab("cfg-contract")
+    before = application.ctrl.cfg_resources.lookup(tab_id).observe()
+    application.registry.register("broken-cfg", BrokenAdapter)
+    with pytest.raises(RuntimeError, match="definition failed"):
+        application.ctrl.new_tab("broken-cfg")
+    assert application.ctrl.list_tab_ids() == [tab_id]
+    assert application.ctrl.cfg_resources.lookup(tab_id).observe() == before
 
 
 def test_production_capture_uses_published_cache_without_live_provider(
@@ -151,7 +210,9 @@ def test_cfg_notification_rejects_app_lifetime_and_run(application: Fixture) -> 
         for command in (
             lambda: application.ctrl.new_tab("cfg-contract"),
             lambda: application.ctrl.close_tab(second),
-            lambda: application.ctrl.start_run(second),
+            lambda: application.ctrl.start_run(
+                second, application.ctrl.cfg_resources.lookup(second).observe().ref
+            ),
         ):
             try:
                 command()

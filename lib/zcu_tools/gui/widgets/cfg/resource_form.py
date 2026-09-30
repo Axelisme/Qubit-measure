@@ -33,6 +33,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgEditing,
     CfgObservation,
     CfgPath,
+    CfgRef,
     CfgStatus,
 )
 
@@ -171,6 +172,12 @@ class ResourceCfgFormWidget(QWidget):
     def set_editing_enabled(self, enabled: bool) -> None:  # noqa: FBT001 - form API
         self._editing_enabled = enabled
         self._tree.setEnabled(enabled and not self._rebuild_pending)
+
+    def current_ref(self) -> CfgRef:
+        """Return the displayed publication's ref without refreshing the owner."""
+        if self._observation is None:
+            raise RuntimeError("Config form is not attached")
+        return self._observation.ref
 
     def is_valid(self) -> bool:
         observation = self._observation

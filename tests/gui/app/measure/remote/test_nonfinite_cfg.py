@@ -7,6 +7,7 @@ import pytest
 from qtpy.QtWidgets import QLineEdit, QWidget
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.cfg import CfgSchema, DirectValue, ScalarSpec
+from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
@@ -83,7 +84,17 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
         observe_run_inputs(
             fx, tab_id, lambda method, params: call(sock, method, params)["result"]
         )
-        rejected = call(sock, "tab.run_start", {"tab_id": tab_id}, rid="run")
+        rejected = call(
+            sock,
+            "tab.run_start",
+            {
+                "tab_id": tab_id,
+                "expected": encode_ref(
+                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                ),
+            },
+            rid="run",
+        )
         assert not rejected["ok"]
         assert rejected["error"]["reason"] == "not_valid"
         assert tab["result"]["diagnostics"][0]["path"] == ["gain"]

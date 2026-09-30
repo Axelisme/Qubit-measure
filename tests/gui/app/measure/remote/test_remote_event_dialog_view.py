@@ -32,6 +32,7 @@ from zcu_tools.gui.app.measure.remote.events import (
     _ser_tab_content_changed,
     _ser_tab_interaction_changed,
 )
+from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -568,7 +569,16 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
         observe_run_inputs(
             fx, tab_id, lambda method, params: call(sock, method, params)["result"]
         )
-        result = call(sock, "tab.run_start", {"tab_id": tab_id})["result"]
+        result = call(
+            sock,
+            "tab.run_start",
+            {
+                "tab_id": tab_id,
+                "expected": encode_ref(
+                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                ),
+            },
+        )["result"]
         # One run_started, then one run_finished with outcome='finished'.
         started = recv_push(sock, "run_started")
         assert set(started) == {"event", "payload", "seq", "origin"}

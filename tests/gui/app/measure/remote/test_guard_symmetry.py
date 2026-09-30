@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.guard import GuardError
 from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import CfgRevision
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
@@ -96,11 +97,18 @@ def test_run_start_draft_context_symmetry(qapp):
 
     # UI path
     with pytest.raises(GuardError, match="active file-backed context"):
-        ctrl.start_run(tab_id)
+        ctrl.start_run(tab_id, ctrl.cfg_resources.lookup(tab_id).observe().ref)
 
     # Remote path — same precondition, mapped to a typed wire error.
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "tab.run_start", {"tab_id": tab_id})
+        _dispatch(
+            ctrl,
+            "tab.run_start",
+            {
+                "tab_id": tab_id,
+                "expected": encode_ref(ctrl.cfg_resources.lookup(tab_id).observe().ref),
+            },
+        )
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert "active file-backed context" in excinfo.value.message
 

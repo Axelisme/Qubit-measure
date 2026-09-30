@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-30 — Atomic resource-bound tab cfg
+**Last updated:** 2026-10-01, specified cfg Run
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 73`, `GUI_VERSION = 105`, and
-`MCP_VERSION = 97` (defined in `zcu_tools.mcp.measure.server`). WIRE 73 replaces
+Current measure-gui values are `WIRE_VERSION = 74`, `GUI_VERSION = 106`, and
+`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 74 requires
+`expected` on `tab.run_start`, using the common cfg_ref codec. GUI 106 runs only the
+specified Valid publication. MCP 98 forwards that expectation once without
+hidden reads, refresh or retry. WIRE 73 replaces
 `tab.set_cfg` with atomic `tab.edit_cfg` and returns cfg_ref in tab snapshots.
 GUI 105 uses one persistent tab cfg resource across Qt, remote, Load and Run.
 MCP 97 forwards explicit cfg_ref expectations without hidden reads or retries.
@@ -271,6 +274,12 @@ Stale errors include expected/actual; input errors can include path/edit_index.
 The adapter does not retry or publish a successful prefix. Plain strings are typed
 strings; __text, __expr, __complex and __ref carry the declared editing intents.
 Source publications advance revision and update all affected cfg before notification.
+
+`tab.run_start` requires the observed cfg_ref as `expected`, independently of the
+connection's seen guards. A stale identity or revision returns expected/actual
+without starting an operation. An Invalid publication cannot run. Active Run
+blocks manual edits, reset, replacement and close on that tab; source publications
+and edits to other tabs remain allowed. Close becomes available after termination.
 
 `editor.get` and `editor.new` retain the independent draft tree with dotted paths.
 Nodes contain kind/path/label/valid. Sections and active references have named

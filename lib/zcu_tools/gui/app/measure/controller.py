@@ -12,6 +12,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.cfg.resource import CfgRef
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -683,8 +684,8 @@ class Controller(SessionControllerMixin):
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()
 
-    def start_run(self, tab_id: str) -> int:
-        return self._run_analyze_control.start_run(tab_id)
+    def start_run(self, tab_id: str, expected: CfgRef) -> int:
+        return self._run_analyze_control.start_run(tab_id, expected)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)

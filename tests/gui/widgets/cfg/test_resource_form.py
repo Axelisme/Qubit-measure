@@ -101,6 +101,7 @@ def test_scalar_edit_and_external_publication_preserve_focused_input(form) -> No
 
     line.setText("3.5")
     assert owner.observe().ref.revision == 1
+    assert form.current_ref() == owner.observe().ref
     assert owner.accept(owner.observe().ref.revision).values == {"value": 3.5}
     assert form.findChild(ScalarInputWidget, "cfgInput:value") is input_widget
     assert line.text() == "3.5"
@@ -108,6 +109,7 @@ def test_scalar_edit_and_external_publication_preserve_focused_input(form) -> No
     owner.edit(owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),))
     assert form.findChild(ScalarInputWidget, "cfgInput:value") is input_widget
     assert line.text() == "8.0"
+    assert form.current_ref() == owner.observe().ref
     assert validity and all(validity)
 
     form.detach()

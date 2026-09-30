@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.remote import (
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -117,12 +118,13 @@ def test_remote_facing_facets_cannot_reenter_during_import(
 ) -> None:
     app = window_app
     previous = app.ctrl.new_tab("demo")
+    expected = app.ctrl.cfg_resources.lookup(previous).observe().ref
 
     def during_load() -> None:
         with pytest.raises(FailedPreconditionError, match="reload"):
             app.ctrl.tab_control.new_tab("demo")
         with pytest.raises(FailedPreconditionError, match="reload"):
-            app.ctrl.run_analyze_control.start_run(previous)
+            app.ctrl.run_analyze_control.start_run(previous, expected)
         with pytest.raises(FailedPreconditionError, match="reload"):
             app.ctrl.run_analyze_control.load_tab_result(previous, "unused.h5")
 
@@ -206,10 +208,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
     previous = app.ctrl.new_tab("demo")
     cfg = app.ctrl.cfg_resources.lookup(previous)
     cfg.edit(cfg.observe().ref.revision, (CfgEdit(("knob",), 8),))
-    versions = {
-        f"tab:{previous}:cfg": app.ctrl.resources_versions()[f"tab:{previous}:cfg"]
-    }
-    assert next(iter(versions.values())) > 0
+    expected = encode_ref(cfg.observe().ref)
     scheduler = ObservedOwnerScheduler()
     remote = RemoteControlAdapter(
         controller=app.ctrl,
@@ -229,7 +228,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
                 method = "tab.close"
                 if request_kind == "stale":
                     method = "tab.run_start"
-                    params["expected_versions"] = versions
+                    params["expected"] = expected
                 elif request_kind == "new":
                     method = "tab.new"
                     params = {"adapter_name": "demo"}

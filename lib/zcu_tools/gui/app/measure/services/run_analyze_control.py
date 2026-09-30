@@ -13,6 +13,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
 )
+from zcu_tools.gui.cfg.resource import CfgRef, CfgStaleError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ class RunAnalyzeControlPort(Protocol):
     def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
-    def start_run(self, tab_id: str) -> int: ...
+    def start_run(self, tab_id: str, expected: CfgRef) -> int: ...
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome: ...
     def cancel_run(self) -> bool: ...
 
@@ -156,11 +157,14 @@ class RunAnalyzeControlFacet:
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
 
-    def start_run(self, tab_id: str) -> int:
+    def start_run(self, tab_id: str, expected: CfgRef) -> int:
+        """Accept exactly the caller's publication, without refresh or substitution."""
         self._access.require_available()
-        cfg_ref = self._state.get_tab(tab_id).cfg.observe().ref
+        actual = self._state.get_tab(tab_id).cfg.observe().ref
+        if expected != actual:
+            raise CfgStaleError(expected, actual)
         permit = self._guard.acquire_run_permit(
-            tab_id, expected_revision=cfg_ref.revision
+            tab_id, expected_revision=expected.revision
         )
         self._ensure_tab_idle(tab_id)
         host = self._render_host()

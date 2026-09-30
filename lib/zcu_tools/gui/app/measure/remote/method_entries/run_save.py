@@ -7,6 +7,7 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     optional_string,
+    required_object,
     required_string,
     save_comment,
 )
@@ -18,13 +19,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_run_start",
         MethodSpec(
             5.0,
-            "Start a tab run via rpc_call; use wait(op=handle) for terminal "
+            "Start a tab run with the explicitly observed cfg ref, without "
+            "refresh or substitution; use wait(op=handle) for terminal "
             "status, failure/cancellation and Send & Stop feedback. The GUI "
             "returns an operation_id, which MCP exposes as {handle}; starting "
             "is not completion. After completion, read result state with "
             "rpc_call on tab.snapshot, or the run figure with rpc_call on "
             "tab.get_figure using subtab_id=run.",
-            (required_string("tab_id"),),
+            (
+                required_string("tab_id"),
+                required_object("expected", "Observed cfg_id and string revision"),
+            ),
         ),
         agent=AgentMethodPolicy(
             guard_deps=(

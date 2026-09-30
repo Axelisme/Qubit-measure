@@ -710,7 +710,7 @@ def test_render_host_routes_to_correct_pane_container(qapp):
         render_host=lambda: host,
         owner_scheduler=ManualOwnerScheduler(),
     )  # type: ignore[arg-type]
-    facet.start_run("tab-1")
+    facet.start_run("tab-1", state.get_tab.return_value.cfg.observe.return_value.ref)
     assert log[-1] == "run"
     facet.analyze("tab-1", MagicMock())
     assert log[-1] == "analysis"

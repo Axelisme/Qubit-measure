@@ -58,7 +58,16 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
     getattr(owner, method).side_effect = lambda *args, **kwargs: (
         order.append("mutation") or MagicMock()
     )
-    handler(adapter, {"tab_id": "t", "updates": {}, "edits": [], "agent_edit": True})
+    handler(
+        adapter,
+        {
+            "tab_id": "t",
+            "expected": {"cfg_id": "cfg-t", "revision": "0"},
+            "updates": {},
+            "edits": [],
+            "agent_edit": True,
+        },
+    )
     assert order == (["mutation"] if headless else [("t", pane), "mutation"])
 
 
@@ -155,6 +164,8 @@ def test_failed_view_selection_does_not_start_an_operation():
     failure = ValueError("unavailable pane")
     adapter.render_view.select_tab_pane.side_effect = failure
     with pytest.raises(ValueError, match="unavailable pane") as caught:
-        h_tab_run_start(adapter, {"tab_id": "t"})
+        h_tab_run_start(
+            adapter, {"tab_id": "t", "expected": {"cfg_id": "cfg-t", "revision": "0"}}
+        )
     assert caught.value is failure
     adapter.run_analyze_control.start_run.assert_not_called()

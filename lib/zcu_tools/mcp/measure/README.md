@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-30 — Atomic tab cfg editing
+**Last updated:** 2026-10-01, specified cfg Run
 
 # `zcu_tools/mcp/measure/`
 
@@ -30,6 +30,10 @@ Shared SocketTransport 送出前與接收逐幀使用 shared framing 的8 MiB UT
 cfg_ref 作為 expected，原樣送一次 `tab.edit_cfg`。Path 是 string array，revision 是
 canonical decimal string。GUI 原子接受整批，或保持上一份 publication。成功可以發布
 Invalid；stale、busy 和 malformed batch 不重試。Cfg expected/actual 與其他資源的 seen guard 分開。
+
+`tab_run(tab, expected)` 必須帶入觀察到的 cfg_ref。工具原樣轉送一次，不預讀、refresh 或
+自動重試。GUI 只接受指定的 Valid publication，stale 會回 expected/actual；Run 使用固定的
+cfg 與 source_basis，不因後續來源變更而替換輸入。
 
 `editor.get` 保留獨立 library draft 的 typed tree 與 prefix 規則。失敗讀取及裸版本表不推進
 基線。Wire 格式與描述由 GUI catalog 擁有。

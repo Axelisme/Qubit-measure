@@ -114,7 +114,8 @@ from __future__ import annotations
 # v70: artifact snapshots, batch save operations and guarded close/shutdown replies.
 # v71: shared interactive plugin discovery, commands and terminal operation replies.
 # v72: project.apply replaces startup.apply with the same params and result.
-WIRE_VERSION = 73
+# v74: tab.run_start requires the caller's explicit cfg ref.
+WIRE_VERSION = 74
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -165,4 +166,5 @@ WIRE_VERSION = 73
 # v102: shared artifact tracking, ordered saves and actual output path reporting.
 # v103: service-owned interactive sessions and best-effort command view follow.
 # v104: one Setup dialog identity; project.apply and general project settings names.
-GUI_VERSION = 105
+# v106: run callers submit their observed cfg identity and revision.
+GUI_VERSION = 106

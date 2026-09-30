@@ -774,7 +774,7 @@ class MainWindow(QMainWindow):
             logger.warning("run_or_stop_tab: blocked — %s", msg)
             self.show_status_message(msg)
             return
-        self._ctrl.start_run(tab_id)
+        self._ctrl.start_run(tab_id, tab_w.cfg_form.current_ref())
 
     def analyze_tab(self, tab_id: str) -> None:
         logger.info("analyze_tab: tab_id=%r", tab_id)

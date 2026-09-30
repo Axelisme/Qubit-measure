@@ -70,7 +70,7 @@ def test_artifact_snapshot_keeps_saved_path_after_draft_edit_and_failed_save(
     tab = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
     try:
-        run = fx.ctrl.start_run(tab)
+        run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
         assert (
             call(sock, "operation.await", {"operation_id": run, "timeout": 2})[
                 "result"
@@ -232,7 +232,9 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         return original_analyze(self, request)
 
     try:
-        run_id = fx.ctrl.start_run(tab_id)  # GUI path, not an MCP start.
+        run_id = fx.ctrl.start_run(
+            tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+        )  # GUI path, not an MCP start.
         run_result = call(
             sock, "operation.await", {"operation_id": run_id, "timeout": 2}
         )
@@ -282,7 +284,9 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
 
     try:
         monkeypatch.setattr(FakeAdapter, "run", held_run)
-        run_id = fx.ctrl.start_run(tab_id)
+        run_id = fx.ctrl.start_run(
+            tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+        )
         assert entered.wait(1)
         assert fx.ctrl.send_feedback("please stop", stop=True) == "run"
         release.set()
@@ -316,7 +320,9 @@ def test_data_save_is_awaitable_and_non_cancellable_until_terminal(
         Path(request.data_path).write_bytes(b"fake saved result")
 
     try:
-        run_id = fx.ctrl.start_run(tab_id)
+        run_id = fx.ctrl.start_run(
+            tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+        )
         assert (
             call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})[
                 "result"
@@ -484,7 +490,9 @@ def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     tab_id = fx.ctrl.new_tab("fake")
-    operation_id = fx.ctrl.start_run(tab_id)
+    operation_id = fx.ctrl.start_run(
+        tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+    )
     bar = ProgressBarModel(
         label="late progress", total=2, start_time=time.monotonic() - 3600
     )
@@ -941,7 +949,9 @@ def test_artifact_save_requires_snapshot_and_keeps_self_written_path_observed(
 
     monkeypatch.setattr(FakeAdapter, "save", save_bytes)
     try:
-        run_id = fx.ctrl.start_run(tab_id)
+        run_id = fx.ctrl.start_run(
+            tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+        )
         assert (
             call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})[
                 "result"

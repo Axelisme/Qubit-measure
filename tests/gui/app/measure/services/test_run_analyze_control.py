@@ -22,6 +22,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
 )
+from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision, CfgStaleError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 from tests.gui._control_fakes import CallLog, call
@@ -43,7 +44,9 @@ class RecordingState:
             adapter=RecordingAdapter(log, analysis=analysis),
             run=SimpleNamespace(result="run-result"),
             cfg=SimpleNamespace(
-                observe=lambda: SimpleNamespace(ref=SimpleNamespace(revision=0))
+                observe=lambda: SimpleNamespace(
+                    ref=CfgRef(CfgId("cfg-1"), CfgRevision(0))
+                )
             ),
         )
 
@@ -307,7 +310,7 @@ def test_gui_started_run_and_both_analysis_stages_are_indexed() -> None:
 def test_run_control_starts_with_guard_and_live_container() -> None:
     facet, log, _state, _bus = _facet()
 
-    assert facet.start_run("tab-1") == 11
+    assert facet.start_run("tab-1", CfgRef(CfgId("cfg-1"), CfgRevision(0))) == 11
 
     assert log.calls == [
         call("state", "get_tab", "tab-1"),
@@ -316,6 +319,23 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
         call("host", "make_run_container", "tab-1"),
         call("run", "start_run", "run-permit", "figure-container"),
     ]
+
+
+@pytest.mark.parametrize(
+    "expected",
+    [CfgRef(CfgId("cfg-1"), CfgRevision(1)), CfgRef(CfgId("other"), CfgRevision(0))],
+)
+def test_run_rejects_a_different_publication_before_permit_or_presentation(
+    expected: CfgRef,
+) -> None:
+    facet, log, _state, _bus = _facet()
+
+    with pytest.raises(CfgStaleError) as caught:
+        facet.start_run("tab-1", expected)
+
+    assert caught.value.expected == expected
+    assert caught.value.actual == CfgRef(CfgId("cfg-1"), CfgRevision(0))
+    assert log.calls == [call("state", "get_tab", "tab-1")]
 
 
 def test_load_result_initializes_analyze_params_and_emits_content_changed() -> None:
@@ -412,7 +432,12 @@ def test_post_analyze_uses_shared_live_container() -> None:
 @pytest.mark.parametrize(
     ("operation", "forbidden_host_call"),
     [
-        (lambda facet: facet.start_run("tab-1"), "make_run_container"),
+        (
+            lambda facet: facet.start_run(
+                "tab-1", CfgRef(CfgId("cfg-1"), CfgRevision(0))
+            ),
+            "make_run_container",
+        ),
         (lambda facet: facet.analyze("tab-1", object()), "make_analysis_container"),
         (
             lambda facet: facet.start_post_analyze("tab-1", object()),

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-30 — Tab cfg single-owner cutover
+**Last updated:** 2026-10-01, specified cfg Run
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -313,7 +313,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
-3. `GuardService` accepts an exact Valid cfg revision and freezes a permit with
+3. `Controller.start_run(tab_id, expected)` requires the observed `CfgRef`.
+   Qt supplies the form's displayed ref; remote callers supply their observed ref.
+   A different cfg identity or revision rejects Run without refresh or fallback.
+   `GuardService` accepts that exact Valid revision and freezes a permit with
    `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
    settings for a live device reject the permit without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
