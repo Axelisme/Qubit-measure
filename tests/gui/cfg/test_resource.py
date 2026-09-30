@@ -866,6 +866,100 @@ def test_unexpected_capture_validator_fault_preserves_publication(
     assert resource.observe() == before
 
 
+def test_group_refresh_publishes_individual_fault_before_any_notification() -> None:
+    sources = Sources(values={"frequency": 2.0, "other": 3.0})
+    first = make_resource(sources)
+    second = make_resource(sources)
+    first.edit(first.observe().ref.revision, (CfgEdit(("a",), EvalValue("frequency")),))
+    second.edit(second.observe().ref.revision, (CfgEdit(("a",), EvalValue("other")),))
+    before_inputs = second.snapshot_inputs()
+    seen: list[tuple[CfgObservation, CfgObservation]] = []
+
+    def published(_observation: CfgObservation) -> None:
+        seen.append((first.observe(), second.observe()))
+
+    remove_first = first.watch(published)
+    remove_second = second.watch(published)
+    seen.clear()
+    sources.revision = 1
+    sources.values = {"frequency": 8.0, "other": 9.0}
+    stable = sources.read()
+
+    def evaluate(expression: str) -> int | float | complex:
+        if expression == "other":
+            raise RuntimeError("second cfg resolver defect")
+        return stable.evaluate_expression(expression)
+
+    try:
+        CfgResource.refresh_group(
+            (first, second),
+            resolution=lambda: replace(stable, evaluate_expression=evaluate),
+        )
+    finally:
+        remove_first()
+        remove_second()
+    assert len(seen) == 2
+    for successful, failed in seen:
+        assert successful.status is CfgStatus.VALID
+        assert successful.tree.children["a"].value == EvalValue("frequency", 8.0)
+        assert failed.status is CfgStatus.UNAVAILABLE
+        unresolved = failed.tree.children["a"].value
+        assert isinstance(unresolved, EvalValue)
+        assert unresolved.expr == "other" and unresolved.resolved is None
+        assert "second cfg resolver defect" in failed.diagnostics[0].message
+        assert successful.source_basis == failed.source_basis == stable.source_basis
+    assert second.snapshot_inputs() == before_inputs
+    with pytest.raises(CfgPreconditionError) as blocked:
+        second.accept(second.observe().ref.revision)
+    assert blocked.value.reason is CfgPreconditionReason.NOT_VALID
+
+
+@pytest.mark.parametrize("centered", [False, True])
+@pytest.mark.parametrize("whole", [False, True])
+def test_range_incomplete_input_publishes_invalid_then_can_be_completed(
+    centered: bool, whole: bool
+) -> None:
+    spec = CenteredSweepSpec(locked_center=1.0) if centered else SweepSpec()
+    value = CenteredSweepValue(1.0, 2.0, 3) if centered else SweepValue(0.0, 2.0, 3)
+    resource = CfgResource(
+        lambda: CfgSchema(
+            CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
+        ),
+        resolution=Sources().read,
+        make_range=make_range,
+    )
+    edge = "span" if centered else "stop"
+    incomplete = DirectValue(None, raw="-")
+    payload = (
+        {"span": incomplete, "expts": 3}
+        if centered
+        else {"start": 0.0, "stop": incomplete, "expts": 3}
+    )
+    changed = resource.edit(
+        resource.observe().ref.revision,
+        (
+            CfgEdit(("range",), payload)
+            if whole
+            else CfgEdit(("range", edge), incomplete),
+        ),
+    )
+    assert changed.status is CfgStatus.INVALID
+    current = changed.tree.children["range"].value
+    assert isinstance(current, (SweepValue, CenteredSweepValue))
+    pending = current.span if isinstance(current, CenteredSweepValue) else current.stop
+    assert isinstance(pending, DirectValue) and pending.value is None
+    assert pending.raw == "-"
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(changed.ref.revision)
+    completed = resource.edit(changed.ref.revision, (CfgEdit(("range", edge), 2.0),))
+    assert completed.status is CfgStatus.VALID
+    assert resource.accept(completed.ref.revision).values["range"] == {
+        "start": 0.0,
+        "stop": 2.0,
+        "expts": 3,
+    }
+
+
 @pytest.mark.parametrize("centered", [False, True])
 @pytest.mark.parametrize("order", list(permutations((0, 1, 2))))
 def test_whole_range_uses_new_geometry_before_step(centered: bool, order) -> None:
