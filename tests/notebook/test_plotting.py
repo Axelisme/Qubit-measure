@@ -9,6 +9,14 @@ import pytest
 from ipympl.backend_nbagg import Canvas, FigureManager, Toolbar
 from ipywidgets import Widget
 from matplotlib.figure import Figure
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+    T1AnalyzeOptions,
+    T1Cfg,
+    T1Exp,
+    T1Result,
+)
+from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import Plots
 
@@ -225,6 +233,37 @@ def test_initialization_failure_releases_widgets_and_allows_retry(
         assert published[0].comm is not None
     finally:
         host.release(figure)
+
+
+def test_notebook_adapter_uses_default_widget_host_and_retains_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    displayed: list[object] = []
+    monkeypatch.setattr(IPython.display, "display", displayed.append)
+    times = np.linspace(0.0, 80.0, 81)
+    source = RunRecord[T1Cfg, T1Result](
+        cfg=None,
+        result=T1Result(times, np.exp(-times / 20.0).astype(np.complex128)),
+    )
+    adapter = NotebookAdapter(T1Exp())
+    try:
+        successful = adapter.analyze(T1AnalyzeOptions(), source=source)
+        figure = successful.figures["fit"]
+        assert displayed == [figure.canvas]
+        assert figure.canvas.manager is not None
+        live_widgets = widget_ids()
+
+        def fail_display(widget: object) -> None:
+            raise RuntimeError("publisher failed")
+
+        monkeypatch.setattr(IPython.display, "display", fail_display)
+        with pytest.raises(RuntimeError, match="publisher failed"):
+            adapter.analyze(T1AnalyzeOptions(skip=1), source=source)
+        assert adapter.analysis is successful
+        assert widget_ids() == live_widgets
+    finally:
+        if adapter.analysis_presentation is not None:
+            adapter.analysis_presentation.release()
 
 
 def test_failed_display_propagates_and_diagnostic_release_closes_widgets(

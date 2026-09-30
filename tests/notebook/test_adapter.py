@@ -30,12 +30,12 @@ class _Core:
         self.saved: list[tuple[RunRecord[_Cfg, float], Path]] = []
         self.metadata: tuple[str | None, str | None, str | None, int] | None = None
 
-    def run(self, cfg: _Cfg, *, context: QickContext) -> float:
+    def run(self, config: _Cfg, *, context: QickContext) -> float:
         self.contexts.append(context)
-        result = cfg.scale
+        result = config.scale
         _, axes = context.plots.subplots("raw")
         axes.plot([0.0], [result])
-        cfg.scale = 99.0
+        config.scale = 99.0
         if self.fail_run:
             raise ValueError("Run failed after creating a diagnostic figure")
         return result
@@ -48,6 +48,8 @@ class _Core:
         plots: Plots,
     ) -> float:
         analysis = source.result * options.weights[0]
+        if source.cfg is not None:
+            source.cfg.scale = 42.0
         options.weights[0] = 99.0
         _, axes = plots.subplots("fit")
         axes.plot([0.0], [analysis])
@@ -85,6 +87,7 @@ class _Core:
 class _Host(NonPresentingHost):
     def __init__(self) -> None:
         self.fail_present = False
+        self.fail_release = False
         self.released: list[Figure] = []
 
     def present(self, figure: Figure) -> None:
@@ -93,17 +96,23 @@ class _Host(NonPresentingHost):
 
     def release(self, figure: Figure) -> None:
         self.released.append(figure)
+        if self.fail_release:
+            raise OSError("Presentation cleanup failed")
 
 
 def test_analysis_returns_explicit_source_and_isolates_working_options() -> None:
     adapter = NotebookAdapter(_Core(), host=NonPresentingHost())
-    source = RunRecord(cfg=_Cfg(scale=3.0), result=3.0)
+    cfg = _Cfg(scale=3.0)
+    source = RunRecord(cfg=cfg, result=3.0)
+    cfg.scale = 11.0
     options = _Options(weights=[2.0])
 
     record = adapter.analyze(options, source=source)
     options.weights[0] = 7.0
 
     assert record.source is source
+    assert source.cfg == _Cfg(scale=3.0)
+    assert cfg.scale == 11.0
     assert record.options.weights == [2.0]
     assert record.result == 6.0
     assert adapter.analysis is record
@@ -139,6 +148,16 @@ def test_successful_load_clears_analysis_but_old_source_stays_explicit() -> None
     latest = adapter.analyze(_Options(weights=[2.0]))
     assert latest.source is loaded
     assert latest.result == 10.0
+
+
+def test_analyze_requires_a_source_before_starting_operation() -> None:
+    adapter = NotebookAdapter(_Core(), host=_Host())
+
+    with pytest.raises(ValueError, match="No run record"):
+        adapter.analyze(_Options(weights=[2.0]))
+
+    assert adapter.analysis is None
+    assert adapter.analysis_presentation is None
 
 
 def test_run_isolates_config_and_replaces_only_current_records() -> None:
@@ -209,6 +228,32 @@ def test_save_uses_explicit_source_and_returns_exact_or_unique_path(
     assert core.saved[-1] == (source, exact)
     assert adapter.last_run is current
     assert adapter.analysis is analysis
+
+
+@pytest.mark.parametrize("operation", ["run", "analyze"])
+def test_producer_and_cleanup_failures_remain_observable(operation: str) -> None:
+    core = _Core()
+    host = _Host()
+    adapter = NotebookAdapter(core, soc=object(), soccfg=object(), host=host)
+    previous_run = adapter.run(_Cfg(scale=3.0))
+    previous_analysis = adapter.analyze(_Options(weights=[2.0]))
+    core.fail_run = operation == "run"
+    core.fail_analysis = operation == "analyze"
+    host.fail_release = True
+
+    action = (
+        (lambda: adapter.run(_Cfg(scale=9.0)))
+        if operation == "run"
+        else (lambda: adapter.analyze(_Options(weights=[3.0])))
+    )
+    with pytest.raises(ExceptionGroup) as errors:
+        action()
+
+    assert errors.value.subgroup(ValueError) is not None
+    assert errors.value.subgroup(OSError) is not None
+    assert adapter.last_run is previous_run
+    assert adapter.analysis is previous_analysis
+    assert len(host.released) == 1
 
 
 @pytest.mark.parametrize("missing", ["soc", "soccfg", "both"])

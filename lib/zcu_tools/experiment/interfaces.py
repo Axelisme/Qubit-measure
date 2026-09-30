@@ -18,7 +18,7 @@ AnalysisT = TypeVar("AnalysisT", covariant=True)
 class RecordExperiment(Protocol[CfgT, ResultT]):
     """A stateless core with explicit acquisition and persistence sources."""
 
-    def run(self, cfg: CfgT, *, context: QickContext) -> ResultT: ...
+    def run(self, config: CfgT, *, context: QickContext) -> ResultT: ...
 
     def save(
         self,
