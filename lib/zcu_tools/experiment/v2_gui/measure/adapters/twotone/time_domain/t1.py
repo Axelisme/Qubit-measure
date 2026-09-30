@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1Analysis,
     T1AnalyzeOptions,
@@ -35,7 +36,7 @@ from zcu_tools.gui.app.measure.adapter import (
 if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
-T1RunResult: TypeAlias = T1Result
+T1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
 @dataclass
@@ -140,7 +141,8 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
     ) -> T1RunResult:
         soc, soccfg = require_soc_handles(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        return T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+        return RunRecord(cfg=cfg, result=result)
 
     def analyze(
         self, req: AnalyzeRequest[T1RunResult, T1AnalyzeParams], *, plots: Plots

@@ -27,6 +27,7 @@ import numpy as np
 
 from zcu_tools.experiment.axes_spec import AxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 
 __all__ = [
     "AbsExperiment",
@@ -207,7 +208,7 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
 
     def save(
         self,
-        result: T_Result,
+        source: RunRecord[T_Config, T_Result],
         destination: Path,
         *,
         comment: str | None = None,
@@ -222,6 +223,7 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         from zcu_tools.experiment.utils import make_comment
 
         spec = self._spec()
+        result = source.result
 
         cfg = getattr(result, "cfg_snapshot")
         if cfg is None:
@@ -247,7 +249,7 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         *,
         server_ip: str | None = None,
         port: int = 4999,
-    ) -> T_Result:
+    ) -> RunRecord[T_Config, T_Result]:
         from zcu_tools.datafile import download_from_server, load_labber_data
         from zcu_tools.experiment.utils import parse_comment
 

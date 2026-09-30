@@ -36,6 +36,7 @@ from zcu_tools.experiment.axes_spec import (
 )
 from zcu_tools.experiment.base import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 
 # --------------------------------------------------------------------------- #
 # Minimal cfg / Result / experiment fixtures matching the AxesSpec contract.
@@ -99,6 +100,43 @@ class _Exp1DReal(PersistableExperiment[_Result1D, _TinyCfg]):
         cfg_type=_TinyCfg,
         tag="test/roundtrip1d-real",
     )
+
+
+@dataclass(frozen=True)
+class _RecordData1D:
+    freqs: np.ndarray
+    signals: np.ndarray
+
+
+class _RecordExp1D(PersistableExperiment[_RecordData1D, _TinyCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = AxesSpec(
+        axes=(Axis("freqs", "Frequency", "Hz", MHZ_TO_HZ, np.float64),),
+        z=ZSpec("signals", "S21", "", np.complex128),
+        result_type=_RecordData1D,
+        cfg_type=_TinyCfg,
+        tag="test/record",
+    )
+
+
+def test_record_roundtrip_keeps_config_with_its_data(tmp_path: Path) -> None:
+    cfg = _TinyCfg(name="source-A", reps=7)
+    data = _RecordData1D(
+        freqs=np.array([400.0, 420.0]),
+        signals=np.array([1.0 + 2.0j, 3.0 + 4.0j]),
+    )
+    source = RunRecord(cfg=cfg, result=data)
+    cfg.name = "later-input"
+    exp = _RecordExp1D()
+    destination = tmp_path / "source-A.hdf5"
+
+    exp.save(source, destination)
+    restored = exp.load(destination)
+
+    assert restored.cfg is not None
+    assert restored.cfg.name == "source-A"
+    assert restored.cfg.reps == 7
+    np.testing.assert_array_equal(restored.result.freqs, data.freqs)
+    np.testing.assert_array_equal(restored.result.signals, data.signals)
 
 
 def _saved_path(tmp_path: Any, base: str) -> str:

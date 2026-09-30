@@ -21,10 +21,15 @@ from .base import (
     retrieve_result,
 )
 from .cfg_model import ExpCfgModel
+from .interfaces import RecordExperiment, SynchronousExperiment
+from .records import RunRecord
 
 __all__ = [
     "config",
     "ExpCfgModel",
+    "RunRecord",
+    "RecordExperiment",
+    "SynchronousExperiment",
     "AbsExperiment",
     "PersistableExperiment",
     "ExperimentProtocol",
