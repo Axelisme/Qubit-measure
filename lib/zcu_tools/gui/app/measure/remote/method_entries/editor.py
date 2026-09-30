@@ -23,7 +23,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "use context.ml_create_from_role (e.g. role_id='pulse:blank' or a named role) "
             "then editor.new(from_name=name) to edit it. item_kind is 'module' or "
             "'waveform'. Returns {editor_id, tree} (tree = the complete cached cfg "
-            "view, same shape as editor.get / tab.get_cfg).",
+            "view, same shape as editor.get).",
             (
                 required_string("item_kind", "'module' or 'waveform'"),
                 required_string(
@@ -59,7 +59,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
             "list net settable paths a reference key switch ('<path>.ref') dropped/"
             "created so you need not re-list after a variant switch. To read cfg use "
-            "tab.get_cfg / editor.get (the complete cached observation).",
+            "editor.get for this session (the complete cached draft tree).",
             (
                 required_string("editor_id"),
                 required_string("path", "Dotted field path"),
