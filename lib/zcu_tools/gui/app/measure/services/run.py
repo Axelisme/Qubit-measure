@@ -72,6 +72,17 @@ class RunService:
             except Exception:
                 logger.exception("retired run draft teardown failed")
 
+    def _prepare_tab_for_run(self, tab_id: str) -> None:
+        # Reserve State's existing busy flag before cleanup or synchronous gate
+        # notifications can reenter tab editing and closing.
+        self._state.set_tab_running(tab_id, True)
+        try:
+            retired = self._state.clear_tab_results(tab_id)
+            self._teardown_retired(retired)
+        except Exception:
+            self._state.set_tab_running(tab_id, False)
+            raise
+
     def start_run(
         self,
         permit: RunPermit,
@@ -89,8 +100,7 @@ class RunService:
         # PRE-OPEN: Starting a run invalidates the previous run/analyze/writeback
         # result. State performs one owner-thread swap and returns every detached
         # draft; cleanup happens only after the new empty panes are committed.
-        retired = self._state.clear_tab_results(tab_id)
-        self._teardown_retired(retired)
+        self._prepare_tab_for_run(tab_id)
 
         # A single StopSignal owns the Schedule-visible stop flag for this run.
         # ``cancel_requested`` is separate: Schedule failures also set the stop
@@ -194,6 +204,7 @@ class RunService:
         try:
             token = self._runner.begin(spec)
         except Exception:
+            self._state.set_tab_running(tab_id, False)
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id=tab_id,
@@ -202,10 +213,8 @@ class RunService:
             )
             raise
 
-        # POST-BEGIN: tab is marked running and started events are emitted only
-        # after begin() succeeds (a begin-raise means no worker started — ADR-0066).
+        # Started events are emitted only after begin() succeeds (ADR-0066).
         self._active_token = token
-        self._state.set_tab_running(tab_id, True)
         with self._bus.origin(self._handles.event_origin(token)):
             self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token

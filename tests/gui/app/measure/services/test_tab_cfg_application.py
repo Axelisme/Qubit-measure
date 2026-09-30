@@ -1,5 +1,6 @@
 """Production cfg owner wiring without tab widgets or live hardware."""
 
+from time import monotonic, sleep
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,7 +23,11 @@ from zcu_tools.gui.cfg.resource import (
     CfgStaleError,
     CfgStatus,
 )
-from zcu_tools.gui.session.events import DeviceChangedPayload, MdChangedPayload
+from zcu_tools.gui.session.events import (
+    DeviceChangedPayload,
+    GateChangedPayload,
+    MdChangedPayload,
+)
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -225,3 +230,51 @@ def test_cfg_notification_rejects_app_lifetime_and_run(application: Fixture) -> 
     assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 3
     assert set(application.ctrl.list_tab_ids()) == {first, second}
     assert application.ctrl.get_running_tab_id() is None
+
+
+@pytest.mark.parametrize("command", ["edit", "reset", "replace", "close"])
+def test_run_registration_notification_blocks_tab_mutation(
+    application: Fixture, qapp, command: str
+) -> None:
+    tab_id = application.ctrl.new_tab("fake")
+    cfg = application.state.get_tab(tab_id).cfg
+    expected = cfg.observe().ref
+    original = cfg.snapshot_inputs()
+    outcomes: list[str] = []
+
+    def during_registration(_event: GateChangedPayload) -> None:
+        if outcomes:
+            return
+        outcomes.append("accepted")
+        try:
+            if command == "edit":
+                cfg.edit(expected.revision, (CfgEdit(("reps",), 9),))
+            elif command == "reset":
+                cfg.reset(expected.revision)
+            elif command == "replace":
+                cfg.replace_inputs(expected.revision, original)
+            else:
+                application.ctrl.close_tab(tab_id)
+        except CfgPreconditionError as exc:
+            if exc.reason is CfgPreconditionReason.MUTATION_BLOCKED:
+                outcomes[0] = "blocked"
+        except RuntimeError as exc:
+            if command == "close" and "busy" in str(exc):
+                outcomes[0] = "blocked"
+
+    unsubscribe = application.bus.subscribe(GateChangedPayload, during_registration)
+    try:
+        application.ctrl.start_run(tab_id, expected)
+    finally:
+        unsubscribe.unsubscribe()
+        application.ctrl.cancel_run()
+        deadline = monotonic() + 3.0
+        while (
+            application.ctrl.get_running_tab_id() is not None and monotonic() < deadline
+        ):
+            qapp.processEvents()
+            sleep(0.001)
+        assert application.ctrl.get_running_tab_id() is None
+    assert outcomes == ["blocked"]
+    assert cfg.observe().ref == expected
+    assert cfg.snapshot_inputs() == original
