@@ -25,7 +25,11 @@ class _Core:
         return cfg.scale
 
     def analyze(
-        self, source: RunRecord[_Cfg, float], options: _Options, *, plots: Plots,
+        self,
+        source: RunRecord[_Cfg, float],
+        options: _Options,
+        *,
+        plots: Plots,
     ) -> float:
         analysis = source.result * options.weights[0]
         options.weights[0] = 99.0
@@ -34,14 +38,23 @@ class _Core:
         return analysis
 
     def save(
-        self, source: RunRecord[_Cfg, float], destination: Path,
-        *, comment: str | None = None, tag: str | None = None,
-        server_ip: str | None = None, port: int = 4999,
+        self,
+        source: RunRecord[_Cfg, float],
+        destination: Path,
+        *,
+        comment: str | None = None,
+        tag: str | None = None,
+        server_ip: str | None = None,
+        port: int = 4999,
     ) -> None:
         raise NotImplementedError("Persistence is not part of this collaborator")
 
     def load(
-        self, source: Path, *, server_ip: str | None = None, port: int = 4999,
+        self,
+        source: Path,
+        *,
+        server_ip: str | None = None,
+        port: int = 4999,
     ) -> RunRecord[_Cfg, float]:
         return RunRecord(cfg=_Cfg(scale=5.0), result=5.0)
 
@@ -59,4 +72,6 @@ def test_analysis_returns_explicit_source_and_isolates_working_options() -> None
     assert record.result == 6.0
     assert adapter.analysis is record
     assert adapter.last_run is None
-    np.testing.assert_array_equal(record.figures["fit"].axes[0].lines[0].get_ydata(), [6.0])
+    np.testing.assert_array_equal(
+        record.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
+    )
