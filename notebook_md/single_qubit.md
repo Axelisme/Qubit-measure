@@ -384,6 +384,8 @@ res_gain_exp.save(
 
 ## Flux dependence
 
+OneTone FluxDep 的 Notebook analyze 回傳互動控制物件。啟動不代表分析完成；有效選點後按 Done 才發布結果與 `pick` 圖，Cancel 保留上一筆成功分析。
+
 ```python
 cur_value = flux_yoko.set_current(-5e-3)
 cur_value * 1e3
@@ -2670,7 +2672,7 @@ md.q_f
 
 ## T1
 
-一般 T1 使用實驗專屬 Notebook 入口。它直接呈現 widget，不需切換全域 Matplotlib backend。`uniform` 屬於量測設定，隨結果保存。
+一般 T1 使用實驗專屬 Notebook 入口。它直接呈現 widget，不需切換全域 Matplotlib backend。`uniform` 屬於量測設定，隨結果保存。下面 With Tone 與 With Sweep Tone 是不同實驗，尚待後續遷移。
 
 ```python
 from zcu_tools.notebook.experiments import T1Exp
@@ -2947,7 +2949,11 @@ jpa_sgs.get_info()
 
 ## Ground state & Excited state
 
+GE 使用實驗專屬 Notebook 入口。Primary analysis 回傳 typed 結果與具名 `fit` 圖。Post analysis 使用同一筆 primary 的來源與 calibration，不重新 fit，圖集合與 primary 分開。
+
 ```python
+from zcu_tools.notebook.experiments import GEExp
+
 exp_cfg = {
     "modules": {
         # "reset": "reset_10",
@@ -2978,19 +2984,20 @@ exp_cfg = {
 cfg = ml.make_cfg(exp_cfg, ze.singleshot.GE_Cfg, shots=100000)
 print("readout length: ", cfg.modules.readout.ro_cfg.ro_length)
 
-sh_ge_exp = ze.singleshot.GE_Exp()
+sh_ge_exp = GEExp()
 _ = sh_ge_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-%matplotlib inline
-md.fid, pops, result_dict, fig = sh_ge_exp.analyze(
+ge_analysis = sh_ge_exp.analyze(
+    initial_state="ground",
     backend="center",
-    # init_p0=0.0,
     # length_ratio=cfg.modules.readout.ro_cfg.ro_length / md.t1_with_tone,
     logscale=True,
     align_t1=True,
 )
+md.fid = ge_analysis.fidelity
+fig = sh_ge_exp.analysis_plots["fit"]
 print(f"Optimal fidelity after rotation = {md.fid:.1%}")
 ```
 
@@ -3001,15 +3008,15 @@ sh_ge_exp.save(
     filepath=reserve_labber_filepath(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
-    comment=str(result_dict),
+    comment=str(ge_analysis),
 )
 ```
 
 ```python
 from zcu_tools.simulate.temp import effective_temperature
 
-n_g = pops[0][0]  # n_gg
-n_e = pops[0][1]  # n_ge
+n_g = ge_analysis.init_pops[0][0]  # n_gg
+n_e = ge_analysis.init_pops[0][1]  # n_ge
 
 n_g, n_e = (n_g, n_e) if n_g > n_e else (n_e, n_g)  # ensure n_g >= n_e
 n_g, n_e = n_g / (n_g + n_e), n_e / (n_g + n_e)  # normalize
@@ -3019,28 +3026,17 @@ eff_T, err_T
 ```
 
 ```python
-md.g_center = result_dict["g_center"]
-md.e_center = result_dict["e_center"]
-md.ge_s = result_dict["s"]
+md.g_center = ge_analysis.g_center
+md.e_center = ge_analysis.e_center
+md.ge_s = ge_analysis.ge_s
 md.g_center, md.e_center, md.ge_s
 ```
 
 ```python
-%matplotlib inline
-confusion_result = sh_ge_exp.calc_confusion_matrix(
-    pops,
-    md.g_center,
-    md.e_center,
-    md.ge_s,
-    consider_other=False,
-)
-md.confusion_matrix = confusion_result.matrix
-md.ge_radius = confusion_result.radius
-fig = sh_ge_exp.plot_confusion_matrix(
-    confusion_result,
-    md.g_center,
-    md.e_center,
-)
+ge_post = sh_ge_exp.post_analyze(consider_other=False)
+md.confusion_matrix = ge_post.confusion.matrix
+md.ge_radius = ge_post.confusion.radius
+post_fig = sh_ge_exp.post_analysis_plots["post"]
 md.ge_radius / md.ge_s
 ```
 
