@@ -51,6 +51,35 @@ def notebook_plots(
         plots.release()
 
 
+def test_initial_frame_is_ready_before_widget_publication(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames: list[bytes] = []
+    frames_at_publication: list[tuple[bytes, ...]] = []
+    send_binary = Canvas.send_binary
+    create, published = notebook_plots
+
+    def record_frame(canvas: Canvas, data: bytes) -> None:
+        send_binary(canvas, data)
+        frames.append(data)
+
+    def publish(canvas: Canvas) -> None:
+        frames_at_publication.append(tuple(frames))
+        published.append(canvas)
+
+    monkeypatch.setattr(Canvas, "send_binary", record_frame)
+    monkeypatch.setattr(IPython.display, "display", publish)
+    plots = create()
+    figure, axes = plots.subplots("fit")
+    axes.plot([0, 1, 2], [0, 1, 0])
+    plots.finish()
+
+    assert published == [figure.canvas]
+    assert frames_at_publication[0]
+    assert frames_at_publication[0][-1].startswith(b"\x89PNG")
+
+
 def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
     monkeypatch: pytest.MonkeyPatch,
