@@ -385,6 +385,8 @@ def _lower_section(
         raise RuntimeError(f"Config section '{section}' has unknown fields: {extras}")
 
     for key, node_spec in spec.fields.items():
+        full_path = ".".join([*path, key])
+        label = getattr(node_spec, "label", "") or key
         node_value = value.fields.get(key)
         if node_value is None:
             if isinstance(node_spec, LiteralSpec):
@@ -392,8 +394,6 @@ def _lower_section(
                 continue
             if isinstance(node_spec, ReferenceSpec) and node_spec.optional:
                 continue
-            label = getattr(node_spec, "label", "") or key
-            full_path = ".".join([*path, key])
             raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
 
         match node_spec:
@@ -403,15 +403,11 @@ def _lower_section(
                     if node_value.value is None:
                         if node_spec.optional:
                             continue
-                        label = node_spec.label or key
-                        full_path = ".".join([*path, key])
                         raise RuntimeError(
                             f"Config field '{full_path}' ({label}) is unset"
                         )
                     result[key] = node_value.value
                 else:
-                    label = node_spec.label or key
-                    full_path = ".".join([*path, key])
                     result[key] = _resolve_eval(
                         node_value,
                         resolve_expression,
@@ -453,15 +449,6 @@ def _lower_section(
                 )
             case ReferenceSpec():
                 assert isinstance(node_value, ReferenceValue)
-                match node_value.value:
-                    case CfgSectionValue():
-                        pass
-                    case _:
-                        label = node_spec.label or key
-                        full_path = ".".join([*path, key])
-                        raise RuntimeError(
-                            f"Config field '{full_path}' ({label}) is missing"
-                        )
                 result[key] = _lower_section(
                     _select_reference_spec(node_spec, node_value, resolve_reference),
                     node_value.value,

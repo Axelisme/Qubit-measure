@@ -226,12 +226,14 @@ def _validate_node_value(
                 _raise_shape_error(path, "CenteredSweepValue", type(value).__name__)
             return
         case ReferenceSpec():
-            if value is None:
-                if not spec.optional:
-                    _raise_shape_error(path, "ReferenceValue", "None")
+            if value is None and spec.optional:
                 return
             if not isinstance(value, ReferenceValue):
-                _raise_shape_error(path, "ReferenceValue", type(value).__name__)
+                _raise_shape_error(
+                    path,
+                    "ReferenceValue",
+                    "None" if value is None else type(value).__name__,
+                )
             try:
                 selected = select_ref_value_spec(spec, value)
             except RuntimeError as exc:

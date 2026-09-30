@@ -193,6 +193,15 @@ def _parse_range_input[T: (int, float)](raw: object, type_: type[T]) -> T | Dire
     return type_(raw)
 
 
+def _parse_required_range_step(
+    raw: dict[str, object], *, label: str
+) -> float | DirectValue:
+    step = raw.get("step")
+    if step is None:
+        raise RuntimeError(f"{label} step is required in session payload")
+    return _parse_range_input(step, float)
+
+
 def _sweep_edge_to_raw(value: float | ScalarValue) -> object:
     if isinstance(value, DirectValue):
         return _node_value_to_raw(ScalarSpec("Sweep edge", float), value)
@@ -244,10 +253,7 @@ def _node_value_from_raw(
                 start = _parse_sweep_edge(raw["start"])
                 stop = _parse_sweep_edge(raw["stop"])
                 expts = _parse_range_input(raw["expts"], int)
-                step_raw = raw.get("step")
-                if step_raw is None:
-                    raise RuntimeError("Sweep step is required in session payload")
-                step = _parse_range_input(step_raw, float)
+                step = _parse_required_range_step(raw, label="Sweep")
                 return SweepValue(start=start, stop=stop, expts=expts, step=step)
             raise RuntimeError("Sweep payload must be an object")
         case CenteredSweepSpec():
@@ -255,12 +261,7 @@ def _node_value_from_raw(
                 center = _parse_sweep_edge(raw["center"])
                 span = _parse_range_input(raw["span"], float)
                 expts = _parse_range_input(raw["expts"], int)
-                step_raw = raw.get("step")
-                if step_raw is None:
-                    raise RuntimeError(
-                        "Centered sweep step is required in session payload"
-                    )
-                step = _parse_range_input(step_raw, float)
+                step = _parse_required_range_step(raw, label="Centered sweep")
                 return CenteredSweepValue(
                     center=center,
                     span=span,

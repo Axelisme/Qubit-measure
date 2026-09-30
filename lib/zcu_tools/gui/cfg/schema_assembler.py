@@ -208,13 +208,13 @@ def _wrap_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
                 )
             return default
         case ScalarSpec():
-            if isinstance(default, (DirectValue, EvalValue)):
-                return default
-            return DirectValue(default)
+            return (
+                default
+                if isinstance(default, (DirectValue, EvalValue))
+                else DirectValue(default)
+            )
         case LiteralSpec():
-            if isinstance(default, DirectValue):
-                return default
-            return DirectValue(default)
+            return default if isinstance(default, DirectValue) else DirectValue(default)
         case ReferenceSpec():
             if default is None and spec.optional:
                 return None

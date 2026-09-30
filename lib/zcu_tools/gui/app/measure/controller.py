@@ -282,10 +282,8 @@ class Controller(SessionControllerMixin):
         # The progress transport is the Qt marshal (a driven adapter). Default to
         # the Qt one so GUI/agent processes (which run a Qt event loop) work
         # without the entry point wiring it; tests inject a synchronous fake.
-        transport: ProgressTransport
-        if progress_transport is not None:
-            transport = progress_transport
-        else:
+        transport = progress_transport
+        if transport is None:
             from zcu_tools.gui.session.adapters.qt_progress_transport import (
                 QtProgressTransport,
             )
