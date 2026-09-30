@@ -612,17 +612,17 @@ def test_start_run_while_running_raises(cf):
         cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
 
-    assert cf.state.is_tab_running(tab_id)
-    other_tab_id = cf.ctrl.new_tab("fake")
-    with pytest.raises(OperationConflictError, match="run is active"):
-        cf.ctrl.start_run(
-            other_tab_id,
-            cf.ctrl.cfg_resources.lookup(other_tab_id).observe().ref,
-        )
-
-    # cleanup
-    ev.set()
-    _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
+    try:
+        assert cf.state.is_tab_running(tab_id)
+        other_tab_id = cf.ctrl.new_tab("fake")
+        with pytest.raises(OperationConflictError, match="run is active"):
+            cf.ctrl.start_run(
+                other_tab_id,
+                cf.ctrl.cfg_resources.lookup(other_tab_id).observe().ref,
+            )
+    finally:
+        ev.set()
+        _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
 
 
 def test_start_run_while_device_setup_active_raises(cf):
