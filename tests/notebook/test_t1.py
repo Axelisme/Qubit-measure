@@ -1,9 +1,12 @@
 """Real T1 integration through the common Notebook record boundary."""
 
+import json
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import LabberData
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1AnalyzeOptions,
@@ -89,3 +92,43 @@ def test_canonical_load_and_explicit_analysis_keep_source_and_native_figure(
     np.testing.assert_array_equal(reloaded_a.result.signals, original.result.signals)
     assert adapter.last_run is reloaded_a
     assert adapter.analysis is None
+
+
+@pytest.mark.parametrize("cfg_state", ["missing", "invalid"])
+def test_loaded_data_without_valid_cfg_remains_analyzable_but_not_saveable(
+    t1_cfg: T1Cfg, tmp_path: Path, cfg_state: str
+) -> None:
+    adapter = NotebookAdapter(T1Exp(), host=NonPresentingHost())
+    original = make_source(t1_cfg, 20.0)
+    valid_path = adapter.save(original, tmp_path / "valid.hdf5")
+    adapter.load(valid_path)
+    previous = adapter.analyze(T1AnalyzeOptions())
+
+    payload = LabberData.load(str(valid_path))
+    metadata = json.loads(payload.comment)
+    if cfg_state == "missing":
+        metadata.pop("cfg")
+    else:
+        metadata["cfg"]["reps"] = "invalid"
+    payload.comment = json.dumps(metadata)
+    boundary_path = Path(payload.save(str(tmp_path / "without-cfg.hdf5")))
+    warning = pytest.warns(UserWarning) if cfg_state == "invalid" else nullcontext()
+    with warning:
+        loaded = adapter.load(boundary_path)
+
+    assert loaded.cfg is None
+    np.testing.assert_array_equal(loaded.result.signals, original.result.signals)
+    assert adapter.last_run is loaded
+    assert adapter.analysis is None
+    analysis = adapter.analyze(T1AnalyzeOptions())
+    assert analysis.source is loaded
+    assert analysis.result.t1 == pytest.approx(20.0)
+
+    destination = tmp_path / "rejected.hdf5"
+    with pytest.raises(ValueError, match=r"RunRecord\.cfg is None"):
+        adapter.save(loaded, destination)
+    assert not destination.exists()
+    assert adapter.last_run is loaded
+    assert adapter.analysis is analysis
+    previous.figures["fit"].savefig(tmp_path / "previous.png")
+    assert (tmp_path / "previous.png").stat().st_size > 0
