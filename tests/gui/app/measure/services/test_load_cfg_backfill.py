@@ -1,9 +1,9 @@
-from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
@@ -35,9 +35,8 @@ class NullableRuntimeCfg(ExpCfgModel):
     reps: object = None
 
 
-@dataclass
-class Result:
-    cfg_snapshot: ExpCfgModel | None
+def make_record(cfg: ExpCfgModel | None) -> RunRecord[ExpCfgModel, object]:
+    return RunRecord(cfg=cfg, result=object())
 
 
 @pytest.fixture
@@ -62,7 +61,7 @@ def app():
     )
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(load_data=True)
-    adapter.load.return_value = Result(RuntimeCfg())
+    adapter.load.return_value = make_record(RuntimeCfg())
     state.add_tab(
         "tab", Session(adapter_name="test", adapter=adapter, cfg_schema=schema)
     )
@@ -123,7 +122,7 @@ def test_unavailable_snapshot_keeps_live_config_and_editor(app, snapshot):
     state, editors, service, adapter, bus = app
     before = state.get_tab("tab").cfg_schema
     original, _ = editors.open_seeded(before, owner_key="tab")
-    adapter.load.return_value = Result(snapshot)
+    adapter.load.return_value = make_record(snapshot)
     events = []
     bus.subscribe(TabContentChangedPayload, events.append)
     outcome = service.load_result(LoadPermit("tab"), "result.hdf5")
@@ -154,7 +153,7 @@ def test_nonoptional_null_snapshot_does_not_replace_config_or_draft(app):
     state, editors, service, adapter, bus = app
     before = state.get_tab("tab").cfg_schema
     original, _ = editors.open_seeded(before, owner_key="tab")
-    adapter.load.return_value = Result(NullableRuntimeCfg())
+    adapter.load.return_value = make_record(NullableRuntimeCfg())
     events = []
     bus.subscribe(TabContentChangedPayload, events.append)
 
@@ -221,7 +220,7 @@ def device_app():
 
 def test_missing_device_option_keeps_existing_selector_and_editor(device_app):
     state, editors, service, adapter, bus, _, original = device_app
-    adapter.load.return_value = Result(
+    adapter.load.return_value = make_record(
         ExpCfgModel(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     before = state.get_tab("tab").cfg_schema
@@ -239,7 +238,7 @@ def test_missing_device_option_keeps_existing_selector_and_editor(device_app):
 
 def test_missing_device_option_is_preserved_when_other_fields_backfill(device_app):
     state, editors, service, adapter, _, _, original = device_app
-    adapter.load.return_value = Result(
+    adapter.load.return_value = make_record(
         RuntimeCfg(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     outcome = service.load_result(LoadPermit("tab"), "result.hdf5")
@@ -261,7 +260,7 @@ def test_device_choice_disappears_before_draft_preparation(device_app):
         ["stable", "stale"],  # converter sees the saved name
         ["stable"],  # new CfgDraft must reject it before publication
     ]
-    adapter.load.return_value = Result(
+    adapter.load.return_value = make_record(
         RuntimeCfg(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     before = state.get_tab("tab").cfg_schema
@@ -292,7 +291,7 @@ def test_device_option_provider_failure_aborts_entire_backfill(
     device_app, caplog, first_response, error_type
 ):
     state, editors, service, adapter, bus, host, original = device_app
-    adapter.load.return_value = Result(
+    adapter.load.return_value = make_record(
         RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     host.list_device_names.side_effect = [first_response, ["stable", "new"]]
@@ -356,7 +355,7 @@ def test_loader_failure_preserves_result_cfg_and_editor(app):
     state, editors, service, adapter, _ = app
     before = state.get_tab("tab").cfg_schema
     original, _ = editors.open_seeded(before, owner_key="tab")
-    old_result = Result(None)
+    old_result = make_record(None)
     state.update_tab_loaded_result("tab", old_result, "old.hdf5")
     adapter.load.side_effect = ValueError("bad file")
     with pytest.raises(LoadDataError):
