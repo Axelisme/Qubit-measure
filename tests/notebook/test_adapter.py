@@ -27,6 +27,8 @@ class _Core:
         self.fail_analysis = False
         self.fail_run = False
         self.contexts: list[QickContext] = []
+        self.saved: list[tuple[RunRecord[_Cfg, float], Path]] = []
+        self.metadata: tuple[str | None, str | None, str | None, int] | None = None
 
     def run(self, cfg: _Cfg, *, context: QickContext) -> float:
         self.contexts.append(context)
@@ -63,7 +65,10 @@ class _Core:
         server_ip: str | None = None,
         port: int = 4999,
     ) -> None:
-        raise NotImplementedError("Persistence is not part of this collaborator")
+        with destination.open("x", encoding="utf-8") as file:
+            file.write(str(source.result))
+        self.saved.append((source, destination))
+        self.metadata = (comment, tag, server_ip, port)
 
     def load(
         self,
@@ -167,6 +172,43 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     np.testing.assert_array_equal(
         previous.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
     )
+
+
+def test_save_uses_explicit_source_and_returns_exact_or_unique_path(
+    tmp_path: Path,
+) -> None:
+    core = _Core()
+    adapter = NotebookAdapter(core, host=_Host())
+    source = RunRecord[_Cfg, float](cfg=None, result=3.0)
+    current = adapter.load(Path("loaded"))
+    analysis = adapter.analyze(_Options(weights=[2.0]))
+    destination = tmp_path / "data.hdf5"
+    destination.write_text("existing", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        adapter.save(source, destination)
+    assert destination.read_text(encoding="utf-8") == "existing"
+
+    unique = adapter.save(
+        source,
+        destination,
+        unique=True,
+        comment="measurement A",
+        tag="trial",
+        server_ip="example.invalid",
+        port=8123,
+    )
+    assert unique == tmp_path / "data_1.hdf5"
+    assert unique.read_text(encoding="utf-8") == "3.0"
+    assert core.saved == [(source, unique)]
+    assert core.metadata == ("measurement A", "trial", "example.invalid", 8123)
+
+    exact = adapter.save(source, tmp_path / "exact.h5")
+    assert exact == tmp_path / "exact.hdf5"
+    assert exact.read_text(encoding="utf-8") == "3.0"
+    assert core.saved[-1] == (source, exact)
+    assert adapter.last_run is current
+    assert adapter.analysis is analysis
 
 
 @pytest.mark.parametrize("missing", ["soc", "soccfg", "both"])
