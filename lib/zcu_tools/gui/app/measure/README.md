@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-30 — GUI 具名圖與逐圖保存
+**Last updated:** 2026-10-01 — Loaded RunRecord cfg 回填
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -333,9 +333,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
    the Writeback service remains stage-free.
 
-`tab.load_data` installs a canonical result into an existing adapter tab and clears
-stale analysis/writeback state. When the result carries a compatible execution
-snapshot, Load best-effort projects its concrete values into the current tab Config.
+`tab.load_data` installs the adapter's loaded RunRecord into an existing tab and clears
+stale analysis/writeback state. Load uses the record's nullable `cfg` as its source.
+It never repairs a missing cfg with the current tab Config. When that cfg is a compatible
+execution snapshot, Load best-effort projects its concrete values into the current tab Config.
 It validates a complete detached candidate, replaces the service-owned editor and
 State Config once, and reports `cfg_backfill=applied|not_applied` to Qt and remote.
 Failed backfill keeps Config and its draft unchanged without undoing the loaded

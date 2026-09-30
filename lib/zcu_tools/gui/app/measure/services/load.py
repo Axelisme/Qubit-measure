@@ -112,17 +112,16 @@ class LoadService:
                 reason_code="invalid_data_file",
             ) from exc
 
+        snapshot = getattr(result, "cfg", None)
         retired = self._state.update_tab_loaded_result(tab_id, result, data_path)
-        self._teardown_retired(retired, tab_id=tab_id)
+        self._teardown_retired(retired)
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,
             result_type=type(result).__name__,
-            has_cfg_snapshot=getattr(result, "cfg_snapshot", None) is not None,
+            has_cfg_snapshot=snapshot is not None,
             has_analyze_params=False,
-            cfg_backfill=self._backfill_cfg(
-                tab_id, getattr(result, "cfg_snapshot", None)
-            ),
+            cfg_backfill=self._backfill_cfg(tab_id, snapshot),
         )
 
     def _backfill_cfg(
@@ -169,9 +168,7 @@ class LoadService:
                     )
         return "applied"
 
-    def _teardown_retired(
-        self, retired: RetiredPaneResources, *, tab_id: str | None = None
-    ) -> None:
+    def _teardown_retired(self, retired: RetiredPaneResources) -> None:
         for draft in retired.writeback_drafts:
             try:
                 self._writeback.teardown_draft(draft)
