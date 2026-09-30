@@ -792,6 +792,9 @@ def test_missing_reference_does_not_offer_stale_children_for_partial_edit(
     resource, catalog = reference_resource
     del catalog.entries["first"]
     before = resource.refresh(resource.observe().ref.revision)
+    assert before.status is CfgStatus.INVALID
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(before.ref.revision)
     with pytest.raises(CfgInputError):
         resource.edit(before.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
     assert resource.observe() == before
