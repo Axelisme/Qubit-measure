@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-01, cfg Run submission and startup reservation
+**Last updated:** 2026-10-01, measure tab resource and independent draft boundaries
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -34,18 +34,21 @@ Spec／Value、`None`、locked literal、reference binding 與 lowering 契約�
 [experiment cfg editing README](../../../experiment/cfg_editing/README.md)。
 Tab cfg edit batch 在完整候選準備成功後一次發布，拒絕不改舊 publication。
 獨立 library editor 的 draft batch 不具有這項原子保證。Source refresh 使用
-已發布快照，不把 live provider 當成 observation 的第二個 owner。設計目標見
-[cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
+已發布快照，不把 live provider 當成 observation 的第二個 owner。Measure tab、
+Run、Qt 與 remote 的資源契約現況見 Cfg ADR；library conversion、selected Apply
+與其他 app 的剩餘目標見 [cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 
 `State` 保存可觀察的 app 資料，`ContextService` 寫入 md／ml；services
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
 版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
 `SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
-不同時 bump device version，caller 再發布變更。Remote adapter 在
-GUI owner thread 比對每條連線的 seen 與目前資源版本；
-受護 RPC 的依賴與讀取揭露資源由 GUI method entries 宣告。未讀過的 key
-即使版本為 0 也不能寫入。MCP 不保存 seen、不傳 `expected_versions`，
-也不隱藏預讀或自動重試；agent 收到 stale 後需明確重讀對應資源。
+不同時 bump device version，caller 再發布變更。Tab cfg edit／Run 使用明示
+`CfgRef`，不另要求每條連線的 cfg seen；它不取代 authentication 或其他 guards。
+其他受護 RPC 由 remote adapter 在 GUI owner thread 比對該連線的 seen 與目前
+版本，依賴與讀取揭露資源由 method entries 宣告。這些 key 未讀過時，即使
+版本為 0 也不能寫入。MCP 原樣轉送 supplied cfg ref，不保存第二份 seen，
+不傳 `expected_versions`，不隱藏預讀或自動重試。Stale 由 caller 明確重讀
+对应完整 publication／snapshot，再決定是否重送。
 GUI 事件與 service 協作見 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)，
 wire guard 與 off-owner await 見 [Remote README](remote/README.md)。
 

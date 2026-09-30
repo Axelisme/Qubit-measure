@@ -1,6 +1,6 @@
 # `zcu_tools.gui.cfg` — 共用設定機制
 
-**Last updated:** 2026-09-30 — Grouped source publication
+**Last updated:** 2026-10-01 — Measure resource and independent draft boundaries
 
 此 Qt-free package 擁有 Spec／Value、`CfgSchema`、完整 value tree、codec、paired assembler、binding 與 generic finished-cfg lowering。Spec 是靜態欄位契約，Value 保存可變編輯內容。`LiteralSpec` 的鎖定值由 Spec 定義；assembler 對齊 value，renderer 不另建鎖定權威。Spec 的 fluent 覆寫回傳新 frozen spec；value 的 `with_*` 是可變操作。Role defaults 與 deferred seed 由實驗 adapter 擁有，不由 structural `make_default_value` 猜測業務預設。
 
@@ -14,6 +14,6 @@ Source owner 提供固定 `CfgResolution`。`CfgResource.refresh_group` 使用�
 app 可提供跨 resource 的通知禁令。Observe、accept 及 snapshot 不刷新來源。App 的
 Load owning flow 可要求完整 Valid 候選，拒絕不改 input 或 revision。
 
-既有 `binding.CfgDraft` 仍提供可編輯 field tree，提供 snapshot、valid、refresh 與 nominal `SettableTarget`。scalar 使用 dotted leaf，sweep 使用直接 edge，reference key 使用 `.ref`，子欄位直接下鑽。列舉和解析共用 grammar；不受理未列出的舊 `.sweep.*`／`.value.*` alias。Reference refresh 透過 caller 提供的 catalog。Linked value 跟隨當次 catalog snapshot；override 保留自身內容與 shape，不再解析原 key。Override 內的 nested linked reference 仍更新，明確 relink 才恢復這層的來源依賴。`ReferenceSpec.discriminator` 由 domain builder 明確宣告，指向每個 allowed shape 的唯一 literal 值；generic cfg 不從 literal 欄位排列推測辨識規則。完整 input round trip 與 caller 收斂仍見 [待實作設計](../../../../docs/adr/draft/cfg-editing-boundaries.md)。
+既有 `binding.CfgDraft` 仍提供可編輯 field tree，提供 snapshot、valid、refresh 與 nominal `SettableTarget`。scalar 使用 dotted leaf，sweep 使用直接 edge，reference key 使用 `.ref`，子欄位直接下鑽。列舉和解析共用 grammar；不受理未列出的舊 `.sweep.*`／`.value.*` alias。Reference refresh 透過 caller 提供的 catalog。Linked value 跟隨當次 catalog snapshot；override 保留自身內容與 shape，不再解析原 key。Override 內的 nested linked reference 仍更新，明確 relink 才恢復這層的來源依賴。`ReferenceSpec.discriminator` 由 domain builder 明確宣告，指向每個 allowed shape 的唯一 literal 值；generic cfg 不從 literal 欄位排列推測辨識規則。Measure tab 的 input round trip、publication 與固定 acceptance 使用 resource 路徑。Library conversion、selected Apply 及其他 app 的 caller 收斂仍見 [待實作設計](../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 
 `lower_finished_cfg` 固定 static、optional dynamic、lower 的順序；consumer 分別提供 expression evaluator、reference shape resolver、range factory，不傳入 broad app environment。linked reference 的 embedded value 與 live-key shape 查詢有不同作用；`EvalValue.resolved` 存在時 lowering 輸出該值；有 resolver 時 optional dynamic 階段仍先重新求值每個 expression 並轉成欄位型別，失敗即中止，結果不同只記錄 drift；沒有 `resolved` 才輸出 resolver 的求值。lowering 不更新 draft。program shape／raw policy 由 [`experiment.cfg_editing`](../../experiment/cfg_editing/README.md) 擁有；runtime generation、role policy 與 library writes 不屬本 package。跨 owner 理由見 [ADR-0065](../../../../docs/adr/0065-cfg-editing.md)。

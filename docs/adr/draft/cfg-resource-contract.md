@@ -1,6 +1,6 @@
 # Cfg 資源公開契約與同步發布
 
-狀態：設計草稿，尚未實作。本文細化 measure 優先的 cfg slice，不宣稱四個 app 已遷移。現況依 [ADR-0065](../0065-cfg-editing.md)、[ADR-0067](../0067-gui-application.md)、[ADR-0068](../0068-remote-transport.md)。[既有 cfg draft](cfg-editing-boundaries.md) 的 library conversion、writeback Apply 與其他 app 義務仍保留。本文的 measure slice 以同步 Valid／Invalid／Unavailable 取代該 draft 的 pending 描述；expression capture 也以始終保存 expression 取代舊 resolve-once direct value 目標。
+狀態：measure tab slice 的設計與驗收記錄。共用 resource、measure tab、Run、Qt 及 remote／MCP 接線的現況見 [ADR-0065](../0065-cfg-editing.md) 與 [ADR-0068](../0068-remote-transport.md)。本文保留設計邊界，不宣稱四個 app 已遷移。App 與 frontend 分界仍依 [ADR-0067](../0067-gui-application.md)。[既有 cfg draft](cfg-editing-boundaries.md) 的 library conversion、writeback Apply 與其他 app 義務仍保留。本文的 measure slice 以同步 Valid／Invalid／Unavailable 取代該 draft 的 pending 描述；expression capture 也以始終保存 expression 取代舊 resolve-once direct value 目標。
 
 ## 問題
 
@@ -78,9 +78,9 @@ Run 在同一有序接受點檢查版本與 app 條件、取得固定 values、�
 
 Measure 的 `tab.get_cfg`／`tab.edit_cfg` 經 composition 注入的 tab cfg lookup 取得 resource-bound handle，直接 observe／edit，再投影完整 observation。不經 Controller cfg setter 或 editor_id 中轉。Lookup 只對應 identity，不複製 editing commands。
 
-現有 `h_tab_set_cfg`、`Controller.cfg_editor_set_fields`、`CfgEditorService.set_fields` 是遷移位置。最小 seed 包含真實 read/edit caller 與 cfg owner 的公開契約測試，不能只放未使用的宣告。所有 tab writer 最終必須進同一 authority，不以鏡像雙寫過渡。接線尚未完整前，integration 中間狀態不可部署。
+Measure tab writer 使用同一資源，沒有舊 `tab.set_cfg` alias、Controller cfg setter 或 live schema 鏡像。公開 read/edit、Run、lifetime、Qt 及 MCP 使用相同 identity／revision 契約。Run 明示 ref，接受固定 values 與 source basis；Qt detach 不撤銷資源。
 
-Library editor／writeback 不因使用同一舊 service 就改成 tab 契約。MCP 其餘工具、完整 Run／lifetime 及 Qt presentation 分後續票驗證。其他 app 的需求不因 measure 先行而刪除。
+Library editor／writeback 不因原 service 也服務 tab 就改成 tab 契約。這些獨立 draft 保留各自的 grammar 及提交用途。其他 app 與 measure 其餘 Controller 領域的需求仍保留，不能由這個 slice 推定完整 app 可部署。
 
 ## 取捨
 
@@ -98,4 +98,4 @@ Explicit revision 讓跨連線 caller 可以明確指定依據，代價是 calle
 
 Run、Qt 與 MCP 完成各自接線後，在共同 tree 驗證同一資源及固定執行資料。Owner、型別重複、私有存取、resolver 外部依賴與 method 宣告用直接 review。重構涉及的型別／lint 負面指標作 best-effort 清理，剩餘問題列明原因；不豁免必要契約或關閉規則。
 
-完成上述實作與驗證後才更新現行 ADR。本 draft 不作為已實作證據。
+Measure tab 的現況已記入現行 ADR。以上保留本 slice 的驗收邊界，不是其他 app 已完成的證據；新 caller 或 app 遷移仍須建立自己的公開行為觀察。
