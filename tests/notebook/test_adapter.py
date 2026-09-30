@@ -25,9 +25,15 @@ class _Options:
 class _Core:
     def __init__(self) -> None:
         self.fail_analysis = False
+        self.contexts: list[QickContext] = []
 
     def run(self, cfg: _Cfg, *, context: QickContext) -> float:
-        return cfg.scale
+        self.contexts.append(context)
+        result = cfg.scale
+        _, axes = context.plots.subplots("raw")
+        axes.plot([0.0], [result])
+        cfg.scale = 99.0
+        return result
 
     def analyze(
         self,
@@ -125,6 +131,39 @@ def test_successful_load_clears_analysis_but_old_source_stays_explicit() -> None
     latest = adapter.analyze(_Options(weights=[2.0]))
     assert latest.source is loaded
     assert latest.result == 10.0
+
+
+def test_run_isolates_config_and_replaces_only_current_records() -> None:
+    core = _Core()
+    soc, soccfg = object(), object()
+    adapter = NotebookAdapter(core, soc=soc, soccfg=soccfg, host=_Host())
+    cfg = _Cfg(scale=3.0)
+    first = adapter.run(cfg)
+    previous = adapter.analyze(_Options(weights=[2.0]))
+    cfg.scale = 7.0
+
+    second = adapter.run(cfg)
+
+    assert first.cfg == _Cfg(scale=3.0)
+    assert first.result == 3.0
+    assert second.cfg == _Cfg(scale=7.0)
+    assert second.result == 7.0
+    assert cfg.scale == 7.0
+    assert adapter.last_run is second
+    assert adapter.analysis is None
+    assert adapter.analysis_presentation is None
+    first_context, second_context = core.contexts
+    assert first_context is not second_context
+    assert first_context.plots is not second_context.plots
+    assert first_context.soc is soc and second_context.soc is soc
+    assert first_context.soccfg is soccfg and second_context.soccfg is soccfg
+    assert adapter.run_presentation is second_context.plots
+    np.testing.assert_array_equal(
+        first_context.plots["raw"].axes[0].lines[0].get_ydata(), [3.0]
+    )
+    np.testing.assert_array_equal(
+        previous.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
+    )
 
 
 @pytest.mark.parametrize("failure", ["core", "finish"])
