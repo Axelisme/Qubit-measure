@@ -84,16 +84,21 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rendered: list[list[float]] = []
-    draw = Canvas.draw
+    rendered: list[tuple[Canvas, list[float]]] = []
+    send_binary = Canvas.send_binary
 
-    def record_draw(canvas: Canvas) -> None:
-        draw(canvas)
+    def record_frame(canvas: Canvas, data: bytes) -> None:
+        send_binary(canvas, data)
         rendered.append(
-            np.asarray(canvas.figure.axes[0].lines[0].get_ydata(), dtype=float).tolist()
+            (
+                canvas,
+                np.asarray(
+                    canvas.figure.axes[0].lines[0].get_ydata(), dtype=float
+                ).tolist(),
+            )
         )
 
-    monkeypatch.setattr(Canvas, "draw", record_draw)
+    monkeypatch.setattr(Canvas, "send_binary", record_frame)
     create, published = notebook_plots
     before = plt.get_fignums()
     backend = plt.get_backend()
@@ -106,13 +111,15 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     assert published == [plots["live"].canvas]
     rendered.clear()
     live.update(np.array([1.0, 2.0]), np.array([5.0, 6.0]))
-    assert rendered == [[5.0, 6.0]]
+    assert rendered
+    assert rendered[-1] == (plots["live"].canvas, [5.0, 6.0])
     plots.finish()
     plots.finish()
 
     assert published == [plots["live"].canvas, ordinary.canvas]
     np.testing.assert_array_equal(plots["live"].axes[0].lines[0].get_ydata(), [5, 6])
-    assert rendered[-1] == [5.0, 6.0]
+    live_frames = [data for canvas, data in rendered if canvas is plots["live"].canvas]
+    assert live_frames[-1] == [5.0, 6.0]
     assert plt.get_fignums() == before
     assert plt.get_backend() == backend
 
@@ -181,6 +188,43 @@ def test_toolbar_release_error_still_closes_canvas_and_keeps_figure_savable(
     output = BytesIO()
     figure.savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG")
+
+
+def test_initialization_failure_releases_widgets_and_allows_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published: list[Canvas] = []
+    failed: list[Canvas] = []
+    monkeypatch.setattr(IPython.display, "display", published.append)
+    host = NotebookPlotHost()
+    figure = Figure()
+    figure.subplots().plot([0, 1], [0, 1])
+    error = RuntimeError("initial draw failed")
+
+    def fail_draw(canvas: Canvas) -> None:
+        failed.append(canvas)
+        raise error
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Canvas, "draw", fail_draw)
+        with pytest.raises(RuntimeError, match="initial draw failed") as exc:
+            host.present(figure)
+    assert exc.value is error
+    canvas = failed[0]
+    assert published == []
+    assert canvas.comm is None
+    assert canvas.layout.comm is None
+    assert figure.canvas is not canvas
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+
+    try:
+        host.present(figure)
+        assert published == [figure.canvas]
+        assert published[0].comm is not None
+    finally:
+        host.release(figure)
 
 
 def test_failed_display_propagates_and_diagnostic_release_closes_widgets(

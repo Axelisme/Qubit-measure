@@ -13,7 +13,7 @@ _T = TypeVar("_T")
 
 
 class NotebookPlotHost:
-    """Present native figures as widgets until explicitly released.
+    """Initialize and synchronously render widgets until explicitly released.
 
     Calls run synchronously on the caller's thread. Callers serialize operations;
     this host does not schedule work or detect frontend availability. Figures
@@ -48,14 +48,18 @@ class NotebookPlotHost:
         # Retain the manager even if publishing fails, so release can clean up.
         display(canvas)
 
-    def refresh(self, figure: Figure, *, final: bool = False) -> None:
+    def refresh(
+        self,
+        figure: Figure,
+        *,
+        final: bool = False,  # noqa: ARG002 - Both PlotHost modes render synchronously.
+    ) -> None:
         manager = self._managers.get(figure)
         if manager is None:
             raise ValueError("Figure is not presented by this host")
-        if final:
-            manager.canvas.draw()
-        else:
-            manager.canvas.draw_idle()
+        # Idle draws require frontend requests that can wait until the cell ends.
+        # Both ordinary updates and final draws use the synchronous path.
+        manager.canvas.draw()
 
     def release(self, figure: Figure) -> None:
         manager = self._managers.get(figure)

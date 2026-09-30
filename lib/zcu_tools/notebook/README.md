@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-09-30 — T1／GE／OneTone FluxDep 便利入口
+**Last updated:** 2026-09-30 — Notebook widget 即時刷新
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -20,8 +20,9 @@
 
 ## 共用責任與目前邊界
 
-明確 Notebook host 同步執行 caller 的操作，caller 負責順序。已有 manager 的 Figure
-不能由另一 host 接管。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
+明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
+widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。
+已有 manager 的 Figure 不能由另一 host 接管。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
 呼叫 `Plots.release()` 才釋放 canvas／toolbar，原 Figure 仍可 `savefig`。直接建立
 widget 而不登記 pyplot manager，避免 cell 結束時額外自動呈現。T1／GE／OneTone FluxDep convenience 使用此 host；其他實驗與舊互動分析入口仍待遷移。Host 不取代
 那些入口的狀態與分析契約。
