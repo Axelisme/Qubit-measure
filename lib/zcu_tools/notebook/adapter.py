@@ -102,9 +102,12 @@ class NotebookAdapter(Generic[CoreT]):
         server_ip: str | None = None,
         port: int = 4999,
     ) -> RunRecord[CfgT, ResultT]:
-        raise NotImplementedError(
-            "Notebook loaded record publication is not implemented"
-        )
+        record = self._core.load(source, server_ip=server_ip, port=port)
+        self._last_run = record
+        self._analysis = None
+        self.run_presentation = None
+        self.analysis_presentation = None
+        return record
 
     def save(  # noqa: PLR0913 - explicit uniqueness plus core persistence options
         self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
