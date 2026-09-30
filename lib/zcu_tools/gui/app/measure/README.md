@@ -23,16 +23,18 @@ analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬�
 
 `CfgEditorService` 按 `editor_id` 保存 cfg draft。可回收的 library-entry
 session 受 LRU／disconnect 回收；由 UI owner 建立的 seeded session 由 owner
-顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。Tab session
-的編輯會嘗試 auto-commit 至 `State.cfg_schema`；使用前仍經成品 cfg
-驗證。`WritebackService` 以 opaque draft 保存候選項及 item-local editor
+顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
+Tab cfg 由 `Session.cfg` 的 `CfgResource` 擁有，不建立 editor session 或
+`State.cfg_schema` 鏡像。Qt 與 remote 都向同一資源提交指定 revision 的命令。
+`WritebackService` 以 opaque draft 保存候選項及 item-local editor
 session，不能把 preview 當成再次計算候選項的指令。`CfgDraft` 的共用
 Spec／Value、`None`、locked literal、reference binding 與 lowering 契約見
 [Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md)、
 [GUI cfg README](../../cfg/README.md) 與
 [experiment cfg editing README](../../../experiment/cfg_editing/README.md)。
-目前 edit batch 及 context Apply 可能留下成功前綴，不能宣稱原子提交；
-refresh／override／revision 的未落實條件見
+Tab cfg edit batch 在完整候選準備成功後一次發布，拒絕不改舊 publication。
+獨立 library editor 的 draft batch 不具有這項原子保證。Source refresh 使用
+已發布快照，不把 live provider 當成 observation 的第二個 owner。設計目標見
 [cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 
 `State` 保存可觀察的 app 資料，`ContextService` 寫入 md／ml；services
@@ -206,7 +208,7 @@ for setup/context/device/predictor/progress domains.
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
-active/running identity, tab read model, cfg schema commits, save path overrides)
+active/running identity, tab read model, cfg resource lookup, save path overrides)
 by composing `WorkspaceService`, `TabService`, `State`, and `EventBus`; remote
 tab handlers use this facet instead of the giant `Controller` surface.
 `RunAnalyzeControlPort` / `RunAnalyzeControlFacet` expose the run/load/analyze
@@ -690,13 +692,11 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   Measure 的 `ContextWritePort` 從 cfg schema 產生 app-side lowering callbacks，
   交給共用 service 在寫入時呼叫；`CfgEditorService` 只交未 lower 的 schema。
   Writeback 選出的 md／ml entries 交給一次 `apply_ml_writes()`，每批至多
-  bump 一次、每種變更事件至多送一次。這不是失敗時整批 rollback 的保證：
-  lower 與 register 依序執行，dump 也先於 version bump 與事件；後項 lower、
-  register 或 dump 失敗時，前項可能已改動 live md／ml，卻沒有這次 batch 的
-  `context` version bump 或變更事件。成功完成後才發布版本及事件；失敗前綴
-  不是已發布的完整提交。尚待實作的無失敗前綴 Apply 見
-  [Cfg 編輯 draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md#observationrun-與-apply)。
-  寫入與 crash durability 是不同責任，磁碟保存見 ADR-0063。
+  bump 一次、每種變更事件至多送一次。整批 lower／register 先在隔離候選
+  完成，後項可讀前項候選，但不能改 live md／ml。準備失敗保留舊內容與版本。
+  成功後一次套用內容、更新版本並通知，最後保存。保存失敗明確回報已套用
+  但未保存，不 rollback 或自動重試。寫入與 crash durability 是不同責任，
+  磁碟保存見 ADR-0063。
 - `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
   宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表
   SoC 已連線。Run guard 檢查 context、cfg、SoC 與 preflight；operation owner 另

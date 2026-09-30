@@ -126,45 +126,27 @@ def _materialize_node(
     policy: SpecMaterializationPolicy,
     path: tuple[str, ...],
 ) -> CfgNodeValue | None:
-    if isinstance(spec, LiteralSpec):
-        return DirectValue(spec.value)
-    if isinstance(spec, ScalarSpec):
-        return policy.scalar_value(path, spec, raw)
-    if isinstance(spec, SweepSpec):
-        return policy.sweep_value(path, spec, raw)
-    if isinstance(spec, CenteredSweepSpec):
-        return policy.centered_sweep_value(path, spec, raw)
-    if isinstance(spec, ReferenceSpec):
-        selected = policy.reference_value(path, spec, raw)
-        if selected is None:
-            if spec.optional:
-                return None
-            raise RuntimeError(f"Required reference {'.'.join(path)!r} is missing")
-        if not any(selected.spec is allowed for allowed in spec.allowed):
-            raise RuntimeError(
-                f"Reference policy selected a spec outside allowed shapes at "
-                f"{'.'.join(path)!r}"
+    match spec:
+        case LiteralSpec():
+            return DirectValue(spec.value)
+        case ScalarSpec():
+            return policy.scalar_value(path, spec, raw)
+        case SweepSpec():
+            return policy.sweep_value(path, spec, raw)
+        case CenteredSweepSpec():
+            return policy.centered_sweep_value(path, spec, raw)
+        case ReferenceSpec():
+            return _materialize_reference(spec, raw, policy=policy, path=path)
+        case CfgSectionSpec():
+            if isinstance(raw, Mapping):
+                return _materialize_section(spec, raw, policy=policy, path=path)
+            value = policy.missing_section_value(path, spec, raw)
+            _validate_section_value(spec, value, path=path)
+            return value
+        case _:
+            raise TypeError(
+                f"Unsupported cfg spec node {type(spec).__name__} at {'.'.join(path)!r}"
             )
-        if isinstance(selected.raw, Mapping):
-            value = _materialize_section(
-                selected.spec,
-                selected.raw,
-                policy=policy,
-                path=path,
-            )
-        else:
-            value = policy.missing_section_value(path, selected.spec, selected.raw)
-            _validate_section_value(selected.spec, value, path=path)
-        return ReferenceValue(chosen_key=selected.chosen_key, value=value)
-    if isinstance(spec, CfgSectionSpec):
-        if isinstance(raw, Mapping):
-            return _materialize_section(spec, raw, policy=policy, path=path)
-        value = policy.missing_section_value(path, spec, raw)
-        _validate_section_value(spec, value, path=path)
-        return value
-    raise TypeError(
-        f"Unsupported cfg spec node {type(spec).__name__} at {'.'.join(path)!r}"
-    )
 
 
 def _validate_section_value(
@@ -187,57 +169,88 @@ def _validate_section_value(
         _validate_node_value(node_spec, value.fields[key], path=(*path, key))
 
 
+def _materialize_reference(
+    spec: ReferenceSpec,
+    raw: object | RawMissing,
+    *,
+    policy: SpecMaterializationPolicy,
+    path: tuple[str, ...],
+) -> ReferenceValue | None:
+    selected = policy.reference_value(path, spec, raw)
+    if selected is None:
+        if spec.optional:
+            return None
+        raise RuntimeError(f"Required reference {'.'.join(path)!r} is missing")
+    if not any(selected.spec is allowed for allowed in spec.allowed):
+        raise RuntimeError(
+            f"Reference policy selected a spec outside allowed shapes at "
+            f"{'.'.join(path)!r}"
+        )
+    if isinstance(selected.raw, Mapping):
+        value = _materialize_section(
+            selected.spec, selected.raw, policy=policy, path=path
+        )
+    else:
+        value = policy.missing_section_value(path, selected.spec, selected.raw)
+        _validate_section_value(selected.spec, value, path=path)
+    return ReferenceValue(chosen_key=selected.chosen_key, value=value)
+
+
 def _validate_node_value(
     spec: CfgNodeSpec,
     value: CfgNodeValue | None,
     *,
     path: tuple[str, ...],
 ) -> None:
-    if isinstance(spec, LiteralSpec):
-        if not isinstance(value, DirectValue) or value.value != spec.value:
-            _raise_shape_error(
-                path,
-                f"DirectValue({spec.value!r})",
-                repr(value),
-            )
-        return
-    if isinstance(spec, ScalarSpec):
-        if not isinstance(value, (DirectValue, EvalValue)):
-            _raise_shape_error(path, "DirectValue or EvalValue", type(value).__name__)
-        return
-    if isinstance(spec, SweepSpec):
-        if not isinstance(value, SweepValue):
-            _raise_shape_error(path, "SweepValue", type(value).__name__)
-        return
-    if isinstance(spec, CenteredSweepSpec):
-        if not isinstance(value, CenteredSweepValue):
-            _raise_shape_error(path, "CenteredSweepValue", type(value).__name__)
-        return
-    if isinstance(spec, ReferenceSpec):
-        if value is None:
-            if not spec.optional:
-                _raise_shape_error(path, "ReferenceValue", "None")
+    match spec:
+        case LiteralSpec():
+            if not isinstance(value, DirectValue) or value.value != spec.value:
+                _raise_shape_error(
+                    path,
+                    f"DirectValue({spec.value!r})",
+                    repr(value),
+                )
             return
-        if not isinstance(value, ReferenceValue):
-            _raise_shape_error(path, "ReferenceValue", type(value).__name__)
-        try:
-            selected = select_ref_value_spec(spec, value)
-        except RuntimeError as exc:
-            allowed = tuple(item.label for item in spec.allowed)
-            _raise_shape_error(
-                path,
-                f"reference matching allowed labels {allowed!r}",
-                f"chosen_key {value.chosen_key!r}",
-                cause=exc,
+        case ScalarSpec():
+            if not isinstance(value, (DirectValue, EvalValue)):
+                _raise_shape_error(
+                    path, "DirectValue or EvalValue", type(value).__name__
+                )
+            return
+        case SweepSpec():
+            if not isinstance(value, SweepValue):
+                _raise_shape_error(path, "SweepValue", type(value).__name__)
+            return
+        case CenteredSweepSpec():
+            if not isinstance(value, CenteredSweepValue):
+                _raise_shape_error(path, "CenteredSweepValue", type(value).__name__)
+            return
+        case ReferenceSpec():
+            if value is None:
+                if not spec.optional:
+                    _raise_shape_error(path, "ReferenceValue", "None")
+                return
+            if not isinstance(value, ReferenceValue):
+                _raise_shape_error(path, "ReferenceValue", type(value).__name__)
+            try:
+                selected = select_ref_value_spec(spec, value)
+            except RuntimeError as exc:
+                allowed = tuple(item.label for item in spec.allowed)
+                _raise_shape_error(
+                    path,
+                    f"reference matching allowed labels {allowed!r}",
+                    f"chosen_key {value.chosen_key!r}",
+                    cause=exc,
+                )
+            _validate_section_value(selected, value.value, path=path)
+            return
+        case CfgSectionSpec():
+            _validate_section_value(spec, value, path=path)
+            return
+        case _:
+            raise TypeError(
+                f"Unsupported cfg spec node {type(spec).__name__} at {'.'.join(path)!r}"
             )
-        _validate_section_value(selected, value.value, path=path)
-        return
-    if isinstance(spec, CfgSectionSpec):
-        _validate_section_value(spec, value, path=path)
-        return
-    raise TypeError(
-        f"Unsupported cfg spec node {type(spec).__name__} at {'.'.join(path)!r}"
-    )
 
 
 def _raise_shape_error(

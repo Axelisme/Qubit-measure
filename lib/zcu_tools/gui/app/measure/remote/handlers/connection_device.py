@@ -155,7 +155,7 @@ def h_device_setup(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
-    updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
+    updates = cast(dict[str, object], params["updates"])  # ParamSpec validated
     dev = adapter.device_control
     info = dev.get_device_info(name)
     if info is None:
@@ -174,7 +174,7 @@ def h_device_setup(
 _DEVICE_SETUP_PROTECTED = frozenset({"type", "address"})
 
 
-def _field_type_and_choices(annotation: object) -> tuple[str, list | None]:
+def _field_type_and_choices(annotation: object) -> tuple[str, list[object] | None]:
     """Wire (type, choices) for a BaseDeviceInfo field annotation.
 
     Literal[...] → ('enum', [members]). Optional[X] unwraps to X.

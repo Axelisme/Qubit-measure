@@ -396,90 +396,92 @@ def _lower_section(
             full_path = ".".join([*path, key])
             raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
 
-        if isinstance(node_spec, ScalarSpec):
-            assert isinstance(node_value, (DirectValue, EvalValue))
-            if isinstance(node_value, DirectValue):
-                if node_value.value is None:
-                    if node_spec.optional:
-                        continue
+        match node_spec:
+            case ScalarSpec():
+                assert isinstance(node_value, (DirectValue, EvalValue))
+                if isinstance(node_value, DirectValue):
+                    if node_value.value is None:
+                        if node_spec.optional:
+                            continue
+                        label = node_spec.label or key
+                        full_path = ".".join([*path, key])
+                        raise RuntimeError(
+                            f"Config field '{full_path}' ({label}) is unset"
+                        )
+                    result[key] = node_value.value
+                else:
                     label = node_spec.label or key
                     full_path = ".".join([*path, key])
-                    raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
-                result[key] = node_value.value
-            else:
-                label = node_spec.label or key
-                full_path = ".".join([*path, key])
-                result[key] = _resolve_eval(
-                    node_value,
+                    result[key] = _resolve_eval(
+                        node_value,
+                        resolve_expression,
+                        path=full_path,
+                        label=label,
+                        type_=node_spec.type,
+                    )
+            case LiteralSpec():
+                result[key] = node_spec.value
+            case SweepSpec():
+                assert isinstance(node_value, SweepValue)
+                start = _resolve_sweep_edge(
+                    node_value.start,
                     resolve_expression,
-                    path=full_path,
-                    label=label,
-                    type_=node_spec.type,
+                    path=".".join([*path, key, "start"]),
+                    label="Sweep start",
                 )
-
-        elif isinstance(node_spec, LiteralSpec):
-            result[key] = node_spec.value
-
-        elif isinstance(node_spec, SweepSpec):
-            assert isinstance(node_value, SweepValue)
-            start = _resolve_sweep_edge(
-                node_value.start,
-                resolve_expression,
-                path=".".join([*path, key, "start"]),
-                label="Sweep start",
-            )
-            stop = _resolve_sweep_edge(
-                node_value.stop,
-                resolve_expression,
-                path=".".join([*path, key, "stop"]),
-                label="Sweep stop",
-            )
-            points = _resolve_range_input(
-                node_value.expts,
-                int,
-                path=".".join([*path, key, "expts"]),
-                label="Sweep points",
-            )
-            result[key] = make_range(start, stop, expts=points)
-
-        elif isinstance(node_spec, CenteredSweepSpec):
-            assert isinstance(node_value, CenteredSweepValue)
-            result[key] = _lower_centered_sweep(
-                node_spec,
-                node_value,
-                full_path=".".join([*path, key]),
-                resolve_expression=resolve_expression,
-                make_range=make_range,
-            )
-
-        elif isinstance(node_spec, ReferenceSpec):
-            assert isinstance(node_value, ReferenceValue)
-            if not isinstance(node_value.value, CfgSectionValue):
-                label = node_spec.label or key
-                full_path = ".".join([*path, key])
-                raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
-            result[key] = _lower_section(
-                _select_reference_spec(node_spec, node_value, resolve_reference),
-                node_value.value,
-                resolve_expression=resolve_expression,
-                resolve_reference=resolve_reference,
-                make_range=make_range,
-                path=[*path, key],
-            )
-
-        elif isinstance(node_spec, CfgSectionSpec):
-            assert isinstance(node_value, CfgSectionValue)
-            result[key] = _lower_section(
-                node_spec,
-                node_value,
-                resolve_expression=resolve_expression,
-                resolve_reference=resolve_reference,
-                make_range=make_range,
-                path=[*path, key],
-            )
-
-        else:
-            raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")
+                stop = _resolve_sweep_edge(
+                    node_value.stop,
+                    resolve_expression,
+                    path=".".join([*path, key, "stop"]),
+                    label="Sweep stop",
+                )
+                points = _resolve_range_input(
+                    node_value.expts,
+                    int,
+                    path=".".join([*path, key, "expts"]),
+                    label="Sweep points",
+                )
+                result[key] = make_range(start, stop, expts=points)
+            case CenteredSweepSpec():
+                assert isinstance(node_value, CenteredSweepValue)
+                result[key] = _lower_centered_sweep(
+                    node_spec,
+                    node_value,
+                    full_path=".".join([*path, key]),
+                    resolve_expression=resolve_expression,
+                    make_range=make_range,
+                )
+            case ReferenceSpec():
+                assert isinstance(node_value, ReferenceValue)
+                match node_value.value:
+                    case CfgSectionValue():
+                        pass
+                    case _:
+                        label = node_spec.label or key
+                        full_path = ".".join([*path, key])
+                        raise RuntimeError(
+                            f"Config field '{full_path}' ({label}) is missing"
+                        )
+                result[key] = _lower_section(
+                    _select_reference_spec(node_spec, node_value, resolve_reference),
+                    node_value.value,
+                    resolve_expression=resolve_expression,
+                    resolve_reference=resolve_reference,
+                    make_range=make_range,
+                    path=[*path, key],
+                )
+            case CfgSectionSpec():
+                assert isinstance(node_value, CfgSectionValue)
+                result[key] = _lower_section(
+                    node_spec,
+                    node_value,
+                    resolve_expression=resolve_expression,
+                    resolve_reference=resolve_reference,
+                    make_range=make_range,
+                    path=[*path, key],
+                )
+            case _:
+                raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")
 
     return result
 
@@ -757,17 +759,18 @@ def _validate_dynamic_node(
 
     if isinstance(spec, ReferenceSpec):
         if isinstance(node_value, ReferenceValue):
-            if isinstance(node_value.value, CfgSectionValue):
-                chosen_spec = _select_reference_spec(
-                    spec, node_value, resolve_reference
-                )
-                _validate_dynamic_section(
-                    chosen_spec,
-                    node_value.value,
-                    resolve_expression=resolve_expression,
-                    resolve_reference=resolve_reference,
-                    path=[full_path],
-                )
+            match node_value.value:
+                case CfgSectionValue():
+                    chosen_spec = _select_reference_spec(
+                        spec, node_value, resolve_reference
+                    )
+                    _validate_dynamic_section(
+                        chosen_spec,
+                        node_value.value,
+                        resolve_expression=resolve_expression,
+                        resolve_reference=resolve_reference,
+                        path=[full_path],
+                    )
         return
 
     if isinstance(spec, CfgSectionSpec):

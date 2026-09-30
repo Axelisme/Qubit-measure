@@ -291,8 +291,9 @@ through the session value lookup and then become direct scalars.
 
 Sweep nodes appear as editable subtrees, not as lowered `SweepCfg` objects.
 `SweepSpec` exposes `start` / `stop` / `expts` / `step`; `CenteredSweepSpec`
-exposes `center` / `span` / `expts` / `step`. `editor.set_field` accepts the same
-dotted edge paths that `tab.get_cfg` reports.
+exposes `center` / `span` / `expts` / `step`. Independent `editor.set_field`
+accepts dotted edge paths from the editor read model. Tab cfg observations and
+`tab.edit_cfg` use string-array paths instead.
 
 `TabCfgResources` owns tab cfg identity. Tab creation provides the resource before
 any view attaches; close revokes its identity. Qt detach only stops watching.

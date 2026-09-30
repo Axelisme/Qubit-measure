@@ -919,32 +919,34 @@ def create_field(
     references: ReferenceCatalog,
     initial_val: object = None,
 ) -> CfgField:
-    if isinstance(spec, ScalarSpec):
-        return ScalarField(spec, evaluate_expression, provide_options, initial_val)
-    if isinstance(spec, LiteralSpec):
-        return LiteralField(spec, initial_val)
-    if isinstance(spec, SweepSpec):
-        return SweepField(spec, evaluate_expression, initial_val)
-    if isinstance(spec, CenteredSweepSpec):
-        return CenteredSweepField(spec, evaluate_expression, initial_val)
-    if isinstance(spec, ReferenceSpec):
-        from .reference import ReferenceField
+    match spec:
+        case ScalarSpec():
+            return ScalarField(spec, evaluate_expression, provide_options, initial_val)
+        case LiteralSpec():
+            return LiteralField(spec, initial_val)
+        case SweepSpec():
+            return SweepField(spec, evaluate_expression, initial_val)
+        case CenteredSweepSpec():
+            return CenteredSweepField(spec, evaluate_expression, initial_val)
+        case ReferenceSpec():
+            from .reference import ReferenceField
 
-        return ReferenceField(
-            spec,
-            evaluate_expression=evaluate_expression,
-            provide_options=provide_options,
-            references=references,
-            initial_val=initial_val,
-        )
-    if isinstance(spec, CfgSectionSpec):
-        return SectionField(
-            spec,
-            evaluate_expression=evaluate_expression,
-            provide_options=provide_options,
-            references=references,
-            initial_val=(
-                initial_val if isinstance(initial_val, CfgSectionValue) else None
-            ),
-        )
-    raise TypeError(f"Unknown spec type: {type(spec).__name__}")
+            return ReferenceField(
+                spec,
+                evaluate_expression=evaluate_expression,
+                provide_options=provide_options,
+                references=references,
+                initial_val=initial_val,
+            )
+        case CfgSectionSpec():
+            return SectionField(
+                spec,
+                evaluate_expression=evaluate_expression,
+                provide_options=provide_options,
+                references=references,
+                initial_val=(
+                    initial_val if isinstance(initial_val, CfgSectionValue) else None
+                ),
+            )
+        case _:
+            raise TypeError(f"Unknown spec type: {type(spec).__name__}")

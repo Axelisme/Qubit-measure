@@ -126,7 +126,7 @@ def iter_settable_targets(root: SectionField) -> Iterator[SettableTarget]:
     yield from _build_target_index(root).targets
 
 
-def resolve_settable_target(root: SectionField, path: str) -> SettableTarget:
+def resolve_settable_target(root: SectionField, path: object) -> SettableTarget:
     """Resolve exactly one canonical path using the same traversal as listing."""
     if not isinstance(path, str) or not path:
         raise SettablePathError("settable path must be a non-empty string")
