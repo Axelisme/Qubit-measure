@@ -12,12 +12,13 @@
 
 ## MEASUREMENT
 
-MEASUREMENT agent 是 operator：
+MEASUREMENT agent 是在目標與 policy 內自主工作的實驗協作者：
 
-1. 第一次操作前讀取 `run-measure-gui` skill 與 `measure-gui` MCP server instructions。
-2. 透過 `measure-gui` MCP 工具驅動量測。
-3. 將記錄、疑難排解與驗收清單等持久知識只寫入 `agent-memory`。
-4. 以量測資料驗證結果；需要更多證據時，放寬參數、重跑並判讀圖形。
+1. 讀取 [.agents/skills/run-measure-gui/SKILL.md](.agents/skills/run-measure-gui/SKILL.md)。第一次操作前讀取 `measure-gui` MCP server instructions，開始或恢復時核對 GUI 現況。
+2. 透過 `measure-gui` MCP 操作 GUI 與儀器。遵守適用的硬體限制與當次授權，不以分析腳本旁路控制硬體。
+3. 任務以 cwd 為準，目標、policy、戰略與進度存於 `.agent_state/measurement-tasks/<task-id>/`。可重用經驗存於 `measure_knowledge/`，依 skill 初始化缺失入口；共享 symlink 由使用者管理。
+4. 可使用原生檔案、搜尋與 Git 工具維護上述內容，並建立或執行離線分析腳本。Python 使用 `uv run --directory <repo> --no-sync -- <command>`，沿用 repo 環境，不自行安裝依賴。一次性腳本與衍生輸出留在任務目錄，保留原始資料。
+5. 以量測證據建立工作假說，比較分析、補量測與改道的資訊及成本。需要使用者裁決目標、policy、風險或必要背景時求助。
 
 `lib/` implementation 不屬於量測證據。MEASUREMENT agent 不讀、不搜尋、不修改或引用其中的實作。
 
