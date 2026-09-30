@@ -13,9 +13,9 @@
 - [design](analysis/design/README.md)：評估模型參數、設計需求與候選組合，並分析 HFSS sweep 資料。
 - [mist](analysis/mist/tool.py)：提供能量摺疊、不連續處理與碰撞遮罩的計算工具。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。
-- [`experiments/t1.py`](experiments/t1.py)：舊一般 T1 專用便利入口，尚未接上共用 RunRecord；不作為新入口。一般 T1 核心的 typed 分析已可綁定 NotebookAdapter，專用 wrapper 與 Result 的剩餘遷移仍未完成。
-- [`experiments/ge.py`](experiments/ge.py)：`GEExp` 使用相同的 Notebook host 呼叫 GE 共用核心。FIT 與 post 各自保留來源、選項、數值與具名圖；post 採用上一次成功的 FIT 校準。失敗操作不覆蓋成功紀錄，run／load 成功清空分析引用，舊圖仍可保存。
-- [`experiments/flux_dep.py`](experiments/flux_dep.py)：`FluxDepNotebookExp.analyze()` 回傳選線 widget 與可拖曳的預覽。使用者按 Done 才呼叫核心，並發布 source、options、數值 result 和具名 `pick` Figure。Cancel 或失敗保留舊紀錄。run/load 成功清空目前分析，但使用者仍可保存舊 Figure。預覽 Figure 與 Result 分開。
+一般 T1 使用 `NotebookAdapter(T1Exp())` 與核心的 typed config／options，不另提供扁平參數 wrapper。T1Result 只有資料；RunRecord 是保存與分析的 explicit 來源。Canonical load 可保留 cfg=None 的有效資料，T1 可離線分析，預設 saver 則拒絕缺 cfg 的來源。
+- [`experiments/ge.py`](experiments/ge.py)：`GEExp` 使用相同的 Notebook host 呼叫 GE 共用核心，尚未接上新版共用 records。FIT 與 post 各自保留來源、選項、數值與具名圖；post 採用上一次成功的 FIT 校準。失敗操作不覆蓋成功紀錄，run／load 成功清空分析引用，舊圖仍可保存。
+- [`experiments/flux_dep.py`](experiments/flux_dep.py)：尚未接上新版共用 records。`FluxDepNotebookExp.analyze()` 回傳選線 widget 與可拖曳的預覽。使用者按 Done 才呼叫核心，並發布 source、options、數值 result 和具名 `pick` Figure。Cancel 或失敗保留舊紀錄。run/load 成功清空目前分析，但使用者仍可保存舊 Figure。預覽 Figure 與 Result 分開。
 - [`utils.py`](utils.py)：提供 sweep、圖檔保存與設備資訊等 Notebook 輔助函式。
 - [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。
 

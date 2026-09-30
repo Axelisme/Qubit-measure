@@ -56,7 +56,6 @@ from zcu_tools.utils.process import rotate2real
 class T1Result:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: T1Cfg | T1WithToneCfg | None = None
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -119,7 +118,6 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         cfg: T1Cfg,
         plots: Plots,
     ) -> T1Result:
-        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         delay_table = materialize_nonuniform_t1_delays(
@@ -157,9 +155,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                 .build_and_acquire()
             )
 
-        return T1Result(
-            times=lengths, signals=signals_buffer.array, cfg_snapshot=original_cfg
-        )
+        return T1Result(times=lengths, signals=signals_buffer.array)
 
     def _run_uniform(
         self,
@@ -168,7 +164,6 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         cfg: T1Cfg,
         plots: Plots,
     ) -> T1Result:
-        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
@@ -200,9 +195,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                 .build_and_acquire()
             )
 
-        return T1Result(
-            times=lengths, signals=signals_buffer.array, cfg_snapshot=original_cfg
-        )
+        return T1Result(times=lengths, signals=signals_buffer.array)
 
     def run(self, config: T1Cfg, *, context: QickContext) -> T1Result:
         cfg = deepcopy(config)
@@ -295,7 +288,6 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
         *,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> T1Result:
-        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -334,9 +326,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
                     )
                 )
 
-        return T1Result(
-            times=lengths, signals=signals_buffer.array, cfg_snapshot=orig_cfg
-        )
+        return T1Result(times=lengths, signals=signals_buffer.array)
 
     @retrieve_result
     def analyze(

@@ -4,8 +4,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1AnalyzeOptions,
+    T1Cfg,
     T1Exp,
     T1Result,
 )
@@ -20,10 +22,12 @@ def test_analysis_fits_decay_and_keeps_native_saveable_figure(
     signal = 0.2 + 0.8 * np.exp(-times / 20)
     if dual_exp:
         signal += 0.4 * np.exp(-times / 5)
-    result = T1Result(times, signal.astype(np.complex128))
+    source: RunRecord[T1Cfg, T1Result] = RunRecord(
+        cfg=None, result=T1Result(times, signal.astype(np.complex128))
+    )
     plots = Plots(NonPresentingHost())
     analysis = T1Exp().analyze(
-        result, T1AnalyzeOptions(dual_exp=dual_exp, skip=2), plots=plots
+        source, T1AnalyzeOptions(dual_exp=dual_exp, skip=2), plots=plots
     )
     plots.finish()
 
@@ -49,9 +53,12 @@ def test_reusing_core_uses_only_explicit_analysis_result() -> None:
     times = np.linspace(0, 80, 81)
     core = T1Exp()
     for expected in [12.0, 24.0, 12.0]:
-        result = T1Result(times, np.exp(-times / expected).astype(np.complex128))
+        source: RunRecord[T1Cfg, T1Result] = RunRecord(
+            cfg=None,
+            result=T1Result(times, np.exp(-times / expected).astype(np.complex128)),
+        )
         plots = Plots(NonPresentingHost())
-        fitted = core.analyze(result, T1AnalyzeOptions(), plots=plots)
+        fitted = core.analyze(source, T1AnalyzeOptions(), plots=plots)
         plots.finish()
         assert fitted.t1 == pytest.approx(expected, rel=0.01)
         plots.release()
