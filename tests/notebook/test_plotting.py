@@ -86,12 +86,6 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
 ) -> None:
     rendered: list[list[float]] = []
     draw = Canvas.draw
-    draw_idle = Canvas.draw_idle
-    refreshed: list[Canvas] = []
-
-    def record_refresh(canvas: Canvas) -> None:
-        draw_idle(canvas)
-        refreshed.append(canvas)
 
     def record_draw(canvas: Canvas) -> None:
         draw(canvas)
@@ -100,7 +94,6 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
         )
 
     monkeypatch.setattr(Canvas, "draw", record_draw)
-    monkeypatch.setattr(Canvas, "draw_idle", record_refresh)
     create, published = notebook_plots
     before = plt.get_fignums()
     backend = plt.get_backend()
@@ -111,9 +104,9 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
 
     live = plots.liveplot_1d("live", "x", "y")
     assert published == [plots["live"].canvas]
-    refreshed.clear()
+    rendered.clear()
     live.update(np.array([1.0, 2.0]), np.array([5.0, 6.0]))
-    assert refreshed == [plots["live"].canvas]
+    assert rendered == [[5.0, 6.0]]
     plots.finish()
     plots.finish()
 
