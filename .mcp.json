@@ -47,18 +47,6 @@
         "lib/zcu_tools/mcp/autofluxdep/server.py"
       ],
       "env": {}
-    },
-    "agent-memory": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "run",
-        "--extra",
-        "client",
-        "python",
-        "lib/zcu_tools/mcp/agent_memory/server.py"
-      ],
-      "env": {}
     }
   }
 }
