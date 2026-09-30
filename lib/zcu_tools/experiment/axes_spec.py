@@ -96,10 +96,6 @@ class AxesSpec(Generic[T_Result, T_Config]):
                 f"AxesSpec field_name(s) {sorted(missing)} not on "
                 f"{self.result_type.__name__} (has {sorted(result_fields)})"
             )
-        if "cfg_snapshot" not in result_fields:
-            raise ValueError(
-                f"{self.result_type.__name__} must declare a 'cfg_snapshot' field"
-            )
 
 
 @dataclass(frozen=True)
