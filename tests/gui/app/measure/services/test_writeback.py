@@ -147,8 +147,11 @@ def test_create_draft_cleans_all_opened_sessions_when_a_later_item_fails():
 
 
 def test_create_draft_rejects_proposal_with_dynamic_editor_identity():
+    from dataclasses import dataclass
+
     svc = WritebackService(MagicMock(), MagicMock())
 
+    @dataclass
     class EditorOwnedProposal(ModuleWriteback):
         editor_id: str = "legacy-editor"
 
