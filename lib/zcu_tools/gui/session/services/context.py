@@ -99,7 +99,7 @@ def _coerce_scalar(text: str, current: Any) -> Any:
     )
 
 
-def _validate_md_key(key: str) -> None:
+def _validate_md_key(key: object) -> None:
     """Validate a user-facing MetaDict key before any content mutation."""
     if not isinstance(key, str):
         raise FailedPreconditionError(
@@ -108,33 +108,9 @@ def _validate_md_key(key: str) -> None:
     if not key.strip():
         raise FailedPreconditionError("MetaDict key must not be empty.")
     try:
-        MetaDict._ensure_data_key(key)
+        MetaDict.validate_data_key(key)
     except (AttributeError, TypeError) as exc:
         raise FailedPreconditionError(str(exc)) from exc
-
-
-def _commit_md_snapshot(md: MetaDict, snapshot: Mapping[str, Any]) -> None:
-    """Commit one already-validated MetaDict snapshot as a single mutation.
-
-    MetaDict exposes attribute-level writes but no rename primitive. Replacing
-    its data mapping under ContextService ownership avoids a caller-visible
-    set-then-delete window and lets the service publish one version/event pair.
-    The old in-memory mapping is restored if the underlying write fails.
-    """
-    previous = dict(md.items())
-    previous_dirty = md._dirty
-    try:
-        md.require_writable()
-        md.sync()
-        md._data.clear()
-        md._data.update(snapshot)
-        md._dirty = True
-        md.sync()
-    except Exception:
-        md._data.clear()
-        md._data.update(previous)
-        md._dirty = previous_dirty
-        raise
 
 
 class ContextService:
@@ -340,7 +316,7 @@ class ContextService:
         if key in snapshot:
             raise FailedPreconditionError(f"MetaDict already has attribute {key!r}.")
         snapshot[key] = value
-        _commit_md_snapshot(md, snapshot)
+        md.replace_contents(snapshot)
         self._state.version.bump("context")
         self._bus.emit(MdChangedPayload(md=md))
 
@@ -357,7 +333,7 @@ class ContextService:
         if new in snapshot:
             raise FailedPreconditionError(f"MetaDict already has attribute {new!r}.")
         snapshot[new] = snapshot.pop(old)
-        _commit_md_snapshot(md, snapshot)
+        md.replace_contents(snapshot)
         self._state.version.bump("context")
         self._bus.emit(MdChangedPayload(md=md))
 

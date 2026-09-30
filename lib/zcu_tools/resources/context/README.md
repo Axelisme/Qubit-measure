@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` — named experiment work contexts
 
-**Last updated:** 2026-09-30 — memory-only context publication
+**Last updated:** 2026-09-30 — MetaDict mutation ownership
 
 Context 是綁定特定參數資源的具名實驗工作 scope；同一 context 預期具有相同的環境與實驗語意。儀器值只是命名便利，名稱可以是任意合法字串。Context 不會自動監控實驗環境。
 
@@ -31,6 +31,8 @@ print(md.qubit_freq)      # 自動 sync + 讀取
 **受保護的屬性**（不進入 `_data`）：`_` 開頭的名稱，以及 `MetaDict` / `SyncFile` class 或 MRO 上已存在的名稱，例如 `dump`、`load`、`sync`、`has_persistence`、`clone`、`items`、`keys`、`get`、`update`。對 protected name 寫入或載入 protected key 會 fail-fast，避免 `_data` 內存在被 class attribute 遮蔽、永遠讀不到的 shadow key。
 
 **批次寫入**：`update(values, **kwargs)` 在一次 auto-sync write transaction 中更新多個 key；單一屬性賦值仍會立即同步，批次修改應優先使用 `update()`。
+
+`validate_data_key()` 擁有資料 key 的型別與 protected-name 驗證。`replace_contents()` 用一次寫入替換完整 mapping，寫入失敗還原記憶體；它不保證回滾已部分寫入的檔案。ContextService 的 create／rename 使用這個公開入口，不直接修改 store 私有資料。這與只交換記憶體的 `swap_contents()` 不同，後者讓 Apply owner 先發布，再依政策保存。
 
 **`clone(dst_path, readonly)`**：複製整個 MetaDict 到新路徑（要求目標不存在）。
 

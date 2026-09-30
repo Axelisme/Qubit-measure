@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast
 
 from qtpy.QtCore import QSize, Qt  # type: ignore[attr-defined]
@@ -89,7 +89,7 @@ class ElidedLabel(QLabel):
 def make_value_widget(
     type_: type,
     default: Any,
-    choices: list[object] | None,
+    choices: Sequence[object] | None,
     *,
     editable: bool = True,
     decimals: int | None = None,
