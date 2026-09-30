@@ -1164,7 +1164,7 @@ _ = single_reset_check_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-fig = single_reset_check_exp.analyze()
+reset_check_fit, fig = single_reset_check_exp.analyze()
 ```
 
 ```python
@@ -1783,7 +1783,7 @@ _ = bathreset_rabicheck_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-fig = bathreset_rabicheck_exp.analyze()
+reset_check_fit, fig = bathreset_rabicheck_exp.analyze()
 ```
 
 ```python

@@ -215,7 +215,11 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
 
     @retrieve_result
     def analyze(
-        self, result: LenRabiResult | None = None, *, decay: bool = True
+        self,
+        result: LenRabiResult | None = None,
+        *,
+        decay: bool = True,
+        fit_phase: bool = False,
     ) -> tuple[float, float, float, float, float, float, Figure]:
         assert result is not None, "no result found"
 
@@ -231,7 +235,11 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         real_signals = real_signals[~nan_mask]
 
         pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, _ = fit_rabi(
-            lens, real_signals, decay=decay, init_phase=None
+            # Signed amplitude covers both zero-drive extrema when phase is fixed.
+            lens,
+            real_signals,
+            decay=decay,
+            init_phase=None if fit_phase else 0.0,
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)

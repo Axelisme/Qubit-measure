@@ -38,7 +38,9 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.process import find_rotate_angle
+
+from .rabi_check_fit import RabiCheckFit, fit_reset_rabi
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,14 @@ class RabiCheckResult:
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
+    # Anchor all branches to the before-reset IQ axis. Branch offsets must not
+    # rotate the projection or independently rescale the measured contrasts.
+    try:
+        angle = find_rotate_angle(signals[0])
+    except ValueError:
+        # Live buffers can be empty before the first acquisition completes.
+        angle = 0.0
+    return (signals * np.exp(-1j * angle)).real
 
 
 class RabiCheckModuleCfg(ConfigBase):
@@ -148,23 +157,62 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
         return RabiCheckResult(gains, signals, cfg_snapshot=orig_cfg)
 
     @retrieve_result
-    def analyze(self, result: RabiCheckResult | None = None) -> Figure:
-        """Show the three reset branches from the live gain sweep."""
-        assert result is not None, "no result found"
+    def analyze(
+        self, result: RabiCheckResult | None = None
+    ) -> tuple[RabiCheckFit, Figure]:
+        """Return descriptive contrast fits and a figure, without reset fidelity.
 
+        Frequency is fitted only to the before-reset branch. All branches share
+        its IQ projection and frequency; after-reset also includes a 2f term.
+        """
+        if result is None:
+            raise ValueError("No reset-check result found")
         gains, signals = result.gains, result.signals
+        if gains.ndim != 1 or signals.shape != (3, gains.size):
+            raise ValueError("Reset-check signals must have shape (3, number of gains)")
+        if not np.array_equal(result.reset_states, [0, 1, 2]):
+            raise ValueError("Reset-check branch order must be [0, 1, 2]")
+        if np.any(np.isinf(signals)):
+            raise ValueError("Reset-check signals must not contain infinities")
         real_signals = reset_rabi_signal2real(signals)
-
-        wo_signals, w_signals, wr_signals = real_signals
-
-        fig, ax = plt.subplots(figsize=config.figsize)
-
-        ax.plot(gains, wo_signals, label="Without Tested Reset", marker=".")
-        ax.plot(gains, w_signals, label="With Tested Reset", marker=".")
-        ax.plot(gains, wr_signals, label="Tested Reset + Rabi Pulse", marker=".")
-        ax.set_xlabel("Pulse gain")
-        ax.set_ylabel("Amplitude")
-        ax.legend()
-        ax.grid(True)
-
-        return fig
+        fit = fit_reset_rabi(gains, real_signals)
+        fig, (ax, residual_ax) = plt.subplots(
+            2,
+            1,
+            sharex=True,
+            figsize=(max(config.figsize[0], 9), max(config.figsize[1], 6)),
+            gridspec_kw={"height_ratios": [3, 1]},
+            layout="constrained",
+        )
+        dense_gains = np.linspace(np.min(gains), np.max(gains), 600)
+        branches = (fit.before, fit.reset, fit.after)
+        labels = ("Before reset", "Reset only", "Reset + Rabi")
+        for index, (branch, label) in enumerate(zip(branches, labels, strict=True)):
+            color = f"C{index}"
+            ax.plot(gains, real_signals[index], ".", color=color, label=label)
+            ax.plot(
+                dense_gains, branch.evaluate(dense_gains, fit.frequency), color=color
+            )
+            residual_ax.plot(
+                gains,
+                real_signals[index] - branch.evaluate(gains, fit.frequency),
+                ".",
+                color=color,
+                label=f"{label}: RMS={branch.residual_rms:.3g}",
+            )
+        ax.set_title(
+            f"Reset Rabi check | f = {fit.frequency:.5g} cycles/gain\n"
+            f"A before = {fit.before.amplitude:.4g}, A after = {fit.after.amplitude:.4g}, "
+            f"relative contrast = {fit.contrast_ratio:.4g}\n"
+            f"Reset residual amplitude = {fit.reset.amplitude:.3g}, "
+            f"after 2f amplitude = {fit.after.second_harmonic_amplitude:.3g}",
+            fontsize=11,
+        )
+        ax.set_ylabel("Projected IQ (a.u.)")
+        residual_ax.set_xlabel("Pulse gain (a.u.)")
+        residual_ax.set_ylabel("Residual (a.u.)")
+        residual_ax.axhline(0, color="gray", linewidth=0.8)
+        for axes in (ax, residual_ax):
+            axes.legend(fontsize=9)
+            axes.grid(True)
+        return fit, fig

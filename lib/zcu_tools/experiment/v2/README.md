@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-09-29 — 父層實驗契約移至 experiment README
+**Last updated:** 2026-09-30 — resolved calibration and local experiment analysis
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -39,6 +39,30 @@ covariance投影，包含local frequency cross-covariance；analysis不重建per
 blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
 `(chi, kappa, resonator frequency, Figure)`。
 
+`twotone/reset/RabiCheckExp.analyze()`回傳`(RabiCheckFit, Figure)`。reset前分支決定
+共同IQ投影與基頻，reset-only以同基頻擬合，reset後追加Rabi的分支包含基頻與二次諧波。
+半峰對峰振幅、相位、相對contrast與殘差只描述平均IQ資料，不推導reset fidelity。
+數值分析由同目錄`rabi_check_fit`擁有，GUI adapter只投影其純量；acquisition與持久化
+資料格式維持三分支gain sweep。
+
+`singleshot/ResetCheckExp`沿用MIST power的population acquisition，以硬體gain／branch
+sweep保存`(Ngain, 3, 2)` G/E populations。analysis可用外部confusion matrix修正，
+回傳reset-only平均／最差excited population，不提供IQ校準writeback。
+Other不是校準後leakage，這些population不是reset-channel fidelity。
+
+`singleshot/AmpRabiExp`保留硬體gain sweep，每個host round擷取所有gain的Reps筆raw IQ；
+不同round的shots串接而不平均，canonical complex128 shape為`(Ngain, Reps * Rounds)`。
+`shot_indices`是inner axis，`gains`是outer axis。完成的round立即更新live分類population；
+取消時未完成round保持NaN，analysis僅移除完全缺失的shot columns，部分缺失的sweep明確拒絕。
+run使用resolved cfg snapshot中的GE centers/radius作live分類，analysis不使用外部confusion matrix。
+
+Amp與Len Rabi共同使用`singleshot.rabi_fit`的raw-IQ joint likelihood與
+`singleshot.rabi_analysis`的population、histogram及confusion matrix診斷圖。
+Amp固定無衰減／零相位，Initial State描述zero-gain前的主要狀態，支援signed gain。
+Amp額外由joint frequency及其covariance推導pi/pi2 gain與誤差，保留原有scalar summary。
+兩者的GUI校準writeback共用backend validity及finite校準值檢查。
+舊Amp population-only檔案缺少IQ shots，無法轉換成新資料，也不在load時虛構raw IQ。
+
 ---
 
 ### 版本實驗的資料形狀
@@ -47,7 +71,7 @@ blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
 
 - **grouped experiment roles**：`CPMG_Exp` 使用 roles `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 roles `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 roles `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` role unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 都只接受 complete grouped HDF5；legacy `.npz` 或 sidecar 不是 runtime 可載入格式；repo 不再提供轉換腳本。
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
-- **single-role 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡的zero-phase Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
+- **single-role 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
 
 Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個program只擷取
 單一length的`shots`筆raw IQ，再寫入sweep-first Result row，避免FPGA同時配置完整
@@ -55,13 +79,13 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
-Singleshot Amp／Len Rabi、T1 family、AC Stark 及 MIST freq/power/power_freq 的 classification
+Singleshot Amp／Len Rabi、ResetCheck、T1 family、AC Stark 及 MIST freq/power/power_freq 的 classification
 校正值由各自 cfg 的 `g_center/e_center/radius` 提供，`run(soc, soccfg, cfg)` 不接受獨立校正參數。Result 的 cfg_snapshot 保存這次使用的
 校正值；complex centers 在 experiment comment 中以可逆 complex literal 序列化，還原由
 Pydantic complex 欄位處理。
 
 Singleshot Rabi joint fit依analysis選擇有衰減或純cosine population dynamics：
-`len_rabi`預設擬合衰減包絡，`amp_rabi`固定使用純cosine。純cosine模型不擬合
+`len_rabi`預設擬合衰減包絡，也可選擇純cosine。純cosine模型不擬合
 `t_r`，結果以`None`表示該參數不適用；兩種模式共用raw-IQ calibration與confusion
 matrix的估計流程。
 
@@ -237,6 +261,26 @@ Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分
 
 ### Singleshot initial state
 
-`GE`、`len_rabi` 與 `amp_rabi` 的 `initial_state` 是 analysis-only 的 `ground` / `excited` 選項，預設 `ground`，描述 probe / swept drive pulse 之前的主要狀態，不代表純態。GE raw rows 固定是 probe off/on；分析與 confusion diagnostic 共同映射到主要 g/e 順序，持久資料不重排。Rabi joint fit 以零 drive 的 excited population 所在半區間限制初態，對同一 pooled PCA histogram 的兩個方向進行候選擬合，以有效性及 likelihood 選擇，不將第一個非零掃描點當成初態。Population、centers 與 confusion matrix 一律保留物理 g/e 語意；len_rabi 保留可選衰減包絡，amp_rabi 固定無衰減。`max_calls` 限制每個方向候選的 Migrad call budget；兩個方向都會評估。
+`GE`、`len_rabi` 與 `amp_rabi` 的 `initial_state` 是 analysis-only 的 `ground` / `excited` 選項，預設 `ground`，描述 probe / swept drive pulse 之前的主要狀態，不代表純態。GE raw rows 固定是 probe off/on；分析與 confusion diagnostic 共同映射到主要 g/e 順序，持久資料不重排。Rabi joint fit 以 pulse 前 excited population 所在半區間限制初態，對同一 pooled PCA histogram 的兩個方向進行候選擬合，以有效性及 likelihood 選擇，不將第一個非零掃描點當成初態。Population、centers 與 confusion matrix 一律保留物理 g/e 語意；len_rabi 保留可選衰減包絡。`max_calls` 限制每個方向候選的 Migrad call budget；兩個方向都會評估。
 
 GE confusion diagnostic 使用兩組各自 refined 的 preparation populations 建立 initial matrix；不以第一列推定第二列。兩組 refinement 均從 joint fit 的同一組 seeds 出發，避免分析順序影響結果。
+
+
+兩條 Len Rabi analysis 都提供 `fit_phase: bool = False`，與 `decay` 獨立。
+一般 Len Rabi 預設固定 0°/180°（由 signed amplitude 決定方向）；啟用後沿用自由
+phase 擬合及包含 phase-frequency covariance 的 π/π/2 length 誤差傳播。
+這將一般 Len Rabi 先前的預設自由 phase 改為 opt-in；amp Rabi 不受影響。
+
+Singleshot 模型是 `p_inf + (p_e0 - p_inf) exp(-t/t_r) cos(omega*t + phase)`；
+無衰減時包絡為 1。`initial_populations` / `p_e0` 表示 pulse 前狀態；
+`zero_length_populations` 是模型外推到 length=0 的值，phase 非零時兩者不同。
+`phase` 以 radians 保存、圖上以 degrees 顯示。自由 phase 限制在初態方向的
+[-π/2, π/2] branch，以避免 180° offset 與 g/e 交換混淆；此模式另限制 baseline
+使振幅方向符合初態，且非負 length 的整條 population 曲線維持 [0, 1]。
+因此這個選項用於初態附近的 shape offset，不辨識跨半週期的未知 rotation。
+固定模式維持原有 parameterization；free-phase 模式的 backend 額外包含 phase
+參數及其 covariance，失敗結果同樣保留所選模型的參數形狀。
+
+`T2RamseyExp.analyze()`與`T2EchoExp.analyze()`提供`fit_phase: bool = False`。
+啟用時由既有`fit_decay_fringe`自由擬合phase；停用保留各自的固定相位策略。
+此選項僅作用於fringe模式，純decay分析忽略它；T2、detune與誤差仍由所選模型推導。

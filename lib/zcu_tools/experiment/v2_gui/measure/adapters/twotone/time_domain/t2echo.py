@@ -48,6 +48,9 @@ class T2EchoAnalyzeParams:
     fit_method: Annotated[Literal["fringe", "decay"], ParamMeta(label="Fit method")] = (
         "fringe"
     )
+    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = (
+        False
+    )
 
 
 @dataclass
@@ -101,6 +104,8 @@ class T2EchoAdapter(
             "'q_f'). No ModuleLibrary writeback."
         ),
         recommended=(
+            "Enable Fit phase offset to fit a free fringe phase; it defaults to "
+            "fixed phase and has no effect for decay-only analysis. "
             "Set the 'Detune ratio (fringes/step)' cfg knob (default 0.1) — it "
             "is the number of fringe periods per delay-sweep step; the absolute "
             "detune (MHz) applied to the final pi/2 pulse phase is detune_ratio "
@@ -169,6 +174,7 @@ class T2EchoAdapter(
         t2e, t2e_err, _, _, fig = T2EchoExp().analyze(
             req.run_result,
             fit_method=params.fit_method,
+            fit_phase=params.fit_phase,
         )
         return T2EchoAnalyzeResult(t2e=t2e, t2e_err=t2e_err, figure=fig)
 

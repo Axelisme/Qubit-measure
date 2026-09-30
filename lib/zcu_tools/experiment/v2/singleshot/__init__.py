@@ -3,6 +3,7 @@ from .ac_stark import AcStarkCfg, AcStarkExp
 from .check import CheckCfg, CheckExp
 from .ge import GE_Cfg, GE_Exp
 from .len_rabi import LenRabiCfg, LenRabiExp
+from .reset_check import ResetCheckCfg, ResetCheckExp
 
 __all__ = [
     # modules
@@ -20,4 +21,6 @@ __all__ = [
     # len rabi
     "LenRabiExp",
     "LenRabiCfg",
+    "ResetCheckCfg",
+    "ResetCheckExp",
 ]
