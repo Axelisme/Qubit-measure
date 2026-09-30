@@ -115,7 +115,8 @@ from __future__ import annotations
 # v71: shared interactive plugin discovery, commands and terminal operation replies.
 # v72: project.apply replaces startup.apply with the same params and result.
 # v74: tab.run_start requires the caller's explicit cfg ref.
-WIRE_VERSION = 74
+# v75: explicit cfg refs replace the per-connection cfg seen guard for Run.
+WIRE_VERSION = 75
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -167,4 +168,5 @@ WIRE_VERSION = 74
 # v103: service-owned interactive sessions and best-effort command view follow.
 # v104: one Setup dialog identity; project.apply and general project settings names.
 # v106: run callers submit their observed cfg identity and revision.
-GUI_VERSION = 106
+# v107: Run admits a valid cfg ref across connections, retaining non-cfg guards.
+GUI_VERSION = 107

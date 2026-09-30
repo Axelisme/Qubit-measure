@@ -33,7 +33,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
         agent=AgentMethodPolicy(
             guard_deps=(
-                "tab:{tab_id}:cfg",
                 "tab:{tab_id}",
                 "soc",
                 "device:*",

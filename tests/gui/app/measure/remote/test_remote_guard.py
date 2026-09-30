@@ -203,10 +203,8 @@ def test_socket_self_write_advances_only_its_prior_seen_context(fx) -> None:
         second.close()
 
 
-@pytest.mark.parametrize("observe_cfg", [False, True])
-def test_context_self_write_advances_only_observed_dependent_cfg(
-    fx, observe_cfg
-) -> None:
+@pytest.mark.parametrize("stale_cfg", [False, True], ids=["current-ref", "old-ref"])
+def test_source_write_requires_the_explicit_current_cfg_ref(fx, stale_cfg) -> None:
     _prepare_guarded_context(fx)
     fx.ctrl.context_control.create_md_attr("count", 4)
     tab_id = fx.ctrl.new_tab("fake")
@@ -224,31 +222,70 @@ def test_context_self_write_advances_only_observed_dependent_cfg(
             ("device.list", {}),
         ):
             assert _raw_call(sock, method, params)["ok"] is True
-        if observe_cfg:
-            assert _raw_call(sock, "tab.get_cfg", {"tab_id": tab_id})["ok"] is True
-        before = fx.state.version.get(f"tab:{tab_id}:cfg")
+        expected = encode_ref(cfg.observe().ref)
+        before = cfg.observe().ref
         assert (
             _raw_call(sock, "context.md_set_attr", {"key": "count", "value": 7})["ok"]
             is True
         )
-        assert fx.state.version.get(f"tab:{tab_id}:cfg") > before
+        assert cfg.observe().ref != before
         started = _raw_call(
             sock,
             "tab.run_start",
             {
                 "tab_id": tab_id,
-                "expected": encode_ref(
-                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                ),
+                "expected": expected if stale_cfg else encode_ref(cfg.observe().ref),
             },
         )
-        if observe_cfg:
-            assert started["ok"] is True
+        if stale_cfg:
+            assert started["error"]["reason"] == "stale_revision"
+            assert started["error"]["data"] == {
+                "expected": expected,
+                "actual": encode_ref(cfg.observe().ref),
+            }
         else:
-            assert started["error"]["reason"] == "stale_version"
-            assert f"tab:{tab_id}:cfg" in started["error"]["data"]["stale"]
+            assert started["ok"] is True
+            result = _raw_call(
+                sock,
+                "operation.await",
+                {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
+            )
+            assert result["result"]["status"] == "finished"
     finally:
         sock.close()
+
+
+def test_cross_connection_cfg_ref_runs_only_after_other_full_reads(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    source = _open_client(fx.service.port)
+    runner = _open_client(fx.service.port)
+    try:
+        publication = _raw_call(source, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        args = {"tab_id": tab_id, "expected": publication["cfg_ref"]}
+        unread = _raw_call(runner, "tab.run_start", args)
+        assert unread["error"]["reason"] == "stale_version"
+        assert "soc" in unread["error"]["data"]["stale"]
+        for method, params in (
+            ("tab.snapshot", {"tab_id": tab_id}),
+            ("soc.info", {"include_cfg": True}),
+        ):
+            assert _raw_call(runner, method, params)["ok"]
+        devices = _raw_call(runner, "device.list")["result"]["devices"]
+        for device in devices:
+            assert _raw_call(runner, "device.snapshot", {"name": device["name"]})["ok"]
+        # Only the other connection read cfg. This request supplies that ref.
+        started = _raw_call(runner, "tab.run_start", args)
+        assert started["ok"]
+        result = _raw_call(
+            runner,
+            "operation.await",
+            {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
+        )
+        assert result["result"]["status"] == "finished"
+    finally:
+        source.close()
+        runner.close()
 
 
 def test_editor_consecutive_self_writes_preserve_commit_observation(fx) -> None:
@@ -837,16 +874,17 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
         # Every source publication advances cfg; a small complete cfg read
         # establishes the new baseline without exporting the large context.
         call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
+        expected = encode_ref(cfg.observe().ref)
         if mutate_cfg:
             cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
         args = {
             "method": "tab.run_start",
-            "params": {"tab_id": tab_id, "expected": encode_ref(cfg.observe().ref)},
+            "params": {"tab_id": tab_id, "expected": expected},
         }
         if mutate_cfg:
             with pytest.raises(RuntimeError) as stale:
                 call("rpc_call", args)
-            assert getattr(stale.value, "reason", None) == "stale_version"
+            assert getattr(stale.value, "reason", None) == "stale_revision"
         else:
             started = call("rpc_call", args)
             _await_completed_run(call, started["handle"])

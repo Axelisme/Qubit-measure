@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-01, specified cfg Run
+**Last updated:** 2026-10-01, explicit cfg ref admission
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,10 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 74`, `GUI_VERSION = 106`, and
-`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 74 requires
+Current measure-gui values are `WIRE_VERSION = 75`, `GUI_VERSION = 107`, and
+`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 75 uses explicit
+cfg refs across connections instead of a per-connection cfg seen guard. GUI 107
+retains tab, SoC, device and authentication guards. WIRE 74 requires
 `expected` on `tab.run_start`, using the common cfg_ref codec. GUI 106 runs only the
 specified Valid publication. MCP 98 forwards that expectation once without
 hidden reads, refresh or retry. WIRE 73 replaces
@@ -187,8 +189,10 @@ an empty seen map. The adapter compares it with current versions on the State
 owner thread before calling the controller. Missing observations, including
 version zero, are stale. Wire methods do not accept `expected_versions`.
 
-Run uses the observed cfg and device snapshots, not live md/ml. Its guard does
-not require exporting the entire context. Load, editor commit and writeback still
+Run uses the explicit cfg ref and observed device snapshots, not live md/ml.
+Cfg admission uses only the resource identity and revision. A ref observed by
+another connection is valid, but tab, SoC and device seen guards still belong to
+the requesting connection. Run does not require exporting the entire context. Load, editor commit and writeback still
 use live context and retain their context guard; Run's change does not authorize
 removing those dependencies.
 
@@ -275,8 +279,9 @@ The adapter does not retry or publish a successful prefix. Plain strings are typ
 strings; __text, __expr, __complex and __ref carry the declared editing intents.
 Source publications advance revision and update all affected cfg before notification.
 
-`tab.run_start` requires the observed cfg_ref as `expected`, independently of the
-connection's seen guards. A stale identity or revision returns expected/actual
+`tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
+not require a second per-connection cfg observation. Tab, SoC, device and
+authentication guards remain independent. A stale identity or revision returns expected/actual
 without starting an operation. An Invalid publication cannot run. Active Run
 blocks manual edits, reset, replacement and close on that tab; source publications
 and edits to other tabs remain allowed. Close becomes available after termination.

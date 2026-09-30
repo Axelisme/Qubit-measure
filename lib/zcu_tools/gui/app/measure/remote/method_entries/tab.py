@@ -121,7 +121,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Library editor observations use their own independent interface.",
             (required_string("tab_id"),),
         ),
-        agent=AgentMethodPolicy(reveals=("tab:{tab_id}:cfg",)),
+        agent=AgentMethodPolicy(),
     ),
     method_entry(
         "tab.edit_cfg",
