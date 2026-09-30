@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.interfaces import RecordExperiment, SynchronousExperiment
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.notebook.plotting import NotebookPlotHost
@@ -63,7 +64,31 @@ class NotebookAdapter(Generic[CoreT]):
         self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
         cfg: CfgT,
     ) -> RunRecord[CfgT, ResultT]:
-        raise NotImplementedError("Notebook record acquisition is not implemented")
+        if self._soc is None or self._soccfg is None:
+            raise ValueError("Run requires both soc and soccfg handles")
+        retained_cfg = deepcopy(cfg)
+        plots = Plots(self._host)
+        context = QickContext(soc=self._soc, soccfg=self._soccfg, plots=plots)
+        try:
+            result = self._core.run(deepcopy(retained_cfg), context=context)
+            plots.finish()
+            record = RunRecord(cfg=retained_cfg, result=result)
+        except BaseException as error:
+            try:
+                try:
+                    plots.finish(present=False)
+                finally:
+                    plots.release()
+            except BaseException as cleanup_error:  # noqa: BLE001 - preserve producer and cleanup failures
+                raise BaseExceptionGroup(
+                    "Run and plot cleanup failed", [error, cleanup_error]
+                ) from None
+            raise
+        self._last_run = record
+        self._analysis = None
+        self.run_presentation = plots
+        self.analysis_presentation = None
+        return record
 
     def analyze(
         self: NotebookAdapter[
