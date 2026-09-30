@@ -395,7 +395,10 @@ def test_cancel_active_operation_returns_interactive_tag(cf):
 
 def test_start_run_sets_is_running(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert cf.state.is_tab_running(tab_id)
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))  # cleanup
 
@@ -422,7 +425,10 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     spy.run.side_effect = _capture_run
     cf.state.get_tab(tab_id).adapter = spy
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     assert captured["cfg"]["reps"] == 42
@@ -430,21 +436,30 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
 
 def test_start_run_emits_run_started(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     cf.bus.emit.assert_any_call(RunStartedPayload(tab_id=tab_id))
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
 def test_run_finished_updates_tab_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.get_tab(tab_id).run.result is not None
 
 
 def test_run_finished_emits_run_finished(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
@@ -458,7 +473,10 @@ def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
     from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
 
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.state.update_tab_analyze(tab_id, object(), Figure())
 
@@ -500,7 +518,10 @@ def test_save_data_completion_reports_only_data_artifact(cf):
 
 def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         TabContentChangedPayload(tab_id, TabContentFact.RUN_RESULT_COMMITTED)
@@ -525,7 +546,10 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     no_analysis.make_save_paths.return_value = None
     cf.state.get_tab(tab_id).adapter = no_analysis
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     # The non-analysis adapter's analyze-params builder is never touched, so the
     # run completes without surfacing an error dialog.
@@ -547,7 +571,10 @@ def test_run_failed_shows_status_message(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.view.show_error_dialog.called
     msg = cf.view.show_error_dialog.call_args[0][1]
@@ -560,7 +587,10 @@ def test_run_failed_clears_run_lock(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.is_run_active() is False
 
@@ -577,12 +607,18 @@ def test_start_run_while_running_raises(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
 
     assert cf.state.is_tab_running(tab_id)
     other_tab_id = cf.ctrl.new_tab("fake")
     with pytest.raises(OperationConflictError, match="run is active"):
-        cf.ctrl.start_run(other_tab_id)
+        cf.ctrl.start_run(
+            other_tab_id,
+            cf.ctrl.cfg_resources.lookup(other_tab_id).observe().ref,
+        )
 
     # cleanup
     ev.set()
@@ -601,7 +637,10 @@ def test_start_run_while_device_setup_active_raises(cf):
     )
 
     with pytest.raises(OperationConflictError, match="device_setup is active"):
-        cf.ctrl.start_run(tab_id)
+        cf.ctrl.start_run(
+            tab_id,
+            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+        )
 
     cf.ctrl._operation_gate.release(1)
 
@@ -617,7 +656,10 @@ def test_draft_context_rejects_real_run_and_save(cf):
     )
 
     with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.start_run(tab_id)
+        cf.ctrl.start_run(
+            tab_id,
+            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+        )
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_data(tab_id, "/tmp/data.h5")
     with pytest.raises(RuntimeError, match="active file-backed context"):
@@ -679,7 +721,10 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     )
 
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
-        cf.ctrl.start_run(tab_id)
+        cf.ctrl.start_run(
+            tab_id,
+            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+        )
 
     cf.ctrl._operation_gate.release(1)
 
@@ -717,7 +762,10 @@ def test_run_clears_active_figure_container_after_finish(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.view.make_run_container.return_value = _make_figure_container()
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
 
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert has_current_container() is False
@@ -725,7 +773,10 @@ def test_run_clears_active_figure_container_after_finish(cf):
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     snapshot = cf.ctrl.get_tab_snapshot(tab_id)
@@ -792,7 +843,10 @@ def test_reset_tab_cfg_while_running_raises(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert cf.state.is_tab_running(tab_id)
 
     from zcu_tools.gui.cfg.resource import CfgPreconditionError
