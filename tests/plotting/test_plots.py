@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 _T = TypeVar("_T")
@@ -78,7 +79,7 @@ def test_normal_figures_wait_for_finish_and_last_live_frame_refreshes() -> None:
     with pytest.raises(RuntimeError, match="Finish"):
         plots.release()
     result = plots.finish()
-    assert result is plots
+    assert result["fit"] is regular
     assert host.presented == [live, regular]
     assert host.refreshed == [(live, True)]
     assert plots.finish() is result
@@ -86,6 +87,27 @@ def test_normal_figures_wait_for_finish_and_last_live_frame_refreshes() -> None:
     plots.release()
     plots.release()
     assert host.released == [regular, live]
+
+
+def test_finished_figures_keep_ownership_without_the_presentation_handle() -> None:
+    plots = Plots(NonPresentingHost())
+    figure, axes = plots.subplots("fit")
+    axes.plot([0.0, 1.0], [2.0, 3.0])
+
+    figures = plots.finish()
+    assert figures is not plots
+    plots.release()
+    del plots
+    gc.collect()
+
+    assert list(figures) == ["fit"]
+    assert figures["fit"] is figure
+    other = FigureCollection()
+    with pytest.raises(ValueError, match="owned by another"):
+        other.adopt("reclaimed", figure)
+    output = BytesIO()
+    figures["fit"].savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_data_is_copied_before_host_dispatch() -> None:
@@ -235,7 +257,7 @@ def test_2d_update_copies_all_arrays_before_owner_dispatch_and_refreshes_on_fini
     np.testing.assert_array_equal(recent.lines[0].get_ydata(), [3.0, 4.0])
     assert heatmap.images[0].get_extent() == pytest.approx((-0.5, 1.5, 5.0, 25.0))
     assert host.refreshed == []
-    assert plots.finish() is plots
+    assert plots.finish()["scan"] is figure
     assert host.refreshed == [(figure, True)]
     plots.release()
     assert host.released == [figure]

@@ -143,3 +143,25 @@ class FigureCollection(Mapping[str, Figure]):
         """Stop accepting new figures while retaining native figure references."""
         with _registration_lock:
             self._sealed = True
+
+
+class NamedFigures(Mapping[str, Figure]):
+    """Read-only completed figures, retaining native artists and their owner.
+
+    Construction seals membership. Keeping this mapping preserves ownership,
+    even when the caller releases presentation or drops the operation handle.
+    Figure contents remain mutable through the native Matplotlib interface.
+    """
+
+    def __init__(self, owner: FigureCollection) -> None:
+        owner.seal()
+        self._owner = owner
+
+    def __getitem__(self, name: str) -> Figure:
+        return self._owner[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._owner)
+
+    def __len__(self) -> int:
+        return len(self._owner)

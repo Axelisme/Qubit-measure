@@ -10,7 +10,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from .figures import FigureCollection
+from .figures import FigureCollection, NamedFigures
 from .liveplot.segments.plot1d import Plot1DSegment
 from .liveplot.segments.plot2d import Plot2DSegment, PlotNonUniform2DSegment
 
@@ -270,7 +270,7 @@ class Plots(FigureCollection):
 
         return self._host.call(create)
 
-    def finish(self, *, present: bool = True) -> FigureCollection:
+    def finish(self, *, present: bool = True) -> NamedFigures:
         if self._finished:
             return self
         self._finished = True
