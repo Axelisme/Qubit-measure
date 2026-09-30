@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, NoAnalyzeParams
 from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
@@ -49,11 +51,13 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
     )
 
 
-def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
+@pytest.mark.parametrize("missing_cfg", [False, True])
+def test_load_result_replaces_run_result_and_invalidates_dependents(
+    missing_cfg: bool,
+) -> None:
     state, tab_id, adapter = _make_state()
     stale_result = object()
-    loaded = MagicMock()
-    loaded.cfg_snapshot = object()
+    loaded = RunRecord(cfg=None if missing_cfg else ExpCfgModel(), result=object())
     adapter.load.return_value = loaded
     tab = state.get_tab(tab_id)
     tab.run.result = stale_result
@@ -90,8 +94,9 @@ def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
     assert tab.post_analysis.writeback_draft is None
     assert writeback.teardown_draft.call_count == 2
     emit.assert_not_called()
-    assert outcome.result_type == type(loaded).__name__
-    assert outcome.has_cfg_snapshot is True
+    assert outcome.result_type == "RunRecord"
+    assert outcome.has_cfg_snapshot is (not missing_cfg)
+    assert outcome.cfg_backfill == "not_applied"
     assert outcome.has_analyze_params is False
     assert state.version.get(f"tab:{tab_id}:result") == 1
     assert state.version.get(f"tab:{tab_id}:analyze") == 1
