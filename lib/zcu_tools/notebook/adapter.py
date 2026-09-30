@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
+from zcu_tools.datafile import format_ext, reserve_labber_filepath
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.interfaces import RecordExperiment, SynchronousExperiment
@@ -157,4 +158,17 @@ class NotebookAdapter(Generic[CoreT]):
         server_ip: str | None = None,
         port: int = 4999,
     ) -> Path:
-        raise NotImplementedError("Notebook explicit record saving is not implemented")
+        path = Path(
+            reserve_labber_filepath(str(destination))
+            if unique
+            else format_ext(str(destination))
+        )
+        self._core.save(
+            source,
+            path,
+            comment=comment,
+            tag=tag,
+            server_ip=server_ip,
+            port=port,
+        )
+        return path
