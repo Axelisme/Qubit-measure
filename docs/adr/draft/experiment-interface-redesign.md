@@ -12,24 +12,34 @@
 
 ### 核心與前端
 
-核心保留無跨次可變狀態的實驗 class。Notebook 使用每個實驗自己的便利 class，GUI adapter 直接使用核心。兩前端不互相包裝，不新增共用 runner 或通用 Notebook adapter。
+核心保留無跨次可變狀態的實驗 class。共用 NotebookAdapter 接收 experiment instance，綁定可重用 hardware handles 與 plot host。同步實驗不再各寫扁平參數 wrapper，caller 直接提供 typed config／options。GUI adapter 直接使用核心，兩前端不互相包裝。
+
+RunRecord 泛型組合 cfg 與實驗專屬 Result。Result 只表達資料，不攜帶 cfg_snapshot。AnalysisRecord 組合 explicit source RunRecord、實際 options、typed Analysis 與純具名 figures；cfg 與 result 從 source 取得，不另外保存一份可混用的來源。
 
 核心操作形狀為：
 
 ```python
 run(config, *, context) -> Result
-analyze(result, options, *, plots) -> Analysis
-save(result, destination) -> None
-load(source) -> Result
+save(source: RunRecord, destination) -> None
+load(source: Path) -> RunRecord
+
+# Only synchronous analysis cores provide this operation.
+analyze(source: RunRecord, options, *, plots) -> Analysis
 ```
 
-QICK context 先只有 soc、soccfg、plots，每次 run 由 caller 建立。單次 buffer、tracker 與 cache 歸 run。中斷、pbar、硬體互斥、重試與 GUI operation 沿現有機制，不以新 outcome 或 runner 取代。
+直接呼叫 core.run 不自動建立 record，也不保存 last state。共用 Notebook 包裝層建立 RunRecord，同步分析成功後建立 AnalysisRecord。Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分析工具各自負責。最低共用 core 契約不能強制 analyze，不補空方法、不探測新舊簽名，也不建立互動 capability registry 或通用 callback framework。
 
-影響 acquisition 的實驗選項全部進 typed config 與 cfg snapshot。核心擁有設定驗證及環境無關預設；GUI 擁有編輯表示、標籤、expression 與 md／module library seed。核心分析不讀 live GUI 狀態。
+QICK context 先只有 soc、soccfg、plots。每次操作另建 context 與 plots，不重用已結束的繪圖操作狀態。Load／analyze 不要求硬體；run 在缺少必要 handles 時先拒絕，不操作儀器。單次 buffer、tracker 與 cache 歸 run。中斷、pbar、硬體互斥、重試與 GUI operation 沿現有機制，不以新 outcome 或 runner 取代。
 
-核心 options 與 Analysis 都是實驗專屬 typed 資料。Analysis 不含 Figure 或 writeback。Notebook caller 記錄來源 Result 與實際 options。Notebook 扁平 keyword 引用核心預設並組成 options，不反射產生簽名、不共享可變預設。Notebook 不新增 writeback。
+影響 acquisition 的實驗選項全部進 typed config，包括 T1 uniform。核心擁有設定驗證及環境無關預設；GUI 擁有編輯表示、標籤、expression 與 md／module library seed。核心分析不讀 live GUI 狀態。Hardware handles 不進 cfg 或 record。
+
+共用包裝層隔離 caller cfg／options 與 core 工作輸入，成功後保留該次來源與選項。Record 的欄位關聯固定，不深拷貝大型 Result，不凍結 Figure artists。Record-owned cfg／options 可被使用者刻意修改，不提供 deep-freeze、讀取時複製或完整不可變歷史保證。
+
+同步核心 options 與 Analysis 是實驗專屬 typed 資料，options 欄位擁有預設值，不另設 Notebook defaults 或動態簽名。Analysis 不含 Figure 或 writeback。Notebook 同步入口回傳 AnalysisRecord，互動工具也保留成功成果的來源、實際 options 與純圖。Notebook 不新增 writeback。
 
 GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選項、隨機 seed、時間或其他重現資訊。Framework 保存來源、插件輸出與圖，不追查插件的隱式依賴，也不保證完整 options 或可重現性。`params` 保持表單輸入，不在 Done 時替換成終態 options；不新增通用 committed-options owner。GUI 與 remote 讀同一份已提交輸出。
+
+實驗跨入 zcu_tools 時使用公開絕對 import，預設置頂。只有具體重型依賴或初始化限制才延遲，不藉此外移模組或建立設定式 discovery。
 
 ### 圖形產物與呈現
 
@@ -47,21 +57,31 @@ plots.adopt("diagnostic", external_fig)
 
 新入口不依賴 ambient plotting scope，也不要求實驗作者寫相關 with。Factory 必須明確接合 host；不能只把舊 plt.subplots 包一層，仍暗中依賴 routing 或每次切換全域 backend。
 
-Adapter 掌握操作／session 使用期，共用 plots 實作處理圖形機制。停止 producer、關閉呈現與保留可保存的 Figure 是不同責任。圖已登記不表示操作成功，失敗診斷圖不得混入上一筆成功分析。
+Adapter／Notebook 分析工具掌握操作或 session 使用期，共用 plots 處理圖形機制。操作中的 Plots 提供建圖、liveplot、adopt 與 host 接合；完成成果使用另一個純具名 Figure 容器，不將 Plots 本身當作 AnalysisRecord.figures。純容器不提供建圖、接管、liveplot 或 host commands。
+
+Presentation owner 保留明確的呈現使用期與 release 責任，不能複製 mapping 後丟失所有權。跨存活 owner 接管仍拒絕。停止 producer、最後 refresh、釋放呈現与保留可保存的原生 Figure 分開處理。替換目前引用不關閉使用者持有的舊圖，release 後原生 artist 操作與 savefig 仍可使用。
+
+圖已登記不表示操作成功。Core、host finish 或必要收尾失敗時不提交新成功 record，失敗診斷圖不得混入上一筆成功分析。
 
 GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget。前端持有 canvas 與選圖狀態。截圖取目前選圖，分析圖保存涵蓋整個集合；不新增多圖排版編輯器。
 
 ### 三種分析生命週期
 
-- **T1**：同步 analyze 正常返回後，Notebook caller 成組發布 typed Analysis、來源、options 與圖集合；GUI 發布 typed 分析輸出、來源與圖集合。
-- **singleshot/ge**：核心另提供 post_analyze。Post 消費對應 primary 與其來源資料，不重新 primary fit，不讀未重新分析的 initial_state 表單；primary／post 各自持有圖集合與 GUI writeback proposal。
-- **onetone/flux_dep**：核心提供領域分析操作，不持有 widget 或 GUI session。Notebook analyze 回傳實驗專屬互動控制物件，GUI 使用既有 INTERACTIVE plugin／session／frontend。啟動返回不終止繪圖；Done 驗證並發布最終結果，Cancel 不取代上一筆成功分析。Notebook 保留實際 options 紀錄；GUI 插件決定成功輸出的欄位，不要求完整終態 options。兩前端共用領域計算與 typed 結果，不強制共用互動框架。
+- T1 提供同步 analyze，消費 explicit RunRecord 與 typed options。Notebook 成功後發布 AnalysisRecord；GUI 發布插件定義的 typed 分析輸出、來源與圖。
+- Singleshot GE 核心另提供 post_analyze。Post 消費 adopted primary 的來源與 calibration，不重新 primary fit，不讀未重新分析的 initial_state 表單。Primary／post 各自持有图與 GUI writeback proposal，不要求其他實驗提供空 post 方法。
+- OneTone FluxDep 核心只負責 acquisition 與資料保存／載入，不實作 analyze。GUI adapter／INTERACTIVE plugin 自行分析，Notebook 使用獨立分析工具。重用現有 TwoLinePicker 與 Qt-free 選線規則，不把 Notebook 工具接回 core.analyze 或共用 Adapter 分析。啟動返回不代表成功；Done 驗證及收尾後發布該次成果，Cancel／failure 不取代上一筆成功。Notebook 保留實際 options，GUI 插件仍自行決定成功輸出的欄位。
 
-Notebook run／load 正常返回後更新 last_result 並清空目前分析；失敗保留舊紀錄。同步 analysis 成功才成組替換分析與圖，明確分析舊 Result 不改 last_result。清空引用不銷毀使用者另行持有的圖或結果，不新增完整歷史管理。
+Notebook run／load 正常返回後更新目前 RunRecord，清空目前分析與圖引用；失敗保留舊紀錄。同步分析成功才成組替換成果，分析舊 RunRecord 不替換目前 run。互動工具綁定自己的來源，晚到完成仍按 G5 發布自身成果，不取最新 run，也不新增 generation gate。清空引用不銷毀使用者持有的舊圖或結果，不新增完整歷史管理。
 
 ### 保存、發現與範圍
 
-實驗擁有 Result 到 canonical 資料的映射，caller 指定路徑；save 不依 last_result。分析圖保存另由 application／Notebook 管理，不改資料格式或 fitting 演算法。
+實驗擁有 RunRecord 到檔案的映射，caller 指定 exact path；save 不依目前 run。預設編解碼沿用 AXES_SPEC／GroupedAxesSpec 與 canonical Labber HDF5，將 cfg envelope 與純 Result 資料分開。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。既有目的地仍拒絕，不新增覆寫、跨程序鎖或原子保存保證。
+
+RunRecord.cfg 允許 None。正常 run 保有有效快照，load 對缺少或無法驗證的 cfg 保留有效資料與既有診斷，不用目前設定補成來源。需要 cfg 的分析或操作在其 owner 入口拒絕；無需 cfg 的分析仍可使用，不由 NotebookAdapter 一律阻擋。預設 canonical saver 保留缺 cfg 時拒絕，GUI 回填／寫回保留 skip。Shape、units、roles、dtype 的資料完整性驗證不放寬。
+
+一般實驗使用預設 save／load，作者可用相同 RunRecord 介面明確 override，不要求額外 experiment_codec，也不聲稱支援任意 Python 物件。Workflow streaming／grouped artifacts 保留自己的契約，不改成 one-shot record 格式。HTTP upload 成功後才可移除 local file。
+
+Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 exact saver。Path helper 不建立檔案或鎖，不宣稱原子 reservation。AnalysisRecord 保留記憶體內來源與 options，分析圖另外保存；不新增完整 analysis session 磁碟格式，也不撤銷實驗既有保存義務。
 
 保留 explicit catalog、v2／v2_gui 分離，以及單檔／package 並存。框架不要求固定內部檔名，不靠掃描或 import 副作用發現實驗。
 
@@ -73,7 +93,7 @@ Notebook run／load 正常返回後更新 last_result 並清空目前分析；�
 
 - 明確 factory 使建圖依賴可讀，但任意第三方 pyplot 操作不再自動路由；adopt 處理返回的 Figure，不提供任意 pyplot 全域狀態隔離。
 - 圖獨立於 Analysis，避免數值型別依前端改變，代價是 caller 必須把資料、來源與圖一起發布。
-- Notebook 專屬類保留少量扁平參數映射，換取熟悉入口與型別提示；不以通用 adapter 或動態簽名消除此映射。
+- 共用 NotebookAdapter 減少同步實驗的重複 wrapper，caller 直接使用核心 typed config／options。互動分析維持前端工具，不將 widget／session 協調塞進共用 Adapter。
 - 不呈現仍建圖，保留實作一致性與保存能力，接受建圖及 artist 更新成本。
 - 不以單一同步方法統一互動 session；通用繪圖不保證自動提供互動輸入。
 - 接受未遷移實驗在中間階段報錯，避免維護第二套繪圖或分析協議；代價是必須逐項追蹤遷移與驗證，不能只用三個標準實驗通過推定整批完成。
@@ -135,7 +155,9 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - GUI 多圖檔名的精確格式、State／SaveService／截圖接線，以及各批 adapter／核心遷移的責任與驗證範圍。
 - 完成後取圖、保留參照與釋放呈現的具體介面，以及名稱或接管衝突拒絕後的 owner 完整性。
 - Notebook inline／widget 的顯示與 close、GUI worker／canvas 更新、最後 refresh 及失敗收尾。
-- GE primary 替換後的 post 關係，以及 Notebook 互動完成後取得結果的方法名。細化不得新增 G5 已排除的 Notebook 晚到發布限制。
+- GE primary 替換後的 post 關係，以及 Notebook 獨立互動工具完成後取得結果的方法名。細化不得新增 G5 已排除的 Notebook 晚到發布限制。
+- RunRecord／AnalysisRecord 的公開型別宣告、同步 bound analyze 的型別限制、純圖容器與 presentation handle 的公開接縫，以及 default／override codec 的正式 observations。
+- T1 tracer-bullet 要有實際 caller、正式 seam tests、可執行 gates 與種子。本文是 contract 文件，不代表這些項目或新產品行為已完成。
 
 現有 Notebook close 與 GUI bridge 限制仍見 [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 和 [GUI plotting](../../../lib/zcu_tools/gui/plotting/README.md)。本草案不聲稱已完成執行期驗證。
 
