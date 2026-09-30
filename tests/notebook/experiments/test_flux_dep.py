@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import ipywidgets as widgets
 import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseEvent
+from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepAnalysis,
     FluxDepAnalyzeOptions,
@@ -21,7 +22,12 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepExp as FluxDepCore,
 )
+from zcu_tools.experiment.v2.runtime.schedule import (
+    ScheduleStep,
+    SignalBuffer,
+)
 from zcu_tools.notebook.experiments import FluxDepNotebookExp
+from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -114,8 +120,12 @@ def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> No
 
 
 @pytest.mark.parametrize("reverse_flux", [False, True])
-def test_simulated_run_publishes_typed_measurement_without_hardware(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reverse_flux: bool
+@pytest.mark.parametrize("stop_after", [None, 2])
+def test_simulated_run_publishes_acquired_rows_in_final_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    reverse_flux: bool,
+    stop_after: int | None,
 ) -> None:
     import zcu_tools.experiment.v2.onetone.flux_dep as core_module
 
@@ -129,9 +139,8 @@ def test_simulated_run_publishes_typed_measurement_without_hardware(
     before = cfg.model_dump()
 
     class FakeBuilder:
-        def __init__(self, buffer: Any, row: int) -> None:
-            self.buffer = buffer
-            self.row = row
+        def __init__(self, step: ScheduleStep[FluxDepCfg, float, object]) -> None:
+            self.step = step
 
         def add_reset(self, *_args: Any) -> FakeBuilder:
             return self
@@ -143,33 +152,21 @@ def test_simulated_run_publishes_typed_measurement_without_hardware(
             return self
 
         def build_and_acquire(self, **_kwargs: Any) -> None:
-            self.buffer.at(self.row).set(source.signals[self.row])
+            index = self.step.index
+            assert isinstance(index, int)
+            self.step.set_data(source.signals[index])
+            if stop_after is not None and index + 1 == stop_after:
+                self.step.set_stop()
 
-    class FakeSchedule:
-        def __init__(self, config: FluxDepCfg, buffer: Any) -> None:
-            self.config = config
-            self.buffer = buffer
+    def fake_builder(
+        step: ScheduleStep[FluxDepCfg, float, object], _soc: object, _soccfg: object
+    ) -> FakeBuilder:
+        return FakeBuilder(step)
 
-        def __enter__(self) -> FakeSchedule:
-            return self
-
-        def __exit__(self, *_args: Any) -> None:
-            pass
-
-        def scan(self, _field: str, values: list[float]):
-            for row, value in enumerate(values):
-                yield (
-                    row,
-                    SimpleNamespace(
-                        cfg=self.config,
-                        value=value,
-                        prog_builder=lambda _soc, _cfg, row=row: FakeBuilder(
-                            self.buffer, row
-                        ),
-                    ),
-                )
-
-    monkeypatch.setattr(core_module, "Schedule", FakeSchedule)
+    monkeypatch.setattr(ScheduleStep, "prog_builder", fake_builder)
+    monkeypatch.setattr(
+        core_module, "SignalBuffer", partial(SignalBuffer, update_interval=1e-6)
+    )
     monkeypatch.setattr(core_module, "set_flux_in_dev_cfg", lambda *_args: None)
     monkeypatch.setattr(core_module, "setup_devices", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -185,12 +182,25 @@ def test_simulated_run_publishes_typed_measurement_without_hardware(
     assert result.cfg_snapshot is not None
     assert result.cfg_snapshot.model_dump() == before
     assert cfg.model_dump() == before
-    np.testing.assert_array_equal(result.signals, source.signals)
+    expected = source.signals.copy()
+    if stop_after is not None:
+        expected[stop_after:] = np.nan + 1j * np.nan
+    np.testing.assert_allclose(result.signals, expected, equal_nan=True)
     np.testing.assert_array_equal(result.values, source.values)
     np.testing.assert_array_equal(result.freqs, source.freqs)
     plots = exp.run_plots
     assert plots is not None and tuple(plots) == ("measurement",)
-    assert len(plots["measurement"].axes) == 2
+    heatmap, scan = plots["measurement"].axes
+    np.testing.assert_allclose(
+        np.asarray(heatmap.images[0].get_array()),
+        np.abs(result.signals).T,
+        equal_nan=True,
+    )
+    last_row = len(source.values) - 1 if stop_after is None else stop_after - 1
+    np.testing.assert_array_equal(
+        np.asarray(scan.lines[-1].get_ydata()), np.abs(source.signals[last_row])
+    )
+    np.testing.assert_array_equal(scan.lines[-1].get_xdata(), source.freqs)
     plots.release()
     plots["measurement"].savefig(tmp_path / "flux-map.png")
     assert (tmp_path / "flux-map.png").stat().st_size > 0
@@ -285,6 +295,68 @@ def test_failed_notebook_publication_cleans_up_widgets_and_keeps_record(
         exp.analyze(source, flux_half=-0.2, flux_int=0.3)
     assert exp.analysis is None
     assert set(widgets.Widget.widgets) == existing_widgets
+
+
+def test_failed_final_pick_publication_retires_preview_without_losing_old_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("IPython.display.display", lambda _widget: None)
+    initial_widgets = set(widgets.Widget.widgets)
+    exp = FluxDepNotebookExp()
+    exp.analyze(make_source(), flux_half=-0.2, flux_int=0.3).done()
+    old_record = exp.analysis
+    old_plots = exp.analysis_plots
+    before_new = set(widgets.Widget.widgets)
+    control = exp.analyze(make_source(), flux_half=-0.1, flux_int=0.4)
+
+    def fail_final(_widget: object) -> None:
+        raise RuntimeError("final canvas failed")
+
+    monkeypatch.setattr("IPython.display.display", fail_final)
+    try:
+        with pytest.raises(RuntimeError, match="final canvas failed"):
+            control.done()
+        assert control.is_finished
+        assert exp.analysis is old_record
+        assert exp.analysis_plots is old_plots
+        assert set(widgets.Widget.widgets) == before_new
+    finally:
+        old_plots.release()
+    assert set(widgets.Widget.widgets) == initial_widgets
+
+
+@pytest.mark.parametrize("terminal", ["done", "cancel"])
+def test_terminal_preview_release_failure_closes_controls_and_retains_record(
+    monkeypatch: pytest.MonkeyPatch, terminal: str
+) -> None:
+    monkeypatch.setattr("IPython.display.display", lambda _widget: None)
+    initial_widgets = set(widgets.Widget.widgets)
+    exp = FluxDepNotebookExp()
+    exp.analyze(make_source(), flux_half=-0.2, flux_int=0.3).done()
+    old_record = exp.analysis
+    old_plots = exp.analysis_plots
+    before_new = set(widgets.Widget.widgets)
+    control = exp.analyze(make_source(), flux_half=-0.1, flux_int=0.4)
+    release = NotebookPlotHost.release
+
+    def fail_preview(self: NotebookPlotHost, figure: Figure) -> None:
+        release(self, figure)
+        if figure is control.figure:
+            raise RuntimeError("preview release failed")
+
+    action = control.done if terminal == "done" else control.cancel
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(NotebookPlotHost, "release", fail_preview)
+            with pytest.raises(RuntimeError, match="preview release failed"):
+                action()
+        assert control.is_finished
+        assert exp.analysis is old_record
+        assert exp.analysis_plots is old_plots
+        assert set(widgets.Widget.widgets) == before_new
+    finally:
+        old_plots.release()
+    assert set(widgets.Widget.widgets) == initial_widgets
 
 
 def test_default_notebook_host_drags_and_releases_preview_widgets(

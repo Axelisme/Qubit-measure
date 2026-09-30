@@ -165,6 +165,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                     )
                 )
 
+        signals_buffer.trigger_update(flush=True)
         return FluxDepResult(
             values=dev_values,
             freqs=freqs,

@@ -156,30 +156,45 @@ class FluxDepInteraction:
         plots = Plots(self._host)
         try:
             result = self._core.analyze(self._source, options, plots=plots)
-            plots.finish()
         except BaseException:
             try:
                 plots.finish(present=False)
             finally:
                 plots.release()
             raise
-        self._host.release(self.figure)
-        self.picker.clear_selection()
-        self._close_controls()
+        try:
+            plots.finish()
+        except BaseException:
+            try:
+                plots.release()
+            finally:
+                self._retire_preview()
+            raise
+        try:
+            self._retire_preview()
+        except BaseException:
+            plots.release()
+            raise
         record = FluxDepAnalysisRecord(self._source, options, result, plots)
         self._publish(record)
         self.result = result
         self.plots = plots
-        self.is_finished = True
         return result
 
     def cancel(self) -> None:
         if self.is_finished:
             raise RuntimeError("Flux interaction has finished")
-        self._host.release(self.figure)
-        self.picker.clear_selection()
-        self._close_controls()
-        self.is_finished = True
+        self._retire_preview()
+
+    def _retire_preview(self) -> None:
+        try:
+            self._host.release(self.figure)
+        finally:
+            self.picker.clear_selection()
+            try:
+                self._close_controls()
+            finally:
+                self.is_finished = True
 
     def _close_controls(self) -> None:
         for control in (

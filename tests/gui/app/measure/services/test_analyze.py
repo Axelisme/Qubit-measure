@@ -29,9 +29,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     FluxPickParams,
     FluxPickResult,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
-    FluxPickPlugin,
-)
 from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
     OneToneFluxDepAdapter,
 )
@@ -274,7 +271,7 @@ def _start_onetone_plugin(
     handles: OperationHandles,
     *,
     writeback: MagicMock | None = None,
-) -> tuple[AnalyzeService, FluxPickPlugin, int]:
+) -> tuple[AnalyzeService, PluginDefinition[Any, Any], int]:
     adapter = state.get_tab("tab1").adapter
     assert isinstance(adapter, OneToneFluxDepAdapter)
     ctx = state.session_env
