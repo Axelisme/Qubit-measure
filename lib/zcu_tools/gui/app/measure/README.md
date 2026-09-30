@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-01, specified cfg Run and startup reservation
+**Last updated:** 2026-10-01, cfg Run submission and startup reservation
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -400,6 +400,16 @@ bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
 
+Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
+The form keeps text input local and captures its first publication ref. Run
+submits that input once, then starts only with a Valid returned publication ref.
+Invalid, Stale, Unavailable or failed submission never runs the previous values.
+Pending input can repair an Invalid publication, but cannot bypass busy,
+context or SoC gates. External updates preserve local text, focus and selection.
+Discard uses the latest delivered publication. Reapply asks for confirmation of
+the differences and submits against the revision shown in that confirmation.
+Library editors and writeback keep their existing `CfgDraft` binding behavior.
+
 `Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
 CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
 Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
@@ -407,22 +417,22 @@ Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布
 `TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
 `CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。
 
-CfgEditor在app seam解碼`ValueRef`，並以typed `CfgEdit` batch依序操作binding target。
-Batch維持fail-fast/non-atomic；只有reference shape edit列出前後path set，成功回final net diff，
-每筆成功edit仍各自bump version與觸發subscriber-aware lazy push。
+獨立 library／inspect／writeback 的 CfgEditor 在 app seam 解碼 `ValueRef`，
+並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
+每筆成功 edit 各自 bump version。它不適用於 tab cfg resource 的原子 batch。
 
-The GUI uses a two-tree model:
+Shared `CfgSchema` pairs two trees. The resource owns these inputs; the form
+renders publications and keeps only unsubmitted input locally:
 
 - Spec tree: static shape, labels, variants, literal locks, optional/ref rules.
-- Value tree: mutable draft data shown by the editor.
+- Value tree: authored inputs, including expressions and reference identities.
 
-`adapter.lowering.schema_to_resolved_dict(schema)` freezes cached values for Run;
-unresolved or invalid fields reject the entire cfg. Legal optional `None` remains
-valid. `schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
-non-Run consumers. `CfgSchema` 保存 shared spec/value data；`CfgDraft` 擁有 expression
-解析與 cached validity，Run 不重新讀取 `MetaDict` 或 `ModuleLibrary`。 `ValueRef` is
-resolve-once: it reads the session `ValueLookup` immediately and stores the
-resolved direct scalar in the value tree.
+Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
+remains valid. Run does not reread `MetaDict` or `ModuleLibrary`.
+`schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
+non-Run draft consumers. `CfgSchema` stores shared spec/value data and `CfgDraft`
+provides draft expression evaluation and cached validity. `ValueRef` resolves
+once through the session `ValueLookup` and stores a direct scalar input.
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter只把current

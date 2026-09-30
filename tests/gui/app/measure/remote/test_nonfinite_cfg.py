@@ -57,6 +57,7 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     fx, tab_id, resource, form, entry = live_cfg_form
     entry.setText(text)
+    form.submit_pending()
     observed_form = resource.observe().tree.children["gain"].value
     assert isinstance(observed_form, DirectValue)
     assert observed_form.raw == text

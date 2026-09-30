@@ -7,6 +7,9 @@ from collections.abc import Callable, Iterator
 from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtGui import QBrush, QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -36,6 +39,8 @@ from zcu_tools.gui.cfg.resource import (
     CfgRef,
     CfgStatus,
 )
+from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
 from .fields import (
     CustomReferenceSelection,
@@ -100,9 +105,11 @@ def _visible_rows(
 class ResourceCfgFormWidget(QWidget):
     """Render one caller-owned CfgEditing handle without a writable draft copy.
 
-    A publication updates stable rows in place, keeping the focused input. A
-    shape change schedules a tree rebuild after the originating Qt signal has
-    returned, so a combo cannot delete itself inside its change handler.
+    Text edits stay local until submit_pending(). The first edit captures its
+    publication ref; later publications never replace pending controls. Stale
+    submission keeps the input until explicit discard or confirmed reapplication.
+    Selectors first submit pending input, then change the published selection.
+    Detach discards only view state and never revokes the caller-owned handle.
     """
 
     validity_changed: Signal = Signal(bool)
@@ -112,8 +119,12 @@ class ResourceCfgFormWidget(QWidget):
         parent: QWidget | None = None,
         *,
         text_input_enhancer: TextInputEnhancer | None = None,
+        dialog_presenter: DialogPresenter | None = None,
     ) -> None:
         super().__init__(parent)
+        self._dialogs = dialog_presenter or QtDialogPresenter()
+        self._pending: dict[CfgPath, DirectValue | EvalValue] = {}
+        self._pending_base: CfgRef | None = None
         self._editor: CfgEditing | None = None
         self._observation: CfgObservation | None = None
         self._unsubscribe: Callable[[], None] | None = None
@@ -130,6 +141,22 @@ class ResourceCfgFormWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self._tree, self._branch_style = make_dense_cfg_tree()
         layout.addWidget(self._tree)
+        self._pending_bar = QWidget(self)
+        pending_layout = QHBoxLayout(self._pending_bar)
+        pending_layout.setContentsMargins(0, 0, 0, 0)
+        self._pending_message = QLabel()
+        self._pending_message.setWordWrap(True)
+        pending_layout.addWidget(self._pending_message, stretch=1)
+        discard = QPushButton("Discard local input")
+        discard.setObjectName("cfgDiscardPending")
+        discard.clicked.connect(self.discard_pending)
+        pending_layout.addWidget(discard)
+        reapply = QPushButton("Reapply local input…")
+        reapply.setObjectName("cfgReapplyPending")
+        reapply.clicked.connect(self._confirm_reapply)
+        pending_layout.addWidget(reapply)
+        self._pending_bar.hide()
+        layout.addWidget(self._pending_bar)
         self.setFont(self._tree.font())
         self._tree.itemExpanded.connect(
             lambda item: self._remember_expanded(item, True)
@@ -159,6 +186,9 @@ class ResourceCfgFormWidget(QWidget):
             unsubscribe()
         self._editor = None
         self._observation = None
+        self._pending.clear()
+        self._pending_base = None
+        self._pending_bar.hide()
         self._rebuild_pending = False
         self._signature = ()
         self._expanded.clear()
@@ -172,6 +202,87 @@ class ResourceCfgFormWidget(QWidget):
     def set_editing_enabled(self, enabled: bool) -> None:  # noqa: FBT001 - form API
         self._editing_enabled = enabled
         self._tree.setEnabled(enabled and not self._rebuild_pending)
+        self._pending_bar.setEnabled(enabled)
+
+    def has_pending(self) -> bool:
+        """Whether this view has input not yet submitted to its owner."""
+        return bool(self._pending)
+
+    def submit_pending(self) -> CfgRef:
+        """Submit once against the first input\'s ref; retain local input on failure."""
+        base = self._pending_base
+        if base is None:
+            return self.current_ref()
+        return self._submit_at(base)
+
+    def _submit_at(self, base: CfgRef) -> CfgRef:
+        editor = self._editor
+        if editor is None:
+            raise RuntimeError("Config form is not attached")
+        edits = tuple(CfgEdit(path, value) for path, value in self._pending.items())
+        published = editor.edit(base.revision, edits)
+        self._pending.clear()
+        self._pending_base = None
+        self._show_publication(published)
+        return published.ref
+
+    def discard_pending(self) -> None:
+        """Use the latest delivered publication, without reading or editing the owner."""
+        self._pending.clear()
+        self._pending_base = None
+        if self._observation is not None:
+            self._show_publication(self._observation)
+        else:
+            self._pending_bar.hide()
+
+    def _update_pending_message(self) -> None:
+        self._pending_bar.setVisible(self.has_pending())
+        conflict = self.has_pending() and self._pending_base != self.current_ref()
+        self._pending_message.setText(
+            "Config changed externally. Local input is preserved; discard or reapply."
+            if conflict
+            else "Local input will be submitted before Run."
+        )
+
+    def _confirm_reapply(self) -> None:
+        observation = self._observation
+        if observation is None or not self.has_pending():
+            return
+        shown_ref = observation.ref
+        shown_edits = tuple(self._pending.items())
+        generation = self._generation
+        differences = []
+        for path, value in shown_edits:
+            node = observation.tree
+            for key in path:
+                child = node.children.get(key)
+                if child is None:
+                    break
+                node = child
+            differences.append(
+                f"{'.'.join(path)}: current {node.value!r} → local {value!r}"
+            )
+
+        def apply(confirmed: bool) -> None:  # noqa: FBT001 - dialog callback
+            if not confirmed or generation != self._generation:
+                return
+            if tuple(self._pending.items()) != shown_edits:
+                self._pending_message.setText(
+                    "Local input changed. Review the differences again."
+                )
+                return
+            try:
+                self._submit_at(shown_ref)
+            except ExpectedError as exc:
+                self._pending_message.setText(str(exc))
+
+        self._dialogs.confirm_async(
+            self,
+            "Reapply local input",
+            f"Apply to config revision {shown_ref.revision}?\n\n"
+            + "\n".join(differences),
+            on_decision=apply,
+        )
 
     def current_ref(self) -> CfgRef:
         """Return the displayed publication's ref without refreshing the owner."""
@@ -196,6 +307,10 @@ class ResourceCfgFormWidget(QWidget):
     def _show_publication(self, published: CfgObservation) -> None:
         previous = self._observation
         self._observation = published
+        self._update_pending_message()
+        if self.has_pending():
+            self.validity_changed.emit(self.is_valid())
+            return
         changed_references: list[tuple[CfgPath, str]] = []
         if previous is not None:
             before = {
@@ -232,7 +347,8 @@ class ResourceCfgFormWidget(QWidget):
         if generation != self._generation or not self._rebuild_pending:
             return
         self._rebuild_pending = False
-        self._rebuild()
+        if not self.has_pending():
+            self._rebuild()
         self._tree.setEnabled(self._editing_enabled)
 
     def _shape_signature(
@@ -300,7 +416,14 @@ class ResourceCfgFormWidget(QWidget):
                 spec,
                 value,
                 options=node.options,
-                submit=lambda selected: self._edit(path, selected, generation),
+                submit=lambda selected: self._edit(
+                    path,
+                    selected,
+                    generation,
+                    immediate=node.options is not None
+                    or spec.type is bool
+                    or self._is_selector(path),
+                ),
                 text_input_enhancer=self._text_input_enhancer,
             )
         if isinstance(spec, SweepSpec):
@@ -341,8 +464,24 @@ class ResourceCfgFormWidget(QWidget):
             return None
         raise TypeError(f"No cfg input renderer for {type(spec).__name__} at {path!r}")
 
+    def _is_selector(self, path: CfgPath) -> bool:
+        observation = self._observation
+        if observation is None:
+            return False
+        node = observation.tree
+        for key in path[:-1]:
+            node = node.children[key]
+        return isinstance(node.spec, ChoiceSectionSpec) and any(
+            binding.selector_key == path[-1] for binding in node.spec.bindings
+        )
+
     def _edit(
-        self, path: CfgPath, value: DirectValue | EvalValue, generation: int
+        self,
+        path: CfgPath,
+        value: DirectValue | EvalValue,
+        generation: int,
+        *,
+        immediate: bool = False,
     ) -> None:
         editor, observation = self._editor, self._observation
         if (
@@ -352,7 +491,26 @@ class ResourceCfgFormWidget(QWidget):
             or observation is None
         ):
             return
-        editor.edit(observation.ref.revision, (CfgEdit(path, value),))
+        if immediate:
+            try:
+                ref = self.submit_pending()
+                editor.edit(ref.revision, (CfgEdit(path, value),))
+            except ExpectedError as exc:
+                self._pending_message.setText(str(exc))
+                self._pending_bar.show()
+                QTimer.singleShot(0, lambda: self._restore_selection(path, generation))
+            return
+        if self._pending_base is None:
+            self._pending_base = observation.ref
+        self._pending[path] = value
+        widget = self._inputs.get(path)
+        if isinstance(widget, ScalarInputWidget):
+            node = observation.tree
+            for key in path:
+                node = node.children[key]
+            widget.display(value, options=node.options)
+        self._update_pending_message()
+        self.validity_changed.emit(self.is_valid())
 
     def _select_reference(
         self, path: CfgPath, selected: ReferenceSelection, generation: int
@@ -365,13 +523,37 @@ class ResourceCfgFormWidget(QWidget):
             or observation is None
         ):
             return
-        if isinstance(selected, CustomReferenceSelection):
-            editor.select_custom_reference(
-                observation.ref.revision, path, selected.label
-            )
-        else:
-            editor.edit(
-                observation.ref.revision, (CfgEdit((*path, "__ref"), selected),)
+        try:
+            ref = self.submit_pending()
+            if isinstance(selected, CustomReferenceSelection):
+                editor.select_custom_reference(ref.revision, path, selected.label)
+            else:
+                editor.edit(ref.revision, (CfgEdit((*path, "__ref"), selected),))
+        except ExpectedError as exc:
+            self._pending_message.setText(str(exc))
+            self._pending_bar.show()
+            QTimer.singleShot(0, lambda: self._restore_selection(path, generation))
+
+    def _restore_selection(self, path: CfgPath, generation: int) -> None:
+        observation = self._observation
+        if observation is None or generation != self._generation:
+            return
+        node = observation.tree
+        for key in path:
+            child = node.children.get(key)
+            if child is None:
+                return
+            node = child
+        widget = self._inputs.get(path)
+        if isinstance(widget, ScalarInputWidget) and isinstance(
+            node.value, (DirectValue, EvalValue)
+        ):
+            widget.display(node.value, options=node.options)
+        elif isinstance(widget, ReferenceInputWidget) and isinstance(
+            node.value, (ReferenceValue, type(None))
+        ):
+            widget.display(
+                node.value, library_keys=reference_library_keys(node), valid=node.valid
             )
 
     def _refresh_inputs(self, published: CfgObservation) -> None:
