@@ -58,6 +58,7 @@ matplotlib.use("Agg")
 import numpy as np
 import pytest
 from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.lookback import (
     LookbackCfg,
     LookbackExp,
@@ -410,13 +411,11 @@ def test_t1_recovers_t1(uniform: bool) -> None:
     result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
     run_plots.finish()
     fit_plots = Plots(NonPresentingHost())
-    analysis = exp.analyze(result, T1AnalyzeOptions(), plots=fit_plots)
+    source = RunRecord(cfg=cfg, result=result)
+    analysis = exp.analyze(source, T1AnalyzeOptions(), plots=fit_plots)
     fit_plots.finish()
     t1 = analysis.t1
     assert cfg == original_cfg
-    assert result.cfg_snapshot is not cfg
-    assert isinstance(result.cfg_snapshot, T1Cfg)
-    assert result.cfg_snapshot.uniform is uniform
     np.testing.assert_array_equal(
         run_plots["measurement"].axes[0].lines[0].get_xdata(), result.times
     )
@@ -459,8 +458,6 @@ def test_t1_interrupted_acquire_returns_partial_result(
     plots.finish()
     assert result.signals.shape == result.times.shape == (30,)
     assert np.all(np.isnan(result.signals))
-    assert isinstance(result.cfg_snapshot, T1Cfg)
-    assert result.cfg_snapshot.uniform is True
     plots.release()
 
 

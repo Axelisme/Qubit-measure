@@ -18,13 +18,14 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepAnalysis,
     FluxDepAnalyzeOptions,
     FluxDepExp,
     FluxDepResult,
 )
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Result
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Result
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     FluxPickParams,
     FluxPickResult,
@@ -234,7 +235,8 @@ def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(qapp) -> 
     tab.adapter = T1Adapter()
     times = np.linspace(0, 100, 101)
     signals = (0.2 + 0.8 * np.exp(-times / 20)).astype(np.complex128)
-    state.update_tab_result("tab1", T1Result(times, signals))
+    source = RunRecord[T1Cfg, T1Result](cfg=None, result=T1Result(times, signals))
+    state.update_tab_result("tab1", source)
     handles = OperationHandles()
     service, bg = _make_service(state, EventBus(), handles=handles)
     plots = _plots()

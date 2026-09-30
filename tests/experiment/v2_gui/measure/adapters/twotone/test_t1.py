@@ -6,7 +6,13 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 from zcu_tools.experiment.context import QickContext
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Analysis, T1Exp, T1Result
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+    T1Analysis,
+    T1Cfg,
+    T1Exp,
+    T1Result,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain.t1 import (
     T1Adapter,
     T1AnalyzeParams,
@@ -28,10 +34,11 @@ def _result() -> T1Result:
 
 def test_t1_gui_analysis_preserves_core_numbers_and_named_fit() -> None:
     result = _result()
+    source = RunRecord[T1Cfg, T1Result](cfg=None, result=result)
     plots = Plots(NonPresentingHost())
     answer = T1Adapter().analyze(
         AnalyzeRequest(
-            result, T1AnalyzeParams(skip=3), md=Mock(), ml=Mock(), predictor=None
+            source, T1AnalyzeParams(skip=3), md=Mock(), ml=Mock(), predictor=None
         ),
         plots=plots,
     )
@@ -51,7 +58,7 @@ def test_t1_gui_run_passes_captured_context_and_formal_cfg(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = T1Adapter()
-    cfg = Mock()
+    cfg = Mock(uniform=False)
     monkeypatch.setattr(adapter, "build_exp_cfg", lambda _raw, _req: cfg)
     result = _result()
     observed: list[tuple[object, QickContext]] = []
@@ -63,7 +70,12 @@ def test_t1_gui_run_passes_captured_context_and_formal_cfg(
     monkeypatch.setattr(T1Exp, "run", run)
     plots = Plots(NonPresentingHost())
     req = RunRequest(soc=Mock(), soccfg=Mock(), device_snapshot={})
-    assert adapter.run(req, {"uniform": False}, plots=plots) is result
+    source = adapter.run(req, {"uniform": False}, plots=plots)
+    assert source.result is result
+    assert source.cfg is not None and source.cfg is not cfg
+    assert source.cfg.uniform is False
+    cfg.uniform = True
+    assert source.cfg.uniform is False
     assert observed[0][0] is cfg
     assert observed[0][1].soc is req.soc
     assert observed[0][1].soccfg is req.soccfg
@@ -75,17 +87,21 @@ def test_t1_gui_run_passes_captured_context_and_formal_cfg(
 def test_t1_gui_save_and_load_delegate_canonical_result_first_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    result = _result()
-    observed: list[tuple[T1Result, Path, str | None]] = []
+    source = RunRecord[T1Cfg, T1Result](cfg=None, result=_result())
+    observed: list[tuple[RunRecord[T1Cfg, T1Result], Path, str | None]] = []
 
     def save(
-        _exp: T1Exp, data: T1Result, path: Path, *, comment: str | None = None
+        _exp: T1Exp,
+        data: RunRecord[T1Cfg, T1Result],
+        path: Path,
+        *,
+        comment: str | None = None,
     ) -> None:
         observed.append((data, path, comment))
 
-    def load(_exp: T1Exp, path: Path) -> T1Result:
+    def load(_exp: T1Exp, path: Path) -> RunRecord[T1Cfg, T1Result]:
         assert path == tmp_path / "data.hdf5"
-        return result
+        return source
 
     monkeypatch.setattr(T1Exp, "save", save)
     monkeypatch.setattr(T1Exp, "load", load)
@@ -93,7 +109,7 @@ def test_t1_gui_save_and_load_delegate_canonical_result_first_paths(
     path = str(tmp_path / "data.hdf5")
     adapter.save(
         SaveDataRequest(
-            result,
+            source,
             path,
             md=Mock(),
             ml=Mock(),
@@ -104,5 +120,5 @@ def test_t1_gui_save_and_load_delegate_canonical_result_first_paths(
             comment="note",
         )
     )
-    assert observed == [(result, Path(path), "note")]
-    assert adapter.load(LoadDataRequest(path, md=Mock(), ml=Mock())) is result
+    assert observed == [(source, Path(path), "note")]
+    assert adapter.load(LoadDataRequest(path, md=Mock(), ml=Mock())) is source
