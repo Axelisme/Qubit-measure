@@ -20,7 +20,6 @@ from zcu_tools.gui.app.autofluxdep.services import (
     PersistedNode,
     PersistedPredictorDialogState,
     PersistedPredictorModel,
-    PersistedStartup,
     PersistedUiPrefs,
     PersistedWorkflow,
     PersistenceError,
@@ -32,9 +31,10 @@ from zcu_tools.gui.app.autofluxdep.services import (
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
-from zcu_tools.gui.session.services.startup import (
-    StartupConnectionRequest,
-    StartupProjectRequest,
+from zcu_tools.gui.session.services.project_settings import (
+    ConnectionPreferences,
+    ProjectRequest,
+    SetupPreferences,
 )
 
 from ._helpers import set_node_cfg_knobs
@@ -152,11 +152,13 @@ def test_restore_old_node_without_enabled_defaults_true(tmp_path: Path):
     assert ctrl.state.nodes[0].enabled is True
 
 
-def test_startup_memento_persistence_roundtrip(tmp_path: Path):
+def test_settings_memento_persistence_roundtrip(tmp_path: Path):
     ctrl = build_core(project_root=str(tmp_path))
-    ctrl.apply_startup_project(StartupProjectRequest("chip", "qub", "res"))
-    ctrl.remember_startup_connection(StartupConnectionRequest(ip="10.0.0.2", port=7000))
-    scope_id = ctrl.get_persisted_startup().scope_id
+    ctrl.setup_control.apply_project(ProjectRequest("chip", "qub", "res"))
+    ctrl.setup_control.remember_connection(
+        ConnectionPreferences(ip="10.0.0.2", port=7000)
+    )
+    scope_id = ctrl.setup_control.get_setup_preferences().scope_id
     ctrl.attach_caretaker(PersistenceCaretaker(ctrl, cache_dir=tmp_path))
     ctrl.persist_all()
 
@@ -166,13 +168,13 @@ def test_startup_memento_persistence_roundtrip(tmp_path: Path):
 
     assert outcome is not None
     assert outcome.load_error is None
-    startup = restored.get_persisted_startup()
-    assert startup.scope_id == scope_id
-    assert startup.ip == "10.0.0.2"
-    assert startup.port == 7000
+    prefs = restored.setup_control.get_setup_preferences()
+    assert prefs.scope_id == scope_id
+    assert prefs.ip == "10.0.0.2"
+    assert prefs.port == 7000
     assert restored.state.project is None
-    assert restored.state.exp_context.soc is None
-    assert restored.state.exp_context.soccfg is None
+    assert restored.state.session_env.soc is None
+    assert restored.state.session_env.soccfg is None
 
 
 def test_restore_old_memento_without_ui_defaults_auto_follow_true(tmp_path: Path):
@@ -202,7 +204,14 @@ def test_restore_old_memento_without_ui_defaults_auto_follow_true(tmp_path: Path
     assert outcome is not None
     assert outcome.load_error is None
     assert ctrl.get_auto_follow_tabs() is True
-    assert ctrl.get_persisted_startup() == PersistedStartup()
+    assert ctrl.setup_control.get_setup_preferences() == SetupPreferences(
+        chip_name="",
+        qub_name="",
+        res_name="",
+        scope_id="",
+        ip="192.168.10.1",
+        port=8887,
+    )
     assert ctrl.state.flux_values == pytest.approx([0.0, 0.5, 1.0])
 
 

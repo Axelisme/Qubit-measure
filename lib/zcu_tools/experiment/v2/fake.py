@@ -10,8 +10,8 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment, ExpCfgModel
 from zcu_tools.experiment.utils import make_comment
-from zcu_tools.experiment.v2.runner import SignalBuffer
-from zcu_tools.liveplot import LivePlot1D, make_plot_frame
+from zcu_tools.experiment.v2.runtime import SignalBuffer
+from zcu_tools.plotting.liveplot import LivePlot1D, make_plot_frame
 
 
 @dataclass(frozen=True)

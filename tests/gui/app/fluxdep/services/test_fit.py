@@ -14,6 +14,8 @@ import os
 import h5py
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     SearchResult,
@@ -25,7 +27,6 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpectrumEntry,
 )
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
 # --- fixtures --------------------------------------------------------------
 
@@ -203,7 +204,7 @@ def test_export_params_writes_json(tmp_path):
     path = svc.export_params(out)
     assert path == out
 
-    from zcu_tools.meta_tool import QubitParams
+    from zcu_tools.resources.qubit_params import QubitParams
 
     fluxdep_fit = QubitParams(out, readonly=True).require_fluxdep_fit()
     assert fluxdep_fit.params == (5.0, 1.2, 0.4)

@@ -24,7 +24,8 @@ from scqubits.core.fluxonium import Fluxonium
 from scqubits.core.hilbert_space import HilbertSpace
 
 %autoreload 2
-from zcu_tools.meta_tool import ExperimentManager, QubitParams
+from zcu_tools.resources.context import ContextManager
+from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.simulate import value2flux
 from zcu_tools.notebook.analysis.t1_curve import charge_spectral_density
 ```
@@ -67,7 +68,7 @@ print(f"g = {g}", "GHz")
 ```
 
 ```python
-em = ExperimentManager(result_dir / "exps")
+em = ContextManager(result_dir / "exps")
 ml, md = em.use_flux(label="1.800mA", readonly=True)
 
 flux = value2flux(1.8e-3, flux_half, flux_period)

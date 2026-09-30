@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 import scqubits.settings as scq_settings
 import zcu_tools.simulate.fluxonium.predict as predict_mod
-from zcu_tools.meta_tool import ParamsProject, QubitParams
+from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 scq_settings.PROGRESSBAR_DISABLED = True

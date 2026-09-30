@@ -5,9 +5,15 @@ import pytest
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from zcu_tools.analysis.fluxdep import (
+    FluxPickInputs,
+    FluxPickState,
     TwoLinePicker,
+    align_lines,
     find_best_mirror_position,
     fold_initial_lines,
+    mirror_loss_at,
+    move_line,
+    swap_lines,
 )
 
 
@@ -24,6 +30,102 @@ def _make_picker(**kwargs) -> TwoLinePicker:
     fig = Figure()
     FigureCanvasAgg(fig)
     return TwoLinePicker(fig, sig, devs, freqs, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("half", "integer", "message"),
+    [(float("nan"), 2.0, "flux_half"), (0.0, float("inf"), "flux_int")],
+)
+def test_flux_pick_state_rejects_nonfinite_positions(
+    half: float, integer: float, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        FluxPickState(flux_half=half, flux_int=integer)
+
+
+def test_flux_pick_inputs_own_read_only_data_with_axis_separation() -> None:
+    signals, devs, freqs = _spectrum()
+    expected = complex(signals[0, 0])
+
+    inputs = FluxPickInputs(signals, devs, freqs)
+    signals[0, 0] += 5.0
+
+    assert inputs.signals[0, 0] == expected
+    assert not inputs.signals.flags.writeable
+    assert inputs.min_distance == pytest.approx(0.1)
+
+
+def test_flux_pick_inputs_reject_mismatched_signal_shape() -> None:
+    signals, devs, freqs = _spectrum()
+    with pytest.raises(ValueError, match="signals shape"):
+        FluxPickInputs(signals[:-1], devs, freqs)
+
+
+def test_mirror_loss_at_uses_valid_rows_of_symmetric_spectrum() -> None:
+    signals, devs, _freqs = _spectrum()
+    real = np.abs(signals)
+
+    loss, mean = mirror_loss_at(devs, real, 0.0)
+
+    assert loss.shape == real.shape
+    assert mean == pytest.approx(0.0, abs=1e-10)
+
+
+def test_align_lines_returns_pure_candidate_near_symmetric_spectrum_center() -> None:
+    signals, devs, _freqs = _spectrum()
+    state = FluxPickState(flux_half=0.1, flux_int=-0.1)
+
+    candidate = align_lines(state, devs, np.abs(signals))
+
+    assert abs(candidate.flux_half) < 0.1
+    assert abs(candidate.flux_int) < 0.1
+    assert (state.flux_half, state.flux_int) == (0.1, -0.1)
+
+
+def test_swap_lines_preserves_settings_and_original_state() -> None:
+    committed = FluxPickState(
+        flux_half=1.0, flux_int=-2.0, conjugate=True, magnitude_only=True
+    )
+
+    candidate = swap_lines(committed)
+
+    assert (candidate.flux_half, candidate.flux_int) == (-2.0, 1.0)
+    assert candidate.conjugate and candidate.magnitude_only
+    assert (committed.flux_half, committed.flux_int) == (1.0, -2.0)
+
+
+def test_move_line_clamps_preview_without_mutating_committed_state() -> None:
+    committed = FluxPickState(flux_half=0.0, flux_int=2.0)
+
+    candidate = move_line(committed, "half", 1.95, min_distance=0.1)
+
+    assert (candidate.flux_half, candidate.flux_int) == pytest.approx((1.9, 2.0))
+    assert (committed.flux_half, committed.flux_int) == (0.0, 2.0)
+
+
+def test_move_line_conjugate_preserves_separation() -> None:
+    committed = FluxPickState(flux_half=0.0, flux_int=2.0, conjugate=True)
+
+    candidate = move_line(committed, "integer", 3.0, min_distance=0.1)
+
+    assert (candidate.flux_half, candidate.flux_int) == (1.0, 3.0)
+
+
+@pytest.mark.parametrize(
+    ("role", "position", "min_distance", "message"),
+    [
+        ("unknown", 1.0, 0.1, "role"),
+        ("half", float("nan"), 0.1, "position"),
+        ("half", 1.0, -0.1, "min_distance"),
+    ],
+)
+def test_move_line_rejects_invalid_action(
+    role: str, position: float, min_distance: float, message: str
+) -> None:
+    committed = FluxPickState(flux_half=0.0, flux_int=2.0)
+    with pytest.raises(ValueError, match=message):
+        move_line(committed, role, position, min_distance=min_distance)  # type: ignore[arg-type]
+    assert (committed.flux_half, committed.flux_int) == (0.0, 2.0)
 
 
 def test_fold_initial_lines_defaults() -> None:
@@ -80,7 +182,12 @@ def test_picker_explicit_pick_hooks() -> None:
 
 
 def test_picker_identifies_main_axes() -> None:
-    picker = _make_picker()
-    assert picker.is_main_axes(picker._ax_main)
-    assert not picker.is_main_axes(picker._ax_loss)
+    signals, devs, freqs = _spectrum()
+    figure = Figure()
+    FigureCanvasAgg(figure)
+    picker = TwoLinePicker(figure, signals, devs, freqs)
+    main_axes, loss_axes = figure.axes
+
+    assert picker.is_main_axes(main_axes)
+    assert not picker.is_main_axes(loss_axes)
     assert not picker.is_main_axes(None)

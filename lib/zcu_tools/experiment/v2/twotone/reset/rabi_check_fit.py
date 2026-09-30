@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import minimize_scalar
+from scipy.optimize import OptimizeResult, minimize_scalar
 
 
 @dataclass(frozen=True)
@@ -118,11 +119,14 @@ def _reference_frequency(
 
     grid = np.linspace(0.25, upper, max(33, int(16 * upper) + 1))
     best = int(np.argmin([loss(float(frequency)) for frequency in grid]))
-    optimum = minimize_scalar(
-        loss,
-        bounds=(grid[max(0, best - 1)], grid[min(grid.size - 1, best + 1)]),
-        method="bounded",
-        options={"xatol": 1e-10},
+    optimum = cast(
+        OptimizeResult,
+        minimize_scalar(
+            loss,
+            bounds=(grid[max(0, best - 1)], grid[min(grid.size - 1, best + 1)]),
+            method="bounded",
+            options={"xatol": 1e-10},
+        ),
     )
     if not optimum.success or not np.isfinite(optimum.fun):
         raise ValueError("Before-reset Rabi frequency fit did not converge")

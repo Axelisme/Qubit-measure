@@ -9,9 +9,9 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.experiment import config
 from zcu_tools.program.v2 import PulseReadoutCfg, ReadoutCfg
-from zcu_tools.utils.fitting.singleshot import transition_state_bin_probabilities
 
 from .rabi_fit import RabiJointFitResult
 from .util import classify_result

@@ -3,18 +3,18 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from zcu_tools.notebook.analysis.fluxdep import fitting
-from zcu_tools.notebook.analysis.fluxdep.fitting import (
-    fit_spectrum,
-    load_database,
-    search_in_database,
-)
-from zcu_tools.notebook.analysis.fluxdep.models import energy2transition
-from zcu_tools.notebook.analysis.fluxdep.njit import (
+from zcu_tools.analysis.fluxdep import search
+from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2transition
+from zcu_tools.analysis.fluxdep.search import load_database
+from zcu_tools.analysis.fluxdep.search_njit import (
     candidate_breakpoint_search,
     eval_dist_bounded,
 )
-from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.notebook.analysis.fluxdep import fitting
+from zcu_tools.notebook.analysis.fluxdep.fitting import (
+    fit_spectrum,
+    search_in_database,
+)
 
 from ._synthetic import synth_ABC as _synth
 
@@ -131,10 +131,10 @@ def test_load_database_is_cached_by_file():
 
 
 def test_search_warns_when_interrupted_after_best_so_far(monkeypatch) -> None:
-    import zcu_tools.notebook.analysis.fluxdep.njit as njit
+    import zcu_tools.analysis.fluxdep.search_njit as njit
 
     monkeypatch.setattr(
-        fitting,
+        search,
         "load_database",
         lambda _path: (
             np.array([0.0, 1.0], dtype=np.float64),
@@ -212,8 +212,8 @@ def test_fit_spectrum_reads_scipy_result_x(monkeypatch) -> None:
 
 def _full_exact_scan(db_path, fluxs, freqs, transitions, EJb, ECb, ELb):
     """A reference full exact scan: search EVERY feasible entry (no prune)."""
-    from zcu_tools.notebook.analysis.fluxdep.models import compile_transitions
-    from zcu_tools.notebook.analysis.fluxdep.njit import (
+    from zcu_tools.analysis.fluxdep.search_models import compile_transitions
+    from zcu_tools.analysis.fluxdep.search_njit import (
         _apply_interp,
         _interp_weights,
         search_one_entry,
@@ -278,8 +278,8 @@ def test_prune_is_identical_to_full_exact_scan(seed):
 def test_entry_lower_bound_is_a_valid_floor():
     # entry_lower_bound(...) must never exceed the entry's true best distance
     # (else the prune could wrongly skip the winner).
-    from zcu_tools.notebook.analysis.fluxdep.models import compile_transitions
-    from zcu_tools.notebook.analysis.fluxdep.njit import (
+    from zcu_tools.analysis.fluxdep.search_models import compile_transitions
+    from zcu_tools.analysis.fluxdep.search_njit import (
         _apply_interp,
         _interp_weights,
         candidate_breakpoint_search,

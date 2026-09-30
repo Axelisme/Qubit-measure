@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from zcu_tools.gui.cfg import CfgSectionSpec, CfgSectionValue, ReferenceSpec
-from zcu_tools.gui.measure_cfg import (
+from zcu_tools.experiment.cfg_editing import (
     PROGRAM_SHAPES,
     ProgramMaterializationPolicy,
     ProgramSpecPolicy,
     materialize_program_module,
     materialize_program_waveform,
 )
+from zcu_tools.gui.cfg import CfgSectionSpec, CfgSectionValue, ReferenceSpec
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
 

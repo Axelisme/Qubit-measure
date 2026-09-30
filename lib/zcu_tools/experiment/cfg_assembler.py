@@ -11,7 +11,7 @@ from zcu_tools.program.v2 import ModuleCfgFactory
 from zcu_tools.utils import deepupdate
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
 
 T_ExpCfg = TypeVar("T_ExpCfg", bound=ExpCfgModel)
@@ -21,7 +21,7 @@ def assemble_experiment_cfg(
     raw_cfg: Mapping[str, Any],
     cfg_model: type[T_ExpCfg],
     *,
-    ml: ModuleLibrary,
+    ml: ModuleLibrary | None,
     device_snapshot: Mapping[str, DeviceInfo],
     overrides: Mapping[str, Any] | None = None,
 ) -> T_ExpCfg:

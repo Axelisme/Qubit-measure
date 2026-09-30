@@ -9,7 +9,7 @@ from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.program.base import ImproveAcquireMixin
+from zcu_tools.program.acquisition import ImproveAcquireMixin
 
 from .ir import IRCompileMixin
 from .macro import ImproveAsmV2

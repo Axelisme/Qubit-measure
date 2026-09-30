@@ -1,4 +1,4 @@
-"""IOManager tests (real ExperimentManager).
+"""IOManager tests (real ContextManager).
 
 GlobalDeviceManager registry CRUD coverage lives in
 ``services/test_device_manager.py`` alongside the rest of the device-registry
@@ -10,11 +10,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 
-def _make_base_ctx(**overrides) -> ExpContext:
+def _make_base_ctx(**overrides) -> SessionEnv:
     defaults = dict(
         md=MagicMock(),
         ml=MagicMock(),
@@ -24,7 +24,7 @@ def _make_base_ctx(**overrides) -> ExpContext:
         predictor=None,
     )
     defaults.update(overrides)
-    return ExpContext(**defaults)  # type: ignore[arg-type]
+    return SessionEnv(**defaults)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ def test_iomanager_use_context_updates_md_ml(tmp_path):
     old_ml = base.ml
 
     result_ctx = io.use_context(label, base)
-    # md and ml should come from ExperimentManager, not the old mocks
+    # md and ml should come from ContextManager, not the old mocks
     assert result_ctx.md is not old_md
     assert result_ctx.ml is not old_ml
 

@@ -7,8 +7,8 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg, make_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
+from zcu_tools.resources.context import ModuleLibrary
 
 
 class _DeviceOnlyCfg(ExpCfgModel):

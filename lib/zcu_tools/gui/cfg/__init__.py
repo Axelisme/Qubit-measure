@@ -1,6 +1,13 @@
 """Pure, app-independent GUI configuration model, inheritance, and codec."""
 
-from .codec import SessionCodecError, decode_eval_wire, raw_to_schema, schema_to_raw
+from .codec import (
+    SessionCodecError,
+    decode_complex,
+    decode_eval_wire,
+    encode_complex,
+    raw_to_schema,
+    schema_to_raw,
+)
 from .inheritance import (
     align_locked_literals,
     inherit_from,
@@ -45,12 +52,14 @@ from .model import (
     SweepSpec,
     SweepValue,
     default_value_for_type,
+    resolved_direct_number,
 )
 from .reference_key import (
     is_custom_reference_key,
     make_custom_reference_key,
     parse_custom_reference_key,
 )
+from .resolved import lower_resolved_cfg
 from .schema_assembler import (
     USE_SPEC_DEFAULT,
     CfgSchemaAssembler,
@@ -70,6 +79,8 @@ __all__ = [
     "ChoiceBinding",
     "ChoiceSectionSpec",
     "DirectValue",
+    "decode_complex",
+    "encode_complex",
     "EvalValue",
     "ExpressionResolver",
     "FloatSpec",
@@ -97,6 +108,7 @@ __all__ = [
     "inherit_from",
     "is_custom_reference_key",
     "lower_finished_cfg",
+    "lower_resolved_cfg",
     "make_default_value",
     "materialize_spec_value",
     "make_custom_reference_key",
@@ -105,6 +117,7 @@ __all__ = [
     "read_value_path",
     "replace_value_path",
     "resolve_spec_path",
+    "resolved_direct_number",
     "schema_to_raw",
     "select_ref_value_spec",
     "validate_finished_cfg",

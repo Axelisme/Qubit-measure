@@ -80,8 +80,9 @@ def test_show_tab_has_display_tools(panel):
 
 def test_auto_limits_match_visualizer(panel, qapp):
     import numpy as np
+    from zcu_tools.analysis.fluxdep.models import PointsData
+    from zcu_tools.analysis.spectrum import SpectrumData
     from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-    from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
     w, ctrl = panel
     fx = np.linspace(0.0, 0.5, 6)
@@ -100,7 +101,7 @@ def test_auto_limits_match_visualizer(panel, qapp):
 
 
 def test_missing_freq_check_blocks_mirror_without_sample_f(panel):
-    from zcu_tools.notebook.persistance import TransitionDict
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
 
     w, _ = panel
     # mirror needs sample_f
@@ -124,9 +125,10 @@ def test_freq_fields_are_blank_by_default(panel):
 
 def test_filter_selector_built_eagerly_when_points_exist(qapp):
     import numpy as np
+    from zcu_tools.analysis.fluxdep.models import PointsData
+    from zcu_tools.analysis.spectrum import SpectrumData
     from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
-    from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
     st = FluxDepState()
     fx = np.array([0.0, 0.1, 0.2, 0.3])

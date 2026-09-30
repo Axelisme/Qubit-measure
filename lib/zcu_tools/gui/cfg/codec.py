@@ -25,6 +25,7 @@ from .model import (
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
+    ScalarValue,
     SweepSpec,
     SweepValue,
     _reference_discriminator_key,
@@ -46,6 +47,8 @@ def decode_eval_wire(raw: object) -> EvalValue | None:
 
 
 def _to_json_compatible(value: object) -> object:
+    if isinstance(value, complex):
+        value = encode_complex(value)
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, list):
@@ -124,22 +127,30 @@ def _node_value_to_raw(
                 "__kind": "eval",
                 "expr": value.expr,
             }
-        return {"__kind": "direct", "value": _to_json_compatible(value.value)}
+        payload: dict[str, object] = {
+            "__kind": "direct",
+            "value": _to_json_compatible(value.value),
+        }
+        if value.raw is not None:
+            payload["raw"] = value.raw
+        if value.error is not None:
+            payload["error"] = value.error
+        return payload
     if isinstance(spec, SweepSpec):
         assert isinstance(value, SweepValue)
         return {
             "start": _sweep_edge_to_raw(value.start),
             "stop": _sweep_edge_to_raw(value.stop),
-            "expts": value.expts,
-            "step": value.step,
+            "expts": _range_input_to_raw(value.expts),
+            "step": _range_input_to_raw(value.step),
         }
     if isinstance(spec, CenteredSweepSpec):
         assert isinstance(value, CenteredSweepValue)
         return {
             "center": _sweep_edge_to_raw(value.center),
-            "span": value.span,
-            "expts": value.expts,
-            "step": value.step,
+            "span": _range_input_to_raw(value.span),
+            "expts": _range_input_to_raw(value.expts),
+            "step": _range_input_to_raw(value.step),
         }
     if isinstance(spec, CfgSectionSpec):
         assert isinstance(value, CfgSectionValue)
@@ -169,7 +180,21 @@ def _node_value_to_raw(
     return _to_json_compatible(value)
 
 
-def _sweep_edge_to_raw(value: float | EvalValue) -> object:
+def _range_input_to_raw(value: int | float | DirectValue) -> object:
+    return _sweep_edge_to_raw(value) if isinstance(value, DirectValue) else value
+
+
+def _parse_range_input[T: (int, float)](raw: object, type_: type[T]) -> T | DirectValue:
+    if isinstance(raw, dict) and raw.get("__kind") == "direct":
+        return _decode_direct_wire(raw, ScalarSpec("Sweep input", type_))
+    if not isinstance(raw, (int, float, str)):
+        raise TypeError("Sweep input must be numeric or a direct carrier")
+    return type_(raw)
+
+
+def _sweep_edge_to_raw(value: float | ScalarValue) -> object:
+    if isinstance(value, DirectValue):
+        return _node_value_to_raw(ScalarSpec("Sweep edge", float), value)
     if isinstance(value, EvalValue):
         return {"__kind": "eval", "expr": value.expr}
     return float(value)
@@ -208,7 +233,7 @@ def _node_value_from_raw(
         if eval_value is not None:
             return eval_value
         if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            return DirectValue(value=raw.get("value"))
+            return _decode_direct_wire(raw, spec)
         if isinstance(raw, str) and raw.strip().startswith("="):
             raise RuntimeError("Legacy scalar '=expr' payload is unsupported")
         return DirectValue(raw)
@@ -216,22 +241,22 @@ def _node_value_from_raw(
         if isinstance(raw, dict):
             start = _parse_sweep_edge(raw["start"])
             stop = _parse_sweep_edge(raw["stop"])
-            expts = int(raw["expts"])
+            expts = _parse_range_input(raw["expts"], int)
             step_raw = raw.get("step")
             if step_raw is None:
                 raise RuntimeError("Sweep step is required in session payload")
-            step = float(step_raw)
+            step = _parse_range_input(step_raw, float)
             return SweepValue(start=start, stop=stop, expts=expts, step=step)
         raise RuntimeError("Sweep payload must be an object")
     if isinstance(spec, CenteredSweepSpec):
         if isinstance(raw, dict):
             center = _parse_sweep_edge(raw["center"])
-            span = float(raw["span"])
-            expts = int(raw["expts"])
+            span = _parse_range_input(raw["span"], float)
+            expts = _parse_range_input(raw["expts"], int)
             step_raw = raw.get("step")
             if step_raw is None:
                 raise RuntimeError("Centered sweep step is required in session payload")
-            step = float(step_raw)
+            step = _parse_range_input(step_raw, float)
             return CenteredSweepValue(
                 center=center,
                 span=span,
@@ -249,7 +274,42 @@ def _node_value_from_raw(
     raise RuntimeError(f"Unsupported spec node for restore: {type(spec).__name__}")
 
 
-def _parse_sweep_edge(raw: object) -> float | EvalValue:
+def _decode_direct_wire(raw: dict[str, object], spec: ScalarSpec) -> DirectValue:
+    text = raw.get("raw")
+    error = raw.get("error")
+    if text is not None and not isinstance(text, str):
+        raise ValueError("Direct input raw must be a string")
+    if error is not None and not isinstance(error, str):
+        raise ValueError("Direct input error must be a string")
+    value = raw.get("value")
+    if spec.type is complex and value is not None:
+        value = decode_complex(value)
+    return DirectValue(value=value, raw=text, error=error)
+
+
+def encode_complex(value: complex) -> dict[str, list[float]]:
+    """Encode a complex scalar without formatting or precision loss."""
+    return {"__complex__": [value.real, value.imag]}
+
+
+def decode_complex(value: object) -> complex:
+    """Decode the explicit complex tag shared by cfg persistence and editing."""
+    if not isinstance(value, dict) or set(value) != {"__complex__"}:
+        raise ValueError("Complex scalar requires a __complex__ object")
+    parts = value["__complex__"]
+    if not isinstance(parts, list) or len(parts) != 2:
+        raise ValueError("Complex scalar requires two components")
+    real, imag = parts
+    if isinstance(real, bool) or not isinstance(real, (int, float)):
+        raise ValueError("Complex real component must be a real number")
+    if isinstance(imag, bool) or not isinstance(imag, (int, float)):
+        raise ValueError("Complex imaginary component must be a real number")
+    return complex(real, imag)
+
+
+def _parse_sweep_edge(raw: object) -> float | ScalarValue:
+    if isinstance(raw, dict) and raw.get("__kind") == "direct":
+        return _decode_direct_wire(raw, ScalarSpec("Sweep edge", float))
     if (
         isinstance(raw, dict)
         and raw.get("__kind") == "eval"

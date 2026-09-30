@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.app.main.state."""
+"""Unit tests for zcu_tools.gui.app.measure.state."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.device.base import BaseDeviceInfo
-from zcu_tools.gui.app.main.state import (
+from zcu_tools.gui.app.measure.state import (
     DeviceState,
     DeviceStatus,
     Session,
@@ -265,13 +265,13 @@ def test_update_tab_analyze_bumps_analyze_version():
     assert state.version.get("tab:t1:analyze") == 2
 
 
-def test_set_context_replaces_exp_context():
+def test_set_context_replaces_session_env():
     ctx1 = _make_ctx()
     ctx2 = _make_ctx()
     state = State(ctx1)
-    assert state.exp_context is ctx1
+    assert state.session_env is ctx1
     state.set_context(ctx2)
-    assert state.exp_context is ctx2
+    assert state.session_env is ctx2
 
 
 def test_set_context_does_not_bump_context_version():
@@ -421,7 +421,7 @@ def test_device_state_status_predicates():
 
 
 def test_tab_state_predicates():
-    from zcu_tools.gui.app.main.state import Session
+    from zcu_tools.gui.app.measure.state import Session
     from zcu_tools.gui.cfg import (
         CfgSchema,
         CfgSectionSpec,

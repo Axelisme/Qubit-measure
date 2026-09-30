@@ -1,10 +1,10 @@
-"""Tests for OperationHandles and OperationChannel (ADR-0019 / ADR-0025).
+"""Tests for OperationHandles and OperationChannel (ADR-0066).
 
 Token minting + the three async verbs (await_outcome / poll / cancel) +
 cancel_all + live_count, independent of exclusion. A handle-only op (analyze /
 interactive) uses exactly this with no OperationGate involvement.
 
-ADR-0025: cross-thread interaction uses per-op OperationChannel (ordered FIFO).
+ADR-0066: cross-thread interaction uses per-op OperationChannel (ordered FIFO).
 Tests cover the three return reasons (completed / user_feedback / timeout),
 the non-terminal guarantee (feedback/timeout leave handle unsettled),
 and the folding rules (Stop+Settled, Stop-then-Message fold into reason,
@@ -45,7 +45,7 @@ class OperationHandles(_OperationHandles):
 
 
 # ---------------------------------------------------------------------------
-# OperationHandles basics (ADR-0019)
+# OperationHandles basics (ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -97,7 +97,7 @@ def test_await_result_timeout_ok() -> None:
 
 
 # ---------------------------------------------------------------------------
-# await_outcome — completed path (ADR-0019 contract)
+# await_outcome — completed path (ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -185,7 +185,7 @@ def test_await_outcome_handle_still_awitable_after_timeout() -> None:
 
 
 # ---------------------------------------------------------------------------
-# await_outcome — user_feedback path (ADR-0025 Message event)
+# await_outcome — user_feedback path (ADR-0066 Message event)
 # ---------------------------------------------------------------------------
 
 
@@ -416,7 +416,7 @@ def test_live_count_tracks_pending_operations() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OperationChannel folding semantics (ADR-0025)
+# OperationChannel folding semantics (ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -597,7 +597,7 @@ def test_handles_cancel_invokes_hook() -> None:
 
 
 def test_settle_window_keeps_token_reachable() -> None:
-    """Registry TOCTOU regression (ADR-0025): ``settle`` publishes the channel
+    """Registry TOCTOU regression (ADR-0066): ``settle`` publishes the channel
     to ``_done`` BEFORE retracting it from ``_live``, so a concurrent
     ``await_outcome`` / ``poll`` always finds it in at least one dict and never
     falls through to the default 'finished' (which would misreport a
@@ -623,7 +623,7 @@ def test_settle_window_keeps_token_reachable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OperationChannel.can_cancel (ADR-0025 §Stop-gating)
+# OperationChannel.can_cancel (ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -640,7 +640,7 @@ def test_channel_can_cancel_false_when_no_hook() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OperationHandles.has_cancel_hook (ADR-0025 §Stop-gating)
+# OperationHandles.has_cancel_hook (ADR-0066)
 # ---------------------------------------------------------------------------
 
 
@@ -698,7 +698,7 @@ def test_has_cancel_hook_is_pure_read_does_not_trigger_hook() -> None:
 def test_pure_nudge_between_awaits_is_delivered_not_dropped() -> None:
     """A pure nudge enqueued while the op is settling (or between awaits) is
     delivered as user_feedback on the next consume, not silently folded away
-    (ADR-0025 in-order drain). The subsequent settle then completes."""
+    (ADR-0066 in-order drain). The subsequent settle then completes."""
     handles = OperationHandles()
     token = handles.create()
     handles.message(token, "also check the readout freq")

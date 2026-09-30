@@ -1,4 +1,4 @@
-"""NotifyHandles — agent-initiated user-prompt channel (Stage 4b, ADR-0025).
+"""NotifyHandles — agent-initiated user-prompt channel (Stage 4b, ADR-0066).
 
 Mirrors OperationChannel's four invariants (producer non-blocking put, consumer
 bounded queue.Queue.get, set-once latch, drain-first) with an independent event
@@ -53,7 +53,7 @@ class Dismiss:
 
 @dataclass(frozen=True)
 class Timeout:
-    """QTimer in the dialog fired — dialog's own timeout SSOT (ADR-0025)."""
+    """QTimer in the dialog fired — dialog's own timeout SSOT (ADR-0066)."""
 
 
 NotifyEvent = Reply | Dismiss | Timeout
@@ -66,7 +66,7 @@ NotifyEvent = Reply | Dismiss | Timeout
 
 @dataclass(frozen=True)
 class NotifyResult:
-    """The result of one gui_prompt_user prompt, structured for wire folding."""
+    """The result of one notify.open/notify.await prompt, structured for wire folding."""
 
     reason: Literal["reply", "dismiss", "timeout"]
     reply: str | None = None
@@ -117,7 +117,7 @@ class NotifyChannel:
         self._q.put(Dismiss())
 
     def timeout(self) -> None:
-        """QTimer in the dialog fired (dialog is the timeout SSOT — ADR-0025)."""
+        """QTimer in the dialog fired (dialog is the timeout SSOT — ADR-0066)."""
         with self._lock:
             if self._settled is not None:
                 return
@@ -143,7 +143,7 @@ class NotifyChannel:
         deadline = time.monotonic() + timeout
 
         while True:
-            # Drain already-queued events first (drain-first, ADR-0025).
+            # Drain already-queued events first (drain-first, ADR-0066).
             try:
                 event = self._q.get_nowait()
             except queue.Empty:

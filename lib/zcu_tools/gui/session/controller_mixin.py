@@ -1,9 +1,9 @@
 """SessionControllerMixin — shared Controller forwards used by both apps.
 
-Both measurement-session app Controllers (measure: ``gui/app/main/controller``;
+Both measurement-session app Controllers (measure: ``gui/app/measure/controller``;
 autofluxdep: ``gui/app/autofluxdep/controller``) expose a wall of one-line
 forwards into the same four session services (soc_connection / context / device /
-startup). Shared dialogs now use explicit control facets; app-local and
+settings). Shared dialogs now use explicit control facets; app-local and
 compatibility callers may still use these forwards. The byte-identical
 implementation lives here.
 
@@ -11,7 +11,7 @@ Design (Candidate #14, Option B — abstract service accessors):
 
 - The mixin declares a small set of **abstract accessors** for the services it
   forwards into (``_soc_svc`` / ``_ctx_svc`` / ``_dev_svc`` /
-  ``_startup_svc``), as annotation-only attribute declarations with explicit
+  ``_settings_svc``), as annotation-only attribute declarations with explicit
   service types. pyright treats each as an attribute the concrete Controller must
   supply, and enforces the declared service type at every forward. Each app
   satisfies them however its own attribute layout already provides the service —
@@ -32,11 +32,13 @@ inspect/remote context consumers use ``ContextControlPort`` directly.
 
 Each app keeps as its own override the methods whose body genuinely diverges:
 
-- ``apply_startup_project`` — measure returns the resolved-project dict (WIRE-48);
-  autofluxdep returns ``bool``. Different return contract, kept per-app.
 - ``get_project_root`` — reads the app's own ``self._project_root`` (app state, not
   a session service).
 - ``get_bus`` — returns the app-specific ``EventBus`` subtype.
+
+Project apply is not forwarded here: the setup dialog uses ``SetupControlPort``, and
+measure's remote ``project.apply`` uses the measure Controller's own
+``apply_project``, which returns the resolved-project dict (WIRE-48).
 
 Layering: this module lives in the shared ``gui/session/`` layer, so it MUST NOT
 import Qt or ``gui.app.*`` (guarded by ``tests/gui/test_shared_layer.py``). Every
@@ -65,14 +67,10 @@ if TYPE_CHECKING:
         DeviceEntry,
         DeviceService,
     )
-    from zcu_tools.gui.session.services.startup import (
-        PersistedStartup,
-        StartupConnectionRequest,
-        StartupService,
-    )
+    from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class SessionControllerMixin:
@@ -89,24 +87,21 @@ class SessionControllerMixin:
     _soc_svc: SoCConnectionService
     _ctx_svc: ContextService
     _dev_svc: DeviceService
-    _startup_svc: StartupService
+    _settings_svc: ProjectSettingsService
 
     def get_bus(self) -> BaseEventBus:
         """Return the concrete app bus; every app controller overrides this."""
         raise NotImplementedError
 
-    # --- setup dialog: startup -------------------------------------------
-    def get_persisted_startup(self) -> PersistedStartup:
-        return self._startup_svc.get_persisted()
-
-    def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
-        self._startup_svc.remember_connection(req)
+    # --- setup dialog: project settings ----------------------------------
+    def get_left_panel_width(self) -> int:
+        return self._settings_svc.get_left_panel_width()
 
     def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        return self._startup_svc.list_result_scopes(refresh=refresh)
+        return self._settings_svc.list_result_scopes(refresh=refresh)
 
     def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
-        return self._startup_svc.derive_project_paths(chip_name, qub_name)
+        return self._settings_svc.derive_project_paths(chip_name, qub_name)
 
     # --- setup dialog: context switching ---------------------------------
     def use_context(self, label: str) -> None:
@@ -125,7 +120,7 @@ class SessionControllerMixin:
         device's current state (never set). ``bind_device=None`` makes an unbound
         context (unit="none", no value). ``clone_from`` is the label of an existing
         context to clone its ml/md from. The new context's label is derived
-        automatically by ``ExperimentManager`` — callers cannot name it directly.
+        automatically by ``ContextManager`` — callers cannot name it directly.
         """
         if bind_device is not None:
             unit = self._dev_svc.get_device_unit_strict(bind_device)

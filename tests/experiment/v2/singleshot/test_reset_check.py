@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
-from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
+from zcu_tools.datafile import save_labber_data
+from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
 from zcu_tools.experiment.v2.singleshot.amp_rabi import (
     AmpRabiCfg,
     AmpRabiExp,
@@ -34,7 +35,6 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.reset import NoneResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.utils.datasaver import save_labber_data
 
 
 def _cfg(reset: bool) -> ResetCheckCfg | AmpRabiCfg:
@@ -51,12 +51,18 @@ def _cfg(reset: bool) -> ResetCheckCfg | AmpRabiCfg:
             sweep=ResetCheckSweepCfg(gain=sweep),
             reps=6,
             rounds=2,
+            g_center=-1,
+            e_center=1,
+            radius=0.5,
         )
     return AmpRabiCfg(
         modules=AmpRabiModuleCfg(qub_pulse=pulse, readout=readout),
         sweep=AmpRabiSweepCfg(gain=sweep),
         reps=6,
         rounds=2,
+        g_center=-1,
+        e_center=1,
+        radius=0.5,
     )
 
 
@@ -142,7 +148,7 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
     before = cfg.model_dump()
     exp = ResetCheckExp() if reset else AmpRabiExp()
     with schedule_stop_scope(StopSignal(event)):
-        result = exp.run(soc, soccfg, cfg, -1, 1, 0.5)  # type: ignore[arg-type]
+        result = exp.run(soc, soccfg, cfg)  # type: ignore[arg-type]
     assert cfg.model_dump() == before
     assert len(programs) == (1 if reset or stop_after == 0 else 2)
     assert result.signals.shape == ((4, 3, 2) if reset else (4, 12))
@@ -174,10 +180,29 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
     exp.save(path, result)  # type: ignore[arg-type]
     loaded = exp.load(path)
     np.testing.assert_array_equal(loaded.signals, result.signals)
+    assert loaded.cfg_snapshot == result.cfg_snapshot
     if isinstance(loaded, ResetCheckResult):
         np.testing.assert_array_equal(loaded.population_states, [0, 1])
     else:
         np.testing.assert_array_equal(loaded.shot_indices, np.arange(12))
+
+
+@pytest.mark.parametrize("reset", [False, True])
+def test_invalid_snapshot_calibration_fails_before_device_setup(
+    monkeypatch: pytest.MonkeyPatch, reset: bool
+) -> None:
+    module = "reset_check" if reset else "amp_rabi"
+    touched = []
+    monkeypatch.setattr(
+        f"zcu_tools.experiment.v2.singleshot.{module}.setup_devices",
+        lambda *args, **kwargs: touched.append(True),
+    )
+    cfg = _cfg(reset)
+    cfg.radius = -1
+    exp = ResetCheckExp() if reset else AmpRabiExp()
+    with pytest.raises(ValueError, match="radius"):
+        exp.run(None, None, cfg)  # type: ignore[arg-type]
+    assert not touched
 
 
 @pytest.mark.parametrize("correct", [False, True])

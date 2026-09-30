@@ -110,10 +110,16 @@ def test_reference_catalog_supplies_compatible_keys_and_linked_snapshot() -> Non
 
     assert field.available_keys() == ("drive_lib",)
     assert field._binding_state is LibraryBindingState.LINKED
-    assert field.get_value() == ReferenceValue("drive_lib", _value(0.25))
+    assert field.get_value() == ReferenceValue(
+        "drive_lib",
+        _value(0.25),
+        resolved_label=_shape().label,
+    )
 
 
 def test_missing_linked_reference_stays_keyed_and_relinks_when_restored() -> None:
+    from zcu_tools.gui.cfg.lowering import validate_finished_cfg
+
     ports = BindingPorts()
     ports.references[("module", "drive_lib")] = ResolvedReference(
         _shape().label, _value(0.25)
@@ -126,6 +132,12 @@ def test_missing_linked_reference_stays_keyed_and_relinks_when_restored() -> Non
     assert field.get_chosen_key() == "drive_lib"
     assert field.has_missing_library_ref()
     assert not field.is_valid()
+    missing_snapshot = draft.snapshot()
+    missing = missing_snapshot.value.fields["drive"]
+    assert isinstance(missing, ReferenceValue)
+    assert missing.chosen_key == "drive_lib"
+    assert missing.resolved_label is None
+    assert missing.error == "Unknown module reference: 'drive_lib'"
 
     ports.references[("module", "drive_lib")] = ResolvedReference(
         _shape().label, _value(0.5)
@@ -133,7 +145,17 @@ def test_missing_linked_reference_stays_keyed_and_relinks_when_restored() -> Non
     draft.refresh_references("module")
     assert not field.has_missing_library_ref()
     assert field.is_valid()
-    assert field.get_value() == ReferenceValue("drive_lib", _value(0.5))
+    assert field.get_value() == ReferenceValue(
+        "drive_lib",
+        _value(0.5),
+        resolved_label=_shape().label,
+    )
+    assert missing.error == "Unknown module reference: 'drive_lib'"
+    with pytest.raises(RuntimeError, match="Unknown module reference"):
+        validate_finished_cfg(
+            missing_snapshot,
+            resolve_reference=lambda kind, key: _shape().label,
+        )
 
 
 def test_modified_reference_deletion_heals_to_custom_and_keeps_edits() -> None:
@@ -153,7 +175,11 @@ def test_modified_reference_deletion_heals_to_custom_and_keeps_edits() -> None:
 
     assert field.get_chosen_key() == "<Custom:Pulse>"
     assert not field.has_missing_library_ref()
-    assert field.get_value() == ReferenceValue("<Custom:Pulse>", _value(0.75))
+    assert field.get_value() == ReferenceValue(
+        "<Custom:Pulse>",
+        _value(0.75),
+        resolved_label=_shape().label,
+    )
 
 
 def test_persisted_modified_missing_reference_remains_relinkable() -> None:
@@ -174,7 +200,11 @@ def test_persisted_modified_missing_reference_remains_relinkable() -> None:
     )
     draft.refresh_references("module")
     assert field._binding_state is LibraryBindingState.LINKED
-    assert field.get_value() == ReferenceValue("drive_lib", _value(0.5))
+    assert field.get_value() == ReferenceValue(
+        "drive_lib",
+        _value(0.5),
+        resolved_label=_shape().label,
+    )
 
 
 @pytest.mark.parametrize(
@@ -205,7 +235,11 @@ def test_optional_reference_disable_and_reenable_preserves_inline_value() -> Non
     assert field.is_valid()
 
     field.set_enabled(True)
-    assert field.get_value() == ReferenceValue("<Custom:Pulse>", _value(0.25))
+    assert field.get_value() == ReferenceValue(
+        "<Custom:Pulse>",
+        _value(0.25),
+        resolved_label=_shape().label,
+    )
 
 
 def test_catalog_value_aligns_locked_literals_before_binding() -> None:
@@ -224,7 +258,11 @@ def test_catalog_value_aligns_locked_literals_before_binding() -> None:
 
     field.set_chosen_key("drive_lib")
 
-    assert field.get_value() == ReferenceValue("drive_lib", _value(0.5))
+    assert field.get_value() == ReferenceValue(
+        "drive_lib",
+        _value(0.5),
+        resolved_label=_shape().label,
+    )
 
 
 def test_reference_key_refresh_is_observable_without_rebuilding_custom_value() -> None:
@@ -241,7 +279,11 @@ def test_reference_key_refresh_is_observable_without_rebuilding_custom_value() -
     field.refresh_references("module")
 
     assert field.available_keys() == ("drive_lib",)
-    assert field.get_value() == ReferenceValue("<Custom:Pulse>", _value(0.25))
+    assert field.get_value() == ReferenceValue(
+        "<Custom:Pulse>",
+        _value(0.25),
+        resolved_label=_shape().label,
+    )
     changed.assert_called_once()
 
 
@@ -620,6 +662,8 @@ def test_catalog_resolver_exception_is_not_downgraded_to_missing() -> None:
 
 
 def test_nested_reference_builds_nested_reference_field() -> None:
+    from dataclasses import replace
+
     nested_spec = ReferenceSpec("module", [_shape()], label="Nested drive")
     container_spec = CfgSectionSpec(
         label="Container",
@@ -647,4 +691,4 @@ def test_nested_reference_builds_nested_reference_field() -> None:
     assert field.sub_field is not None
     nested = field.sub_field.fields["nested"]
     assert isinstance(nested, ReferenceField)
-    assert nested.get_value() == nested_value
+    assert nested.get_value() == replace(nested_value, resolved_label=_shape().label)

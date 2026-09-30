@@ -1,7 +1,7 @@
 # 0018 — autofluxdep 的 orchestrator 是純需求解析器；三介面（requires/provides/produce）+ Builder 柯里化統一 Node 與 Service
 
-**狀態：** accepted（2026-06-05）。
-**關聯：** autofluxdep-gui 的 grilling 設計（見 `lib/zcu_tools/gui/app/autofluxdep/CONTEXT.md`）。承 autofluxdep 的「Node 不是 Task、用宣告式依賴取代 cfg_maker walrus 鏈」基調。
+**狀態：** accepted（2026-06-05）。部分取代（2026-09-27）：§3 中 predictor 的校正方式與「不需要就不載入」兩項敘述已不是現行設計，見該節的取代說明；Builder／Node 與 requires／provides／produce 介面仍有效。
+**關聯：** autofluxdep-gui 的 grilling 設計（見 `lib/zcu_tools/gui/app/autofluxdep/README.md`）。承 autofluxdep 的「Node 不是 Task、用宣告式依賴取代 cfg_maker walrus 鏈」基調。
 
 ## 背景
 
@@ -35,6 +35,8 @@ orchestrator 對所有 provider 一律 `node.produce(snapshot)`，**零 isinstan
 ### 3. predictor 不洩漏
 
 `predict_freq` / `cur_m` 是 predictor Service **provides** 的 key；qubit_freq 用一般 `requires` 讀。orchestrator 不懂 `predict_freq` 是什麼，只看到「某 provider provides 它、qubit_freq requires 它」。predictor 的校正（`calibrate(flux, measured_freq)`）是 Service 的方法、由 qubit_freq 量完觸發，**不是 orchestrator 做**。某 workflow 沒有 require predictor 的 key，predictor 就不載——orchestrator 不預設任何 provider 存在。
+
+> **已取代（2026-09-27）。** 上段最後兩句不再描述現行設計。校正：`qubit_freq` 在 run 中保留 raw／base predictor 不變；可信的 physical recovery 若有啟用，只安裝 run／placement-local overlay，residual correction 由 feedback slot 保存，不直接校正共用 predictor，見 [[0062]]。載入：現行 run setup 會無條件前置 `PredictorBuilder`；「沒有 node 需要時不載入 predictor」是已核准、尚未落實的目標，由 [autofluxdep explicit dependencies draft](draft/autofluxdep-explicit-dependencies.md) 追蹤。orchestrator 只看 provides／requires、不懂 predictor 語意這一點仍然成立。
 
 ## 拒絕的替代方案
 

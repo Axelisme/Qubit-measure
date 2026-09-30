@@ -1,6 +1,6 @@
 """ExportService — write the spectrum collection to spectrums.hdf5.
 
-Assembles each SpectrumEntry into a persistance ``SpectrumResult`` and delegates
+Assembles each SpectrumEntry into an analysis.fluxdep.models ``SpectrumResult`` and delegates
 to ``dump_spectrums``. The default path follows the notebook layout
 (``result_dir/data/fluxdep/spectrums.hdf5``); the directory is created only here,
 at the command boundary, not on a pure query.
@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 import os
 
+from zcu_tools.analysis.fluxdep.io import dump_spectrums
+from zcu_tools.analysis.fluxdep.models import SpectrumResult
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
-from zcu_tools.notebook.persistance import SpectrumResult, dump_spectrums
 
 logger = logging.getLogger(__name__)
 

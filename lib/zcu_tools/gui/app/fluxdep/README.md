@@ -1,9 +1,9 @@
-**Last updated:** 2026-07-12 — owner-thread runtime adapters
+**Last updated:** 2026-09-27 — shared database search and diagnostic renderer
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
 MCP server entry 位於 `zcu_tools.mcp.fluxdep.server`；本 package 只包含 GUI app、
-state/services/UI 與 GUI-process remote adapter。Import path 固定為
+state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Import path 固定為
 `zcu_tools.gui.app.fluxdep.*`。
 
 ## Module Purpose
@@ -43,7 +43,7 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 
 分層 `app → Controller(façade) → services → State`。MainWindow 是唯一的 driving
 view（給人）；RemoteControlAdapter 是 **read-only observing view**（給 agent 讀
-狀態，不驅動分析）。仿 measure ADR-0013 的 view-split 機制，但 fluxdep 的 remote
+狀態，不驅動分析）。仿 measure ADR-0068 的 view-split 機制，但 fluxdep 的 remote
 view 只暴露查詢，不暴露 mutation。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
@@ -54,11 +54,11 @@ view 只暴露查詢，不暴露 mutation。
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。
   `SpectrumEntry` 持 raw(SpectrumData)/points(PointsData)/per-spectrum flux 對齊/
   aligned/points_selected/alignment_seeded。raw/points 直接複用
-  `notebook.persistance` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
+  `analysis.spectrum` 與 `analysis.fluxdep.models` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
 - **`services/`** — 薄包裝純運算，mutate State：`load`(LoadService)、
   `alignment`(Alignment/Points)、`store`(SpectrumStore/Selection)、`export`。
   全部 Qt-free、同步、可獨立測。純運算核心複用
-  `zcu_tools.analysis.fluxdep` + `notebook.persistance`。
+  `zcu_tools.analysis.fluxdep` + `zcu_tools.analysis.spectrum`。
 - **`controller.py`** — 命令 façade：持 State + EventBus + service，每動作 mutate
   State 後 emit 對應事件。service 保持純（不碰 bus），Controller 是協調層。
   **繼承共用 `BaseController`**（`gui/controller_base`，generic over State+Bus）取得
@@ -75,7 +75,7 @@ view 只暴露查詢，不暴露 mutation。
   各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；`ui/interactive/display.contrast_limits`
   一份供 find_points/result_preview。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
-- **`services/remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
+- **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
   （`gui/remote/control_service`，零 policy 覆寫），讓 agent **只讀**觀測（無任何 mutation RPC）。MCP
   entrypoint 位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在
   `zcu_tools/mcp/core/bridge`。
@@ -83,7 +83,7 @@ view 只暴露查詢，不暴露 mutation。
 ## Key Design Decisions
 
 ### 領域邊界：不碰 experiment.v2
-LoadService 用底層 `load_data`(utils/datasaver) + `format_rawdata`(persistance)，
+LoadService 用底層 `load_data`(datafile) + `format_rawdata`(analysis.spectrum)，
 **不 import `experiment.v2`**（避免把 measure 實驗層拖進來）。OneTone/TwoTone
 載入完全相同；`spec_type` 只是 metadata，下游選點工具才分支。
 
@@ -97,9 +97,10 @@ LoadService 用底層 `load_data`(utils/datasaver) + `format_rawdata`(persistanc
 measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(base) 提供 canvas +
 可覆寫的 on_press/move/release + 控制項區 + `finished` signal。
 
-**v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：notebook 的
-`search_in_database(plot=True)` 內部用 pyplot（`plt.figure()`/`plt.show()`）——要在 worker
-跑且**不改 fitting.py**，就靠攔截 pyplot 路由內嵌。共用套件:
+**v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：
+[search kernel](../../../analysis/fluxdep/README.md) 只算數值；
+[診斷圖 builder](../../../plotting/fluxdep/README.md) 使用 `plt.figure()`，service 在 worker 中呼叫 `plt.show()`。
+沿用 pyplot 路由內嵌。共用套件:
 - `plotting/backend.py`（client）：`module://zcu_tools.gui.plotting.backend`，攔 `plt.figure()` →
   attach 到當前 `FigureContainer`；`plt.show()` → activate（**未 attach 則 raise**，Fast-Fail 統一）；
   `GuiFigureCanvas.draw_idle` 吃跨線程。
@@ -110,7 +111,7 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   matplotlib backend，建立 `QApplication` 後處理 `ensure_host()` /
   `aboutToQuit→set_shutting_down(True)` / adapter start-stop。`app.py` 的
   behavior 只做 controller/window/adapter wiring；process entrypoint 只在
-  `script/run_fluxdep_gui.py`。
+  `scripts/run_fluxdep_gui.py`。
 - **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
   `enter=` CM 組合 `routing_scope(diag_container)` + `use_pbar_factory(factory)`，由 runner
   在 worker 執行緒**於 thunk 內**進入（ContextVar 在 QThreadPool worker 裡看不到主執行緒的
@@ -137,12 +138,12 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
   **重用 scatter(set_offsets) + debounce redraw(50ms)**。
 
 ### Flux-Dependence Analysis kernel handoff
-ADR-0028 下，互動選點、filtering、line selection、one-tone peak detection 的共用規則住在
+[fluxdep kernel README](../../../analysis/fluxdep/README.md) 下，互動選點、filtering、line selection、one-tone peak detection 的共用規則住在
 `zcu_tools.analysis.fluxdep`。Qt `ui/interactive/` widget 只保留控制項、canvas、worker/debounce
-與 Qt event translation；database search、診斷圖與 params export 仍留在 GUI 既有 pipeline。
+與 Qt event translation；共用躍遷換算與 database search 位於 `analysis.fluxdep`，診斷圖由 `plotting.fluxdep` 建立，params export 留在 app pipeline。
 
 ### flux 對齊：per-spectrum + 可繼承
-每張譜各自一份 flux_half/int/period（對齊 persistance.SpectrumResult）。新載入的譜可
+每張譜各自一份 flux_half/int/period（對齊 analysis.fluxdep.models.SpectrumResult）。新載入的譜可
 `inherit_from` 既有譜的對齊當初值（`alignment_seeded` 標記），LinePicker 才會 seed；
 fresh load 用 picker 預設。OneTone 譜的 LinePicker 鎖 magnitude-only（相位無資訊）。
 
@@ -184,18 +185,18 @@ MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `Remote
   RemoteControlAdapter + mcp_server，不在共用 transport 裡。
 
 ### v2 database search：State 邊界 + 兩條執行路徑
-search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 唯一的長阻塞作業。
+search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 唯一的長阻塞作業。
 拆成**純計算 vs State 寫入**兩半，守住 main-thread State 不變式：
 - `FitService.compute_search`：純函式，先 snapshot State 的輸入（db 路徑/bounds/transitions/
   選中點雲），再跑 search，**不寫 State**，回 `SearchResult(params, figure)`。可在 worker 跑。
 - `FitService.record_result`：唯一寫 State 處（`set_fit_result`），只在主執行緒呼。
-- **GUI 路徑（唯一觸發路徑）**：`FitPanelWidget` 的 `_SearchWorker` 跑 compute_search（off-main，
+- **GUI 路徑（唯一觸發路徑）**：`AnalyzePanelWidget` 經 `BackgroundRunner` 跑 `Controller.compute_search`（off-main，
   GIL 釋放不卡 UI），完成 emit `SearchResult` → 主執行緒 slot `record_search_result` 寫 State +
   畫圖。**不可中斷**（單一確定性掃描，只 disable Search 鈕 + 進度條，無 Cancel）。
   - search 是 user 在 GUI 裡按的，**沒有 RPC 觸發路徑**（remote view 只讀）。`Controller.
-    search_database` 仍在（GUI worker 用），但不再有 `fit.search` handler。compute/record
+    search_database` 是主執行緒上 compute + record 的便利入口，GUI worker 不用它；沒有 `fit.search` handler。compute/record
     分拆仍是守 main-thread State 不變式的關鍵。
-- **進度注入**：`fitting.py` 的 search 走 `make_pbar`。GUI worker 用
+- **進度注入**：`analysis.fluxdep.search` 走 `make_pbar`。GUI worker 用
   `use_pbar_factory` 裝 `GuiProgressBar`（emit Qt signal 到主執行緒進度條，節流 50ms）。
 
 ### v2 結果存放 + 視覺化
@@ -212,17 +213,17 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（預設按 `viz.derive_auto_limits` = notebook
     `auto_derive_limits`）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
   AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
-- **pyplot Gcf 累積坑**：`search_in_database` 的 `plt.figure()` 不 close 會堆進 pyplot 全域 figure 堆疊，
+- **pyplot Gcf 累積坑**：診斷圖 builder 的 `plt.figure()` 不 close 會堆進 pyplot 全域 figure 堆疊，
   第二次 search 的 `plt.show()` 會作用在已 detach 的舊 figure → backend raise「not attached」+ 圖只剩標題。
   修法：`_on_search` 每次 `plt.close("all")` 清 Gcf（只丟 pyplot 引用，已內嵌的 canvas 仍活在 container）。
-- `transitions` 沿用 `persistance.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
+- `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
   與任意 `transitions{n}`/`mirror{n}` 動態 list 群）——這正是 extra_items 的設計用途，**不改 pydantic/
   dataclass**（會更弱型）。
 - `services/viz.py`：matplotlib 重寫 notebook 的 plotly `FreqFluxDependVisualizer`，純函式畫進傳入的
   Figure（background heatmap gray_r + simulation lines + 選中點 + r_f/sample_f const-freq 線 +
-  dev_value secondary axis）。診斷圖直接用 `search_in_database(plot=True)` 的後端原生 Figure，不重畫。
+  dev_value secondary axis）。診斷圖直接用共用 builder 的後端原生 Figure，不重畫。
 - params.json 的 flux_half/int/period 取**第一張已對齊譜**（notebook 單譜語意；多譜同對齊到同 flux 座標）。
-- params.json export 透過 `meta_tool.QubitParams` 寫 `project` 與 `fluxdep_fit`；重寫 fluxdep fit 會更新 `fluxdep_fit.timestamp`，但不刪除獨立的 `dispersive` section。
+- params.json export 透過 `resources.qubit_params.QubitParams` 寫 `project` 與 `fluxdep_fit`；重寫 fluxdep fit 會更新 `fluxdep_fit.timestamp`，但不刪除獨立的 `dispersive` section。
 
 ## Known Limitations
 
@@ -239,7 +240,7 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
 
 ## Entry Points
 
-- `script/run_fluxdep_gui.py` — 啟動（`--control-port` 開 read-only RPC 給 agent/MCP）。
+- `scripts/run_fluxdep_gui.py` — 啟動（`--control-port` 開 read-only RPC 給 agent/MCP）。
 - `.mcp.json` 註冊 `fluxdep-gui` MCP server；skill `run-fluxdep-gui`
   (`.claude/skills/`，三副本同步 .agent/.codex；`sync_skills.sh` 只同步 SKILL.md) 只含
   SKILL.md。GUI 不提供操作 RPC；socket 層驗證限於 launch + read-only state。

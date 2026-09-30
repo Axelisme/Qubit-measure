@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import cast
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from typing import Literal, cast
 
 from ..inheritance import make_default_value, select_ref_value_spec
 from ..model import (
@@ -23,6 +24,8 @@ from ..model import (
     ScalarValue,
     SweepSpec,
     SweepValue,
+    require_finite_scalar,
+    resolved_direct_number,
 )
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 from .range import CenteredSweepEditor, SweepEditor
@@ -105,6 +108,20 @@ class CfgField(ABC):
             raise RuntimeError(f"{type(self).__name__} is closed")
 
 
+def _parse_direct_text(spec: ScalarSpec, text: str) -> DirectValue:
+    if spec.type not in (int, float, complex, str):
+        raise TypeError(f"Text input is unsupported for {spec.type.__name__}")
+    if not text.strip() and (spec.optional or spec.type is not str):
+        return DirectValue(None, raw=text)
+    try:
+        parsed = spec.type(text.strip() if spec.optional else text)
+        if isinstance(parsed, (float, complex)):
+            require_finite_scalar(parsed)
+    except ValueError as exc:
+        return DirectValue(None, raw=text, error=str(exc))
+    return DirectValue(parsed, raw=text)
+
+
 class ScalarField(CfgField):
     spec: ScalarSpec
 
@@ -147,12 +164,44 @@ class ScalarField(CfgField):
         if isinstance(new_value, EvalValue):
             new_value = self._resolved_eval_value(new_value)
 
-        if new_value != self._value:
-            self._value = new_value
+        self._commit_prepared_value(new_value)
+
+    def prepare_agent_value(
+        self, value: ScalarValue
+    ) -> tuple[ScalarValue, Callable[[], None]]:
+        """Preflight an endpoint and return its single-use, immediate commit."""
+        self._require_open()
+        if isinstance(value, EvalValue):
+            prepared = self._resolved_eval_value(value)
+        else:
+            self._validate_direct_value(value)
+            prepared = value
+        previous = self._value
+        committed = False
+
+        def commit() -> None:
+            nonlocal committed
+            self._require_open()
+            if committed or self._value != previous:
+                raise RuntimeError("stale prepared scalar value")
+            committed = True
+            self._commit_prepared_value(prepared)
+
+        return prepared, commit
+
+    def _commit_prepared_value(self, value: ScalarValue) -> None:
+        """Install an already-resolved scalar without re-evaluating its expression."""
+        if value != self._value:
+            self._value = value
             self._refresh_validity()
             self.on_change.emit(self.get_value())
         else:
             self._refresh_validity()
+
+    def set_text(self, text: str) -> None:
+        """Store direct input text and its parse result, including invalid input."""
+        self._require_open()
+        self.set_value(_parse_direct_text(self.spec, text))
 
     def _validate_direct_value(self, value: DirectValue) -> None:
         raw = value.value
@@ -163,6 +212,8 @@ class ScalarField(CfgField):
                 f"ScalarField {self.spec.label!r} expects "
                 f"{self.spec.type.__name__}, got {type(raw).__name__}"
             )
+        if isinstance(raw, (float, complex)):
+            require_finite_scalar(raw)
 
     def available_options(self) -> tuple[object, ...] | None:
         self._require_open()
@@ -208,8 +259,6 @@ class ScalarField(CfgField):
         return tuple(options)
 
     def _resolved_eval_value(self, value: EvalValue) -> EvalValue:
-        from dataclasses import replace
-
         try:
             raw = self._evaluate_expression(value.expr)
             resolved = _coerce_eval_result(raw, self.spec.type)
@@ -231,28 +280,43 @@ class ScalarField(CfgField):
     def _refresh_validity(self) -> None:
         if isinstance(self._value, DirectValue):
             raw = self._value.value
-            valid = raw is not None or self.spec.optional
+            valid = self._value.error is None and (
+                raw is not None or self.spec.optional
+            )
         else:
             raw = self._value.resolved
             valid = raw is not None
         if valid and self.spec.required and raw == "":
             valid = False
         options = self.available_options()
+        validation_error = None
         if valid and raw is not None and options is not None and raw not in options:
             valid = False
+            validation_error = f"Value {raw!r} is not an available option"
+        self._value = replace(self._value, validation_error=validation_error)
         self._set_valid(valid)
 
 
-def _coerce_eval_result(value: int | float, type_: type) -> int | float:
+def _coerce_eval_result(
+    value: int | float | complex, type_: type
+) -> int | float | complex:
     if isinstance(value, bool):
         raise RuntimeError("Expression evaluator returned bool instead of a number")
+    if type_ is complex:
+        result = complex(value)
+        require_finite_scalar(result)
+        return result
+    if isinstance(value, complex):
+        raise RuntimeError("Complex expression result cannot target a real field")
     if type_ is float:
-        return float(value)
+        result = float(value)
+        require_finite_scalar(result)
+        return result
     if type_ is int:
         if not float(value).is_integer():
             raise RuntimeError(f"Expression result {value!r} is not an integer")
         return int(value)
-    raise RuntimeError(f"Eval mode only supports int or float, got {type_!r}")
+    raise RuntimeError(f"Eval mode only supports int, float or complex, got {type_!r}")
 
 
 class LiteralField(CfgField):
@@ -269,6 +333,53 @@ class LiteralField(CfgField):
     def set_value(self, value: object) -> None:
         self._require_open()
         del value
+
+
+def _agent_request_keys(request: Mapping[str, object], required: set[str]) -> None:
+    keys = set(request)
+    allowed = required | {"expts", "step"}
+    if required == {"span"}:
+        allowed.add("center")  # Report a locked center explicitly at the field.
+    unknown = keys - allowed
+    if unknown:
+        raise ValueError(f"unexpected whole sweep keys: {unknown}")
+    missing = required - keys
+    if missing:
+        raise ValueError(f"missing whole sweep keys: {missing}")
+    if "expts" in keys and "step" in keys:
+        raise ValueError("conflict: expts and step")
+    if "expts" not in keys and "step" not in keys:
+        raise ValueError("missing expts or step")
+
+
+def _agent_number(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{label} must be a number")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise ValueError(f"{label} must be finite")
+    return numeric
+
+
+def _agent_expts(value: object) -> int:
+    if type(value) is not int:
+        raise TypeError("expts must be an integer")
+    return value
+
+
+def _agent_endpoint(
+    field: ScalarField, value: object
+) -> tuple[ScalarValue, Callable[[], None]]:
+    if isinstance(value, EvalValue):
+        source = value
+    else:
+        source = DirectValue(_agent_number(value, "endpoint"))
+    resolved, commit = field.prepare_agent_value(source)
+    if isinstance(resolved, EvalValue):
+        if resolved.resolved is None:
+            raise ValueError(f"unresolved sweep endpoint: {resolved.error}")
+        _agent_number(resolved.resolved, "endpoint")
+    return resolved, commit
 
 
 class SweepField(CfgField):
@@ -305,6 +416,8 @@ class SweepField(CfgField):
             evaluate_expression,
             initial_val=self._coerce_edge(initial.stop),
         )
+        # Child construction resolves expressions; derive step from those cached values.
+        self._step = SweepEditor.canonicalize(self.get_value()).step
         self.start_field.on_change.connect(self._on_child_change)
         self.stop_field.on_change.connect(self._on_child_change)
         self.start_field.on_validity_changed.connect(self._on_child_validity_changed)
@@ -318,6 +431,7 @@ class SweepField(CfgField):
             stop=self._edge_value(self.stop_field.get_value()),
             expts=self._expts,
             step=self._step,
+            auto_norm=False,
         )
 
     def set_value(self, value: object) -> None:
@@ -326,13 +440,64 @@ class SweepField(CfgField):
             raise TypeError(
                 f"SweepField expects SweepValue, got {type(value).__name__}"
             )
-        canonical = SweepEditor.canonicalize(value)
+        self._apply_value(SweepEditor.canonicalize(value))
+
+    def set_agent_value(self, request: Mapping[str, object]) -> SweepValue:
+        """Resolve and validate a whole-sweep request before one committed update."""
+        self._require_open()
+        _agent_request_keys(request, {"start", "stop"})
+        if not self.spec.editable:
+            raise ValueError("whole sweep is locked")
+        start, commit_start = _agent_endpoint(self.start_field, request["start"])
+        stop, commit_stop = _agent_endpoint(self.stop_field, request["stop"])
+        candidate = replace(self.get_value(), start=start, stop=stop, auto_norm=False)
+        if "expts" in request:
+            candidate = SweepEditor.update_expts(
+                candidate, _agent_expts(request["expts"])
+            )
+        else:
+            candidate = SweepEditor.update_step(
+                candidate, _agent_number(request["step"], "step")
+            )
+        _agent_number(resolved_direct_number(candidate.step), "normalized step")
+        self._apply_value(candidate, commits=(commit_start, commit_stop))
+        return self.get_value()
+
+    def set_text(self, edge: Literal["expts", "step"], text: str) -> None:
+        self._require_open()
+        if edge == "expts":
+            edit = SweepEditor.update_expts
+            type_ = int
+        elif edge == "step":
+            edit = SweepEditor.update_step
+            type_ = float
+        else:
+            raise ValueError(f"Unknown sweep input: {edge!r}")
+        value = _parse_direct_text(ScalarSpec(f"Sweep {edge}", type_), text)
+        current = self.get_value()
+        try:
+            candidate = edit(current, value)
+        except (ValueError, OverflowError) as exc:
+            candidate = edit(current, DirectValue(None, raw=text, error=str(exc)))
+        self._apply_value(candidate)
+
+    def _apply_value(
+        self,
+        canonical: SweepValue,
+        *,
+        commits: tuple[Callable[[], None], ...] | None = None,
+    ) -> None:
         self._updating = True
         try:
-            self.start_field.set_value(self._coerce_edge(canonical.start))
-            self.stop_field.set_value(self._coerce_edge(canonical.stop))
+            if commits is not None:
+                for commit in commits:
+                    commit()
+            else:
+                self.start_field.set_value(self._coerce_edge(canonical.start))
+                self.stop_field.set_value(self._coerce_edge(canonical.stop))
             self._expts = canonical.expts
             self._step = canonical.step
+            self._step = SweepEditor.canonicalize(self.get_value()).step
         finally:
             self._updating = False
         self._refresh_validity()
@@ -359,7 +524,7 @@ class SweepField(CfgField):
 
     @staticmethod
     def _coerce_edge(value: object) -> ScalarValue:
-        if isinstance(value, EvalValue):
+        if isinstance(value, (DirectValue, EvalValue)):
             return value
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return DirectValue(float(value))
@@ -368,27 +533,37 @@ class SweepField(CfgField):
         )
 
     @staticmethod
-    def _edge_value(value: ScalarValue) -> float | EvalValue:
-        if isinstance(value, EvalValue):
+    def _edge_value(value: ScalarValue) -> float | ScalarValue:
+        if (
+            isinstance(value, EvalValue)
+            or value.raw is not None
+            or value.error is not None
+            or value.value is None
+        ):
             return value
-        if value.value is None:
-            raise TypeError("Sweep edge DirectValue is unset (None)")
         return float(value.value)
 
     def _on_child_change(self, *_: object) -> None:
         if self._updating:
             return
-        canonical = SweepEditor.canonicalize(self.get_value())
-        self._expts = canonical.expts
-        self._step = canonical.step
-        self._refresh_validity()
-        self.on_change.emit(canonical)
+        self._apply_value(SweepEditor.canonicalize(self.get_value()))
 
     def _on_child_validity_changed(self, *_: object) -> None:
         self._refresh_validity()
 
     def _refresh_validity(self) -> None:
-        self._set_valid(self.start_field.is_valid() and self.stop_field.is_valid())
+        value = self.get_value()
+        edges_valid = all(
+            not isinstance(edge, DirectValue) or edge.value is not None
+            for edge in (value.start, value.stop)
+        )
+        self._set_valid(
+            self.start_field.is_valid()
+            and self.stop_field.is_valid()
+            and edges_valid
+            and resolved_direct_number(value.expts) is not None
+            and resolved_direct_number(value.step) is not None
+        )
 
 
 class CenteredSweepField(CfgField):
@@ -432,6 +607,7 @@ class CenteredSweepField(CfgField):
             span=self._span,
             expts=self._expts,
             step=self._step,
+            auto_norm=False,
         )
 
     def set_value(self, value: object) -> None:
@@ -443,9 +619,74 @@ class CenteredSweepField(CfgField):
             )
         canonical = CenteredSweepEditor.canonicalize(value)
         self._validate_value(canonical)
+        self._apply_value(canonical)
+
+    def set_agent_value(self, request: Mapping[str, object]) -> CenteredSweepValue:
+        """Resolve and validate a centered sweep before one committed update."""
+        self._require_open()
+        locked = self.spec.locked_center is not None or not self.spec.center_editable
+        _agent_request_keys(request, {"span"} if locked else {"center", "span"})
+        if not self.spec.editable:
+            raise ValueError("whole sweep is locked")
+        if locked and "center" in request:
+            raise ValueError("center is locked")
+        commits: tuple[Callable[[], None], ...] = ()
+        center = self.get_value().center
+        if not locked:
+            center, commit_center = _agent_endpoint(
+                self.center_field, request["center"]
+            )
+            commits = (commit_center,)
+        candidate = replace(
+            self.get_value(), center=center, span=_agent_number(request["span"], "span")
+        )
+        if "expts" in request:
+            candidate = CenteredSweepEditor.update_expts(
+                candidate, _agent_expts(request["expts"])
+            )
+        else:
+            candidate = CenteredSweepEditor.update_step(
+                candidate, _agent_number(request["step"], "step")
+            )
+        self._validate_value(candidate)
+        _agent_number(resolved_direct_number(candidate.step), "normalized step")
+        self._apply_value(candidate, commits=commits)
+        return self.get_value()
+
+    def set_text(self, edge: Literal["span", "expts", "step"], text: str) -> None:
+        self._require_open()
+        type_ = float
+        if edge == "span":
+            edit = CenteredSweepEditor.update_span
+        elif edge == "expts":
+            edit = CenteredSweepEditor.update_expts
+            type_ = int
+        elif edge == "step":
+            edit = CenteredSweepEditor.update_step
+        else:
+            raise ValueError(f"Unknown centered sweep input: {edge!r}")
+        value = _parse_direct_text(ScalarSpec(f"Sweep {edge}", type_), text)
+        current = self.get_value()
+        try:
+            candidate = edit(current, value)
+            self._validate_value(candidate)
+        except (ValueError, OverflowError) as exc:
+            candidate = edit(current, DirectValue(None, raw=text, error=str(exc)))
+        self._apply_value(candidate)
+
+    def _apply_value(
+        self,
+        canonical: CenteredSweepValue,
+        *,
+        commits: tuple[Callable[[], None], ...] | None = None,
+    ) -> None:
         self._updating = True
         try:
-            self.center_field.set_value(self._coerce_center(canonical.center))
+            if commits is not None:
+                for commit in commits:
+                    commit()
+            else:
+                self.center_field.set_value(self._coerce_center(canonical.center))
             self._span = canonical.span
             self._expts = canonical.expts
             self._step = canonical.step
@@ -477,7 +718,7 @@ class CenteredSweepField(CfgField):
 
     @staticmethod
     def _coerce_center(value: object) -> ScalarValue:
-        if isinstance(value, EvalValue):
+        if isinstance(value, (DirectValue, EvalValue)):
             return value
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return DirectValue(float(value))
@@ -486,15 +727,20 @@ class CenteredSweepField(CfgField):
         )
 
     @staticmethod
-    def _center_value(value: ScalarValue) -> float | EvalValue:
-        if isinstance(value, EvalValue):
+    def _center_value(value: ScalarValue) -> float | ScalarValue:
+        if (
+            isinstance(value, EvalValue)
+            or value.raw is not None
+            or value.error is not None
+            or value.value is None
+        ):
             return value
-        if value.value is None:
-            raise TypeError("Centered sweep center DirectValue is unset (None)")
         return float(value.value)
 
     def _validate_value(self, value: CenteredSweepValue) -> None:
-        if value.expts > 1 and value.span <= 0.0:
+        points = resolved_direct_number(value.expts)
+        span = resolved_direct_number(value.span)
+        if points is not None and span is not None and points > 1 and span <= 0.0:
             raise ValueError("Centered sweep span must be > 0 when expts > 1")
         if self.spec.locked_center is None:
             return
@@ -516,8 +762,12 @@ class CenteredSweepField(CfgField):
             )
 
     @staticmethod
-    def _resolved_center(value: float | EvalValue) -> float | None:
-        raw: object = value.resolved if isinstance(value, EvalValue) else value
+    def _resolved_center(value: float | ScalarValue) -> float | None:
+        raw: object
+        if isinstance(value, DirectValue):
+            raw = value.value if value.error is None else None
+        else:
+            raw = value.resolved if isinstance(value, EvalValue) else value
         if raw is None:
             return None
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
@@ -530,18 +780,24 @@ class CenteredSweepField(CfgField):
     def _on_child_change(self, *_: object) -> None:
         if self._updating:
             return
-        canonical = CenteredSweepEditor.canonicalize(self.get_value())
-        self._span = canonical.span
-        self._expts = canonical.expts
-        self._step = canonical.step
-        self._refresh_validity()
-        self.on_change.emit(canonical)
+        self._apply_value(CenteredSweepEditor.canonicalize(self.get_value()))
 
     def _on_child_validity_changed(self, *_: object) -> None:
         self._refresh_validity()
 
     def _refresh_validity(self) -> None:
-        self._set_valid(self.center_field.is_valid())
+        value = self.get_value()
+        valid = self.center_field.is_valid() and all(
+            resolved_direct_number(part) is not None
+            for part in (value.span, value.expts, value.step)
+        )
+        if isinstance(value.center, DirectValue) and value.center.value is None:
+            valid = False
+        try:
+            self._validate_value(value)
+        except ValueError:
+            valid = False
+        self._set_valid(valid)
 
 
 class SectionField(CfgField):

@@ -56,7 +56,7 @@ class DispersiveGuiBehavior(GuiRuntimeBehavior):
         window = MainWindow(ctrl)
         adapter = None
         if control is not None:
-            from zcu_tools.gui.app.dispersive.services.remote.service import (
+            from zcu_tools.gui.app.dispersive.remote.service import (
                 RemoteControlAdapter,
             )
             from zcu_tools.gui.session.adapters.qt_owner_scheduler import (

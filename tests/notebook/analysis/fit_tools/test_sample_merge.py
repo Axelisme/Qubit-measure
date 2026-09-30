@@ -9,7 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 import zcu_tools.notebook.analysis.fit_tools.sample_merge as sample_merge
-from zcu_tools.meta_tool import (
+from zcu_tools.notebook.analysis.fit_tools import (
+    FluxFrame,
+    SampleSource,
+    merge_sample_sources,
+    write_merged_samples,
+    write_sample_merge_report,
+)
+from zcu_tools.resources.sample_table import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
     FLUX_COLUMN,
@@ -17,13 +24,6 @@ from zcu_tools.meta_tool import (
     FLUX_PERIOD_COLUMN,
     SAMPLE_COORDINATE_COLUMNS,
     SampleTableV2Error,
-)
-from zcu_tools.notebook.analysis.fit_tools import (
-    FluxFrame,
-    SampleSource,
-    merge_sample_sources,
-    write_merged_samples,
-    write_sample_merge_report,
 )
 
 

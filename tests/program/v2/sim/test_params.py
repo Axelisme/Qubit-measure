@@ -16,15 +16,17 @@ import math
 import numpy as np
 import pytest
 from pydantic import ValidationError
-from zcu_tools.experiment.v2_gui.adapters._support.ctx_helpers import proper_flux_range
+from zcu_tools.experiment.v2_gui.measure.adapters._support.ctx_helpers import (
+    proper_flux_range,
+)
 from zcu_tools.gui.cfg import (
-    EvalValue,
+    DirectValue,
     SweepValue,
 )
-from zcu_tools.gui.session.types import ExpContext
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs, s21, value_to_flux
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 # ---------------------------------------------------------------------------
 # Minimal valid kwargs reused across tests
@@ -48,9 +50,11 @@ _VALID: dict = {
 
 
 def _numeric_sweep_bounds(sweep: SweepValue) -> tuple[float, float]:
-    if isinstance(sweep.start, EvalValue) or isinstance(sweep.stop, EvalValue):
+    start = sweep.start.value if isinstance(sweep.start, DirectValue) else sweep.start
+    stop = sweep.stop.value if isinstance(sweep.stop, DirectValue) else sweep.stop
+    if not isinstance(start, (int, float)) or not isinstance(stop, (int, float)):
         raise AssertionError("default guide sweep must have numeric fallback bounds")
-    return float(sweep.start), float(sweep.stop)
+    return float(start), float(stop)
 
 
 class TestSimParamsConstruction:
@@ -313,7 +317,7 @@ class TestSimParamsPollLatency:
 class TestSimParamsParamsJsonRoundTrip:
     """Verify that a params.json-shaped dict can be unpacked into SimParams.
 
-    The dict structure mirrors what persistance.py produces:
+    The dict structure follows the params.json fluxdep and dispersive sections:
         {
             "fluxdep_fit": {
                 "params": {"EJ": ..., "EC": ..., "EL": ...},
@@ -394,7 +398,7 @@ class TestDefaultSimParamFluxPeriod:
     """
 
     def test_default_readout_blobs_are_visible_over_base_noise(self) -> None:
-        guide_ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
         guide = proper_flux_range(guide_ctx, expts=2)
         guide_start, guide_stop = _numeric_sweep_bounds(guide)
         guide_center = 0.5 * (guide_start + guide_stop)
@@ -414,7 +418,7 @@ class TestDefaultSimParamFluxPeriod:
     def test_guide_sweep_covers_at_least_one_period(self) -> None:
         # value_to_flux(v) = (v + flux_bias - flux_half) / flux_period + 0.5
         # The guide sweep should span at least one period for visible dispersion.
-        guide_ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
         guide = proper_flux_range(guide_ctx, expts=2)
         guide_start, guide_stop = _numeric_sweep_bounds(guide)
         p = DEFAULT_SIMPARAM

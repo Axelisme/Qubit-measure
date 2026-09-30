@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import field_serializer
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
@@ -21,9 +22,9 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlot1D
+from zcu_tools.plotting.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -64,6 +65,13 @@ class FreqSweepCfg(ConfigBase):
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
+    g_center: complex
+    e_center: complex
+    radius: float
+
+    @field_serializer("g_center", "e_center")
+    def serialize_center(self, value: complex) -> str:
+        return str(value)
 
 
 class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
@@ -90,9 +98,6 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
         soc,
         soccfg,
         cfg: FreqCfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
     ) -> FreqResult:
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
@@ -137,9 +142,9 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(
                         raw2signal_fn=raw_population_signal,
-                        g_center=g_center,
-                        e_center=e_center,
-                        ge_radius=radius,
+                        g_center=orig_cfg.g_center,
+                        e_center=orig_cfg.e_center,
+                        ge_radius=orig_cfg.radius,
                     )
                 )
             signals = buffer.array

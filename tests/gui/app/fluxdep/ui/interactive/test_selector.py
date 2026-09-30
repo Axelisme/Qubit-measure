@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import PointsData, SpectrumResult
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
-from zcu_tools.notebook.persistance import (
-    PointsData,
-    SpectrumData,
-    SpectrumResult,
-)
 
 
 def _spectrum_result(n_pts=5) -> SpectrumResult:

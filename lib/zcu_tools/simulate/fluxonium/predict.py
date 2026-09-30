@@ -64,7 +64,7 @@ class FluxoniumPredictor:
 
     @classmethod
     def from_file(cls, result_path: str, flux_bias: float = 0.0) -> FluxoniumPredictor:
-        from zcu_tools.meta_tool import QubitParams
+        from zcu_tools.resources.qubit_params import QubitParams
 
         model = QubitParams(result_path, readonly=True).require_fluxonium_model(
             flux_bias=flux_bias

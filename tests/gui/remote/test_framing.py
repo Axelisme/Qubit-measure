@@ -130,7 +130,7 @@ def test_encode_line_multibyte_chars_exceed_byte_limit_but_not_char_limit():
     # Build a value string where:
     #   char count ≈ MAX_LINE_BYTES // 3 + 1  →  under MAX_LINE_BYTES chars
     #   byte count ≈ (MAX_LINE_BYTES // 3 + 1) * 3  →  over MAX_LINE_BYTES bytes
-    cjk_count = MAX_LINE_BYTES // 3 + 1  # each char → 3 bytes → total > 1 MiB
+    cjk_count = MAX_LINE_BYTES // 3 + 1  # each char uses three UTF-8 bytes
     big_value = "測" * cjk_count
     # Sanity check: char count is under the limit, byte count is over.
     import json
@@ -148,6 +148,23 @@ def test_encode_line_multibyte_chars_exceed_byte_limit_but_not_char_limit():
     with pytest.raises(RemoteError) as exc_info:
         encode_line({"data": big_value})
     assert exc_info.value.code == ErrorCode.INTERNAL
+
+
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_encode_and_decode_agree_at_message_byte_boundary(extra_bytes: int) -> None:
+    overhead = len(encode_line({"data": ""})) - 1
+    obj = {"data": "x" * (MAX_LINE_BYTES - overhead + extra_bytes)}
+    payload = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+    if extra_bytes:
+        with pytest.raises(RemoteError) as outgoing:
+            encode_line(obj)
+        assert outgoing.value.code == ErrorCode.INTERNAL
+        with pytest.raises(RemoteError) as incoming:
+            decode_line(payload)
+        assert incoming.value.code == ErrorCode.INVALID_PARAMS
+    else:
+        assert encode_line(obj) == payload + b"\n"
+        assert decode_line(payload) == obj
 
 
 def test_encode_line_pure_ascii_near_limit_still_encodes():

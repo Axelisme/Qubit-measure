@@ -8,18 +8,18 @@ from typing import Any, TypeVar
 
 import numpy as np
 
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
-    QubitFreqResult,
-    Sweep1DResult,
-    Sweep2DResult,
-)
-from zcu_tools.utils.datasaver import (
+from zcu_tools.datafile import (
     Axis,
     DatasetRole,
     LabberPayload,
     StreamingGroupedLabberWriter,
     StreamingLabberRoleSpec,
     load_grouped_labber_data,
+)
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
+    QubitFreqResult,
+    Sweep1DResult,
+    Sweep2DResult,
 )
 
 ROLE_SIGNAL = DatasetRole("signal")
@@ -153,7 +153,7 @@ def result_progress_summary(result: object) -> dict[str, Any]:
 
     ``n_measured`` counts rows whose primary raw signal contains finite data.
     ``fit_summary.n_fitted`` counts rows whose declaration's primary fit scalar is
-    finite. ADR-0040 treats raw-present/fit-nan rows as committed measurements.
+    finite. ADR-0063 distinguishes committed raw measurements from fit/provide outcomes.
     """
     declaration = result_declaration(result)
     fit_summary = dict(declaration.extra_fit_summary(result))

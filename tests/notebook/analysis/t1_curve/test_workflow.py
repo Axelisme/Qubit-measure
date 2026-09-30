@@ -12,7 +12,6 @@ import zcu_tools.notebook.analysis.t1_curve.workflow as workflow
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.meta_tool import SampleTableV2Error
 from zcu_tools.notebook.analysis.fit_tools import F01FluxCorrectionResult
 from zcu_tools.notebook.analysis.t1_curve import (
     PurcellEffectParams,
@@ -34,6 +33,7 @@ from zcu_tools.notebook.analysis.t1_curve import (
     run_t1_curve_analysis,
     subtract_relaxation_limit,
 )
+from zcu_tools.resources.sample_table import SampleTableV2Error
 
 
 def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:

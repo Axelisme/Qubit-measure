@@ -22,8 +22,12 @@ forbidden_modules =
 # it are not. Its 517 edges are excluded here rather than treated as debt.
 ignore_imports =
     zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
+    zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
 
-# ADR-0020: shared session primitives cannot import app policy.
+# D1: cfg_editing is experiment-side editing support; gui.cfg is a Qt-free
+# generic framework. The endpoint is the gui.cfg package facade only.
+
+# ADR-0067: shared session primitives cannot import app policy.
 [importlinter:contract:session-no-app]
 name = C2: shared session does not depend on apps
 type = forbidden
@@ -41,7 +45,7 @@ source_modules =
 forbidden_modules =
     zcu_tools.gui.app
     zcu_tools.experiment
-    zcu_tools.meta_tool
+    zcu_tools.resources
 
 # ADR-0045: shared renderers receive policy through ports.
 [importlinter:contract:cfg-widgets-no-runtime]
@@ -52,7 +56,7 @@ source_modules =
 forbidden_modules =
     zcu_tools.gui.app
     zcu_tools.experiment
-    zcu_tools.meta_tool
+    zcu_tools.resources
     zcu_tools.gui.session
     zcu_tools.device
     zcu_tools.notebook
@@ -64,9 +68,10 @@ type = forbidden
 source_modules =
     zcu_tools.gui.app.autofluxdep
 forbidden_modules =
-    zcu_tools.gui.app.main
+    zcu_tools.gui.app.measure
 
-# ADR-0028: notebook and GUI are adapters of the analysis kernel.
+# lib/zcu_tools/analysis/fluxdep/README.md: notebook and GUI are adapters of the
+# analysis kernel (formerly ADR-0028).
 [importlinter:contract:fluxdep-kernel-no-adapters]
 name = C6: fluxdep kernel does not depend on its adapters
 type = forbidden
@@ -75,3 +80,27 @@ source_modules =
 forbidden_modules =
     zcu_tools.gui
     zcu_tools.notebook
+
+# D1: cfg_editing may use the Qt-free generic gui.cfg only, not other GUI owners.
+[importlinter:contract:cfg-editing-only-gui-cfg]
+name = C7: experiment cfg editing depends only on the generic gui cfg core
+type = forbidden
+source_modules =
+    zcu_tools.experiment.cfg_editing
+forbidden_modules =
+    zcu_tools.gui.app
+    zcu_tools.gui.plotting
+    zcu_tools.gui.remote
+    zcu_tools.gui.session
+    zcu_tools.gui.widgets
+    zcu_tools.gui.controller_base
+    zcu_tools.gui.error_messages
+    zcu_tools.gui.event_bus
+    zcu_tools.gui.expected_error
+    zcu_tools.gui.launcher
+    zcu_tools.gui.logging_setup
+    zcu_tools.gui.owner
+    zcu_tools.gui.project
+    zcu_tools.gui.result_scope
+    zcu_tools.gui.runtime
+    zcu_tools.gui.version_table

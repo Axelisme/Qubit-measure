@@ -4,11 +4,10 @@ The dependency model (``nodes/spec.py``) carries plain *values* between Nodes.
 Some run-lived capabilities do not fit value-passing because they are stateful
 and shared across the whole sweep:
 
-- **predictor**: flux→qubit-freq prediction whose ``bias`` is *adapted* by
-  qubit_freq's calibration when the backend supports a physical bias update. Its
-  query face is read by the predictor Service Node to produce base
-  ``predict_freq`` / ``cur_m``; its calibration face is a method a Node triggers,
-  never the orchestrator.
+- **predictor**: flux→qubit-freq prediction. Its query face is read by the
+  predictor Service Node to produce base ``predict_freq`` / ``cur_m``. The real
+  predictor adapter retains an explicit bias calibration method, but the current
+  qubit_freq run path uses fitted physical overlays and does not call it.
 - **feedback**: placement-scoped scalar estimators/controllers whose state lives
   across flux points. Nodes decide what a correction/proposal means and when to
   observe/apply it.
@@ -44,10 +43,12 @@ class Predictor(Protocol):
 
     *Query* face (pure): ``predict_freq`` / ``predict_matrix_element`` — used by
     the predictor Service Node to produce ``predict_freq`` / ``cur_m``.
-    *Calibration* face (mutating, triggered by a Node not the orchestrator):
-    ``calibrate`` folds a measured freq into the physical/base predictor when the
-    backend supports it. Generic residual correction lives in
-    ``autofluxdep.feedback`` and is composed by the use-site node, not hidden here.
+    *Calibration* face (mutating if supported): ``calibrate`` directly updates
+    the real adapter's underlying physical predictor bias from a measured freq;
+    it is a no-op for SimplePredictor. The current qubit_freq run path does not
+    call it: accepted physical fits use a run-local overlay instead. Generic
+    residual correction lives in ``autofluxdep.feedback`` and is composed by
+    the use-site node, not hidden here.
     """
 
     def predict_freq(self, flux: float) -> float: ...
@@ -100,9 +101,10 @@ class SimplePredictor:
 class FluxoniumPredictorAdapter:
     """Wraps a real ``FluxoniumPredictor`` into the ``Predictor`` interface.
 
-    The real predictor owns the physical model and its bias update. Residual
-    interpolation is generic feedback state owned by the qubit_freq node's slot,
-    so this adapter only exposes the base prediction and physical calibration.
+    The real predictor owns the physical model and its bias update. The adapter
+    exposes direct calibration for explicit callers; the current run path uses
+    physical overlays instead. Residual interpolation is generic feedback state
+    owned by the qubit_freq node's slot.
     """
 
     fluxonium: Any  # a zcu_tools.simulate.fluxonium.FluxoniumPredictor

@@ -5,15 +5,18 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
-from zcu_tools.experiment.v2_gui.registry import ADAPTERS, register_all
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import (
+    FakeAdapter,
+    FakeAnalyzeParams,
+)
+from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS, register_all
+from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     RunRequest,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import DirectValue
 
 
@@ -43,8 +46,8 @@ def test_fake_adapter_full_flow():
 
     # 3. run
     schema.value.fields["noise_scale"] = DirectValue(0.05)
-    run_req = RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
-    result = adapter.run(run_req, schema)
+    run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={})
+    result = adapter.run(run_req, schema_to_raw_dict(schema, ctx.md, ctx.ml))
     assert isinstance(result.data, np.ndarray)
     assert len(result.data) == 11
 
@@ -75,7 +78,7 @@ def test_registry_register_all_and_create():
     register_all(reg)
     assert reg.has("fake/freq")
     adapter = reg.create("fake/freq")
-    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
 
     assert isinstance(adapter, FakeFreqAdapter)
 

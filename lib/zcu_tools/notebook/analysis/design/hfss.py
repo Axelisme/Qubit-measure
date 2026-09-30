@@ -6,7 +6,7 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from zcu_tools.utils.fitting import fit_anticross
+from zcu_tools.analysis.fitting import fit_anticross
 
 
 def analyze_1d_sweep(

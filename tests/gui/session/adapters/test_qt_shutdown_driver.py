@@ -2,7 +2,7 @@
 
 Verifies the two ends — immediate settle (no operations) and the polled wait
 until an operation settles — without reaching into the coordinator. Operations
-are modelled directly as OperationHandles tokens (ADR-0019)."""
+are modelled directly as OperationHandles tokens (ADR-0066)."""
 
 from __future__ import annotations
 

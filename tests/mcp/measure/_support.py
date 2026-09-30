@@ -5,8 +5,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
+from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
+from zcu_tools.gui.app.measure.remote.method_entries._registry import (
+    build_agent_catalog,
+)
+from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import (
     MeasureMcpSession,
@@ -33,7 +38,7 @@ class WireTransport:
         self,
         deliver_reply: Callable[[dict[str, Any]], None],
         deliver_event: Callable[[dict[str, Any]], None],
-        on_closed: Callable[[], None],
+        on_closed: Callable[[Exception | None], None],
     ) -> None:
         self.deliver_reply = deliver_reply
         self.deliver_event = deliver_event
@@ -41,11 +46,17 @@ class WireTransport:
     def send_line(self, payload: dict[str, Any]) -> None:
         method, params = payload["method"], payload["params"]
         self.sent.append((method, params))
+        reply: dict[str, Any]
         if method in self.replies:
             response = self.replies[method]
             reply = response(params) if callable(response) else response
         elif method == "resources.versions":
             reply = {"ok": True, "result": {"versions": {}}}
+        elif method == "wire.version":
+            reply = {
+                "ok": True,
+                "result": {"wire_version": WIRE_VERSION, "gui_version": 79},
+            }
         elif self.responder is not None:
             reply = {"ok": True, "result": self.responder(method, params)}
         else:
@@ -67,18 +78,6 @@ class MeasureClient:
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.tools[name]["handler"](arguments)
 
-    def observe_versions(self, versions: dict[str, int]) -> None:
-        self.transport.replies["resources.versions"] = {
-            "ok": True,
-            "result": {"versions": versions},
-        }
-        self.transport.replies["state.has_soc"] = {
-            "ok": True,
-            "result": {"value": False},
-        }
-        self.context.send_gui_rpc("state.has_soc", {})
-        self.transport.sent.clear()
-
 
 def make_client(
     tmp_path: Path,
@@ -88,13 +87,13 @@ def make_client(
     port_is_open: PortIsOpenFn | None = None,
 ) -> MeasureClient:
     config = MCPBridgeConfig(
-        tool_prefix="gui_",
+        tool_prefix="",
         server_display_name="measure-test",
         server_instructions="",
         app_name="gui",
         default_port=8765,
-        mcp_version=74,
-        wire_version=55,
+        mcp_version=75,
+        wire_version=WIRE_VERSION,
         pid_file=tmp_path / "unused.pid",
         log_file=tmp_path / "unused.log",
         run_script_name="run_measure_gui.py",
@@ -109,14 +108,17 @@ def make_client(
         resolve_connect_port=resolver,
         port_is_open=port_is_open or (lambda port: False),
     )
-    bridge = McpBridge(config, on_event=session.deliver_event)
+    bridge = McpBridge(config)
     session.attach_bridge(bridge)
     transport = WireTransport(responder)
+    transport.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {"methods": build_agent_catalog(METHOD_ENTRIES)},
+    }
     bridge.set_transport(transport)
     context = MeasureToolContext(
         config,
         session,
-        METHOD_SPECS,
         resolve_connect_port=resolver,
     )
     return MeasureClient(context, transport, build_measure_tools(context))

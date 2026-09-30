@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from qick.asm_v2 import QickParam
 
-from . import datasaver, fitting, math, process, tomography
+from . import math, process, tomography
 
 
 def deepupdate(
@@ -78,13 +78,10 @@ def format_obj(obj: Any) -> Any:
 
 __all__ = [
     # modules
-    "fitting",
     "math",
     "process",
     "tomography",
     # utils
     "deepupdate",
-    # datasaver
-    "datasaver",
     "format_obj",
 ]

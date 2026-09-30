@@ -2,7 +2,7 @@
 
 Holds the read-only ``remote`` bridge (the RPC/MCP face onto the Controller) and
 the app-local workflow persistence caretaker. The session services (connection /
-context / device / startup) are the shared ones composed in the Controller, not
+context / device / settings) are the shared ones composed in the Controller, not
 app-local.
 """
 

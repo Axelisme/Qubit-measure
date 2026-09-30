@@ -10,7 +10,7 @@ vocabulary (``OperationKind``), the conflict error, and the ``ExclusionGate``
 port. Each app keeps its own concrete ``OperationGate`` (the conflict *policy*)
 and adds its own app-specific kinds (measure: ``run``; autofluxdep: a sweep kind);
 the port is keyed by the kind's wire string so a session service can name a
-session kind without the gate's full vocabulary leaking here (ADR-0019, decision
+session kind without the gate's full vocabulary leaking here (ADR-0066, decision
 3 of the session-core extraction).
 
 More driven-adapter ports (driver factory / project IO / progress transport) join
@@ -29,9 +29,9 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceProtocol
-    from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
+    from zcu_tools.resources.context import ModuleLibrary
 
 
 _T = TypeVar("_T")
@@ -127,7 +127,7 @@ class BackgroundExecutor(Protocol):
     ``submit`` runs ``work`` off-main, delivering its result to ``on_done`` or
     its exception to ``on_error`` on the owner thread. ``run_in_pool`` picks the
     shared pool vs a dedicated thread.  All ambient scopes must be built into
-    ``work`` by the caller before this call (ADR-0026 §2).
+    ``work`` by the caller before this call (ADR-0066).
     """
 
     def submit(
@@ -217,7 +217,8 @@ class DriverFactoryPort(Protocol):
 class DeviceMemoryInfo:
     """A remembered (memory-only) device's identity — the element type of
     ``RememberedDevicePort.register_remembered_devices``. Lives in the seam so both
-    the device service and startup depend on it here, not on each other's module.
+    the device service and project settings depend on it here, not on each other's
+    module.
     """
 
     type_name: str
@@ -227,10 +228,10 @@ class DeviceMemoryInfo:
 
 @runtime_checkable
 class RememberedDevicePort(Protocol):
-    """Remembered-device registration as used by ``StartupService.restore_devices``.
+    """Remembered-device registration as used by ``ProjectSettingsService.restore_settings``.
 
-    The one device command startup issues; depends on the port, not the concrete
-    ``DeviceService``.
+    The one device command settings restore issues; depends on the port, not the
+    concrete ``DeviceService``.
     """
 
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None: ...
@@ -240,9 +241,9 @@ class RememberedDevicePort(Protocol):
 class ProjectIOPort(Protocol):
     """Experiment-project file I/O as used by ``ContextService``.
 
-    Implemented by ``IOManager`` (which wraps ``ExperimentManager``). This is the
+    Implemented by ``IOManager`` (which wraps ``ContextManager``). This is the
     file-backed project / flux-context store; the service never touches
-    ``ExperimentManager`` directly.
+    ``ContextManager`` directly.
     """
 
     @property
@@ -250,14 +251,15 @@ class ProjectIOPort(Protocol):
     def setup(self, result_dir: str) -> None: ...
     def list_contexts(self) -> list[str]: ...
     def get_active_label(self) -> str | None: ...
-    def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext: ...
+    def use_context(self, label: str, base_ctx: SessionEnv) -> SessionEnv: ...
     def new_context(
         self,
-        base_ctx: ExpContext,
+        base_ctx: SessionEnv,
         value: float | None = None,
         unit: str = "none",
         clone_from: str | None = None,
-    ) -> ExpContext: ...
+        label: str | None = None,
+    ) -> SessionEnv: ...
 
 
 @runtime_checkable
@@ -266,7 +268,7 @@ class ContextReadPort(Protocol):
 
     A ``CfgEditorSession`` reads the current ml to seed a session opened
     ``from_name`` (load an existing entry's shape). Reading only — all ml/md
-    *content writes* go through the app's ``ContextWritePort`` (ADR-0006:
+    *content writes* go through the app's ``ContextWritePort`` (ADR-0067:
     ContextService is the single write authority). Symmetric name with
     ``ContextWritePort``.
     """
@@ -275,14 +277,14 @@ class ContextReadPort(Protocol):
 
 
 @runtime_checkable
-class StartupContextPort(Protocol):
-    """Context bootstrap commands as used by ``StartupService``.
+class ProjectContextPort(Protocol):
+    """Project context commands as used by ``ProjectSettingsService``.
 
-    ``StartupService`` orchestrates project startup (one-way command into the
+    ``ProjectSettingsService`` applies a project (one-way command into the
     context); it depends on this port, not the concrete ``ContextService``.
     """
 
-    def set_startup_context(
+    def set_project_context(
         self,
         md: object,
         ml: object,
@@ -301,7 +303,7 @@ class DeviceRegistryPort(Protocol):
 
     The five methods mirror ``GlobalDeviceManager``'s classmethod surface, but
     expressed as instance methods so ``DeviceService`` can swap the concrete
-    singleton for an in-memory fake in tests (ADR-0026 §D).
+    singleton for an in-memory fake in tests (ADR-0066).
     """
 
     def register_device(self, name: str, device: Any) -> None: ...

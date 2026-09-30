@@ -94,6 +94,26 @@ half-open time intervals, with the final segment including the waveform endpoint
 Total waveform duration is the sum of segment durations.
 _Avoid_: piece, section, pulse part
 
+**Permit**:
+呼叫受保護 GUI 操作前，對該次請求已檢查的前置條件憑證。
+它不表示操作期間的硬體資源仍然可用，也不需釋放。
+_Avoid_: lease, operation handle
+
+**Exclusion Lease**:
+操作啟動時取得、在終局釋放的動態互斥佔用。
+它與操作追蹤用的 handle 不同，也不代替請求前置條件檢查。
+_Avoid_: permit, operation handle
+
+**SessionEnv**:
+GUI session 目前生效的實驗 context 與 live 連線資源。
+它與預填 Setup 的 Session Preference 不同。
+_Avoid_: persisted session preference, complete app state
+
+**Session Preference**:
+GUI 記住、用來預填 Setup 的 project 名稱、result scope 與連線位址。
+它不表示 project 已套用或儀器已連線，也與目前生效的 SessionEnv 分開。
+_Avoid_: startup preference
+
 ## Example Dialogue
 
 Developer: "This experiment result has multiple measured views. Is that several

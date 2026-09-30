@@ -24,9 +24,9 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseReadout,
@@ -65,7 +65,7 @@ class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
-    # Axes are declared inner-first (ADR-0027): inner (fastest-varying) axis is
+    # Axes are declared inner-first (ADR-0063): inner (fastest-varying) axis is
     # freqs (stored as Hz on disk, MHz in memory); outer axis is jpa flux (a.u.).
     # signals.shape == (len(fluxes), len(freqs)); non-square sweeps round-trip.
     AXES_SPEC = AxesSpec(

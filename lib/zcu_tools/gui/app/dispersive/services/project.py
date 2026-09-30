@@ -18,7 +18,7 @@ from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     FluxoniumInputs,
 )
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.qubit_params import (
     QubitParams,
     QubitParamsError,
     params_path_for_result_dir,

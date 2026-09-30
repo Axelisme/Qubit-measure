@@ -1,0 +1,139 @@
+"""Editor remote method entries."""
+
+from __future__ import annotations
+
+from zcu_tools.gui.remote.method_spec import MethodSpec
+
+from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
+from ._params import (
+    _json,
+    _str,
+    _str_opt,
+)
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
+
+METHODS: tuple[RemoteMethodEntry, ...] = (
+    method_entry(
+        "editor.new",
+        "editor:h_editor_new",
+        MethodSpec(
+            5.0,
+            "Open a stateful editing session over an EXISTING ModuleLibrary "
+            "module/waveform (by 'from_name'). To create a new blank/shaped entry, "
+            "use context.ml_create_from_role (e.g. role_id='pulse:blank' or a named role) "
+            "then editor.new(from_name=name) to edit it. item_kind is 'module' or "
+            "'waveform'. Returns {editor_id, tree} (tree = the complete cached cfg "
+            "view, same shape as editor.get / tab.get_cfg).",
+            (
+                _str("item_kind", "'module' or 'waveform'"),
+                _str("from_name", "Existing ml entry name to load for editing"),
+            ),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
+        "editor.set_field",
+        "editor:h_editor_set_field",
+        MethodSpec(
+            5.0,
+            "Set one field in an editing session. 'path' must be a canonical dotted "
+            "leaf copied from editor.new/get: scalar '<path>', sweep edge "
+            "'<path>.start|stop|expts|step' (or centered center/span/expts/step), "
+            "reference key '<path>.ref', and reference children directly below the "
+            "reference. Removed '.sweep.<edge>' / '.value.<child>' aliases are "
+            "rejected without mutation and the error gives the replacement. "
+            "'value' is a JSON scalar, or an md-reference expression as "
+            '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
+            "commit), or a registered value source as "
+            '{"__kind":"value_ref","key":"device.flux.value","type":"float"} '
+            "(resolved immediately at set time and stored as a direct scalar; discover "
+            "keys with value.list / value.read). NOTE: eval/value_ref forms are "
+            "accepted ONLY on a scalar leaf — a "
+            "sweep_edge (a sweep's start/stop/expts/step) accepts ONLY a number/int, "
+            "never an eval/value_ref; an adapter's default eval edge cannot be "
+            "overwritten this way, pass a numeric value instead. "
+            "Returns {valid, removed, added} — does NOT echo cfg content "
+            "(that would force a lowering pass that eagerly evaluates EvalValue). "
+            "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
+            "list net settable paths a reference key switch ('<path>.ref') dropped/"
+            "created so you need not re-list after a variant switch. To read cfg use "
+            "tab.get_cfg / editor.get (the complete cached observation).",
+            (
+                _str("editor_id"),
+                _str("path", "Dotted field path"),
+                _json(
+                    "value",
+                    "JSON scalar, {__kind:eval, expr}, or {__kind:value_ref, key, type?}",
+                ),
+            ),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
+        "editor.set_fields",
+        "editor:h_editor_set_fields",
+        MethodSpec(
+            5.0,
+            "Apply ordered agent cfg edits to one existing editor draft. 'edits' "
+            "is [{path, value}] with canonical scalar/reference paths or a whole "
+            "sweep object at its parent path; GUI editor.set_field still uses leaf "
+            "sweep controls. On error stop without undoing the successful prefix "
+            "and name the failed path/applied count. Returns "
+            "{valid, removed, added, applied, actual}; 'actual' contains "
+            "normalized sweeps. This does not commit the ModuleLibrary item.",
+            (_str("editor_id"), _json("edits", "Ordered {path, value} edits")),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
+        "editor.get",
+        "editor:h_editor_get",
+        MethodSpec(
+            5.0,
+            CFG_OBSERVATION_DESCRIPTION,
+            (
+                _str("editor_id"),
+                _str_opt(
+                    "prefix",
+                    "Return only the sub-tree rooted at this dotted path "
+                    "(e.g. 'modules.readout'); omit for the whole draft. No match → {}",
+                ),
+            ),
+        ),
+        agent=AgentMethodPolicy(
+            reveals=("editor:{editor_id}",), reveals_without=("prefix",)
+        ),
+    ),
+    method_entry(
+        "editor.commit",
+        "editor:h_editor_commit",
+        MethodSpec(
+            10.0,
+            "Save the editing session (from rpc_call on editor.new) as a ModuleLibrary "
+            "module/waveform: lower the session (eval expressions resolved against "
+            "MetaDict to concrete numbers) and register it into the ModuleLibrary "
+            "under 'name'. This is NOT 'apply a tab cfg edit' — tab cfg edits are "
+            "already live (WYSIWYG); this persists the draft as a named ml entry. "
+            "Returns {}. On success the session is destroyed; on validation failure "
+            "it RAISES and the session is kept so you can fix and retry.",
+            (
+                _str("editor_id"),
+                _str("name", "ml entry name to register under"),
+            ),
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=("editor:{editor_id}", "context"), refresh_after_write=True
+        ),
+    ),
+    method_entry(
+        "editor.discard",
+        "editor:h_editor_discard",
+        MethodSpec(
+            5.0,
+            "Discard an editing session (from rpc_call on editor.new) without writing to the "
+            "ModuleLibrary. Returns {}.",
+            (_str("editor_id"),),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+)

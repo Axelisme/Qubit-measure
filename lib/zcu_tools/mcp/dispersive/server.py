@@ -8,7 +8,7 @@ analysis method tool is generated 1:1 from the wire-method contract table
 (``METHOD_SPECS``, all pure queries — the user drives the GUI); the agent-facing
 lifecycle tools (``dispersive_launch`` / ``dispersive_connect`` /
 ``dispersive_disconnect``) are built by the shared read-only factory and fork
-``script/run_dispersive_gui.py``.
+``scripts/run_dispersive_gui.py``.
 
 The whole server body (``send_gui_rpc``, the lifecycle tools, cleanup, the stdio
 loop) lives in :func:`zcu_tools.mcp.core.readonly_server.build_readonly_server`;
@@ -39,10 +39,10 @@ _BOOTSTRAP["bootstrap_standalone_server"](
 
 # NOTE: absolute imports (NOT relative) — this module is launched as a script
 # (``python .../server.py`` per .mcp.json), so it has no parent package.
-from zcu_tools.gui.app.dispersive.services.remote.method_specs import (  # noqa: E402
+from zcu_tools.gui.app.dispersive.remote.method_specs import (  # noqa: E402
     METHOD_SPECS,
 )
-from zcu_tools.gui.app.dispersive.services.remote.wire_version import (  # noqa: E402
+from zcu_tools.gui.app.dispersive.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402

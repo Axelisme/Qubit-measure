@@ -1,7 +1,7 @@
 """Read-only value lookup for session-scoped, resolve-once values.
 
 This module is a pure session-layer leaf. It intentionally knows nothing about
-Qt, app/main cfg trees, devices, or predictors; concrete owners register small,
+Qt, app/measure cfg trees, devices, or predictors; concrete owners register small,
 side-effect-free providers through ``ValueRegistry`` and callers receive only the
 ``ValueLookup`` read interface.
 """

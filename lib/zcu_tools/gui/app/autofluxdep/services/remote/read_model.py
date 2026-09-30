@@ -75,7 +75,7 @@ class ControllerRemoteReadModel:
             "next_flux_idx": self._controller.next_flux_idx,
             "run_status": self._controller.run_status,
             "has_results": _has_enabled_results(state),
-            "has_loaded_predictor": state.exp_context.predictor is not None,
+            "has_loaded_predictor": state.session_env.predictor is not None,
             "has_run_predictor": state.run_predictor is not None,
         }
 

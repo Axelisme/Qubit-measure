@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -16,12 +16,12 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueRegistry
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _state() -> State:
     return State(
-        ExpContext(
+        SessionEnv(
             md=MetaDict(),
             ml=ModuleLibrary(),
             soc=None,
@@ -53,8 +53,8 @@ def test_context_sources_read_live_context_values() -> None:
     assert registry.get_as("context.active_label", str) == "flux_0.0_A"
     assert registry.get_as("project.result_dir", str) == "/result"
 
-    state.set_context(dataclasses.replace(state.exp_context, chip_name="chip2"))
-    bus.emit(ContextSwitchedPayload(md=state.exp_context.md, ml=state.exp_context.ml))
+    state.set_context(dataclasses.replace(state.session_env, chip_name="chip2"))
+    bus.emit(ContextSwitchedPayload(md=state.session_env.md, ml=state.session_env.ml))
 
     assert registry.get_as("context.chip_name", str) == "chip2"
 
@@ -72,14 +72,14 @@ def test_predictor_sources_follow_predictor_lifecycle() -> None:
     predictor.flux_half = 0.25
     predictor.flux_period = 0.5
     predictor.flux_bias = -0.01
-    state.set_context(dataclasses.replace(state.exp_context, predictor=predictor))
+    state.set_context(dataclasses.replace(state.session_env, predictor=predictor))
     bus.emit(PredictorChangedPayload())
 
     assert registry.get_as("predictor.loaded", bool) is True
     assert registry.get_as("predictor.EJ", float) == pytest.approx(4.0)
     assert registry.get_as("predictor.flux_bias", float) == pytest.approx(-0.01)
 
-    state.set_context(dataclasses.replace(state.exp_context, predictor=None))
+    state.set_context(dataclasses.replace(state.session_env, predictor=None))
     bus.emit(PredictorChangedPayload())
 
     assert registry.get_as("predictor.loaded", bool) is False

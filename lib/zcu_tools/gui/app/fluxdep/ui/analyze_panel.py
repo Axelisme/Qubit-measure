@@ -166,8 +166,8 @@ class AnalyzePanelWidget(QWidget):
 
     def _refresh_filter_tab(self) -> None:
         """(Re)build the cross-spectrum selector for the current spectra."""
+        from zcu_tools.analysis.fluxdep.models import SpectrumResult
         from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
-        from zcu_tools.notebook.persistance import SpectrumResult
 
         if self._filter_widget is not None:
             # Quiesce before deleteLater: the SelectorWidget may have a pooled
@@ -450,7 +450,7 @@ class AnalyzePanelWidget(QWidget):
             self._status.setText(f"Database not found: {db_path}")
             return
         # Pre-check that needed r_f / sample_f are filled for the chosen
-        # transitions (else search_in_database would fail with a cryptic error).
+        # transitions (else search_database would fail with a cryptic error).
         missing = self._missing_freq_message(
             self._transitions_form.get_transitions(),
             _parse_freq(self._r_f),

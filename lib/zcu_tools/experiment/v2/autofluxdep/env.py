@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.resources.context import ModuleLibrary
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 

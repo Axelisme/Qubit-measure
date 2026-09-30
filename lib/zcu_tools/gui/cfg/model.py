@@ -11,6 +11,11 @@ def default_value_for_type(type_: type) -> object:
     return defaults.get(type_, None)
 
 
+def require_finite_scalar(value: float | complex) -> None:
+    if not (math.isfinite(value.real) and math.isfinite(value.imag)):
+        raise ValueError("Scalar value must be finite")
+
+
 # ---------------------------------------------------------------------------
 # Spec tree — static, defined by Adapter, never mutated
 # ---------------------------------------------------------------------------
@@ -348,14 +353,27 @@ CfgNodeSpec = (
 
 @dataclass(frozen=True)
 class DirectValue:
-    """A directly-entered scalar value. ``value is None`` means *unset* (the
-    field has no value yet) — there is no separate ``is_unset`` flag, the value
-    itself is the single source of truth (ADR-0010). Scalar types are only
-    int/float/str/bool, whose legal values are never ``None``, so ``None``
-    unambiguously means unset. The ``DirectValue`` wrapper is kept even when
-    unset so the scalar's *mode* (direct vs ``EvalValue``) survives."""
+    """A directly-entered scalar value with optional input text and parse error.
+
+    ``value=None`` means unset when ``error`` is absent. Scalar types are
+    int/float/complex/str/bool, whose legal values are never ``None``.
+    Text parsing failures retain ``raw``
+    and ``error`` with no parsed value, so invalid input cannot reuse an earlier
+    valid value. ``validation_error`` records binding constraints such as option
+    membership without discarding the current selection. Binding recomputes that
+    runtime metadata; persistence stores only the input.
+    The wrapper also preserves direct mode while unset or invalid."""
 
     value: Any | None = None
+    raw: str | None = field(default=None, kw_only=True)
+    error: str | None = field(default=None, kw_only=True)
+    validation_error: str | None = field(default=None, kw_only=True, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.error is not None and (self.raw is None or self.value is not None):
+            raise ValueError(
+                "Invalid direct input requires raw text and no parsed value"
+            )
 
 
 @dataclass(frozen=True)
@@ -363,64 +381,130 @@ class EvalValue:
     expr: str
     resolved: Any | None = None
     error: str | None = None
+    validation_error: str | None = field(default=None, kw_only=True, repr=False)
 
 
 ScalarValue: TypeAlias = DirectValue | EvalValue
 
 # Accepted input for the value-tree fluent ``with_field``: a raw scalar (wrapped
 # in DirectValue) or an already-built scalar value.
-ScalarLeafInput: TypeAlias = int | float | str | bool | DirectValue | EvalValue
+ScalarLeafInput: TypeAlias = (
+    int | float | complex | str | bool | DirectValue | EvalValue
+)
+
+
+def resolved_direct_number(value: int | float | DirectValue) -> int | float | None:
+    """Read a numeric carrier without reparsing text or substituting an old value."""
+    number = value.value if isinstance(value, DirectValue) else value
+    if number is None:
+        return None
+    if isinstance(number, bool) or not isinstance(number, (int, float)):
+        raise TypeError("Expected a direct numeric value")
+    return number
+
+
+def _normalize_range_text(
+    value: DirectValue, label: str, type_: type, minimum: float | None = None
+) -> DirectValue:
+    number = resolved_direct_number(value)
+    if number is None:
+        return value
+    if type(number) is not type_:
+        raise TypeError(f"{label} expects {type_.__name__}")
+    try:
+        finite = math.isfinite(number)
+    except OverflowError:
+        finite = False
+    if finite and (minimum is None or number >= minimum):
+        return value
+    error = f"{label} must be finite"
+    if minimum is not None:
+        error += f" and >= {minimum:g}"
+    if value.raw is None:
+        raise ValueError(error)
+    return DirectValue(None, raw=value.raw, error=error)
+
+
+def _normalize_sweep_points(value: int | DirectValue) -> int | DirectValue:
+    if isinstance(value, DirectValue):
+        return _normalize_range_text(value, "Sweep points", int, 1)
+    if type(value) is not int:
+        raise TypeError("Sweep points must be an integer")
+    if value < 1:
+        raise ValueError("SweepValue.expts must be >= 1")
+    return value
 
 
 @dataclass
 class SweepValue:
-    start: float | EvalValue
-    stop: float | EvalValue
-    expts: int
-    step: float = 0.1
+    start: float | ScalarValue
+    stop: float | ScalarValue
+    expts: int | DirectValue
+    step: float | DirectValue = 0.1
     # ``auto_norm`` (init-only) derives ``step`` from start/stop/expts at
     # construction so that any direct ``SweepValue(start, stop, expts=N)`` (the
     # 16 adapter defaults, session codec, inheritance) is self-consistent — step
     # is a derived view of expts, not an independent input. ``SweepEditor`` (the
     # canonicalisation authority, which also runs the reverse step→expts rule)
     # passes ``auto_norm=False`` so its already-computed value is not re-derived.
-    # Only plain numeric bounds are normalised; EvalValue bounds are left to
+    # Numeric direct bounds are normalised; EvalValue bounds are left to
     # ``SweepEditor`` (which owns the resolved-edge handling) — auto_norm never
     # touches an EvalValue's ``resolved`` (it may be unresolved or non-numeric).
     auto_norm: InitVar[bool] = True
 
     def __post_init__(self, auto_norm: bool) -> None:
-        if self.expts < 1:
-            raise ValueError("SweepValue.expts must be >= 1")
+        self.expts = _normalize_sweep_points(self.expts)
+        if isinstance(self.start, DirectValue):
+            self.start = _normalize_range_text(self.start, "Sweep start", float)
+        if isinstance(self.stop, DirectValue):
+            self.stop = _normalize_range_text(self.stop, "Sweep stop", float)
+        if isinstance(self.step, DirectValue):
+            self.step = _normalize_range_text(self.step, "Sweep step", float)
+        start = self.start.value if isinstance(self.start, DirectValue) else self.start
+        stop = self.stop.value if isinstance(self.stop, DirectValue) else self.stop
+        points = resolved_direct_number(self.expts)
         if (
             auto_norm
-            and isinstance(self.start, (int, float))
-            and isinstance(self.stop, (int, float))
+            and not isinstance(self.step, DirectValue)
+            and points is not None
+            and isinstance(start, (int, float))
+            and isinstance(stop, (int, float))
         ):
             self.step = (
-                0.0
-                if self.expts == 1
-                else (float(self.stop) - float(self.start)) / (self.expts - 1)
+                0.0 if points == 1 else (float(stop) - float(start)) / (points - 1)
             )
 
 
 @dataclass
 class CenteredSweepValue:
-    center: float | EvalValue
-    span: float
-    expts: int
-    step: float = 0.1
+    center: float | ScalarValue
+    span: float | DirectValue
+    expts: int | DirectValue
+    step: float | DirectValue = 0.1
     auto_norm: InitVar[bool] = True
 
     def __post_init__(self, auto_norm: bool) -> None:
-        if self.expts < 1:
-            raise ValueError("CenteredSweepValue.expts must be >= 1")
-        span = float(self.span)
-        if not math.isfinite(span) or span < 0.0:
-            raise ValueError("CenteredSweepValue.span must be finite and >= 0")
-        self.span = span
-        if auto_norm:
-            self.step = 0.0 if self.expts == 1 else span / (self.expts - 1)
+        self.expts = _normalize_sweep_points(self.expts)
+        if isinstance(self.center, DirectValue):
+            self.center = _normalize_range_text(self.center, "Sweep center", float)
+        if isinstance(self.span, DirectValue):
+            self.span = _normalize_range_text(self.span, "Sweep span", float, 0)
+        else:
+            span = float(self.span)
+            if not math.isfinite(span) or span < 0.0:
+                raise ValueError("CenteredSweepValue.span must be finite and >= 0")
+            self.span = span
+        if isinstance(self.step, DirectValue):
+            self.step = _normalize_range_text(self.step, "Sweep step", float, 0)
+        span = resolved_direct_number(self.span)
+        points = resolved_direct_number(self.expts)
+        if (
+            auto_norm
+            and not isinstance(self.step, DirectValue)
+            and span is not None
+            and points is not None
+        ):
+            self.step = 0.0 if points == 1 else span / (points - 1)
 
 
 @dataclass
@@ -431,6 +515,9 @@ class ReferenceValue:
     # away from the library snapshot (LibraryBindingState.MODIFIED). Persisted so
     # the override survives reload; False for pure library refs and <Custom:> refs.
     is_overridden: bool = False
+    # Resolution metadata belongs to the displayed snapshot, not the live catalog.
+    resolved_label: str | None = field(default=None, kw_only=True)
+    error: str | None = field(default=None, kw_only=True)
 
     def with_field(self, path: str, value: ScalarLeafInput) -> Self:
         """Set a scalar leaf inside this ref's value (in-place, returns self).
@@ -438,7 +525,7 @@ class ReferenceValue:
         Adapter-side default override sugar (replaces long factory params). The
         value tree is mutable by contract; this mutates and returns self for
         chaining — deliberately asymmetric with spec-side fluent (which returns
-        new frozen specs). See CONTEXT.md "Value OO 覆寫".
+        new frozen specs). See the gui/cfg README for Spec/Value ownership.
         """
         self.value.with_field(path, value)
         return self

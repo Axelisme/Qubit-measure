@@ -14,17 +14,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.meta_tool import (
-    DeviceValueUnit,
-    QubitParams,
-    SampleFluxFrame,
-    SampleFluxResolution,
-    T1CurveFit,
-    T1CurveFitParams,
-    T1CurveFitUncertainty,
-    resolve_sample_flux,
-    validate_sample_table_v2,
-)
 from zcu_tools.notebook.analysis.fit_tools import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
@@ -33,6 +22,19 @@ from zcu_tools.notebook.analysis.fit_tools import (
     predict_f01_mhz,
 )
 from zcu_tools.progress_bar import make_pbar
+from zcu_tools.resources.qubit_params import (
+    QubitParams,
+    T1CurveFit,
+    T1CurveFitParams,
+    T1CurveFitUncertainty,
+)
+from zcu_tools.resources.sample_table import (
+    DeviceValueUnit,
+    SampleFluxFrame,
+    SampleFluxResolution,
+    resolve_sample_flux,
+    validate_sample_table_v2,
+)
 from zcu_tools.simulate import flux2value
 from zcu_tools.simulate.fluxonium import (
     calculate_eff_t1_vs_flux_fast,

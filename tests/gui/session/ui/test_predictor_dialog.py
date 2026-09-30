@@ -463,7 +463,7 @@ def test_predictor_dialog_apply_surfaces_service_error(qapp):
 def test_predictor_dialog_calibration_defaults_to_q_f_and_requires_single_selection(
     qapp,
 ):
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.q_f = 4567.0
@@ -481,7 +481,7 @@ def test_predictor_dialog_calibration_defaults_to_q_f_and_requires_single_select
 
 
 def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.q_f = 4567.0
@@ -504,7 +504,7 @@ def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
 
 
 def test_predictor_dialog_calibrate_requires_loaded_predictor(qapp):
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.q_f = 4567.0
@@ -523,7 +523,7 @@ def test_predictor_dialog_calibrate_requires_loaded_predictor(qapp):
 
 def test_predictor_dialog_calibrate_requires_single_selected_transition(qapp):
     from qtpy.QtWidgets import QTableWidgetSelectionRange  # type: ignore[attr-defined]
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.q_f = 4567.0

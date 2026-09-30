@@ -30,7 +30,7 @@ def test_shared_cfg_widget_import_does_not_load_forbidden_layers() -> None:
         forbidden = (
             "zcu_tools.gui.app",
             "zcu_tools.experiment",
-            "zcu_tools.meta_tool",
+            "zcu_tools.resources",
             "zcu_tools.gui.event_bus",
             "zcu_tools.gui.session",
             "zcu_tools.device",
@@ -55,7 +55,7 @@ def test_shared_cfg_widget_source_has_no_forbidden_imports() -> None:
     forbidden_prefixes = (
         "zcu_tools.gui.app",
         "zcu_tools.experiment",
-        "zcu_tools.meta_tool",
+        "zcu_tools.resources",
         "zcu_tools.gui.event_bus",
         "zcu_tools.gui.session",
         "zcu_tools.device",

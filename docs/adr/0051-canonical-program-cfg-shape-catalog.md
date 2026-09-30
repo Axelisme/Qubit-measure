@@ -5,7 +5,9 @@ status: accepted
 # 0051 — Canonical program cfg shape catalog
 
 **狀態：** accepted（2026-07-11）。
-**關聯：** [[0020]]、[[0045]]、[[0046]]、[[0050]]。
+**關聯：** [[0067]]、[[0045]]、[[0046]]、[[0050]]。
+
+> 現行定位：跨 owner 分工見 [[0065]]。本篇舊路徑已過時；現行 catalog／materializer owner 是 `experiment.cfg_editing`，app normalization 尚未收斂。
 
 ## 背景
 
@@ -16,11 +18,12 @@ shape 漂移。
 
 ## 決策
 
-`zcu_tools.gui.measure_cfg` 是跨 app、Qt-free 的 program cfg GUI projection owner：
+`zcu_tools.experiment.cfg_editing` 是跨 app、Qt-free 的 program cfg GUI projection owner：
 
 - closed catalog 固定列出七種 module 與六種 waveform discriminator、label、fresh spec factory；
-- catalog 不做 runtime registration，也不 import program/v2、app、session、experiment、Qt 或
-  `meta_tool`；test 以顯式 runtime cfg class 集合驗 closed discriminator parity；
+- catalog 不做 runtime registration；模組本身只 import `zcu_tools.gui.cfg` 與同 package 的 specs，
+  不 import program/v2、app、session、Qt 或 `resources`（資源家族）。package 位於
+  `experiment` 之下，import 時會載入 `experiment` package 的 base 依賴（見 [[0065]]）；test 以顯式 runtime cfg class 集合驗 closed discriminator parity；
 - 每次 factory call 建立 deep-fresh Spec tree，包括 nested section、scalar choices 與
   `ReferenceSpec.allowed` mutable containers；
 - `ProgramSpecPolicy` 只有 `arb_data_choices_source` 與
@@ -36,7 +39,7 @@ scalar missing、missing/non-mapping section、reference selection與Sweep carri
 Literal永遠採Spec lock，extra raw key可代表domain object未公開於GUI的intentional subset，不做
 blanket rejection。
 
-`gui.measure_cfg.ProgramMaterializationPolicy`擁有program raw semantics：root `type/style`選shape、
+`experiment.cfg_editing.ProgramMaterializationPolicy`擁有program raw semantics：root `type/style`選shape、
 missing `ch/ro_ch`為0而其它scalar為None、missing/non-mapping nested section建立完整Spec default、
 required reference missing選`allowed[0]`，以及app可materialize subset。missing waveform style是Const；
 explicit unknown style/type Fast Fail。main policy支援完整七種module與六種waveform；autoflux只

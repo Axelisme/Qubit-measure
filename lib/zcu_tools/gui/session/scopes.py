@@ -1,11 +1,11 @@
-"""Session-layer ambient scope helpers (ADR-0026 §2).
+"""Session-layer ambient scope helpers (ADR-0066).
 
 ``progress_ambient`` is the only helper here: it carries the pbar ContextVar
 into a worker thread. It is session-layer (no Qt, no figure routing) so both
 the session device service and the app-layer run/analyze services can use it.
 
 ``figure_ambient`` (app-layer, Qt-dependent) lives in
-``gui/app/main/services/scopes.py``.
+``gui/app/measure/services/scopes.py``.
 """
 
 from __future__ import annotations

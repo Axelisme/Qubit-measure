@@ -32,16 +32,16 @@ if _LIB not in sys.path:
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from zcu_tools.notebook.analysis.fluxdep.fitting import (
-    fit_spectrum,
-    search_in_database,
-)
-from zcu_tools.notebook.analysis.fluxdep.njit import (
+from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.search_njit import (
     candidate_breakpoint_search,
     entry_lower_bound,
     eval_dist_bounded,
 )
-from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.notebook.analysis.fluxdep.fitting import (
+    fit_spectrum,
+    search_in_database,
+)
 
 from tests.notebook.analysis.fluxdep._synthetic import synth_ABC
 
@@ -123,7 +123,7 @@ def _synth_observation(db_path: str, idx: int, n_fluxs: int, transitions):
     for m in range(f_energies.shape[2]):
         energies[:, m] = np.interp(fluxs, f_fluxs, f_energies[idx, :, m])
 
-    from zcu_tools.notebook.analysis.fluxdep.models import energy2transition
+    from zcu_tools.analysis.fluxdep.models import energy2transition
 
     fs, _ = energy2transition(energies, transitions)
     # Pick one observed transition per flux (column 0) — clean data.

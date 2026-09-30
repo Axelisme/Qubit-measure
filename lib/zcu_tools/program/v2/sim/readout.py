@@ -42,13 +42,13 @@ from functools import lru_cache
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting.resonance.hanger import HangerModel
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.simulate.fluxonium.dispersive import (
     DressedLabelingError,
     calculate_dispersive_vs_flux_fast,
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-from zcu_tools.utils.fitting.resonance.hanger import HangerModel
 
 from .params import SimParams
 from .waveforms import envelope_at

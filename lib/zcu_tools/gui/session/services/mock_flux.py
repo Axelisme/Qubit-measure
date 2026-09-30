@@ -74,9 +74,9 @@ class MockFluxProvisioner:
     ) -> None:
         self._bus = bus
         self._dev_svc = device
-        # PredictorService owns the predictor seam (exp_context.predictor +
+        # PredictorService owns the predictor seam (session_env.predictor +
         # PredictorChangedPayload). The provisioner installs the sim predictor
-        # through it rather than poking exp_context directly, so the one write path
+        # through it rather than poking session_env directly, so the one write path
         # (set_context + event emit) stays unduplicated.
         self._pred_svc = predictor
         # FLUX-AWARE-MOCK: set while our auto-provisioned fake_flux connect is in
@@ -181,7 +181,7 @@ class MockFluxProvisioner:
         FLUX-AWARE-MOCK. Read the *actual* params off the connected soc (not the
         DEFAULT_SIMPARAM constant) so a future parameterised mock stays consistent.
         Overwrite policy: never stomp a predictor the user already loaded — if
-        ``exp_context.predictor`` is already set, leave it. Either way, log INFO so
+        ``session_env.predictor`` is already set, leave it. Either way, log INFO so
         the choice is visible. A white-noise mock (no SimParams) has no physics to
         derive from, so it is skipped (the fake_flux binding above already raised if
         the soc was somehow not a real mock).

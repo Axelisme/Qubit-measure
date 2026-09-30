@@ -5,15 +5,17 @@ status: accepted
 # 0053 — Owner scheduler seam 與 hardware gate presence
 
 **狀態:** accepted（2026-07-12 contract freeze）。
-**關聯:** [[0019]]、[[0021]]、[[0026]]、[[0044]]、[[0052]]。
+**關聯:** [[0066]]、[[0067]]、[[0064]]、[[0068]]。
 
-## 背景
+## 背景（2026-07-12 決策時）
 
-application core 對「Qt main thread」的殘餘依賴已收斂到少數機制點(`tests/gui/test_qt_import_boundary.py` 的 KNOWN_QT_DEBT 清單):core 真正需要的不是 Qt main thread,而是**「所有 State mutation 由單一 owner loop 序列執行」**這個不變式。具體殘餘:
+本節記錄決策當時的狀態。現況：`OwnerScheduler`（`gui/session/ports.py`）與其 Qt adapter `QtOwnerScheduler`（`gui/session/adapters/qt_owner_scheduler.py`）已取代 `MainThreadDispatcher`；下列 session 與 measure services 不再繼承 QObject；`_ActiveLease` 已帶 `origin_kind`、`note`、`since`（`gui/session/hardware_gate.py`）。
+
+當時 application core 對「Qt main thread」的殘餘依賴已收斂到少數機制點(`tests/gui/test_qt_import_boundary.py` 的 KNOWN_QT_DEBT 清單):core 真正需要的不是 Qt main thread,而是**「所有 State mutation 由單一 owner loop 序列執行」**這個不變式。具體殘餘:
 
 - `gui/remote/rpc_endpoint.py` 的 `MainThreadDispatcher(QObject)`:IO thread → main thread 的 marshal 用 Qt queued Signal 實作。
-- `gui/session/adapters/qt_background.py`:`BackgroundExecutor` port([[0026]])的 Qt 實作以 QThread/QThreadPool 執行,「完成後回 owner thread」靠 Qt 事件圈。
-- 7 個 service 檔(session {connection,device} + app/main {run,save,analyze,post_analyze,staged_analyze})繼承 QObject 僅為了 completion Signal——它們的 async 執行早已走 `OperationRunner`。
+- `gui/session/adapters/qt_background.py`:`BackgroundExecutor` port([[0066]])的 Qt 實作以 QThread/QThreadPool 執行,「完成後回 owner thread」靠 Qt 事件圈。
+- 7 個 service 檔(session {connection,device} + app/measure {run,save,analyze,post_analyze,staged_analyze})繼承 QObject 僅為了 completion Signal——它們的 async 執行早已走 `OperationRunner`。
 
 另外,多前端 presence(「另一方正在跑 T1」)的資料基礎缺失:`RunBlocksHardwareGate` 的 `_ActiveLease` 只有互斥所需的 kind/owner_id/resource_id,不知道「被誰、為何、從何時」佔用。先例:Bluesky queueserver 的 lock 附 owner name + note,read-only API 永不受鎖。
 
@@ -65,7 +67,7 @@ serializer catalog。4處consumer改訂閱bus；QObject/Signal/parent全數移�
 `ExclusionRequest`新增required nonblank `note`作為service→gate internal carrier；不改
 `OperationRunner.__init__/begin`或`OperationSpec`。`_ActiveLease`與`register(...)`擴充三欄:
 
-- `origin_kind`:發起者(取自 [[0052]] `EventOrigin.kind`:user/agent/system);
+- `origin_kind`:發起者(取自 [[0068]] `EventOrigin.kind`:user/agent/system);
 - `note`:發起 service 提供的人讀描述；固定模板為measure `run <adapter_name> (tab <tab_id>)`、autofluxdep `autofluxdep run`、SoC `connect SoC (mock|remote)`、device `<connect|disconnect|setup> device: <name>`;
 - `since`:內部單調開始時間(顯示用途,不參與互斥判斷)。
 
@@ -81,7 +83,7 @@ session core（不建`QApplication`且阻擋Qt imports），pump owner queue跑s
 
 ## 後果
 
-- KNOWN_QT_DEBT 預期 13 → 2(剩 `app/main/app.py` composition root 與 `app/autofluxdep/controller.py`,各有明確後續歸屬)。
+- KNOWN_QT_DEBT 預期 13 → 2(剩 `app/measure/app.py` composition root 與 `app/autofluxdep/controller.py`,各有明確後續歸屬)。
 - Web/headless runtime 屆時只需新增 asyncio scheduler + transport,不再觸碰 core。
 - gate presence 讓 Hybrid 模式(Qt + agent 並用)的互斥失敗從「被拒絕」變成「知道被誰、為何拒絕」。
 - `cfg_binding.py` 與 `error_handler.py` 的 Qt 觸碰部分上移 ui 層(批次 3 工作單項目,機制不涉本 ADR)。

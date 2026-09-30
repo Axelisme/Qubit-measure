@@ -1,4 +1,4 @@
-"""OperationRunner — kind-agnostic operation lifecycle mechanism (ADR-0026 §1).
+"""OperationRunner — kind-agnostic operation lifecycle mechanism (ADR-0066).
 
 ``OperationRunner`` is the *mechanism* shared by every async operation (run /
 FIT-analyze / post-analyze / device-setup / device-connect / device-disconnect).
@@ -96,7 +96,7 @@ class OperationSpec:
 
     Fields:
     - ``exclusion``: hardware exclusion parameters, or ``None`` for analyze ops
-      (no exclusion facet, ADR-0019).
+      (no exclusion facet, ADR-0066).
     - ``owner_id``: progress-container owner label (tab_id / device_name). Only
       consumed when ``wants_progress`` is True.
     - ``wants_progress``: whether to mint a per-op progress factory and pass it
@@ -122,7 +122,7 @@ class OperationSpec:
 
 
 class OperationRunner:
-    """Kind-agnostic operation lifecycle mechanism (ADR-0026 §1). Only mechanism;
+    """Kind-agnostic operation lifecycle mechanism (ADR-0066). Only mechanism;
     every op's domain policy is injected via OperationSpec. Only recognises ports."""
 
     def __init__(

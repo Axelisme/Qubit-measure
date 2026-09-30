@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.events import DeviceChangedPayload
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
 # Default display window in flux (Φ/Φ₀) units (plan spec).
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
@@ -129,7 +129,7 @@ def _normalize_tracked_transitions(
 
 
 def _empty_md() -> MetaDict:
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     return MetaDict()
 

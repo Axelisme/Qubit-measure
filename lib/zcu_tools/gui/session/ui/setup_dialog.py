@@ -30,9 +30,9 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.session.services.startup import (
-    StartupConnectionRequest,
-    StartupProjectRequest,
+from zcu_tools.gui.session.services.project_settings import (
+    ConnectionPreferences,
+    ProjectRequest,
 )
 from zcu_tools.program import describe_soc
 
@@ -55,14 +55,12 @@ class SetupDialog(QDialog):
         self,
         controller: SetupControlPort,
         parent: QWidget | None = None,
-        startup_mode: bool = False,
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
-        self._startup_mode = startup_mode
         self._result_scopes: tuple[ResultScope, ...] = ()
         self._syncing_scope_selection = False
-        self.setWindowTitle("Setup" if startup_mode else "Setup / Context")
+        self.setWindowTitle("Setup")
         self.resize(900, 600)
 
         root_layout = QVBoxLayout(self)
@@ -117,11 +115,9 @@ class SetupDialog(QDialog):
         self._res_edit.setPlaceholderText("e.g. R1")
         project_form.addRow("Resonator name:", self._res_edit)
 
-        # apply startup context button
-        self._apply_btn = QPushButton(
-            "Apply & Setup" if startup_mode else "Apply startup context"
-        )
-        self._apply_btn.clicked.connect(self._on_apply_startup_clicked)
+        # apply project button
+        self._apply_btn = QPushButton("Apply project")
+        self._apply_btn.clicked.connect(self._on_apply_clicked)
         project_form.addRow("", self._apply_btn)
         left_layout.addWidget(project_group)
 
@@ -223,7 +219,7 @@ class SetupDialog(QDialog):
         # initialise
         self._refresh_result_scopes(silent=True)
         self._on_names_changed()
-        self._prefill_from_persistence()
+        self._prefill_from_preferences()
         self._refresh_device_list()
         self._refresh_context_list()
         self._maybe_show_current_cfg()
@@ -264,9 +260,9 @@ class SetupDialog(QDialog):
 
         Reopening the dialog after a close (``show()`` on the kept instance)
         replaces any previously-typed-but-never-applied draft with the
-        currently-active project's values from ``startup_prefs``.  The initial
-        show during bootstrap is harmless because ``_prefill_from_persistence``
-        already ran in ``__init__``.
+        remembered values from ``get_setup_preferences``.  The first show is
+        harmless because ``_prefill_from_preferences`` already ran in
+        ``__init__``.
 
         Spontaneous show events (window-system restore after minimise) keep the
         draft — the user never closed the dialog, so wiping mid-typing input
@@ -278,7 +274,7 @@ class SetupDialog(QDialog):
             if a0.spontaneous():
                 return
         self._refresh_result_scopes(silent=True)
-        self._prefill_from_persistence()
+        self._prefill_from_preferences()
         self._refresh_context_list()
 
     def _on_bus_context_switched(self, payload: object) -> None:
@@ -307,8 +303,8 @@ class SetupDialog(QDialog):
     # Project panel handlers
     # ------------------------------------------------------------------
 
-    def _prefill_from_persistence(self) -> None:
-        data = self._ctrl.get_persisted_startup()
+    def _prefill_from_preferences(self) -> None:
+        data = self._ctrl.get_setup_preferences()
         if data.chip_name:
             self._chip_edit.setText(data.chip_name)
         if data.qub_name:
@@ -316,13 +312,13 @@ class SetupDialog(QDialog):
         if data.res_name:
             self._res_edit.setText(data.res_name)
         self._on_names_changed()
-        self._select_persisted_scope(data.scope_id)
+        self._select_remembered_scope(data.scope_id)
         if data.ip:
             self._ip_edit.setText(data.ip)
         if data.port:
             self._port_spin.setValue(data.port)
 
-    def _select_persisted_scope(self, scope_id: str) -> None:
+    def _select_remembered_scope(self, scope_id: str) -> None:
         if not scope_id:
             return
         idx = self._scope_combo.findData(scope_id)
@@ -464,13 +460,13 @@ class SetupDialog(QDialog):
         else:
             self._unit_label.setText("—")
 
-    def _on_apply_startup_clicked(self) -> None:
+    def _on_apply_clicked(self) -> None:
         chip = self._chip_edit.text().strip() or "unknown_chip"
         qub = self._qub_edit.text().strip() or "unknown_qubit"
         res = self._res_edit.text().strip() or "unknown_resonator"
         scope_id = self._scope_combo.currentData()
-        result = self._ctrl.apply_startup_project(
-            StartupProjectRequest(
+        result = self._ctrl.apply_project(
+            ProjectRequest(
                 chip_name=chip,
                 qub_name=qub,
                 res_name=res,
@@ -479,9 +475,9 @@ class SetupDialog(QDialog):
         )
         if not result:
             return
-        self._set_project_status(f"Startup context applied: {chip}/{qub} (res={res})")
+        self._set_project_status(f"Project applied: {chip}/{qub} (res={res})")
         logger.info(
-            "SetupDialog: startup context applied chip=%r qub=%r res=%r",
+            "SetupDialog: project applied chip=%r qub=%r res=%r",
             chip,
             qub,
             res,
@@ -593,8 +589,8 @@ class SetupDialog(QDialog):
         )
 
         if not use_mock:
-            self._ctrl.remember_startup_connection(
-                StartupConnectionRequest(
+            self._ctrl.remember_connection(
+                ConnectionPreferences(
                     ip=self._ip_edit.text().strip(),
                     port=self._port_spin.value(),
                 )

@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from pydantic import TypeAdapter
+
+from zcu_tools.device import DeviceInfo
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    ExpAdapterProtocol,
+    RunRequest,
+    require_soc_handles,
+)
+from zcu_tools.gui.app.measure.adapter.lowering import schema_to_resolved_dict
+from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.types import ContextReadiness
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.state import State
+
+
+class GuardError(FailedPreconditionError):
+    """Raised when a protected operation's static precondition is not met.
+
+    This is the single failure mode both clients (View and remote) see when a
+    Permit cannot be issued. It is a domain-readiness failure, never a dynamic
+    resource conflict (that is OperationGate's OperationConflictError).
+
+    ``reason_code`` is a stable machine-readable tag (e.g. ``"no_run_result"``)
+    so a remote client can decide the next action without parsing the human
+    ``message``. Empty when unset.
+    """
+
+
+@dataclass(frozen=True)
+class RunPermit:
+    """Proof that a run request is statically valid for ``tab_id``.
+
+    Carries detached resolved cfg and observed device settings captured at issue.
+    RunService never re-reads State and the adapter never re-lowers a schema.
+    This credential requires no release; the operation owns its hardware lease.
+    """
+
+    tab_id: str
+    adapter_name: str
+    request: RunRequest
+    raw_cfg: dict[str, object]
+    adapter: ExpAdapterProtocol
+
+
+@dataclass(frozen=True)
+class SavePermit:
+    """Proof that a tab is eligible to save data/image (ACTIVE + has result)."""
+
+    tab_id: str
+
+
+@dataclass(frozen=True)
+class LoadPermit:
+    """Proof that a tab may load a canonical result into the current context."""
+
+    tab_id: str
+
+
+@dataclass(frozen=True)
+class AnalyzePermit:
+    """Proof that a tab is eligible to analyze (context + has run result)."""
+
+    tab_id: str
+
+
+@dataclass(frozen=True)
+class WritebackPermit:
+    """Proof that a tab is eligible to write back (context + analyze result)."""
+
+    tab_id: str
+
+
+class GuardService:
+    """Central issuer of typed Permits for the implemented domain guards.
+
+    Pure query service over ``State`` and ``SessionEnv.readiness`` — no side
+    effects, no event emission. View and remote share the available permits
+    for protected operations, but not every capability is checked here:
+    analyze does not reject NONE and post-analyze has no capability permit yet
+    (see the GUI capability draft).
+
+    Permits cover *static* preconditions per operation (context readiness,
+    committed cfg validity, run SoC requirement or load capability). *Dynamic*
+    resource availability (tab busy, hardware exclusion) is checked at the
+    operation boundary by the owning service or OperationGate — see ADR-0066.
+    """
+
+    def __init__(self, state: State) -> None:
+        self._state = state
+
+    def _require_tab(self, tab_id: str) -> Any:
+        if not self._state.has_tab(tab_id):
+            raise GuardError(f"Unknown tab: {tab_id!r}", reason_code="unknown_tab")
+        return self._state.get_tab(tab_id)
+
+    def _require_readiness(self, expected: ContextReadiness, operation: str) -> None:
+        readiness = self._state.session_env.readiness
+        if readiness is expected:
+            return
+        if expected is ContextReadiness.ACTIVE:
+            raise GuardError(
+                f"Cannot {operation} without an active file-backed context "
+                f"(current readiness: {readiness.value}).",
+                reason_code="no_active_context",
+            )
+        raise GuardError(
+            f"Cannot {operation}: context readiness {readiness.value} "
+            f"(required: {expected.value}).",
+            reason_code="wrong_readiness",
+        )
+
+    def _require_context(self, operation: str) -> None:
+        """Require any editable context (DRAFT or ACTIVE), not EMPTY."""
+        if self._state.session_env.readiness is ContextReadiness.EMPTY:
+            raise GuardError(
+                f"Cannot {operation}: no experiment context. Use Project… to set "
+                "up chip/qubit or load a project.",
+                reason_code="no_context",
+            )
+
+    def acquire_run_permit(self, tab_id: str) -> RunPermit:
+        tab = self._require_tab(tab_id)
+        self._require_readiness(ContextReadiness.ACTIVE, "run")
+
+        ctx = self._state.session_env
+        # Freeze only observed values. Never query devices during permit issue.
+        try:
+            raw_cfg = schema_to_resolved_dict(tab.cfg_schema)
+            device_snapshot: dict[str, DeviceInfo] = {}
+            info_type = TypeAdapter(DeviceInfo)
+            for device in self._state.list_devices():
+                if device.is_live():
+                    if device.info is None:
+                        raise ValueError(
+                            f"Device {device.name!r} has no observed settings"
+                        )
+                    device_snapshot[device.name] = info_type.validate_python(
+                        device.info
+                    )
+        except Exception as exc:
+            raise GuardError(
+                f"Config invalid: {exc}", reason_code="invalid_cfg"
+            ) from exc
+
+        req = RunRequest(
+            soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot=device_snapshot
+        )
+        if tab.adapter.capabilities.requires_soc:
+            try:
+                require_soc_handles(req)
+            except RuntimeError as exc:
+                raise GuardError(str(exc), reason_code="no_soc") from exc
+
+        try:
+            tab.adapter.validate_run_request(req, raw_cfg)
+        except Exception as exc:
+            raise GuardError(
+                f"Run config invalid: {exc}", reason_code="invalid_cfg"
+            ) from exc
+
+        logger.debug("acquire_run_permit: tab_id=%r", tab_id)
+        return RunPermit(
+            tab_id=tab_id,
+            adapter_name=tab.adapter_name,
+            request=req,
+            raw_cfg=raw_cfg,
+            adapter=tab.adapter,
+        )
+
+    def acquire_save_permit(self, tab_id: str) -> SavePermit:
+        tab = self._require_tab(tab_id)
+        self._require_readiness(ContextReadiness.ACTIVE, "save")
+        if not tab.has_run_result():
+            raise GuardError(
+                "No run result available to save.", reason_code="no_run_result"
+            )
+        logger.debug("acquire_save_permit: tab_id=%r", tab_id)
+        return SavePermit(tab_id=tab_id)
+
+    @staticmethod
+    def _supports_load_data(adapter: Any) -> bool:
+        """Read the import-validated load capability without probing a worker."""
+        caps = getattr(adapter, "capabilities", None)
+        return isinstance(caps, AdapterCapabilities) and caps.load_data
+
+    def acquire_load_permit(self, tab_id: str) -> LoadPermit:
+        tab = self._require_tab(tab_id)
+        self._require_context("load data")
+        if not self._supports_load_data(tab.adapter):
+            raise GuardError(
+                "This tab does not support loading data files.",
+                reason_code="unsupported_load",
+            )
+        logger.debug("acquire_load_permit: tab_id=%r", tab_id)
+        return LoadPermit(tab_id=tab_id)
+
+    def acquire_analyze_permit(self, tab_id: str) -> AnalyzePermit:
+        tab = self._require_tab(tab_id)
+        self._require_context("analyze")
+        if not tab.has_run_result():
+            raise GuardError(
+                "No run result available to analyze.", reason_code="no_run_result"
+            )
+        logger.debug("acquire_analyze_permit: tab_id=%r", tab_id)
+        return AnalyzePermit(tab_id=tab_id)
+
+    def acquire_writeback_permit(self, tab_id: str) -> WritebackPermit:
+        tab = self._require_tab(tab_id)
+        self._require_context("write back")
+        if not tab.has_analyze_result():
+            raise GuardError(
+                "No analyze result available for writeback.",
+                reason_code="no_analyze_result",
+            )
+        logger.debug("acquire_writeback_permit: tab_id=%r", tab_id)
+        return WritebackPermit(tab_id=tab_id)

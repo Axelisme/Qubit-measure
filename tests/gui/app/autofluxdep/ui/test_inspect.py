@@ -21,8 +21,8 @@ import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.session.events import MdChangedPayload
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 def _seed_context(ctrl: Controller) -> tuple[MetaDict, ModuleLibrary]:
     """Install a DRAFT context with one md key + one module + one waveform.
 
-    Goes through the shared ``ContextService.set_startup_context`` so the context
+    Goes through the shared ``ContextService.set_project_context`` so the context
     becomes non-EMPTY (``has_context()`` true) — md/ml writes then succeed and the
     real emit path fires, exactly as a configured GUI session.
     """
@@ -53,7 +53,7 @@ def _seed_context(ctrl: Controller) -> tuple[MetaDict, ModuleLibrary]:
     ml.register_waveform(
         drive_wav=WaveformCfgFactory.from_raw({"style": "const", "length": 1.0})
     )
-    ctrl._ctx_svc.set_startup_context(md, ml)
+    ctrl._ctx_svc.set_project_context(md, ml)
     return md, ml
 
 

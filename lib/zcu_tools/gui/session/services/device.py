@@ -14,6 +14,7 @@ from typing import (
 
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceOperationFinishedPayload,
@@ -132,7 +133,7 @@ class DeviceEntry:
 
 @dataclass(frozen=True)
 class DeviceSetupSnapshot:
-    # Live progress is polled via operation.progress (by operation_id, ADR-0013
+    # Live progress is polled via operation.progress (by operation_id, ADR-0068
     # device↔run alignment), not carried here — this names *which* device is
     # setting up.
     device_name: str
@@ -154,8 +155,8 @@ class ActiveDeviceOperation:
     kind: OperationKind
     snapshot: DeviceSnapshot
     # The operation handle (runner token), so a concurrent-enumeration reader can
-    # drive gui_op_poll / gui_op_wait per in-flight op without re-resolving it by
-    # device name.
+    # await each in-flight GUI operation by token, or expose it through MCP
+    # status() as an agent handle, without re-resolving by device name.
     token: int
 
 
@@ -181,10 +182,6 @@ class _InflightOp:
     token: int
     kind: OperationKind
     prior: DeviceState | None
-
-
-class DeviceRegistrationError(RuntimeError):
-    """Expected driver construction or registration failure."""
 
 
 _DEVICE_TYPE_REGISTRY: dict[str, tuple[str, bool]] = {
@@ -231,7 +228,7 @@ class GlobalDeviceRegistryAdapter:
     ``GlobalDeviceManager`` is a classmethod-only singleton; this adapter wraps
     its five registry methods as instance methods so ``DeviceService`` can satisfy
     the instance-method ``DeviceRegistryPort`` Protocol without touching the
-    singleton directly (ADR-0026 §D.2).  The wrapper adds no logic of its own.
+    singleton directly (ADR-0066).  The wrapper adds no logic of its own.
     """
 
     def register_device(self, name: str, device: object) -> None:
@@ -293,9 +290,9 @@ class DeviceService:
     ) -> None:
         self._bus = bus
         self._state = state
-        # Device composes both leaves (ADR-0019): Exclusion (device mutation vs
+        # Device composes both leaves (ADR-0066): Exclusion (device mutation vs
         # run / another mutation of the same device) + a Handle (operation_id +
-        # await + cancel for setup). OperationRunner owns the mechanism (ADR-0026 §1);
+        # await + cancel for setup). OperationRunner owns the mechanism (ADR-0066);
         # gate is kept directly for is_device_mutating / _reject_mutating_read;
         # bg is kept directly for poll_device_info (best-effort read, not a runner op).
         self._gate = gate
@@ -307,7 +304,7 @@ class DeviceService:
         self._driver_factory = driver_factory or _default_driver_factory
         # Registry port: hides the GlobalDeviceManager singleton behind an
         # instance-method interface so tests can inject an in-memory fake without
-        # touching the real singleton (ADR-0026 §D).
+        # touching the real singleton (ADR-0066).
         self._registry: DeviceRegistryPort = (
             device_registry
             if device_registry is not None
@@ -434,7 +431,7 @@ class DeviceService:
         # device: it reuses the stored type/address. Return the connect
         # operation's token so the wire/MCP layers can expose it as an async
         # handle (FC1 — reconnect must produce an operation_id like the other
-        # device starts, otherwise gui_op_wait cannot track a name-only reconnect).
+        # device starts, otherwise MCP wait(op) cannot track a name-only reconnect).
         dev = self._require_device(name)
         if not dev.is_memory_only():
             raise FailedPreconditionError(
@@ -548,14 +545,14 @@ class DeviceService:
             # Setup is the OffMain-thread strategy with the progress scope only (no
             # figure routing; the driver's setup() polls stop_event
             # directly). progress_ambient is session-layer (no Qt) so device.py
-            # can import it without crossing the session→app boundary (ADR-0026 §2).
+            # can import it without crossing the session→app boundary (ADR-0066).
             with progress_ambient(factory):
                 driver.setup(info, stop_event=stop_event)
                 return driver.get_info()
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # bg reports outcome; we own stop_event, so we interpret cancellation
-            # (ADR-0019): normal return + stop_event set = cancelled.
+            # (ADR-0066): normal return + stop_event set = cancelled.
             if bg.ok:
                 if stop_event.is_set():
                     _on_setup_cancelled(settle)
@@ -682,7 +679,7 @@ class DeviceService:
         """Assemble the read-time projection of a device-state entry from State.
 
         Live setup progress is no longer spliced here — it is polled separately
-        via operation.progress (by operation_id, ADR-0013 device↔run alignment).
+        via operation.progress (by operation_id, ADR-0068 device↔run alignment).
         """
         return DeviceSnapshot(
             name=dev.name,

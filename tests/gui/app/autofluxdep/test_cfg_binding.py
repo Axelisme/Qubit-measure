@@ -5,11 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 import zcu_tools.gui.app.autofluxdep.cfg.binding as binding_module
+from zcu_tools.experiment.cfg_editing import ProgramShape, UnknownProgramShapeError
 from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import waveform_cfg_to_value
 from zcu_tools.gui.cfg import ScalarSpec
-from zcu_tools.gui.measure_cfg import ProgramShape, UnknownProgramShapeError
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _bindings(ml: ModuleLibrary | None = None) -> tuple[AutofluxCfgBindings, MagicMock]:

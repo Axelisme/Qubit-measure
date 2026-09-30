@@ -1,4 +1,4 @@
-"""Workflow orchestrator — the pure requirement resolver (see CONTEXT.md).
+"""Workflow orchestrator — the pure requirement resolver (see the autofluxdep app README).
 
 Sweeps flux × the user-ordered providers. It is a **requirement resolver**, NOT
 an ordering / topological resolver: execution order is whatever sequence it is
@@ -109,7 +109,7 @@ class DepDeclaring(Protocol):
 
 # notify(provider_name, flux_idx): the row-updated notification the round_hook
 # fires — the main thread redraws that provider's Plotter. Pure data (a name +
-# an index), no figure crosses the thread (ADR-0017).
+# an index), no figure crosses the thread (ADR-0067).
 Notify = Callable[[str, int], None]
 
 

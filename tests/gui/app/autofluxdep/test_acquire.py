@@ -10,12 +10,12 @@ calibrate).
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
     fill_decay_fit_or_skip,
     is_good_fit,
     is_trusted_decay_scalar_fit,
 )
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import Sweep1DResult
 
 # --- is_good_fit: accepts a clean fit, rejects an all-noise (dead-point) fit ---
 

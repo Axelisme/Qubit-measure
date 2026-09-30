@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-02 — universal cfg tree and shared sweep range/sampling presentation
+**Last updated:** 2026-09-29 — Setup 去除 startup 特化
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -15,13 +15,26 @@ headless runtime使用pure `ThreadPoolBackgroundExecutor`，並在worker完成�
 投遞唯一terminal callback。具體executor的`quiesce()`會停止新工作並等待worker與owner delivery
 ack，session services只依賴`submit` port。
 
+## Remote response delivery (`remote/`)
+
+Shared framing 的 request/response 上限為 8 MiB UTF-8 bytes，不含換行。
+仍採單則 NDJSON 訊息，不分批；完整 context read 必須成功才建立 guard baseline。
+Per-client writer 在 socket backpressure 時保存尚未送出的 byte cursor，等待可寫後接續；
+不重送整則訊息，停止或斷線會退出等待並釋放連線。
+每個 client 的待送預算為16 MiB，包含 queue 與 writer 持有的完整 encoded frame；
+完成交付才釋放預算，超出則中止該連線，IO owner 清空 queue 並釋放 app context。
+Shared endpoint 無法編碼 RPC 回覆時送有界的 `internal` error，reason 為
+`response_encoding_failed`。Handler 可能已執行，caller 不可因回覆失敗而盲目重送 mutation。
+若 correlated fallback 仍無法編碼，或 reply queue 拒收，就中止該連線，交 IO owner
+釋放其 app context。Push 的 drop policy 不變；shared transport 不解讀 method、guard 或 operation。
+
 ## Expected Errors (`expected_error.py`)
 
 Caller-correctable failure使用Qt-free、remote-independent的nominal `ExpectedError`
 seam。closed category只有`INVALID_INPUT`與`FAILED_PRECONDITION`；producer以concrete
 exception或raise site明列分類，optional `reason_code`提供stable machine tag。普通
 `RuntimeError`、provider/persistence/async terminal與invariant failures不自動opt in。
-RuntimeError-compatible fixed leaves讓既有view/handler catches維持相容（ADR-0047）。
+RuntimeError-compatible fixed leaves讓既有view/handler catches維持相容（ADR-0068）。
 `gui.remote`的shared dispatch在main/off-main兩條路徑以同一translator投影nominal
 `ExpectedError`；generic mapping保留message/reason且不攜帶structured data。direct
 `RemoteError`仍供request coercion與domain-special payload使用，ordinary exception則保留
@@ -38,41 +51,64 @@ leaf、sweep直接edge、reference `.ref`與直接child；legacy `.sweep`/`.valu
 default/inheritance helpers、raw persistence codec、domain-free raw spec walk，以及generic finished-cfg
 validation/lowering。materialization walker把missing scalar/section、reference shape與Sweep carrier交給
 窄policy，不理解program vocabulary；lowering只依賴expression/reference/range三個callable ports，維持
-static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
+static → optional dynamic → lower、snapshot/relink 的現行行為（ADR-0065；局部 lowering 契約見 ADR-0046）。
+`lower_resolved_cfg(schema, make_range=...)` 是另一個明確的 snapshot-only 入口，不接
+expression/reference resolver。它隔離複製後，以已解析 scalar 與各 reference 自身的 cached
+shape 重用既有 static validation/lowering；error 或尚未 resolved 一律拒絕，不解析 raw，
+也不重新推導輸入 controls。原 schema 與回傳 mutable data 互相隔離。
+`lower_finished_cfg` 的 live validation/relink 政策不變；呼叫者自行選擇契約。
 raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag validation不由app重複實作。
+Numeric 與 complex ScalarSpec 的 direct text 由 ScalarField 解析，保存 raw 與 error；
+Widget 只傳入文字並顯示 model 狀態，invalid text 不沿用舊有效值。
+Scalar carriers 的 validation_error 保存當時選項 membership 的失敗；選項恢復只使新 snapshot
+有效，不治癒舊 snapshot。這是 binding 重算的 runtime metadata，persistence 不保存它。
+Sweep start/stop 與
+center 同樣保留 direct raw/error。Sweep points／step 與 centered span 也保存 model-owned
+文字與解析狀態，codec 可往返，finished cfg 拒絕任一 incomplete/invalid control。
+Step 文字反推 points 後保存實際 canonical step；Widget 同時呈現 raw 與 resolved，
+重建 form 不清除未完成輸入。Typed setters 仍拒絕非法型別／範圍。
+Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值使用 `{"__complex__": [re, im]}`
+並由 shared codec 編解碼；磁碟 expression 仍只保存 expr，不作為執行快照。
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
 Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
-並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、ExpContext、MetaDict、
+並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、MetaDict、
 ModuleLibrary、logical key或generation policy；measure與autoflux各自保有domain builder，只共用這層
-tree mechanics（ADR-0012、ADR-0045）。
+tree mechanics（ADR-0065；局部 authoring 見 ADR-0012）。
 
 generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adapter facade只暴露
 framework contract、request/result/writeback/analyze params與protocol signature需要的session
 vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
 `NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
 normalization與policy binding留在`cfg.module_adapter`，program shape/spec與raw missing/subset policy由
-`gui.measure_cfg`擁有（ADR-0051）。
+`experiment.cfg_editing`擁有（ADR-0065；catalog 細節見其 README）。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
 allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與
 reference value且要求leaf已存在。這層不create、不wrap、不處理lock或domain policy；
 `CfgSectionValue.with_field`只保留scalar wrapping後委派replace。
 
-`zcu_tools.gui.measure_cfg`是Qt-free measure-domain層：closed catalog擁有七種module與六種
+`zcu_tools.experiment.cfg_editing`是Qt-free measure-domain層：closed catalog擁有七種module與六種
 waveform的discriminator、label與fresh Spec factory；app只綁定Arb choices與readout inheritance
 兩個spec policy，以及可materialize module/waveform subset。program materializer固定missing
 `ch/ro_ch=0`、其它scalar為unset、nested section完整default、required ref採`allowed[0]`；missing style
-是Const，explicit unknown Fast Fail。它不importprogram runtime/app/session/experiment，`gui.cfg`也不
+是Const，explicit unknown Fast Fail。它不 import program runtime/app/session，`gui.cfg` 也不
 反向import它。
 
 Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`是shared core只
 轉送的app-local opaque id。module/waveform shape factory與raw materialization policy由
-`gui.measure_cfg`擁有，resolver與runtime object normalization留在各app，
+`experiment.cfg_editing`擁有，resolver與runtime object normalization留在各app，
 既有`module_ref`/`waveform_ref` persistence wire shape不變。
+ReferenceValue 的 runtime snapshot 保存 chosen_key、resolved_label 與 error；missing library
+時保留可編輯 subtree，但 finished cfg 拒絕該 snapshot。Persistence 不保存 resolution metadata，
+重新 attach 時由 binding 解析當前 catalog。
 
 `zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。
-`CfgDraft`集中snapshot、validity、refresh與close lifecycle；field只依賴expression evaluator、
+`CfgDraft`集中snapshot、validity、refresh與close lifecycle。`observe()` 回 detached
+`CfgNodeObservation` tree，包含 Literal／readonly、cached options、active reference shape、
+完整 value carriers 與 validity；不查 live sources，不修改 model，也不代替 persistence codec。
+Remote viewer 可投影這份 nominal read contract，不必重建 field-subtype traversal。
+field只依賴expression evaluator、
 opaque option provider與reference catalog三個窄ports，不持controller/environment aggregate。
 scalar field在建構與修改時依宣告型別Fast Fail；section/reference的whole-value更新先完成純資料
 key檢查與replacement build，再一次提交，不會留下partial tree或中間validity event。leaf edit只
@@ -82,7 +118,7 @@ Fast Fail。reference catalog以shape label與optional materialized value精確�
 unsupported與corrupt。widget只attach draft並render `draft.root`，detach不會close
 service-owned draft。
 
-此package不import `gui.app.*`、`experiment.*`、Qt、`meta_tool`、`notebook`或`device`，
+此package不import `gui.app.*`、`experiment.*`、Qt、`resources`、`notebook`或`device`，
 也沒有broad environment object或global resolver registry。scalar option source與reference
 kind都是shared只轉送的opaque string；measure與autofluxdep各自提供
 app-local ports與module shape policy；autofluxdep不經measure lowering/conversion。
@@ -96,7 +132,7 @@ exit-code handling. Apps expose a fixed `GuiRuntimeBehavior.spec` class variable
 for static process contract and implement `assemble(control)` for app-local
 controller/window/adapter wiring. Launch-time CLI values stay in
 `GuiLaunchOptions` and behavior constructor arguments. App modules expose
-behavior classes; standalone `script/run_*_gui.py` launchers are the process
+behavior classes; standalone `scripts/run_*_gui.py` launchers are the process
 entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
@@ -116,7 +152,7 @@ runtime applies plot policy.
 
 `ResultScopeManager` scans `result/**/params.json` under the project root and
 treats each hit as a selectable result scope. Measurement-session setup dialogs
-(measure/autofluxdep) use that scope to apply startup context; analysis dialogs
+(measure/autofluxdep) use that scope to apply a project; analysis dialogs
 (fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
 dropdown picker only, leaving typed paths and Browse flows available.
 Measurement-session discovery is snapshot-cached: ordinary dialog reopen/apply
@@ -134,8 +170,8 @@ marshalling). Read a dialog's outcome from its `accepted` / `finished` signal
 instead of `exec()`'s return value, set `WA_DeleteOnClose`, and hold an instance
 reference so `open()`'s immediate return does not let it be garbage-collected.
 The measure registry path (`MainWindow.open_dialog` / `close_dialog`) is detailed
-in `app/main/services/remote/README.md`. The sole intentional `exec()` is the
-global unhandled-exception presenter in `app/main/ui/error_handler.py`, where the
+in `app/measure/remote/README.md`. The sole intentional `exec()` is the
+global unhandled-exception presenter in `app/measure/ui/error_handler.py`, where the
 process is already crashing and the message must block.
 
 Short-lived modal confirmations, error reports, and text prompts are the
@@ -190,6 +226,9 @@ protocol。
 `CfgFormWidget.attach()`先成功建立完整root widget，再訂閱caller-owned draft；build失敗不留下
 draft callbacks。detach以stable Python callback解除change/validity subscriptions並刪除Qt tree，
 仍不close draft。
+
+`schema_changed` 按 event-loop tick 收合：同一 tick 內的多次 draft 變更只在單次 0 ms `QTimer`
+觸發時送出一份 `draft.snapshot()`；`validity_changed` 不延後，逐次即時送出。
 
 `CfgFormWidget` accepts an optional field decoration provider keyed by full dotted
 cfg path. The shared renderer applies `hidden`, `enabled`, `tone`, `badge`, and
@@ -276,7 +315,7 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All four `script/run_*_gui.py` launchers and
+GUI entry point configures logging. All four `scripts/run_*_gui.py` launchers and
 the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
 rolling their own handler set.
 

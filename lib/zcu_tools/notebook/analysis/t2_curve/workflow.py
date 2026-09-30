@@ -13,15 +13,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.meta_tool import (
-    DeviceValueUnit,
-    QubitParams,
-    SampleFluxFrame,
-    SampleFluxResolution,
-    T1CurveFit,
-    resolve_sample_flux,
-    validate_sample_table_v2,
-)
 from zcu_tools.notebook.analysis.fit_tools import (
     ErrorResolutionResult,
     FluxResidualWeighting,
@@ -29,6 +20,17 @@ from zcu_tools.notebook.analysis.fit_tools import (
     align_flux_to_window,
     correct_flux_from_f01,
     predict_f01_mhz,
+)
+from zcu_tools.resources.qubit_params import (
+    QubitParams,
+    T1CurveFit,
+)
+from zcu_tools.resources.sample_table import (
+    DeviceValueUnit,
+    SampleFluxFrame,
+    SampleFluxResolution,
+    resolve_sample_flux,
+    validate_sample_table_v2,
 )
 
 from .base import (

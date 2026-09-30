@@ -39,8 +39,8 @@ class BaseController(Generic[StateT, BusT]):
         self._state = state
         self._bus = bus
         # Base dir the default result/database paths anchor under (the repo root,
-        # injected by the entry script) so a .bat launcher that cd's into script/
-        # does not scope defaults under script/. None → cwd (legacy / tests).
+        # injected by the entry script) so a .bat launcher that cd's into scripts/
+        # does not scope defaults under scripts/. None → cwd (legacy / tests).
         self._project_root = project_root if project_root is not None else os.getcwd()
 
     @property
@@ -55,7 +55,7 @@ class BaseController(Generic[StateT, BusT]):
         """Base dir the default result/database paths anchor under (the repo
         root, injected by the entry script). The project dialog derives defaults
         through ``default_result_dir`` against this, NOT cwd, so a .bat launcher
-        that cd's into script/ still scopes under the repo root."""
+        that cd's into scripts/ still scopes under the repo root."""
         return self._project_root
 
     def _emit(self, payload: BasePayload) -> None:

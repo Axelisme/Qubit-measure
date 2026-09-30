@@ -7,30 +7,30 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ExperimentManager
+    from zcu_tools.resources.context import ContextManager
 
 
 class IOManager:
-    """Wraps ExperimentManager; returns new ExpContext objects to Controller."""
+    """Wraps ContextManager; returns new SessionEnv objects to Controller."""
 
     def __init__(self) -> None:
-        self._em: ExperimentManager | None = None
+        self._em: ContextManager | None = None
 
     def setup(self, result_dir: str) -> None:
-        from zcu_tools.meta_tool import ExperimentManager
+        from zcu_tools.resources.context import ContextManager
 
         logger.info("setup: result_dir=%r", result_dir)
-        self._em = ExperimentManager(Path(result_dir) / "exps")
+        self._em = ContextManager(Path(result_dir) / "exps")
 
     def list_contexts(self) -> list[str]:
         if self._em is None:
             return []
         return self._em.list_contexts()
 
-    def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext:
+    def use_context(self, label: str, base_ctx: SessionEnv) -> SessionEnv:
         """Switch to an existing context; preserve soc/soccfg/predictor/database_path."""
         logger.info("use_context: label=%r", label)
         if self._em is None:
@@ -40,12 +40,13 @@ class IOManager:
 
     def new_context(
         self,
-        base_ctx: ExpContext,
+        base_ctx: SessionEnv,
         value: float | None = None,
         unit: str = "none",
         clone_from: str | None = None,
-    ) -> ExpContext:
-        """Create a new context; return updated ExpContext to Controller.
+        label: str | None = None,
+    ) -> SessionEnv:
+        """Create a new context; return updated SessionEnv to Controller.
 
         ``clone_from`` is the label of an existing context to clone (its ml/md
         are read from ``exp_dir/<label>``); ``None`` starts empty. ``em.new_flux``
@@ -53,10 +54,11 @@ class IOManager:
         """
         if self._em is None:
             raise RuntimeError("IOManager not set up. Call setup() first.")
-        ml, md = self._em.new_flux(value=value, clone_from=clone_from, unit=unit)  # type: ignore[arg-type]
-        # Flush files so list_contexts() and use_context() can find them immediately.
-        md.dump()
-        ml.dump()
+        if unit not in ("A", "V", "K", "none"):
+            raise ValueError(f"unsupported context unit: {unit!r}")
+        ml, md = self._em.new_flux(
+            value=value, clone_from=clone_from, label=label, unit=unit
+        )
         return dataclasses.replace(base_ctx, md=md, ml=ml)
 
     @property

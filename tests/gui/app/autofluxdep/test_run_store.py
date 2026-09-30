@@ -9,12 +9,12 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
-from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
     QubitFreqResult,
     Sweep1DResult,
 )
+from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
 from zcu_tools.gui.app.autofluxdep.services import run_store as run_store_module

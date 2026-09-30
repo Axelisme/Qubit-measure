@@ -17,12 +17,12 @@ import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.controller import Controller
-from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.state import DeviceStatus, State
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.measure.registry import register_all
+from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.state import DeviceStatus, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,
@@ -34,16 +34,16 @@ from zcu_tools.gui.session.services.mock_flux import (
     FAKE_FLUX_DEVICE_NAME,
     FAKE_FLUX_INITIAL_VALUE,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 # ---------------------------------------------------------------------------
 # Fixture: a real Controller wired to a real bus, starting disconnected.
 # ---------------------------------------------------------------------------
 
 
-def _empty_ctx() -> ExpContext:
+def _empty_ctx() -> SessionEnv:
     # soc=None so the connect path actually runs (no pre-connected MagicMock soc).
-    return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    return SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 
 
 class _Fixture:
@@ -159,7 +159,7 @@ def test_mock_connect_registers_fake_flux_device(fx):
 def test_mock_connect_sets_soc_flux_device(fx):
     _connect_mock(fx)
 
-    soc = fx.state.exp_context.soc
+    soc = fx.state.session_env.soc
     assert soc is not None
     # set_flux_device records the name on the soc's internal SimParams copy.
     assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
@@ -196,7 +196,7 @@ def test_sync_connect_provisions_fake_flux_and_binds_soc(fx):
     assert dev.info is not None
     assert getattr(dev.info, "value") == FAKE_FLUX_INITIAL_VALUE
 
-    soc = fx.state.exp_context.soc
+    soc = fx.state.session_env.soc
     assert soc is not None
     assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
@@ -230,7 +230,7 @@ def test_reconnect_does_not_double_register_fake_flux(fx):
     # Exactly one fake_flux entry, value untouched (no re-ramp), binding intact.
     assert fx.state.get_device(FAKE_FLUX_DEVICE_NAME) is not None
     assert _fake_device(FAKE_FLUX_DEVICE_NAME).get_value() == 0.123
-    soc = fx.state.exp_context.soc
+    soc = fx.state.session_env.soc
     assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
@@ -276,7 +276,7 @@ def test_mock_connect_reconnects_disconnected_fake_flux(fx):
     ), "fake_flux was not reconnected after Use MockSoc with MEMORY_ONLY device"
 
     # Binding must still be in place on the new soc.
-    soc = fx.state.exp_context.soc
+    soc = fx.state.session_env.soc
     assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
@@ -295,7 +295,7 @@ def test_mock_connect_skips_reconnect_when_already_connected(fx):
 
     # Value must be untouched — no reconnect / re-setup fired.
     assert _fake_device(FAKE_FLUX_DEVICE_NAME).get_value() == 0.777
-    soc = fx.state.exp_context.soc
+    soc = fx.state.session_env.soc
     assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
@@ -318,7 +318,7 @@ def test_mock_connect_installs_sim_predictor(fx):
 
     # The installed predictor predicts the same f01 as one built directly from the
     # mock soc's own SimParams (the production builder, reused here).
-    soc = fx.state.exp_context.soc
+    soc = fx.state.session_env.soc
     sim_params = soc.sim_params  # type: ignore[union-attr]
     assert sim_params is not None
     reference = build_predictor_from_simparams(sim_params)
@@ -358,13 +358,13 @@ def test_remote_connect_does_not_provision_fake_flux(fx, monkeypatch):
     fake_soc = MagicMock(name="remote_soc")
     fake_soccfg = MagicMock(name="remote_soccfg")
     monkeypatch.setattr(
-        "zcu_tools.remote.make_soc_proxy",
+        "zcu_tools.qick_remote.make_soc_proxy",
         lambda ip, port: (fake_soc, fake_soccfg),
         raising=False,
     )
 
     fx.ctrl.start_connect(ConnectRemoteRequest(ip="127.0.0.1", port=1234))
-    assert _pump_until(lambda: fx.state.exp_context.soc is fake_soc)
+    assert _pump_until(lambda: fx.state.session_env.soc is fake_soc)
     fx.quiesce()
     _process_events()
 

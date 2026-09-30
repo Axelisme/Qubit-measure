@@ -1,11 +1,11 @@
 """SessionState — the session-core slice of GUI app state.
 
-Holds what every measurement-session app shares: the active ``ExpContext``, the
-multi-device set (``DeviceState`` keyed by name), the remembered startup prefs,
+Holds what every measurement-session app shares: the active ``SessionEnv``, the
+multi-device set (``DeviceState`` keyed by name), the remembered preferences,
 and the optimistic-concurrency ``VersionTable`` (a single shared table — each app
 adds its own experiment-surface keys to the same table, decision 6). An app's
 own ``State`` subclasses this and adds its experiment slice (measure: tabs; a
-sibling app: its own surface), so ``state.exp_context`` / ``state.devices`` /
+sibling app: its own surface), so ``state.session_env`` / ``state.devices`` /
 ``state.version`` resolve uniformly across apps.
 
 Import-clean: ``BaseDeviceInfo`` is referenced only under TYPE_CHECKING (its
@@ -21,7 +21,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.owner import OwnerThreadGuard
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.version_table import VersionTable
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class DeviceState:
     State owns this; DeviceService holds only the live driver (in
     GlobalDeviceManager), the worker threads and the progress model. ``info`` is
     a ``BaseDeviceInfo`` value snapshot (not a live driver) and so lives here.
-    ``remember`` is the persistent flag that drives the startup persistence
+    ``remember`` is the persistent flag that drives the settings persistence
     projection — it is no longer a transient connect-request attribute.
 
     There is deliberately no ``progress`` field: setup progress is live
@@ -97,13 +97,13 @@ DEFAULT_LEFT_PANEL_WIDTH = 500
 
 
 @dataclass
-class StartupPrefs:
-    """Remembered startup preferences — the *prefill* values, distinct from the
-    active ``ExpContext``.
+class SessionPreferences:
+    """Remembered session preferences — the *prefill* values, distinct from the
+    active ``SessionEnv``.
 
     These are what the setup dialog prefills and what persistence projects to
     disk; they are NOT the live connection/active-project state. Because the
-    instrument never auto-connects on launch, there is no need to distinguish
+    instrument never auto-connects, there is no need to distinguish
     "currently connected to" from "remembered" — apply/connect just update these
     prefill values at write-time, and restore writes them back without applying
     a context. Mutable (State holds live mutable objects); a value-only block, so
@@ -123,15 +123,15 @@ class StartupPrefs:
 
 class SessionState:
     """Passive session-core state — the active context, the device set, the
-    remembered startup prefs, and the shared version table. App ``State``
+    remembered preferences, and the shared version table. App ``State``
     subclasses add their experiment-surface slice + version keys."""
 
-    def __init__(self, ctx: ExpContext) -> None:
+    def __init__(self, ctx: SessionEnv) -> None:
         self._owner_guard = OwnerThreadGuard()
-        self.exp_context: ExpContext = ctx
-        # Remembered startup prefs (prefill values), distinct from exp_context.
-        # StartupService writes at apply/connect; PersistenceCaretaker projects.
-        self.startup_prefs: StartupPrefs = StartupPrefs()
+        self.session_env: SessionEnv = ctx
+        # Remembered preferences (prefill values), distinct from session_env.
+        # ProjectSettingsService writes at apply/connect; PersistenceCaretaker projects.
+        self.preferences: SessionPreferences = SessionPreferences()
         # Device state SSOT. DeviceService writes here (on the Qt main thread,
         # at its terminal slots) and holds only the live driver / worker / progress.
         self.devices: dict[str, DeviceState] = {}
@@ -141,8 +141,8 @@ class SessionState:
         # at their terminal slots; each app's experiment writers for their keys).
         self.version = VersionTable()
 
-    def set_context(self, ctx: ExpContext) -> None:
-        """Replace the whole ExpContext. Pure field swap — does NOT bump the
+    def set_context(self, ctx: SessionEnv) -> None:
+        """Replace the whole SessionEnv. Pure field swap — does NOT bump the
         ``context`` resource version, because the same setter is used to swap
         non-md/ml fields (soc/soccfg via connect, predictor via load/clear).
 
@@ -152,16 +152,17 @@ class SessionState:
         guarded resource. This keeps soc-connect / predictor-load from spuriously
         marking md/ml-dependent ops (run / editor.commit / writeback) stale.
 
-        The full set of "writes md/ml → bump context" paths is enumerated at the
-        canonical anchor on ``ContextService.set_md_attr``.
+        The full set of "completed md/ml write → bump context" paths is enumerated
+        at the canonical anchor on ``ContextService.set_md_attr``; a failed batch
+        write leaves an unpublished prefix without a bump.
         """
         self._assert_owner()
-        self.exp_context = ctx
+        self.session_env = ctx
 
-    def set_startup_prefs(self, prefs: StartupPrefs) -> None:
-        """Replace remembered startup preferences on the owner thread."""
+    def set_preferences(self, prefs: SessionPreferences) -> None:
+        """Replace remembered preferences on the owner thread."""
         self._assert_owner()
-        self.startup_prefs = prefs
+        self.preferences = prefs
 
     # ------------------------------------------------------------------
     # Device state (DeviceService writes these on the Qt main thread).

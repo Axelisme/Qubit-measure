@@ -1,8 +1,36 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
-from ..model import CenteredSweepValue, EvalValue, SweepValue
+from ..model import (
+    CenteredSweepValue,
+    DirectValue,
+    EvalValue,
+    ScalarValue,
+    SweepValue,
+    resolved_direct_number,
+)
+
+
+def _canonical_step_input(
+    current: float | DirectValue, derived: float | None
+) -> float | DirectValue:
+    if (
+        isinstance(current, DirectValue)
+        and current.raw is not None
+        and (current.value is None or derived is None or current.value == derived)
+    ):
+        return current
+    return DirectValue(None) if derived is None else derived
+
+
+def _resolved_step_input(
+    source: float | DirectValue, resolved: float
+) -> float | DirectValue:
+    if isinstance(source, DirectValue):
+        return DirectValue(resolved, raw=source.raw)
+    return resolved
 
 
 class SweepEditor:
@@ -11,74 +39,49 @@ class SweepEditor:
     @staticmethod
     def canonicalize(value: SweepValue) -> SweepValue:
         bounds = SweepEditor._numeric_bounds(value)
-        if bounds is None:
-            return value
-        start, stop = bounds
-        # auto_norm=False: this IS the canonicalisation authority — step is
-        # already derived here, don't let SweepValue re-derive it.
-        return SweepValue(
-            start=value.start,
-            stop=value.stop,
-            expts=value.expts,
-            step=SweepEditor._step_from_expts(start, stop, value.expts),
-            auto_norm=False,
+        points = resolved_direct_number(value.expts)
+        derived = None
+        if bounds is not None and points is not None:
+            derived = SweepEditor._step_from_expts(*bounds, int(points))
+        return replace(
+            value, step=_canonical_step_input(value.step, derived), auto_norm=False
         )
 
     @staticmethod
-    def update_start(value: SweepValue, start: float | EvalValue) -> SweepValue:
+    def update_start(value: SweepValue, start: float | ScalarValue) -> SweepValue:
+        return SweepEditor.canonicalize(replace(value, start=start, auto_norm=False))
+
+    @staticmethod
+    def update_stop(value: SweepValue, stop: float | ScalarValue) -> SweepValue:
+        return SweepEditor.canonicalize(replace(value, stop=stop, auto_norm=False))
+
+    @staticmethod
+    def update_expts(value: SweepValue, expts: int | DirectValue) -> SweepValue:
         return SweepEditor.canonicalize(
-            SweepValue(
-                start=start,
-                stop=value.stop,
-                expts=value.expts,
-                step=value.step,
-                auto_norm=False,
-            )
+            replace(value, expts=expts, step=0.0, auto_norm=False)
         )
 
     @staticmethod
-    def update_stop(value: SweepValue, stop: float | EvalValue) -> SweepValue:
-        return SweepEditor.canonicalize(
-            SweepValue(
-                start=value.start,
-                stop=stop,
-                expts=value.expts,
-                step=value.step,
-                auto_norm=False,
-            )
-        )
-
-    @staticmethod
-    def update_expts(value: SweepValue, expts: int) -> SweepValue:
-        return SweepEditor.canonicalize(
-            SweepValue(
-                start=value.start,
-                stop=value.stop,
-                expts=expts,
-                step=value.step,
-                auto_norm=False,
-            )
-        )
-
-    @staticmethod
-    def update_step(value: SweepValue, step: float) -> SweepValue:
-        if not math.isfinite(step):
+    def update_step(value: SweepValue, step: float | DirectValue) -> SweepValue:
+        candidate = replace(value, step=step, auto_norm=False)
+        requested = resolved_direct_number(candidate.step)
+        if requested is None:
+            return candidate
+        if not math.isfinite(requested):
             raise ValueError("Sweep step must be finite")
-        bounds = SweepEditor._numeric_bounds(value)
+        bounds = SweepEditor._numeric_bounds(candidate)
         if bounds is None:
-            return value
+            # A typed edit retains the existing unresolved-axis contract. Text
+            # input still needs a snapshot of the new raw, even before resolution.
+            return candidate if isinstance(step, DirectValue) else value
         start, stop = bounds
-        expts = 1 if step == 0.0 else max(1, round((stop - start) / step + 1))
-        # step is the user's input → expts is reverse-derived; auto_norm=False so
-        # the supplied step is preserved (not overwritten by the forward rule).
-        return SweepEditor.canonicalize(
-            SweepValue(
-                start=value.start,
-                stop=value.stop,
-                expts=expts,
-                step=step,
-                auto_norm=False,
-            )
+        expts = 1 if requested == 0.0 else max(1, round((stop - start) / requested + 1))
+        resolved = SweepEditor._step_from_expts(start, stop, expts)
+        return replace(
+            candidate,
+            expts=expts,
+            step=_resolved_step_input(candidate.step, resolved),
+            auto_norm=False,
         )
 
     @staticmethod
@@ -90,8 +93,12 @@ class SweepEditor:
         return start, stop
 
     @staticmethod
-    def _resolved_edge(value: float | EvalValue) -> float | None:
-        resolved = value.resolved if isinstance(value, EvalValue) else value
+    def _resolved_edge(value: float | ScalarValue) -> float | None:
+        resolved = (
+            value.resolved
+            if isinstance(value, EvalValue)
+            else resolved_direct_number(value)
+        )
         if resolved is None:
             return None
         numeric = float(resolved)
@@ -109,65 +116,59 @@ class CenteredSweepEditor:
 
     @staticmethod
     def canonicalize(value: CenteredSweepValue) -> CenteredSweepValue:
-        return CenteredSweepValue(
-            center=value.center,
-            span=value.span,
-            expts=value.expts,
-            step=CenteredSweepEditor._step_from_expts(value.span, value.expts),
-            auto_norm=False,
+        span = resolved_direct_number(value.span)
+        points = resolved_direct_number(value.expts)
+        derived = None
+        if span is not None and points is not None:
+            derived = CenteredSweepEditor._step_from_expts(float(span), int(points))
+        return replace(
+            value, step=_canonical_step_input(value.step, derived), auto_norm=False
         )
 
     @staticmethod
     def update_center(
-        value: CenteredSweepValue, center: float | EvalValue
+        value: CenteredSweepValue, center: float | ScalarValue
     ) -> CenteredSweepValue:
         return CenteredSweepEditor.canonicalize(
-            CenteredSweepValue(
-                center=center,
-                span=value.span,
-                expts=value.expts,
-                step=value.step,
-                auto_norm=False,
-            )
+            replace(value, center=center, auto_norm=False)
         )
 
     @staticmethod
-    def update_span(value: CenteredSweepValue, span: float) -> CenteredSweepValue:
+    def update_span(
+        value: CenteredSweepValue, span: float | DirectValue
+    ) -> CenteredSweepValue:
         return CenteredSweepEditor.canonicalize(
-            CenteredSweepValue(
-                center=value.center,
-                span=span,
-                expts=value.expts,
-                step=value.step,
-                auto_norm=False,
-            )
+            replace(value, span=span, step=0.0, auto_norm=False)
         )
 
     @staticmethod
-    def update_expts(value: CenteredSweepValue, expts: int) -> CenteredSweepValue:
+    def update_expts(
+        value: CenteredSweepValue, expts: int | DirectValue
+    ) -> CenteredSweepValue:
         return CenteredSweepEditor.canonicalize(
-            CenteredSweepValue(
-                center=value.center,
-                span=value.span,
-                expts=expts,
-                step=value.step,
-                auto_norm=False,
-            )
+            replace(value, expts=expts, step=0.0, auto_norm=False)
         )
 
     @staticmethod
-    def update_step(value: CenteredSweepValue, step: float) -> CenteredSweepValue:
-        if not math.isfinite(step) or step < 0.0:
+    def update_step(
+        value: CenteredSweepValue, step: float | DirectValue
+    ) -> CenteredSweepValue:
+        candidate = replace(value, step=step, auto_norm=False)
+        requested = resolved_direct_number(candidate.step)
+        if requested is None:
+            return candidate
+        if not math.isfinite(requested) or requested < 0.0:
             raise ValueError("Centered sweep step must be finite and >= 0")
-        expts = 1 if step == 0.0 else max(1, round(value.span / step + 1))
-        return CenteredSweepEditor.canonicalize(
-            CenteredSweepValue(
-                center=value.center,
-                span=value.span,
-                expts=expts,
-                step=step,
-                auto_norm=False,
-            )
+        span = resolved_direct_number(candidate.span)
+        if span is None:
+            return candidate
+        expts = 1 if requested == 0.0 else max(1, round(span / requested + 1))
+        resolved = CenteredSweepEditor._step_from_expts(float(span), expts)
+        return replace(
+            candidate,
+            expts=expts,
+            step=_resolved_step_input(candidate.step, resolved),
+            auto_norm=False,
         )
 
     @staticmethod

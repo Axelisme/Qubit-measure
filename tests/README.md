@@ -1,21 +1,22 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-25 — test structure policy
+**Last updated:** 2026-09-29 — entry routing; datafile, resources, cfg_editing test owners
 
-本頁是整個 `tests/` 套件新增、拆分與搬遷測試的結構規則，也保留硬體與 GUI 測試的領域注意事項。
-測試行為與驗證流程以 [AGENTS.md](../AGENTS.md) 為準。
+本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
 ## 放置新增測試
 
 1. 先找同一個可觀察行為或契約的既有測試檔。新增 regression 優先放在該檔；同一 owner
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
-   `T1` 等名稱若是領域實體或真實物理量，仍可作檔名的一部分，不能只靠字面判定為 ticket 名。
-2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/script/` 和
+   `T1` 等名稱也可能是真實物理量，依情境判讀，不靠字面判為 ticket 名。
+2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/` 和
    `tests/tools/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
+   Notebook 專用且已抽離的 helper 仍在其模組路徑驗證介面，不必提升為通用工具。
 3. 案例按情境與預期結果命名，從模組接縫或公開契約檢查可觀察結果。
    文件、靜態內容、設定值及腳本旗標直接審閱；既有白箱或靜態檢查案例不因本頁宣稱已搬遷。
+   不新增頂層 unit／integration／e2e 目錄，亦不測 Notebook／腳本的主要內容。
 
 ## Fixture 與測試支援碼
 
@@ -85,10 +86,10 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 ## 現有 owner 導覽
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
-`tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/adapters/`
+`tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/measure/adapters/`
 擁有 adapter 對設定與寫回的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
-接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/meta_tool/`、`tests/analysis/`、
-`tests/notebook/`、`tests/utils/` 分別擁有其路徑對應模組的測試。
+接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
+`tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
 與同名的其他 registry 測試無關。需要定位檔案時以目前目錄及程式 owner 為準。
 
@@ -144,7 +145,7 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 ### Experiment v2 Schedule runtime tests
 
-`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
+`tests/experiment/v2/runtime/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
 `tests/experiment/v2/onetone/` 放 onetone domain-level pure behavior tests；例如 `freq`
 的 homophasal helper 測端點保留與 resonator-circle phase 等距，不碰 GUI 或硬體。
@@ -181,7 +182,7 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 
 ### Shared GUI cfg import ownership tests
 
-`tests/gui/measure_cfg/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
+`tests/experiment/cfg_editing/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
 runtime parity、nested allowed sets、deep-fresh mutable containers、main/autoflux僅兩個policy差異、
 strict root-only Mapping/typed inspection、missing/non-string/unknown與fresh-process import purity；materializer tests另鎖spec/value完整對齊、scalar
 missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與
@@ -207,10 +208,10 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 
 ### Experiment v2 GUI adapter tests
 
-`tests/experiment/v2_gui/adapters/_support/test_schema_builder.py`鎖定context-free
+`tests/experiment/v2_gui/measure/adapters/_support/test_schema_builder.py`鎖定context-free
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
-`tests/gui/app/main/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
+`tests/gui/app/measure/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
 adapter definition 可重複 instantiate；registry 數量與 static spec 宣告直接審閱。
 
 Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷史 Phase 切檔。
@@ -218,9 +219,11 @@ Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷
 不是 ticket 命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，
 但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
 
-onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering、md preflight 與 writeback
-contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md fit params，runtime
-取樣公式由 domain-level tests 擁有。`onetone/freq` writeback tests 覆蓋 MetaDict
+onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering 與 writeback contract。
+`tests/gui/app/measure/adapter/test_lowering_adapter.py` 擁有 homophasal 正式 optional cfg
+到 domain assembly 的接縫，校正不從 live md 注入；runtime 取樣公式由 domain-level tests
+擁有。Guard tests 驗證 cached-only cfg 與 device snapshot 凍結；RunService tests 驗證
+worker delivery 與既有 operation cleanup。`onetone/freq` writeback tests 覆蓋 MetaDict
 `r_f` / `rf_w` / `theta0` 與 `readout_rf` ModuleLibrary writeback 的 no-snapshot gate、
 pulse-readout schema、non-pulse skip，以及 default 仍不 adopt library readout。
 
@@ -236,13 +239,13 @@ late subscribe不補收舊event，以及slow-client drop budget不阻塞healthy 
 remote EventBus與cfg-editor focused tests另鎖serializer/current-path/encode lazy cost、failure logging、
 `editor_closed` delivery cleanup；diagnostic測試確認fault channel仍不受subscription gate影響。
 
-`tests/gui/app/main/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
+`tests/gui/app/measure/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
 完整call sequence、zero-reaction local edits與lazy單次snapshot；service與真實UI測試覆蓋
 run去重、analysis start-rejected/failure/cancel retained-figure restore、load stale-canvas clear、
 same-class form hydrate/cache，以及ModuleLibrary變更透過attached cfg draft更新run gate。
 
 `tests/gui/test_expected_error.py`鎖定closed category、legacy RuntimeError/ValueError ancestry與
-explicit concrete opt-in/exclusion；`tests/gui/app/main/services/remote/test_expected_error_wire_compat.py`
+explicit concrete opt-in/exclusion；`tests/gui/app/measure/remote/test_expected_error_wire_compat.py`
 以exact `(code, message, reason, data)` tuple鎖定既有handler projection，並證
 `ResultScopeError`分類不依賴reason prefix。
 
@@ -256,8 +259,9 @@ invariant failure不被降級；unexpected dispatch測試另確認controller err
 `tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
 view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
-`tests/gui/app/main/services/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
+`tests/gui/app/measure/remote/test_remote_mcp_toolchain.py`保留GUI project/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
+`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_setup_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Setup 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填；autofluxdep 對應的還原、顯式 Apply／Connect、run／paused 拒絕與再次保存在 `tests/gui/app/autofluxdep/ui/test_setup_flow.py`。
 Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
 script flags 用直接 review，不納入 pytest。
 
@@ -406,16 +410,15 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 
 ### GUI analyze params 測試
 
-`tests/gui/app/main/adapter/test_analyze_params.py` 覆蓋 dataclass-based analyze params helper；`tests/gui/app/main/ui/test_analyze_form.py` 覆蓋 `AnalyzeFormWidget` 的 dataclass round-trip、hydrate 不 emit、使用者編輯 emit instance。新增 GUI adapter 測試時，analysis 參數應直接使用 adapter 回傳的 params dataclass instance，不要組 raw dict 或假設 `get_analyze_params()` 可迭代。
+`tests/gui/app/measure/adapter/test_analyze_params.py` 覆蓋 dataclass-based analyze params helper；`tests/gui/app/measure/ui/test_analyze_form.py` 覆蓋 `AnalyzeFormWidget` 的 dataclass round-trip、hydrate 不 emit、使用者編輯 emit instance。新增 GUI adapter 測試時，analysis 參數應直接使用 adapter 回傳的 params dataclass instance，不要組 raw dict 或假設 `get_analyze_params()` 可迭代。
 
 ### measure-gui canonical result load 測試
 
 load-result feature 的 targeted tests 分散在對應 ownership：
-`tests/experiment/v2_gui/adapters/test_base_load.py` 鎖 adapter default load contract；
-`tests/experiment/v2_gui/adapters/test_legacy_load.py` 鎖 adapter legacy single-file fallback；
-`tests/gui/app/main/services/test_load.py` 鎖 state invalidation / version bump；
-`tests/gui/app/main/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
-`tests/gui/app/main/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
+`tests/experiment/v2_gui/measure/adapters/test_base_load.py` 鎖 adapter default load contract；
+`tests/gui/app/measure/services/test_load.py` 鎖 state invalidation / version bump；
+`tests/gui/app/measure/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
+`tests/gui/app/measure/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
 `tests/mcp/measure/`覆蓋operation handle與RPC timeout policy：bounded
 GUI handler timeout應回傳狀態，transport timeout應被視為連線異常。
 

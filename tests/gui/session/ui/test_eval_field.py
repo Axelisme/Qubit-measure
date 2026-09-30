@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.session.expression import EvalRef
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
-from zcu_tools.meta_tool import MetaDict
+from zcu_tools.resources.context import MetaDict
 
 
 def _field(md: MetaDict, decimals: int = 6) -> EvalNumericField:

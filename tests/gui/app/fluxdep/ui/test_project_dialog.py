@@ -99,7 +99,7 @@ def test_browse_buttons_exist(dialog):
 
 
 def test_result_scope_dropdown_lists_discovered_params(qapp, tmp_path):
-    from zcu_tools.meta_tool import ParamsProject, QubitParams
+    from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 
     params_path = tmp_path / "result" / "ChipA" / "Q1" / "params.json"
     QubitParams(params_path).ensure_project(ParamsProject("ChipA", "Q1"))
@@ -114,7 +114,7 @@ def test_result_scope_dropdown_lists_discovered_params(qapp, tmp_path):
 def test_selecting_result_scope_updates_names_and_paths(qapp, tmp_path):
     import os
 
-    from zcu_tools.meta_tool import ParamsProject, QubitParams
+    from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 
     params_path = tmp_path / "result" / "ChipA" / "Q1" / "params.json"
     QubitParams(params_path).ensure_project(ParamsProject("ChipA", "Q1"))

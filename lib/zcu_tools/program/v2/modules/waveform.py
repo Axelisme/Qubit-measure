@@ -20,8 +20,8 @@ from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.resources.context import ModuleLibrary
 
 
 class AbsWaveformCfg(ConfigBase, ABC):
@@ -125,7 +125,7 @@ class ArbWaveformCfg(AbsWaveformCfg):
 
     @property
     def length(self) -> float:
-        from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
+        from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
         return ArbWaveformDatabase.inspect(self.data).duration
 
@@ -318,7 +318,7 @@ class ArbWaveform(AbsWaveform):
         self, ch: int, prog: ModularProgramV2, even_length: bool = False
     ) -> tuple[NDArray, NDArray | None]:
         # lazy import to avoid circular import
-        from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
+        from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
         cfg = self.waveform_cfg
         assert isinstance(cfg, ArbWaveformCfg)

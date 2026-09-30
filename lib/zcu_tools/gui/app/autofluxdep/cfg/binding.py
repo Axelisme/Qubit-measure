@@ -3,15 +3,15 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, cast
 
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
-from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
-from zcu_tools.gui.measure_cfg import (
+from zcu_tools.experiment.cfg_editing import (
     ProgramCfgKind,
     ProgramShape,
     program_shape_for_input,
 )
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
 from zcu_tools.gui.session.expression import evaluate_numeric_expr
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from .module_adapter import (
     AUTOFLUX_PROGRAM_MATERIALIZATION_POLICY,

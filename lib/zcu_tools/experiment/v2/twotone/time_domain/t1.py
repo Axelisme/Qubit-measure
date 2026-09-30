@@ -11,7 +11,8 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 
-import zcu_tools.utils.fitting as ft
+import zcu_tools.analysis.fitting as ft
+from zcu_tools.analysis.fitting import fit_decay, fit_dual_decay
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     US_TO_S,
@@ -25,12 +26,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import (
     materialize_nonuniform_t1_delays,
     sweep2array,
 )
-from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
+from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
@@ -45,7 +46,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
 

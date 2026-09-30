@@ -1,4 +1,4 @@
-"""Declarative, per-experiment persistence spec (ADR-0027).
+"""Declarative, per-experiment persistence spec (ADR-0063).
 
 An ``AxesSpec`` decouples an experiment's in-memory frozen Result dataclass from
 its on-disk (Labber) representation, and drives the base ``save()``/``load()``
@@ -19,8 +19,7 @@ from typing import Any, Generic, Literal, TypeVar
 
 import numpy as np
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.utils.datasaver import (
+from zcu_tools.datafile import (
     DatasetRole,
     GroupedLabberData,
     LabberMetadata,
@@ -28,6 +27,7 @@ from zcu_tools.utils.datasaver import (
     load_grouped_labber_data,
     save_grouped_labber_data,
 )
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 __all__ = [
     "Axis",
@@ -347,7 +347,7 @@ class RoleSpec:
 
 @dataclass(frozen=True)
 class GroupedAxesSpec(Generic[T_Result, T_Config]):
-    """Experiment-level grouped persistence contract (ADR-0027)."""
+    """Experiment-level grouped persistence contract (ADR-0063)."""
 
     roles: tuple[RoleSpec, ...]
     result_type: type[T_Result]

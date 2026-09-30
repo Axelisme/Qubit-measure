@@ -1,4 +1,4 @@
-"""Builder / Node / placement — the execution abstraction (see CONTEXT.md).
+"""Builder / Node / placement — the execution abstraction (see the autofluxdep app README).
 
 The orchestrator sees only three things on a provider: ``provides``,
 ``requires``, and (per flux point) a ``Node`` with ``produce``. It is a pure
@@ -286,7 +286,7 @@ class PlacedNode:
     # Seed for the per-placement schema. Consumed once in ``__post_init__`` to
     # build ``schema``; not retained (the schema is the SSOT thereafter).
     overrides: InitVar[Mapping[str, Any] | None] = None
-    # Active ExpContext used only while building fresh defaults. It is not retained,
+    # Active SessionEnv used only while building fresh defaults. It is not retained,
     # and persisted workflow restore still overwrites from the saved raw value tree.
     default_context: InitVar[Any | None] = None
     schema: NodeCfgSchema = field(init=False)

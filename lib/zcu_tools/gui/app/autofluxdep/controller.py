@@ -32,6 +32,7 @@ from qtpy.QtCore import (
     Signal,  # type: ignore[attr-defined]
 )
 
+from zcu_tools.experiment.v2_gui.autofluxdep.catalog import create_placement
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -48,7 +49,6 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
-from zcu_tools.gui.app.autofluxdep.experiments.catalog import create_placement
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
@@ -130,7 +130,7 @@ from zcu_tools.gui.session.services.predictor import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH
-from zcu_tools.meta_tool import QubitParams, QubitParamsError
+from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
@@ -140,10 +140,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.services.startup import (
-        ResolvedStartupProject,
-        StartupProjectRequest,
-    )
+    from zcu_tools.gui.session.services.project_settings import ResolvedProject
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
 logger = logging.getLogger(__name__)
@@ -232,8 +229,8 @@ class Controller(SessionControllerMixin):
 
         # --- session-core infrastructure (this app owns its gate + executor) ---
         # autofluxdep composes the shared session services (connection / context /
-        # device / startup) by injecting its own concrete infra through the session
-        # ports (ADR-0019, session-core extraction decision 3): an app-local
+        # device / settings) by injecting its own concrete infra through the session
+        # ports (ADR-0066, session-core extraction decision 3): an app-local
         # OperationGate (conflict policy) + the shared BackgroundRunner (no figure
         # routing) alongside the shared OperationHandles / ProgressService /
         # IOManager. The progress transport defaults to the Qt marshal so a GUI /
@@ -266,7 +263,7 @@ class Controller(SessionControllerMixin):
             io_manager=self._io_manager,
             runner=self._runner,
             project_root=self._project_root,
-            on_project_applied=self._on_startup_project_applied,
+            on_project_applied=self._on_project_applied,
         )
         self._session = session
         self._soc_svc = session.soc_connection
@@ -288,7 +285,7 @@ class Controller(SessionControllerMixin):
         self._setup_control = GuardedSetupControl(
             session.setup_control, self._require_session_mutable
         )
-        self._startup_svc = session.startup
+        self._settings_svc = session.settings
 
     # --- read-only accessors for the UI ---
 
@@ -428,7 +425,7 @@ class Controller(SessionControllerMixin):
             for node in self._state.nodes
         )
         return AppPersistedState(
-            startup=self._startup_svc.capture_startup(
+            startup=self._settings_svc.capture_settings(
                 left_panel_width=DEFAULT_LEFT_PANEL_WIDTH
             ),
             workflow=PersistedWorkflow(nodes=nodes),
@@ -482,7 +479,7 @@ class Controller(SessionControllerMixin):
         rejected: list[RestoreIssue] = []
         predictor_issue: RestoreIssue | None = None
         restored_predictor = False
-        self._startup_svc.restore_startup(state.startup)
+        self._settings_svc.restore_settings(state.startup)
         self._state.replace_nodes([])
 
         try:
@@ -627,18 +624,12 @@ class Controller(SessionControllerMixin):
         if self.is_paused:
             raise RuntimeError(f"autofluxdep {subject} is locked while a run is paused")
 
-    # -- setup dialog: project / startup --
-    # apply_startup_project diverges (autofluxdep returns bool; measure returns the
-    # resolved-project dict per WIRE-48) so it stays a per-app override. get_bus /
-    # get_project_root also stay per-app (app EventBus subtype / app state). Every
+    # -- setup dialog: project --
+    # The setup dialog applies a project through ``setup_control`` (guarded against
+    # run/paused, reacting through ``_on_project_applied``). get_bus /
+    # get_project_root stay per-app (app EventBus subtype / app state). Every
     # other setup-controller forward lives in SessionControllerMixin.
-    def apply_startup_project(self, req: StartupProjectRequest) -> bool:
-        self._require_workflow_editable()
-        resolved = self._startup_svc.apply_project(req)
-        self._on_startup_project_applied(resolved)
-        return True
-
-    def _on_startup_project_applied(self, project: ResolvedStartupProject) -> None:
+    def _on_project_applied(self, project: ResolvedProject) -> None:
         self._state.set_project(
             ProjectInfo(
                 chip_name=project.chip_name,
@@ -650,9 +641,7 @@ class Controller(SessionControllerMixin):
         )
         self._try_auto_load_predictor_from_params(project)
 
-    def _try_auto_load_predictor_from_params(
-        self, project: ResolvedStartupProject
-    ) -> None:
+    def _try_auto_load_predictor_from_params(self, project: ResolvedProject) -> None:
         params_path = Path(project.params_path)
         if not params_path.is_file():
             logger.debug(
@@ -718,7 +707,7 @@ class Controller(SessionControllerMixin):
             builder=builder,
             name=name,
             overrides=params,
-            default_context=self._state.exp_context,
+            default_context=self._state.session_env,
         )
         self._state.append_node(node)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
@@ -732,7 +721,7 @@ class Controller(SessionControllerMixin):
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
         """
         self._require_workflow_editable()
-        node = create_placement(type_name, ctx=self._state.exp_context)
+        node = create_placement(type_name, ctx=self._state.session_env)
         node.name = self._unique_name(node.name)
         self._state.append_node(node)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
@@ -1053,7 +1042,7 @@ class Controller(SessionControllerMixin):
     def _build_tools(self, providers: list[PlacedNode] | None = None) -> Tools:
         """Build the sweep's run-lived predictor and feedback capabilities.
 
-        ``exp_context.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
+        ``session_env.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
         setup / by PredictorService) or None. A real predictor is wrapped into
         ``FluxoniumPredictorAdapter``; with none loaded we fall back to the
         base-only ``SimplePredictor`` stand-in. Feedback capabilities are built

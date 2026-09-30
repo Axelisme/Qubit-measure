@@ -10,9 +10,9 @@ helpers and ports. A string-key lookup is only an escape hatch for rare,
 multi-source defaults and for writing the current value of a source into
 `MetaDict`.
 
-**Related:** ContextService is the single md/ml write authority in [[0006]];
-service role and port discipline follow [[0004]]/[[0005]]; session-core sharing
-is defined in [[0020]]; cfg editor sessions and `EvalValue` wire handling are
+**Related:** ContextService is the single md/ml write authority in [[0067]];
+service role and port discipline follow [[0067]]; session-core sharing
+is defined in [[0067]]; cfg editor sessions and `EvalValue` wire handling are
 defined in [[0008]]; role defaults and context-free cfg definitions live under
 [[0009]]/[[0012]].
 
@@ -24,7 +24,7 @@ measure-gui provides a read-only value lookup in the session layer.
   key as a typed scalar.
 - `ValueRegistry` is the registration interface: only the session composition
   root and source owners mutate it.
-- `ExpContext` may carry the read-only lookup facade so adapter default
+- `SessionEnv` may carry the read-only lookup facade so adapter default
   generation can use it without receiving app services or mutable registries.
 - Provider registration is owner-scoped. Owners can atomically replace all their
   providers or unregister as a group when a predictor reloads, a device changes,
@@ -48,8 +48,15 @@ and direct `ctx.md`/`ctx.ml` reads remain the preferred path.
 Source references use a sibling concept to `EvalValue`, not an extension of
 `EvalValue`.
 
-- `EvalValue` remains a live md expression stored in cfg value trees and resolved
-  by cfg lowering.
+- `EvalValue` stores an md expression together with its last resolved result.
+  The field resolves it when set and on expression refresh. Cfg lowering
+  outputs the stored result when one exists. With an expression resolver,
+  lowering first re-evaluates every expression against the current md,
+  coerces it to the field type, and aborts if any evaluation or coercion fails; a successful re-evaluation that differs from
+  the stored result only logs drift. Without a stored result, lowering outputs
+  the resolver's evaluation.
+  The earlier wording "a live md expression resolved by cfg lowering" no longer
+  describes the current semantics, which [[0065]] owns.
 - `ValueRef` means "read this registered value now and materialize the result".
   It is never persisted as a lazy reference.
 - Agent wire uses explicit tagged objects, for example
@@ -65,7 +72,7 @@ Source references use a sibling concept to `EvalValue`, not an extension of
   once and replaces the token with the current value formatted as text. Plain
   strings in the wire contract are not globally interpreted.
 - Adapter definition may use the typed `value_source(...)` Seed; role-default
-  seeds may use `Source(...)`. Both resolve through `ExpContext.values` only when
+  seeds may use `Source(...)`. Both resolve through `SessionEnv.values` only when
   `MeasureCfgDefinition.instantiate(ctx)` creates a fresh cfg, then store ordinary
   direct values in the value tree. Restore與使用者編輯不保留或重跑lazy source。
 

@@ -458,7 +458,11 @@ def _singleshot_tone_pulse() -> PulseCfg:
 def _singleshot_t1_cfg(
     length: SweepCfg | list[float],
 ) -> singleshot_t1.T1Cfg:
+    g_center, e_center = _expected_ge_centers()
     return singleshot_t1.T1Cfg(
+        g_center=g_center,
+        e_center=e_center,
+        radius=0.4 * abs(g_center - e_center),
         reps=20,
         rounds=1,
         modules=singleshot_t1.T1ModuleCfg(
@@ -474,7 +478,11 @@ def _singleshot_t1_cfg(
 def _singleshot_t1_tone_cfg(
     length: SweepCfg | list[float],
 ) -> singleshot_t1_tone.T1WithToneCfg:
+    g_center, e_center = _expected_ge_centers()
     return singleshot_t1_tone.T1WithToneCfg(
+        g_center=g_center,
+        e_center=e_center,
+        radius=0.4 * abs(g_center - e_center),
         reps=20,
         rounds=1,
         modules=singleshot_t1_tone.T1WithToneModuleCfg(
@@ -492,7 +500,11 @@ def _singleshot_t1_tone_cfg(
 def _singleshot_t1_tone_sweep_cfg(
     length: SweepCfg | list[float],
 ) -> singleshot_t1_tone_sweep.T1WithToneSweepCfg:
+    g_center, e_center = _expected_ge_centers()
     return singleshot_t1_tone_sweep.T1WithToneSweepCfg(
+        g_center=g_center,
+        e_center=e_center,
+        radius=0.4 * abs(g_center - e_center),
         reps=20,
         rounds=1,
         modules=singleshot_t1_tone_sweep.T1WithToneSweepModuleCfg(
@@ -513,17 +525,8 @@ def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
     cfg = _singleshot_t1_cfg(length_sweep)
-    g_center, e_center = _expected_ge_centers()
 
-    result = singleshot_t1.T1Exp().run(
-        soc,
-        soccfg,
-        cfg,
-        g_center,
-        e_center,
-        0.4 * abs(g_center - e_center),
-        uniform=False,
-    )
+    result = singleshot_t1.T1Exp().run(soc, soccfg, cfg, uniform=False)
 
     ideal_times = t1_delay_axis(
         start=length_sweep.start,
@@ -536,57 +539,38 @@ def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
     np.testing.assert_array_equal(result.lengths, expected_times)
     assert len(result.lengths) == length_sweep.expts
     assert result.signals.shape == (length_sweep.expts, 2, 2)
+    assert result.cfg_snapshot is not None
+    assert (
+        result.cfg_snapshot.g_center,
+        result.cfg_snapshot.e_center,
+        result.cfg_snapshot.radius,
+    ) == (cfg.g_center, cfg.e_center, cfg.radius)
 
 
 def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     cfg = _singleshot_t1_cfg([0.0, 0.0001, 1.0])
-    g_center, e_center = _expected_ge_centers()
 
     with pytest.raises(
         ValueError,
         match="delay sweep collapsed after cycle quantization",
     ):
-        singleshot_t1.T1Exp().run(
-            soc,
-            soccfg,
-            cfg,
-            g_center,
-            e_center,
-            0.4 * abs(g_center - e_center),
-            uniform=False,
-        )
+        singleshot_t1.T1Exp().run(soc, soccfg, cfg, uniform=False)
 
 
 @pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
 def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
-    g_center, e_center = _expected_ge_centers()
-    radius = 0.4 * abs(g_center - e_center)
 
     if variant == "tone":
         cfg = _singleshot_t1_tone_cfg(length_sweep)
-        result = singleshot_t1_tone.T1WithToneExp().run(
-            soc,
-            soccfg,
-            cfg,
-            g_center,
-            e_center,
-            radius,
-            uniform=False,
-        )
+        result = singleshot_t1_tone.T1WithToneExp().run(soc, soccfg, cfg, uniform=False)
         expected_signal_shape = (length_sweep.expts, 2, 2)
     else:
         cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
         result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-            soc,
-            soccfg,
-            cfg,
-            g_center,
-            e_center,
-            radius,
-            uniform=False,
+            soc, soccfg, cfg, uniform=False
         )
         expected_signal_shape = (2, 2, length_sweep.expts, 2)
 
@@ -615,8 +599,6 @@ def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
     length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
     cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
     cfg.rounds = 2
-    g_center, e_center = _expected_ge_centers()
-    radius = 0.4 * abs(g_center - e_center)
     acquire_count = 0
     next_seed = soc.next_sim_acquire_seed
 
@@ -627,15 +609,7 @@ def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
 
     monkeypatch.setattr(soc, "next_sim_acquire_seed", counted_next_seed)
 
-    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-        soc,
-        soccfg,
-        cfg,
-        g_center,
-        e_center,
-        radius,
-        uniform=False,
-    )
+    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(soc, soccfg, cfg, uniform=False)
 
     assert cfg.sweep.gain is not None
     assert acquire_count == cfg.sweep.gain.expts
@@ -645,17 +619,9 @@ def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires() -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=0.6, expts=6, step=0.1)
     cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
-    g_center, e_center = _expected_ge_centers()
-    radius = 0.4 * abs(g_center - e_center)
 
     result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-        soc,
-        soccfg,
-        cfg,
-        g_center,
-        e_center,
-        radius,
-        uniform=True,
+        soc, soccfg, cfg, uniform=True
     )
 
     assert result.signals.shape == (2, 2, length_sweep.expts, 2)
@@ -669,8 +635,6 @@ def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
     cfg = _singleshot_t1_tone_sweep_cfg(
         SweepCfg(start=0.0, stop=0.5, expts=6, step=0.1)
     )
-    g_center, e_center = _expected_ge_centers()
-    radius = 0.4 * abs(g_center - e_center)
 
     monkeypatch.setattr(
         singleshot_t1_tone_sweep,
@@ -680,13 +644,7 @@ def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
 
     with pytest.raises(ValueError, match="strictly positive"):
         singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-            soc,
-            soccfg,
-            cfg,
-            g_center,
-            e_center,
-            radius,
-            uniform=uniform,
+            soc, soccfg, cfg, uniform=uniform
         )
 
 
@@ -696,8 +654,6 @@ def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     direct_times = [0.008, 0.009, 1.0]
-    g_center, e_center = _expected_ge_centers()
-    radius = 0.4 * abs(g_center - e_center)
 
     with pytest.raises(
         ValueError,
@@ -705,23 +661,11 @@ def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
     ):
         if variant == "tone":
             singleshot_t1_tone.T1WithToneExp().run(
-                soc,
-                soccfg,
-                _singleshot_t1_tone_cfg(direct_times),
-                g_center,
-                e_center,
-                radius,
-                uniform=False,
+                soc, soccfg, _singleshot_t1_tone_cfg(direct_times), uniform=False
             )
         else:
             singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-                soc,
-                soccfg,
-                _singleshot_t1_tone_sweep_cfg(direct_times),
-                g_center,
-                e_center,
-                radius,
-                uniform=False,
+                soc, soccfg, _singleshot_t1_tone_sweep_cfg(direct_times), uniform=False
             )
 
 

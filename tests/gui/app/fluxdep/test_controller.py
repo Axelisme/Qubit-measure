@@ -29,7 +29,7 @@ def _record(ctrl: Controller, payload_type: type[Payload]) -> list:
 
 def test_get_project_root_returns_injected_root():
     # The entry script injects the repo root so default paths anchor there, not
-    # cwd (the .bat launcher cd's into script/).
+    # cwd (the .bat launcher cd's into scripts/).
     ctrl = Controller(FluxDepState(), project_root="/repo")
     assert ctrl.get_project_root() == "/repo"
 
@@ -121,7 +121,7 @@ def test_full_pipeline_export_roundtrip(spectrum_hdf5, tmp_path):
     out = str(tmp_path / "spectrums.hdf5")
     resolved = ctrl.export_spectrums(filepath=out)
 
-    from zcu_tools.notebook.persistance import load_spectrums
+    from zcu_tools.analysis.fluxdep.io import load_spectrums
 
     loaded = load_spectrums(resolved)
     assert name in loaded
@@ -150,8 +150,9 @@ def _fit_db_file(tmp_path) -> str:
 
 
 def _seed_aligned_points(ctrl: Controller) -> None:
+    from zcu_tools.analysis.fluxdep.models import PointsData
+    from zcu_tools.analysis.spectrum import SpectrumData
     from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-    from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
     fluxs = np.array([0.0, 0.1, 0.2, 0.3])
     raw = SpectrumData(
@@ -181,8 +182,8 @@ def _seed_aligned_points(ctrl: Controller) -> None:
 
 
 def test_set_fit_params_emits_fit_changed(tmp_path):
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
     from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
-    from zcu_tools.notebook.persistance import TransitionDict
 
     ctrl = _ctrl()
     seen = _record(ctrl, FitChangedPayload)
@@ -200,8 +201,8 @@ def test_set_fit_params_emits_fit_changed(tmp_path):
 
 
 def test_compute_search_does_not_emit_or_record(tmp_path):
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
     from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
-    from zcu_tools.notebook.persistance import TransitionDict
 
     ctrl = _ctrl()
     _seed_aligned_points(ctrl)
@@ -226,8 +227,8 @@ def test_compute_search_does_not_emit_or_record(tmp_path):
 
 
 def test_search_database_records_and_emits(tmp_path):
+    from zcu_tools.analysis.fluxdep.models import TransitionDict
     from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
-    from zcu_tools.notebook.persistance import TransitionDict
 
     ctrl = _ctrl()
     _seed_aligned_points(ctrl)

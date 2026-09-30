@@ -1,9 +1,9 @@
 """Result-scope discovery and params.json identity management.
 
 A result scope is the first-level project root for one chip/qubit pair: the
-directory that owns ``params.json`` and contains the ExperimentManager contexts.
+directory that owns ``params.json`` and contains the ContextManager contexts.
 This module is Qt-free; params.json parsing and migration policy lives in
-``meta_tool.QubitParams``.
+``resources.qubit_params.QubitParams``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from zcu_tools.gui.expected_error import ExpectedError, ExpectedErrorCategory
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.qubit_params import (
     UNKNOWN_RESONATOR_NAME,
     ParamsProject,
     QubitParams,
@@ -144,7 +144,7 @@ class ResultScopeManager:
         return self._project_root / "result"
 
     def derive_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
-        from zcu_tools.utils.datasaver import get_datafolder_path
+        from zcu_tools.datafile import get_datafolder_path
 
         result_dir = self.result_root / chip_name / qub_name
         database_path = get_datafolder_path(

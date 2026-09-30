@@ -9,7 +9,9 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import field_serializer
 
+from zcu_tools.analysis.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -21,7 +23,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.singleshot.util import (
     calc_populations,
     correct_populations,
@@ -31,8 +33,13 @@ from zcu_tools.experiment.v2.utils import (
     materialize_nonuniform_t1_pulse_lengths,
     sweep2array,
 )
-from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
-from zcu_tools.liveplot.backend import close_figure
+from zcu_tools.plotting.liveplot import (
+    LivePlot1D,
+    LivePlot2D,
+    MultiLivePlot,
+    make_plot_frame,
+)
+from zcu_tools.plotting.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -46,7 +53,6 @@ from zcu_tools.program.v2 import (
     TableLengthPulse,
 )
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
 
 def _default_initial_states() -> NDArray[np.int64]:
@@ -87,6 +93,13 @@ class T1WithToneSweepSweepCfg(ConfigBase):
 class T1WithToneSweepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneSweepModuleCfg
     sweep: T1WithToneSweepSweepCfg
+    g_center: complex
+    e_center: complex
+    radius: float
+
+    @field_serializer("g_center", "e_center")
+    def serialize_center(self, value: complex) -> str:
+        return str(value)
 
 
 class T1WithToneSweepModuleCfg(ConfigBase):
@@ -389,16 +402,17 @@ class T1WithToneSweepExp(
         soc,
         soccfg,
         cfg: T1WithToneSweepCfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
         *,
         uniform: bool = True,
     ) -> T1WithToneSweepResult:
         if uniform:
-            return self._run_uniform(soc, soccfg, cfg, g_center, e_center, radius)
+            return self._run_uniform(
+                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
+            )
         else:
-            return self._run_non_uniform(soc, soccfg, cfg, g_center, e_center, radius)
+            return self._run_non_uniform(
+                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
+            )
 
     def analyze(
         self,

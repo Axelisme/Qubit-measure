@@ -7,8 +7,6 @@ from .interactive import (
 )
 
 # Physical models
-from .models import energy2linearform, energy2transition
-
 # Interactive tools
 from .onetone import InteractiveOneTone
 

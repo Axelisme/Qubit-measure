@@ -19,12 +19,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 
-import numpy as np
-from numpy.typing import NDArray
-
+from zcu_tools.analysis.dispersive.models import PreprocessResult
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import SpectrumData
 
 logger = logging.getLogger(__name__)
 
@@ -75,28 +73,6 @@ class OnetoneEntry:
 
     name: str
     raw: SpectrumData  # dev_values / fluxs / freqs(GHz) / signals(complex)
-
-
-@dataclass
-class PreprocessResult:
-    """Output of the signal-preprocessing pipeline (the notebook's cells 5-6).
-
-    ``norm_phases`` is the normalized phase-difference image the tuning / fit work
-    against. ``sp_fluxs`` / ``sp_freqs`` are the (flux, GHz-freq) axes. ``edelays``
-    / ``edelay`` are the per-row and median electronic-delay diagnostics (for the
-    3-panel preview). ``median_rf`` is the median over flux of each row's peak
-    frequency (GHz) — the data-derived seed for the r_f tuning slider. ``signature``
-    fingerprints the smoothing parameters so a stale fit can be invalidated when
-    preprocessing is re-run differently.
-    """
-
-    sp_fluxs: NDArray[np.float64]
-    sp_freqs: NDArray[np.float64]  # GHz
-    norm_phases: NDArray[np.float64]  # (n_flux, n_freq)
-    edelays: NDArray[np.float64]
-    edelay: float
-    median_rf: float = 0.0  # GHz — median of per-flux peak frequencies
-    signature: tuple = ()
 
 
 @dataclass

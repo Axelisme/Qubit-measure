@@ -1,84 +1,55 @@
-**Last updated:** 2026-09-25 — GUI remote test ownership
+**Last updated:** 2026-09-29 — reconciled MCP behavior and module layout
 
 # `zcu_tools/mcp/measure/`
 
-measure-gui 的 MCP entry，負責把 MCP tool call 轉接到 live measure-gui
-RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 transport。
+這是 measure-gui 的 MCP driving adapter。它只透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態；GUI core 不 import MCP。GUI remote method entries 擁有每個 wire method 的 exposure、guard、read-reveal、成功寫入刷新 baseline 與 operation policy。MCP 連線時載入 live `rpc.catalog`，不維護第二份 method/policy 表，也不根據 catalog 動態建立 tools。
 
-## 邊界
+## 連線與操作
 
-Cfg agent直接複製`gui_tab_get_cfg`/`gui_editor_get_cfg`列出的canonical leaf path；不加入
-`.sweep`或`.value` wrapper。Batch path diff是成功後final net結果，失敗後重新讀cfg reconcile。
+- `assembly.py` 建立固定手寫工具表。01／02 提供 `connect`、`status`、`wait`、`cancel` 與三個 `rpc_*`；05 增加 `experiments`、`guide`、`tab_open`、`tab_get`、`tab_live`、`screenshot`；04 的 predictor 工具經 GUI 同一 `PredictorService` 讀、載、預測與單點 bias 校正；device 四工具沿 GUI `DeviceService` 驗證欄位與讀取現況，使用 02 的 opaque operation handle 等待、取消或逾時後恢復，不另存一份操作結果。其餘 domain tools 依各自 ticket 接入；`rpc_call` 只能呼叫 catalog 標為 `rpc` 的 method。`tab_get` 的 artifacts 直接投影 GUI State 快照，含 status、default_path、last_saved_path 與 is_saveable。MCP 只轉換 artifact key 與 data/image kind，不自行推導 dirty 或掃描磁碟。cfg完整投影包含型別、選項、鎖定與cached值。
+- `tab_save` 送出一次 GUI-owned batch operation，不在 MCP 迴圈存各 artifact。GUI 在啟動存檔前切到目標 tab 的 Data pane；讀取及非同步完成不切頁。明確 paths/comment 更新共同草稿，省略則沿用。短等完成才回 saved 實際路徑；未完成回 op，失敗保留 operation 診斷。長存檔和部分成功從 `tab_get` 的 last_saved_path 查，不另存 operation payload。Agent 須先明確讀 summary/artifacts，工具不預讀或重送 stale mutation。
+- `session.py` 擁有單一 MCP session 的 catalog、bridge 與 opaque integer operation handles。明確重連或非預期 EOF 後清 catalog/舊 handle 對應；下一個 GUI incarnation 可重用 wire operation ID，但不重用此 MCP session 曾向 agent 外露的 handle。GUI-origin operation 由 `status` 收錄，與 agent-started operation 使用同一映射；wait/cancel/progress 在每次 wire 操作前確認連線，再把 opaque handle 解析成該 GUI 世代的 ID。送出前若斷線即失敗，不用舊 ID 向重啟後的 GUI 重送。這不是第二個 operation outcome store。
+- GUI owner bump 資源版本，remote adapter 保存每連線的 seen。完整讀取成功才記錄宣告的資源；部分讀取、失敗、逾時與回覆編碼失敗不建立觀察。未看過的 key 即使版本 0 仍拒絕。自寫只推進先前 seen 等於寫入前版本的資源；未看過的連帶 cfg 變更不加入 seen。MCP 不保存版本、不送 expected_versions、不解析寫入收據。stale、斷線或 timeout 都不自動重送。
+- `tab_get` summary/artifacts 與 `tab_live` 保留完整 `operation_state`，含 result/analysis revisions、availability 及有效 paths。cfg-only 讀取不暗中讀 snapshot；原始 result 陣列不是操作狀態的必要內容。
+- `tab_open(from_file)` 只送一次 GUI `tab.open_file`，不隱藏預讀。Agent 必須先讀 context。GUI 負責建立、載入、失敗清理與聚焦；成功另回 cfg_backfill，not_applied 保留結果。新 tab 只建立存在 baseline，後续寫入仍需明確讀取對應資源。
+- 接手既有或重啟後的 GUI 時，明確呼叫 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)` 和 `context.snapshot`，分別重讀 tab 操作狀態、完整 SoC cfg、目前 active label 與所有可序列化 md/ml cfg。`context.snapshot` 可能回傳大型敏感資料，遇無法序列化的值會失敗且不刷新版本；摘要、局部 getter 與裸 `resources.versions` 都不能替代完整讀取。
+- 圖像由 GUI owner 渲染並寫入 MCP session 專屬暫存 PNG；工具只回絕對路徑，連線期間可讀，server 關閉時清理。`tab_live` 的 elapsed_s 來自 GUI operation handle 的單一起時，不取各進度條 elapsed 的最大值。既有無 `out_path` 的 GUI screenshot RPC 仍可回 base64，MCP 特化工具不用 inline 圖片。
+- `bridge` 只管 socket/GUI subprocess。`connect(token=...)` 使用現有 GUI control-token 認證；session 留住本次憑證供斷線後重新握手，顯式切換 port 不沿用前一 GUI 的 token。未授權與 wire 不相容分別回報；MCP 工具記錄遮蔽 token。`connect(launch=...)` 對已由此 bridge 啟動且仍活著的 GUI 不會在另一個空 port 假裝再次啟動；MCP 清理只斷線，不殺 GUI。所有硬體 gate、取消與 operation 結果都仍歸 GUI owners。
 
-Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, subtab_id=run|analysis|post_analysis)`讀對應pane figure（run為live container截圖，analysis/post為canonical State figure）；`gui_tab_writeback_list`、`gui_tab_writeback_set_item`與`gui_tab_writeback_apply`以`(tab_id, subtab_id=analysis|post_analysis)`定址pane draft；`gui_tab_save_data`（tab-only）與`gui_tab_save_image(tab_id, subtab_id=analysis|post_analysis)`分離，無`gui_tab_save` bundle與`gui_tab_commit`。舊`gui_tab_get_current_figure`、`tab.save_result`/`save_post_image`及其bundle均已移除；寫入/預覽回覆投影`destination_context`（當下active ExpContext）；operation期間同pane的remote edit/apply被gate。
+## 傳輸上限
 
-- `server.py` 是 bootstrap／stdio entry：`main()`建立同次呼叫專屬的session、
-  bridge、context與tool table。Cleanup及piggyback hooks綁定該次session，不暴露
-  測試用compatibility aliases。
-- `zcu_tools.mcp._standalone.bootstrap_standalone_server()` 是所有 standalone
-  MCP entry server 共用的最小啟動 helper：在 entry import `zcu_tools.*` 前把
-  repo `lib` 加進 `sys.path`，並用一致的 stderr + `SystemExit(1)` 做 dependency
-  preflight。各 app server 只保留自己的 required modules 與錯誤訊息。
-- `tool_context.py` 的frozen `MeasureToolContext`顯式持有config、session、method specs
-  與port resolver。Generated及override handlers共用該context的guarded sender，
-  不經module-global provider或反向查找server。
-- `assembly.py::build_measure_tools(context)`每次建立fresh tool table，先驗證exposure
-  再合併generated及override tools並加上call logging。不同assembly的handlers不串線。
-- `tools_*.py`依domain共置hand-written handler與schema；domain factory綁定傳入context。
-- `exposure.py` 從 GUI wire contract 的 `METHOD_SPECS[*].mcp` 推導 generated /
-  internal / override exposure plan，並在 assembly 時 fail-fast 檢查 generated
-  tool collision、manual/generated collision、override tool 缺漏，以及
-  internal/override method 誤用 `MethodSpec.tool_name`。
-- `session.py` 擁有 measure-only policy state：diagnostics與low-frequency event兩個
-  bounded piggyback queues、
-  optimistic-concurrency baseline、guarded send flow、operation handle capture，以及
-  `gui_debug_operations` 使用的 latest-handle projection。
-- `session_policy.py` 放不可變 policy table 與純 helper：version guard deps、
-  read-reveal table、start-op semantic key mapping、stale key 語義化。
-- arbitrary waveform tools 是 agent-friendly generated RPC aliases：
-  `list_arb_waveform`、`get_arb_waveform_preview`、`set_arb_waveform`。
-  它們操作 qubit-scoped `.npz` asset store；`set_arb_waveform` guard deps 是
-  `arb_waveforms`，list/preview 只 reveal `arb_waveforms`，validation/collision/missing
-  以 tool error 的 stable `reason` 回報。
-- `gui_value_list` / `gui_value_read` 是 generated read-only RPC tools，對應
-  `value.list` / `value.read`。它們是 resolve-once value source 逃生通道；
-  因來源可能投影 context/device/predictor，不列入 read-reveal table。
-- `gui_editor_set` / `gui_tab_set_cfg` 的 scalar `value` 可傳
-  `{"__kind":"value_ref","key":"device.flux.value","type":"float"}`，其中
-  `flux` 是具名 registered device。
-  bridge 不解這個 tag；GUI 端 `CfgEditorSession` / `LiveModel` 立即解析成 direct
-  scalar，失敗以 stable RPC/tool error 回報。
-- `tab.load_data` / generated `gui_tab_load_data` 是同步 mutation：guard deps 是
-  `tab:{tab_id}`、`tab:{tab_id}:result`、`tab:{tab_id}:analyze`、`context`；不依賴
-  SoC、device、cfg 或 save path，且不進 operation-handle table。
-- load failure 以 `precondition_failed` 搭配 stable `reason` 呈現：
-  `invalid_data_file`（canonical/adapter 不相容）、`unsupported_load`、
-  `data_file_read_failed`；agent 不需要 parse traceback 或 raw Python exception。
-- 一般 generated / hand-written RPC 的 transport timeout 以 `MethodSpec.timeout_seconds`
-  加少量 slack 為準；`operation.await` 與 `notify.await` 必須由 caller 明確傳入
-  動態 timeout。GUI handler timeout 代表可預期的 bounded wait 結果，transport
-  timeout 代表控制 socket 已失去可信度，MCP bridge 會關閉該 socket 並讓下一次 call
-  重新連線。
-- `McpBridge` 只屬於 `zcu_tools.mcp.core` 的 transport adapter；measure-gui policy
-  不下放到 bridge。
-- 每次 explicit connect、launch auto-connect或lazy auto-connect後，session先呼叫
-  `events.list`再訂閱回傳的既有low-frequency catalog，不維護第二份event清單。
-  完整wire envelope（`event`、`payload`、`seq`、`origin`）在下一個successful
-  MCP tool reply以compact JSON block穿透；queue bounded、disconnect清空且不提供
-  replay，因此operation wait/poll與fresh snapshot仍是authority。
-- Wire method MCP exposure policy 由
-  `zcu_tools.gui.app.main.services.remote.method_entries` 的 method entry 宣告：
-  default `generated` 產生 1:1 RPC tool；`internal` 保留 wire method 供 bundle /
-  lifecycle 內部使用；`override` 指向一個或多個 hand-written MCP tools。
-  MCP-only lifecycle/bundle/debug tools 不硬塞進 method policy。
+Shared SocketTransport 送出前與接收逐幀使用 shared framing 的8 MiB UTF-8 bytes上限，
+不含換行，不分批。超限request在送出前拒絕，既有連線仍可使用；超限response會關閉
+該連線並使pending RPC收到明確的message_too_large錯誤，不能假定mutation未執行。
+兩者都不自動重送；重新連線重新載入 catalog，GUI seen 從空集合開始。
 
-## 測試注意
+## Cfg 讀取
 
-`tests/mcp/measure/`透過factory、真實session／bridge及recording Transport驗證tool行為；
-stdio以`server.main()`覆蓋成功回覆piggyback及cleanup。GUI handler與真socket事件整合
-留在`tests/gui/app/main/services/remote/`，shared policy construction留在`tests/gui/remote/`。
-Schema文字及tool inventory以直接review確認，不用私有alias或靜態pytest維護。
+`tab.get_cfg`／`editor.get` 回完整 typed observation，包含 locked 欄位、raw/resolved/error、
+validity 與 cached choices；GUI model 是來源，讀取不重新解析 md/ml。Prefix 回指定 node，
+保留其完整 path；即使 prefix 是空字串也不更新整份 cfg 觀察版本。失敗讀取與裸版本表
+不推進基線，其他 cfg 的更新不影響目標 cfg。Wire 格式與描述由 GUI catalog 擁有。
 
-Remote/MCP 測試會建立 loopback socket；受限 sandbox 可能需要 unsandboxed execution。
-headless 測試環境通常需要 `QT_QPA_PLATFORM=offscreen`、
-`QT_QPA_PLATFORMTHEME=`、`MPLBACKEND=Agg`。
+## 關閉
+
+`tab_close`與`shutdown`只送一次GUI命令，GUI在同次owner dispatch檢查active operations與全部unsaved artifacts。`discard_unsaved`不能略過busy。GUI自身data-only提示不變。
+
+`shutdown`等待回覆中的GUI PID自然退出，最多五秒，不以shared PID file選程序。不呼叫bridge.stop或送終止信號；請求或等待逾時回stopped=false，讓操作者處理，不自動重試。
+
+## Library 編輯
+
+`ml_edit`只送一次GUI application命令。CfgEditorService使用共用CfgDraft，經ContextWritePort逐項提交；首錯即停，保留已提交前綴並清理內部草稿。回覆區分applied、failed、skipped與實際cfg。save_as不修改來源，首次成功才建立目的地。Agent須明確觀察context，沒有editor/context隱藏預讀或自動重試。
+
+Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，MODIFIED參照保留inline修改。既有draft由service反應library變更並發布，同一份狀態供widget與MCP觀察。
+
+## Interactive
+
+`tab_interact` 原樣轉送一次 active plugin command，不解讀實驗專屬命令。省略 payload 時回 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 先驗證 session 與命令，再跟隨 Analysis pane 並執行；done 結束原 analysis operation，取消沿用 cancel(op)。此介面採 best-effort，不加 seen guard，後提交者為準；沒有來源鎖、隱藏預讀或重試。GUI 傳回的 PNG 在 MCP 邊界解碼到 session-owned 暫存檔，工具回絕對路徑而非 inline 圖片。
+
+## Writeback
+
+`writeback` 的 preview 直接投影 GUI 共享草稿與目前 context，不在 MCP materialize cfg。寫入只送一次 `tab.writeback_write`；GUI 依序修改指定草稿，首錯保留已改前綴且不開始 context apply。全部成功後一次 apply 指定 IDs，不改 GUI 勾選；結果以含 id、kind、target、before、after 的列表保留跨 kind 同名目的地。MCP 不隱藏預讀、不重試。GUI 在改草稿前透過明確 view 命令切到目標 analysis/post pane；preview 與非同步完成不切頁。
+
+## 驗證
+
+`tests/mcp/measure/` 以 public tools/session、recording transport 驗證 catalog、連線、guard、operation。GUI remote/service 測試驗證真 socket 與 GUI-origin path。離線選集只用 fake/mock，不啟動真儀器；測試路徑與 fixture 見 `tests/README.md`。

@@ -266,15 +266,15 @@ def test_progress_stack_skips_unchanged_bar_properties(qapp):
 def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.app.main.adapter import ExpContext, RunRequest
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
+    from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
     from zcu_tools.progress_bar.interface import use_pbar_factory
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
 
-    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
 
@@ -291,9 +291,12 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
         fields={"freq": SweepValue(start=5800.0, stop=5808.0, expts=5)}
     )
 
+    from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+
+    raw_cfg = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     with use_pbar_factory(factory):
         run_result = adapter.run(
-            RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}), raw_cfg
         )
         QApplication.processEvents()
 

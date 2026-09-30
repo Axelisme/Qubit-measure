@@ -1,7 +1,7 @@
 """Safe numeric expression evaluation for GUI scalar eval fields.
 
-Moved from gui.app.main.expression to the session layer so that both the
-cfg-editor (app/main) and the device dialog (session/ui) can share the same
+Moved from gui.app.measure.expression to the session layer so that both the
+cfg-editor (app/measure) and the device dialog (session/ui) can share the same
 evaluator without creating a session→app upward dependency.
 """
 
@@ -17,15 +17,17 @@ from typing import TYPE_CHECKING
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
-_BIN_OPS: dict[type[ast.operator], Callable[[float, float], float]] = {
+_BIN_OPS: dict[
+    type[ast.operator], Callable[[float | complex, float | complex], float | complex]
+] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
 }
-_UNARY_OPS: dict[type[ast.unaryop], Callable[[float], float]] = {
+_UNARY_OPS: dict[type[ast.unaryop], Callable[[float | complex], float | complex]] = {
     ast.UAdd: operator.pos,
     ast.USub: operator.neg,
 }
@@ -39,7 +41,7 @@ class EvalRef:
     [minimum, maximum] bounds the resolved value must satisfy. The device dialog
     resolves it against the current MetaDict at apply time (Design 1: resolve
     once at apply, not per-keystroke). This type must NOT leak into or depend on
-    app/main adapter machinery (EvalValue is a different, adapter-bound type).
+    app/measure adapter machinery (EvalValue is a different, adapter-bound type).
     """
 
     expr: str
@@ -49,7 +51,15 @@ class EvalRef:
 
 
 def evaluate_numeric_expr(expr: str, md: MetaDict) -> float:
-    """Evaluate a restricted numeric expression against MetaDict attributes."""
+    """Evaluate a real-valued expression for device and real-only inputs."""
+    value = evaluate_scalar_expr(expr, md)
+    if isinstance(value, complex):
+        raise RuntimeError("Expression must resolve to a real number")
+    return value
+
+
+def evaluate_scalar_expr(expr: str, md: MetaDict) -> float | complex:
+    """Evaluate real or complex scalar arithmetic without calls or attributes."""
     if not expr.strip():
         raise RuntimeError("Expression must not be empty")
     try:
@@ -70,13 +80,15 @@ def coerce_eval_result(value: float, type_: type) -> int | float:
     raise RuntimeError(f"Eval mode only supports int or float, got {type_!r}")
 
 
-def _eval_node(node: ast.AST, md: MetaDict) -> float:
+def _eval_node(node: ast.AST, md: MetaDict) -> float | complex:
     if isinstance(node, ast.Expression):
         return _eval_node(node.body, md)
     if isinstance(node, ast.Constant):
-        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+        if isinstance(node.value, bool) or not isinstance(
+            node.value, (int, float, complex)
+        ):
             raise RuntimeError("Only numeric constants are allowed")
-        return float(node.value)
+        return node.value if isinstance(node.value, complex) else float(node.value)
     if isinstance(node, ast.Name):
         try:
             value = getattr(md, node.id)
@@ -84,9 +96,9 @@ def _eval_node(node: ast.AST, md: MetaDict) -> float:
             raise RuntimeError(
                 f"Variable {node.id!r} is not defined in MetaDict"
             ) from exc
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if isinstance(value, bool) or not isinstance(value, (int, float, complex)):
             raise RuntimeError(f"MetaDict variable {node.id!r} is not numeric")
-        return float(value)
+        return value if isinstance(value, complex) else float(value)
     if isinstance(node, ast.BinOp):
         op = _BIN_OPS.get(type(node.op))
         if op is None:

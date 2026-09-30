@@ -14,13 +14,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEventLoop
-from zcu_tools.gui.app.main.services.operation_gate import (
+from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate,
 )
-from zcu_tools.gui.app.main.services.operation_gate import (
+from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind as MeasureOpKind,
 )
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.operation_handles import OperationHandles
@@ -93,7 +93,7 @@ class _FakeProgress:
 
 def _make_state() -> State:
     return State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
 
 
@@ -140,7 +140,7 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
     loop.exec()
 
     assert svc.has_soc()
-    assert state.exp_context.soccfg is not None
+    assert state.session_env.soccfg is not None
 
 
 def test_start_connect_mock_soc_carries_default_simparam(qapp):
@@ -163,7 +163,7 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
     svc.start_connect(ConnectMockRequest())
     loop.exec()
 
-    soc = state.exp_context.soc
+    soc = state.session_env.soc
     assert soc is not None, "soc must be set after mock connect"
     assert hasattr(soc, "_sim_params"), "mock soc must expose _sim_params"
     sim_params = getattr(soc, "_sim_params")
@@ -192,7 +192,7 @@ def test_start_connect_mock_sim_params_override_is_honoured(qapp):
     svc.start_connect(ConnectMockRequest(sim_params=custom))
     loop.exec()
 
-    soc = state.exp_context.soc
+    soc = state.session_env.soc
     assert soc is not None
     sim_params = getattr(soc, "_sim_params", None)
     assert sim_params is not None
@@ -248,7 +248,7 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
 
     assert soc is not None and soccfg is not None
     assert svc.has_soc()
-    assert state.exp_context.soc is soc
+    assert state.session_env.soc is soc
     # The shared _apply_connection side effects fired synchronously.
     assert state.version.get("soc") == soc_before + 1
     assert len(payloads) == 1
@@ -256,6 +256,54 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     # Lease released, no lingering active token.
     assert not gate.has_active(OperationKind.SOC_CONNECT)
     assert not svc.is_connect_active()
+
+
+def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
+    qapp, monkeypatch
+):
+    import zcu_tools.qick_remote as remote
+    from zcu_tools.program.v2.mocksoc import make_mock_soc
+
+    svc, _bg, _handles = _make_svc()
+    svc.connect_sync(ConnectMockRequest())
+    assert svc.is_mock_soc()
+    assert svc.connected_endpoint() == {"address": None, "port": None}
+
+    def proxy(ip: str, port: int):
+        assert (ip, port) == ("192.0.2.1", 8888)
+        return make_mock_soc()
+
+    monkeypatch.setattr(remote, "make_soc_proxy", proxy)
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    assert not svc.is_mock_soc()
+    assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
+
+    def fail(ip: str, port: int):
+        raise ConnectionRefusedError("offline")
+
+    monkeypatch.setattr(remote, "make_soc_proxy", fail)
+    with pytest.raises(ConnectionRefusedError, match="offline"):
+        svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
+    assert svc.has_soc()
+    assert not svc.is_mock_soc()
+    assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
+
+
+def test_gui_async_remote_connect_updates_the_successful_endpoint(qapp, monkeypatch):
+    import zcu_tools.qick_remote as remote
+    from zcu_tools.program.v2.mocksoc import make_mock_soc
+
+    def proxy(ip: str, port: int):
+        assert (ip, port) == ("192.0.2.3", 8000)
+        return make_mock_soc()
+
+    monkeypatch.setattr(remote, "make_soc_proxy", proxy)
+    svc, background, _handles = _make_svc()
+    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.3", port=8000))
+    assert svc.connected_endpoint() == {"address": None, "port": None}
+    background.deliver_result()
+    assert svc.has_soc()
+    assert svc.connected_endpoint() == {"address": "192.0.2.3", "port": 8000}
 
 
 def test_connect_sync_rejects_concurrent_calls(qapp):
@@ -279,7 +327,7 @@ def test_connect_sync_remote_failure_releases_lease_and_raises(qapp, monkeypatch
     gate = OperationGate(EventBus())
     svc, _bg, _handles = _make_svc(gate=gate)
 
-    import zcu_tools.remote as remote
+    import zcu_tools.qick_remote as remote
 
     def fail(ip: str, port: int) -> None:
         raise ConnectionRefusedError("nope")
@@ -366,7 +414,7 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
     runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
-    import zcu_tools.remote as remote
+    import zcu_tools.qick_remote as remote
 
     def fail(ip: str, port: int) -> None:
         raise ConnectionRefusedError("nope")
