@@ -5,7 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.measure.services.ports import CfgEdit
+from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
+from zcu_tools.gui.cfg.resource import (
+    CfgInputError,
+    CfgPreconditionError,
+    CfgStaleError,
+)
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -98,10 +103,7 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
     return {
         "tab_id": tab_id,
         "adapter_name": adapter.tab_control.get_tab_adapter_name(tab_id),
-        # Shared cfg-editor session id for this tab (None until the tab's form
-        # is populated). Address it with the editor.* methods to edit cfg with
-        # the GUI reflecting every change. (A tab uses its tab_id as owner key.)
-        "editor_id": adapter.ctrl.editor_id_for_owner(tab_id),
+        "cfg_ref": encode_ref(adapter.cfg_lookup(tab_id).observe().ref),
         "interaction": {
             "global_run_active": bool(interaction.global_run_active),
             "is_running": bool(interaction.is_running),
@@ -179,58 +181,28 @@ def _save_paths_wire(paths) -> dict[str, str | None] | None:
 def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..cfg_observation import build_cfg_observation
+    from ..cfg_observation import build_resource_observation
 
-    tab_id = str(params["tab_id"])
-    if not adapter.tab_control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    # Read the same service-owned draft as the form, including locked fields
-    # and cached input state. A read never resolves live sources.
-    editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
-    if editor_id is None:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"tab {tab_id!r} cfg form has no live model yet",
-        )
-    raw_prefix = params.get("prefix")
-    prefix = str(raw_prefix) if raw_prefix else None
-    draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
-    return {"tree": build_cfg_observation(draft, prefix=prefix)}
+    return build_resource_observation(
+        adapter.cfg_lookup(str(params["tab_id"])).observe()
+    )
 
 
-def h_tab_set_cfg(
+def h_tab_edit_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    from ..cfg_observation import build_resource_observation, cfg_error_to_remote
+
     tab_id = str(params["tab_id"])
-    if not adapter.tab_control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    # Block edits while the tab is running — same guard the human gets via the
-    # disabled form (ADR-0068).
-    if adapter.tab_control.get_running_tab_id() == tab_id:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
-        )
-    editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
-    if editor_id is None:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"tab {tab_id!r} cfg form has no live model yet",
-        )
-    raw_edits = params.get("edits")
-    if not isinstance(raw_edits, list):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'edits' must be a list")
-    # Decode only the wire envelope here. The editor aggregate owns ordered,
-    # fail-fast, non-atomic execution and the final net path-set diff.
-    edits: list[CfgEdit] = []
-    for i, edit in enumerate(raw_edits):
-        if not isinstance(edit, dict) or "path" not in edit or "value" not in edit:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"edits[{i}] must be an object with 'path' and 'value'",
-            )
-        edits.append(CfgEdit(str(edit["path"]), edit["value"]))
+    try:
+        expected = decode_ref(params["expected"])
+        edits = decode_edits(params["edits"])
+        editor = adapter.cfg_lookup(tab_id)
+        actual = editor.observe().ref
+        if expected != actual:
+            raise CfgStaleError(expected, actual)
+        result = editor.edit(expected.revision, edits)
+    except (CfgInputError, CfgPreconditionError) as exc:
+        raise cfg_error_to_remote(exc) from exc
     follow_tab(adapter, tab_id, "run")
-    return adapter.ctrl.cfg_editor_set_fields(
-        editor_id, edits, agent_edit=params.get("agent_edit") is True
-    ).to_wire()
+    return build_resource_observation(result)

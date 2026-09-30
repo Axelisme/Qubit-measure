@@ -1,10 +1,9 @@
-"""Agent whole-sweep cfg edit through the live tab's GUI socket."""
+"""Atomic cfg edits through the GUI socket and the MCP boundary."""
 
 from __future__ import annotations
 
 import pytest
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.gui.app.measure.state import Session
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CfgSchema,
@@ -21,12 +20,7 @@ from ._helpers import Fixture, call, mcp_client, open_client
 @pytest.fixture()
 def live_tab(qapp):
     fixture = Fixture()
-    tab_id = "tab-agent-sweep"
-    cfg = FakeAdapter().make_default_cfg(fixture.state.session_env)
-    fixture.state.add_tab(
-        tab_id, Session(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg)
-    )
-    fixture.ctrl.open_seeded_cfg_editor(cfg, gc=False, owner_key=tab_id)
+    tab_id = fixture.ctrl.new_tab("fake")
     fixture.start()
     yield fixture, tab_id
     fixture.stop()
@@ -46,7 +40,7 @@ def mcp_tab(live_tab, tmp_path, monkeypatch):
         sock.close()
 
 
-def test_tab_get_mcp_projects_gui_types_choices_and_locks_without_focusing(
+def test_tab_get_mcp_preserves_complete_publication_without_focusing(
     qapp, tmp_path, monkeypatch
 ):
     fixture = Fixture()
@@ -65,12 +59,10 @@ def test_tab_get_mcp_projects_gui_types_choices_and_locks_without_focusing(
             ),
         }
     )
-    cfg = CfgSchema(spec, make_default_value(spec))
     tab_id = "tab-agent-cfg-read"
-    fixture.state.add_tab(
-        tab_id, Session(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg)
+    fixture.prepare_tab(
+        tab_id, FakeAdapter(), CfgSchema(spec, make_default_value(spec))
     )
-    fixture.ctrl.open_seeded_cfg_editor(cfg, gc=False, owner_key=tab_id)
     fixture.start()
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fixture.service.port, tmp_path)
@@ -79,20 +71,15 @@ def test_tab_get_mcp_projects_gui_types_choices_and_locks_without_focusing(
         invoke("connect", {"port": fixture.service.port})
         before = call(sock, "tab.list_all")
         result = invoke("tab_get", {"tab": tab_id, "include": ["cfg"]})
-        children = result["cfg"]["children"]
+        children = result["cfg"]["tree"]["children"]
         assert children["axis"]["kind"] == "centered_sweep"
         assert children["axis"]["locked_center"] == 0.0
         assert children["axis"]["center_editable"] is False
-        assert children["nqz"]["kind"] == "scalar"
         assert children["nqz"]["type"] == "int"
         assert children["nqz"]["choices"] == [1, 2]
         assert children["drive"]["kind"] == "reference"
         assert children["drive"]["choices"] == ["Pulse"]
-        assert result.get("partial") is None
-        assert (
-            result["cfg"]
-            == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["tree"]
-        )
+        assert result["cfg"] == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
         assert (
             call(sock, "tab.list_all")["result"]["active_tab_id"]
             == before["result"]["active_tab_id"]
@@ -103,135 +90,127 @@ def test_tab_get_mcp_projects_gui_types_choices_and_locks_without_focusing(
         fixture.stop()
 
 
-def test_tab_edit_mcp_normalizes_sweep_on_live_gui_draft(mcp_tab):
+def test_tab_edit_mcp_normalizes_sweep_in_one_publication(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
+    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     result = invoke(
         "tab_edit",
         {
             "tab": tab_id,
+            "expected": before["cfg_ref"],
             "edits": [
-                {"path": "sweep", "value": {"start": 2.0, "stop": 8.0, "step": 2.2}}
+                {"path": ["sweep"], "value": {"start": 2.0, "stop": 8.0, "step": 2.2}},
             ],
         },
     )
-    assert result["applied"] == 1 and result["valid"] is True
-    assert result["actual"]["sweep"] == {
-        "start": 2.0,
-        "stop": 8.0,
-        "expts": 4,
-        "step": 2.0,
-    }
-    observed = call(sock, "tab.get_cfg", {"tab_id": tab_id})
-    assert observed["ok"] is True
-    assert (
-        observed["result"]["tree"]["children"]["sweep"]["inputs"]["expts"]["resolved"]
-        == 4
-    )
+    assert result["status"] == "Valid"
+    assert result["cfg_ref"]["cfg_id"] == before["cfg_ref"]["cfg_id"]
+    assert int(result["cfg_ref"]["revision"]) == int(before["cfg_ref"]["revision"]) + 1
+    inputs = result["tree"]["children"]["sweep"]["inputs"]
+    assert inputs["expts"]["resolved"] == 4
+    assert inputs["step"]["resolved"] == pytest.approx(2.0)
+    assert result == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
 
 
-def test_tab_edit_mcp_failure_preserves_successful_prefix(mcp_tab):
+def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
+    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     with pytest.raises(GuiRpcError) as raised:
         invoke(
             "tab_edit",
             {
                 "tab": tab_id,
+                "expected": before["cfg_ref"],
                 "edits": [
+                    {"path": ["gain"], "value": 0.25},
                     {
-                        "path": "sweep",
-                        "value": {"start": 2.0, "stop": 8.0, "expts": 4},
+                        "path": ["sweep"],
+                        "value": {"start": 3.0, "stop": 9.0, "step": 2.0, "expts": 4},
                     },
-                    {"path": "sweep", "value": {"start": 3.0, "stop": 9.0}},
                 ],
             },
         )
-    assert raised.value.reason == "invalid_settable_path"
-    assert "'sweep' failed after 1 applied" in str(raised.value)
-    observed = call(sock, "tab.get_cfg", {"tab_id": tab_id})
-    assert observed["ok"] is True
-    inputs = observed["result"]["tree"]["children"]["sweep"]["inputs"]
-    assert inputs["start"]["resolved"] == pytest.approx(2.0)
-    assert inputs["expts"]["resolved"] == 4
+    assert raised.value.code == "invalid_params"
+    assert raised.value.reason == "invalid_value"
+    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
 
 
-@pytest.mark.parametrize("method", ["tab.set_cfg", "editor.set_fields"])
-@pytest.mark.parametrize("source", ["value_ref", "reference_child"])
-def test_agent_batch_preserves_precondition_category_and_reason(
-    live_tab, monkeypatch, method, source
-):
-    from zcu_tools.gui.session.value_lookup import UnavailableValue
+def test_stale_reference_returns_expected_actual_and_never_retries(mcp_tab):
+    _, tab_id, invoke, sock = mcp_tab
+    expected = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["cfg_ref"]
+    actual = invoke(
+        "tab_edit",
+        {
+            "tab": tab_id,
+            "expected": expected,
+            "edits": [{"path": ["gain"], "value": 0.25}],
+        },
+    )
+    rejected = call(
+        sock,
+        "tab.edit_cfg",
+        {
+            "tab_id": tab_id,
+            "expected": expected,
+            "edits": [{"path": ["gain"], "value": 0.5}],
+        },
+    )
+    assert rejected["error"]["code"] == "precondition_failed"
+    assert rejected["error"]["reason"] == "stale_revision"
+    assert rejected["error"]["data"] == {
+        "expected": expected,
+        "actual": actual["cfg_ref"],
+    }
+    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == actual
 
+
+def test_edit_error_identifies_failed_path_and_index_without_committing(live_tab):
     fixture, tab_id = live_tab
-    spec = CfgSectionSpec(
-        fields={
-            "gain": ScalarSpec("Gain", float),
-            "drive": ReferenceSpec(
-                "module",
-                [
-                    CfgSectionSpec(
-                        label="Pulse", fields={"gain": ScalarSpec("Gain", float)}
-                    )
-                ],
-                optional=True,
-            ),
-        }
-    )
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
-        CfgSchema(spec, make_default_value(spec)), gc=False, owner_key=tab_id
-    )
-    if source == "value_ref":
-
-        def unavailable(*_args):
-            raise UnavailableValue("device.flux.value", "device unavailable")
-
-        monkeypatch.setattr(fixture.ctrl, "read_value_source", unavailable)
-        failing = {
-            "path": "gain",
-            "value": {
-                "__kind": "value_ref",
-                "key": "device.flux.value",
-                "type": "float",
-            },
-        }
-        reason = ""
-    else:
-        from zcu_tools.gui.cfg.binding.targets import SettableTargetUnavailable
-
-        draft = fixture.ctrl.get_cfg_editor_draft(editor_id)
-        resolve = draft.resolve_agent_target
-
-        def resolve_available(path):
-            if path == "drive.gain":
-                raise SettableTargetUnavailable("reference shape currently unavailable")
-            return resolve(path)
-
-        monkeypatch.setattr(draft, "resolve_agent_target", resolve_available)
-        failing = {"path": "drive.gain", "value": 0.5}
-        reason = "settable_target_unavailable"
-    params = (
-        {"tab_id": tab_id, "agent_edit": True}
-        if method == "tab.set_cfg"
-        else {"editor_id": editor_id}
-    )
-    params["edits"] = [{"path": "gain", "value": 0.25}, failing]
     sock = open_client(fixture.service.port)
     try:
-        reply = call(sock, method, params)
-        assert reply["error"]["code"] == "precondition_failed"
-        assert reply["error"].get("reason", "") == reason
-        assert (
-            f"{failing['path']!r} failed after 1 applied" in reply["error"]["message"]
+        before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        reply = call(
+            sock,
+            "tab.edit_cfg",
+            {
+                "tab_id": tab_id,
+                "expected": before["cfg_ref"],
+                "edits": [
+                    {"path": ["gain"], "value": 0.25},
+                    {"path": ["missing"], "value": 1},
+                ],
+            },
         )
-        tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
-        assert tree["children"]["gain"]["input"]["resolved"] == 0.25
+        assert reply["error"]["reason"] == "unknown_path"
+        assert reply["error"]["data"] == {"path": ["missing"], "edit_index": 1}
+        assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
     finally:
         sock.close()
 
 
-def test_library_editor_batch_uses_shared_agent_sweep_and_preserves_prefix(live_tab):
-    fixture, tab_id = live_tab
-    editor_id = fixture.ctrl.editor_id_for_owner(tab_id)
-    assert editor_id is not None
+def test_malformed_envelope_precedes_resource_lookup(live_tab):
+    fixture, _ = live_tab
+    sock = open_client(fixture.service.port)
+    try:
+        reply = call(
+            sock,
+            "tab.edit_cfg",
+            {
+                "tab_id": "missing",
+                "expected": {"cfg_id": "missing", "revision": "01"},
+                "edits": [],
+            },
+        )
+        assert reply["error"]["code"] == "invalid_params"
+        assert reply["error"]["reason"] == "malformed_input"
+    finally:
+        sock.close()
+
+
+def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
+    fixture, _ = live_tab
+    schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
     sock = open_client(fixture.service.port)
     try:
         result = call(
@@ -240,7 +219,10 @@ def test_library_editor_batch_uses_shared_agent_sweep_and_preserves_prefix(live_
             {
                 "editor_id": editor_id,
                 "edits": [
-                    {"path": "sweep", "value": {"start": 2.0, "stop": 8.0, "step": 2.2}}
+                    {
+                        "path": "sweep",
+                        "value": {"start": 2.0, "stop": 8.0, "step": 2.2},
+                    },
                 ],
             },
         )
@@ -257,9 +239,7 @@ def test_library_editor_batch_uses_shared_agent_sweep_and_preserves_prefix(live_
                 ],
             },
         )
-        assert rejected["ok"] is False
         assert rejected["error"]["reason"] == "invalid_settable_path"
-        assert "'sweep' failed after 1 applied" in rejected["error"]["message"]
         tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
         assert tree["children"]["gain"]["input"]["resolved"] == pytest.approx(0.25)
         assert tree["children"]["sweep"]["inputs"]["expts"]["resolved"] == 4
@@ -267,75 +247,48 @@ def test_library_editor_batch_uses_shared_agent_sweep_and_preserves_prefix(live_
         sock.close()
 
 
-def test_agent_edit_normalizes_whole_sweep_in_the_shared_tab_draft(live_tab):
-    fixture, tab_id = live_tab
-    sock = open_client(fixture.service.port)
-    try:
-        resp = call(
-            sock,
-            "tab.set_cfg",
-            {
-                "tab_id": tab_id,
-                "agent_edit": True,
-                "edits": [
-                    {"path": "sweep", "value": {"start": 2.0, "stop": 8.0, "step": 2.2}}
-                ],
-            },
+@pytest.mark.parametrize("failure", ["unavailable", "provider_fault"])
+def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
+    live_tab, monkeypatch, failure
+):
+    from zcu_tools.gui.session.value_lookup import ProviderError, UnavailableValue
+
+    fixture, _ = live_tab
+    schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
+
+    def reject(*_args):
+        if failure == "unavailable":
+            raise UnavailableValue("device.bias.value", "not ready")
+        raise ProviderError(
+            "device.bias.value", "device:bias", ValueError("driver fault")
         )
-        assert resp["ok"] is True, resp
-        assert resp["result"]["applied"] == 1
-        assert resp["result"]["actual"]["sweep"] == {
-            "start": 2.0,
-            "stop": 8.0,
-            "expts": 4,
-            "step": 2.0,
-        }
-        observed = call(sock, "tab.get_cfg", {"tab_id": tab_id})
-        assert observed["ok"] is True
-        inputs = observed["result"]["tree"]["children"]["sweep"]["inputs"]
-        assert inputs["expts"]["resolved"] == 4
-        assert inputs["step"]["resolved"] == pytest.approx(2.0)
-    finally:
-        sock.close()
 
-
-def test_agent_batch_failure_preserves_applied_sweep_and_names_failed_path(live_tab):
-    fixture, tab_id = live_tab
+    monkeypatch.setattr(fixture.ctrl, "read_value_source", reject)
     sock = open_client(fixture.service.port)
     try:
-        resp = call(
+        reply = call(
             sock,
-            "tab.set_cfg",
+            "editor.set_fields",
             {
-                "tab_id": tab_id,
-                "agent_edit": True,
+                "editor_id": editor_id,
                 "edits": [
+                    {"path": "gain", "value": 0.25},
                     {
-                        "path": "sweep",
-                        "value": {"start": 2.0, "stop": 8.0, "step": 2.0},
-                    },
-                    {
-                        "path": "sweep",
+                        "path": "gain",
                         "value": {
-                            "start": 3.0,
-                            "stop": 9.0,
-                            "step": 2.0,
-                            "expts": 4,
+                            "__kind": "value_ref",
+                            "key": "device.bias.value",
+                            "type": "float",
                         },
                     },
                 ],
             },
         )
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-        assert resp["error"]["reason"] == "invalid_settable_path"
-        assert "'sweep' failed after 1 applied" in resp["error"]["message"]
-        observed = call(sock, "tab.get_cfg", {"tab_id": tab_id})
-        assert observed["ok"] is True
-        inputs = observed["result"]["tree"]["children"]["sweep"]["inputs"]
-        assert inputs["start"]["resolved"] == pytest.approx(2.0)
-        assert inputs["stop"]["resolved"] == pytest.approx(8.0)
-        assert inputs["expts"]["resolved"] == 4
-        assert inputs["step"]["resolved"] == pytest.approx(2.0)
+        assert reply["error"]["code"] == (
+            "precondition_failed" if failure == "unavailable" else "controller_error"
+        )
+        tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
+        assert tree["children"]["gain"]["input"]["resolved"] == 0.25
     finally:
         sock.close()

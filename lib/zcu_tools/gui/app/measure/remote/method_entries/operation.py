@@ -5,8 +5,8 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
-    _int,
-    _num_default,
+    default_number,
+    required_integer,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -26,10 +26,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the exposed op handle to a GUI-local operation_id. Unknown or evicted "
             "ids fail; terminal failure and Stop feedback are returned as data.",
             (
-                _int(
+                required_integer(
                     "operation_id", "GUI-local operation id mapped from an MCP handle"
                 ),
-                _num_default("timeout", 120.0, "Seconds to wait"),
+                default_number("timeout", 120.0, "Seconds to wait"),
             ),
             off_main_thread=True,
         ),
@@ -42,7 +42,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Request cancellation of a GUI-local operation by id (MCP exposes "
             "the fixed cancel(op) tool instead of this internal method).",
-            (_int("operation_id", "Known GUI-local operation id"),),
+            (required_integer("operation_id", "Known GUI-local operation id"),),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -59,7 +59,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "operation-wide lifetime from the GUI handle registry, or null for "
             "unknown/evicted ids; it is not derived from individual bars. "
             "Agents read progress through wait.",
-            (_int("operation_id", "Known GUI-local operation id"),),
+            (required_integer("operation_id", "Known GUI-local operation id"),),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

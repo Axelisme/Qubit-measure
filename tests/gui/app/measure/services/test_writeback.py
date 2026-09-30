@@ -16,8 +16,6 @@ from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     WaveformWriteback,
 )
-from zcu_tools.gui.app.measure.events.tab import TabContentChangedPayload
-from zcu_tools.gui.app.measure.services.guard import WritebackPermit
 from zcu_tools.gui.app.measure.services.ports import CfgEdit, CfgEditResult
 from zcu_tools.gui.app.measure.services.writeback import (
     WritebackEdit,
@@ -27,7 +25,6 @@ from zcu_tools.gui.app.measure.services.writeback import (
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import (
-    ExpectedErrorCategory,
     FailedPreconditionError,
     InvalidInputError,
 )
@@ -51,7 +48,7 @@ def _make_state_with_tab(tab_id: str = "t1") -> State:
     )
     state.add_tab(
         tab_id,
-        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     return state
 
@@ -151,10 +148,13 @@ def test_create_draft_cleans_all_opened_sessions_when_a_later_item_fails():
 
 def test_create_draft_rejects_proposal_with_dynamic_editor_identity():
     svc = WritebackService(MagicMock(), MagicMock())
-    proposal = ModuleWriteback(
+
+    class EditorOwnedProposal(ModuleWriteback):
+        editor_id: str = "legacy-editor"
+
+    proposal = EditorOwnedProposal(
         target_name="a", description="a", edit_schema=MagicMock()
     )
-    setattr(proposal, "editor_id", "legacy-editor")
 
     with pytest.raises(InvalidInputError, match="must not expose editor_id"):
         svc.create_draft([proposal])

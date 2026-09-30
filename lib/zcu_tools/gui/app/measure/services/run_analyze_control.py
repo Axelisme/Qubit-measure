@@ -158,7 +158,10 @@ class RunAnalyzeControlFacet:
 
     def start_run(self, tab_id: str) -> int:
         self._access.require_available()
-        permit = self._guard.acquire_run_permit(tab_id)
+        cfg_ref = self._state.get_tab(tab_id).cfg.observe().ref
+        permit = self._guard.acquire_run_permit(
+            tab_id, expected_revision=cfg_ref.revision
+        )
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None

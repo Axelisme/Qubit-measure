@@ -6,9 +6,9 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
-    _json,
-    _str,
-    _str_opt,
+    optional_string,
+    required_json,
+    required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -25,8 +25,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "'waveform'. Returns {editor_id, tree} (tree = the complete cached cfg "
             "view, same shape as editor.get / tab.get_cfg).",
             (
-                _str("item_kind", "'module' or 'waveform'"),
-                _str("from_name", "Existing ml entry name to load for editing"),
+                required_string("item_kind", "'module' or 'waveform'"),
+                required_string(
+                    "from_name", "Existing ml entry name to load for editing"
+                ),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
@@ -59,9 +61,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "created so you need not re-list after a variant switch. To read cfg use "
             "tab.get_cfg / editor.get (the complete cached observation).",
             (
-                _str("editor_id"),
-                _str("path", "Dotted field path"),
-                _json(
+                required_string("editor_id"),
+                required_string("path", "Dotted field path"),
+                required_json(
                     "value",
                     "JSON scalar, {__kind:eval, expr}, or {__kind:value_ref, key, type?}",
                 ),
@@ -81,7 +83,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "and name the failed path/applied count. Returns "
             "{valid, removed, added, applied, actual}; 'actual' contains "
             "normalized sweeps. This does not commit the ModuleLibrary item.",
-            (_str("editor_id"), _json("edits", "Ordered {path, value} edits")),
+            (
+                required_string("editor_id"),
+                required_json("edits", "Ordered {path, value} edits"),
+            ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -92,8 +97,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             CFG_OBSERVATION_DESCRIPTION,
             (
-                _str("editor_id"),
-                _str_opt(
+                required_string("editor_id"),
+                optional_string(
                     "prefix",
                     "Return only the sub-tree rooted at this dotted path "
                     "(e.g. 'modules.readout'); omit for the whole draft. No match → {}",
@@ -117,8 +122,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Returns {}. On success the session is destroyed; on validation failure "
             "it RAISES and the session is kept so you can fix and retry.",
             (
-                _str("editor_id"),
-                _str("name", "ml entry name to register under"),
+                required_string("editor_id"),
+                required_string("name", "ml entry name to register under"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -132,7 +137,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Discard an editing session (from rpc_call on editor.new) without writing to the "
             "ModuleLibrary. Returns {}.",
-            (_str("editor_id"),),
+            (required_string("editor_id"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),

@@ -6,9 +6,9 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _json,
-    _str,
-    _str_opt,
+    optional_string,
+    required_json,
+    required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -22,7 +22,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Commit each successful edit, stop at the first failure without rollback. "
             "save_as creates a new entry after the first successful edit; source stays unchanged. "
             "Returns valid/applied/errors. Read context.snapshot explicitly first.",
-            (_str("kind"), _str("name"), _json("edits"), _str_opt("save_as")),
+            (
+                required_string("kind"),
+                required_string("name"),
+                required_json("edits"),
+                optional_string("save_as"),
+            ),
         ),
         agent=AgentMethodPolicy(
             exposure="tool",
@@ -39,7 +44,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Switch the active context to 'label'. Echoes {label, has_active_context}. "
             "An unknown label fails fast (invalid_params) with the available labels; no "
             "applied project fails with precondition_failed.",
-            (_str("label", "Context label to switch to"),),
+            (required_string("label", "Context label to switch to"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -54,14 +59,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "none is active); null starts empty. An unknown clone source fails "
             "without changing active/labels. Echoes {label, has_active_context}.",
             (
-                _str_opt("label", "Optional explicit context label"),
-                _str_opt(
+                optional_string("label", "Optional explicit context label"),
+                optional_string(
                     "bind_device",
                     "Connected flux device to bind: its current value/unit name the "
                     "context (whitelist: FakeDevice->none, YOKOGS200->A). Omit for an "
                     "unbound context (unit=none, no value).",
                 ),
-                _str_opt(
+                optional_string(
                     "clone_from", "Label of an existing context to clone ml/md from"
                 ),
             ),
@@ -123,7 +128,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Read one MetaDict attribute",
-            (_str("key", "MetaDict key"),),
+            (required_string("key", "MetaDict key"),),
         ),
     ),
     method_entry(
@@ -146,8 +151,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{key, type, owner, description, value}. Optional 'type' is one of "
             "int|float|str|bool and must match the registered source type.",
             (
-                _str("key", "Registered value source key, e.g. device.flux.value"),
-                _str_opt("type", "Optional expected type: int, float, str, or bool"),
+                required_string(
+                    "key", "Registered value source key, e.g. device.flux.value"
+                ),
+                optional_string(
+                    "type", "Optional expected type: int, float, str, or bool"
+                ),
             ),
         ),
     ),
@@ -163,8 +172,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "same name exists in both collections; unknown names fail with "
             "available options.",
             (
-                _str_opt("name", "Entry to read; omit for the index"),
-                _str_opt("kind", "module or waveform when names collide"),
+                optional_string("name", "Entry to read; omit for the index"),
+                optional_string("kind", "module or waveform when names collide"),
             ),
         ),
     ),
@@ -176,8 +185,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Set one MetaDict attribute; receipt=true returns its actual "
             "{before, after} from the owner turn.",
             (
-                _str("key", "MetaDict key"),
-                _json("value", "JSON-safe value"),
+                required_string("key", "MetaDict key"),
+                required_json("value", "JSON-safe value"),
                 ParamSpec(
                     "receipt",
                     JsonType.BOOLEAN,
@@ -195,7 +204,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Delete one MetaDict attribute",
-            (_str("key", "MetaDict key"),),
+            (required_string("key", "MetaDict key"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -207,7 +216,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Delete one ModuleLibrary module. Echoes {deleted: name}. LINKED cfg refs "
             "keep the missing key and become invalid until it returns or is edited; "
             "MODIFIED refs retain their inline Custom value.",
-            (_str("name", "Module name"),),
+            (required_string("name", "Module name"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -219,7 +228,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Delete one ModuleLibrary waveform. Echoes {deleted: name}. LINKED cfg refs "
             "keep the missing key and become invalid until it returns or is edited; "
             "MODIFIED refs retain their inline Custom value.",
-            (_str("name", "Waveform name"),),
+            (required_string("name", "Waveform name"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -231,7 +240,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Rename a ModuleLibrary module old→new (clash fails fast). Echoes "
             "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
             "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
-            (_str("old", "Current module name"), _str("new", "New module name")),
+            (
+                required_string("old", "Current module name"),
+                required_string("new", "New module name"),
+            ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -243,7 +255,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Rename a ModuleLibrary waveform old→new (clash fails fast). Echoes "
             "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
             "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
-            (_str("old", "Current waveform name"), _str("new", "New waveform name")),
+            (
+                required_string("old", "Current waveform name"),
+                required_string("new", "New waveform name"),
+            ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -270,8 +285,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "an editing session. Echoes {created: name}. To then change the entry use "
             "rpc_call on editor.new(item_kind, from_name=name).",
             (
-                _str("role_id", "role id from context.ml_list_roles"),
-                _str("name", "new ml entry name"),
+                required_string("role_id", "role id from context.ml_list_roles"),
+                required_string("name", "new ml entry name"),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),

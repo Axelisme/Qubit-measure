@@ -86,8 +86,6 @@ from .ports import (
     CfgEdit,
     CfgEditResult,
     ContextWritePort,
-    PreparedCfgEditor,
-    RetiredCfgEditor,
 )
 
 if TYPE_CHECKING:
@@ -315,29 +313,6 @@ class CfgEditorSession:
         return self.draft.snapshot()
 
 
-@dataclass
-class _PreparedReplacement:
-    service: CfgEditorService
-    session: CfgEditorSession
-    previous_id: str | None
-    consumed: bool = False
-
-    @property
-    def editor_id(self) -> str:
-        return self.session.editor_id
-
-
-@dataclass
-class _RetiredReplacement:
-    service: CfgEditorService
-    session: CfgEditorSession
-    closed: bool = False
-
-    @property
-    def editor_id(self) -> str:
-        return self.session.editor_id
-
-
 class CfgEditorService:
     """Repository for ``CfgEditorSession`` aggregates, keyed by a server id.
 
@@ -358,11 +333,8 @@ class CfgEditorService:
     ``ModuleLibrary`` identity; ``replace`` fast-fails after a context switch so
     a dirty draft cannot write into a same-named entry in another context.
 
-    ``publish_owner`` receives an isolated schema on seeded-session creation and
-    every active draft change, synchronously on the owner thread. It includes
-    invalid input. Composition routes it into the owning resource's State and
-    revision; a viewer is never needed to publish. Prepared replacements remain
-    unpublished until their owner commits the replacement State.
+    These drafts belong to library, inspect and writeback flows. Tab cfg is
+    owned independently by CfgResource and is never mirrored here.
     """
 
     def __init__(
@@ -372,14 +344,11 @@ class CfgEditorService:
         write_port: ContextWritePort,
         versions: EditorVersionPort,
         bus: EventBus,
-        *,
-        publish_owner: Callable[[str, CfgSchema], None] | None = None,
     ) -> None:
         self._bindings = MeasureCfgBindings(env_ctrl)
         self._read = read_port
         self._write = write_port
         self._versions = versions
-        self._publish_owner = publish_owner
         self._editors: dict[str, CfgEditorSession] = {}
         self._seq = itertools.count()
         self._listener: ChangeListener | None = None
@@ -455,9 +424,9 @@ class CfgEditorService:
     ) -> tuple[str, tuple[SettableTarget, ...]]:
         """Open a session seeded from an existing ``CfgSchema`` (no item_kind).
 
-        Used by UI surfaces that own a cfg draft which is *not* an ml entry — a
-        tab's cfg (seed = ``State.cfg_schema``) and a writeback module/waveform
-        item (seed = its ``edit_schema``). Such a session is teardown-only
+        Used by inspect and writeback surfaces that own an independent draft,
+        such as a writeback item's ``edit_schema``. Tab cfg editing uses its
+        persistent CfgResource instead. Such a session is teardown-only
         (``commit`` is rejected — there is no ml-entry to register). Defaults to
         ``gc=False`` since these are always owner-driven.
         """
@@ -493,103 +462,12 @@ class CfgEditorService:
         )
         self._editors[editor_id] = session
         self._attach_change_stream(session)
-        self._publish_owner_snapshot(session)
         if gc:
             self._evict_excess_gc()
         return editor_id, session.current_targets()
 
-    def snapshot_owner(self, owner_key: str) -> CfgSchema | None:
-        editor_id = self.editor_id_for_owner(owner_key)
-        return None if editor_id is None else self.get_draft(editor_id).snapshot()
-
     def provide_options(self, source_id: str) -> Sequence[object]:
         return self._bindings.provide_options(source_id)
-
-    def prepare_replacement(self, owner_key: str, seed: CfgSchema) -> PreparedCfgEditor:
-        """Build off-registry without closing or publishing the current draft."""
-        if not owner_key:
-            raise ValueError("Replacement requires an owner key")
-        previous_id = self.editor_id_for_owner(owner_key)
-        draft = self._bindings.new_draft(seed)
-        try:
-            if not draft.is_valid():
-                raise ValueError("Replacement cfg editor draft is invalid")
-            session = CfgEditorSession(
-                editor_id=self._new_id(owner_key),
-                draft=draft,
-                resolve_value_ref=self._bindings.resolve_value_ref,
-                gc=False,
-                owner_key=owner_key,
-                seq=next(self._seq),
-            )
-            session.current_targets()
-            self._attach_change_stream(session)
-            return _PreparedReplacement(self, session, previous_id)
-        except Exception:
-            draft.close()
-            raise
-
-    def activate_replacement(
-        self, prepared: PreparedCfgEditor
-    ) -> RetiredCfgEditor | None:
-        """Swap registry membership without emitting or closing viewer resources.
-
-        Preparation and activation must run in the same owner-thread turn.
-        A changed owner is a programming error; discard the prepared token.
-        """
-        if (
-            not isinstance(prepared, _PreparedReplacement)
-            or prepared.service is not self
-        ):
-            raise ValueError("Replacement belongs to another service")
-        if prepared.consumed:
-            raise ValueError("Replacement has already been consumed")
-        session = prepared.session
-        assert session.owner_key is not None
-        if self.editor_id_for_owner(session.owner_key) != prepared.previous_id:
-            raise ValueError("Replacement owner changed after preparation")
-        previous = (
-            self._editors.get(prepared.previous_id)
-            if prepared.previous_id is not None
-            else None
-        )
-        retired = _RetiredReplacement(self, previous) if previous is not None else None
-        if previous is not None:
-            if previous.change_cb is not None:
-                previous.draft.on_change.disconnect(previous.change_cb)
-                previous.change_cb = None
-            del self._editors[previous.editor_id]
-        self._editors[session.editor_id] = session
-        prepared.consumed = True
-        return retired
-
-    def discard_prepared(self, prepared: PreparedCfgEditor) -> None:
-        if (
-            not isinstance(prepared, _PreparedReplacement)
-            or prepared.service is not self
-        ):
-            raise ValueError("Replacement belongs to another service")
-        if prepared.consumed:
-            return
-        prepared.consumed = True
-        prepared.session.draft.close()
-
-    def retire_replaced(self, retired: RetiredCfgEditor) -> None:
-        if not isinstance(retired, _RetiredReplacement) or retired.service is not self:
-            raise ValueError("Retired editor belongs to another service")
-        if retired.closed:
-            return
-        retired.closed = True
-        session = retired.session
-        try:
-            session.draft.close()
-        finally:
-            try:
-                self._versions.drop_editor_version(session.editor_id)
-            finally:
-                self._emit(
-                    session.editor_id, "editor_closed", lambda: {"reason": "reopened"}
-                )
 
     def editor_id_for_owner(self, owner_key: str) -> str | None:
         for editor_id, session in self._editors.items():
@@ -791,7 +669,6 @@ class CfgEditorService:
             # Prepared and retired drafts must not publish into the active owner.
             if self._editors.get(editor_id) is not session:
                 return
-            self._publish_owner_snapshot(session)
             self._versions.bump_editor_version(editor_id)
             self._emit(
                 editor_id,
@@ -801,16 +678,6 @@ class CfgEditorService:
 
         session.change_cb = _on_change
         session.draft.on_change.connect(_on_change)
-
-    def _publish_owner_snapshot(self, session: CfgEditorSession) -> None:
-        """Publish complete model state synchronously, including invalid input.
-
-        The composition root routes known owners to their State projection.
-        Viewer timers never participate in this write or its resource revision.
-        Replacement activation leaves publication to its atomic owner swap.
-        """
-        if self._publish_owner is not None and session.owner_key is not None:
-            self._publish_owner(session.owner_key, session.draft.snapshot())
 
     def _emit(
         self,

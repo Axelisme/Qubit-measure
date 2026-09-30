@@ -51,7 +51,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v94: fixed tab_interact tool over the shared GUI plugin session.
 # v95: finalized shared-state workflow guidance and interactive concurrency instructions.
 # v96: the project tool applies through the project.apply GUI method.
-MCP_VERSION = 96
+MCP_VERSION = 97
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by

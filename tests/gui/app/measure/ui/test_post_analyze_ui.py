@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 if TYPE_CHECKING:
@@ -48,6 +49,7 @@ class _EmptyPostParams:
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     return ctrl
 
@@ -204,7 +206,6 @@ def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatc
         _mock_ctrl(),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
-    monkeypatch.setattr(tab, "_populate_cfg", MagicMock())
     monkeypatch.setattr(tab, "_bind_to_controller", MagicMock())
 
     tab.attach(
@@ -288,7 +289,7 @@ def test_post_run_click_starts_post_analyze(qapp):
     tab_w.read_post_analyze_params.return_value = _PostParams(backend="center")
     window._tab_widgets["tab-1"] = tab_w
 
-    window._on_post_analyze_clicked("tab-1")
+    window.post_analyze_tab("tab-1")
 
     ctrl.start_post_analyze.assert_called_once()
     args = ctrl.start_post_analyze.call_args.args
@@ -496,7 +497,7 @@ def test_post_save_image_click_saves_post_figure(qapp):
     tab_w.get_post_image_path.return_value = "/tmp/post.png"
     window._tab_widgets["tab-1"] = tab_w
 
-    window._on_post_save_image_clicked("tab-1")
+    window.save_tab_post_analysis_image("tab-1")
 
     ctrl.save_post_image.assert_called_once_with("tab-1", "/tmp/post.png")
 

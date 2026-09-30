@@ -1,6 +1,6 @@
 """FeedbackPanel — docked, collapsible user→agent feedback panel.
 
-A ``_CollapsibleSection`` (the same ▼/▶ header idiom as the in-tab
+A ``CollapsibleSection`` (the same ▼/▶ header idiom as the in-tab
 Analysis/Writeback sections) that holds a one-line message input plus
 "Send" / "Send & Stop" buttons. FeedbackDockController mounts it directly
 below the figure of the target tab (running tab if any, else the active tab)
@@ -34,7 +34,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.widgets.cfg.fields.containers import _CollapsibleSection
+from zcu_tools.gui.widgets.cfg.fields.containers import CollapsibleSection
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class FeedbackPanel(_CollapsibleSection):
+class FeedbackPanel(CollapsibleSection):
     """Collapsible 'Send to agent' panel docked below the figure.
 
     Public API (called by the dock controller):

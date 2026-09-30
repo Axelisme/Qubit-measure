@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.measure.adapter.lowering import make_sweep_range
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
+    DeviceChangedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
+    PredictorChangedPayload,
+)
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
@@ -31,6 +41,7 @@ from .run_analyze_control import RunAnalyzeControlFacet
 from .save import SaveService
 from .save_control import SaveControlFacet
 from .tab import TabService
+from .tab_cfg import TabCfgResources
 from .tab_control import TabControlFacet
 from .workspace import WorkspaceService
 from .writeback import WritebackService
@@ -39,7 +50,6 @@ from .writeback_control import WritebackControlFacet
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -90,6 +100,7 @@ class AppServices:
     context_control: ContextControlPort
     setup_control: SetupControlPort
     tab: TabService
+    tab_cfg: TabCfgResources
     tab_control: TabControlPort
     run_analyze_control: RunAnalyzeControlPort
     load: LoadService
@@ -152,29 +163,51 @@ def build_app_services(
     device = session.device
     arb_waveform = ArbWaveformService(state)
 
-    # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
-    # builds/reads/tears those down, so it is built after cfg_editor (single-
-    # direction command edge — cfg_editor never calls writeback, ADR-0067).
-    def publish_tab_cfg(owner_key: str, schema: CfgSchema) -> None:
-        # Other editor owners (inspect/writeback) keep their drafts off tab State.
-        if owner_key in state.tabs:
-            state.update_tab_cfg_schema(owner_key, schema)
+    bindings = MeasureCfgBindings(cfg_editor_ctrl)
 
+    def cfg_resolution() -> CfgResolution:
+        captured = session.value_sources.snapshot()
+        source = bindings.snapshot_from_state(state, captured_values=captured.values)
+        return replace(
+            source,
+            source_basis=(
+                *source.source_basis,
+                SourceRevision("values", CfgRevision(captured.revision)),
+            ),
+        )
+
+    tab_cfg = TabCfgResources(
+        resolution=cfg_resolution,
+        make_range=make_sweep_range,
+        mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
+    )
+
+    def refresh_tab_cfg(_payload: object) -> None:
+        tab_cfg.refresh_all()
+
+    for event_type in (
+        ContextSwitchedPayload,
+        DeviceChangedPayload,
+        MdChangedPayload,
+        MlChangedPayload,
+        PredictorChangedPayload,
+    ):
+        bus.subscribe(event_type, refresh_tab_cfg)
+    # Independent library/inspect/writeback drafts never publish tab cfg.
     cfg_editor = CfgEditorService(
         cfg_editor_ctrl,
         read_port=cfg_editor_ctrl,
         write_port=cfg_editor_ctrl,
         versions=cfg_editor_ctrl,
         bus=bus,
-        publish_owner=publish_tab_cfg,
     )
     writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
-    tab = TabService(state, registry, writeback)
+    tab = TabService(state, registry, writeback, tab_cfg)
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state)
-    load = LoadService(state, writeback, cfg_editor=cfg_editor, bus=bus)
+    load = LoadService(state, writeback, provide_options=bindings.provide_options)
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
@@ -254,6 +287,7 @@ def build_app_services(
         context_control=session.context_control,
         setup_control=session.setup_control,
         tab=tab,
+        tab_cfg=tab_cfg,
         tab_control=tab_control,
         run_analyze_control=run_analyze_control,
         load=load,

@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
     h_tab_run_start,
     h_tab_save_artifacts,
 )
-from zcu_tools.gui.app.measure.remote.handlers.tab import h_tab_set_cfg
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     h_tab_writeback_write,
 )
@@ -32,7 +31,6 @@ class Params:
         (h_tab_run_start, "run", "start_run"),
         (h_tab_analyze, "analysis", "analyze"),
         (h_tab_post_analyze, "post_analysis", "start_post_analyze"),
-        (h_tab_set_cfg, "run", "cfg_editor_set_fields"),
     ],
 )
 def test_write_follow_precedes_mutation_and_headless_still_works(
@@ -49,7 +47,7 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
         ),
     )
     adapter.tab_control.get_running_tab_id.return_value = None
-    owner = adapter.ctrl if method == "cfg_editor_set_fields" else control
+    owner = control
     order = []
     if headless:
         adapter.render_view = None

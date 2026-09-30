@@ -134,3 +134,70 @@ def test_device_sources_do_not_publish_active_flux_alias() -> None:
     assert registry.get_as("device.flux_yoko.value", float) == pytest.approx(0.5)
     with pytest.raises(MissingValue):
         registry.get_as("device.active_flux.value", float)
+
+
+def test_capture_snapshot_reads_published_cache_and_detaches_values(
+    monkeypatch,
+) -> None:
+    state = _state()
+    registry, bus, binder = _binder(state)
+    state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="FakeDevice",
+            address="none",
+            status=DeviceStatus.CONNECTED,
+            remember=True,
+            info=FakeDeviceInfo(address="none", value=0.25),
+        )
+    )
+    bus.emit(DeviceChangedPayload(name="flux"))
+    before = binder.snapshot()
+    state.set_device_info("flux", FakeDeviceInfo(address="none", value=0.75))
+    monkeypatch.setattr(
+        registry, "get_as", MagicMock(side_effect=AssertionError("Provider read"))
+    )
+
+    assert binder.snapshot().values["device.flux.value"] == 0.25
+    bus.emit(DeviceChangedPayload(name="flux"))
+    after = binder.snapshot()
+    assert after.values["device.flux.value"] == 0.75
+    assert after.revision > before.revision
+    assert before.values["device.flux.value"] == 0.25
+    after.values["device.flux.value"] = 99.0
+    assert binder.snapshot().values["device.flux.value"] == 0.75
+
+
+def test_capture_cache_removal_and_recreation_does_not_reuse_old_publication() -> None:
+    state = _state()
+    _registry, bus, binder = _binder(state)
+    state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="FakeDevice",
+            address="none",
+            status=DeviceStatus.CONNECTED,
+            remember=True,
+            info=FakeDeviceInfo(address="none", value=0.25),
+        )
+    )
+    bus.emit(DeviceChangedPayload(name="flux"))
+    before = binder.snapshot()
+    state.remove_device("flux")
+    bus.emit(DeviceChangedPayload(name="flux"))
+    removed = binder.snapshot()
+    assert "device.flux.value" not in removed.values
+    state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="FakeDevice",
+            address="new",
+            status=DeviceStatus.CONNECTED,
+            remember=True,
+            info=FakeDeviceInfo(address="new", value=0.75),
+        )
+    )
+    bus.emit(DeviceChangedPayload(name="flux"))
+    recreated = binder.snapshot()
+    assert before.revision < removed.revision < recreated.revision
+    assert recreated.values["device.flux.value"] == 0.75

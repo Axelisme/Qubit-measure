@@ -273,7 +273,7 @@ def test_tab_get_projects_complete_gui_artifacts_with_cfg(tmp_path: Path) -> Non
         result["operation_state"]
         == reply("tab.snapshot", {"tab_id": "old-tab"})["tabs"][0]
     )
-    assert result["cfg"] == {"frequency": {"raw": "5", "resolved": 5}}
+    assert result["cfg"] == reply("tab.get_cfg", {"tab_id": "old-tab"})
     assert result["artifacts"] == [
         {**artifacts[0], "key": "data", "kind": "data"},
         {**artifacts[1], "key": "analysis", "kind": "image"},
@@ -365,7 +365,7 @@ def test_cfg_only_read_calls_only_its_resource(tmp_path: Path) -> None:
     client.context.session.ensure_connected()
     client.transport.sent.clear()
     result = client.call("tab_get", {"tab": "old-tab", "include": ["cfg"]})
-    assert result["cfg"] == {"frequency": {"value": 5.0}}
+    assert result["cfg"] == reply("tab.get_cfg", {"tab_id": "old-tab"})
     assert client.transport.sent == [("tab.get_cfg", {"tab_id": "old-tab"})]
 
 

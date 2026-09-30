@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
     from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
+    from .services.tab_cfg import TabCfgLookup
     from .services.tab_control import TabControlPort
     from .services.writeback_control import WritebackControlPort, WritebackPane
 
@@ -328,6 +330,7 @@ class Controller(SessionControllerMixin):
         self._ctx_svc = services.context
         self._context_control = services.context_control
         self._setup_control = services.setup_control
+        self._tab_cfg = services.tab_cfg
         self._tab_svc = services.tab
         self._tab_control = services.tab_control
         self._run_analyze_control = services.run_analyze_control
@@ -534,6 +537,10 @@ class Controller(SessionControllerMixin):
     @property
     def setup_control(self) -> SetupControlPort:
         return self._setup_control
+
+    @property
+    def cfg_resources(self) -> TabCfgLookup:
+        return self._tab_cfg
 
     @property
     def tab_control(self) -> TabControlPort:
@@ -782,10 +789,9 @@ class Controller(SessionControllerMixin):
             if operation.token is not None:
                 self._operation_handles.stop(operation.token, reason=message)
             return operation.tag()
-        else:
-            if operation.token is not None:
-                self._operation_handles.message(operation.token, message)
-            return None
+        if operation.token is not None:
+            self._operation_handles.message(operation.token, message)
+        return None
 
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0066)
@@ -866,7 +872,9 @@ class Controller(SessionControllerMixin):
         """
         self._services.experiment_access.shutting_down = False
 
-    def get_operation_progress(self, operation_id: int) -> tuple:
+    def get_operation_progress(
+        self, operation_id: int
+    ) -> tuple[tuple[int, ProgressBarModel], ...]:
         return self._operation_control.get_operation_progress(operation_id)
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
@@ -1327,28 +1335,6 @@ class Controller(SessionControllerMixin):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab_control.get_tab_snapshot(tab_id)
 
-    def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        """Store an explicit tab cfg replacement through TabControl.
-
-        Editor changes already publish synchronously through CfgEditorService;
-        viewers must not call this method to replay a delayed model snapshot.
-        Dialog and writeback drafts stay off tab State until their own Apply.
-        """
-        self._tab_control.update_tab_cfg(tab_id, schema)
-
-    def reset_tab_cfg(self, tab_id: str) -> CfgSchema:
-        """Regenerate the tab's cfg to the adapter's default and commit it.
-
-        Discards the whole current cfg: builds a fresh default CfgSchema from the
-        adapter (under the live context) and writes it back as the committed
-        truth, returning it so the caller can re-seed its cfg form.
-
-        Running gate: editing/replacing a running tab's cfg is forbidden (the
-        worker captured the cfg at launch) — fail fast, mirroring the
-        ``tab.update_cfg`` RPC guard.
-        """
-        return self._tab_control.reset_tab_cfg(tab_id)
-
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
         self._bus.emit(
@@ -1393,6 +1379,6 @@ class Controller(SessionControllerMixin):
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
 
-    def get_adapter_guide(self, adapter_name: str) -> dict:
+    def get_adapter_guide(self, adapter_name: str) -> dict[str, str]:
         """Static human-facing orientation guide of an adapter (no tab needed)."""
         return self._tab_svc.adapter_guide(adapter_name)

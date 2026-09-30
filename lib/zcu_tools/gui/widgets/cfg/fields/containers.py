@@ -30,8 +30,8 @@ from .reference_shared import (
 )
 
 
-class _CollapsibleSection(QWidget):  # pyright: ignore[reportUnusedClass] - measure imports it
-    """Internal helper for collapsible headers."""
+class CollapsibleSection(QWidget):
+    """Shared header and body layout for collapsible app panels."""
 
     def __init__(
         self,
@@ -95,7 +95,7 @@ class _CollapsibleSection(QWidget):  # pyright: ignore[reportUnusedClass] - meas
 
 
 # SectionWidget removed: sole tree (TreeCfgWidget) owns all section/subtree
-# structure. _CollapsibleSection is retained only for non-cfg app usage
+# structure. CollapsibleSection is retained only for non-cfg app usage
 # (e.g., feedback panel) and is decoupled from cfg form path.
 
 

@@ -204,10 +204,11 @@ def test_context_self_write_advances_only_observed_dependent_cfg(
     _prepare_guarded_context(fx)
     fx.ctrl.context_control.create_md_attr("count", 4)
     tab_id = fx.ctrl.new_tab("fake")
-    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(
-        fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
-    )
-    fx.ctrl.cfg_editor_set_field(editor_id, "reps", {"__kind": "eval", "expr": "count"})
+    from zcu_tools.gui.cfg import EvalValue
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), EvalValue("count")),))
     sock = _open_client(fx.service.port)
     try:
         for method, params in (
@@ -695,9 +696,9 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
 ) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
-    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(
-        fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
-    )
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -710,8 +711,11 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
         call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
         _edit_context_as_gui(fx, "unrelated", 17)
+        # Every source publication advances cfg; a small complete cfg read
+        # establishes the new baseline without exporting the large context.
+        call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
         if mutate_cfg:
-            fx.ctrl.cfg_editor_set_field(editor_id, "reps", 42)
+            cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
         args = {"method": "tab.run_start", "params": {"tab_id": tab_id}}
         if mutate_cfg:
             with pytest.raises(RuntimeError) as stale:
@@ -722,7 +726,6 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
             _await_completed_run(call, started["handle"])
     finally:
         bridge.disconnect()
-        fx.ctrl.teardown_cfg_editor(editor_id)
 
 
 @pytest.mark.parametrize("value_bytes", [2 << 20, MAX_LINE_BYTES - 2048])

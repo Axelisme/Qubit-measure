@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
-    ExpectedErrorCategory,
     FailedPreconditionError,
 )
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -60,7 +59,7 @@ def _make_service(
     adapter = MagicMock()
     state.add_tab(
         "tab",
-        Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=adapter, cfg=MagicMock()),
     )
     state.update_tab_result("tab", object())
     bg = MagicMock()  # BackgroundRunner stand-in; submit() is inspected per-test
@@ -119,9 +118,7 @@ def _await_artifact_completion(bus, handles, token):
 def batch_save_service(qapp):
     state = State(MagicMock())
     adapter = MagicMock()
-    state.add_tab(
-        "tab", Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock())
-    )
+    state.add_tab("tab", Session(adapter_name="fake", adapter=adapter, cfg=MagicMock()))
     state.update_tab_result("tab", object())
     primary, post = _make_figure(), _make_figure()
     state.update_tab_analyze("tab", object(), primary)
@@ -404,7 +401,7 @@ def test_artifact_save_submit_failure_settles_before_completion(tmp_path: Path) 
 
 def test_start_save_data_creates_parent_at_command_boundary(
     qapp,
-    tmp_path: Path,  # noqa: ARG001
+    tmp_path: Path,
 ) -> None:
     svc, _, bg = _make_service()
     facts = _record_facts(svc)
@@ -419,7 +416,7 @@ def test_start_save_data_creates_parent_at_command_boundary(
 
 def test_start_save_data_resolves_path_to_actual_hdf5(
     qapp,
-    tmp_path: Path,  # noqa: ARG001
+    tmp_path: Path,
 ) -> None:
     # The path handed to the saver (and reported to the agent) is normalised up
     # front to what actually lands on disk: .hdf5 extension + uniqueness suffix —
@@ -435,7 +432,7 @@ def test_start_save_data_resolves_path_to_actual_hdf5(
 
 def test_save_terminal_restores_agent_origin_with_operation_id(
     qapp, tmp_path: Path
-) -> None:  # noqa: ARG001
+) -> None:
     svc, _state, bg = _make_service()
     observed: list[EventMeta] = []
     svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
@@ -551,7 +548,7 @@ def test_inline_save_terminal_does_not_leave_live_operation(tmp_path: Path) -> N
 
 def test_save_image_creates_parent_at_command_boundary(
     qapp,
-    tmp_path: Path,  # noqa: ARG001
+    tmp_path: Path,
 ) -> None:
     svc, state, _ = _make_service()
     figure = _make_figure()

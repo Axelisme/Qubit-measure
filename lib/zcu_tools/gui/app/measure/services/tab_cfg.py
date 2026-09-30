@@ -6,17 +6,23 @@ Tab operation guards remain with the application lifecycle owner.
 """
 
 from collections.abc import Callable
+from typing import Protocol
 
 from zcu_tools.gui.cfg.lowering import RangeFactory
 from zcu_tools.gui.cfg.model import CfgSchema
 from zcu_tools.gui.cfg.resource import (
     CfgAcceptance,
     CfgEditing,
+    CfgObservation,
     CfgPreconditionError,
     CfgPreconditionReason,
     CfgResolution,
     CfgResource,
 )
+
+
+class TabCfgLookup(Protocol):
+    def lookup(self, tab_id: str) -> CfgEditing: ...
 
 
 class TabCfgResources:
@@ -44,6 +50,7 @@ class TabCfgResources:
         The concrete result belongs to the creating application flow, not the
         frontend. A failed preparation leaves no tab association behind.
         """
+        self._require_not_notifying()
         if not tab_id:
             raise ValueError("tab identity must not be empty")
         if tab_id in self._resources:
@@ -54,6 +61,9 @@ class TabCfgResources:
             resolution=self._resolution,
             make_range=self._make_range,
             mutation_allowed=lambda: self._mutation_allowed(tab_id),
+            notification_active=lambda: CfgResource.notifications_active(
+                tuple(self._resources.values())
+            ),
         )
         self._resources[tab_id] = resource
         return resource
@@ -74,6 +84,18 @@ class TabCfgResources:
         resource = self._require(tab_id)
         resource.revoke()
         del self._resources[tab_id]
+
+    def refresh_all(self) -> tuple[CfgObservation, ...]:
+        return CfgResource.refresh_group(
+            tuple(self._resources.values()), resolution=self._resolution
+        )
+
+    def _require_not_notifying(self) -> None:
+        if CfgResource.notifications_active(tuple(self._resources.values())):
+            raise CfgPreconditionError(
+                CfgPreconditionReason.REENTRANT_MUTATION,
+                "Tab lifetime mutation is forbidden during cfg notification",
+            )
 
     def _require(self, tab_id: str) -> CfgResource:
         try:

@@ -16,7 +16,6 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     QIODevice,
     QRect,
     QSize,
-    Qt,
 )
 from qtpy.QtGui import QColor, QPixmap  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -33,6 +32,7 @@ from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
 
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 
@@ -121,6 +121,7 @@ def _failing_renderer_for(target_fig: object):
 
 def make_ctrl():
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
@@ -201,13 +202,6 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
 @pytest.fixture
 def exp_tab_widget(qapp, monkeypatch):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe-editor"
-        self.cfg_form.is_valid = lambda: True  # type: ignore[method-assign]
-        self.cfg_form.first_invalid_reason = lambda: None  # type: ignore[method-assign]
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
 
     def mock_attach(fig, container):
         from qtpy.QtWidgets import QWidget
@@ -753,7 +747,7 @@ def test_gallery_narrow_single_column_three_cards(qapp):
     g.show()
     QApplication.processEvents()
     QApplication.processEvents()
-    assert not g.is_wide_mode(), f"expected narrow mode at 360, got wide"
+    assert not g.is_wide_mode(), "expected narrow mode at 360, got wide"
     geoms = _gallery_geometry_cards(g)
     assert "run" in geoms and "analysis" in geoms and "post_analysis" in geoms
     r: QRect = geoms["run"]
@@ -903,9 +897,9 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
             a = geoms["analysis"]
             p = geoms["post_analysis"]
             assert abs(r.x() - a.x()) <= 2 and abs(a.x() - p.x()) <= 2, (
-                f"3-card narrow x not aligned"
+                "3-card narrow x not aligned"
             )
-            assert r.y() < a.y() < p.y(), f"3-card narrow y not monotonic"
+            assert r.y() < a.y() < p.y(), "3-card narrow y not monotonic"
 
         # Wide via ExpTabWidget resize — automatic.
         tab.resize(1200, 600)
@@ -925,7 +919,7 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
             assert abs(r.y() - a.y()) <= 4, (
                 f"2-card wide y not aligned {r.y()} vs {a.y()}"
             )
-            assert a.x() > r.x() + r.width() - 4, f"2-card wide not side-by-side"
+            assert a.x() > r.x() + r.width() - 4, "2-card wide not side-by-side"
             assert abs(r.width() - a.width()) <= 20
         else:
             r = geoms["run"]

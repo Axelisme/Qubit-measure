@@ -72,7 +72,11 @@ def test_channel_scalar_inherits_eval_value() -> None:
 
     result = inherit_from(old_val, old_spec, new_spec)
 
-    assert result.fields["ch"] is old_eval
+    assert result.fields["ch"] == EvalValue(expr="qub_ch")
+    old_val.fields["ch"] = EvalValue(expr="different_source")
+    inherited = result.fields["ch"]
+    assert isinstance(inherited, EvalValue)
+    assert inherited.expr == "qub_ch"
 
 
 def test_channel_missing_key_uses_scalar_default() -> None:

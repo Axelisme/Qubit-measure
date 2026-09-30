@@ -44,10 +44,10 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.gui.cfg.resource import CfgRevision
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
@@ -62,6 +62,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure._cfg_fakes import make_cfg
 
 
 def _empty_schema() -> CfgSchema:
@@ -72,8 +73,10 @@ def _make_state(
     *,
     readiness: ContextReadiness = ContextReadiness.EMPTY,
 ) -> tuple[State, str, MagicMock]:
-    md = MagicMock()
-    ml = MagicMock()
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+    md = MetaDict(None)
+    ml = ModuleLibrary(None)
     state = State(
         SessionEnv(
             md=md,
@@ -88,7 +91,11 @@ def _make_state(
     adapter.capabilities = AdapterCapabilities(requires_soc=True)
     state.add_tab(
         tab_id,
-        Session(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
+        Session(
+            adapter_name="any",
+            adapter=adapter,
+            cfg=make_cfg(_empty_schema(), state=state),
+        ),
     )
     return state, tab_id, adapter
 
@@ -99,7 +106,9 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
         tab_id=tab_id,
         adapter_name=state.get_tab(tab_id).adapter_name,
         request=RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
-        raw_cfg={},
+        accepted_cfg=state.get_tab(tab_id).cfg.accept(
+            state.get_tab(tab_id).cfg.observe().ref.revision
+        ),
         adapter=adapter,
     )
 
@@ -262,16 +271,26 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 
 def test_worker_executes_permit_after_model_changes_and_releases_lease():
     state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
-    schema = state.get_tab(tab_id).cfg_schema
-    schema.spec.fields["gain"] = ScalarSpec(label="Gain", type=float)
-    schema.value.fields["gain"] = EvalValue("gain", resolved=0.25)
-    permit = GuardService(state).acquire_run_permit(tab_id)
+    state.session_env.md.update(gain=0.25)
+    cfg = make_cfg(
+        CfgSchema(
+            CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
+            CfgSectionValue(fields={"gain": EvalValue("gain")}),
+        ),
+        state=state,
+    )
+    state.get_tab(tab_id).cfg = cfg
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=CfgRevision(0)
+    )
     svc, gate, bg, _ = _make_run_service(state)
     result = object()
     adapter.run.return_value = result
 
     svc.start_run(permit)
-    schema.value.fields["gain"] = DirectValue(0.75)
+    state.session_env.md.update(gain=0.75)
+    state.version.bump("context")
+    cfg.refresh(cfg.observe().ref.revision)
     bg.run_work()
 
     adapter.run.assert_called_once_with(permit.request, {"gain": 0.25})

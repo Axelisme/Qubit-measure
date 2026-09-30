@@ -42,6 +42,9 @@ class RecordingState:
         self.tab = SimpleNamespace(
             adapter=RecordingAdapter(log, analysis=analysis),
             run=SimpleNamespace(result="run-result"),
+            cfg=SimpleNamespace(
+                observe=lambda: SimpleNamespace(ref=SimpleNamespace(revision=0))
+            ),
         )
 
     def has_tab(self, tab_id: str) -> bool:
@@ -77,7 +80,7 @@ class RecordingGuard:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def acquire_run_permit(self, tab_id: str) -> object:
+    def acquire_run_permit(self, tab_id: str, *, expected_revision: int) -> object:
         self._log.add("guard", "acquire_run_permit", tab_id)
         return "run-permit"
 
@@ -307,6 +310,7 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
     assert facet.start_run("tab-1") == 11
 
     assert log.calls == [
+        call("state", "get_tab", "tab-1"),
         call("guard", "acquire_run_permit", "tab-1"),
         call("state", "is_tab_busy", "tab-1"),
         call("host", "make_run_container", "tab-1"),

@@ -146,9 +146,7 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
             "source_file": snap.get("result_source_path"),
         }
     if "cfg" in include:
-        result["cfg"] = ctx.session.read_internal("tab.get_cfg", {"tab_id": tab})[
-            "tree"
-        ]
+        result["cfg"] = ctx.session.read_internal("tab.get_cfg", {"tab_id": tab})
     if "analyze_params" in include:
         primary = ctx.session.read_internal("tab.get_analyze_params", {"tab_id": tab})
         post = ctx.session.read_internal("tab.get_post_analyze_params", {"tab_id": tab})

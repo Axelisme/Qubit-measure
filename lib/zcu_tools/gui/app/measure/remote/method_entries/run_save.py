@@ -6,9 +6,9 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _comment,
-    _str,
-    _str_opt,
+    optional_string,
+    required_string,
+    save_comment,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -24,7 +24,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "is not completion. After completion, read result state with "
             "rpc_call on tab.snapshot, or the run figure with rpc_call on "
             "tab.get_figure using subtab_id=run.",
-            (_str("tab_id"),),
+            (required_string("tab_id"),),
         ),
         agent=AgentMethodPolicy(
             guard_deps=(
@@ -49,8 +49,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
             "backfill failure does not undo the loaded result.",
             (
-                _str("tab_id"),
-                _str("data_path", "Canonical HDF5 result file to load"),
+                required_string("tab_id"),
+                required_string("data_path", "Canonical HDF5 result file to load"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -95,9 +95,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Returns an operation handle and reserved path, not proof of success. "
             "Wait for completion and read artifacts for the last successful path.",
             (
-                _str("tab_id"),
-                _str_opt("data_path", "Override data path"),
-                _comment(),
+                required_string("tab_id"),
+                optional_string("data_path", "Override data path"),
+                save_comment(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -120,7 +120,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "and reserved destinations, not proof of completion. Read artifacts "
             "after terminal failure for partial successes.",
             (
-                _str("tab_id"),
+                required_string("tab_id"),
                 ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
                 ParamSpec(
                     "paths",
@@ -129,7 +129,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     default={},
                     description="Artifact key to destination path",
                 ),
-                _comment(),
+                save_comment(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -158,9 +158,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "values analysis|post_analysis. Explicit image_path updates the GUI "
             "draft before saving; omission keeps the draft, and an empty path is rejected.",
             (
-                _str("tab_id"),
-                _str("subtab_id", "Pane: analysis|post_analysis"),
-                _str_opt("image_path", "Override image path"),
+                required_string("tab_id"),
+                required_string("subtab_id", "Pane: analysis|post_analysis"),
+                optional_string("image_path", "Override image path"),
             ),
         ),
         agent=AgentMethodPolicy(

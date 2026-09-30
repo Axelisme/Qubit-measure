@@ -6,8 +6,8 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _obj_default,
-    _str,
+    default_object,
+    required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -23,14 +23,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "cancellation does not settle a separate analyze operation. Returns "
             "{ok, cancelled}: cancelled is false when none was in flight; "
             "true requests cancellation, not necessarily worker completion.",
-            (_str("tab_id"),),
+            (required_string("tab_id"),),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.get_analyze_result",
         "analysis:h_tab_get_analyze_result",
-        MethodSpec(5.0, "Read tab analyze result scalar summary", (_str("tab_id"),)),
+        MethodSpec(
+            5.0, "Read tab analyze result scalar summary", (required_string("tab_id"),)
+        ),
     ),
     method_entry(
         "tab.get_analyze_params",
@@ -39,7 +41,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Read primary analyze params as {analyze_params, definitions}. Values "
             "are null before a result exists; definitions come from the live adapter.",
-            (_str("tab_id"),),
+            (required_string("tab_id"),),
         ),
     ),
     method_entry(
@@ -58,7 +60,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "tab.get_analyze_params). Makes the tab busy while it runs; a "
             "concurrent save/edit returns precondition_failed until it settles. "
             "Read the fit summary with rpc_call on tab.get_analyze_result.",
-            (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
+            (
+                required_string("tab_id"),
+                default_object("updates", "Analyze param updates"),
+            ),
         ),
         agent=AgentMethodPolicy(
             exposure="tool",
@@ -78,7 +83,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the existing analysis operation. The GUI-local preview never becomes "
             "the returned state; figure may show it and preview_active reports it.",
             (
-                _str("tab_id"),
+                required_string("tab_id"),
                 ParamSpec("payload", JsonType.OBJECT, required=False),
             ),
         ),
@@ -88,7 +93,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab.get_post_analyze_result",
         "analysis:h_tab_get_post_analyze_result",
         MethodSpec(
-            5.0, "Read tab post-analysis result scalar summary", (_str("tab_id"),)
+            5.0,
+            "Read tab post-analysis result scalar summary",
+            (required_string("tab_id"),),
         ),
     ),
     method_entry(
@@ -98,7 +105,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Read post-analysis params as {post_analyze_params, definitions}. Values "
             "are null before post analysis; definitions come from the live adapter.",
-            (_str("tab_id"),),
+            (required_string("tab_id"),),
         ),
     ),
     method_entry(
@@ -117,7 +124,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "overrides post params (read current values with rpc_call on "
             "tab.get_post_analyze_params). Read the fit summary with rpc_call on "
             "tab.get_post_analyze_result.",
-            (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
+            (
+                required_string("tab_id"),
+                default_object("updates", "Post-analysis param updates"),
+            ),
         ),
         agent=AgentMethodPolicy(
             exposure="tool",

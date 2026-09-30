@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -18,25 +17,23 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSchemaAssembler,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    FloatSpec,
     IntSpec,
-    ReferenceSpec,
     ScalarSpec,
 )
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 
 def make_ctrl():
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
@@ -132,14 +129,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
 def exp_tab_widget(qapp, monkeypatch):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    orig = mod.ExpTabWidget._populate_cfg
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe-editor"
-        self.cfg_form.is_valid = lambda: True
-        self.cfg_form.first_invalid_reason = lambda: None
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
     orig_attach = mod.attach_existing_figure_to_container
 
     def mock_attach(fig, container):
@@ -153,7 +142,6 @@ def exp_tab_widget(qapp, monkeypatch):
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     yield mod.ExpTabWidget
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
@@ -186,7 +174,6 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget):
         CfgSectionSpec,
         CfgSectionValue,
         DirectValue,
-        ScalarSpec,
     )
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
@@ -248,8 +235,6 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(qapp, exp_tab_wi
     initially = tab._analyze_section.is_collapsed()
     tab._analyze_section._header.mouseReleaseEvent  # exists
     # Simulate click on header
-    from qtpy.QtCore import QEvent, QPoint, Qt
-    from qtpy.QtGui import QMouseEvent
 
     # Directly call toggle via header click handler
     tab._analyze_section._toggle()
@@ -314,7 +299,7 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(qapp, exp_tab_wi
         assert idx_params < idx_analyze < idx_writeback, (
             f"order params {idx_params} analyze {idx_analyze} writeback {idx_writeback}"
         )
-    except ValueError as e:
+    except ValueError:
         # Fallback: at least check that analyze_btn is between sections via geometry
         assert is_descendant(tab.analyze_btn, inner)
     # Scroll area still contains ledger
@@ -368,7 +353,6 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
     assert any("6100.0" in p.text() for p in prop)
     assert any("create readout_rf" in p.text() for p in prop)
     # Edit buttons: 2 editable (md_item, ml_item), wf-1 not editable (no schema)
-    from qtpy.QtWidgets import QPushButton
 
     edits = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
     assert len(edits) == 2
@@ -418,6 +402,7 @@ def test_writeback_baseline_captured_via_service(qapp):
     # Create a fake context
     ctx = SessionEnv(md=md, ml=ml, soc=None, soccfg=None)
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_session_env.return_value = ctx
     # CfgEditor mock
     cfg_editor = MagicMock()

@@ -236,11 +236,13 @@ class CfgResource:
         make_range: RangeFactory,
         initial: CfgSchema | None = None,
         mutation_allowed: Callable[[], bool] = lambda: True,
+        notification_active: Callable[[], bool] = lambda: False,
     ) -> None:
         self._defaults = defaults
         self._resolution = resolution
         self._make_range = make_range
         self._mutation_allowed = mutation_allowed
+        self._notification_active = notification_active
         self._closed = False
         self._notifying = 0
         self._subscribers: dict[object, Callable[[CfgObservation], None]] = {}
@@ -325,28 +327,43 @@ class CfgResource:
             raise
         return self._publish(candidate, observation, inputs)
 
+    def require_mutation_allowed(self) -> None:
+        """Guard an owning flow before it commits related non-cfg state."""
+        self._check_command(self._observation.ref.revision)
+
     def snapshot_inputs(self) -> CfgSchema:
         """Detach input state for the owning persistence/load flow, without refresh."""
         self._require_open()
         return deepcopy(self._inputs)
 
     def replace_inputs(
-        self, expected_revision: CfgRevision, schema: CfgSchema
+        self,
+        expected_revision: CfgRevision,
+        schema: CfgSchema,
+        *,
+        require_valid: bool = False,
     ) -> CfgObservation:
-        """Atomically install same-definition inputs from an owning load flow."""
+        """Install owning-flow inputs; optional backfill can require Valid."""
         self._check_command(expected_revision)
-        return self._replace_inputs(deepcopy(schema))
+        return self._replace_inputs(deepcopy(schema), require_valid=require_valid)
 
     def reset(self, expected_revision: CfgRevision) -> CfgObservation:
         self._check_command(expected_revision)
         return self._replace_inputs(deepcopy(self._defaults()))
 
-    def _replace_inputs(self, schema: CfgSchema) -> CfgObservation:
+    def _replace_inputs(
+        self, schema: CfgSchema, *, require_valid: bool = False
+    ) -> CfgObservation:
         if schema.spec != self._spec:
             raise RuntimeError("replacement changed the resource definition")
         candidate, basis = self._prepare(deepcopy(schema))
         try:
             observation = self._next_observation(candidate, basis)
+            if require_valid and observation.status is not CfgStatus.VALID:
+                raise CfgInputError(
+                    CfgInputReason.INVALID_VALUE,
+                    "Owning-flow replacement requires a Valid candidate",
+                )
         except BaseException:
             candidate.close()
             raise
@@ -354,20 +371,7 @@ class CfgResource:
 
     def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
         self._check_command(expected_revision, editing=False)
-        source: CfgResolution | None = None
-        candidate: CfgDraft | None = None
-        try:
-            source = self._resolution()
-            candidate, basis = self._prepare(deepcopy(self._inputs), source=source)
-            observation = self._next_observation(candidate, basis)
-        except Exception as exc:
-            if candidate is not None:
-                candidate.close()
-            logging.getLogger(__name__).exception(
-                "Cfg refresh failed; publishing Unavailable"
-            )
-            return self._publish_unavailable(exc, source)
-        return self._publish(candidate, observation)
+        return self.refresh_group((self,), resolution=self._resolution)[0]
 
     def accept(self, expected_revision: CfgRevision) -> AcceptedConfig:
         self._check_command(expected_revision, editing=False)
@@ -395,7 +399,7 @@ class CfgResource:
             )
 
     def _require_not_notifying(self) -> None:
-        if self._notifying:
+        if self._notifying or self._notification_active():
             raise CfgPreconditionError(
                 CfgPreconditionReason.REENTRANT_MUTATION,
                 "cfg mutation and acceptance are forbidden during notification",
@@ -465,6 +469,8 @@ class CfgResource:
         candidate: CfgDraft,
         observation: CfgObservation,
         inputs: CfgSchema | None = None,
+        *,
+        notify: bool = True,
     ) -> CfgObservation:
         previous = self._draft
         if inputs is not None:
@@ -472,15 +478,16 @@ class CfgResource:
         self._draft = candidate
         self._observation = observation
         previous.close()
-        self._notify()
+        if notify:
+            self._notify()
         return deepcopy(observation)
 
-    def _publish_unavailable(
+    def _unavailable_observation(
         self, failure: Exception, source: CfgResolution | None
     ) -> CfgObservation:
         from ._unavailable import unavailable_tree
 
-        observation = CfgObservation(
+        return CfgObservation(
             replace(
                 self._observation.ref,
                 revision=CfgRevision(self._observation.ref.revision + 1),
@@ -496,9 +503,6 @@ class CfgResource:
                 ),
             ),
         )
-        self._observation = observation
-        self._notify()
-        return deepcopy(observation)
 
     def _notify(self) -> None:
         for token, callback in tuple(self._subscribers.items()):
@@ -515,6 +519,72 @@ class CfgResource:
             )
         finally:
             self._notifying -= 1
+
+    def _prepare_refresh(
+        self, source: CfgResolution
+    ) -> tuple[CfgDraft | None, CfgObservation]:
+        candidate: CfgDraft | None = None
+        try:
+            candidate, basis = self._prepare(deepcopy(self._inputs), source=source)
+            return candidate, self._next_observation(candidate, basis)
+        except Exception as exc:
+            if candidate is not None:
+                candidate.close()
+            logging.getLogger(__name__).exception("Cfg resolution failed")
+            return None, self._unavailable_observation(exc, source)
+
+    def _install_refresh(
+        self, candidate: CfgDraft | None, observation: CfgObservation
+    ) -> None:
+        if candidate is None:
+            self._observation = observation
+        else:
+            self._publish(candidate, observation, notify=False)
+
+    @staticmethod
+    def notifications_active(resources: Sequence[CfgResource]) -> bool:
+        """Keep notification-state inspection inside the cfg implementation owner."""
+        return any(resource._notifying for resource in resources)
+
+    @staticmethod
+    def refresh_group(
+        resources: Sequence[CfgResource],
+        *,
+        resolution: Callable[[], CfgResolution],
+    ) -> tuple[CfgObservation, ...]:
+        """Prepare all affected publications, install all, then notify subscribers."""
+        members = tuple(resources)
+        if not members:
+            return ()
+        for resource in members:
+            resource._check_command(resource._observation.ref.revision, editing=False)
+        source: CfgResolution | None = None
+        failure: Exception | None = None
+        try:
+            source = resolution()
+        except Exception as exc:
+            failure = exc
+            logging.getLogger(__name__).exception("Cfg source snapshot failed")
+        prepared: list[tuple[CfgResource, CfgDraft | None, CfgObservation]] = []
+        for resource in members:
+            candidate: CfgDraft | None = None
+            if failure is not None:
+                observation = resource._unavailable_observation(failure, None)
+            else:
+                assert source is not None
+                candidate, observation = resource._prepare_refresh(source)
+            prepared.append((resource, candidate, observation))
+        for resource, candidate, observation in prepared:
+            resource._install_refresh(candidate, observation)
+        for resource in members:
+            resource._notifying += 1
+        try:
+            for resource in members:
+                resource._notify()
+        finally:
+            for resource in members:
+                resource._notifying -= 1
+        return tuple(deepcopy(observation) for _, _, observation in prepared)
 
 
 def _validate_path(path: object) -> None:

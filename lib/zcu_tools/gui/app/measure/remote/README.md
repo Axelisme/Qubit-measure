@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-29 — project.apply wire method
+**Last updated:** 2026-09-30 — Atomic resource-bound tab cfg
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 72`, `GUI_VERSION = 104`, and
-`MCP_VERSION = 96` (defined in `zcu_tools.mcp.measure.server`). WIRE 72 renames the
+Current measure-gui values are `WIRE_VERSION = 73`, `GUI_VERSION = 105`, and
+`MCP_VERSION = 97` (defined in `zcu_tools.mcp.measure.server`). WIRE 73 replaces
+`tab.set_cfg` with atomic `tab.edit_cfg` and returns cfg_ref in tab snapshots.
+GUI 105 uses one persistent tab cfg resource across Qt, remote, Load and Run.
+MCP 97 forwards explicit cfg_ref expectations without hidden reads or retries.
+WIRE 72 renames the
 project wire method `startup.apply` to `project.apply` with the same params and
 result. GUI 104 opens one Setup dialog identity for launch and toolbar; MCP 96
 makes the `project` tool apply through `project.apply`. MCP 95 finalizes
@@ -259,7 +263,16 @@ terminal status, not removed aliases. No tool inventory is generated from
 changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
 field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
-`tab.get_cfg`, `editor.get`, and `editor.new` return the same typed `tree` format.
+`tab.get_cfg` returns cfg_ref, status, tree, source_basis and diagnostics from the
+persistent tab resource. It has no prefix or widget prerequisite. Tree paths are
+string arrays. `tab.edit_cfg` requires expected cfg_id and canonical decimal-string
+revision, decodes the common editing codec, then performs one atomic batch.
+Stale errors include expected/actual; input errors can include path/edit_index.
+The adapter does not retry or publish a successful prefix. Plain strings are typed
+strings; __text, __expr, __complex and __ref carry the declared editing intents.
+Source publications advance revision and update all affected cfg before notification.
+
+`editor.get` and `editor.new` retain the independent draft tree with dotted paths.
 Nodes contain kind/path/label/valid. Sections and active references have named
 children, including locked literals. Scalar/literal input and sweep inputs retain
 mode/raw/resolved/error/validation_error. Reference nodes include their chosen key,
@@ -267,8 +280,8 @@ cached shape label, error, override flag, and choices. Reads do not resolve sour
 Unknown objects, non-string object keys, and nonfinite numbers fail serialization;
 complex numbers use the shared reversible tag, with no string fallback.
 
-Prefix reads select a node while preserving its full path; sweep edges and reference
-keys select their parent node. Unknown prefixes return an empty object. Only a
+Independent editor prefix reads select a node while preserving its full path;
+sweep edges and reference keys select their parent node. Unknown prefixes return an empty object. Only a
 successful read with no prefix parameter establishes the full cfg observation.
 Wire keys children/input/inputs are not mutation-path segments.
 
@@ -281,11 +294,12 @@ Sweep nodes appear as editable subtrees, not as lowered `SweepCfg` objects.
 exposes `center` / `span` / `expts` / `step`. `editor.set_field` accepts the same
 dotted edge paths that `tab.get_cfg` reports.
 
-Headless editor sessions are owned by `CfgEditorService`. Agent-created sessions
-are garbage-collected on commit/discard/client drop; UI-owned sessions are tied
-to their owner widget or tab. Each owner session has a fresh id; Load's successful
-Config replacement retires the old id, so clients rediscover the new session
-before editing.
+`TabCfgResources` owns tab cfg identity. Tab creation provides the resource before
+any view attaches; close revokes its identity. Qt detach only stops watching.
+Load backfill preserves cfg_id and advances revision on the same resource.
+`CfgEditorService` owns separate library, inspect and writeback drafts.
+Agent-created sessions are garbage-collected on commit/discard/client drop;
+UI-owned independent drafts follow their own owner lifetime.
 
 ## Operation Handles
 

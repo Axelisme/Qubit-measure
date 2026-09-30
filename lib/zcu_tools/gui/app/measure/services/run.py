@@ -66,8 +66,6 @@ class RunService:
         self._active_token: int | None = None
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:
-        if retired is None:
-            return
         for draft in retired.writeback_drafts:
             try:
                 self._writeback.teardown_draft(draft)
@@ -102,7 +100,7 @@ class RunService:
         cancel_requested = threading.Event()
         adapter = permit.adapter
         request = permit.request
-        raw_cfg = permit.raw_cfg
+        raw_cfg = permit.accepted_cfg.values
 
         def request_cancel() -> None:
             cancel_requested.set()
@@ -113,13 +111,12 @@ class RunService:
             # figure routing+liveplot (figure_ambient, app layer), progress
             # (progress_ambient, session layer), and cancel (Schedule StopSignal
             # plus device setup cancel scope).
-            with figure_ambient(live_container):
-                with progress_ambient(factory):
-                    with schedule_stop_scope(stop_signal):
-                        with device_setup_cancel_scope(stop_event):
-                            result = adapter.run(request, raw_cfg)
-                            stop_signal.raise_if_error()
-                            return result
+            with figure_ambient(live_container), progress_ambient(factory):
+                with schedule_stop_scope(stop_signal):
+                    with device_setup_cancel_scope(stop_event):
+                        result = adapter.run(request, raw_cfg)
+                        stop_signal.raise_if_error()
+                        return result
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # Interpret bg outcome: we own stop_event, so we decide cancelled vs

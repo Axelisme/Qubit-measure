@@ -40,7 +40,7 @@ from ._helpers import Fixture, call, open_client, recv_push
 
 
 @pytest.fixture()
-def fx(qapp):  # noqa: ARG001
+def fx(qapp):
     f = Fixture()
     f.start()
     yield f
@@ -641,7 +641,7 @@ def test_device_setup_spec_requires_live_info(fx):
 
 def test_device_setup_spec_uses_device_control_facet(fx):
     ctrl_get = MagicMock(side_effect=AssertionError("broad controller used"))
-    setattr(fx.ctrl, "get_device_info", ctrl_get)
+    fx.ctrl.get_device_info = ctrl_get
     facet_get = MagicMock(return_value=FakeDeviceInfo(address="none", value=2.5))
     fx.service.device_control.get_device_info = facet_get  # type: ignore[method-assign]
 
@@ -832,7 +832,7 @@ def test_context_md_write_and_delete(fx):
     try:
         resp = call(sock, "context.md_set_attr", {"key": "bias", "value": 0.25})
         assert resp["ok"] is True
-        assert getattr(md, "bias") == 0.25
+        assert md.bias == 0.25
 
         resp = call(sock, "context.md_del_attr", {"key": "bias"}, rid="2")
         assert resp["ok"] is True
@@ -1113,30 +1113,32 @@ def test_save_set_paths_delegates_to_save_control(fx):
 def _add_fake_tab(fx, tab_id: str) -> None:
     """Register a minimal Session so has_tab(tab_id) is True."""
     from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-    from zcu_tools.gui.app.measure.state import Session
 
     adapter = FakeAdapter()
     cfg = adapter.make_default_cfg(fx.state.session_env)
-    fx.state.add_tab(
-        tab_id, Session(adapter_name="fake", adapter=adapter, cfg_schema=cfg)
-    )
+    fx.prepare_tab(tab_id, adapter, cfg)
 
 
-def test_editor_set_field_blocked_while_owning_tab_runs(fx):
-    """A tab cfg draft (editor session owned by tab_id) can't be edited while
-    that tab runs — same guard the human gets via the disabled form (F11)."""
+def test_tab_cfg_edit_blocked_while_owning_tab_runs(fx):
+    """The resource enforces the same busy gate for every frontend."""
     tab_id = "tab-run"
     _add_fake_tab(fx, tab_id)
-    cfg = fx.state.get_tab(tab_id).cfg_schema
-    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(cfg, gc=False, owner_key=tab_id)
+    from zcu_tools.gui.cfg.edit_codec import encode_ref
+
+    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
+    expected = encode_ref(cfg.observe().ref)
     sock = open_client(fx.service.port)
     try:
-        with patch.object(fx.ctrl, "get_running_tab_id", return_value=tab_id):
-            resp = call(
-                sock,
-                "editor.set_field",
-                {"editor_id": editor_id, "path": "reps", "value": 10},
-            )
+        fx.state.set_tab_running(tab_id, True)
+        resp = call(
+            sock,
+            "tab.edit_cfg",
+            {
+                "tab_id": tab_id,
+                "expected": expected,
+                "edits": [{"path": ["reps"], "value": 10}],
+            },
+        )
         assert resp["ok"] is False
         assert resp["error"]["code"] == "precondition_failed"
     finally:
@@ -1148,7 +1150,7 @@ def test_editor_set_field_blocked_while_owning_tab_runs(fx):
 # ---------------------------------------------------------------------------
 
 
-def test_project_apply_resolves_generated_scope_under_project_root(qapp, tmp_path):  # noqa: ARG001
+def test_project_apply_resolves_generated_scope_under_project_root(qapp, tmp_path):
     """Omitting scope_id uses the generated per-qubit result scope under the
     injected project root, not cwd. The RPC returns the resolved paths."""
     import os
@@ -1188,7 +1190,7 @@ def test_project_apply_resolves_generated_scope_under_project_root(qapp, tmp_pat
         fx.stop()
 
 
-def test_result_scope_list_reports_discovered_params(qapp, tmp_path):  # noqa: ARG001
+def test_result_scope_list_reports_discovered_params(qapp, tmp_path):
     import json
 
     from ._helpers import Fixture

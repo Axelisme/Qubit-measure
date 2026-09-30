@@ -21,6 +21,8 @@ from zcu_tools.gui.app.measure.state import (
     State,
 )
 
+from tests.gui.app.measure._cfg_fakes import cfg_resources
+
 
 def test_tab_snapshot_is_single_pure_render_model() -> None:
     state = State(
@@ -38,7 +40,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
         Session(
             adapter_name="fake",
             adapter=MagicMock(),
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=MagicMock(), params=analyze_params),
             save=SavePaneState(data_path_override="data.h5", comment="draft note"),
@@ -49,7 +51,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     # TabService's render model depends only on State + a writeback query port;
     # readiness / save paths come off State's aggregates, not sibling
     # app-services. The registry is unused by get_snapshot.
-    service = TabService(state, MagicMock(), writeback)
+    service = TabService(state, MagicMock(), writeback, cfg_resources(state))
 
     snapshot = service.get_snapshot("tab")
 
@@ -73,14 +75,16 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
         Session(
             adapter_name="fake",
             adapter=MagicMock(),
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             analysis=AnalysisPaneState(writeback_draft=draft),
         ),
     )
     writeback = MagicMock()
     writeback.preview_draft.return_value = []
 
-    snapshot = TabService(state, MagicMock(), writeback).get_snapshot("tab")
+    snapshot = TabService(
+        state, MagicMock(), writeback, cfg_resources(state)
+    ).get_snapshot("tab")
 
     assert snapshot.analysis is not None
     assert snapshot.analysis.has_writeback_draft is True
@@ -95,7 +99,7 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
         Session(
             adapter_name="fake",
             adapter=MagicMock(),
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             analysis=AnalysisPaneState(writeback_draft=draft),
         ),
     )
@@ -103,7 +107,9 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
     writeback.preview_draft.side_effect = RuntimeError("broken draft")
 
     with pytest.raises(RuntimeError, match="broken draft"):
-        TabService(state, MagicMock(), writeback).get_snapshot("tab")
+        TabService(state, MagicMock(), writeback, cfg_resources(state)).get_snapshot(
+            "tab"
+        )
 
 
 def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
@@ -114,13 +120,13 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
             Session(
                 adapter_name="fake",
                 adapter=MagicMock(),
-                cfg_schema=MagicMock(),
+                cfg=MagicMock(),
             ),
         )
     state.set_tab_running("running", True)
     writeback = MagicMock()
     writeback.preview_draft.return_value = []
-    service = TabService(state, MagicMock(), writeback)
+    service = TabService(state, MagicMock(), writeback, cfg_resources(state))
 
     running = service.get_snapshot("running").interaction
     idle = service.get_snapshot("idle").interaction
@@ -154,7 +160,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
         Session(
             adapter_name="ge",
             adapter=MagicMock(),
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=MagicMock()),
             post_analysis=PostAnalysisPaneState(
@@ -166,7 +172,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
     )
     writeback = MagicMock()
     writeback.preview_draft.return_value = []
-    service = TabService(state, MagicMock(), writeback)
+    service = TabService(state, MagicMock(), writeback, cfg_resources(state))
 
     snapshot = service.get_snapshot("tab")
 
@@ -187,12 +193,12 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
         Session(
             adapter_name="ge",
             adapter=adapter,
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=MagicMock()),  # primary result present
         ),
     )
-    service = TabService(state, MagicMock(), MagicMock())
+    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
 
     out = service.initialize_tab_post_analyze_params("tab")
 
@@ -209,12 +215,12 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
         Session(
             adapter_name="ge",
             adapter=MagicMock(),
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=None),  # no primary analyze result
         ),
     )
-    service = TabService(state, MagicMock(), MagicMock())
+    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
 
     with pytest.raises(RuntimeError, match="primary analyze result"):
         service.initialize_tab_post_analyze_params("tab")
@@ -231,14 +237,16 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record() -> None:
         Session(
             adapter_name="fake",
             adapter=adapter,
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             save=SavePaneState(data_path_override="data.hdf5"),
             analysis=AnalysisPaneState(image_path_override="analysis.png"),
         ),
     )
     state.update_tab_loaded_result("tab", object(), "existing.hdf5")
 
-    snapshot = TabService(state, MagicMock(), MagicMock()).get_snapshot("tab")
+    snapshot = TabService(
+        state, MagicMock(), MagicMock(), cfg_resources(state)
+    ).get_snapshot("tab")
 
     assert snapshot.run is not None and snapshot.run.source_path == "existing.hdf5"
     assert [(a.kind, a.status) for a in snapshot.artifacts] == [
@@ -261,13 +269,13 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift() -> None:
         Session(
             adapter_name="fake",
             adapter=adapter,
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             save=SavePaneState(data_path_override="data.hdf5"),
         ),
     )
     state.update_tab_result("tab", object())
     state.update_tab_comment("tab", "initial")
-    service = TabService(state, MagicMock(), MagicMock())
+    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
 
     state.get_tab("tab").artifacts.started(ArtifactKind.DATA)
@@ -299,12 +307,12 @@ def test_artifact_failure_preserves_previous_success_but_does_not_mark_new_draft
         Session(
             adapter_name="fake",
             adapter=adapter,
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
             save=SavePaneState(data_path_override="first.hdf5"),
         ),
     )
     state.update_tab_result("tab", object())
-    service = TabService(state, MagicMock(), MagicMock())
+    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
     tracker = state.get_tab("tab").artifacts
     tracker.started(ArtifactKind.DATA)

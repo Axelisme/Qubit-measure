@@ -141,7 +141,7 @@ class ControllerFixture:
 
 
 @pytest.fixture()
-def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:  # noqa: ARG001
+def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
     # Scope persistence to a temp dir so tests never read/write the real cache.
     fixture = ControllerFixture(cache_dir=tmp_path)
     yield fixture
@@ -195,7 +195,7 @@ def _make_figure_container() -> FigureContainer:
 # ---------------------------------------------------------------------------
 
 
-def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
+def test_get_project_root_returns_injected_root(qapp, tmp_path):
     """The entry script injects the repo root; the Controller exposes it so the
     setup dialog / project RPC anchor default paths there instead of cwd (the
     .bat launcher cd's into scripts/, so cwd is the wrong base)."""
@@ -204,7 +204,7 @@ def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
     assert fixture.ctrl.get_project_root() == injected
 
 
-def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):  # noqa: ARG001
+def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):
     """No injection (tests / `python -m` from the repo root) → cwd, the existing
     behaviour, so nothing regresses for callers that don't pass a root."""
     import os
@@ -401,17 +401,13 @@ def test_start_run_sets_is_running(cf):
 
 
 def test_start_run_passes_lowered_committed_state_cfg(cf):
-    """start_run delivers concrete values from the committed State cfg."""
+    """start_run delivers values accepted from the tab cfg resource."""
     tab_id = cf.ctrl.new_tab("fake")
 
-    # Mutate committed cfg in State after tab creation.
-    base = cf.state.get_tab(tab_id).cfg_schema
-    mutated_value = dataclasses.replace(
-        base.value,
-        fields={**base.value.fields, "reps": DirectValue(42)},
-    )
-    mutated = dataclasses.replace(base, value=mutated_value)
-    cf.ctrl.update_tab_cfg(tab_id, mutated)
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
 
     # Observe the payload at the worker-to-adapter boundary.
     captured: dict[str, dict[str, object]] = {}
@@ -739,23 +735,19 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
     assert snapshot.analysis.params is not None
 
 
-def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
-    """cfg keystrokes must not trigger a full snapshot rebuild.
+def test_cfg_edit_publishes_without_full_tab_interaction_rebuild(cf):
+    from zcu_tools.gui.cfg.resource import CfgEdit
 
-    update_tab_cfg writes to State but emits no TAB_INTERACTION_CHANGED;
-    validity refreshes come from CfgFormWidget.validity_changed instead.
-    """
     tab_id = cf.ctrl.new_tab("fake")
-    base = cf.state.get_tab(tab_id).cfg_schema
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    published = []
+    cfg.watch(published.append)
+    before = cfg.observe().ref
     cf.bus.emit.reset_mock()
-
-    cf.ctrl.update_tab_cfg(tab_id, base)
-
-    for call in cf.bus.emit.call_args_list:
-        payload = call.args[0] if call.args else None
-        assert not isinstance(payload, TabInteractionChangedPayload), (
-            f"update_tab_cfg emitted TAB_INTERACTION_CHANGED unexpectedly: {call}"
-        )
+    after = cfg.edit(before.revision, (CfgEdit(("reps",), 42),))
+    assert published[-1].ref == after.ref
+    assert after.ref.revision == before.revision + 1
+    assert cf.bus.emit.call_args_list == []
 
 
 def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
@@ -776,26 +768,21 @@ def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
     ]
 
 
-def test_reset_tab_cfg_restores_adapter_default(cf):
-    """reset_tab_cfg commits the adapter default and returns that same schema."""
+def test_tab_cfg_reset_restores_adapter_default_on_same_resource(cf):
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
     tab_id = cf.ctrl.new_tab("fake")
-
-    # Mutate the committed cfg away from the default.
-    base = cf.state.get_tab(tab_id).cfg_schema
-    mutated_value = dataclasses.replace(
-        base.value,
-        fields={**base.value.fields, "reps": DirectValue(123)},
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 123),))
+    before = cfg.observe().ref
+    returned = cfg.reset(before.revision)
+    defaults = _default_fake_schema(cf.state.session_env)
+    assert returned.ref.cfg_id == before.cfg_id
+    assert returned.ref.revision == before.revision + 1
+    assert (
+        cf.state.get_tab(tab_id).cfg.snapshot_inputs().value.fields["reps"]
+        == defaults.value.fields["reps"]
     )
-    cf.ctrl.update_tab_cfg(tab_id, dataclasses.replace(base, value=mutated_value))
-
-    returned = cf.ctrl.reset_tab_cfg(tab_id)
-
-    default = _default_fake_schema(cf.state.session_env)
-    assert returned.value.fields["reps"] == default.value.fields["reps"]
-    # State now holds the returned default, not the mutated draft.
-    committed = cf.state.get_tab(tab_id).cfg_schema
-    assert committed is returned
-    assert committed.value.fields["reps"] == default.value.fields["reps"]
 
 
 def test_reset_tab_cfg_while_running_raises(cf):
@@ -808,8 +795,11 @@ def test_reset_tab_cfg_while_running_raises(cf):
     cf.ctrl.start_run(tab_id)
     assert cf.state.is_tab_running(tab_id)
 
-    with pytest.raises(RuntimeError, match="currently running"):
-        cf.ctrl.reset_tab_cfg(tab_id)
+    from zcu_tools.gui.cfg.resource import CfgPreconditionError
+
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    with pytest.raises(CfgPreconditionError, match="blocked"):
+        cfg.reset(cfg.observe().ref.revision)
 
     # cleanup
     ev.set()
@@ -905,8 +895,10 @@ def test_persist_then_restore_app_state(tmp_path):
     capture (flush) on one Controller, restore on a fresh one sharing the dir."""
     cf = ControllerFixture(cache_dir=tmp_path)
     tab_id = cf.ctrl.new_tab("fake")
-    schema = _default_fake_schema(cf.state.session_env)
-    cf.ctrl.update_tab_cfg(tab_id, schema)
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
     resolved = cf.ctrl.apply_project(ProjectRequest("chip", "qub", "res"))
     cf.ctrl.setup_control.remember_connection(
         ConnectionPreferences(ip="10.0.0.2", port=7000)
@@ -919,6 +911,7 @@ def test_persist_then_restore_app_state(tmp_path):
     assert len(cf_restored.state.tabs) == 1
     restored_tab = next(iter(cf_restored.state.tabs.values()))
     assert restored_tab.adapter_name == "fake"
+    assert restored_tab.cfg.snapshot_inputs().value.fields["reps"] == DirectValue(42)
     # remembered settings round-tripped (prefill values; project not auto-applied).
     prefs = cf_restored.ctrl.setup_control.get_setup_preferences()
     assert prefs.chip_name == "chip"

@@ -178,11 +178,9 @@ def test_pane_writeback_requires_an_existing_draft(pane: str) -> None:
     facet, _log, state, writeback, _versions, _bus = _facet()
     draft_attr = "analysis_draft" if pane == "analysis" else "post_draft"
     setattr(writeback, draft_attr, None)
-    setattr(
-        state.tab.analysis if pane == "analysis" else state.tab.post_analysis,
-        "writeback_draft",
-        None,
-    )
+    (
+        state.tab.analysis if pane == "analysis" else state.tab.post_analysis
+    ).writeback_draft = None
 
     with pytest.raises(FailedPreconditionError, match="No .*writeback draft"):
         facet.apply_writeback_for_pane("tab-1", cast(Any, pane))
@@ -221,7 +219,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
         Session(
             adapter_name="fake",
             adapter=MagicMock(),
-            cfg_schema=MagicMock(),
+            cfg=MagicMock(),
         ),
     )
     port = MagicMock()

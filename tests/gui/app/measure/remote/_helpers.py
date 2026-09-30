@@ -14,20 +14,27 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.measure.registry import register_all
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
+from zcu_tools.gui.app.measure.adapter import (
+    ContextReadiness,
+    ExpAdapterProtocol,
+    SessionEnv,
+)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
+from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg.resource import CfgObservation, CfgResource
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import remote_error_from_expected
@@ -44,8 +51,8 @@ from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 def make_ctx() -> SessionEnv:
     return SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
+        md=MetaDict(None),
+        ml=ModuleLibrary(None),
         soc=MagicMock(),
         soccfg=make_mock_soccfg(),
         res_name="fake_res",
@@ -59,11 +66,7 @@ def make_ctx() -> SessionEnv:
 def observe_run_inputs(
     fx, tab_id: str, invoke: Callable[[str, dict[str, Any]], Any]
 ) -> None:
-    """Prepare the headless form owner and explicitly read each run dependency."""
-    if fx.ctrl.editor_id_for_owner(tab_id) is None:
-        fx.ctrl.open_seeded_cfg_editor(
-            fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
-        )
+    """Explicitly read each run dependency; tab cfg exists without a widget."""
     for method, params in (
         ("tab.snapshot", {"tab_id": tab_id}),
         ("tab.get_cfg", {"tab_id": tab_id}),
@@ -128,6 +131,7 @@ class Fixture:
         active_label: str | None = None,
         role_catalog: RoleCatalog | None = None,
         empty_project: bool = False,
+        headless: bool = False,
     ) -> None:
         initial = (
             SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
@@ -139,7 +143,7 @@ class Fixture:
         register_all(self.registry)
         if not self.registry.has("fake"):
             self.registry.register("fake", FakeAdapter)
-        self.view = make_view()
+        self.view = None if headless else make_view()
         io_manager = IOManager()
         if not empty_project:
             exp_manager = MagicMock()
@@ -164,6 +168,27 @@ class Fixture:
             owner_scheduler=QtOwnerScheduler(),
             render_view=self.view,
         )
+
+    def prepare_tab(
+        self,
+        tab_id: str,
+        adapter: ExpAdapterProtocol,
+        schema: CfgSchema,
+        *,
+        adapter_name: str = "fake",
+    ) -> CfgResource:
+        """Install a custom test tab through the application lifetime owner."""
+        resources = cast(TabCfgResources, self.ctrl.cfg_resources)
+        cfg = resources.create(tab_id, lambda: schema, initial=schema)
+        self.state.add_tab(
+            tab_id, Session(adapter_name=adapter_name, adapter=adapter, cfg=cfg)
+        )
+
+        def published(_observation: CfgObservation) -> None:
+            self.state.version.bump(f"tab:{tab_id}:cfg")
+
+        cfg.watch(published)
+        return cfg
 
     def start(self) -> int:
         return self.service.start()
@@ -240,6 +265,7 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
             context_control=_facet_or_self("context_control"),
             device_control=_facet_or_self("device_control"),
             predictor_control=_facet_or_self("predictor_control"),
+            cfg_lookup=lambda tab_id: _facet_or_self("cfg_resources").lookup(tab_id),
             render_view=_facet_or_self("render_view"),
         ),
     )

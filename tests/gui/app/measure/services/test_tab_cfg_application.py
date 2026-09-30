@@ -1,0 +1,166 @@
+"""Production cfg owner wiring without tab widgets or live hardware."""
+
+import pytest
+from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.cfg.model import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    ScalarSpec,
+)
+from zcu_tools.gui.cfg.resource import (
+    CfgEdit,
+    CfgObservation,
+    CfgPreconditionError,
+    CfgPreconditionReason,
+    CfgStatus,
+)
+from zcu_tools.gui.session.events import DeviceChangedPayload, MdChangedPayload
+from zcu_tools.gui.session.state import DeviceState, DeviceStatus
+
+from tests.gui.app.measure.remote._helpers import Fixture
+
+
+class SchemaAdapter(FakeAdapter):
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+        return CfgSchema(
+            CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
+            CfgSectionValue(fields={"gain": DirectValue(1.0)}),
+        )
+
+
+@pytest.fixture
+def application(qapp):
+    fixture = Fixture(headless=True)
+    fixture.registry.register("cfg-contract", SchemaAdapter)
+    yield fixture
+    for tab_id in tuple(fixture.ctrl.list_tab_ids()):
+        fixture.ctrl.close_tab(tab_id)
+
+
+def test_headless_lifetime_snapshot_and_single_authority(application: Fixture) -> None:
+    tab_id = application.ctrl.new_tab("cfg-contract")
+    editor = application.ctrl.cfg_resources.lookup(tab_id)
+    before = editor.observe()
+    assert before.status is CfgStatus.VALID
+    snapshot = application.ctrl.get_tab_snapshot(tab_id)
+    snapshot.cfg_schema.value.fields["gain"] = DirectValue(99.0)
+    assert application.state.get_tab(tab_id).cfg.accept(before.ref.revision).values == {
+        "gain": 1.0
+    }
+    editor.edit(before.ref.revision, (CfgEdit(("gain",), 7.0),))
+    assert application.ctrl.get_tab_snapshot(tab_id).cfg_schema.value.fields[
+        "gain"
+    ] == DirectValue(7.0)
+    application.ctrl.close_tab(tab_id)
+    with pytest.raises(CfgPreconditionError) as caught:
+        editor.observe()
+    assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
+    recreated = application.ctrl.new_tab("cfg-contract")
+    assert (
+        application.ctrl.cfg_resources.lookup(recreated).observe().ref.cfg_id
+        != before.ref.cfg_id
+    )
+
+
+def test_production_capture_uses_published_cache_without_live_provider(
+    application: Fixture, monkeypatch
+) -> None:
+    application.state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="FakeDevice",
+            address="none",
+            remember=True,
+            status=DeviceStatus.CONNECTED,
+            info=FakeDeviceInfo(address="none", value=0.25),
+        )
+    )
+    application.bus.emit(DeviceChangedPayload(name="flux"))
+    tab_id = application.ctrl.new_tab("cfg-contract")
+    editor = application.ctrl.cfg_resources.lookup(tab_id)
+
+    def live_read_forbidden(*_args, **_kwargs):
+        raise AssertionError("Capture must not query a live value provider")
+
+    monkeypatch.setattr(application.ctrl, "read_value_source", live_read_forbidden)
+    published = editor.edit(
+        editor.observe().ref.revision,
+        (CfgEdit(("gain",), EvalValue("$device.flux.value")),),
+    )
+    accepted = application.state.get_tab(tab_id).cfg.accept(published.ref.revision)
+    assert accepted.values == {"gain": 0.25}
+    assert any(source.source_id == "values" for source in accepted.source_basis)
+    application.state.set_device_info(
+        "flux", FakeDeviceInfo(address="none", value=0.75)
+    )
+    application.bus.emit(DeviceChangedPayload(name="flux"))
+    after = editor.observe()
+    assert after.ref.revision > published.ref.revision
+    assert application.state.get_tab(tab_id).cfg.accept(after.ref.revision).values == {
+        "gain": 0.25
+    }
+    assert accepted.values == {"gain": 0.25}
+
+
+def test_source_event_publishes_every_tab_before_callback(application: Fixture) -> None:
+    application.state.session_env.md.update(x=1.0)
+    first = application.ctrl.new_tab("cfg-contract")
+    second = application.ctrl.new_tab("cfg-contract")
+    editors = [
+        application.ctrl.cfg_resources.lookup(tab_id) for tab_id in (first, second)
+    ]
+    for editor in editors:
+        editor.edit(
+            editor.observe().ref.revision, (CfgEdit(("gain",), EvalValue("x")),)
+        )
+    before = editors[0].observe().ref
+    observed = []
+
+    def callback(publication: CfgObservation) -> None:
+        if publication.ref != before:
+            observed.append(tuple(editor.observe() for editor in editors))
+
+    unsubscribe = editors[0].watch(callback)
+    application.state.session_env.md.update(x=9.0)
+    application.state.version.bump("context")
+    application.bus.emit(MdChangedPayload(md=application.state.session_env.md))
+    unsubscribe()
+    assert len(observed) == 1
+    assert observed[0][0].source_basis == observed[0][1].source_basis
+    for tab_id, publication in zip((first, second), observed[0], strict=True):
+        assert application.state.get_tab(tab_id).cfg.accept(
+            publication.ref.revision
+        ).values == {"gain": 9.0}
+
+
+def test_cfg_notification_rejects_app_lifetime_and_run(application: Fixture) -> None:
+    first = application.ctrl.new_tab("cfg-contract")
+    second = application.ctrl.new_tab("cfg-contract")
+    editor = application.ctrl.cfg_resources.lookup(first)
+    initial = editor.observe().ref
+    failures = []
+
+    def callback(publication: CfgObservation) -> None:
+        if publication.ref == initial:
+            return
+        for command in (
+            lambda: application.ctrl.new_tab("cfg-contract"),
+            lambda: application.ctrl.close_tab(second),
+            lambda: application.ctrl.start_run(second),
+        ):
+            try:
+                command()
+            except CfgPreconditionError as exc:
+                failures.append(exc.reason)
+
+    unsubscribe = editor.watch(callback)
+    editor.edit(initial.revision, (CfgEdit(("gain",), 2.0),))
+    unsubscribe()
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 3
+    assert set(application.ctrl.list_tab_ids()) == {first, second}
+    assert application.ctrl.get_running_tab_id() is None

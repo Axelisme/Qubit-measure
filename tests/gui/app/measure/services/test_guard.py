@@ -28,7 +28,16 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
 )
+from zcu_tools.gui.cfg.resource import (
+    CfgEdit,
+    CfgPreconditionError,
+    CfgRevision,
+    CfgStaleError,
+)
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from tests.gui.app.measure._cfg_fakes import make_cfg
 
 
 def _make_state(
@@ -41,8 +50,8 @@ def _make_state(
     analyze_result: object = object(),
     load_data: bool = True,
 ) -> tuple[State, str]:
-    md = MagicMock()
-    ml = MagicMock()
+    md = MetaDict(None)
+    ml = ModuleLibrary(None)
     soc = MagicMock() if soc_attached else None
     soccfg = MagicMock() if soc_attached else None
     state = State(SessionEnv(md=md, ml=ml, soc=soc, soccfg=soccfg, readiness=readiness))
@@ -60,7 +69,9 @@ def _make_state(
     else:
         schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
-    tab = Session(adapter_name="any", adapter=adapter, cfg_schema=schema)
+    tab = Session(
+        adapter_name="any", adapter=adapter, cfg=make_cfg(schema, state=state)
+    )
     tab.run.result = run_result
     tab.analysis.result = analyze_result
     state.add_tab(tab_id, tab)
@@ -76,73 +87,102 @@ def test_run_permit_issued_for_active_valid_cfg():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
     guard = GuardService(state)
 
-    permit = guard.acquire_run_permit(tab_id)
+    permit = guard.acquire_run_permit(tab_id, expected_revision=CfgRevision(0))
 
     assert isinstance(permit, RunPermit)
     assert permit.tab_id == tab_id
-    assert permit.raw_cfg == {}
+    assert permit.accepted_cfg.values == {}
     assert permit.request.soc is state.session_env.soc
     assert permit.adapter is state.get_tab(tab_id).adapter
     adapter = cast(MagicMock, permit.adapter)
     adapter.validate_run_request.assert_called_once_with(permit.request, {})
 
 
-def test_run_permit_freezes_displayed_expression_without_live_context() -> None:
+def test_run_permit_freezes_published_expression_and_provenance() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    schema = state.get_tab(tab_id).cfg_schema
-    schema.spec.fields["gain"] = ScalarSpec(label="Gain", type=float)
-    schema.value.fields["gain"] = EvalValue("gain", resolved=0.25)
+    state.session_env.md.update(gain=0.25)
+    cfg = make_cfg(
+        CfgSchema(
+            CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
+            CfgSectionValue(fields={"gain": EvalValue("gain")}),
+        ),
+        state=state,
+    )
+    state.get_tab(tab_id).cfg = cfg
+    before = cfg.observe()
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=before.ref.revision
+    )
+    state.session_env.md.update(gain=0.75)
+    state.version.bump("context")
+    cfg.refresh(before.ref.revision)
 
-    permit = GuardService(state).acquire_run_permit(tab_id)
-    schema.value.fields["gain"] = DirectValue(0.75)
-
-    assert permit.raw_cfg == {"gain": 0.25}
-    md, ml = state.session_env.md, state.session_env.ml
-    assert isinstance(md, MagicMock)
-    assert isinstance(ml, MagicMock)
-    assert md.mock_calls == []
-    assert ml.mock_calls == []
+    assert permit.accepted_cfg.values == {"gain": 0.25}
+    assert permit.accepted_cfg.ref == before.ref
+    assert permit.accepted_cfg.source_basis == before.source_basis
+    assert cfg.accept(cfg.observe().ref.revision).values == {"gain": 0.75}
 
 
-def test_run_permit_does_not_resolve_missing_cached_expression() -> None:
+def test_run_permit_rejects_invalid_expression_without_preflight() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    schema = state.get_tab(tab_id).cfg_schema
-    schema.spec.fields["gain"] = ScalarSpec(label="Gain", type=float)
-    schema.value.fields["gain"] = EvalValue("gain")
+    cfg = make_cfg(
+        CfgSchema(
+            CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
+            CfgSectionValue(fields={"gain": EvalValue("missing_gain")}),
+        ),
+        state=state,
+    )
+    state.get_tab(tab_id).cfg = cfg
+    with pytest.raises(CfgPreconditionError):
+        GuardService(state).acquire_run_permit(
+            tab_id, expected_revision=cfg.observe().ref.revision
+        )
+    cast(
+        MagicMock, state.get_tab(tab_id).adapter
+    ).validate_run_request.assert_not_called()
 
-    with pytest.raises(GuardError, match="unresolved"):
-        GuardService(state).acquire_run_permit(tab_id)
 
-    md, ml = state.session_env.md, state.session_env.ml
-    adapter = state.get_tab(tab_id).adapter
-    assert isinstance(md, MagicMock)
-    assert isinstance(ml, MagicMock)
-    assert isinstance(adapter, MagicMock)
-    assert md.mock_calls == []
-    assert ml.mock_calls == []
-    adapter.validate_run_request.assert_not_called()
-
-
-def test_run_permit_freezes_cached_reference_shape_and_values() -> None:
+def test_run_permit_detaches_reference_shape_and_values() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    schema = state.get_tab(tab_id).cfg_schema
     shape = CfgSectionSpec(
         label="Pulse", fields={"gain": ScalarSpec(label="Gain", type=float)}
     )
-    schema.spec.fields["asset"] = ReferenceSpec(kind="module", allowed=[shape])
     value = CfgSectionValue(fields={"gain": DirectValue(0.25)})
-    schema.value.fields["asset"] = ReferenceValue(
-        "library_pulse", value, resolved_label="Pulse"
+    cfg = make_cfg(
+        CfgSchema(
+            CfgSectionSpec(
+                fields={"asset": ReferenceSpec(kind="module", allowed=[shape])}
+            ),
+            CfgSectionValue(
+                fields={
+                    "asset": ReferenceValue(
+                        "<Custom:Pulse>", value, resolved_label="Pulse"
+                    )
+                }
+            ),
+        ),
+        state=state,
     )
-
-    permit = GuardService(state).acquire_run_permit(tab_id)
-    value.fields["gain"] = DirectValue(0.75)
+    state.get_tab(tab_id).cfg = cfg
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=cfg.observe().ref.revision
+    )
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("asset", "gain"), 0.75),))
+    value.fields["gain"] = DirectValue(9.0)
     shape.fields.clear()
+    assert permit.accepted_cfg.values == {"asset": {"gain": 0.25}}
 
-    assert permit.raw_cfg == {"asset": {"gain": 0.25}}
-    ml = state.session_env.ml
-    assert isinstance(ml, MagicMock)
-    assert ml.mock_calls == []
+
+def test_run_permit_rejects_stale_revision_without_preflight() -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    cfg = state.get_tab(tab_id).cfg
+    old = cfg.observe().ref
+    cfg.refresh(old.revision)
+    with pytest.raises(CfgStaleError):
+        GuardService(state).acquire_run_permit(tab_id, expected_revision=old.revision)
+    cast(
+        MagicMock, state.get_tab(tab_id).adapter
+    ).validate_run_request.assert_not_called()
 
 
 def test_run_permit_detaches_observed_device_settings(monkeypatch) -> None:
@@ -161,7 +201,9 @@ def test_run_permit_detaches_observed_device_settings(monkeypatch) -> None:
     live_read = MagicMock(side_effect=AssertionError("Unexpected hardware read"))
     monkeypatch.setattr(GlobalDeviceManager, "get_all_info", live_read)
 
-    permit = GuardService(state).acquire_run_permit(tab_id)
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=CfgRevision(0)
+    )
     info.value = 0.5
     state.set_device_info("bias", FakeDeviceInfo(address="fake", value=0.75))
 
@@ -193,7 +235,7 @@ def test_run_permit_rejects_live_device_without_observed_settings(status) -> Non
     )
 
     with pytest.raises(GuardError, match="no observed settings"):
-        GuardService(state).acquire_run_permit(tab_id)
+        GuardService(state).acquire_run_permit(tab_id, expected_revision=CfgRevision(0))
     adapter = state.get_tab(tab_id).adapter
     assert isinstance(adapter, MagicMock)
     adapter.validate_run_request.assert_not_called()
@@ -211,7 +253,9 @@ def test_run_permit_excludes_remembered_disconnected_device() -> None:
         )
     )
 
-    permit = GuardService(state).acquire_run_permit(tab_id)
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=CfgRevision(0)
+    )
     assert permit.request.device_snapshot == {}
 
 
@@ -223,7 +267,7 @@ def test_run_permit_translates_adapter_preflight_error() -> None:
     guard = GuardService(state)
 
     with pytest.raises(GuardError, match="Run config invalid: bad preflight") as exc:
-        guard.acquire_run_permit(tab_id)
+        guard.acquire_run_permit(tab_id, expected_revision=CfgRevision(0))
 
     assert exc.value.reason_code == "invalid_cfg"
     assert exc.value.__cause__ is preflight_error
@@ -235,7 +279,7 @@ def test_run_permit_rejected_when_not_active(readiness: ContextReadiness):
     guard = GuardService(state)
 
     with pytest.raises(GuardError, match="active file-backed context") as exc:
-        guard.acquire_run_permit(tab_id)
+        guard.acquire_run_permit(tab_id, expected_revision=CfgRevision(0))
     assert exc.value.reason_code == "no_active_context"
 
 
@@ -262,8 +306,8 @@ def test_run_permit_rejected_on_invalid_cfg():
     adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
     guard = GuardService(state)
 
-    with pytest.raises(GuardError, match="Config invalid"):
-        guard.acquire_run_permit(tab_id)
+    with pytest.raises(CfgPreconditionError, match="valid"):
+        guard.acquire_run_permit(tab_id, expected_revision=CfgRevision(0))
     adapter.validate_run_request.assert_not_called()
 
 
@@ -275,7 +319,7 @@ def test_run_permit_rejected_when_soc_required_but_missing():
     guard = GuardService(state)
 
     with pytest.raises(GuardError, match="soc"):
-        guard.acquire_run_permit(tab_id)
+        guard.acquire_run_permit(tab_id, expected_revision=CfgRevision(0))
     adapter.validate_run_request.assert_not_called()
 
 
@@ -285,7 +329,7 @@ def test_run_permit_issued_without_soc_when_capability_does_not_require():
     )
     guard = GuardService(state)
 
-    permit = guard.acquire_run_permit(tab_id)
+    permit = guard.acquire_run_permit(tab_id, expected_revision=CfgRevision(0))
     assert isinstance(permit, RunPermit)
 
 
@@ -294,7 +338,7 @@ def test_run_permit_rejected_for_unknown_tab():
     guard = GuardService(state)
 
     with pytest.raises(GuardError, match="Unknown tab"):
-        guard.acquire_run_permit("does-not-exist")
+        guard.acquire_run_permit("does-not-exist", expected_revision=CfgRevision(0))
 
 
 # ---------------------------------------------------------------------------

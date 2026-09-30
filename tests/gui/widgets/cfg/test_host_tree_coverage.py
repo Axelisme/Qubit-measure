@@ -10,8 +10,6 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    ReferenceSpec,
-    ReferenceValue,
     ScalarSpec,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -52,15 +50,6 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     from zcu_tools.gui.app.measure.state import TabInteractionState
     from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 
-    # stub _populate_cfg to avoid needing real cfg editor service
-    orig = mod.ExpTabWidget._populate_cfg
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe"
-        self.cfg_form.is_valid = lambda: True
-        self.cfg_form.first_invalid_reason = lambda: None
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
     orig_attach = mod.attach_existing_figure_to_container
     monkeypatch.setattr(
         mod, "attach_existing_figure_to_container", lambda fig, container: MagicMock()
@@ -133,27 +122,21 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         ),
     )
 
+    from qtpy.QtWidgets import QTreeWidget
+    from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
+
+    from tests.gui.app.measure._cfg_fakes import make_cfg
+
+    cfg = make_cfg(schema)
+    ctrl.cfg_resources.lookup.return_value = cfg
     tab = ExpTabWidget("t1", ctrl, caps)
     tab.attach(with_artifacts(snap), MagicMock())
-    # Need to populate a real cfg to verify tree – attach a draft directly to cfg_form
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.cfg import CfgSchema as CS
-
-    ctrl2 = _fake_ctrl()
-    schema2 = CfgSchema(
-        spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
-        value=CfgSectionValue(fields={"reps": DirectValue(5)}),
-    )
-    # cfg_form is already a TreeCfgWidget holder; ensure its root is tree when attached
-    # Re-attach with real draft
-    tab.cfg_form.detach()
-    draft = MeasureCfgBindings(ctrl2).new_draft(schema2)
-    tab.cfg_form.attach(draft)
-    assert isinstance(tab.cfg_form._root_widget, TreeCfgWidget)
-    tab.cfg_form.detach()
-    draft.close()
+    assert isinstance(tab.cfg_form, ResourceCfgFormWidget)
+    tree = tab.cfg_form.findChild(QTreeWidget)
+    assert tree is not None and tree.topLevelItemCount() == 1
+    item = tree.topLevelItem(0)
+    assert item is not None and item.text(0) == "Reps"
     tab.detach()
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
@@ -181,9 +164,7 @@ def test_autofluxdep_default_and_generation_use_sole_tree(qapp):
 
 def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
     """writeback module/waveform Edit dialog CfgFormWidget is sole tree."""
-    from zcu_tools.gui.app.measure.adapter import ModuleWriteback
     from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
     from zcu_tools.gui.cfg import (
         CfgSectionSpec,
         CfgSectionValue,

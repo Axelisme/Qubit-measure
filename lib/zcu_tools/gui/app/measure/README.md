@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-30 — Headless tab cfg ownership seam
+**Last updated:** 2026-09-30 — Tab cfg single-owner cutover
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -306,13 +306,13 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 ## Run / Analyze Workflow
 
 1. A tab is created from a registered experiment adapter.
-2. The tab owns a service-managed cfg editor session backed by `CfgDraft`.
-   Run renders that draft through the sole shared cfg tree (S1); Analysis
+2. The tab owns a persistent `CfgResource`, independent of widget lifetime.
+   Run renders its publications through `ResourceCfgFormWidget`; Analysis
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
-3. `GuardService` validates static preconditions and freezes a permit containing
-   cached resolved cfg and detached State-owned device settings. Missing observed
+3. `GuardService` accepts an exact Valid cfg revision and freezes a permit with
+   `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
    settings for a live device reject the permit without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
 4. The operation policy builds worker thunks with the needed ambient scopes:
@@ -332,10 +332,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 `tab.load_data` installs a canonical result into an existing adapter tab and clears
 stale analysis/writeback state. When the result carries a compatible execution
 snapshot, Load best-effort projects its concrete values into the current tab Config.
-It validates a complete detached candidate, replaces the service-owned editor and
-State Config once, and reports `cfg_backfill=applied|not_applied` to Qt and remote.
-Failed backfill keeps Config and its draft unchanged without undoing the loaded
-result. Fields without a reliable runtime inverse keep the current draft value;
+It validates a complete detached candidate, publishes once on the same cfg resource,
+and reports `cfg_backfill=applied|not_applied` to Qt and remote. Successful backfill
+preserves cfg identity and advances its revision. Failed backfill keeps the previous
+cfg publication without undoing the loaded result. Fields without a reliable runtime inverse keep the current draft value;
 dynamic selectors must match live options and the new complete draft must be valid
 before publication. A failed lookup or malformed option list rejects the entire
 backfill rather than silently skipping that selector. Module/waveform references
@@ -395,11 +395,12 @@ bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
 
-`CfgEditorService` 在 active draft 變更時同步發布完整 `CfgSchema`，composition 將 tab owner
-投影到 `State.cfg_schema` 並更新整份 cfg 的 resource revision。Invalid raw 同樣發布，不依賴
-viewer 是否 attach 或 Qt timer 是否執行。Widget 只輸入與渲染，不重送 schema 到 State。
-Inspect/writeback owner 不寫 tab cfg；prepared replacement 保留原有 owner State swap 邊界。
-Run permit 使用此 snapshot 的 cached resolved 值，不重新解析來源。
+`Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
+CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
+Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
+發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
+`TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
+`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。
 
 CfgEditor在app seam解碼`ValueRef`，並以typed `CfgEdit` batch依序操作binding target。
 Batch維持fail-fast/non-atomic；只有reference shape edit列出前後path set，成功回final net diff，
@@ -426,9 +427,15 @@ factory組成三個窄ports；adapter package不import或forward shared cfg publ
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
-`services.tab_cfg.TabCfgResources` 管理 tab 到 cfg resource 的身份關聯。建立失敗不留下關聯，retire 先撤銷舊 handle，再移除關聯；lookup 直接回傳 resource-bound editing，不轉送命令。此 headless 接縫已有測試，但 production TabService／Qt writer 尚未接入，不能視為完成遷移。
+`services.tab_cfg.TabCfgResources` 管理 tab 到 cfg resource 的身份關聯。TabService 建立及關閉
+資源，lookup 直接回傳 resource-bound editing，不轉送命令。建立失敗不留下關聯，retire
+先撤銷舊 handle，再移除關聯。Widget detach 只停止觀察，不改資源 lifetime。
 
-`MeasureCfgBindings.snapshot` 將 metadata、library 與 options 複製成一次命令使用的固定 view；bare capture 使用同一 metadata，dotted capture 只讀 owner 注入的已發布快取值。`snapshot_from_state`以context、device set及每個已註冊device的版本建立basis，device刪除再建立仍由set版本區分；捕捉值由caller提供已發布快取，不枚舉任意provider或讀硬體。這些接縫已建立，tab resource在production的source/cache owner與writer接線仍未完成。
+`MeasureCfgBindings.snapshot_from_state` 複製 metadata、library 與 options，並記錄 context、
+device set、每個 device 及 value cache 的 source basis。Bare capture 使用同一 metadata。
+Dotted capture 只讀 `ValueSourceBinder` 已發布的 detached cache，不查 live provider 或硬體。
+Source 更新先準備及安裝所有 tab 的新 publication，再通知任何 subscriber。
+來源故障發布 Unavailable，不保留舊 Valid。通知期間拒絕 cfg mutation、acceptance 和 tab lifetime mutation。
 
 `MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
 dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些
@@ -460,8 +467,8 @@ Linked module / waveform reference fields preserve their embedded value snapshot
 when the library key is missing. The field stays library-keyed and invalid so
 re-adding the same key relinks it, while persistence can still serialize the snapshot without consulting
 `ModuleLibrary`. Restored overridden refs whose key is missing can instead
-become custom references; this does not implement the approved override dependency
-semantics (see [Cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)).
+retain their overridden inline input without depending on the old key. Nested linked
+references keep their own dependencies; explicit relink restores this layer's dependency.
 
 Adapter cfg authoring lives in `experiment/v2_gui` as a context-free
 `MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
@@ -471,7 +478,8 @@ The framework protocol does not expose a static spec query. Shared
 `CfgSchemaAssembler` owns only paired-tree mechanics and has no measure domain/context
 knowledge (ADR-0012、ADR-0065).
 
-`CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
+Measure tab 使用 shared `ResourceCfgFormWidget`，只 watch publication 並提交 typed input。
+以下 `CfgFormWidget` binding 路徑供獨立 library／inspect／writeback draft 使用。
 每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
 `default_cfg_renderers()` 為五個 non-section exact field types
 （`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定

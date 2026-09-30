@@ -152,29 +152,6 @@ def test_tab_control_routes_tab_read_model_to_tab_service() -> None:
     ]
 
 
-def test_tab_control_updates_cfg_via_tab_service() -> None:
-    facet, log, _state, _tab, _workspace, _bus = _facet()
-    schema = cast(Any, object())
-
-    facet.update_tab_cfg("tab-1", schema)
-
-    assert log.calls == [
-        call("tab", "update_tab_cfg", "tab-1", schema),
-    ]
-
-
-def test_tab_control_reset_cfg_rebuilds_default_and_commits() -> None:
-    facet, log, _state, tab, _workspace, _bus = _facet()
-
-    assert facet.reset_tab_cfg("tab-1") is tab.default_schema
-
-    assert log.calls == [
-        call("tab", "get_tab_adapter_name", "tab-1"),
-        call("tab", "make_default_cfg", "adapter-a"),
-        call("tab", "update_tab_cfg", "tab-1", tab.default_schema),
-    ]
-
-
 @pytest.mark.parametrize("cleanup_step", ["close_tab", "set_active_tab"])
 def test_open_file_reports_cleanup_failure_without_hiding_load_error(
     cleanup_step: str,
@@ -191,13 +168,3 @@ def test_open_file_reports_cleanup_failure_without_hiding_load_error(
     assert caught.value.reason_code == "cleanup_failed"
     assert "new-tab" in str(caught.value)
     failure.assert_called_once()
-
-
-def test_tab_control_reset_cfg_rejects_running_tab() -> None:
-    facet, log, state, _tab, _workspace, _bus = _facet()
-    state.running_tab_id = "tab-1"
-
-    with pytest.raises(RuntimeError, match="currently running"):
-        facet.reset_tab_cfg("tab-1")
-
-    assert log.calls == []

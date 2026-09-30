@@ -19,7 +19,6 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import DirectValue
-from zcu_tools.gui.cfg.binding import ScalarField
 
 
 @pytest.fixture
@@ -73,27 +72,28 @@ def test_tab_cfg_and_revision_publish_without_viewer_timer(
     tab_id = ctrl.new_tab("fake")
     other_tab = ctrl.new_tab("fake")
     qapp.processEvents()
-    editor_id = ctrl.editor_id_for_owner(tab_id)
-    assert editor_id is not None
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = ctrl.cfg_resources.lookup(tab_id)
     key = f"tab:{tab_id}:cfg"
     other_key = f"tab:{other_tab}:cfg"
     before = ctrl.resources_versions()
 
-    ctrl.cfg_editor_set_field(editor_id, "gain", 0.25)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.25),))
 
     saved = ctrl.get_tab_snapshot(tab_id).cfg_schema
     assert saved.value.fields["gain"] == DirectValue(0.25)
     assert ctrl.resources_versions()[key] == before[key] + 1
     assert ctrl.resources_versions()[other_key] == before[other_key]
 
-    field = ctrl.get_cfg_editor_draft(editor_id).root.fields["gain"]
-    assert isinstance(field, ScalarField)
-    field.set_text("1e")
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), DirectValue(raw="1e")),))
 
     invalid = ctrl.get_tab_snapshot(tab_id).cfg_schema.value.fields["gain"]
     assert isinstance(invalid, DirectValue)
     assert invalid.raw == "1e"
-    assert invalid.error is not None
+    observed_value = cfg.observe().tree.children["gain"].value
+    assert isinstance(observed_value, DirectValue)
+    assert observed_value.error is not None
     assert invalid.value is None
     assert saved.value.fields["gain"] == DirectValue(0.25)
     assert ctrl.resources_versions()[key] == before[key] + 2

@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_resolved_dict
+from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgRevision
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness
 
@@ -48,8 +48,8 @@ class RunPermit:
     tab_id: str
     adapter_name: str
     request: RunRequest
-    raw_cfg: dict[str, object]
     adapter: ExpAdapterProtocol
+    accepted_cfg: AcceptedConfig
 
 
 @dataclass(frozen=True)
@@ -128,14 +128,17 @@ class GuardService:
                 reason_code="no_context",
             )
 
-    def acquire_run_permit(self, tab_id: str) -> RunPermit:
+    def acquire_run_permit(
+        self, tab_id: str, *, expected_revision: CfgRevision
+    ) -> RunPermit:
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
         ctx = self._state.session_env
         # Freeze only observed values. Never query devices during permit issue.
+        accepted = tab.cfg.accept(expected_revision)
         try:
-            raw_cfg = schema_to_resolved_dict(tab.cfg_schema)
+            raw_cfg = accepted.values
             device_snapshot: dict[str, DeviceInfo] = {}
             info_type = TypeAdapter(DeviceInfo)
             for device in self._state.list_devices():
@@ -173,8 +176,8 @@ class GuardService:
             tab_id=tab_id,
             adapter_name=tab.adapter_name,
             request=req,
-            raw_cfg=raw_cfg,
             adapter=tab.adapter,
+            accepted_cfg=accepted,
         )
 
     def acquire_save_permit(self, tab_id: str) -> SavePermit:

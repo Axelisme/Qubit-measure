@@ -107,12 +107,13 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS
 
     assert len(TREE_DEPTH_COLORS) == 5
-    # Tree should have been attached via real CfgDraft (not stubbed)
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+    # The production form renders the caller-owned cfg publication.
+    from qtpy.QtWidgets import QTreeWidget
+    from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
-    assert tab.cfg_form._root_widget is not None
-    assert isinstance(tab.cfg_form._root_widget, TreeCfgWidget)
-    tree = tab.cfg_form._root_widget._tree
+    assert isinstance(tab.cfg_form, ResourceCfgFormWidget)
+    tree = tab.cfg_form.findChild(QTreeWidget)
+    assert tree is not None
     assert tree.isHeaderHidden()
     assert tree.indentation() == 10
     assert tree.font().pixelSize() == 13
@@ -160,7 +161,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert idx_analyze is not None
     idx_writeback = widgets.index(tab.writeback_section)
     assert idx_params < idx_analyze < idx_writeback
-    # Post-Analysis should remain baseline _CollapsibleSection (not ledger)
+    # Post-Analysis should remain baseline CollapsibleSection (not ledger)
     # fake/freq does not have post_analysis, so post widgets should not exist
     assert not hasattr(tab, "post_writeback_widget") or tab._has_post is False
 

@@ -10,8 +10,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     LoadDataRequest,
 )
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.cfg import DirectValue
+from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.session.types import ContextReadiness
 
 from tests.gui.app.measure._reload_fakes import OldAdapter
@@ -94,7 +94,9 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
     assert fx.state.get_tab(tab).run.result == LoadedResult(
         None if backfill == "not_applied" else LoadedCfg()
     )
-    assert fx.state.get_tab(tab).cfg_schema.value.fields["knob"] == DirectValue(knob)
+    assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
+        "knob"
+    ] == DirectValue(knob)
     stale = call(sock, "tab.load_data", {"tab_id": tab, "data_path": path})
     assert stale["error"]["reason"] == "stale_version"
     keys = stale["error"]["data"]["stale"]
@@ -117,7 +119,7 @@ def test_open_file_backfill_failure_retains_loaded_result(app, monkeypatch):
     def reject_replacement(self, *args, **kwargs):
         raise ValueError("cfg cannot be prepared")
 
-    monkeypatch.setattr(CfgEditorService, "prepare_replacement", reject_replacement)
+    monkeypatch.setattr(CfgResource, "replace_inputs", reject_replacement)
     assert call(sock, "context.snapshot")["ok"] is True
     reply = call(
         sock, "tab.open_file", {"adapter_name": "file", "data_path": "saved.h5"}
@@ -127,7 +129,9 @@ def test_open_file_backfill_failure_retains_loaded_result(app, monkeypatch):
     tab = reply["result"]["tab_id"]
     assert fx.state.active_tab_id == tab
     assert fx.state.get_tab(tab).run.result == LoadedResult(LoadedCfg())
-    assert fx.state.get_tab(tab).cfg_schema.value.fields["knob"] == DirectValue(7)
+    assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
+        "knob"
+    ] == DirectValue(7)
 
 
 @pytest.mark.parametrize("has_previous", [False, True])
