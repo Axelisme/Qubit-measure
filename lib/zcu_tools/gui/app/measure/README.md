@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-01, specified cfg Run
+**Last updated:** 2026-10-01, specified cfg Run and startup reservation
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -538,6 +538,10 @@ controlled fields.
 - `FeedbackDockController` owns the docked feedback panel, target-tab
   resolution, and op-count plus agent-presence gate; `MainWindow` keeps the
   public render-view refresh façade.
+- Run reserves the existing tab busy state before cleanup and registration.
+  Active-operation reads project domain-admitted handles. A startup reservation
+  has no domain handle until submission succeeds; failed submission releases busy
+  without publishing one. Reads remain valid during synchronous gate notifications.
 - GUI domain owners project live run/analyze/device handles for `status`, including
   GUI-started work. Shared `OperationHandles` own the wait channel; unknown or
   evicted handles are errors to measure MCP, not finished operations. `wait`

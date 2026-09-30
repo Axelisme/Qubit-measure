@@ -23,6 +23,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgStaleError,
     CfgStatus,
 )
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     GateChangedPayload,
@@ -278,3 +279,58 @@ def test_run_registration_notification_blocks_tab_mutation(
     assert outcomes == ["blocked"]
     assert cfg.observe().ref == expected
     assert cfg.snapshot_inputs() == original
+
+
+@pytest.mark.parametrize("fail_submit", [False, True])
+def test_run_registration_and_failed_submission_allow_operation_reads(
+    application: Fixture, qapp, monkeypatch: pytest.MonkeyPatch, fail_submit: bool
+) -> None:
+    if fail_submit:
+
+        def reject_submission(*_args, **_kwargs) -> None:
+            raise RuntimeError("submission rejected")
+
+        monkeypatch.setattr(BackgroundRunner, "submit", reject_submission)
+    tab_id = application.ctrl.new_tab("fake")
+    ref = application.ctrl.cfg_resources.lookup(tab_id).observe().ref
+    observed: list[tuple[bool, tuple[int, ...], tuple[int, ...]]] = []
+    errors: list[str] = []
+
+    def during_registration(_event: GateChangedPayload) -> None:
+        try:
+            tab_ops = application.ctrl.run_analyze_control.active_tab_operations()
+            all_ops = application.ctrl.operation_control.active_operations()
+            observed.append(
+                (
+                    application.ctrl.get_running_tab_id() == tab_id,
+                    tuple(op.op for op in tab_ops),
+                    tuple(op.op for op in all_ops),
+                )
+            )
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    subscription = application.bus.subscribe(GateChangedPayload, during_registration)
+    try:
+        if fail_submit:
+            with pytest.raises(RuntimeError, match="submission rejected"):
+                application.ctrl.start_run(tab_id, ref)
+            assert application.ctrl.get_running_tab_id() is None
+            assert application.ctrl.operation_control.active_operations() == ()
+        else:
+            token = application.ctrl.start_run(tab_id, ref)
+            assert tuple(
+                op.op for op in application.ctrl.operation_control.active_operations()
+            ) == (token,)
+    finally:
+        subscription.unsubscribe()
+        application.ctrl.cancel_run()
+        deadline = monotonic() + 3.0
+        while (
+            application.ctrl.get_running_tab_id() is not None and monotonic() < deadline
+        ):
+            qapp.processEvents()
+            sleep(0.001)
+        assert application.ctrl.get_running_tab_id() is None
+    assert errors == []
+    assert observed == [(True, (), ())] * (2 if fail_submit else 1)

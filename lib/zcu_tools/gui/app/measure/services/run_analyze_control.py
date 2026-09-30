@@ -74,7 +74,10 @@ class RunAnalyzeControlPort(Protocol):
 
     def has_tab(self, tab_id: str) -> bool: ...
     def get_running_tab_id(self) -> str | None: ...
-    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]: ...
+    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]:
+        """Domain-admitted handles; busy may also include a start reservation."""
+        ...
+
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def start_run(self, tab_id: str, expected: CfgRef) -> int: ...
@@ -140,12 +143,14 @@ class RunAnalyzeControlFacet:
         return self._state.running_tab_id
 
     def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]:
+        """Read admitted handles, including during synchronous startup notifications."""
         operations: list[ActiveTabOperation] = []
         running = self._state.running_tab_id
-        if running is not None:
-            token = self._run.active_token
-            if token is None:
-                raise RuntimeError("running tab has no operation handle")
+        # State also reserves busy during start. Run publishes its domain handle
+        # only after begin succeeds; registration and failed-submit cleanup can
+        # synchronously notify before that transfer. Reads omit the reservation.
+        token = self._run.active_token
+        if running is not None and token is not None:
             operations.append(ActiveTabOperation(token, running, "run"))
         operations.extend(
             ActiveTabOperation(token, tab, "analyze")
