@@ -79,18 +79,30 @@ class NotebookAdapter(Generic[CoreT]):
         retained_options = deepcopy(options)
         working_source = RunRecord(cfg=selected.cfg, result=selected.result)
         plots = Plots(self._host)
-        result = self._core.analyze(
-            working_source,
-            deepcopy(retained_options),
-            plots=plots,
-        )
-        figures = plots.finish()
-        record = AnalysisRecord(
-            source=selected,
-            options=retained_options,
-            result=result,
-            figures=figures,
-        )
+        try:
+            result = self._core.analyze(
+                working_source,
+                deepcopy(retained_options),
+                plots=plots,
+            )
+            figures = plots.finish()
+            record = AnalysisRecord(
+                source=selected,
+                options=retained_options,
+                result=result,
+                figures=figures,
+            )
+        except BaseException as error:
+            try:
+                try:
+                    plots.finish(present=False)
+                finally:
+                    plots.release()
+            except BaseException as cleanup_error:  # noqa: BLE001 - preserve producer and cleanup failures
+                raise BaseExceptionGroup(
+                    "Analysis and plot cleanup failed", [error, cleanup_error]
+                ) from None
+            raise
         self._analysis = record
         self.analysis_presentation = plots
         return record
