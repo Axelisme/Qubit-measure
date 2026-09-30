@@ -139,8 +139,8 @@ class AbsExperiment(Generic[T_Result, T_Config]):
 class PersistableExperiment(Generic[T_Result, T_Config]):
     """Stateless canonical save/load via ``AXES_SPEC``.
 
-    Callers choose the Result and destination explicitly. Loading returns a new
-    Result without changing this instance. Callers also own path reservation;
+    Callers choose the RunRecord and destination explicitly. Loading returns a
+    new RunRecord without changing this instance. Callers also own path reservation;
     an existing destination is rejected rather than overwritten.
     """
 
@@ -225,9 +225,9 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         spec = self._spec()
         result = source.result
 
-        cfg = getattr(result, "cfg_snapshot")
+        cfg = source.cfg
         if cfg is None:
-            raise ValueError("cfg_snapshot is None")
+            raise ValueError("RunRecord.cfg is None; cannot save without configuration")
         comment = make_comment(cfg, comment)
 
         axes = [
@@ -275,8 +275,7 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
             for i, ax in enumerate(spec.axes)
         }
         kwargs[spec.z.field_name] = self._cast_loaded_z(ld.z, spec)
-        kwargs["cfg_snapshot"] = cfg_snapshot
-        return spec.result_type(**kwargs)
+        return RunRecord(cfg=cfg_snapshot, result=spec.result_type(**kwargs))
 
     def _cast_loaded_z(
         self,
