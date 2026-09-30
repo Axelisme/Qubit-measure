@@ -22,12 +22,13 @@ from .base import (
 )
 from .cfg_model import ExpCfgModel
 from .interfaces import RecordExperiment, SynchronousExperiment
-from .records import RunRecord
+from .records import AnalysisRecord, RunRecord
 
 __all__ = [
     "config",
     "ExpCfgModel",
     "RunRecord",
+    "AnalysisRecord",
     "RecordExperiment",
     "SynchronousExperiment",
     "AbsExperiment",

@@ -26,6 +26,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import (
@@ -213,11 +214,12 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
     def analyze(
         self,
-        result: T1Result,
+        source: RunRecord[T1Cfg, T1Result],
         options: T1AnalyzeOptions,
         *,
         plots: Plots,
     ) -> T1Analysis:
+        result = source.result
         xs = result.times[options.skip :]
         signals = result.signals[options.skip :]
 
