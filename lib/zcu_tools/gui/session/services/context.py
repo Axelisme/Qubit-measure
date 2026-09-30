@@ -101,16 +101,12 @@ def _coerce_scalar(text: str, current: Any) -> Any:
 
 def _validate_md_key(key: object) -> None:
     """Validate a user-facing MetaDict key before any content mutation."""
-    if not isinstance(key, str):
-        raise FailedPreconditionError(
-            f"MetaDict keys must be str, got {type(key).__name__}"
-        )
-    if not key.strip():
-        raise FailedPreconditionError("MetaDict key must not be empty.")
     try:
-        MetaDict.validate_data_key(key)
+        validated = MetaDict.validate_data_key(key)
     except (AttributeError, TypeError) as exc:
         raise FailedPreconditionError(str(exc)) from exc
+    if not validated.strip():
+        raise FailedPreconditionError("MetaDict key must not be empty.")
 
 
 class ContextService:
