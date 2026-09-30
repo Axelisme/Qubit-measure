@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
+    FluxDepAnalyzeOptions,
     FluxDepCfg,
     FluxDepExp,
     FluxDepResult,
@@ -177,8 +178,27 @@ class OneToneFluxDepAdapter(
         *,
         plots: Plots,
     ) -> PluginDefinition[Any, Any]:
+        def build_result(_inputs, state, output: Plots) -> FluxPickResult:
+            core_result = self.exp_cls().analyze(
+                req.run_result,
+                FluxDepAnalyzeOptions(
+                    flux_half=state.flux_half,
+                    flux_int=state.flux_int,
+                    conjugate=state.conjugate,
+                    magnitude_only=state.magnitude_only,
+                ),
+                plots=output,
+            )
+            return FluxPickResult(
+                flx_half=core_result.flux_half,
+                flx_int=core_result.flux_int,
+                flx_period=core_result.flux_period,
+            )
+
         # One-tone resonator spectra have uninformative phase.
-        return make_flux_pick_plugin(req, force_magnitude=True, plots=plots)
+        return make_flux_pick_plugin(
+            req, force_magnitude=True, plots=plots, result_builder=build_result
+        )
 
     def make_interactive_frontend(
         self,
@@ -223,7 +243,7 @@ class OneToneFluxDepAdapter(
             raise RuntimeError("FluxDep dev section must lower to a dict")
         # dev_raw = {"flux_dev": "flux_yoko", ...}
         # convert to make_cfg patch format: {"flux_yoko": {"label": "flux_dev"}}
-        dev_patch: dict[str, dict] = {}
+        dev_patch: dict[str, dict[str, str]] = {}
         for label_key, device_name in dev_raw.items():
             if not isinstance(device_name, str) or not device_name:
                 raise RuntimeError(

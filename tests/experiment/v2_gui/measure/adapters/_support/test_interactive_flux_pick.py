@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
     FluxPickPlugin,
     make_flux_pick_plugin,
+    render_flux_pick,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
     OneToneFluxDepAdapter,
@@ -43,7 +44,9 @@ def _request(md: MetaDict | None = None):
 
 def test_plugin_typed_actions_and_commands_share_committed_state():
     plots = Plots(NonPresentingHost())
-    plugin = make_flux_pick_plugin(_request(), force_magnitude=True, plots=plots)
+    plugin = make_flux_pick_plugin(
+        _request(), force_magnitude=True, plots=plots, result_builder=render_flux_pick
+    )
     session = plugin.open(ManualOwnerScheduler())
     start = session.snapshot()
     assert start.magnitude_only is True
@@ -84,7 +87,9 @@ def test_equal_seed_cannot_finish_until_a_valid_line_is_committed() -> None:
     md = MetaDict()
     md.flx_half = md.flx_int = 0.0
     plots = Plots(NonPresentingHost())
-    plugin = make_flux_pick_plugin(_request(md), force_magnitude=True, plots=plots)
+    plugin = make_flux_pick_plugin(
+        _request(md), force_magnitude=True, plots=plots, result_builder=render_flux_pick
+    )
     session = plugin.open(ManualOwnerScheduler())
     with pytest.raises(FailedPreconditionError, match="separat"):
         plugin.finish(session)

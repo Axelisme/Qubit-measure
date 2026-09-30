@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-09-30 — 一般 T1 與 singleshot GE explicit core
+**Last updated:** 2026-09-30 — T1／GE／OneTone FluxDep explicit core
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -8,13 +8,15 @@
 
 ---
 
-## 一般 T1 與 singleshot GE 的核心入口
+## T1、singleshot GE 與 OneTone FluxDep 的核心入口
 
 `twotone.time_domain.T1Exp` 使用無跨次狀態的 `run(config, *, context)` 和 `analyze(result, options, *, plots)`。`T1Cfg.uniform` 隨 cfg snapshot 保存；`T1AnalyzeOptions` 明確提供 skip 與 dual_exp，`T1Analysis` 只含數值。Run 建立具名 measurement liveplot，分析建立 fit 圖；caller 負責操作結束後 finish 及釋放呈現，不以新操作關閉舊圖。
 
 `singleshot.ge.GE_Exp` 使用同一個顯式 run／analyze 邊界；`post_analyze(result, primary, options, *, plots)` 使用已取得的 FIT 校準，不重新擬合。FIT 與 post 各自向本次 `Plots` 發布 `fit`／`post` 圖，回傳的 analysis 只含數值。Notebook 便利入口 `zcu_tools.notebook.experiments.GEExp` 管理成功操作的來源、選項及圖，不由核心持有上次操作狀態。
 
-一般 T1 與 GE 的 Notebook 入口都在 `zcu_tools.notebook.experiments`，不由核心 namespace 轉接。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用已遷移的 T1／GE。T1WithTone／ScanT1WithTone 不因同檔案而視為已遷移。
+`onetone.flux_dep.FluxDepExp` 用 explicit context 執行同步 run。`measurement` 使用共用 2D 熱圖與掃描線 handle，也能繪製反向通量掃描。`analyze(result, FluxDepAnalyzeOptions, *, plots)` 建立具名 `pick` Figure，回傳只有 half/int/period 的數值。核心不建立 widget，也不保留上次 Result。Canonical 保存使用 cfg snapshot 與量測軸。Notebook 和 GUI 各自控制互動；GUI preview 不作結果圖。
+
+已遷移的 T1、GE 與 OneTone FluxDep 的 Notebook 入口都在 `zcu_tools.notebook.experiments`，不由核心 namespace 轉接。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用已遷移的三個入口。T1WithTone／ScanT1WithTone 不因同檔案而視為已遷移。
 
 ## 目錄佈局
 

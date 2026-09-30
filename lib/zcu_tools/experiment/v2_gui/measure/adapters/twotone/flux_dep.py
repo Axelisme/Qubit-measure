@@ -22,6 +22,7 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend im
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
     make_flux_pick_plugin,
+    render_flux_pick,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
@@ -153,7 +154,12 @@ class FluxDepAdapter(
         self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams], *, plots: Plots
     ) -> PluginDefinition[Any, Any]:
         # Two-tone spectra may carry useful phase information.
-        return make_flux_pick_plugin(req, force_magnitude=False, plots=plots)
+        return make_flux_pick_plugin(
+            req,
+            force_magnitude=False,
+            plots=plots,
+            result_builder=render_flux_pick,
+        )
 
     def make_interactive_frontend(
         self,
@@ -196,7 +202,7 @@ class FluxDepAdapter(
         dev_raw = cfg_raw.pop("dev")
         if not isinstance(dev_raw, dict):
             raise RuntimeError("FluxDep dev section must lower to a dict")
-        dev_patch: dict[str, dict] = {}
+        dev_patch: dict[str, dict[str, str]] = {}
         for label_key, device_name in dev_raw.items():
             if not isinstance(device_name, str) or not device_name:
                 raise RuntimeError(

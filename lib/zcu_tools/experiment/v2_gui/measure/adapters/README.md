@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-30 — 顯式 Plots 與 T1／GE 遷移
+**Last updated:** 2026-09-30 — 顯式 Plots 與 T1／GE／OneTone FluxDep 遷移
 
 # measure experiment adapters
 
@@ -29,9 +29,9 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 
 已遷移adapter的`run(req, raw_cfg, *, plots)`使用Guard凍結的resolved cfg，
 `analyze(req, *, plots)`將圖寫入本次具名Plots，不把Figure塞入數值結果。
-T1 與 singleshot GE 已將 GUI 呼叫接到 Notebook 共用的無跨次狀態 core。
+T1、singleshot GE 與 OneTone FluxDep 已將 GUI 呼叫接到 Notebook 共用的無跨次狀態 core。
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
-其餘 adapter 逐項遷移。舊簽名在過渡期可能報錯，framework 不提供 pyplot 或簽名 fallback。
+OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫核心，取得數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone 仍使用原來的終止 renderer，尚未遷移其核心。其餘 adapter 逐項遷移。舊簽名在過渡期可能報錯，framework 不提供 pyplot 或簽名 fallback。
 `RunRequest`只提供SoC handles與detached device snapshot；Base assembler
 以此snapshot和`ml=None`建立experiment cfg。自訂builder若委派Base，
 須宣告 `ExpCfg_cls`；domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。

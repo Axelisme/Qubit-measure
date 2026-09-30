@@ -21,6 +21,7 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend im
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
     make_flux_pick_plugin,
+    render_flux_pick,
 )
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
@@ -131,6 +132,7 @@ def _start(fx, *, background=None):
         ),
         force_magnitude=True,
         plots=plots,
+        result_builder=render_flux_pick,
     )
     plugin.bind_background(background or fx.ctrl.run_background)
     # Set up a real AnalyzeService operation; RPC interactions below always go

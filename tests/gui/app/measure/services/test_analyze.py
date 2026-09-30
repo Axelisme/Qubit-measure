@@ -18,13 +18,29 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.experiment.v2.onetone.flux_dep import (
+    FluxDepAnalysis,
+    FluxDepAnalyzeOptions,
+    FluxDepExp,
+    FluxDepResult,
+)
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Result
+from zcu_tools.experiment.v2_gui.measure.adapters._support import (
+    FluxPickParams,
+    FluxPickResult,
+)
+from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
+    FluxPickPlugin,
+)
+from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
+    OneToneFluxDepAdapter,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain.t1 import (
     T1Adapter,
     T1AnalyzeParams,
     T1AnalyzeResult,
 )
-from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, ContextReadiness
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactKey,
     ArtifactKind,
@@ -110,11 +126,12 @@ def _make_service(
     *,
     fail_submit: bool = False,
     handles: OperationHandles | None = None,
+    writeback: MagicMock | None = None,
 ) -> tuple[AnalyzeService, _FakeBg]:
     bg = _FakeBg(fail_submit=fail_submit)
     handles = handles or OperationHandles()
     progress = ProgressService(DirectProgressTransport())
-    writeback = MagicMock()
+    writeback = writeback if writeback is not None else MagicMock()
     writeback.create_draft.return_value = None
     runner = OperationRunner(MagicMock(), handles, progress, bg, bus)  # type: ignore[arg-type]
     svc = AnalyzeService(state, runner, bus, writeback, handles)
@@ -248,6 +265,174 @@ def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(qapp) -> 
     plots["fit"].savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG")
     plots.release()
+
+
+def _start_onetone_plugin(
+    state: State,
+    source: FluxDepResult,
+    plots: Plots,
+    handles: OperationHandles,
+    *,
+    writeback: MagicMock | None = None,
+) -> tuple[AnalyzeService, FluxPickPlugin, int]:
+    adapter = state.get_tab("tab1").adapter
+    assert isinstance(adapter, OneToneFluxDepAdapter)
+    ctx = state.session_env
+    plugin = adapter.make_interactive_plugin(
+        AnalyzeRequest(source, FluxPickParams(), ctx.md, ctx.ml, ctx.predictor),
+        plots=plots,
+    )
+    service, _bg = _make_service(
+        state, EventBus(), handles=handles, writeback=writeback
+    )
+    token = service.start_plugin(
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance=FluxPickParams(),
+        plots=plots,
+    )
+    return service, plugin, token
+
+
+def test_onetone_gui_done_uses_core_result_and_retains_named_pick(qapp) -> None:
+    state = _make_state()
+    tab = state.get_tab("tab1")
+    tab.adapter = OneToneFluxDepAdapter()
+    values = np.linspace(-0.5, 0.5, 9)
+    freqs = np.linspace(4.8, 5.4, 7)
+    signals = np.asarray(
+        np.sin(values[:, None] * 7 + freqs[None, :] * 9)
+        + 1j * np.cos(values[:, None] * 3 - freqs[None, :] * 7),
+        dtype=np.complex128,
+    )
+    source = FluxDepResult(values, freqs, signals)
+    state.update_tab_result("tab1", source)
+    ctx = state.session_env
+    ctx.md.flx_half = -0.2
+    ctx.md.flx_int = 0.3
+    plots = _plots()
+    handles = OperationHandles()
+    writeback = MagicMock()
+    service, plugin, token = _start_onetone_plugin(
+        state, source, plots, handles, writeback=writeback
+    )
+    active = service.get_interactive("tab1")
+    assert active is not None
+    assert tuple(plots) == ()
+    plugin.execute_command(active.session, "swap_lines", {})
+    committed = active.session.snapshot()
+    assert service.finish_plugin("tab1") is True
+    assert service.get_interactive("tab1") is None
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+    pane = state.get_tab("tab1").analysis
+    assert isinstance(pane.result, FluxPickResult)
+    assert pane.result.flx_half == committed.flux_half
+    assert pane.result.flx_int == committed.flux_int
+    assert pane.result.flx_period == pytest.approx(1.0)
+    writeback_items = writeback.create_draft.call_args.args[0]
+    assert {item.target_name: item.proposed_value for item in writeback_items} == {
+        "flx_half": committed.flux_half,
+        "flx_int": committed.flux_int,
+        "flx_period": pane.result.flx_period,
+    }
+    assert pane.plots is plots
+    assert tuple(plots) == ("pick",)
+    np.testing.assert_allclose(
+        np.asarray(plots["pick"].axes[0].lines[0].get_xdata(), dtype=np.float64),
+        [committed.flux_half],
+    )
+    image = [
+        item
+        for item in state.get_artifact_snapshots("tab1")
+        if item.key == ArtifactKey(ArtifactKind.ANALYSIS, "pick")
+    ]
+    assert len(image) == 1 and image[0].is_saveable
+    assert image[0].status is SaveStatus.NOT_SAVED
+    plots.release()
+    output = BytesIO()
+    plots["pick"].savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+
+
+def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None:
+    state = _make_state()
+    tab = state.get_tab("tab1")
+    tab.adapter = OneToneFluxDepAdapter()
+    previous = object()
+    previous_plots = _plots()
+    old_figure, _ = previous_plots.subplots("old")
+    previous_plots.finish()
+    values = np.linspace(-0.5, 0.5, 9)
+    freqs = np.linspace(4.8, 5.4, 7)
+    source = FluxDepResult(values, freqs, np.ones((9, 7), dtype=np.complex128))
+    state.update_tab_result("tab1", source)
+    state.update_tab_analyze("tab1", previous, previous_plots)
+    plots = _plots()
+    handles = OperationHandles()
+    service, _plugin, token = _start_onetone_plugin(state, source, plots, handles)
+    assert service.cancel_interactive("tab1") is True
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "cancelled"
+    assert service.get_interactive("tab1") is None
+    assert state.get_tab("tab1").analysis.result is previous
+    assert state.get_tab("tab1").analysis.plots is previous_plots
+    assert tuple(plots) == ()
+    output = BytesIO()
+    old_figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+    previous_plots.release()
+
+
+def test_onetone_gui_failed_core_analysis_settles_without_replacing_old_pane(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _make_state()
+    tab = state.get_tab("tab1")
+    tab.adapter = OneToneFluxDepAdapter()
+    source = FluxDepResult(
+        np.linspace(-0.5, 0.5, 9),
+        np.linspace(4.8, 5.4, 7),
+        np.ones((9, 7), dtype=np.complex128),
+    )
+    state.update_tab_result("tab1", source)
+    previous = object()
+    previous_plots = _plots()
+    old_figure, _ = previous_plots.subplots("old")
+    previous_plots.finish()
+    state.update_tab_analyze("tab1", previous, previous_plots)
+    ctx = state.session_env
+    ctx.md.flx_half = -0.2
+    ctx.md.flx_int = 0.3
+    plots = _plots()
+
+    def fail_core(
+        self: FluxDepExp,
+        result: FluxDepResult,
+        options: FluxDepAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> FluxDepAnalysis:
+        del self, plots
+        assert result is source
+        assert options.flux_half == pytest.approx(-0.2)
+        raise RuntimeError("core analysis failed")
+
+    monkeypatch.setattr(FluxDepExp, "analyze", fail_core)
+    handles = OperationHandles()
+    service, _plugin, token = _start_onetone_plugin(state, source, plots, handles)
+    assert service.finish_plugin("tab1") is True
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert service.get_interactive("tab1") is None
+    assert state.get_tab("tab1").analysis.result is previous
+    assert state.get_tab("tab1").analysis.plots is previous_plots
+    assert tuple(plots) == ()
+    image = BytesIO()
+    old_figure.savefig(image, format="png")
+    assert image.getvalue().startswith(b"\x89PNG")
+    previous_plots.release()
 
 
 def test_start_analyze_rejects_busy_tab(qapp):

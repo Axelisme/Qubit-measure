@@ -23,6 +23,7 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend im
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
     make_flux_pick_plugin,
+    render_flux_pick,
 )
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -56,7 +57,9 @@ def _frontend(qapp):
         predictor=None,
     )
     plots = Plots(NonPresentingHost())
-    plugin = make_flux_pick_plugin(req, force_magnitude=True, plots=plots)
+    plugin = make_flux_pick_plugin(
+        req, force_magnitude=True, plots=plots, result_builder=render_flux_pick
+    )
     session = plugin.open(ManualOwnerScheduler())
     env = _DeferredEnv()
     plugin.bind_background(env.run_background)

@@ -45,6 +45,30 @@ class FluxPickActions:
     apply_alignment: Action[FluxPickState, tuple[float, float]]
 
 
+def render_flux_pick(
+    inputs: FluxPickInputs, state: FluxPickState, plots: Plots
+) -> FluxPickResult:
+    """Render the unchanged TwoTone terminal pick until its core is migrated."""
+    figure = Figure(figsize=(8, 5))
+    FigureCanvasAgg(figure)
+    picker = TwoLinePicker(
+        figure,
+        inputs.signals,
+        inputs.dev_values,
+        inputs.freqs,
+        flux_half=state.flux_half,
+        flux_int=state.flux_int,
+        force_magnitude=state.magnitude_only,
+    )
+    picker.show_state(state)
+    plots.adopt("pick", figure)
+    return FluxPickResult(
+        flx_half=state.flux_half,
+        flx_int=state.flux_int,
+        flx_period=2 * abs(state.flux_int - state.flux_half),
+    )
+
+
 class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
     """Captured numeric inputs and typed actions stay with this one operation."""
 
@@ -58,29 +82,17 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
     )
 
     def __init__(
-        self, inputs: FluxPickInputs, seed: FluxPickState, *, plots: Plots
+        self,
+        inputs: FluxPickInputs,
+        seed: FluxPickState,
+        *,
+        plots: Plots,
+        result_builder: Callable[
+            [FluxPickInputs, FluxPickState, Plots], FluxPickResult
+        ],
     ) -> None:
         def build_result(state: FluxPickState) -> FluxPickResult:
-            # The GUI's pointer preview is disposable. Done (GUI or remote)
-            # builds its own native figure from the committed numeric snapshot.
-            figure = Figure(figsize=(8, 5))
-            FigureCanvasAgg(figure)
-            picker = TwoLinePicker(
-                figure,
-                inputs.signals,
-                inputs.dev_values,
-                inputs.freqs,
-                flux_half=state.flux_half,
-                flux_int=state.flux_int,
-                force_magnitude=state.magnitude_only,
-            )
-            picker.show_state(state)
-            plots.adopt("pick", figure)
-            return FluxPickResult(
-                flx_half=state.flux_half,
-                flx_int=state.flux_int,
-                flx_period=2 * abs(state.flux_int - state.flux_half),
-            )
+            return result_builder(inputs, state, plots)
 
         actions = FluxPickActions(
             move=Action(lambda state, pair: _move(state, pair, inputs.min_distance)),
@@ -261,7 +273,11 @@ def _apply_alignment(
 
 
 def make_flux_pick_plugin(
-    req: AnalyzeRequest[Any, Any], *, force_magnitude: bool, plots: Plots
+    req: AnalyzeRequest[Any, Any],
+    *,
+    force_magnitude: bool,
+    plots: Plots,
+    result_builder: Callable[[FluxPickInputs, FluxPickState, Plots], FluxPickResult],
 ) -> FluxPickPlugin:
     """Capture a read-only spectrum, fold the two calibrated seed positions."""
     result = req.run_result
@@ -273,4 +289,5 @@ def make_flux_pick_plugin(
         inputs,
         FluxPickState(flux_half=half, flux_int=integer, magnitude_only=force_magnitude),
         plots=plots,
+        result_builder=result_builder,
     )
