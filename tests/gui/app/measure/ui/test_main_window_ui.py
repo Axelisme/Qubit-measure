@@ -23,11 +23,15 @@ from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ScalarSpec,
+    SweepSpec,
+    SweepValue,
 )
 from zcu_tools.gui.cfg.resource import (
     AcceptedConfig,
@@ -2389,7 +2393,9 @@ class RunFormFixture:
 
 
 @pytest.fixture
-def run_form(qapp: QApplication) -> Iterator[RunFormFixture]:
+def run_form(
+    qapp: QApplication, request: pytest.FixtureRequest
+) -> Iterator[RunFormFixture]:
     ctrl = _apply_window_defaults(_mock_ctrl())
     ctrl.bus = EventBus()
     snapshot = _snapshot(
@@ -2415,6 +2421,25 @@ def run_form(qapp: QApplication) -> Iterator[RunFormFixture]:
         CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
         CfgSectionValue({"value": DirectValue(2.0)}),
     )
+    range_mode = getattr(request, "param", None)
+    if range_mode is not None:
+        centered = range_mode == "center-span"
+        schema = CfgSchema(
+            CfgSectionSpec(
+                fields={
+                    "value": ScalarSpec("Value", float),
+                    "range": CenteredSweepSpec() if centered else SweepSpec(),
+                }
+            ),
+            CfgSectionValue(
+                {
+                    "value": DirectValue(2.0),
+                    "range": CenteredSweepValue(1.0, 2.0, 3)
+                    if centered
+                    else SweepValue(0.0, 2.0, 3),
+                }
+            ),
+        )
     owner = CfgResource(
         lambda: schema,
         resolution=resolution,
@@ -2471,6 +2496,32 @@ def test_run_submits_local_input_and_uses_returned_ref(
     assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
     assert ref.revision == base.revision + 1
     assert accepted.values == {"value": 3.5}
+    assert not fx.tab.cfg_form.has_pending()
+
+
+@pytest.mark.parametrize("run_form", ["endpoints", "center-span"], indirect=True)
+def test_run_uses_the_last_pending_sampling_operation(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    widget = fx.tab.cfg_form.findChild(QWidget, "cfgInput:range")
+    assert widget is not None
+    points = widget.findChild(QLineEdit, "expts")
+    step = widget.findChild(QLineEdit, "step")
+    assert points is not None and step is not None
+    for line, text in ((points, "9"), (step, "0.5"), (points, "7")):
+        line.setFocus()
+        line.selectAll()
+        for char in text:
+            for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                QApplication.sendEvent(
+                    line, QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char)
+                )
+    fx.tab.run_btn.click()
+    assert len(fx.runs) == 1
+    ref, accepted = fx.runs[0]
+    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
+    assert accepted.values == {"value": 2.0, "range": (0, 2, 7)}
     assert not fx.tab.cfg_form.has_pending()
 
 

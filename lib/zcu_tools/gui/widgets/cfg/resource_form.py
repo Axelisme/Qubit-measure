@@ -134,6 +134,7 @@ class ResourceCfgFormWidget(QWidget):
         self._text_input_enhancer = text_input_enhancer
         self._rows: dict[CfgPath, QTreeWidgetItem] = {}
         self._inputs: dict[CfgPath, InputWidget] = {}
+        self._rendered_nodes: dict[CfgPath, CfgNodeObservation] = {}
         self._signature: tuple[tuple[CfgPath, CfgPath | None, object], ...] = ()
         self._expanded: dict[CfgPath, bool] = {}
 
@@ -370,6 +371,7 @@ class ResourceCfgFormWidget(QWidget):
             widget.setParent(None)
             widget.deleteLater()
         self._inputs.clear()
+        self._rendered_nodes.clear()
         self._rows.clear()
         self._tree.clear()
 
@@ -412,6 +414,10 @@ class ResourceCfgFormWidget(QWidget):
         if isinstance(spec, ScalarSpec):
             if not isinstance(value, (DirectValue, EvalValue)):
                 raise TypeError(f"Scalar input at {path!r} has no scalar value")
+            self._rendered_nodes[path] = node
+            immediate = (
+                node.options is not None or spec.type is bool or self._is_selector(path)
+            )
             return ScalarInputWidget(
                 spec,
                 value,
@@ -420,9 +426,7 @@ class ResourceCfgFormWidget(QWidget):
                     path,
                     selected,
                     generation,
-                    immediate=node.options is not None
-                    or spec.type is bool
-                    or self._is_selector(path),
+                    immediate=immediate,
                 ),
                 text_input_enhancer=self._text_input_enhancer,
             )
@@ -502,13 +506,19 @@ class ResourceCfgFormWidget(QWidget):
             return
         if self._pending_base is None:
             self._pending_base = observation.ref
+        # The owner applies edits in order, so the last sampling operation must win.
+        self._pending.pop(path, None)
         self._pending[path] = value
         widget = self._inputs.get(path)
         if isinstance(widget, ScalarInputWidget):
-            node = observation.tree
-            for key in path:
-                node = node.children[key]
-            widget.display(value, options=node.options)
+            widget.display(value, options=self._rendered_nodes[path].options)
+        else:
+            range_widget = self._inputs.get(path[:-1])
+            key = path[-1]
+            if isinstance(range_widget, SweepInputWidget) and key in ("start", "stop"):
+                range_widget.display_edge(key, value)
+            elif isinstance(range_widget, CenteredSweepInputWidget) and key == "center":
+                range_widget.display_center(value)
         self._update_pending_message()
         self.validity_changed.emit(self.is_valid())
 
@@ -561,6 +571,7 @@ class ResourceCfgFormWidget(QWidget):
             self._color_item(self._rows[path], node)
             widget = self._inputs.get(path)
             if isinstance(widget, ScalarInputWidget):
+                self._rendered_nodes[path] = node
                 if not isinstance(node.value, (DirectValue, EvalValue)):
                     raise TypeError(f"Scalar input at {path!r} has no scalar value")
                 widget.display(node.value, options=node.options)

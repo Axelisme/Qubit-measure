@@ -3,13 +3,14 @@
 from collections.abc import Callable, Iterator, Sequence
 
 import pytest
-from qtpy.QtCore import QEvent, Qt
-from qtpy.QtGui import QKeyEvent
+from qtpy.QtCore import QEvent, Qt, QTimer
+from qtpy.QtGui import QContextMenuEvent, QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QTreeWidget,
     QWidget,
@@ -24,6 +25,7 @@ from zcu_tools.gui.cfg import (
     ChoiceBinding,
     ChoiceSectionSpec,
     DirectValue,
+    EvalValue,
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
@@ -122,6 +124,40 @@ def type_text(line: QLineEdit, text: str) -> None:
                 line,
                 QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char),
             )
+
+
+def choose_input_mode(line: QLineEdit, action_text: str) -> None:
+    chosen: list[str] = []
+
+    def choose() -> None:
+        menu = QApplication.activePopupWidget()
+        if not isinstance(menu, QMenu):
+            return
+        action = next(
+            (item for item in menu.actions() if item.text() == action_text), None
+        )
+        if action is None:
+            menu.close()
+            return
+        menu.setActiveAction(action)
+        chosen.append(action.text())
+        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            QApplication.sendEvent(
+                menu,
+                QKeyEvent(
+                    event_type, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier
+                ),
+            )
+
+    QTimer.singleShot(0, choose)
+    point = line.rect().center()
+    QApplication.sendEvent(
+        line,
+        QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse, point, line.mapToGlobal(point)
+        ),
+    )
+    assert chosen == [action_text]
 
 
 def test_scalar_input_submits_one_batch(form: ResourceCfgFormWidget) -> None:
@@ -324,6 +360,73 @@ def test_range_input_submits_subpath_to_owner(
     observed = owner.observe()
     assert observed.ref.revision == 1
     assert owner.accept(observed.ref.revision).values == {"range": (0, 2, 5)}
+
+
+@pytest.mark.parametrize("edge", ["start", "stop", "center"])
+def test_range_local_mode_changes_reach_the_nested_scalar(
+    form: ResourceCfgFormWidget, edge: str
+) -> None:
+    centered = edge == "center"
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    value = CenteredSweepValue(1.0, 2.0, 3) if centered else SweepValue(0.0, 2.0, 3)
+    owner = resource(
+        CfgSchema(
+            CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
+        )
+    )
+    form.attach(owner)
+    widget = form.findChild(QWidget, "cfgInput:range")
+    assert widget is not None
+    scalar = widget.findChild(ScalarInputWidget, edge)
+    assert scalar is not None
+    line = scalar.findChild(QLineEdit)
+    assert line is not None
+    choose_input_mode(line, "Use expression")
+    line = scalar.findChild(QLineEdit)
+    assert line is not None
+    type_text(line, "1 + 2")
+    assert owner.observe().ref.revision == 0
+    form.submit_pending()
+    authored = owner.observe().tree.children["range"].value
+    assert isinstance(authored, (SweepValue, CenteredSweepValue))
+    assert getattr(authored, edge) == EvalValue("1 + 2", resolved=0.0)
+
+    scalar = widget.findChild(ScalarInputWidget, edge)
+    assert scalar is not None
+    line = scalar.findChild(QLineEdit)
+    assert line is not None
+    choose_input_mode(line, "Use direct value")
+    line = scalar.findChild(QLineEdit)
+    assert line is not None
+    type_text(line, "1.5")
+    form.submit_pending()
+    authored = owner.observe().tree.children["range"].value
+    assert isinstance(authored, (SweepValue, CenteredSweepValue))
+    assert getattr(authored, edge) == DirectValue(1.5, raw="1.5")
+
+
+@pytest.mark.parametrize("centered", [False, True], ids=["endpoints", "center-span"])
+def test_pending_sampling_uses_the_last_operation(
+    form: ResourceCfgFormWidget, centered: bool
+) -> None:
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    value = CenteredSweepValue(1.0, 2.0, 3) if centered else SweepValue(0.0, 2.0, 3)
+    owner = resource(
+        CfgSchema(
+            CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
+        )
+    )
+    form.attach(owner)
+    widget = form.findChild(QWidget, "cfgInput:range")
+    assert widget is not None
+    points = widget.findChild(QLineEdit, "expts")
+    step = widget.findChild(QLineEdit, "step")
+    assert points is not None and step is not None
+    type_text(points, "9")
+    type_text(step, "0.5")
+    type_text(points, "7")
+    form.submit_pending()
+    assert owner.accept(owner.observe().ref.revision).values == {"range": (0, 2, 7)}
 
 
 def test_choice_selection_changes_visible_rows_after_publication(
@@ -536,6 +639,75 @@ def test_reapply_uses_the_revision_shown_in_confirmation(
             assert owner.observe().ref == current.ref
             assert form.has_pending()
             assert scalar_line(form).text() == "3.5"
+    finally:
+        form.detach()
+        form.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["direct-leaf", "nested-leaf"])
+def test_removed_reference_keeps_collecting_input_and_rejects_reapply(
+    qapp: QApplication, nested: bool
+) -> None:
+    leaf = ScalarSpec("X", float)
+    shape = CfgSectionSpec(
+        label="Shape",
+        fields={"shape": CfgSectionSpec(fields={"x": leaf})} if nested else {"x": leaf},
+    )
+    shape_value = (
+        CfgSectionValue({"shape": CfgSectionValue({"x": DirectValue(2.0)})})
+        if nested
+        else CfgSectionValue({"x": DirectValue(2.0)})
+    )
+    owner = resource(
+        CfgSchema(
+            CfgSectionSpec(
+                fields={
+                    "ref": ReferenceSpec(
+                        "reference",
+                        [shape],
+                        optional=True,
+                    )
+                }
+            ),
+            CfgSectionValue({"ref": ReferenceValue("<Custom:Shape>", shape_value)}),
+        )
+    )
+    dialogs = DeferredDialogs()
+    form = ResourceCfgFormWidget(dialog_presenter=dialogs)
+    form.resize(600, 450)
+    form.show()
+    try:
+        form.attach(owner)
+        qapp.processEvents()
+        line = scalar_line(form, "ref.shape.x" if nested else "ref.x")
+        type_text(line, "3.5")
+        current = owner.edit(
+            owner.observe().ref.revision, (CfgEdit(("ref", "__ref"), None),)
+        )
+        qapp.processEvents()
+        # This control represents the old rendered tree, not the new publication.
+        type_text(line, "4.75")
+        line.setSelection(1, 2)
+        assert line.text() == "4.75" and line.hasFocus() and line.selectedText() == ".7"
+        with pytest.raises(CfgStaleError):
+            form.submit_pending()
+        button = form.findChild(QPushButton, "cfgReapplyPending")
+        assert button is not None
+        button.click()
+        assert dialogs.decide is not None
+        dialogs.decide(True)
+        assert owner.observe().ref == current.ref
+        assert form.has_pending()
+        assert line.text() == "4.75" and line.hasFocus() and line.selectedText() == ".7"
+        assert any(
+            "Config changed externally" not in label.text() and "ref" in label.text()
+            for label in form.findChildren(QLabel)
+        )
+        form.discard_pending()
+        qapp.processEvents()
+        assert not form.has_pending()
+        assert owner.observe().tree.children["ref"].value is None
     finally:
         form.detach()
         form.deleteLater()

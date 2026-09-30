@@ -748,6 +748,7 @@ class SweepInputWidget(QWidget):
             submit=lambda value: self._submit("start", value),
             text_input_enhancer=text_input_enhancer,
         )
+        self._start_widget.setObjectName("start")
         self._stop_widget = ScalarInputWidget(
             edge_spec,
             _range_scalar_value(value.stop),
@@ -756,6 +757,7 @@ class SweepInputWidget(QWidget):
             submit=lambda value: self._submit("stop", value),
             text_input_enhancer=text_input_enhancer,
         )
+        self._stop_widget.setObjectName("stop")
 
         self._expts = _make_range_input("expts")
         self._expts.textChanged.connect(self._on_expts_changed)
@@ -796,6 +798,13 @@ class SweepInputWidget(QWidget):
     def _on_step_changed(self, text: str) -> None:
         if not self._updating:
             self._submit("step", DirectValue(None, raw=text))
+
+    def display_edge(
+        self, key: Literal["start", "stop"], value: DirectValue | EvalValue
+    ) -> None:
+        """Display a local authored edge without evaluating or submitting it."""
+        widget = self._start_widget if key == "start" else self._stop_widget
+        widget.display(value, options=None)
 
     def display(self, val: SweepValue) -> None:
         """Render the published range without normalizing or resubmitting it."""
@@ -848,6 +857,7 @@ class CenteredSweepInputWidget(QWidget):
             submit=lambda value: self._submit("center", value),
             text_input_enhancer=text_input_enhancer,
         )
+        self._center_widget.setObjectName("center")
 
         self._span = _make_range_input("span")
         self._span.textChanged.connect(self._on_span_changed)
@@ -897,6 +907,10 @@ class CenteredSweepInputWidget(QWidget):
     def _on_step_changed(self, text: str) -> None:
         if not self._updating:
             self._submit("step", DirectValue(None, raw=text))
+
+    def display_center(self, value: DirectValue | EvalValue) -> None:
+        """Display a local authored center without evaluating or submitting it."""
+        self._center_widget.display(value, options=None)
 
     def display(self, val: CenteredSweepValue) -> None:
         """Render the published range without normalizing or resubmitting it."""
