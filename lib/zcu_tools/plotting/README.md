@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 繪圖能力家族
 
-**Last updated:** 2026-09-30 — 明確 plots host 與 typed 1D／2D 更新
+**Last updated:** 2026-10-01 — 完成成果與 presentation handle 分離
 
 本目錄收納具獨立定位或真實跨入口需求的共用繪圖能力。`liveplot/` 提供即時更新的 plotter、segment 與 frontend-neutral backend 契約，供 experiment runtime 與 GUI caller 使用；詳見 [liveplot/README.md](liveplot/README.md)。
 
@@ -20,7 +20,10 @@ canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換�
 再同步送到 host owner 修改 artists。不呈現 host 仍建圖、更新 artists 並支援
 原生 savefig。匯入明確 plots 不初始化 pyplot 或 Notebook display；非呈現操作
 只需基本依賴，不決定 GUI backend。Caller 停止 producer 後才 finish；完成後
-拒絕新 typed update，另以 release 釋放呈現，不銷毀原 Figure。失敗時可
+拒絕新 typed update。`finish()` 回傳另一個 `NamedFigures`，只有具名 Mapping
+介面，沒有建圖或 host commands。它保留圖與登記 owner，不因 caller 丟棄
+Plots handle 而失去所有權。Presentation owner 另持有 Plots，以 release
+釋放呈現，不銷毀 NamedFigures 中的原 Figure。失敗時可
 finish(present=False) 保留普通診斷圖而不呈現。GUI host 在 gui/plotting，
 shared plotting 不依賴 Qt。舊 2D／scatter 與其他 experiment/application callers
 仍待遷移；本 factory 不替他們改接呼叫。

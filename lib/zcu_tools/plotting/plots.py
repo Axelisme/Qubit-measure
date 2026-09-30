@@ -180,6 +180,7 @@ class Plots(FigureCollection):
         self._host = host
         self._live: list[Figure] = []
         self._finished = False
+        self._finished_figures: NamedFigures | None = None
         self._released: set[Figure] = set()
 
     def _ensure_active(self) -> None:
@@ -271,10 +272,11 @@ class Plots(FigureCollection):
         return self._host.call(create)
 
     def finish(self, *, present: bool = True) -> NamedFigures:
-        if self._finished:
-            return self
+        if self._finished_figures is not None:
+            return self._finished_figures
         self._finished = True
-        self.seal()
+        figures = NamedFigures(self)
+        self._finished_figures = figures
 
         def complete() -> None:
             for figure in self._live:
@@ -285,7 +287,7 @@ class Plots(FigureCollection):
                         self._host.present(figure)
 
         self._host.call(complete)
-        return self
+        return figures
 
     def release(self) -> None:
         """Release every presentation, reporting failures after trying all figures."""
