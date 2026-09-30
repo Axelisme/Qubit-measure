@@ -1,24 +1,27 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-09-30 — Notebook widget 即時刷新
+**Last updated:** 2026-10-01 — 共用 records 與 typed NotebookAdapter
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
 ## 工作家族
 
+- [`adapter.py`](adapter.py)：`NotebookAdapter` 綁定 experiment instance、可選 hardware handles 與 host。`run()` 需要 soc／soccfg，每次新建 QickContext 與 Plots；`load()`／同步 `analyze()` 可離線使用。RunRecord 組合 nullable cfg 與純資料，AnalysisRecord 組合 explicit source、typed options／analysis 與純具名 figures。同步分析入口只適用於提供 analyze 的核心，不替互動核心補空方法。`save(source, destination)` 不依目前 run，提供 unique path 並回傳實際目的地；canonical cfg 要求仍由核心決定。
 - [fluxdep](analysis/fluxdep/README.md)：通量依賴光譜的資料處理、擬合、圖表與互動選點。`fitting.py` 保留 `fit_spectrum` 與組合搜尋、診斷圖的 `search_in_database` 入口；數值搜尋由 analysis 擁有。
 - [t1_curve](analysis/t1_curve/README.md) 與 [t2_curve](analysis/t2_curve/README.md)：各自保留 Notebook 的曲線分析、擬合與分階段工作流程。模型選擇與保存條件見各自的 README。
 - [fit_tools](analysis/fit_tools/README.md)：支援 Notebook 分析中的校正、資料接合、loss、weights 與溫度模型；不把這些能力一概視為共用分析核心。
 - [design](analysis/design/README.md)：評估模型參數、設計需求與候選組合，並分析 HFSS sweep 資料。
 - [mist](analysis/mist/tool.py)：提供能量摺疊、不連續處理與碰撞遮罩的計算工具。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。
-- [`experiments/t1.py`](experiments/t1.py)：一般 T1 的實驗專屬便利類，從 `zcu_tools.notebook.experiments` 匯入 `T1Exp`。預設使用 widget host，`present=False` 仍建圖並可保存。每次操作建立新的 plots，成功後成組更新來源、options、數值與圖；分析舊 Result 不替換 last_result。Run／load 成功清空目前分析引用，失敗保留舊紀錄；使用者持有的舊圖不因新操作而關閉。
+- [`experiments/t1.py`](experiments/t1.py)：舊一般 T1 專用便利入口，尚未接上共用 RunRecord；不作為新入口。一般 T1 核心的 typed 分析已可綁定 NotebookAdapter，專用 wrapper 與 Result 的剩餘遷移仍未完成。
 - [`experiments/ge.py`](experiments/ge.py)：`GEExp` 使用相同的 Notebook host 呼叫 GE 共用核心。FIT 與 post 各自保留來源、選項、數值與具名圖；post 採用上一次成功的 FIT 校準。失敗操作不覆蓋成功紀錄，run／load 成功清空分析引用，舊圖仍可保存。
 - [`experiments/flux_dep.py`](experiments/flux_dep.py)：`FluxDepNotebookExp.analyze()` 回傳選線 widget 與可拖曳的預覽。使用者按 Done 才呼叫核心，並發布 source、options、數值 result 和具名 `pick` Figure。Cancel 或失敗保留舊紀錄。run/load 成功清空目前分析，但使用者仍可保存舊 Figure。預覽 Figure 與 Result 分開。
 - [`utils.py`](utils.py)：提供 sweep、圖檔保存與設備資訊等 Notebook 輔助函式。
 - [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。
 
 ## 共用責任與目前邊界
+
+NotebookAdapter 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。失敗操作只收尾本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
 
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。
