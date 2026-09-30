@@ -25,6 +25,7 @@ class _Options:
 class _Core:
     def __init__(self) -> None:
         self.fail_analysis = False
+        self.fail_run = False
         self.contexts: list[QickContext] = []
 
     def run(self, cfg: _Cfg, *, context: QickContext) -> float:
@@ -33,6 +34,8 @@ class _Core:
         _, axes = context.plots.subplots("raw")
         axes.plot([0.0], [result])
         cfg.scale = 99.0
+        if self.fail_run:
+            raise ValueError("Run failed after creating a diagnostic figure")
         return result
 
     def analyze(
@@ -163,6 +166,52 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     )
     np.testing.assert_array_equal(
         previous.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
+    )
+
+
+@pytest.mark.parametrize("missing", ["soc", "soccfg", "both"])
+def test_run_requires_handles_before_starting_operation(missing: str) -> None:
+    core = _Core()
+    adapter = NotebookAdapter(
+        core,
+        soc=object() if missing == "soccfg" else None,
+        soccfg=object() if missing == "soc" else None,
+        host=_Host(),
+    )
+
+    with pytest.raises(ValueError, match="soc and soccfg"):
+        adapter.run(_Cfg(scale=3.0))
+
+    assert core.contexts == []
+    assert adapter.last_run is None
+    assert adapter.run_presentation is None
+
+
+@pytest.mark.parametrize("failure", ["core", "finish"])
+def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
+    core = _Core()
+    host = _Host()
+    adapter = NotebookAdapter(core, soc=object(), soccfg=object(), host=host)
+    previous_run = adapter.run(_Cfg(scale=3.0))
+    previous_run_presentation = adapter.run_presentation
+    previous_analysis = adapter.analyze(_Options(weights=[2.0]))
+    previous_analysis_presentation = adapter.analysis_presentation
+    core.fail_run = failure == "core"
+    host.fail_present = failure == "finish"
+    cfg = _Cfg(scale=9.0)
+
+    with pytest.raises(ValueError, match="failed"):
+        adapter.run(cfg)
+
+    assert cfg.scale == 9.0
+    assert adapter.last_run is previous_run
+    assert adapter.run_presentation is previous_run_presentation
+    assert adapter.analysis is previous_analysis
+    assert adapter.analysis_presentation is previous_analysis_presentation
+    assert len(host.released) == 1
+    np.testing.assert_array_equal(host.released[0].axes[0].lines[0].get_ydata(), [9.0])
+    np.testing.assert_array_equal(
+        previous_analysis.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
     )
 
 
