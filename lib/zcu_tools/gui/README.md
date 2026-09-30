@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-30 — Measure tab resource presentation
+**Last updated:** 2026-10-01, resource form local input
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -200,6 +200,15 @@ stable names. Either path keeps a Python reference until `finished` / `destroyed
 cleanup runs.
 
 ## Shared Qt Cfg Widgets (`widgets/cfg/`)
+
+`ResourceCfgFormWidget` renders a caller-owned `CfgEditing` handle. Text input
+stays in the view until `submit_pending()` sends one batch against the first
+input\'s publication ref. External publications keep pending controls, focus and
+selection intact. Stale submission retains that input. The user can discard it
+or confirm the displayed differences before reapplying to the shown revision.
+Selectors submit pending input before changing the selection. Detach unsubscribes
+and discards view input without revoking the resource or rerunning defaults.
+This local-input behavior does not change `CfgFormWidget`\'s draft binding contract.
 
 `zcu_tools.gui.widgets.cfg`擁有`CfgFormWidget`、field widgets與presentation-only
 decoration contract。widget attach service-owned `CfgDraft`並render `draft.root`；detach會

@@ -2,28 +2,51 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, Qt
+from qtpy.QtCore import QCoreApplication, QEvent, Qt
+from qtpy.QtGui import QKeyEvent
+from qtpy.QtWidgets import QApplication, QLineEdit, QWidget
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     MetaDictWriteback,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
-from zcu_tools.gui.app.measure.state import TabInteractionState
+from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+)
+from zcu_tools.gui.cfg.resource import (
+    AcceptedConfig,
+    CfgEdit,
+    CfgRef,
+    CfgResolution,
+    CfgResource,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
+from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 
@@ -2356,3 +2379,286 @@ def test_programmatic_request_shutdown_bypasses_unsaved_guard(qapp):
     assert len(dialogs.calls) == 0
     QCoreApplication.processEvents()
     ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
+
+
+@dataclass
+class RunFormFixture:
+    window: MainWindow
+    ctrl: MagicMock
+    owner: CfgResource
+    tab: ExpTabWidget
+    line: QLineEdit
+    runs: list[tuple[CfgRef, AcceptedConfig]]
+    source_fault: list[bool]
+
+
+@pytest.fixture
+def run_form(
+    qapp: QApplication, request: pytest.FixtureRequest
+) -> Iterator[RunFormFixture]:
+    ctrl = _apply_window_defaults(_mock_ctrl())
+    ctrl.bus = EventBus()
+    snapshot = _snapshot(
+        "pending-tab",
+        supports_analysis=False,
+        has_run_result=False,
+        has_analyze_result=False,
+        has_figure=False,
+    )
+    ctrl.get_tab_snapshot.return_value = snapshot
+    sources = State(
+        SessionEnv(md=MetaDict(None), ml=ModuleLibrary(None), soc=None, soccfg=None)
+    )
+    bindings = MeasureCfgBindings(PublishedHost(sources))
+    source_fault = [False]
+
+    def resolution() -> CfgResolution:
+        if source_fault[0]:
+            raise RuntimeError("Source snapshot failed")
+        return bindings.snapshot_from_state(sources, captured_values={})
+
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
+        CfgSectionValue({"value": DirectValue(2.0)}),
+    )
+    range_mode = getattr(request, "param", None)
+    if range_mode is not None:
+        centered = range_mode == "center-span"
+        schema = CfgSchema(
+            CfgSectionSpec(
+                fields={
+                    "value": ScalarSpec("Value", float),
+                    "range": CenteredSweepSpec() if centered else SweepSpec(),
+                }
+            ),
+            CfgSectionValue(
+                {
+                    "value": DirectValue(2.0),
+                    "range": CenteredSweepValue(1.0, 2.0, 3)
+                    if centered
+                    else SweepValue(0.0, 2.0, 3),
+                }
+            ),
+        )
+    owner = CfgResource(
+        lambda: schema,
+        resolution=resolution,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    ctrl.cfg_resources.lookup.side_effect = lambda tab_id: owner
+    runs: list[tuple[CfgRef, AcceptedConfig]] = []
+
+    def start(tab_id: str, ref: CfgRef) -> None:
+        runs.append((ref, owner.accept(ref.revision)))
+
+    ctrl.start_run.side_effect = start
+    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window.add_tab_widget("pending-tab", "fake")
+    window.resize(1100, 700)
+    window.show()
+    qapp.processEvents()
+    tabs = window.findChildren(ExpTabWidget)
+    assert len(tabs) == 1
+    tab = tabs[0]
+    widget = tab.cfg_form.findChild(QWidget, "cfgInput:value")
+    assert widget is not None
+    line = widget.findChild(QLineEdit)
+    assert line is not None
+    try:
+        yield RunFormFixture(window, ctrl, owner, tab, line, runs, source_fault)
+    finally:
+        window.remove_tab_widget("pending-tab")
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def edit_run_input(fx: RunFormFixture, text: str) -> None:
+    fx.line.setFocus()
+    fx.line.selectAll()
+    for char in text:
+        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            QApplication.sendEvent(
+                fx.line, QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char)
+            )
+
+
+def test_run_submits_local_input_and_uses_returned_ref(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    base = fx.owner.observe().ref
+    edit_run_input(fx, "3.5")
+    assert fx.owner.observe().ref == base
+    assert fx.tab.run_btn.isEnabled()
+    fx.tab.run_btn.click()
+    assert len(fx.runs) == 1
+    ref, accepted = fx.runs[0]
+    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
+    assert ref.revision == base.revision + 1
+    assert accepted.values == {"value": 3.5}
+    assert not fx.tab.cfg_form.has_pending()
+
+
+@pytest.mark.parametrize("run_form", ["endpoints", "center-span"], indirect=True)
+def test_run_uses_the_last_pending_sampling_operation(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    widget = fx.tab.cfg_form.findChild(QWidget, "cfgInput:range")
+    assert widget is not None
+    points = widget.findChild(QLineEdit, "expts")
+    step = widget.findChild(QLineEdit, "step")
+    assert points is not None and step is not None
+    for line, text in ((points, "9"), (step, "0.5"), (points, "7")):
+        line.setFocus()
+        line.selectAll()
+        for char in text:
+            for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                QApplication.sendEvent(
+                    line, QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char)
+                )
+    fx.tab.run_btn.click()
+    assert len(fx.runs) == 1
+    ref, accepted = fx.runs[0]
+    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
+    assert accepted.values == {"value": 2.0, "range": (0, 2, 7)}
+    assert not fx.tab.cfg_form.has_pending()
+
+
+@pytest.mark.parametrize("text", ["-", "nan"], ids=["incomplete", "nonfinite"])
+def test_run_publishes_invalid_input_but_never_runs_old_values(
+    run_form: RunFormFixture,
+    text: str,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, text)
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.runs == []
+    assert not fx.tab.cfg_form.is_valid()
+    assert fx.line.text() == text
+
+
+def test_run_stale_keeps_input_focus_selection_and_does_not_retry(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.51")
+    fx.line.setSelection(1, 2)
+    current = fx.owner.edit(
+        fx.owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),)
+    )
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.runs == []
+    assert fx.owner.observe().ref == current.ref
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.line.text() == "3.51"
+    assert fx.line.hasFocus() and fx.line.selectedText() == ".5"
+
+
+def test_run_unavailable_stops_without_discarding_input(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.5")
+    fx.owner.revoke()
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.runs == []
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.line.text() == "3.5"
+
+
+def test_run_submission_fault_propagates_without_using_old_values(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.5")
+    base = fx.owner.observe().ref
+    fx.source_fault[0] = True
+    with pytest.raises(RuntimeError, match="Source snapshot failed"):
+        fx.window.run_or_stop_tab("pending-tab")
+    assert fx.owner.observe().ref == base
+    assert fx.runs == []
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.line.text() == "3.5"
+
+
+def test_run_can_submit_a_repair_to_invalid_published_config(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    fx.owner.edit(
+        fx.owner.observe().ref.revision,
+        (CfgEdit(("value",), DirectValue(None, raw="-")),),
+    )
+    assert not fx.tab.run_btn.isEnabled()
+    edit_run_input(fx, "4.5")
+    assert fx.tab.run_btn.isEnabled()
+    fx.tab.run_btn.click()
+    assert len(fx.runs) == 1
+    assert fx.runs[0][1].values == {"value": 4.5}
+
+
+@pytest.mark.parametrize("block", ["busy", "context", "soc", "global-run"])
+def test_pending_input_does_not_bypass_other_run_gates(
+    run_form: RunFormFixture,
+    block: str,
+) -> None:
+    fx = run_form
+    fx.ctrl.get_tab_snapshot.return_value = _snapshot(
+        "pending-tab",
+        supports_analysis=False,
+        has_run_result=False,
+        has_analyze_result=False,
+        has_figure=False,
+        is_analyzing=block == "busy",
+        has_active_context=block != "context",
+        has_soc=block != "soc",
+        global_run_active=block == "global-run",
+    )
+    edit_run_input(fx, "3.5")
+    assert not fx.tab.run_btn.isEnabled()
+    assert fx.runs == []
+
+
+def test_stop_does_not_submit_local_input(run_form: RunFormFixture) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.5")
+    base = fx.owner.observe().ref
+    fx.ctrl.get_tab_snapshot.return_value = _snapshot(
+        "pending-tab",
+        supports_analysis=False,
+        is_running=True,
+    )
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.owner.observe().ref == base
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.runs == []
+    fx.ctrl.cancel_run.assert_called_once_with()
+
+
+def test_reset_explicitly_discards_pending_input(run_form: RunFormFixture) -> None:
+    fx = run_form
+    # Reset's confirmation is the explicit authorization to discard local input.
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
+    # Reopen through the public view lifecycle using the same cfg owner.
+    fx.window.remove_tab_widget("pending-tab")
+    fx.window.deleteLater()
+    fx.window = MainWindow(fx.ctrl, dialog_presenter=dialogs)
+    fx.window.add_tab_widget("pending-tab", "fake")
+    tab = fx.window.findChildren(ExpTabWidget)[0]
+    line = tab.cfg_form.findChild(QLineEdit)
+    assert line is not None
+    line.selectAll()
+    for char in "3.5":
+        QApplication.sendEvent(
+            line,
+            QKeyEvent(QEvent.Type.KeyPress, 0, Qt.KeyboardModifier.NoModifier, char),
+        )
+        QApplication.sendEvent(
+            line,
+            QKeyEvent(QEvent.Type.KeyRelease, 0, Qt.KeyboardModifier.NoModifier, char),
+        )
+    assert tab.cfg_form.has_pending()
+    tab.reset_btn.click()
+    assert not tab.cfg_form.has_pending()
+    assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 2.0}

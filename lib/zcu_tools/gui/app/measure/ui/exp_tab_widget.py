@@ -312,6 +312,7 @@ class ExpTabWidget(QWidget):
         run_layout.setSpacing(2)
 
         self.cfg_form = ResourceCfgFormWidget(
+            dialog_presenter=self._dialog_presenter,
             text_input_enhancer=make_value_source_input_enhancer(ctrl),
         )
         run_layout.addWidget(self.cfg_form, stretch=1)
@@ -950,7 +951,8 @@ class ExpTabWidget(QWidget):
         if not confirmed:
             return
         assert self._actions is not None, "reset clicked before bind"
-        self._cfg.reset(self._cfg.observe().ref.revision)
+        self._cfg.reset(self.cfg_form.current_ref().revision)
+        self.cfg_form.discard_pending()
         self._actions.refresh_interaction(self.tab_id)
 
     def _is_data_visible(self) -> bool:
@@ -1045,7 +1047,7 @@ class ExpTabWidget(QWidget):
             self._run_action_layout.setStretch(1, 80)
             self.run_btn.setText("Run")
             self.run_btn.setObjectName("primaryButton")
-            cfg_valid = self.cfg_form.is_valid()
+            cfg_valid = self.cfg_form.is_valid() or self.cfg_form.has_pending()
             can_run = (
                 not local_busy
                 and not state.global_run_active
