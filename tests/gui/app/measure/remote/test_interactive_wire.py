@@ -572,11 +572,20 @@ def test_interactive_submitted_params_replace_previous_pane_only_on_done(
         assert pending.result is old_result
         assert pending.plots is old_plots
 
+        changed = _interact(
+            sock, tab_id, {"command": "set_conjugate", "args": {"enabled": True}}
+        )["result"]["state"]
+        assert changed["conjugate"] is True
+        assert fx.state.get_tab(tab_id).analysis.params is old_params
+
         if terminal == "done":
             assert _interact(sock, tab_id, {"command": "done"})["ok"] is True
             committed = fx.state.get_tab(tab_id).analysis
             assert committed.params is submitted
             assert committed.result is not old_result
+            assert committed.result.flx_half == pytest.approx(changed["flux_half"])
+            assert committed.result.flx_int == pytest.approx(changed["flux_int"])
+            assert fx.ctrl.get_tab_analyze_result(tab_id) is committed.result
             assert committed.plots is not old_plots
         else:
             assert (

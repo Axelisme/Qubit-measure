@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-30 — 顯式 Plots 與 T1／GE／OneTone FluxDep 遷移
+**Last updated:** 2026-09-30 — 顯式 Plots、三個標準實驗與插件輸出責任
 
 # measure experiment adapters
 
@@ -36,6 +36,11 @@ OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed 
 以此snapshot和`ml=None`建立experiment cfg。自訂builder若委派Base，
 須宣告 `ExpCfg_cls`；domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。
 Analyze 與 writeback 保持各自的 context 契約。
+
+插件自行定義 typed 成功輸出的欄位，決定需要保留的選項與重現資訊。
+Framework 保存來源、插件輸出與圖，不要求完整 options 或保證可重現性。
+`params` 保持表單輸入，互動 Done 不以終態 options 替換它。
+GUI 與 remote 讀同一份已提交輸出；取消或失敗不覆蓋前次成功紀錄。
 
 `cfg_definition()` 使用 `_support` 提供的 measure-domain builder vocabulary，但結構與預設
 policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_value` 兩個方法理解同一

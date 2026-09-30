@@ -63,15 +63,21 @@ sim_flxs = np.linspace(-0.05, 0.55, 200)
 %matplotlib widget
 filepath = r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\R4_flux_1.hdf5"
 
-exp = ze.onetone.FluxDepExp()
-flxs, fpts, signals = exp.load(filepath)
+from zcu_tools.notebook.experiments import FluxDepNotebookExp
 
-actline = exp.analyze()
+exp = FluxDepNotebookExp()
+spectrum = exp.load(filepath)
+flxs, fpts, signals = spectrum.values, spectrum.freqs, spectrum.signals
+
+actline = exp.analyze()  # Select the two lines, then click Done.
 ```
 
 ```python
-mA_c, mA_e = actline.get_positions()
-period = 2 * abs(mA_e - mA_c)
+selection = exp.analysis
+if selection is None:
+    raise RuntimeError("Select the two flux lines and click Done first")
+mA_c, mA_e = selection.result.flux_half, selection.result.flux_int
+period = selection.result.flux_period
 1e3 * mA_c, 1e3 * mA_e
 ```
 

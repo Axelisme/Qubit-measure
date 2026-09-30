@@ -61,18 +61,38 @@ class NotebookPlotHost:
         if manager is None:
             return
         # Matplotlib types only the base of this concrete ipympl canvas.
-        _release_canvas(cast("Canvas", manager.canvas))
-        del self._managers[figure]
+        try:
+            _release_canvas(cast("Canvas", manager.canvas))
+        finally:
+            del self._managers[figure]
 
 
 def _release_canvas(canvas: "Canvas") -> None:
     from ipympl.backend_nbagg import Toolbar
+    from ipywidgets import Widget
+
+    errors: list[Exception] = []
+
+    def close(widget: Widget) -> None:
+        try:
+            widget.close()
+        except Exception as exc:  # noqa: BLE001 - finish cleanup and report failures
+            errors.append(exc)
+            # Close the comm even if a widget's specialized close failed first.
+            try:
+                Widget.close(widget)
+            except Exception as cleanup_exc:  # noqa: BLE001 - retain both errors
+                errors.append(cleanup_exc)
 
     # A failed manager constructor may not have installed a widget toolbar yet.
     toolbar = canvas.toolbar
     if isinstance(toolbar, Toolbar):
-        toolbar.layout.close()
-        toolbar.close()
-    canvas.layout.close()
-    canvas.close()
+        close(toolbar.layout)
+        close(toolbar)
+    close(canvas.layout)
+    close(canvas)
     FigureCanvasAgg(canvas.figure)
+    if len(errors) == 1:
+        raise errors[0]
+    if errors:
+        raise ExceptionGroup("Notebook widget release failed", errors)

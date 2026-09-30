@@ -424,7 +424,9 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, ze.onetone.FluxDepCfg, reps=1000, rounds=1)
 
-res_flux_exp = ze.onetone.FluxDepExp()
+from zcu_tools.notebook.experiments import FluxDepNotebookExp
+
+res_flux_exp = FluxDepNotebookExp()
 _ = res_flux_exp.run(soc, soccfg, cfg)
 ```
 
@@ -435,13 +437,16 @@ res_flux_exp.save(
 ```
 
 ```python
-%matplotlib widget
-actline = res_flux_exp.analyze()
+flux_pick = res_flux_exp.analyze()  # Select the two lines, then click Done.
 ```
 
 ```python
-md.flx_half, md.flx_int = actline.get_positions()
-md.flx_period = 2 * abs(md.flx_int - md.flx_half)
+flux_record = res_flux_exp.analysis
+if flux_record is None:
+    raise RuntimeError("Select the two flux lines and click Done first")
+md.flx_half = flux_record.result.flux_half
+md.flx_int = flux_record.result.flux_int
+md.flx_period = flux_record.result.flux_period
 md.flx_half, md.flx_int, md.flx_period
 ```
 

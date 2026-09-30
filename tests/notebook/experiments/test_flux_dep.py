@@ -9,6 +9,7 @@ from typing import Any
 import ipywidgets as widgets
 import numpy as np
 import pytest
+from ipympl.backend_nbagg import Canvas, Toolbar
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.onetone.flux_dep import (
@@ -23,6 +24,7 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepExp as FluxDepCore,
 )
 from zcu_tools.experiment.v2.runtime.schedule import (
+    ScheduleOutcomeError,
     ScheduleStep,
     SignalBuffer,
 )
@@ -206,6 +208,58 @@ def test_simulated_run_publishes_acquired_rows_in_final_measurement(
     assert (tmp_path / "flux-map.png").stat().st_size > 0
 
 
+def test_failed_schedule_acquisition_does_not_publish_partial_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import zcu_tools.experiment.v2.onetone.flux_dep as core_module
+
+    monkeypatch.setattr("IPython.display.display", lambda _widget: None)
+    existing_widgets = set(widgets.Widget.widgets)
+    source = make_source()
+    exp = FluxDepNotebookExp(present=False)
+    exp.analyze(source, flux_half=-0.2, flux_int=0.3).done()
+    old_record = exp.analysis
+    old_plots = exp.analysis_plots
+    old_source = exp.last_result
+    real_builder = ScheduleStep.prog_builder
+
+    class FailingProgram:
+        def __init__(self, _soccfg: Any, cfg: Any, **_kwargs: Any) -> None:
+            self.cfg_model = cfg
+
+        def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
+            raise RuntimeError("acquisition failed")
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    def failing_builder(
+        step: ScheduleStep[FluxDepCfg, float, dict[str, Any]], soc: Any, soccfg: Any
+    ) -> Any:
+        return real_builder(step, soc, soccfg, program_cls=FailingProgram)
+
+    monkeypatch.setattr(ScheduleStep, "prog_builder", failing_builder)
+    monkeypatch.setattr(core_module, "set_flux_in_dev_cfg", lambda *_args: None)
+    monkeypatch.setattr(core_module, "setup_devices", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        core_module,
+        "sweep2array",
+        lambda _sweep, field=None, *_args, **_kwargs: (
+            source.freqs if field == "freq" else source.values
+        ),
+    )
+    try:
+        with pytest.raises(ScheduleOutcomeError, match="acquisition failed") as exc:
+            exp.run("simulated-soc", "simulated-soccfg", make_cfg())
+        assert exc.value.status == "failed"
+        assert exp.analysis is old_record
+        assert exp.analysis_plots is old_plots
+        assert exp.last_result is old_source
+    finally:
+        old_plots.release()
+    assert set(widgets.Widget.widgets) == existing_widgets
+
+
 def test_canonical_save_load_resets_current_analysis_but_retains_old_pick(
     tmp_path: Path,
 ) -> None:
@@ -357,6 +411,49 @@ def test_terminal_preview_release_failure_closes_controls_and_retains_record(
     finally:
         old_plots.release()
     assert set(widgets.Widget.widgets) == initial_widgets
+
+
+@pytest.mark.parametrize("terminal", ["done", "cancel"])
+@pytest.mark.parametrize("stage", ["before", "after"])
+def test_toolbar_failure_before_preview_canvas_close_preserves_old_record(
+    monkeypatch: pytest.MonkeyPatch, terminal: str, stage: str
+) -> None:
+    monkeypatch.setattr("IPython.display.display", lambda _widget: None)
+    existing_widgets = set(widgets.Widget.widgets)
+    exp = FluxDepNotebookExp()
+    exp.analyze(make_source(), flux_half=-0.2, flux_int=0.3).done()
+    old_record = exp.analysis
+    old_plots = exp.analysis_plots
+    control = exp.analyze(make_source(), flux_half=-0.1, flux_int=0.4)
+    canvas = control.figure.canvas
+    assert isinstance(canvas, Canvas)
+    toolbar = canvas.toolbar
+    assert isinstance(toolbar, Toolbar)
+    close = Toolbar.close
+
+    def fail_closing_toolbar(self: Toolbar) -> None:
+        if self is toolbar and stage == "before":
+            raise RuntimeError("toolbar close failed before canvas close")
+        close(self)
+        if self is toolbar and stage == "after":
+            raise RuntimeError("toolbar close failed before canvas close")
+
+    action = control.done if terminal == "done" else control.cancel
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(Toolbar, "close", fail_closing_toolbar)
+            with pytest.raises(
+                RuntimeError, match="toolbar close failed before canvas"
+            ):
+                action()
+        assert control.is_finished
+        assert canvas.comm is None
+        assert control.figure.canvas is not canvas
+        assert exp.analysis is old_record
+        assert exp.analysis_plots is old_plots
+    finally:
+        old_plots.release()
+    assert set(widgets.Widget.widgets) == existing_widgets
 
 
 def test_default_notebook_host_drags_and_releases_preview_widgets(

@@ -27,7 +27,9 @@ QICK context 先只有 soc、soccfg、plots，每次 run 由 caller 建立。單
 
 影響 acquisition 的實驗選項全部進 typed config 與 cfg snapshot。核心擁有設定驗證及環境無關預設；GUI 擁有編輯表示、標籤、expression 與 md／module library seed。核心分析不讀 live GUI 狀態。
 
-核心 options 與 Analysis 都是實驗專屬 typed 資料。Analysis 不含 Figure 或 writeback。Caller 記錄來源 Result 與實際 options。Notebook 扁平 keyword 引用核心預設並組成 options，不反射產生簽名、不共享可變預設。Notebook 不新增 writeback。
+核心 options 與 Analysis 都是實驗專屬 typed 資料。Analysis 不含 Figure 或 writeback。Notebook caller 記錄來源 Result 與實際 options。Notebook 扁平 keyword 引用核心預設並組成 options，不反射產生簽名、不共享可變預設。Notebook 不新增 writeback。
+
+GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選項、隨機 seed、時間或其他重現資訊。Framework 保存來源、插件輸出與圖，不追查插件的隱式依賴，也不保證完整 options 或可重現性。`params` 保持表單輸入，不在 Done 時替換成終態 options；不新增通用 committed-options owner。GUI 與 remote 讀同一份已提交輸出。
 
 ### 圖形產物與呈現
 
@@ -51,9 +53,9 @@ GUI application 持有結果與具名圖集合，保存不反向依賴 Qt widget
 
 ### 三種分析生命週期
 
-- **T1**：同步 analyze 正常返回後，caller 成組發布 typed Analysis、來源、options 與圖集合。
+- **T1**：同步 analyze 正常返回後，Notebook caller 成組發布 typed Analysis、來源、options 與圖集合；GUI 發布 typed 分析輸出、來源與圖集合。
 - **singleshot/ge**：核心另提供 post_analyze。Post 消費對應 primary 與其來源資料，不重新 primary fit，不讀未重新分析的 initial_state 表單；primary／post 各自持有圖集合與 GUI writeback proposal。
-- **onetone/flux_dep**：核心提供領域分析操作，不持有 widget 或 GUI session。Notebook analyze 回傳實驗專屬互動控制物件，GUI 使用既有 INTERACTIVE plugin／session／frontend。啟動返回不終止繪圖；Done 驗證並發布最終結果，Cancel 不取代上一筆成功分析。兩前端共用領域計算與 typed 結果，不強制共用互動框架。
+- **onetone/flux_dep**：核心提供領域分析操作，不持有 widget 或 GUI session。Notebook analyze 回傳實驗專屬互動控制物件，GUI 使用既有 INTERACTIVE plugin／session／frontend。啟動返回不終止繪圖；Done 驗證並發布最終結果，Cancel 不取代上一筆成功分析。Notebook 保留實際 options 紀錄；GUI 插件決定成功輸出的欄位，不要求完整終態 options。兩前端共用領域計算與 typed 結果，不強制共用互動框架。
 
 Notebook run／load 正常返回後更新 last_result 並清空目前分析；失敗保留舊紀錄。同步 analysis 成功才成組替換分析與圖，明確分析舊 Result 不改 last_result。清空引用不銷毀使用者另行持有的圖或結果，不新增完整歷史管理。
 
@@ -116,7 +118,7 @@ Notebook 互動分析直接使用 Notebook widget，不增加前端可用性 pre
 
 ### G7：未遷移 adapters
 
-GUI application 統一使用純數值結果與 plots。三個標準實驗的 concrete adapters 先接入新核心，其他實驗與 adapters 隨後分期遷移，不要求每個中間階段都維持舊 caller 可用。Interactive plugin／frontend 使用 session-owned 圖集合，不探測新舊簽名，不新增反射或雙協議 fallback。
+GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另要求通用終態 options。三個標準實驗的 concrete adapters 先接入新核心，其他實驗與 adapters 隨後分期遷移，不要求每個中間階段都維持舊 caller 可用。Interactive plugin／frontend 使用 session-owned 圖集合，不探測新舊簽名，不新增反射或雙協議 fallback。
 
 完整清單須包含未出現在 GUI catalog 的實驗、組合量測 caller 與必要 helper。共用基底、fake 和支援框架需另外分類，不以 class 數量代替公開實驗清單。每項都需對應遷移範圍與驗證證據。
 

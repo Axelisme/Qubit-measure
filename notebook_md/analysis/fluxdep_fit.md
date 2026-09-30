@@ -27,6 +27,7 @@ jupyter:
 ```python
 %load_ext autoreload
 import os
+from pathlib import Path
 from pprint import pprint
 import numpy as np
 
@@ -77,11 +78,12 @@ type = "OneTone"  # or "TwoTone"
 # type = "TwoTone"  # or "OneTone"
 
 if type == "OneTone":
-    exp = ze.onetone.FluxDepExp()
+    spectrum = ze.onetone.FluxDepExp().load(Path(spect_path))
+    dev_values, freqs, signals = spectrum.values, spectrum.freqs, spectrum.signals
 else:
     exp = ze.twotone.FreqFluxExp()
-dev_values, freqs, signals = exp.load(spect_path)
-freqs *= 1e-3  # MHz -> GHz
+    dev_values, freqs, signals = exp.load(spect_path)
+freqs = freqs * 1e-3  # MHz -> GHz; leave the loaded spectrum unchanged.
 ```
 
 ```python

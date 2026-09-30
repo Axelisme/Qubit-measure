@@ -123,6 +123,44 @@ def test_release_closes_widgets_and_preserves_other_operation_and_savefig(
     assert output.getvalue().startswith(b"\x89PNG")
 
 
+@pytest.mark.parametrize("stage", ["before", "after"])
+def test_toolbar_release_error_still_closes_canvas_and_keeps_figure_savable(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    create, published = notebook_plots
+    plots = create()
+    figure, _axes = plots.subplots("fit")
+    plots.finish()
+    canvas = published[0]
+    toolbar = canvas.toolbar
+    assert isinstance(toolbar, Toolbar)
+    original_close = Toolbar.close
+
+    def fail_toolbar_close(self: Toolbar) -> None:
+        if stage == "before":
+            raise RuntimeError("toolbar close failed")
+        original_close(self)
+        raise RuntimeError("toolbar close failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Toolbar, "close", fail_toolbar_close)
+        with pytest.raises(ExceptionGroup, match="Failed to release plot") as exc:
+            plots.release()
+    assert len(exc.value.exceptions) == 1
+    assert str(exc.value.exceptions[0]) == "toolbar close failed"
+    assert canvas.comm is None
+    assert canvas.layout.comm is None
+    assert toolbar.comm is None
+    assert toolbar.layout.comm is None
+    assert figure.canvas is not canvas
+    assert figure.canvas.manager is None
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+
+
 def test_failed_display_propagates_and_diagnostic_release_closes_widgets(
     notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
     monkeypatch: pytest.MonkeyPatch,
