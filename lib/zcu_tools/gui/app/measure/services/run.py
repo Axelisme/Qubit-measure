@@ -77,6 +77,9 @@ class RunService:
                 logger.exception("retired run draft teardown failed")
 
     def _prepare_tab_for_run(self, tab_id: str) -> None:
+        # Reject conflicts before reserving State or clearing results. Runner
+        # checks the same gate again when opening the operation.
+        self._gate.ensure_can_start(OperationKind.RUN)
         # Reserve State's existing busy flag before cleanup or synchronous gate
         # notifications can reenter tab editing and closing.
         self._state.set_tab_running(tab_id, True)
@@ -98,10 +101,6 @@ class RunService:
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
-
-        # Reject hardware conflicts before reserving State or clearing results.
-        # Runner checks the same gate again when opening the operation.
-        self._gate.ensure_can_start(OperationKind.RUN)
 
         logger.info("start_run: tab_id=%r", tab_id)
 
