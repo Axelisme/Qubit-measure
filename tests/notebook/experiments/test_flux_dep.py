@@ -31,7 +31,9 @@ def suppress_notebook_display(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_done_publishes_source_options_numeric_result_and_named_figure(tmp_path) -> None:
+def test_done_publishes_source_options_numeric_result_and_named_figure(
+    tmp_path,
+) -> None:
     analyzer = FluxDepAnalyzer(NonPresentingHost())
     source = make_source()
     original_signals = source.result.signals.copy()

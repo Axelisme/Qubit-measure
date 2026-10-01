@@ -75,52 +75,6 @@ def make_cfg() -> FluxDepCfg:
     )
 
 
-def test_done_publishes_source_options_numeric_result_and_named_figure(
-    tmp_path,
-) -> None:
-    exp = FluxDepNotebookExp(present=False)
-    source = make_source()
-    control = exp.analyze(source, flux_half=-0.2, flux_int=0.3, magnitude_only=True)
-    assert isinstance(control.widget, widgets.VBox)
-    assert control.positions() == pytest.approx((-0.2, 0.3))
-    assert control.result is None
-    assert exp.analysis is None
-
-    control.done_button.click()
-    assert control.is_finished
-    record = exp.analysis
-    assert record is not None
-    assert record.source is source
-    assert record.options == FluxDepAnalyzeOptions(-0.2, 0.3, magnitude_only=True)
-    assert record.result == FluxDepAnalysis(-0.2, 0.3, 1.0)
-    assert control.result is record.result
-    assert control.plots is exp.analysis_plots
-    assert list(record.plots) == ["pick"]
-    record.plots["pick"].savefig(tmp_path / "onetone-pick.png")
-    assert (tmp_path / "onetone-pick.png").stat().st_size > 0
-    with pytest.raises(RuntimeError, match="finished"):
-        control.done()
-
-
-def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> None:
-    exp = FluxDepNotebookExp(present=False)
-    first = exp.analyze(make_source(), flux_half=-0.2, flux_int=0.3)
-    first.done()
-    old = exp.analysis
-
-    next_control = exp.analyze(make_source(), flux_half=0.0, flux_int=0.0)
-    with pytest.raises(ValueError, match="separated"):
-        next_control.done()
-    assert not next_control.is_finished
-    assert exp.analysis is old
-    next_control.set_positions(-0.1, 0.4)
-    next_control.cancel_button.click()
-    assert next_control.is_finished
-    assert exp.analysis is old
-    with pytest.raises(RuntimeError, match="finished"):
-        next_control.done()
-
-
 @pytest.mark.parametrize("reverse_flux", [False, True])
 @pytest.mark.parametrize("stop_after", [None, 2])
 def test_simulated_run_publishes_acquired_rows_in_final_measurement(
