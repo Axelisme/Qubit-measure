@@ -203,7 +203,7 @@ def _make_run_service(
     writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, bg, bus)  # type: ignore[arg-type]
-    svc = RunService(state, runner, bus, handles, writeback)
+    svc = RunService(state, runner, bus, handles, writeback, gate=gate)
     return svc, gate, bg, handles
 
 

@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.ports import ExclusionGate
 
     from ..state import RetiredPaneResources
     from .ports import RunStatePort, WritebackLifecyclePort
@@ -52,9 +53,12 @@ class RunService:
         bus: EventBus,
         handles: OperationHandles,
         writeback: WritebackLifecyclePort,
+        *,
+        gate: ExclusionGate,
     ) -> None:
         self._state = state
         self._runner = runner
+        self._gate = gate
         self._bus = bus
         # handles is used by cancel_run (handles.cancel) and for live_count queries
         # by the controller. The runner also holds a reference to the same handles
@@ -94,6 +98,10 @@ class RunService:
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
+
+        # Reject hardware conflicts before reserving State or clearing results.
+        # Runner checks the same gate again when opening the operation.
+        self._gate.ensure_can_start(OperationKind.RUN)
 
         logger.info("start_run: tab_id=%r", tab_id)
 
