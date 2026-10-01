@@ -53,4 +53,34 @@ class GEPostAnalyzer:
     def analyze(
         self, primary: GEPrimaryRecord, options: GEPostAnalyzeOptions
     ) -> GEPostAnalysisRecord:
-        raise NotImplementedError("Explicit adopted-primary post analysis")
+        retained_options = deepcopy(options)
+        working_source = RunRecord(cfg=primary.source.cfg, result=primary.source.result)
+        plots = Plots(self._host)
+        try:
+            result = self._core.post_analyze(
+                working_source,
+                primary.result,
+                deepcopy(retained_options),
+                plots=plots,
+            )
+            figures = plots.finish()
+            record = GEPostAnalysisRecord(
+                primary=primary,
+                options=retained_options,
+                result=result,
+                figures=figures,
+            )
+        except BaseException as error:
+            try:
+                try:
+                    plots.finish(present=False)
+                finally:
+                    plots.release()
+            except BaseException as cleanup_error:  # noqa: BLE001 - retain both operation failures
+                raise BaseExceptionGroup(
+                    "Post analysis and plot cleanup failed", [error, cleanup_error]
+                ) from None
+            raise
+        self.analysis = record
+        self.analysis_plots = plots
+        return record
