@@ -97,8 +97,8 @@ def build_session_services(
     ``project_root`` anchors generated result/database paths and result-scope
     discovery;
     ``driver_factory`` defaults to the device service's built-in hardware factory
-    when omitted; ``device_registry`` defaults to the ``GlobalDeviceRegistryAdapter``
-    (production singleton) when omitted — tests inject an in-memory fake.
+    when omitted; ``device_registry`` defaults to a new session-owned
+    DeviceManager. Callers sharing drivers must supply the same registry.
     """
     value_registry = ValueRegistry()
     device = DeviceService(

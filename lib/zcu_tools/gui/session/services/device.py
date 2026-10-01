@@ -12,7 +12,7 @@ from typing import (
     runtime_checkable,
 )
 
-from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
+from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.events import (
@@ -222,44 +222,6 @@ def list_supported_device_types() -> list[str]:
     return list(_DEVICE_TYPE_REGISTRY.keys())
 
 
-class GlobalDeviceRegistryAdapter:
-    """Thin instance adapter over ``GlobalDeviceManager``'s classmethods.
-
-    ``GlobalDeviceManager`` is a classmethod-only singleton; this adapter wraps
-    its five registry methods as instance methods so ``DeviceService`` can satisfy
-    the instance-method ``DeviceRegistryPort`` Protocol without touching the
-    singleton directly (ADR-0066).  The wrapper adds no logic of its own.
-    """
-
-    def register_device(self, name: str, device: object) -> None:
-        from zcu_tools.device import GlobalDeviceManager
-
-        GlobalDeviceManager.register_device(name, cast(BaseDevice[Any], device))
-
-    def drop_device(self, name: str, ignore_error: bool = False) -> None:
-        from zcu_tools.device import GlobalDeviceManager
-
-        GlobalDeviceManager.drop_device(name, ignore_error=ignore_error)
-
-    def get_device(self, name: str) -> object:
-        from zcu_tools.device import GlobalDeviceManager
-
-        return GlobalDeviceManager.get_device(name)
-
-    def get_all_devices(self) -> dict[str, object]:
-        from zcu_tools.device import GlobalDeviceManager
-
-        # Cast: GlobalDeviceManager returns dict[str, BaseDevice[Unknown]]; the
-        # port contract uses dict[str, object] (covariance not expressible with
-        # dict directly).  The values are never mutated through this view.
-        return cast(dict[str, object], GlobalDeviceManager.get_all_devices())
-
-    def get_info(self, name: str) -> object:
-        from zcu_tools.device import GlobalDeviceManager
-
-        return GlobalDeviceManager.get_info(name)
-
-
 def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     if type_name not in _DEVICE_TYPE_REGISTRY:
         raise DeviceRegistrationError(f"Unknown device type: {type_name!r}")
@@ -302,13 +264,10 @@ class DeviceService:
         # instance that runner holds internally.
         self._handles = handles
         self._driver_factory = driver_factory or _default_driver_factory
-        # Registry port: hides the GlobalDeviceManager singleton behind an
-        # instance-method interface so tests can inject an in-memory fake without
-        # touching the real singleton (ADR-0066).
+        from zcu_tools.device import DeviceManager
+
         self._registry: DeviceRegistryPort = (
-            device_registry
-            if device_registry is not None
-            else GlobalDeviceRegistryAdapter()
+            device_registry if device_registry is not None else DeviceManager()
         )
         # Device state lives in State (the SSOT). This service holds only the
         # live driver (in the registry), the worker threads, and the in-flight

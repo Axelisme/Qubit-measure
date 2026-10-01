@@ -3,10 +3,9 @@ from __future__ import annotations
 import threading
 import warnings
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from .base import BaseDevice
-from .cancel_scope import current_device_setup_cancel_signal
 
 if TYPE_CHECKING:
     from . import DeviceInfo
@@ -39,50 +38,52 @@ class DeviceCloseInProgressError(RuntimeError):
         self.names = names
 
 
-class GlobalDeviceManager:
-    _devices: ClassVar[dict[str, BaseDevice]] = {}
-    _lock: ClassVar[threading.RLock] = threading.RLock()
-    # In-flight close claims keyed by id(device).  The value holds a strong
-    # reference so the identity cannot be recycled while a close is pending.
-    _close_claims: ClassVar[dict[int, BaseDevice]] = {}
+class DeviceManager:
+    """Own a named device registry and coordinate its drivers' lifetimes.
 
-    @classmethod
-    def register_device(cls, name: str, device: BaseDevice) -> None:
+    Share one manager between callers that share drivers. Separate managers
+    isolate registrations and close claims; they must not own the same driver.
+    Disconnect never changes device outputs or closes the resource factory.
+    """
+
+    def __init__(self) -> None:
+        self._devices: dict[str, BaseDevice] = {}
+        self._lock = threading.RLock()
+        # Keep claimed identities alive until their close completes.
+        self._close_claims: dict[int, BaseDevice] = {}
+
+    def register_device(self, name: str, device: BaseDevice) -> None:
         if not isinstance(device, BaseDevice):
             raise TypeError(
                 f"register_device expected BaseDevice for {name!r}, "
                 f"got {type(device).__name__}"
             )
 
-        with cls._lock:
-            if name in cls._devices:
+        with self._lock:
+            if name in self._devices:
                 warnings.warn(f"Device {name} already registered, overwriting")
-            cls._devices[name] = device
+            self._devices[name] = device
 
-    @classmethod
-    def drop_device(cls, name: str, ignore_error: bool = False) -> None:
-        with cls._lock:
-            if name not in cls._devices:
+    def drop_device(self, name: str, ignore_error: bool = False) -> None:
+        with self._lock:
+            if name not in self._devices:
                 if ignore_error:
                     return
                 raise ValueError(f"Device {name} not found")
-            del cls._devices[name]
+            del self._devices[name]
 
-    @classmethod
-    def get_device(cls, name: str) -> BaseDevice:
-        with cls._lock:
-            if name not in cls._devices:
+    def get_device(self, name: str) -> BaseDevice:
+        with self._lock:
+            if name not in self._devices:
                 raise ValueError(f"Device {name} not found")
-            return cls._devices[name]
+            return self._devices[name]
 
-    @classmethod
-    def get_all_devices(cls) -> dict[str, BaseDevice]:
-        with cls._lock:
-            return dict(cls._devices)
+    def get_all_devices(self) -> dict[str, BaseDevice]:
+        with self._lock:
+            return dict(self._devices)
 
-    @classmethod
     def setup_devices(
-        cls,
+        self,
         dev_cfg: Mapping[str, DeviceInfo],
         *,
         progress: bool = True,
@@ -92,54 +93,45 @@ class GlobalDeviceManager:
         # that the check-then-act is atomic with respect to concurrent
         # register/drop calls.  Fast-fail: any unknown name aborts the whole
         # batch before any setup begins.
-        with cls._lock:
+        with self._lock:
             for name in dev_cfg:
-                if name not in cls._devices:
+                if name not in self._devices:
                     raise ValueError(f"Device {name} not found")
             # Snapshot instance references; registry mutations after this point
             # do not affect which instances we are about to configure.
             snapshot: list[tuple[BaseDevice, DeviceInfo]] = [
-                (cls._devices[name], cfg) for name, cfg in dev_cfg.items()
+                (self._devices[name], cfg) for name, cfg in dev_cfg.items()
             ]
-
-        resolved_cancel_signal = (
-            cancel_signal
-            if cancel_signal is not None
-            else current_device_setup_cancel_signal()
-        )
 
         # Per-instance op_lock serializes each setup() call. Busy devices raise
         # DeviceBusyError immediately (fail-fast); we do not swallow that error.
         for device, cfg in snapshot:
-            if resolved_cancel_signal is not None and resolved_cancel_signal.is_set():
+            if cancel_signal is not None and cancel_signal.is_set():
                 return
             device.setup(
                 cfg,
                 progress=progress,
-                stop_event=resolved_cancel_signal,
+                stop_event=cancel_signal,
             )
 
-    @classmethod
-    def get_info(cls, name: str) -> DeviceInfo:
+    def get_info(self, name: str) -> DeviceInfo:
         # Resolve the instance under the registry lock; call get_info() outside
         # it so a long-running setup() on another device cannot block this read.
-        device = cls.get_device(name)
+        device = self.get_device(name)
         return device.get_info()  # type: ignore[return-value]
 
-    @classmethod
-    def get_all_info(cls) -> dict[str, DeviceInfo]:
+    def get_all_info(self) -> dict[str, DeviceInfo]:
         # Snapshot the registry under the lock, then query each device outside
         # it so concurrent setup() calls on individual devices do not block
         # the whole registry for the duration of their I/O.
-        snapshot = cls.get_all_devices()
+        snapshot = self.get_all_devices()
         return {name: device.get_info() for name, device in snapshot.items()}  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Registry-owned disconnect
     # ------------------------------------------------------------------
 
-    @classmethod
-    def close_device(cls, name: str, *, ignore_missing: bool = False) -> None:
+    def close_device(self, name: str, *, ignore_missing: bool = False) -> None:
         """Close one registered device and drop its stale aliases on success.
 
         The call claims the device identity (``id(device)``) under the registry
@@ -151,36 +143,35 @@ class GlobalDeviceManager:
         identity survives); on ordinary failure the entries are kept so the
         caller can retry.
         """
-        with cls._lock:
-            if name not in cls._devices:
+        with self._lock:
+            if name not in self._devices:
                 if ignore_missing:
                     return
                 raise ValueError(f"Device {name} not found")
-            device = cls._devices[name]
+            device = self._devices[name]
             identity = id(device)
-            if identity in cls._close_claims:
+            if identity in self._close_claims:
                 raise DeviceCloseInProgressError((name,))
-            cls._close_claims[identity] = device
+            self._close_claims[identity] = device
 
         try:
             device.close()
         except Exception as exc:
-            cls._release_close_claim(identity)
+            self._release_close_claim(identity)
             raise DeviceCloseFailure((name,), exc) from exc
         except BaseException:
-            cls._release_close_claim(identity)
+            self._release_close_claim(identity)
             raise
         else:
             # Release the claim and drop the closed identity's aliases in one
             # atomic lock acquisition: a follower can never observe a released
             # claim whose identity is still registered and double-close it.
-            cls._finish_close(
+            self._finish_close(
                 closed_identities=(identity,),
                 claimed_identities=(identity,),
             )
 
-    @classmethod
-    def close_all_devices(cls) -> None:
+    def close_all_devices(self) -> None:
         """Close every registered device once, aggregating named errors.
 
         Snapshot, identity-dedupe and claim all claimable identities in one
@@ -201,8 +192,8 @@ class GlobalDeviceManager:
         # left an already-cleaned registry (so the snapshot is empty or lacks
         # the identity), while one still in flight still holds the claim — a
         # follower can never double-close an identity it snapshotted.
-        with cls._lock:
-            snapshot = dict(cls._devices)
+        with self._lock:
+            snapshot = dict(self._devices)
             if not snapshot:
                 return
 
@@ -215,13 +206,13 @@ class GlobalDeviceManager:
             claimed: list[tuple[int, BaseDevice]] = []
             in_progress: list[DeviceCloseInProgressError] = []
             for identity, aliases in names_by_identity.items():
-                if identity in cls._close_claims:
+                if identity in self._close_claims:
                     # Another manager close API owns this identity: fail fast
                     # with a named error and let the batch continue.
                     in_progress.append(DeviceCloseInProgressError(tuple(aliases)))
                     continue
                 device = devices_by_identity[identity]
-                cls._close_claims[identity] = device
+                self._close_claims[identity] = device
                 claimed.append((identity, device))
 
         failures: list[DeviceCloseFailure] = []
@@ -240,7 +231,7 @@ class GlobalDeviceManager:
             # A BaseException propagating from a later device must not leave
             # earlier successful closes registered, nor any owned claim held:
             # clean both up atomically before the exception escapes.
-            cls._finish_close(
+            self._finish_close(
                 closed_identities=succeeded,
                 claimed_identities=(identity for identity, _ in claimed),
             )
@@ -249,14 +240,12 @@ class GlobalDeviceManager:
         if errors:
             raise ExceptionGroup(f"failed to close {len(errors)} device(s)", errors)
 
-    @classmethod
-    def _release_close_claim(cls, identity: int) -> None:
-        with cls._lock:
-            cls._close_claims.pop(identity, None)
+    def _release_close_claim(self, identity: int) -> None:
+        with self._lock:
+            self._close_claims.pop(identity, None)
 
-    @classmethod
     def _finish_close(
-        cls,
+        self,
         *,
         closed_identities: Iterable[int],
         claimed_identities: Iterable[int],
@@ -272,11 +261,11 @@ class GlobalDeviceManager:
         owns and must release.
         """
         closed = set(closed_identities)
-        with cls._lock:
+        with self._lock:
             if closed:
                 for alias in [
-                    a for a, dev in cls._devices.items() if id(dev) in closed
+                    a for a, dev in self._devices.items() if id(dev) in closed
                 ]:
-                    del cls._devices[alias]
+                    del self._devices[alias]
             for identity in claimed_identities:
-                cls._close_claims.pop(identity, None)
+                self._close_claims.pop(identity, None)

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-from zcu_tools.device import DeviceInfo, GlobalDeviceManager
+from zcu_tools.device import DeviceInfo, DeviceManager
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
 from zcu_tools.device.yoko import YOKOGS200
 from zcu_tools.program.v2 import SweepCfg
@@ -148,16 +148,17 @@ def savefig(fig: Figure, filepath: str, close_after: bool = True, **kwargs) -> N
         plt.close(fig)
 
 
-def dump_device_info(path: str | Path) -> None:
+def dump_device_info(path: str | Path, device_manager: DeviceManager) -> None:
     info_snapshot = {
-        name: info.to_dict()
-        for name, info in GlobalDeviceManager.get_all_info().items()
+        name: info.to_dict() for name, info in device_manager.get_all_info().items()
     }
     with open(str(path), "w") as f:
         json.dump(info_snapshot, f, indent=2)
 
 
-def reconnect_devices(dev_info: Mapping[str, DeviceInfo]) -> ResourceManager:
+def reconnect_devices(
+    dev_info: Mapping[str, DeviceInfo], device_manager: DeviceManager
+) -> ResourceManager:
     from pyvisa import ResourceManager
 
     resource_manager = ResourceManager()
@@ -168,6 +169,6 @@ def reconnect_devices(dev_info: Mapping[str, DeviceInfo]) -> ResourceManager:
             device = RohdeSchwarzSGS100A(info.address, resource_manager)
         else:
             raise ValueError(f"Not supported device type: {info.type}")
-        GlobalDeviceManager.register_device(name, device)
+        device_manager.register_device(name, device)
 
     return resource_manager
