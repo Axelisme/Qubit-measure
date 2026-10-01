@@ -1077,7 +1077,7 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
-    cast(SweepField, sweep_widget._field).start_field.set_value(
+    sweep_widget._field.start_field.set_value(
         EvalValue(expr="r_f - 1", resolved=5999.0)
     )
     out = w.read_values()
@@ -1911,14 +1911,14 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert isinstance(root, TreeCfgWidget)
     # 1. Initially unmodified
     assert ref_widget._combo.currentText() == "Lib: my_pulse"
-    assert cast(ReferenceField, ref_widget._field).is_modified() is False
+    assert ref_widget._field.is_modified() is False
 
     # Edit the displayed library frequency through its text input.
     entry = next(w for w in w.findChildren(QLineEdit) if w.text() == "7000.0")
     entry.setText("8000.0")
 
     # Verify is_modified is True and combobox text has (modified) suffix
-    assert cast(ReferenceField, ref_widget._field).is_modified() is True
+    assert ref_widget._field.is_modified() is True
     assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
 
     # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
@@ -1951,7 +1951,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert clean_idx >= 0
     ref_widget._combo.setCurrentIndex(clean_idx)
 
-    assert cast(ReferenceField, ref_widget._field).is_modified() is False
+    assert ref_widget._field.is_modified() is False
     mod_val2 = w.read_values().fields["mod"]
     assert isinstance(mod_val2, ReferenceValue)
     freq_val2 = mod_val2.value.fields["ro_freq"]
@@ -2019,7 +2019,7 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 
     module_widgets = w.findChildren(ReferenceWidget)
     mw = module_widgets[0]
-    field = cast(ReferenceField, mw._field)
+    field = mw._field
 
     assert field.is_enabled is True
 
@@ -2101,7 +2101,7 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
 
     ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
-    field = cast(ReferenceField, ref_widget._field)
+    field = ref_widget._field
     assert field.has_missing_library_ref() is True
     assert field.is_valid() is False
     assert ref_widget._missing_ref_hint.isVisible() is True
