@@ -14,7 +14,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-from zcu_tools.plotting.figures import NamedFigures
+from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
@@ -78,6 +78,8 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     class P:
         thr: float = 0.5
 
+    figures = FigureCollection()
+    figures.adopt("fit", Figure())
     snap = TabSnapshot(
         adapter_name="fake",
         cfg_schema=schema,
@@ -100,7 +102,7 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         analysis=AnalysisPaneSnapshot(
             params=P(),
             result=object(),
-            figures=NamedFigures({"fit": Figure()}),
+            figures=figures,
             writeback_items=(),
             image_paths={"fit": PathResourceSnapshot(override=None, path="/tmp/a")},
             has_writeback_draft=False,
