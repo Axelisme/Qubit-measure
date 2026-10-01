@@ -22,6 +22,17 @@ def suppress_display(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("IPython.display.display", lambda _widget: None)
 
 
+def assert_canonical_payload(data: LabberData, result: FluxDepResult) -> None:
+    assert [(axis.name, axis.unit) for axis in data.axes] == [
+        ("Frequency", "Hz"),
+        ("Flux device value", "a.u."),
+    ]
+    assert (data.data.name, data.data.unit) == ("Signal", "a.u.")
+    np.testing.assert_array_equal(data.axes[0].values, result.freqs * 1e6)
+    np.testing.assert_array_equal(data.axes[1].values, result.values)
+    np.testing.assert_array_equal(data.data.values, result.signals)
+
+
 def test_canonical_load_keeps_pending_pick_source_and_retains_old_figure(
     tmp_path: Path,
 ) -> None:
@@ -39,15 +50,7 @@ def test_canonical_load_keeps_pending_pick_source_and_retains_old_figure(
     path_a, path_b = tmp_path / "source-a.hdf5", tmp_path / "source-b.hdf5"
     core.save(source_a, path_a)
     core.save(source_b, path_b)
-    data = LabberData.from_file(path_a)
-    np.testing.assert_array_equal(
-        data.get_x("Frequency", "Hz"), source_a.result.freqs * 1e6
-    )
-    np.testing.assert_array_equal(
-        data.get_x("Flux device value", "a.u."), source_a.result.values
-    )
-    np.testing.assert_array_equal(data.get_z("Signal", "a.u."), source_a.result.signals)
-    assert data.axis_order == ("Frequency", "Flux device value")
+    assert_canonical_payload(LabberData.load(str(path_a)), source_a.result)
 
     adapter = NotebookAdapter(core)
     loaded_a = adapter.load(path_a)
@@ -74,7 +77,7 @@ def test_canonical_load_keeps_pending_pick_source_and_retains_old_figure(
     assert completed.source is loaded_a
     assert completed.options.flux_half == pytest.approx(-0.1)
     assert completed.options.flux_int == pytest.approx(0.4)
-    assert completed.analysis.flux_period == pytest.approx(1.0)
+    assert completed.result.flux_period == pytest.approx(1.0)
     assert adapter.last_run is loaded_b
     saved = adapter.save(loaded_a, tmp_path / "saved-a.hdf5", unique=False)
     round_trip = core.load(saved)
@@ -101,7 +104,7 @@ def test_loaded_data_without_valid_cfg_can_be_picked_but_not_saved(
     core = FluxDepExp()
     original = tmp_path / "original.hdf5"
     core.save(source, original)
-    data = LabberData.from_file(original)
+    data = LabberData.load(str(original))
     metadata = json.loads(data.comment)
     if cfg_kind == "missing":
         del metadata["cfg"]
@@ -109,7 +112,7 @@ def test_loaded_data_without_valid_cfg_can_be_picked_but_not_saved(
         metadata["cfg"]["reps"] = "not-an-integer"
     data.comment = json.dumps(metadata)
     altered = tmp_path / "without-valid-cfg.hdf5"
-    data.write(altered)
+    data.save(str(altered))
     adapter = NotebookAdapter(core)
     expected_warning = (
         pytest.warns(UserWarning, match="Config validation failed")
@@ -124,10 +127,10 @@ def test_loaded_data_without_valid_cfg_can_be_picked_but_not_saved(
     np.testing.assert_array_equal(loaded.result.signals, source.result.signals)
     tool = FluxDepAnalyzer()
     completed = tool.start(loaded, FluxDepPickerOptions(-0.2, 0.3)).done()
-    assert completed.source is loaded and completed.cfg is None
-    assert completed.analysis.flux_half == pytest.approx(-0.2)
-    assert completed.analysis.flux_int == pytest.approx(0.3)
-    assert completed.analysis.flux_period == pytest.approx(1.0)
+    assert completed.source is loaded and completed.source.cfg is None
+    assert completed.result.flux_half == pytest.approx(-0.2)
+    assert completed.result.flux_int == pytest.approx(0.3)
+    assert completed.result.flux_period == pytest.approx(1.0)
     with pytest.raises(ValueError, match="RunRecord.cfg is None"):
         adapter.save(loaded, tmp_path / "rejected.hdf5", unique=False)
     assert not (tmp_path / "rejected.hdf5").exists()
