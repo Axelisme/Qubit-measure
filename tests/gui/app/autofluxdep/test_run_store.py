@@ -323,8 +323,8 @@ def test_run_store_finalize_records_report_failure_after_journal_event(
 
     monkeypatch.setattr(run_store_module, "write_markdown_report", fail_report)
 
-    with pytest.raises(RuntimeError, match="report boom"):
-        store.finalize("finished")
+    output_errors = store.finalize("finished")
+    assert output_errors == ("report boom",)
 
     manifest = load_manifest(store.manifest_path)
     assert manifest["terminal"]["status"] == "finished"
@@ -368,7 +368,8 @@ def test_run_store_finalize_skips_report_when_journal_snapshot_unavailable(
     assert events[-1]["completed_flux_count"] is None
     assert events[-1]["exports"] == {}
     assert events[-1]["reports"] == {}
-    assert events[-1]["export_errors"] == ["journal boom"]
+    assert events[-1]["writer_errors"] == ["journal boom"]
+    assert events[-1]["export_errors"] == []
     assert events[-1]["report_errors"] == [
         "journal snapshot unavailable; skipped terminal report"
     ]
@@ -400,6 +401,24 @@ def test_run_store_finalize_surfaces_writer_finalize_runtime_error(
     events = load_journal_events(store.run_dir / "journal.jsonl")
     assert events[-1]["type"] == "run_finalized"
     assert events[-1]["writer_errors"] == ["probe: flush failed"]
+
+
+def test_manifest_write_failure_is_not_a_derived_output_warning(tmp_path, monkeypatch):
+    node, result = _node_and_result()
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[0.0],
+        flux_device_name=None,
+        nodes=[node],
+        results={"probe": result},
+    )
+
+    def fail_replace(*_args, **_kwargs):
+        raise OSError("manifest unavailable")
+
+    monkeypatch.setattr(run_store_module.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="manifest unavailable"):
+        store.finalize("finished")
 
 
 def test_run_store_close_writers_ignores_explicit_already_closed(tmp_path):

@@ -36,8 +36,8 @@ from zcu_tools.gui.app.autofluxdep.services.remote.wire_version import (
 
 
 def test_versions_track_workflow_enabled_contract():
-    assert WIRE_VERSION == 6
-    assert GUI_VERSION == 10
+    assert WIRE_VERSION == 7
+    assert GUI_VERSION == 11
 
 
 def test_every_payload_type_has_a_serializer():
@@ -69,13 +69,14 @@ def test_serializers_emit_json_friendly_requery_hints():
         RunContinuedPayload(next_flux_idx=2): "run_continued",
         NodeEnteredPayload(name="t1", idx=0): "node_entered",
         PointDonePayload(idx=1): "point_done",
-        RunFinishedPayload(): "run_finished",
-        RunStoppedPayload(): "run_stopped",
+        RunFinishedPayload(output_errors=("export unavailable",)): "run_finished",
+        RunStoppedPayload(output_errors=("export unavailable",)): "run_stopped",
         RunFailedPayload(
             message="boom",
             node="probe",
             flux_idx=2,
             stage="produce",
+            output_errors=("export unavailable",),
         ): "run_failed",
     }
     for payload, wire_name in samples.items():
@@ -86,6 +87,10 @@ def test_serializers_emit_json_friendly_requery_hints():
         json.dumps(wire)
         assert "requery" in wire
         assert wire_event_name(type(payload)) == wire_name
+        if isinstance(
+            payload, (RunFinishedPayload, RunStoppedPayload, RunFailedPayload)
+        ):
+            assert wire["output_errors"] == ["export unavailable"]
         if isinstance(payload, RunFailedPayload):
             assert wire["message"] == "boom"
             assert wire["node"] == "probe"

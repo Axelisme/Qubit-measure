@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -48,6 +49,8 @@ from zcu_tools.gui.app.autofluxdep.services.result_io import (
 )
 from zcu_tools.gui.app.autofluxdep.services.run_report import write_markdown_report
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
+
+logger = logging.getLogger(__name__)
 
 MANIFEST_FORMAT_VERSION = 1
 JOURNAL_EVENT_VERSION = 1
@@ -102,7 +105,6 @@ class RunStore:
         self._failure_counts: Counter[str] = Counter()
         self._exports: dict[str, Any] = {}
         self._reports: dict[str, str] = {}
-        self._terminal_errors: list[str] = []
         self._manifest = self._initial_manifest(flux_device_name)
 
     @classmethod
@@ -329,12 +331,8 @@ class RunStore:
         *,
         error: Exception | None = None,
         next_flux_idx: int | None = None,
-    ) -> None:
-        """Close writers, generate terminal sidecars, and finalize manifest."""
-        writer_errors: list[str] = []
-        export_errors: list[str] = []
-        report_errors: list[str] = []
-
+    ) -> tuple[str, ...]:
+        """Finalize canonical data or raise; return independent output errors."""
         terminal = dict(self._manifest["terminal"])
         terminal["status"] = status
         terminal["finalized_at"] = _utc_now()
@@ -344,18 +342,22 @@ class RunStore:
         if next_flux_idx is not None:
             lifecycle["next_flux_idx"] = self._validate_next_flux_idx(next_flux_idx)
 
-        try:
-            self.close_writers(finalize=True)
-        except RuntimeError as exc:
-            writer_errors.append(str(exc))
-
+        writer_errors = self._close_node_writers(finalize=True)
+        export_errors = self._close_sidecar_writers(finalize=True)
+        report_errors: list[str] = []
         exports: dict[str, Any] = {}
         journal_events: Sequence[Mapping[str, Any]] | None = None
         try:
             journal_events = self.iter_journal_events()
-            exports = self._generate_exports(journal_events)
         except Exception as exc:
-            export_errors.append(str(exc))
+            logger.exception("Canonical journal snapshot failed")
+            writer_errors.append(str(exc))
+        if journal_events is not None:
+            try:
+                exports = self._generate_exports(journal_events)
+            except Exception as exc:
+                logger.exception("Terminal export failed")
+                export_errors.append(str(exc))
 
         terminal["error"] = _terminal_error_message(
             error, (*writer_errors, *export_errors)
@@ -379,10 +381,10 @@ class RunStore:
             try:
                 reports = self._generate_report(report_manifest, journal_events)
             except Exception as exc:
+                logger.exception("Terminal report failed")
                 report_errors.append(str(exc))
 
         terminal_errors = [*writer_errors, *export_errors, *report_errors]
-        self._terminal_errors.extend(terminal_errors)
         terminal["error"] = _terminal_error_message(error, terminal_errors)
         self._append_event(
             "run_finalized",
@@ -407,10 +409,19 @@ class RunStore:
         self._exports = dict(exports)
         self._reports = dict(reports)
         self._write_manifest()
-        if terminal_errors:
+        if writer_errors:
             raise RuntimeError("; ".join(terminal_errors))
+        return tuple((*export_errors, *report_errors))
 
     def close_writers(self, *, finalize: bool = False) -> None:
+        errors = [
+            *self._close_node_writers(finalize=finalize),
+            *self._close_sidecar_writers(finalize=finalize),
+        ]
+        if errors:
+            raise RuntimeError("; ".join(errors))
+
+    def _close_node_writers(self, *, finalize: bool) -> list[str]:
         errors: list[str] = []
         for node_name, writer in self._writers.items():
             if finalize:
@@ -424,21 +435,26 @@ class RunStore:
             except RuntimeError as exc:
                 if not _is_already_closed_writer_error(exc):
                     errors.append(f"{node_name}: {exc}")
+        return errors
+
+    def _close_sidecar_writers(self, *, finalize: bool) -> list[str]:
+        errors: list[str] = []
         sidecar_writers = self._labber_browser_writers
         if sidecar_writers is not None:
             if finalize:
                 try:
                     sidecar_writers.finalize()
-                except RuntimeError as exc:
+                except Exception as exc:
                     if not _is_already_closed_labber_browser_writer_error(exc):
+                        logger.exception("Terminal sidecar finalize failed")
                         errors.append(f"labber_browser: {exc}")
             try:
                 sidecar_writers.close()
-            except RuntimeError as exc:
+            except Exception as exc:
                 if not _is_already_closed_labber_browser_writer_error(exc):
+                    logger.exception("Terminal sidecar close failed")
                     errors.append(f"labber_browser: {exc}")
-        if errors:
-            raise RuntimeError("; ".join(errors))
+        return errors
 
     def iter_journal_events(self) -> list[dict[str, Any]]:
         return list(load_journal_events(self._journal_path))
@@ -845,8 +861,8 @@ def _is_already_closed_writer_error(exc: RuntimeError) -> bool:
     return str(exc) == "streaming Labber writer is closed"
 
 
-def _is_already_closed_labber_browser_writer_error(exc: RuntimeError) -> bool:
-    return str(exc) in {
+def _is_already_closed_labber_browser_writer_error(exc: Exception) -> bool:
+    return isinstance(exc, RuntimeError) and str(exc) in {
         "Labber Browser sidecar writers are closed",
         "streaming Labber writer is closed",
     }
