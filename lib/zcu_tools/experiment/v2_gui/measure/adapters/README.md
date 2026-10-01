@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02 — TwoTone pulse calibration records
+**Last updated:** 2026-10-02 — Bath reset records
 
 # measure experiment adapters
 
@@ -41,6 +41,7 @@ OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed 
 TwoTone AmpRabi／LenRabi 的 run 回傳 RunRecord，FIT 以 explicit source 與 typed options 分析，結果只含 scalar，`fit` 圖交給 Plots。Gain／length／Rabi frequency 的 scalar writeback 不依賴 cfg；校準 pulse module writeback 只從該 source.cfg 複製 qub_pulse，缺 cfg 時略過 module items。
 T2Echo／T2Ramsey 在 build_exp_cfg 將 detune_ratio 降為 cfg.detune，run 配對 cfg／Result，FIT 只回傳 scalar 並發布具名 fit。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時只提供 t2r。
 CKP 的 run 配對 cfg 與純 Result 為 RunRecord，兩張 measurement 熱圖分別呈現 ground／excited。FIT 只提交 chi／kappa／res_freq scalar與具名 fit 圖，保留 chi／rf_w／readout_f writeback。
+Bath reset 的 FreqGain／Length／Phase adapter 將同次 cfg／Result 配成 RunRecord，FIT 使用 explicit source 與本次 Plots，僅提交 scalar 或空數值結果。三者的 reset_bath／reset_bath_e module writeback 使用來源 cfg，缺 cfg 時略過；md 欄位與 phase gating 不變。
 `RunRequest`只提供SoC handles與detached device snapshot；Base assembler
 以此snapshot和`ml=None`建立experiment cfg。自訂builder若委派Base，
 須宣告 `ExpCfg_cls`；domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。

@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting.base import cosfunc, fitcos
@@ -16,14 +13,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     BathReset,
     BathResetCfg,
@@ -44,11 +41,16 @@ from zcu_tools.utils.process import rotate2real
 class PhaseResult:
     phases: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: PhaseCfg | None = None
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
+
+
+@dataclass(frozen=True)
+class PhaseAnalysis:
+    max_phase: float
+    min_phase: float
 
 
 class PhaseModuleCfg(ConfigBase):
@@ -76,17 +78,20 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         tag="twotone/reset/bath/phase",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
-        cfg: PhaseCfg,
+        config: PhaseCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> PhaseResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         phases = sweep2array(
@@ -98,38 +103,41 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             },
         )
 
-        with LivePlot1D("Phase (deg)", "Signal (a.u.)") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(phases),),
-                on_update=lambda data: viewer.update(
-                    phases, bathreset_signal2real(data)
-                ),
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Phase (deg)", "Signal (a.u.)"
+        )
+        signals_buffer = SignalBuffer(
+            (len(phases),),
+            on_update=lambda data: viewer.update(phases, bathreset_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            modules.tested_reset.set_param(
+                "pi2_phase", sweep2param("phase", sched.cfg.sweep.phase)
             )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                modules.tested_reset.set_param(
-                    "pi2_phase", sweep2param("phase", sched.cfg.sweep.phase)
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    BathReset("tested_reset", modules.tested_reset),
+                    Readout("readout", modules.readout),
                 )
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        BathReset("tested_reset", modules.tested_reset),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("phase", sched.cfg.sweep.phase)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-                signals = signals_buffer.array
+                .declare_sweep("phase", sched.cfg.sweep.phase)
+                .build_and_acquire()
+            )
 
-        return PhaseResult(phases, signals, cfg_snapshot=orig_cfg)
+        return PhaseResult(phases, signals_buffer.array)
 
-    @retrieve_result
-    def analyze(self, result: PhaseResult | None = None) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
+    def analyze(
+        self,
+        source: RunRecord[PhaseCfg, PhaseResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> PhaseAnalysis:
+        del options
+        result = source.result
 
         phases, signals = result.phases, result.signals
 
@@ -152,8 +160,7 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         while abs(min_phase) > abs(min_phase + 360):
             min_phase += 360
 
-        fig, ax = plt.subplots()
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit")
 
         ax.plot(phases, real_signals, ".-", label="data")
         ax.plot(phases, y_fit, "-", label="fit")
@@ -170,4 +177,4 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
 
         fig.tight_layout()
 
-        return max_phase, min_phase, fig
+        return PhaseAnalysis(max_phase=max_phase, min_phase=min_phase)

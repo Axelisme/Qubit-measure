@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.bath.freq import (
+    FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
     FreqGainResult,
@@ -28,6 +29,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -36,10 +38,11 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import bath_reset_writeback_items
 
-BathFreqGainRunResult: TypeAlias = FreqGainResult
+BathFreqGainRunResult: TypeAlias = RunRecord[FreqGainCfg, FreqGainResult]
 
 # The pi/2 readout tomography pulse sits at a fixed phase offset; the domain
 # adds a 4-point QickSweep1D("phase", 0, 270) on top of pi2_cfg.phase, so the
@@ -85,7 +88,6 @@ class BathFreqGainAnalyzeParams:
 class BathFreqGainAnalyzeResult(AnalyzeResultBase):
     gain: float
     freq: float
-    figure: Figure
 
 
 class BathFreqGainAdapter(
@@ -169,14 +171,28 @@ class BathFreqGainAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> BathFreqGainRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FreqGainExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[BathFreqGainRunResult, BathFreqGainAnalyzeParams]
+        self,
+        req: AnalyzeRequest[BathFreqGainRunResult, BathFreqGainAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> BathFreqGainAnalyzeResult:
         params = req.analyze_params
-        gain, freq, fig = FreqGainExp().analyze(
-            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        analysis = FreqGainExp().analyze(
+            req.run_result,
+            FreqGainAnalyzeOptions(
+                smooth=params.smooth, smooth_method=params.smooth_method
+            ),
+            plots=plots,
         )
-        return BathFreqGainAnalyzeResult(gain=gain, freq=freq, figure=fig)
+        return BathFreqGainAnalyzeResult(gain=analysis.gain, freq=analysis.freq)
 
     def get_writeback_items(
         self,
@@ -195,7 +211,7 @@ class BathFreqGainAdapter(
                 proposed_value=result.freq,
             ),
         ]
-        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
+        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg))
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

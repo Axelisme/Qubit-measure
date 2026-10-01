@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 
@@ -18,14 +15,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     BathReset,
     BathResetCfg,
@@ -52,7 +49,20 @@ class FreqGainResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
     phases: NDArray[np.float64] = field(default_factory=_default_phase_values)
-    cfg_snapshot: FreqGainCfg | None = None
+
+
+@dataclass(frozen=True)
+class FreqGainAnalyzeOptions:
+    smooth: float = 1.0
+    smooth_method: SmoothMethod = "wavelet"
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+
+
+@dataclass(frozen=True)
+class FreqGainAnalysis:
+    gain: float
+    freq: float
 
 
 class FreqGainModuleCfg(ConfigBase):
@@ -93,17 +103,20 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         tag="twotone/reset/bath/freq_gain",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
-        cfg: FreqGainCfg,
+        config: FreqGainCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> FreqGainResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         reset_cfg = modules.tested_reset
@@ -119,82 +132,74 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
-        with LivePlot2D("Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)") as viewer:
-            signals_buffer = SignalBuffer(
-                (4, len(gains), len(freqs)),
-                on_update=lambda data: viewer.update(
-                    freqs, gains, bathreset_signal2real(data).T
-                ),
+        viewer = context.plots.liveplot_2d(
+            "measurement", "Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)"
+        )
+        signals_buffer = SignalBuffer(
+            (4, len(gains), len(freqs)),
+            on_update=lambda data: viewer.update(
+                freqs, gains, bathreset_signal2real(data).T
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            tested_reset = modules.tested_reset
+            tested_reset.set_param(
+                "res_gain", sweep2param("gain", sched.cfg.sweep.gain)
             )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                tested_reset = modules.tested_reset
-                tested_reset.set_param(
-                    "res_gain", sweep2param("gain", sched.cfg.sweep.gain)
-                )
-                tested_reset.set_param(
-                    "res_freq", sweep2param("freq", sched.cfg.sweep.freq)
-                )
-                phase_param = (
-                    QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
-                )
-                tested_reset.set_param("pi2_phase", phase_param)
+            tested_reset.set_param(
+                "res_freq", sweep2param("freq", sched.cfg.sweep.freq)
+            )
+            phase_param = QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
+            tested_reset.set_param("pi2_phase", phase_param)
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        BathReset("tested_reset", tested_reset),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("phase", 4)
-                    .declare_sweep("gain", sched.cfg.sweep.gain)
-                    .declare_sweep("freq", sched.cfg.sweep.freq)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    BathReset("tested_reset", tested_reset),
+                    Readout("readout", modules.readout),
                 )
-                signals = signals_buffer.array
+                .declare_sweep("phase", 4)
+                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .declare_sweep("freq", sched.cfg.sweep.freq)
+                .build_and_acquire()
+            )
 
         return FreqGainResult(
             gains=gains,
             freqs=freqs,
             phases=phases,
-            signals=signals,
-            cfg_snapshot=orig_cfg,
+            signals=signals_buffer.array,
         )
 
-    @retrieve_result
     def analyze(
         self,
-        result: FreqGainResult | None = None,
-        smooth: float = 1.0,
+        source: RunRecord[FreqGainCfg, FreqGainResult],
+        options: FreqGainAnalyzeOptions,
         *,
-        smooth_method: SmoothMethod = "wavelet",
-        wavelet: str = "sym4",
-        wavelet_level: int = 0,
-    ) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> FreqGainAnalysis:
+        result = source.result
 
         gains, freqs, signals = result.gains, result.freqs, result.signals
 
         # Find peak in amplitude
         smooth_signals = smooth_signal_nd(
             signals,
-            method=smooth_method,
-            sigma=smooth,
+            method=options.smooth_method,
+            sigma=options.smooth,
             axes=(1, 2),
-            wavelet=wavelet,
-            wavelet_level=wavelet_level,
+            wavelet=options.wavelet,
+            wavelet_level=options.wavelet_level,
         ).astype(np.complex128)
         real_signals = bathreset_signal2real(smooth_signals)
 
         gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
         freq_opt = freqs[np.argmax(np.max(real_signals, axis=0))]
 
-        fig, ax = plt.subplots()
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit")
 
         ax.imshow(
             real_signals,
@@ -212,4 +217,4 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
 
         fig.tight_layout()
 
-        return gain_opt, freq_opt, fig
+        return FreqGainAnalysis(gain=float(gain_opt), freq=float(freq_opt))

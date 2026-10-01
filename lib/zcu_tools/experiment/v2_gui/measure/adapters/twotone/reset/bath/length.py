@@ -5,23 +5,25 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.bath.length import (
     LengthCfg,
     LengthExp,
     LengthResult,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     md,
-    run_figure_only_analyze,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -29,10 +31,11 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import bath_reset_writeback_items
 
-BathLengthRunResult: TypeAlias = LengthResult
+BathLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 # The domain replaces pi2_cfg.phase with a 4-point QickSweep1D("phase", 0, 270)
 # for the tomography readout, so the form value is inert; lock it to the
@@ -41,11 +44,8 @@ _PI2_PHASE_OFFSET_DEG: float = 90.0
 
 
 @dataclass
-class BathLengthAnalyzeResult(FigureOnlyAnalyzeResult):
-    # D5: the length sweep is a look-at-the-curve fit — analysis renders the decay
-    # trace for the Analyze tab but extracts no scalar, so there is no writeback.
-    # The single ``figure`` field is inherited from FigureOnlyAnalyzeResult.
-    pass
+class BathLengthAnalyzeResult(AnalyzeResultBase):
+    """The length analysis publishes a figure without fitted scalars."""
 
 
 class BathLengthAdapter(
@@ -126,10 +126,21 @@ class BathLengthAdapter(
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> BathLengthRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = LengthExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[BathLengthRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[BathLengthRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> BathLengthAnalyzeResult:
-        return run_figure_only_analyze(LengthExp, BathLengthAnalyzeResult, req)
+        LengthExp().analyze(req.run_result, None, plots=plots)
+        return BathLengthAnalyzeResult()
 
     def get_writeback_items(
         self,
@@ -139,7 +150,7 @@ class BathLengthAdapter(
         # Gated per-experiment 'reset_bath' / 'reset_bath_e' proposals: emitted when
         # md carries the calibrated cavity freq/gain and the matching pi/2 phase.
         items: list[WritebackItem] = []
-        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
+        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg))
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
