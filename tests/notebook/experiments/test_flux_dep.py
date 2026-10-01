@@ -13,9 +13,13 @@ from matplotlib.figure import Figure
 from zcu_tools.analysis.fluxdep.line_state import FluxPickAnalysis, FluxPickState
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepResult
-from zcu_tools.notebook.experiments import FluxDepAnalyzer, FluxDepPickerOptions
+from zcu_tools.notebook.experiments import (
+    FluxDepAnalysisRecord,
+    FluxDepAnalyzer,
+    FluxDepPickerOptions,
+)
 from zcu_tools.notebook.plotting import NotebookPlotHost
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.plotting.plots import NonPresentingHost, PlotHost, Plots
 
 
 def make_source() -> RunRecord[FluxDepCfg, FluxDepResult]:
@@ -41,6 +45,14 @@ def expect_analysis_plots(analyzer: FluxDepAnalyzer) -> Plots:
     plots = analyzer.analysis_plots
     assert plots is not None
     return plots
+
+
+def completed_analyzer(
+    host: PlotHost | None = None,
+) -> tuple[FluxDepAnalyzer, FluxDepAnalysisRecord, Plots]:
+    analyzer = FluxDepAnalyzer(host)
+    record = analyzer.start(make_source(), FluxDepPickerOptions(-0.2, 0.3)).done()
+    return analyzer, record, expect_analysis_plots(analyzer)
 
 
 def test_done_publishes_source_options_numeric_result_and_named_figure(
@@ -169,10 +181,7 @@ def test_failed_final_pick_publication_retires_preview_without_losing_old_record
 ) -> None:
     monkeypatch.setattr("IPython.display.display", lambda _widget: None)
     initial_widgets = set(widgets.Widget.widgets)
-    exp = FluxDepAnalyzer()
-    exp.start(make_source(), FluxDepPickerOptions(-0.2, 0.3)).done()
-    old_record = exp.analysis
-    old_plots = expect_analysis_plots(exp)
+    exp, old_record, old_plots = completed_analyzer()
     before_new = set(widgets.Widget.widgets)
     control = exp.start(make_source(), FluxDepPickerOptions(-0.1, 0.4))
 
@@ -198,10 +207,7 @@ def test_terminal_preview_release_failure_closes_controls_and_retains_record(
 ) -> None:
     monkeypatch.setattr("IPython.display.display", lambda _widget: None)
     initial_widgets = set(widgets.Widget.widgets)
-    exp = FluxDepAnalyzer()
-    exp.start(make_source(), FluxDepPickerOptions(-0.2, 0.3)).done()
-    old_record = exp.analysis
-    old_plots = expect_analysis_plots(exp)
+    exp, old_record, old_plots = completed_analyzer()
     before_new = set(widgets.Widget.widgets)
     control = exp.start(make_source(), FluxDepPickerOptions(-0.1, 0.4))
     release = NotebookPlotHost.release
@@ -233,10 +239,7 @@ def test_toolbar_failure_before_preview_canvas_close_preserves_old_record(
 ) -> None:
     monkeypatch.setattr("IPython.display.display", lambda _widget: None)
     existing_widgets = set(widgets.Widget.widgets)
-    exp = FluxDepAnalyzer()
-    exp.start(make_source(), FluxDepPickerOptions(-0.2, 0.3)).done()
-    old_record = exp.analysis
-    old_plots = expect_analysis_plots(exp)
+    exp, old_record, old_plots = completed_analyzer()
     control = exp.start(make_source(), FluxDepPickerOptions(-0.1, 0.4))
     canvas = control.figure.canvas
     assert isinstance(canvas, Canvas)
