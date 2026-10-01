@@ -10,7 +10,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .load import LoadTabResultOutcome
@@ -42,10 +41,6 @@ class TabControlPort(Protocol):
         self, adapter_name: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
-
-    def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None: ...
-
-    def reset_tab_cfg(self, tab_id: str) -> CfgSchema: ...
 
 
 class TabControlFacet:
@@ -129,19 +124,3 @@ class TabControlFacet:
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
-
-    def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        self._access.require_available()
-        self._tab.update_tab_cfg(tab_id, schema)
-
-    def reset_tab_cfg(self, tab_id: str) -> CfgSchema:
-        self._access.require_available()
-        if self._state.running_tab_id == tab_id:
-            raise RuntimeError(
-                f"tab {tab_id!r} is currently running; cancel the run before "
-                "resetting cfg"
-            )
-        adapter_name = self._tab.get_tab_adapter_name(tab_id)
-        schema = self._tab.make_default_cfg(adapter_name)
-        self._tab.update_tab_cfg(tab_id, schema)
-        return schema

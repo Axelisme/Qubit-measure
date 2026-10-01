@@ -89,7 +89,7 @@ class MainDialogRegistry:
         if name is DialogName.ARB_WAVEFORM:
             from .arb_waveform_dialog import ArbWaveformDialog
 
-            return ArbWaveformDialog(self._ctrl, parent=self._parent)
+            return ArbWaveformDialog(self._ctrl.arb_waveforms, parent=self._parent)
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
     def open(self, name: DialogName) -> None:

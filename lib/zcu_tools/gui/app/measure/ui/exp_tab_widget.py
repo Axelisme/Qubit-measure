@@ -63,9 +63,43 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
+from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
+from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
+from zcu_tools.gui.session.ui.progress_stack import ProgressStack
+from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets.cfg.fields.containers import CollapsibleSection
+from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
+
 from .analyze_form import AnalyzeFormWidget
 from .data_figure_preview_gallery import DataFigurePreviewGallery
 from .writeback_widget import WritebackWidget
+
+logger = logging.getLogger(__name__)
+
+# Approved prototype blue primary treatment (A3)
+_BLUE_PRIMARY_STYLESHEET = (
+    "QPushButton#primaryButton { background-color: #286ac7; color: white; "
+    "font-weight: 600; border: 1px solid #205aa9; border-radius: 4px; }"
+    "QPushButton#primaryButton:disabled { background-color: #a0b8d9; color: #e6edf7; border-color: #8da6c9; }"
+    "QPushButton#primaryButton:hover:!disabled { background-color: #2f76dc; }"
+)
+_RED_STOP_STYLESHEET = (
+    "background-color: #f44336; color: white; font-weight: bold; "
+    "border: 1px solid #d32f2f; border-radius: 4px;"
+)
+_GREEN_RESET_STYLESHEET = (
+    "QPushButton#resetButton { background-color: #2e8b57; color: white; "
+    "font-weight: 600; border: 1px solid #246f46; border-radius: 4px; }"
+    "QPushButton#resetButton:hover:!disabled { background-color: #369d65; }"
+    "QPushButton#resetButton:pressed:!disabled { background-color: #226b43; }"
+    "QPushButton#resetButton:disabled { background-color: #9dbdaa; color: #eef5f0; "
+    "border-color: #8eab99; }"
+)
+
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -256,10 +290,6 @@ class ExpTabWidget(QWidget):
         preview_renderer: Any | None = None,
     ) -> None:
         super().__init__(parent)
-        if not isinstance(capabilities, AdapterCapabilities):
-            raise TypeError(
-                f"ExpTabWidget requires AdapterCapabilities, got {type(capabilities).__name__!r}"
-            )
         self.tab_id = tab_id
         self._ctrl = ctrl
         self._capabilities = capabilities
@@ -267,8 +297,7 @@ class ExpTabWidget(QWidget):
         self._has_post = bool(capabilities.post_analysis)
         self._dialog_presenter = dialog_presenter or QtDialogPresenter()
         self._progress_control = ctrl.progress_control
-        # editor_id of this tab's shared cfg-editor session
-        self._cfg_editor_id: str | None = None
+        self._cfg = ctrl.cfg_resources.lookup(tab_id)
         # The action boundary is retained for Reset; button slots close over it.
         self._actions: TabActions | None = None
         # Optional injected Figure->PNG renderer for Data preview (tests)
@@ -316,7 +345,8 @@ class ExpTabWidget(QWidget):
         run_layout.setContentsMargins(4, 4, 4, 4)
         run_layout.setSpacing(2)
 
-        self.cfg_form = CfgFormWidget(
+        self.cfg_form = ResourceCfgFormWidget(
+            dialog_presenter=self._dialog_presenter,
             text_input_enhancer=make_value_source_input_enhancer(ctrl),
         )
         run_layout.addWidget(self.cfg_form, stretch=1)
@@ -417,7 +447,7 @@ class ExpTabWidget(QWidget):
             post_layout = QVBoxLayout(post_inner)
             post_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
-            self._post_analyze_section = _CollapsibleSection(
+            self._post_analyze_section = CollapsibleSection(
                 "Post-Analysis", collapsible=True, collapsed=False
             )
             self.post_analyze_form = AnalyzeFormWidget()
@@ -434,7 +464,7 @@ class ExpTabWidget(QWidget):
             post_layout.addWidget(self.post_analyze_btn)
 
             # Post writeback
-            self.post_writeback_section = _CollapsibleSection(
+            self.post_writeback_section = CollapsibleSection(
                 "Writeback", collapsible=True, collapsed=False
             )
             self.post_writeback_widget = WritebackWidget(
@@ -700,7 +730,7 @@ class ExpTabWidget(QWidget):
                 f"capability mismatch for tab {self.tab_id!r}: "
                 f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
             )
-        self._populate_cfg(snapshot.cfg_schema, self._ctrl)
+        self.cfg_form.attach(self._cfg)
         if (
             self._has_analysis
             and snapshot.analysis is not None
@@ -727,13 +757,6 @@ class ExpTabWidget(QWidget):
         self.set_data_path(snapshot.paths.data.path or "")
         self.update_interaction_state(snapshot)
         self._bind_to_controller(actions)
-
-    def _populate_cfg(self, schema: CfgSchema, ctrl: Controller) -> None:
-        editor_id, _ = ctrl.open_seeded_cfg_editor(
-            schema, gc=False, owner_key=self.tab_id
-        )
-        self._cfg_editor_id = editor_id
-        self.cfg_form.attach(ctrl.get_cfg_editor_draft(editor_id))
 
     # ── populate / refresh helpers ────────────────────────────────────────
 
@@ -1011,28 +1034,9 @@ class ExpTabWidget(QWidget):
         if not confirmed:
             return
         assert self._actions is not None, "reset clicked before bind"
-        schema = self._ctrl.reset_tab_cfg(self.tab_id)
-        self._reseed_cfg(schema)
+        self._cfg.reset(self.cfg_form.current_ref().revision)
+        self.cfg_form.discard_pending()
         self._actions.refresh_interaction(self.tab_id)
-
-    def _reseed_cfg(self, schema: CfgSchema) -> None:
-        self.cfg_form.detach()
-        if self._cfg_editor_id is not None:
-            self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
-            self._cfg_editor_id = None
-        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
-            schema, gc=False, owner_key=self.tab_id
-        )
-        self.attach_cfg_editor(editor_id)
-
-    def attach_cfg_editor(self, editor_id: str) -> None:
-        """Attach the owner's published session without creating another draft."""
-        if self._ctrl.editor_id_for_owner(self.tab_id) != editor_id:
-            raise RuntimeError("Cannot attach a retired cfg editor")
-        self.cfg_form.detach()
-        self._cfg_editor_id = None
-        self.cfg_form.attach(self._ctrl.get_cfg_editor_draft(editor_id))
-        self._cfg_editor_id = editor_id
 
     def _is_data_visible(self) -> bool:
         return self._left_tabs.currentWidget() is self._save_panel
@@ -1126,7 +1130,7 @@ class ExpTabWidget(QWidget):
             self._run_action_layout.setStretch(1, 80)
             self.run_btn.setText("Run")
             self.run_btn.setObjectName("primaryButton")
-            cfg_valid = self.cfg_form.is_valid()
+            cfg_valid = self.cfg_form.is_valid() or self.cfg_form.has_pending()
             can_run = (
                 not local_busy
                 and not state.global_run_active
@@ -1265,7 +1269,4 @@ class ExpTabWidget(QWidget):
         self._save_center.unbind_image_path_changed()
         self._progress_unsub()
         self.cfg_form.detach()
-        if self._cfg_editor_id is not None:
-            self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
-            self._cfg_editor_id = None
         self._actions = None

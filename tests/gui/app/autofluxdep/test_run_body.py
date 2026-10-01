@@ -37,6 +37,7 @@ from ._helpers import (
     connect_mock,
     make_builder,
     make_measurement_builder,
+    pump_controller_until_idle,
     run_controller_to_completion,
 )
 
@@ -118,6 +119,118 @@ def test_controller_run_writes_artifact_manifest_journal_and_node_hdf5(tmp_path)
         data_root / manifest["files"]["nodes"][0]["path"], "probe"
     )
     assert not np.isnan(node_result.signal[0]).any()
+
+
+@pytest.mark.parametrize("terminal", ["finished", "stopped", "paused_stop"])
+@pytest.mark.parametrize("output", ["report", "export", "sidecar"])
+def test_output_failure_preserves_terminal_result(
+    tmp_path, monkeypatch, terminal, output
+):
+    from zcu_tools.gui.app.autofluxdep.events.run import (
+        PointDonePayload,
+        RunFailedPayload,
+        RunFinishedPayload,
+        RunStoppedPayload,
+    )
+    from zcu_tools.gui.app.autofluxdep.services import run_store
+    from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
+        LabberBrowserSidecarWriters,
+    )
+
+    def fail_output(*_args, **_kwargs):
+        raise OSError("output unavailable")
+
+    if output == "report":
+        monkeypatch.setattr(run_store, "write_markdown_report", fail_output)
+    elif output == "export":
+        monkeypatch.setattr(
+            run_store, "export_qubit_freq_fluxdep_spectrum", fail_output
+        )
+    else:
+        monkeypatch.setattr(LabberBrowserSidecarWriters, "finalize", fail_output)
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(
+        make_measurement_builder("qubit_freq" if output == "export" else "t1")
+    )
+    ctrl.set_flux_values([0.0, 0.5, 1.0])
+    terminal_events = []
+    for payload_type in (RunFailedPayload, RunFinishedPayload, RunStoppedPayload):
+        ctrl.bus.subscribe(payload_type, terminal_events.append)
+
+    def on_point(payload):
+        if payload.idx == 0:
+            if terminal == "stopped":
+                ctrl.stop_run("test stop")
+            elif terminal == "paused_stop":
+                ctrl.request_pause()
+
+    ctrl.bus.subscribe(PointDonePayload, on_point)
+    token = ctrl.start_run()
+    pump_controller_until_idle(ctrl)
+    if terminal == "paused_stop":
+        assert ctrl.is_paused
+        assert ctrl.stop_run("test paused stop")
+    else:
+        result = ctrl.await_operation(token, timeout=0.0)
+        assert result is not None and result.outcome is not None
+        assert result.outcome.status == (
+            "finished" if terminal == "finished" else "cancelled"
+        )
+
+    assert len(terminal_events) == 1
+    payload = terminal_events[0]
+    assert isinstance(
+        payload, RunFinishedPayload if terminal == "finished" else RunStoppedPayload
+    )
+    assert any("output unavailable" in error for error in payload.output_errors)
+    assert ctrl.can_export_sample_table()
+    assert not ctrl.is_paused and not ctrl.is_running
+    manifest = load_manifest(_latest_run_dir(tmp_path) / "manifest.json")
+    assert manifest["terminal"]["status"] == (
+        "finished" if terminal == "finished" else "stopped"
+    )
+    node = manifest["files"]["nodes"][0]
+    persisted = load_node_result(
+        Path(manifest["paths"]["data_root"]) / node["path"], node["name"]
+    )
+    assert not np.isnan(persisted.signal[0]).any()
+
+
+@pytest.mark.parametrize("failure", ["writer", "journal", "node"])
+def test_canonical_finalize_failure_remains_run_failure(tmp_path, monkeypatch, failure):
+    from zcu_tools.datafile import StreamingGroupedLabberWriter
+    from zcu_tools.gui.app.autofluxdep.events.run import RunFailedPayload
+    from zcu_tools.gui.app.autofluxdep.services import run_store
+    from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore
+
+    def fail_canonical(*_args, **_kwargs):
+        raise RuntimeError("canonical unavailable")
+
+    if failure == "writer":
+        monkeypatch.setattr(StreamingGroupedLabberWriter, "finalize", fail_canonical)
+    elif failure == "journal":
+        monkeypatch.setattr(RunStore, "iter_journal_events", fail_canonical)
+    else:
+        monkeypatch.setattr(run_store, "write_markdown_report", fail_canonical)
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(
+        make_builder("probe", produce_fn=fail_canonical)
+        if failure == "node"
+        else make_measurement_builder("probe")
+    )
+    ctrl.set_flux_values([0.0])
+    failures = []
+    ctrl.bus.subscribe(RunFailedPayload, failures.append)
+    token = ctrl.start_run()
+    pump_controller_until_idle(ctrl)
+    result = ctrl.await_operation(token, timeout=0.0)
+    assert result is not None and result.outcome is not None
+    assert result.outcome.status == "failed"
+    assert len(failures) == 1
+    assert "canonical unavailable" in failures[0].message
+    if failure == "node":
+        assert failures[0].output_errors == ("canonical unavailable",)
+    assert not ctrl.can_export_sample_table()
 
 
 def test_disabled_node_is_omitted_from_run_results_and_artifact(tmp_path):

@@ -1,96 +1,107 @@
-"""Shared reference editor authority for form and tree.
-
-Single source for ReferenceField combo population, selection handling,
-missing-reference hint, and invalid styling. Both ``ReferenceWidget`` (form)
-and the tree's reference header use these helpers so the registry remains the
-sole editor authority (A4/S1).
-"""
+"""Reference choice presentation shared by resource and legacy binding adapters."""
 
 from __future__ import annotations
 
-import logging
-from typing import cast
+from dataclasses import dataclass
+from typing import TypeAlias
 
-from qtpy.QtWidgets import QComboBox, QLabel, QToolButton  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QComboBox, QLabel  # type: ignore[attr-defined]
 
-from zcu_tools.gui.cfg import is_custom_reference_key, make_custom_reference_key
-from zcu_tools.gui.cfg.binding import ReferenceField
-
-logger = logging.getLogger(__name__)
+from zcu_tools.gui.cfg import (
+    ReferenceSpec,
+    ReferenceValue,
+    make_custom_reference_key,
+    parse_custom_reference_key,
+)
+from zcu_tools.gui.cfg.binding.observation import CfgNodeObservation
 
 NONE_KEY = "<None>"
 
 
-def refresh_reference_combo(combo: QComboBox, field: ReferenceField) -> None:
-    """Populate ``combo`` exactly like the validated form renderer."""
-    combo.blockSignals(True)
-    combo.clear()
-    current = field.get_chosen_key()
-    if field.spec.optional:
-        combo.addItem("None", NONE_KEY)
-        combo.insertSeparator(combo.count())
-    for spec in field.spec.allowed:
-        label = spec.label or "Custom"
-        key = make_custom_reference_key(label)
-        combo.addItem(label, key)
-    compatible = field.available_keys()
-    if compatible:
-        combo.insertSeparator(combo.count())
-        for name in compatible:
-            if name == current and field.is_modified():
-                combo.addItem(f"Lib: {name} (modified)", name)
-                combo.addItem(f"Revert to Lib: {name}", name)
-            else:
-                combo.addItem(f"Lib: {name}", name)
-    if field.spec.optional and not field.is_enabled:
-        combo.setCurrentIndex(0)
-    else:
-        idx = combo.findData(current)
-        if idx < 0 and field.has_missing_library_ref():
-            combo.addItem(f"Missing: {current}", current)
-            idx = combo.findData(current)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
-    combo.blockSignals(False)
+@dataclass(frozen=True)
+class CustomReferenceSelection:
+    label: str
 
 
-def handle_reference_combo_change(field: ReferenceField, key: object) -> None:
-    """Apply a combo selection to ``field`` (mirrors ReferenceWidget)."""
+ReferenceSelection: TypeAlias = CustomReferenceSelection | str | None
+
+
+def reference_library_keys(node: CfgNodeObservation) -> tuple[str, ...]:
+    """Project catalog keys from the cached reference observation, without I/O."""
+    spec = node.spec
+    if not isinstance(spec, ReferenceSpec):
+        raise TypeError("reference options require a ReferenceSpec")
+    options = node.options or ()
+    labels = tuple(shape.label for shape in spec.allowed)
+    if options[: len(labels)] != labels:
+        raise ValueError("reference options do not match the definition")
+    keys: list[str] = []
+    for key in options[len(labels) :]:
+        if not isinstance(key, str):
+            raise TypeError("reference catalog keys must be strings")
+        keys.append(key)
+    return tuple(keys)
+
+
+def display_reference_combo(
+    combo: QComboBox,
+    spec: ReferenceSpec,
+    value: ReferenceValue | None,
+    library_keys: tuple[str, ...],
+) -> None:
+    """Populate one header from a cached value and compatible catalog keys."""
+    previous = combo.blockSignals(True)
+    try:
+        combo.clear()
+        current = value.chosen_key if value is not None else None
+        if spec.optional:
+            combo.addItem("None", NONE_KEY)
+            combo.insertSeparator(combo.count())
+        for shape in spec.allowed:
+            label = shape.label or "Custom"
+            combo.addItem(label, make_custom_reference_key(label))
+        if library_keys:
+            combo.insertSeparator(combo.count())
+            for name in library_keys:
+                if value is not None and name == current and value.is_overridden:
+                    combo.addItem(f"Lib: {name} (modified)", name)
+                    combo.addItem(f"Revert to Lib: {name}", name)
+                else:
+                    combo.addItem(f"Lib: {name}", name)
+        if value is None and spec.optional:
+            combo.setCurrentIndex(0)
+        elif current is not None:
+            index = combo.findData(current)
+            if index < 0 and value is not None and value.error is not None:
+                combo.addItem(f"Missing: {current}", current)
+                index = combo.findData(current)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+    finally:
+        combo.blockSignals(previous)
+
+
+def selected_reference(key: object) -> ReferenceSelection:
     if key == NONE_KEY:
-        field.set_enabled(False)
-        return
-    if field.spec.optional and not field.is_enabled:
-        field.set_enabled(True)
-    # ``key`` is expected to be str from combo data
-    field.set_chosen_key(cast(str, key))
+        return None
+    if not isinstance(key, str):
+        raise TypeError("reference choice must be a string")
+    label = parse_custom_reference_key(key)
+    if label is not None:
+        return CustomReferenceSelection(label)
+    return key
 
 
-def refresh_missing_hint(label: QLabel, field: ReferenceField) -> None:
-    if field.has_missing_library_ref():
-        key = field.get_chosen_key()
+def display_missing_hint(label: QLabel, value: ReferenceValue | None) -> None:
+    if value is not None and value.error is not None:
         label.setText(
-            f"Missing library reference: {key}. "
+            f"Missing library reference: {value.chosen_key}. "
             "Switch key, or re-add an entry of that name to re-link."
         )
         label.setVisible(True)
-        return
-    label.setVisible(False)
+    else:
+        label.setVisible(False)
 
 
-def apply_reference_validity(
-    combo: QComboBox,
-    expand_btn: QToolButton | None,
-    field: ReferenceField,
-    valid: bool,
-) -> None:
-    style = "" if valid else "border: 1px solid red;"
-    combo.setStyleSheet(style)
-    if expand_btn is not None:
-        expand_btn.setStyleSheet("" if valid else "color: red;")
-    # Ensure missing hint visibility matches current field state
-    # (caller should also call refresh_missing_hint if needed)
-    logger.debug(
-        "ReferenceShared.validity_changed: key=%r valid=%r",
-        field.get_chosen_key(),
-        valid,
-    )
+def display_reference_validity(combo: QComboBox, *, valid: bool) -> None:
+    combo.setStyleSheet("" if valid else "border: 1px solid red;")

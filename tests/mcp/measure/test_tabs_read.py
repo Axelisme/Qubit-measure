@@ -288,7 +288,7 @@ def test_tab_get_projects_complete_gui_artifacts_with_cfg(tmp_path: Path) -> Non
         result["operation_state"]
         == reply("tab.snapshot", {"tab_id": "old-tab"})["tabs"][0]
     )
-    assert result["cfg"] == {"frequency": {"raw": "5", "resolved": 5}}
+    assert result["cfg"] == reply("tab.get_cfg", {"tab_id": "old-tab"})
     assert result["artifacts"] == [
         {
             key: item[key]
@@ -380,16 +380,38 @@ def test_tab_live_uses_gui_run_operation_elapsed_and_figure_path(
     assert not Path(result["figure"]).exists()
 
 
-def test_cfg_only_read_calls_only_its_resource(tmp_path: Path) -> None:
+@pytest.mark.parametrize("status", ["Valid", "Invalid", "Unavailable"])
+def test_cfg_only_read_calls_only_its_resource(tmp_path: Path, status: str) -> None:
+    publication = {
+        "cfg_ref": {"cfg_id": "cfg-observed", "revision": "17"},
+        "status": status,
+        "tree": {
+            "kind": "section",
+            "path": [],
+            "children": {
+                "frequency": {
+                    "kind": "scalar",
+                    "path": ["frequency"],
+                    "input": {"mode": "expression", "raw": "freq", "resolved": 5.0},
+                    "editing_input": {"__expr": "freq"},
+                }
+            },
+        },
+        "source_basis": [{"source_id": "context", "revision": "4"}],
+        "diagnostics": []
+        if status == "Valid"
+        else [{"path": ["frequency"], "reason": "invalid_value", "message": status}],
+    }
+
     def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
         assert method == "tab.get_cfg" and params == {"tab_id": "old-tab"}
-        return {"tree": {"frequency": {"value": 5.0}}}
+        return publication
 
     client = make_client(tmp_path, reply)
     client.context.session.ensure_connected()
     client.transport.sent.clear()
     result = client.call("tab_get", {"tab": "old-tab", "include": ["cfg"]})
-    assert result["cfg"] == {"frequency": {"value": 5.0}}
+    assert result["cfg"] == reply("tab.get_cfg", {"tab_id": "old-tab"})
     assert client.transport.sent == [("tab.get_cfg", {"tab_id": "old-tab"})]
 
 

@@ -6,18 +6,58 @@ status: accepted
 
 ## 問題與決策
 
-量測 GUI、agent 和 Autofluxdep 都要編輯 Spec／Value 設定。若 widget 擁有唯一可編輯的樹，沒有開啟 widget 的 agent 或 writeback 就不能共用同一份設定。若通用 cfg core 辨認 program 形狀或自行取得整個 app context，新增實驗會改動不擁有該領域政策的層。
+Qt、remote 與 Run 必須使用同一份 tab cfg。若 widget 持有唯一可編輯的樹，headless caller 就依賴 view 的存在。若 Run 重新解析 live source，caller 看到的值與實際執行值可能不同。
 
-`gui.cfg` 擁有 Qt-free 的 Spec／Value、`CfgSchema`、binding、codec、組裝與 finished-cfg validation／lowering 機制；`gui.widgets.cfg` 只呈現 caller 提供的 `CfgDraft`，detach 不關閉 draft。資源的 app owner 管理其編輯 lifetime，並提供 expression、reference 與 option 來源。measure 的 `CfgEditorService` 持有 tab、library entry 及 writeback 項目的 headless draft；widget 與 agent 操作同一個 draft。writeback 以 opaque draft 封裝各項 session identity，提交仍交給 `ContextService`。Autofluxdep 的 placement value tree 由 workflow owner 保存，Default cfg 與 Generation overrides 保持不同用途；目前 form 建立兩個局部 draft，編輯時由 Controller 接收合併後的 value tree。它沒有共用 measure 的 editor service。這個 form-local lifetime 與已核准的跨 frontend resource-owned 目標不同，見 [cfg draft](draft/cfg-editing-boundaries.md)。
+`gui.cfg` 提供 Qt-free 的資料機制。`CfgResource` 擁有 input tree、identity、revision、解析及 publication。Measure 的 `TabCfgResources` 擁有 tab 資源的建立、查找、操作禁令與撤銷。Qt 取得 editing handle，Run owner 取得 acceptance 能力，remote 將請求送到同一資源。Controller 組裝這些能力，不逐項轉送 cfg edit commands。
 
-通用 core 不解讀 program discriminator、MetaDict、ModuleLibrary 或 generation policy。`experiment.cfg_editing` 擁有 module／waveform 的 closed shape catalog、Spec factory 與 raw materialization policy；app 仍負責 runtime object normalization、選用的子集合與 role defaults。composition 將窄能力接到 consumer，converter 不寫 library。其 import 會載入 `experiment` package 的 base 依賴，並非完全不載入 experiment。實驗 adapter 的 context-free definition 在建立 fresh cfg 時才解析 deferred defaults；restore 與 refresh 不重跑 resolve-once seed。Autofluxdep 的 logical paths、generation plan 和 run-time patches 仍由其 workflow owner 管理（[[0062]]）。
+這條資源路徑適用於 measure tab。獨立 library、inspect 與 writeback editor 仍由 `CfgEditorService` 管理 headless draft。Autofluxdep 的 Default cfg 與 Generation overrides 仍由 node form 建立局部 draft，workflow owner 保存 placement value tree。這些用途沒有因 measure tab 切換就全面遷移。
 
-`gui.cfg.binding` 擁有可列舉且可解析的 canonical target path；remote 只將它投影為 wire 形狀，不建立另一套欄位 grammar。共用 lowering 接受 expression、reference shape、range 三個窄 port，app 提供實際來源與 domain policy。編輯中的 schema 可不完整；成品使用者在 lowering 前檢查結構與值。當前 lowering 輸出 EvalValue 已保存的結果。caller 傳入 expression resolver 時，lowering 先以目前 md 重新求值每個 expression 並轉成欄位型別，任何一個求值或型別轉換失敗就中止；成功但與保存結果不同時只記錄 drift。沒有保存結果時輸出 resolver 的求值，兩者都沒有則失敗；linked reference 的 shape 會查詢 resolver，內容仍取 embedded value。這不是「Run 已接受指定 editor revision」的保證。measure 的 edit batch 目前逐筆修改 live draft，錯誤保留已成功的前綴；不能把 net path diff 或一次 Context write call 當成原子編輯或原子 Apply 的證據。
+## 共用機制與領域 owner
 
-session source owner 以唯讀 lookup 提供小量跨來源值，只有 composition 與來源 owner 註冊 provider；device lookup 讀 cached observation，不輪詢硬體。來源 owner 通知外部變更，measure editor service 對其 draft 觸發 expression／reference／option refresh；widget 不擁有其生命週期。Autofluxdep 目前由開啟的 node form 對其局部 draft 處理刷新事件，未開啟 form 時沒有等價的 placement-owned refresh。Linked ref、EvalValue 和 resolve-once 的現行差別是：linked ref 保留 key 與內嵌內容，可在 refresh 時更新投影；EvalValue 保存 expression 及解析結果；`ValueRef` 或 fresh seed 在輸入時讀取一次，保存普通 direct 值，不跟隨來源。現行 overridden reference 在部分 missing-key 路徑會轉成 custom key，且 lowering 仍查原 linked key；不能將核准的「override 解除此層來源依賴」當作現況。refresh／failure／relink 及指定 revision 使用的目標契約見 [cfg draft](draft/cfg-editing-boundaries.md)。
+`gui.cfg` 擁有 Spec／Value、`CfgSchema`、input codec、binding、組裝、成品驗證及 lowering 機制。它不辨認 program discriminator、MetaDict、ModuleLibrary 或 generation policy。`experiment.cfg_editing` 擁有 module／waveform 的 closed shape catalog、Spec factories 與 raw materialization policy。App 負責 runtime object normalization、選用子集合及 role defaults，composition 注入窄能力，converter 不寫 library。
+
+`experiment.cfg_editing` 可依賴 Qt-free `gui.cfg`，但其 package import 仍載入 experiment base 依賴。Library-entry conversion 與兩 app 的 normalization 尚未全部收斂，剩餘目標見 [cfg editing draft](draft/cfg-editing-boundaries.md)。
+
+實驗 adapter 的 context-free definition 只在 fresh cfg 或明確 reset 時解析 defaults。Restore 保存輸入，source refresh 不重跑 seed。Definition 在資源 lifetime 中固定；需要另一份 definition 時由 app 建立新資源並撤銷舊 identity。
+
+## Measure tab 的 publication 與使用
+
+Input 保存 direct value、raw text、expression、reference 及 range 的編輯意圖。Input 中的解析結果不作為可信結果。資源先準備隔離的完整候選，再同步解析並發布一個 revision。成功的同值命令與空 batch 也增加 revision。被拒絕的 batch 不保留成功前綴。
+
+Publication 同時包含 `CfgRef`、Valid／Invalid／Unavailable、tree、source basis 及 diagnostics。合法未完成輸入可以成功發布 Invalid。必要來源未就緒或 source refresh 故障發布 Unavailable，不保留舊 Valid 冒充新結果。Edit／Reset 的非預期準備故障則保留原 publication。
+
+Observe、watch 及 accept 不刷新來源。Watch 先註冊再交付初始 observation；unsubscribe 停止後續通知。通知期間禁止 mutation、accept、Run 及 close。Subscriber 故障送診斷，不回滾已提交 publication，也不阻止其他 subscriber 收到結果。
+
+Run caller 明示觀察到的 `CfgRef`。只有同 identity、同 revision 的 Valid publication 可以接受。Stale 或非 Valid 不提交 operation，不刷新、不換版、不重試。Accepted config 深層隔離 values 與 source basis，worker 和 artifact 使用固定資料，後續 source 更新不改執行值。Cfg acceptance 不替代 hardware guard、lease 或 operation lifecycle，見 [[0066]]。
+
+Tab 建立時資源已可 headless 編輯。Qt attach／detach 只管理 view 與 watch，不建立或撤銷 cfg。Load backfill 在同一資源準備完整 Valid 候選，成功保留 identity 並增加 revision，失敗保留原 input 與 publication。Idle close 撤銷舊 handle，重建同名 tab 使用新 identity。Active Run 禁止同 tab 的人工 edit、reset、replacement 及 close，其他 tab 與自動 source publication 不受此禁令阻擋。
+
+## 固定來源與 reference
+
+Source owner 發布本地來源及版本。解析使用固定 `CfgResolution`，不輪詢硬體或做外部 I/O。Device lookup 使用已發布 cache。Source 更新先準備並安裝所有受影響 cfg 的 publication，再通知；某個 cfg 解析故障不撤銷其他資源或 source 的更新。
+
+Linked reference 隨固定來源更新這層內容。Override 解除這層對原 key 的依賴，保留自身 shape 與 input，nested linked reference、expression 及 asset 依賴仍各自存在。明確 relink 才重新建立來源依賴。Expression 保留文字與動態依賴，refresh 更新解析結果；resolve-once direct value 不重讀來源。
+
+`gui.session.expression` 共用 simpleeval 的受限數學引擎。Cfg expression 中 `$` 標記的引用在當次寫入以已發布來源捕捉，再以 typed literal 取代該位置，未標記引用保持動態。捕捉失敗整批拒絕，不保存待未來解析的 `$`。它仍保存 expression，不新增 capture 持久型別。精確語法與錯誤邊界見 [resource contract](draft/cfg-resource-contract.md)。
+
+## Custom reference 的繼承
+
+選擇 Custom 是明確的 resource-bound 命令。Cfg owner 從指定 revision 的已發布內容準備完整新候選，best-effort 繼承相容輸入，再原子發布。切換 Gauss 至 DRAG 時，共同型別及單位的 length、sigma 可保留，新型別的固定值由 Spec 決定。不相容欄位使用新 shape 的初始值，nested linkage 保留其既定依賴。
+
+這是操作便利性，不是相容補丁，也不保證候選符合量測條件。普通跨型別 edit 仍要求完整 payload，不因有繼承命令就隱含補值。Qt 不自行讀 owner input 或複製繼承規則。
+
+## 獨立 draft 與尚未完成的範圍
+
+`CfgDraft` 仍提供獨立 editor 的可編輯 field tree。Binding 列舉及解析 canonical dotted targets，remote 只投影這份 grammar。Measure tab 則使用 string-array paths 與共同 editing codec，兩種 read/write 契約不能互換。獨立 library／writeback batch 保留 fail-fast、non-atomic 成功前綴，不是 tab atomic edit 的另一入口。
+
+Legacy `lower_finished_cfg` 接受 expression、reference shape 及 range 窄 ports。有 expression resolver 時會重新求值並檢查型別，可能在使用時讀來源；這不是 measure tab 的 acceptance 路徑。Tab Run 使用已解析並接受的 values，不以 legacy lowering 的 live read 保證指定 revision。
+
+Writeback 以 opaque draft 封裝 session identity，提交交給 context write owner。一次 `ContextWritePort` 呼叫不能證明 selected Apply 的全部失敗原子性或 crash durability。Autofluxdep 的 placement refresh、resource lifetime、Run 接受版本，以及 library／writeback Apply 的剩餘收斂仍見 [cfg editing draft](draft/cfg-editing-boundaries.md)。本篇不宣稱整個 multi-app Controller 工作完成。
 
 ## 取捨與相鄰責任
 
-單一通用資料機制減少兩個 app 對 path、codec 和 lowering 的重複實作，代價是每個 app 必須提供窄 port 並管理自己的資源。通用 renderer 不取得 runtime policy，也不強制 Autofluxdep 使用 measure service。當前 app 的編輯與使用時機尚未完全一致；此篇不把 UI auto-commit、使用時 live 解析或 batch 成功前綴提升為未來跨 app 的規則。
+單一 tab resource 讓 GUI、remote 與 Run 共用版本、驗證及 publication，代價是 app 必須提供固定來源、管理 lifetime，caller 必須明示觀察版本。保留獨立 draft 用途避免將 library Apply 或 workflow patches 誤當成 tab edit。
 
-md／ml 寫入權由 [[0067]] 定義；保存責任與 crash durability 歸 [[0063]]；workflow 的 run-start base 與逐點 patch 歸 [[0062]]。局部資料形狀、binding 操作與 codec 見 [GUI cfg owner](../../lib/zcu_tools/gui/cfg/README.md)、[experiment editing owner](../../lib/zcu_tools/experiment/cfg_editing/README.md)、[measure app](../../lib/zcu_tools/gui/app/measure/README.md) 與 [Autofluxdep app](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。舊篇 [[0008]]–[[0012]]、[[0037]]、[[0045]]／[[0046]]、[[0050]]／[[0051]] 保留未完全遷移的局部契約；與本篇或 draft 衝突的舊行為不構成新的共用保證。
+md／ml 寫入權由 [[0067]] 定義；保存與 crash durability 歸 [[0063]]；Autofluxdep run-start base 與逐點 patches 歸 [[0062]]；wire、guard、delivery failure 見 [[0068]]。模組入口見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)、[experiment editing owner](../../lib/zcu_tools/experiment/cfg_editing/README.md)、[measure app](../../lib/zcu_tools/gui/app/measure/README.md) 與 [Autofluxdep app](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。
+
+舊篇 [[0008]] 至 [[0012]]、[[0037]]、[[0045]]、[[0046]]、[[0050]] 及 [[0051]] 保留尚適用的局部契約。它們的 tab draft、雙樹、live Run 或成功前綴敘述不覆蓋本篇的 measure tab resource 契約。

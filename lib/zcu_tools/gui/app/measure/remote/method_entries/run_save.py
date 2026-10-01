@@ -6,9 +6,10 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _comment,
-    _str,
-    _str_opt,
+    optional_string,
+    required_object,
+    required_string,
+    save_comment,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -18,17 +19,20 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_run_start",
         MethodSpec(
             5.0,
-            "Start a tab run via rpc_call; use wait(op=handle) for terminal "
+            "Start a tab run with the explicitly observed cfg ref, without "
+            "refresh or substitution; use wait(op=handle) for terminal "
             "status, failure/cancellation and Send & Stop feedback. The GUI "
             "returns an operation_id, which MCP exposes as {handle}; starting "
             "is not completion. After completion, read result state with "
             "rpc_call on tab.snapshot, or the run figure with rpc_call on "
             "tab.get_figure using subtab_id=run.",
-            (_str("tab_id"),),
+            (
+                required_string("tab_id"),
+                required_object("expected", "Observed cfg_id and string revision"),
+            ),
         ),
         agent=AgentMethodPolicy(
             guard_deps=(
-                "tab:{tab_id}:cfg",
                 "tab:{tab_id}",
                 "soc",
                 "device:*",
@@ -47,10 +51,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "then has a run result and can be analyzed without a SoC connection. "
             "Compatible snapshot values backfill Config automatically, replacing "
             "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
-            "backfill failure does not undo the loaded result.",
+            "backfill failure does not undo the loaded result. analysis_error "
+            "reports analysis preparation failure without undoing the load; "
+            "has_analyze_params is false until preparation succeeds.",
             (
-                _str("tab_id"),
-                _str("data_path", "Canonical HDF5 result file to load"),
+                required_string("tab_id"),
+                required_string("data_path", "Canonical HDF5 result file to load"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -95,9 +101,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Returns an operation handle and reserved path, not proof of success. "
             "Wait for completion and read artifacts for the last successful path.",
             (
-                _str("tab_id"),
-                _str_opt("data_path", "Override data path"),
-                _comment(),
+                required_string("tab_id"),
+                optional_string("data_path", "Override data path"),
+                save_comment(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -120,7 +126,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "and reserved destinations, not proof of completion. Read artifacts "
             "after terminal failure for partial successes.",
             (
-                _str("tab_id"),
+                required_string("tab_id"),
                 ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
                 ParamSpec(
                     "paths",
@@ -129,7 +135,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     default={},
                     description="Artifact key to destination path",
                 ),
-                _comment(),
+                save_comment(),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -158,10 +164,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "The pane is analysis|post_analysis. Explicit image_path updates the GUI "
             "draft before saving; omission keeps the draft, and an empty path is rejected.",
             (
-                _str("tab_id"),
-                _str("subtab_id", "Pane: analysis|post_analysis"),
-                _str("figure_name", "Name of the figure in that pane"),
-                _str_opt("image_path", "Override image path"),
+                required_string("tab_id"),
+                required_string("subtab_id"),
+                required_string("figure_name"),
+                optional_string("imagepath"),
             ),
         ),
         agent=AgentMethodPolicy(

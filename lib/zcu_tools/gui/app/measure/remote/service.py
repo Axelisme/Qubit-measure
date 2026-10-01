@@ -63,6 +63,7 @@ if TYPE_CHECKING:
         WritebackControlPort,
     )
     from zcu_tools.gui.cfg.binding import SettableTarget
+    from zcu_tools.gui.cfg.resource import CfgEditing
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import OwnerScheduler
@@ -122,6 +123,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
     ctrl: Controller
     tab_control: TabControlPort
+    cfg_lookup: Callable[[str], CfgEditing]
     run_analyze_control: RunAnalyzeControlPort
     operation_control: OperationControlPort
     save_control: SaveControlPort
@@ -150,6 +152,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         )
         self.render_view = render_view
         self.tab_control = controller.tab_control
+        self.cfg_lookup = controller.cfg_resources.lookup
         self.run_analyze_control = controller.run_analyze_control
         self.operation_control = controller.operation_control
         self.save_control = controller.save_control

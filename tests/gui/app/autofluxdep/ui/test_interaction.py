@@ -955,6 +955,32 @@ def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp):
             win.deleteLater()
 
 
+def test_derived_report_failure_warns_without_failing_gui_run(app, qapp, monkeypatch):
+    from zcu_tools.gui.app.autofluxdep.services import run_store
+
+    from .._helpers import ensure_test_project, pump_controller_until_idle
+
+    def fail_report(*_args, **_kwargs):
+        raise OSError("report unavailable")
+
+    monkeypatch.setattr(run_store, "write_markdown_report", fail_report)
+    ctrl, win = app
+    dialogs = _dialogs(win)
+    ensure_test_project(ctrl)
+    ctrl.set_flux_values([0.0])
+    token = ctrl.start_run()
+    pump_controller_until_idle(ctrl)
+    qapp.processEvents()
+    result = ctrl.await_operation(token, timeout=0.0)
+    assert result is not None and result.outcome is not None
+    assert result.outcome.status == "finished"
+    assert ctrl.can_export_sample_table()
+    assert [(call.kind, call.title) for call in dialogs.calls] == [
+        ("warning", "Derived output failed"),
+    ]
+    dialogs.consume_message_containing("warning", "report unavailable")
+
+
 def test_run_start_exception_does_not_escape_qt_slot(app, monkeypatch):
     ctrl, win = app
     dialogs = _dialogs(win)

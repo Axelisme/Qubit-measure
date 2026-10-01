@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from zcu_tools.gui.cfg import (
     CfgSchema,
@@ -14,7 +12,6 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
 )
-from zcu_tools.gui.cfg.binding import ReferenceField
 
 from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
 
@@ -101,7 +98,7 @@ def test_reference_identity_change_reapplies_folding(qapp, ctrl):
     assert item.isExpanded() is False
     ref_widget = form.findChild(ReferenceWidget)
     assert ref_widget is not None
-    field = cast(ReferenceField, ref_widget._field)
+    field = ref_widget._field
     # Switch to custom via field API (mirrors combo selection)
     field.set_chosen_key("<Custom:Direct Readout>")
     qapp.processEvents()
@@ -145,7 +142,7 @@ def test_disabled_optional_reference_collapsed_and_whole_row_click_does_not_expa
     assert item.isExpanded() is True
     ref_widget = form.findChild(ReferenceWidget)
     assert ref_widget is not None
-    field = cast(ReferenceField, ref_widget._field)
+    field = ref_widget._field
     # Select None via shipped combo
     none_idx = ref_widget._combo.findData(ReferenceWidget._NONE_KEY)
     assert none_idx >= 0

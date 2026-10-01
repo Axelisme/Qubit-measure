@@ -88,7 +88,7 @@ class FluxDepFit:
         return (self.EJ, self.EC, self.EL)
 
     def to_json_section(self) -> dict[str, Any]:
-        section = {
+        section: dict[str, Any] = {
             "params": {"EJ": self.EJ, "EC": self.EC, "EL": self.EL},
             "flux_half": self.flux_half,
             "flux_int": self.flux_int,
@@ -650,7 +650,7 @@ class QubitParams(SyncFile):
         self.sync()
 
     def _sync_before_write(self, *, require_existing: bool) -> None:
-        self._check_can_write()
+        self.require_writable()
         if require_existing:
             self._sync_existing()
         elif self._path is None or self._path.exists():

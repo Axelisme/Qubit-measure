@@ -17,6 +17,8 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
 )
 
+from tests.gui.app.measure._cfg_fakes import make_cfg
+
 
 def _make_state(tab_id: str = "t1") -> State:
     state = State(MagicMock())
@@ -25,7 +27,7 @@ def _make_state(tab_id: str = "t1") -> State:
         Session(
             adapter_name="fake",
             adapter=MagicMock(),
-            cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),
+            cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
         ),
     )
     return state

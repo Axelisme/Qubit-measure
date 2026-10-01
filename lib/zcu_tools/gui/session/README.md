@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-29 — Setup 與設定 interface 去除 startup 特化
+**Last updated:** 2026-09-30 — Context Apply 候選與儲存邊界
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -6,6 +6,8 @@
 app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep 共用這層。
+
+`ContextService.apply_ml_writes` 在無檔案路徑的 md/ml 候選完成全部準備；後項可讀前項候選結果，但不修改 live store。成功後一次安裝內容、增加 context 版本並通知，再執行既有同步／存檔。儲存失敗記錄並回報「已套用，但儲存失敗」，不回滾、不重試，也不追蹤額外未保存狀態。
 
 ## Context、session environment 與 Run snapshot
 
@@ -35,7 +37,7 @@ session/
 ├── context_control.py  — ContextControlPort + ContextControlFacet：context switching / md/ml / value-source / bind-device new-context 的窄 control facet（ContextService + DeviceService），供 shared InspectDialogBase、main remote context/value handlers、app-local md providers 使用；md create/rename 以單一 service mutation 暴露
 ├── setup_control.py    — SetupControlPort + SetupControlFacet：SetupDialog 專用 composition facade（ProjectSettingsService + ContextControlPort + SoCConnectionService + DeviceControlPort + BaseEventBus + optional project-applied hook）；setup dialog 不再依賴 app Controller
 ├── controller_mixin.py — SessionControllerMixin：兩 app 逐字相同的 app-local/compatibility forwards（讀 4 個 abstract service accessor `_soc_svc`/`_ctx_svc`/`_dev_svc`/`_settings_svc`，以 annotation-only 宣告型別由 concrete Controller 供應同名 attr，**不**用 @property 以免 data-descriptor `__set__` 撞既有 `self._x_svc=` 賦值）。shared setup/context/inspect/device/predictor/progress UI 改走各自 ControlPort；app 各自只留 body 真正分歧的 override：`get_project_root`（讀 app `_project_root`）、`get_bus`（回 app EventBus subtype）。專案套用不經此 mixin：setup dialog 走 `SetupControlPort`，measure 的 remote `project.apply` 走 measure Controller 的 `apply_project`（回 resolved dict/WIRE-48）。import-clean（service/request 型別全 TYPE_CHECKING-only），列入 test_shared_layer 守
-├── expression.py       — 安全 numeric expression evaluator（evaluate_numeric_expr + coerce_eval_result，純函式吃 MetaDict）+ EvalRef（frozen dataclass：eval 模式欄位的 read_raw() marker，apply 時 resolve，不持久化）；import-clean leaf
+├── expression.py       — simpleeval 共用數值求值引擎，封裝函式／算子白名單、AST／數值大小限制及 MetaDict 名稱查詢。`evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
 ├── value_lookup.py     — read-only value source lookup（`ValueLookup`/`ValueRegistry`/owner-scoped replace/unregister/`ValueRef` resolve-once helpers）；純 session leaf，provider 來源由 service binder 負責，使用端只見 lookup
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free；worker API 同時支援 incremental `update(delta)` 與 absolute `set_progress(n)`
 ├── adapters/

@@ -112,6 +112,44 @@ class MetaDict(SyncFile):
 
         return md
 
+    def snapshot(self) -> Self:
+        """Copy current memory without loading or saving the backing file."""
+        result = self.__class__()
+        result._data = deepcopy(self._data)
+        return result
+
+    def swap_contents(self, candidate: MetaDict) -> None:
+        """Exchange prepared memory only; keep each store's identity and path."""
+        self.require_writable()
+        candidate.require_writable()
+        self._data, candidate._data = candidate._data, self._data
+        self._dirty = True
+        candidate._dirty = True
+
+    def replace_contents(self, contents: Mapping[str, Any]) -> None:
+        """Replace a complete mapping with one write, restoring memory on failure.
+
+        Unlike ``swap_contents``, this uses the store's synchronization policy.
+        It does not promise rollback of a partially written backing file.
+        """
+        prepared = dict(contents)
+        self._validate_data_keys(prepared)
+        _reject_reserved_literal_tags(prepared)
+        previous = dict(self.items())
+        previous_dirty = self._dirty
+        try:
+            self.require_writable()
+            self.sync()
+            self._data.clear()
+            self._data.update(prepared)
+            self._dirty = True
+            self.sync()
+        except Exception:
+            self._data.clear()
+            self._data.update(previous)
+            self._dirty = previous_dirty
+            raise
+
     def _load(self, path: str) -> None:
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -158,7 +196,8 @@ class MetaDict(SyncFile):
         return protected
 
     @classmethod
-    def _ensure_data_key(cls, name: object) -> str:
+    def validate_data_key(cls, name: object) -> str:
+        """Return a valid data key or reject a protected attribute name."""
         if not isinstance(name, str):
             raise TypeError(f"MetaDict keys must be str, got {type(name).__name__}")
         if cls._is_protected(name):
@@ -168,7 +207,7 @@ class MetaDict(SyncFile):
     @classmethod
     def _validate_data_keys(cls, data: Mapping[Any, Any]) -> None:
         for name in data:
-            cls._ensure_data_key(name)
+            cls.validate_data_key(name)
 
     def __getattr__(self, name: str) -> Any:
         if type(self)._is_protected(name):

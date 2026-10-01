@@ -18,6 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -30,7 +31,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
 )
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
-from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchResult
+from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
@@ -149,8 +150,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self,
         *,
         pbar_factory: PbarFactory | None = None,
-        plot: bool = False,
-    ) -> SearchResult:
+    ) -> DatabaseSearchResult:
         """Run the search WITHOUT touching State (safe on a worker thread).
 
         Pair with ``record_search_result`` on the main thread. The GUI worker
@@ -158,9 +158,9 @@ class Controller(BaseController[FluxDepState, EventBus]):
         record it; the synchronous convenience ``search_database`` does both in
         sequence on the calling thread.
         """
-        return self._fit.compute_search(pbar_factory=pbar_factory, plot=plot)
+        return self._fit.compute_search(pbar_factory=pbar_factory)
 
-    def record_search_result(self, result: SearchResult) -> None:
+    def record_search_result(self, result: DatabaseSearchResult) -> None:
         """Write a computed search result onto State (MAIN THREAD only)."""
         self._fit.record_result(result)
         self._emit(FitChangedPayload(has_result=True))
@@ -169,8 +169,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self,
         *,
         pbar_factory: PbarFactory | None = None,
-        plot: bool = False,
-    ) -> SearchResult:
+    ) -> DatabaseSearchResult:
         """Synchronous convenience: compute the search then record it.
 
         Runs the blocking search inline on the calling thread, which must be the
@@ -178,7 +177,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         GUI worker uses the split ``compute_search`` / ``record_search_result`` to
         keep the search off-main.
         """
-        result = self._fit.compute_search(pbar_factory=pbar_factory, plot=plot)
+        result = self._fit.compute_search(pbar_factory=pbar_factory)
         self.record_search_result(result)
         return result
 

@@ -23,7 +23,7 @@ def fx(qapp):
 
 def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
     tab = fx.ctrl.new_tab("fake")
-    run = fx.ctrl.start_run(tab)
+    run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
     sock = open_client(fx.service.port)
     try:
         assert (

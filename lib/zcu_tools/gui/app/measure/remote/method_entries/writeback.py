@@ -6,8 +6,8 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _str,
-    _str_opt,
+    optional_string,
+    required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -26,8 +26,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "value sets an md value to null; omission keeps its proposal. "
             "Context apply retains existing failure semantics, not cross-file atomicity.",
             (
-                _str("tab_id"),
-                _str("subtab_id", "Pane: analysis|post_analysis"),
+                required_string("tab_id"),
+                required_string("subtab_id", "Pane: analysis|post_analysis"),
                 ParamSpec("write", JsonType.JSON, required=True),
             ),
         ),
@@ -66,7 +66,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
             "rpc_call on tab.writeback_set; the user's Edit dialog renders the same "
             "model (WYSIWYG).",
-            (_str("tab_id"), _str("subtab_id", "Pane: analysis|post_analysis")),
+            (
+                required_string("tab_id"),
+                required_string("subtab_id", "Pane: analysis|post_analysis"),
+            ),
         ),
     ),
     method_entry(
@@ -88,19 +91,19 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "fail-fast and non-atomic. proposed_value and edits are mutually exclusive "
             "(different item kinds). Echoes the edited {item}; an edits batch also "
             "returns {valid, removed, added} as the final net before/after path-set "
-            "difference (same shape as tab.set_cfg; A→B→A is empty). Agent edits "
+            "difference (A→B→A is empty). Agent edits "
             "use the shared aggregate grammar: edit a sweep as one object, not "
             "the GUI's leaf controls. Read current/proposed values via "
             "tab.writeback_preview.",
             (
-                _str("tab_id"),
-                _str("subtab_id", "Pane: analysis|post_analysis"),
-                _str("id", "writeback item session id (<kind>-<n>)"),
+                required_string("tab_id"),
+                required_string("subtab_id", "Pane: analysis|post_analysis"),
+                required_string("id", "writeback item session id (<kind>-<n>)"),
                 # Boolean (not JSON): a JSON schema of {type: boolean} makes the
                 # client send a real boolean. Declared as JSON, the client may send
                 # the string "false", which ``bool("false")`` wrongly reads as True.
                 ParamSpec("selected", JsonType.BOOLEAN, required=False),
-                _str_opt("target_name", "new apply destination name"),
+                optional_string("target_name", "new apply destination name"),
                 ParamSpec(
                     "proposed_value",
                     JsonType.JSON,
@@ -141,8 +144,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "re-read the context before a dependent follow-up write); "
             "destination_context is the active SessionEnv projection at reply time.",
             (
-                _str("tab_id"),
-                _str("subtab_id", "Pane: analysis|post_analysis"),
+                required_string("tab_id"),
+                required_string("subtab_id", "Pane: analysis|post_analysis"),
                 ParamSpec(
                     "ids",
                     JsonType.JSON,

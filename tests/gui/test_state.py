@@ -21,6 +21,8 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
 )
 
+from tests.gui.app.measure._cfg_fakes import make_cfg
+
 
 def _make_ctx():
     return MagicMock()
@@ -34,7 +36,7 @@ def _add_tab(state: State, tab_id: str, adapter: MagicMock) -> object:
     cfg_schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
     state.add_tab(
         tab_id,
-        Session(adapter_name="fake", adapter=adapter, cfg_schema=cfg_schema),
+        Session(adapter_name="fake", adapter=adapter, cfg=make_cfg(cfg_schema)),
     )
     return cfg_schema
 
@@ -71,7 +73,7 @@ def test_add_tab_then_get_tab_returns_correct_tabstate():
     assert isinstance(tab, Session)
     assert tab.adapter_name == "fake"
     assert tab.adapter is adapter
-    assert tab.cfg_schema is cfg_schema
+    assert tab.cfg.snapshot_inputs() == cfg_schema
 
 
 def test_add_tab_duplicate_raises():
@@ -431,7 +433,7 @@ def test_tab_state_predicates():
     tab = Session(
         adapter_name="fake",
         adapter=_make_adapter(),
-        cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),
+        cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
     )
     assert tab.has_run_result() is False
     assert tab.has_analyze_result() is False

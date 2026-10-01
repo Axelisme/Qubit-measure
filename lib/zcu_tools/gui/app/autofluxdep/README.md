@@ -1,6 +1,6 @@
 # `gui/app/autofluxdep/` — Autofluxdep app
 
-**Last updated:** 2026-09-27 — experiment entry relocation
+**Last updated:** 2026-10-01 — primary and derived completion
 
 這個 app 擁有 autofluxdep GUI shell、workflow 編排、run lifecycle、artifact 與 UI；
 [concrete experiment、catalog 與共用量測 mechanics](../../../experiment/v2_gui/autofluxdep/README.md)
@@ -35,7 +35,14 @@ Restart 則建立新 run。Orchestrator 的 node 失敗會回報 run failure，�
 Metadata root 保存 manifest、journal 和 report；data root 保存 committed node rows 與 exports。
 Committed Node Row 與 Flux Point Commit 是不同的 workflow 事實；取消或失敗時已提交的 row
 仍保留，未提交的暫存資料不視為 durable。Workflow memento 由 app 的 caretaker 保存；
-RunCfgSnapshot 與 artifact 保留本次 run 的配置證據。持久化邊界見
+RunCfgSnapshot 與 artifact 保留本次 run 的配置證據。
+
+Terminal canonical writer、journal 或 manifest 失敗仍使 run 失敗。Terminal sidecar
+finalize、export 或 report 失敗不改 finished／stopped outcome，也不清除 sample export
+入口；RunStore 返回衍生錯誤，RunSession 與 terminal run payload 的 `output_errors`
+保留它們。Qt 另外顯示衍生輸出警告，remote terminal event 投影同一錯誤清單。
+Manifest 的 terminal error 和 journal 仍保存所有結算診斷，不等同量測 row failure。
+持久化邊界見
 [ADR-0063](../../../../../docs/adr/0063-persistence-ownership.md)。
 
 `services/` 也提供 app-local setup、run path、persistence 和 export 的整合；`ui/` 提供

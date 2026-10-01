@@ -106,6 +106,7 @@ class _RunBridge(QObject):
     run_finished = Signal()
     run_stopped = Signal()
     run_failed = Signal(str)
+    output_failed = Signal(str)
     row_updated = Signal(str, int, float)
 
     def __init__(self, ctrl: Controller) -> None:
@@ -153,14 +154,20 @@ class _RunBridge(QObject):
     def _on_point_done_payload(self, payload: PointDonePayload) -> None:
         self.point_done.emit(payload.idx)
 
-    def _on_run_finished_payload(self, _payload: RunFinishedPayload) -> None:
+    def _on_run_finished_payload(self, payload: RunFinishedPayload) -> None:
         self.run_finished.emit()
+        if payload.output_errors:
+            self.output_failed.emit("\n".join(payload.output_errors))
 
-    def _on_run_stopped_payload(self, _payload: RunStoppedPayload) -> None:
+    def _on_run_stopped_payload(self, payload: RunStoppedPayload) -> None:
         self.run_stopped.emit()
+        if payload.output_errors:
+            self.output_failed.emit("\n".join(payload.output_errors))
 
     def _on_run_failed_payload(self, payload: RunFailedPayload) -> None:
         self.run_failed.emit(payload.message)
+        if payload.output_errors:
+            self.output_failed.emit("\n".join(payload.output_errors))
 
     def notify(self, name: str, idx: int) -> None:
         """The worker-thread notify callback — re-emits as a queued Qt signal."""
@@ -323,18 +330,7 @@ class MainWindow(QMainWindow):
         self._list.auto_follow_changed.connect(self._on_auto_follow_changed)
         self._detail.user_tab_changed.connect(self._on_user_detail_tab_changed)
 
-        # run bridge (worker thread → main thread)
-        self._bridge = _RunBridge(ctrl)
-        self._bridge.run_started.connect(self._on_run_started)
-        self._bridge.run_pause_requested.connect(self._on_run_pause_requested)
-        self._bridge.run_paused.connect(self._on_run_paused)
-        self._bridge.run_continued.connect(self._on_run_continued)
-        self._bridge.node_entered.connect(self._on_node_entered)
-        self._bridge.point_done.connect(self._on_point_done)
-        self._bridge.row_updated.connect(self._on_row_updated)
-        self._bridge.run_finished.connect(self._on_run_finished)
-        self._bridge.run_stopped.connect(self._on_run_stopped)
-        self._bridge.run_failed.connect(self._on_run_failed)
+        self._bridge = self._create_run_bridge(ctrl)
 
         # Shared session changes refresh the top status row, flux source picker, and
         # any materialized cfg editor LiveModels.
@@ -355,6 +351,22 @@ class MainWindow(QMainWindow):
         self._refresh_toolbar_buttons()
         self._refresh_session_status()
         self._on_select(self._list.selected_index)
+
+    def _create_run_bridge(self, ctrl: Controller) -> _RunBridge:
+        """Connect run facts and independent output diagnostics to Qt reactions."""
+        bridge = _RunBridge(ctrl)
+        bridge.run_started.connect(self._on_run_started)
+        bridge.run_pause_requested.connect(self._on_run_pause_requested)
+        bridge.run_paused.connect(self._on_run_paused)
+        bridge.run_continued.connect(self._on_run_continued)
+        bridge.node_entered.connect(self._on_node_entered)
+        bridge.point_done.connect(self._on_point_done)
+        bridge.row_updated.connect(self._on_row_updated)
+        bridge.run_finished.connect(self._on_run_finished)
+        bridge.run_stopped.connect(self._on_run_stopped)
+        bridge.run_failed.connect(self._on_run_failed)
+        bridge.output_failed.connect(self._on_output_failed)
+        return bridge
 
     def restore_workflow_view(self) -> None:
         """Refresh list/detail/flux widgets after controller-level restore."""
@@ -1057,6 +1069,13 @@ class MainWindow(QMainWindow):
         self._sync_predictor_dialog_live_state()
         self._sync_inspect_dialog_read_only()
         self._sync_devices_dialog_read_only()
+
+    def _on_output_failed(self, message: str) -> None:
+        self._dialog_presenter.warning(
+            self,
+            "Derived output failed",
+            f"Run data is retained. Some exports or reports failed:\n{message}",
+        )
 
     def _on_run_failed(self, message: str) -> None:
         """A Node's produce raised mid-sweep → unlock the UI + surface the error.

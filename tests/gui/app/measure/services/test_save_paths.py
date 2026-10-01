@@ -9,6 +9,8 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import State
 
+from tests.gui.app.measure._cfg_fakes import cfg_resources
+
 
 def _make_context(tmp_path: Path) -> SessionEnv:
     return SessionEnv(
@@ -29,7 +31,7 @@ def test_tab_save_path_query_is_pure_and_does_not_create_directories(
     state = State(_make_context(tmp_path))
     registry = Registry()
     registry.register("fake", FakeAdapter)
-    svc = TabService(state, registry, MagicMock())
+    svc = TabService(state, registry, MagicMock(), cfg_resources(state))
     tab_id = svc.new_tab("fake")
 
     path = svc.get_tab_data_path(tab_id)

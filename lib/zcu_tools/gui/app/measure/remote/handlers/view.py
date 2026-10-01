@@ -53,12 +53,14 @@ def h_view_snapshot(
 ) -> Mapping[str, object]:
     del params
     snap = render_view(adapter).get_view_snapshot()
-    if not isinstance(snap, dict):
-        raise RemoteError(
-            ErrorCode.INTERNAL,
-            f"view snapshot returned non-dict {type(snap).__name__}",
-        )
-    return snap
+    match snap:
+        case dict():
+            return snap
+        case _:
+            raise RemoteError(
+                ErrorCode.INTERNAL,
+                f"view snapshot returned non-dict {type(snap).__name__}",
+            )
 
 
 def h_dialog_screenshot(
@@ -69,11 +71,6 @@ def h_dialog_screenshot(
     name_str = str(params["name"])
     dialog_name = parse_dialog_name(name_str)
     png = render_view(adapter).take_dialog_screenshot(dialog_name)
-    if not isinstance(png, (bytes, bytearray)):
-        raise RemoteError(
-            ErrorCode.INTERNAL,
-            f"screenshot returned non-bytes {type(png).__name__}",
-        )
     return _png_reply(png, params)
 
 
@@ -85,19 +82,19 @@ def h_view_screenshot(
     # (headless is already fast-failed by _render_view), so there is no
     # PRECONDITION branch like the per-dialog grab.
     png = render_view(adapter).take_window_screenshot()
-    if not isinstance(png, (bytes, bytearray)):
-        raise RemoteError(
-            ErrorCode.INTERNAL,
-            f"window screenshot returned non-bytes {type(png).__name__}",
-        )
-    return _png_reply(png, params)
+    return _png_reply(png, params, description="window screenshot")
 
 
 def _png_reply(
-    png: bytes | bytearray, params: Mapping[str, object]
+    png: object, params: Mapping[str, object], *, description: str = "screenshot"
 ) -> dict[str, object]:
     import base64
 
+    if not isinstance(png, (bytes, bytearray)):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            f"{description} returned non-bytes {type(png).__name__}",
+        )
     out_path = params.get("out_path")
     if out_path is not None:
         path = str(out_path)
@@ -122,9 +119,4 @@ def h_tab_get_figure(
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     png = render_view(adapter).take_figure_screenshot_for_subtab(tab_id, subtab_id)
-    if not isinstance(png, (bytes, bytearray)):
-        raise RemoteError(
-            ErrorCode.INTERNAL,
-            f"figure screenshot returned non-bytes {type(png).__name__}",
-        )
-    return _png_reply(png, params)
+    return _png_reply(png, params, description="figure screenshot")

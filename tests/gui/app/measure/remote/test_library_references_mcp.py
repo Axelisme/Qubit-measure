@@ -69,9 +69,12 @@ def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
     )
     fx = Fixture(active_label="ctx001")
     fx.state.set_context(replace(fx.state.session_env, md=MetaDict(), ml=library))
-    tab_id = fx.ctrl.new_tab("fake")
-    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(schema, gc=False, owner_key=tab_id)
-    fx.ctrl.cfg_editor_set_field(editor_id, f"modified.{field}", 0.75)
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    tab_id = "references"
+    cfg = fx.prepare_tab(tab_id, FakeAdapter(), schema)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("modified", field), 0.75),))
     fx.start()
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
@@ -96,17 +99,19 @@ def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
         assert linked["valid"] is False
         assert linked["error"] is not None
         modified = after["children"]["modified"]
-        assert modified["ref"] == f"<Custom:{spec.label}>"
+        assert modified["ref"] == "seed"
+        assert modified["is_overridden"] is True
         assert modified["valid"] is True
         assert modified["children"][field]["input"]["resolved"] == 0.75
-        published = fx.state.get_tab(tab_id).cfg_schema.value.fields
+        published = cfg.snapshot_inputs().value.fields
         published_linked = published["linked"]
         published_modified = published["modified"]
         assert isinstance(published_linked, ReferenceValue)
         assert isinstance(published_modified, ReferenceValue)
         assert published_linked.chosen_key == "seed"
-        assert published_linked.error is not None
-        assert published_modified.chosen_key == f"<Custom:{spec.label}>"
+        assert linked["error"] is not None
+        assert published_modified.chosen_key == "seed"
+        assert published_modified.is_overridden is True
     finally:
         bridge.disconnect()
         fx.stop()

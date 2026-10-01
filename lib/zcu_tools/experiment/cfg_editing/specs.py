@@ -95,6 +95,7 @@ def _make_flat_top_waveform_spec(
             "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
             "raise_waveform": ReferenceSpec(
                 kind="waveform",
+                discriminator="style",
                 allowed=[
                     _make_cosine_waveform_spec(policy, "Cosine"),
                     _make_gauss_waveform_spec(policy, "Gauss"),
@@ -114,6 +115,7 @@ def _make_pulse_spec(policy: ProgramSpecPolicy, label: str) -> CfgSectionSpec:
             "type": LiteralSpec("pulse"),
             "waveform": ReferenceSpec(
                 kind="waveform",
+                discriminator="style",
                 allowed=[
                     _make_const_waveform_spec(policy, "Const"),
                     _make_cosine_waveform_spec(policy, "Cosine"),
@@ -257,16 +259,19 @@ def _make_bath_reset_spec(policy: ProgramSpecPolicy, label: str) -> CfgSectionSp
             "type": LiteralSpec("reset/bath"),
             "cavity_tone_cfg": ReferenceSpec(
                 kind="module",
+                discriminator="type",
                 allowed=[_make_pulse_spec(policy, "Pulse")],
                 label="Cavity Tone",
             ),
             "qubit_tone_cfg": ReferenceSpec(
                 kind="module",
+                discriminator="type",
                 allowed=[_make_pulse_spec(policy, "Pulse")],
                 label="Qubit Tone",
             ),
             "pi2_cfg": ReferenceSpec(
                 kind="module",
+                discriminator="type",
                 allowed=[_make_pulse_spec(policy, "Pulse")],
                 label="Pi/2 Pulse",
             ),

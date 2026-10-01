@@ -46,6 +46,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure._cfg_fakes import cfg_resources, make_cfg
 
 
 @dataclass
@@ -104,7 +105,7 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
         Session(
             adapter_name="fake",
             adapter=adapter,
-            cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),
+            cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
         ),
     )
     state.update_tab_result("tab", "run")
@@ -169,7 +170,9 @@ def test_snapshot_exposes_independent_panes_and_paths() -> None:
     # Attach drafts to panes so snapshot can preview them.
     state.get_tab(tab_id).analysis.writeback_draft = primary_draft  # type: ignore[assignment]
     state.get_tab(tab_id).post_analysis.writeback_draft = post_draft  # type: ignore[assignment]
-    snapshot = TabService(state, MagicMock(), writeback).get_snapshot(tab_id)
+    snapshot = TabService(
+        state, MagicMock(), writeback, cfg_resources(state)
+    ).get_snapshot(tab_id)
 
     assert snapshot.run is not None and snapshot.run.result == "run"
     assert snapshot.analysis is not None and snapshot.analysis.result is primary
@@ -501,7 +504,7 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
 
     adapter = DisabledAdapter()
     state.get_tab(tab_id).adapter = adapter  # type: ignore[assignment]
-    load = LoadService(state, MagicMock(), cfg_editor=MagicMock(), bus=EventBus())
+    load = LoadService(state, MagicMock(), provide_options=lambda _kind: [])
 
     with pytest.raises(LoadDataError) as exc_info:
         load.load_result(LoadPermit(tab_id), "/tmp/x")

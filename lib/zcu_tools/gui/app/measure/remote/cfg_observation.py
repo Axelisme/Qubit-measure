@@ -19,6 +19,14 @@ from zcu_tools.gui.cfg import (
     encode_complex,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, CfgNodeObservation
+from zcu_tools.gui.cfg.edit_codec import encode_input, encode_ref
+from zcu_tools.gui.cfg.resource import (
+    CfgInputError,
+    CfgPreconditionError,
+    CfgStaleError,
+)
+from zcu_tools.gui.cfg.resource import CfgObservation as ResourceObservation
+from zcu_tools.gui.remote.errors import RemoteError, remote_error_from_expected
 
 CFG_OBSERVATION_DESCRIPTION = (
     "Returns {tree}, a complete cached cfg observation including locked fields. "
@@ -32,6 +40,39 @@ CFG_OBSERVATION_DESCRIPTION = (
     "selects its parent node, and unknown prefixes return {}. Omit prefix to "
     "establish a full cfg observation; even an empty prefix does not refresh its guard."
 )
+
+
+def cfg_error_to_remote(exc: CfgInputError | CfgPreconditionError) -> RemoteError:
+    """Keep cfg detail at its wire boundary, separate from other resource guards."""
+    mapped = remote_error_from_expected(exc)
+    data: dict[str, object] = {}
+    if exc.path is not None:
+        data["path"] = list(exc.path)
+    if exc.edit_index is not None:
+        data["edit_index"] = exc.edit_index
+    if isinstance(exc, CfgStaleError):
+        data["expected"] = encode_ref(exc.expected)
+        data["actual"] = encode_ref(exc.actual)
+    return RemoteError(
+        mapped.code, mapped.message, reason=mapped.reason, data=data or None
+    )
+
+
+def build_resource_observation(observation: ResourceObservation) -> dict[str, object]:
+    """Serialize a complete publication without querying a live provider."""
+    return {
+        "cfg_ref": encode_ref(observation.ref),
+        "status": observation.status.value,
+        "tree": _project(observation.tree, ()),
+        "source_basis": [
+            {"source_id": source.source_id, "revision": str(source.revision)}
+            for source in observation.source_basis
+        ],
+        "diagnostics": [
+            {"path": list(item.path), "reason": item.reason, "message": item.message}
+            for item in observation.diagnostics
+        ],
+    }
 
 
 def build_cfg_observation(
@@ -52,6 +93,14 @@ def build_cfg_observation(
     return _project(node, path)
 
 
+def _editing_input(value: object) -> object:
+    if value is None or isinstance(
+        value, (DirectValue, EvalValue, str, int, float, complex)
+    ):
+        return encode_input(value)
+    raise TypeError(f"Unexpected scalar observation input {type(value).__name__}")
+
+
 def _control_names(node: CfgNodeObservation) -> tuple[str, ...]:
     if isinstance(node.spec, ReferenceSpec):
         return ("ref",)
@@ -62,16 +111,23 @@ def _control_names(node: CfgNodeObservation) -> tuple[str, ...]:
     return ()
 
 
-def _project(node: CfgNodeObservation, path: str) -> dict[str, object]:
+def _project(
+    node: CfgNodeObservation, path: str | tuple[str, ...]
+) -> dict[str, object]:
     spec = node.spec
     result: dict[str, object] = {
-        "path": path,
+        "path": list(path) if isinstance(path, tuple) else path,
         "label": spec.label,
         "valid": node.valid,
     }
     if isinstance(spec, (CfgSectionSpec, ReferenceSpec)):
         result["children"] = {
-            key: _project(child, f"{path}.{key}" if path else key)
+            key: _project(
+                child,
+                (*path, key)
+                if isinstance(path, tuple)
+                else (f"{path}.{key}" if path else key),
+            )
             for key, child in node.children.items()
         }
     if isinstance(spec, CfgSectionSpec):
@@ -88,6 +144,11 @@ def _project(node: CfgNodeObservation, path: str) -> dict[str, object]:
             "optional": spec.optional,
             "choices": _json_value(node.options),
             "input": _input(node.value),
+            **(
+                {"editing_input": _editing_input(node.value)}
+                if isinstance(path, tuple)
+                else {}
+            ),
         }
     if isinstance(spec, LiteralSpec):
         return {

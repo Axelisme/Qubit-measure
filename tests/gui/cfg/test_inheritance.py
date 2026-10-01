@@ -10,9 +10,12 @@ from zcu_tools.gui.app.measure.specs import (
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
+    CfgNodeSpec,
+    CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     LiteralSpec,
     ReferenceSpec,
     ReferenceValue,
@@ -33,11 +36,11 @@ def _scalar_spec(type_: type, label: str = "x") -> ScalarSpec:
     return ScalarSpec(label=label, type=type_)
 
 
-def _section(fields: dict) -> CfgSectionSpec:
+def _section(fields: dict[str, CfgNodeSpec]) -> CfgSectionSpec:
     return CfgSectionSpec(fields=fields)
 
 
-def _val(fields: dict) -> CfgSectionValue:
+def _val(fields: dict[str, CfgNodeValue | None]) -> CfgSectionValue:
     return CfgSectionValue(fields=fields)
 
 
@@ -66,6 +69,21 @@ def test_scalar_same_type_inherits():
     result = inherit_from(old_val, old_spec, new_spec)
 
     assert result.fields["x"] == DirectValue(3.14)
+
+
+def test_inherited_expression_keeps_input_without_old_resolution_cache():
+    old_spec = _section({"length": _scalar_spec(float)})
+    new_spec = _section({"length": _scalar_spec(float)})
+    entered = EvalValue("offset + 0.8", resolved=3.0, error="old error")
+    old_val = _val({"length": entered})
+
+    result = inherit_from(old_val, old_spec, new_spec)
+
+    inherited = result.fields["length"]
+    assert inherited == EvalValue("offset + 0.8")
+    assert inherited is not entered
+    assert old_val.fields["length"] is entered
+    assert entered.resolved == 3.0
 
 
 def test_scalar_type_mismatch_uses_default():
@@ -210,6 +228,55 @@ def test_waveformref_inherits():
     assert wrv.value.fields["amp"] == DirectValue(0.9)
 
 
+def test_nested_reference_retains_link_and_override_without_sharing_values():
+    original = _section({"length": _scalar_spec(float)})
+    expanded = _section({"length": _scalar_spec(float), "sigma": _scalar_spec(float)})
+    old_ref = ReferenceSpec(kind="waveform", allowed=[original])
+    new_ref = ReferenceSpec(kind="waveform", allowed=[expanded])
+    nested = ReferenceValue(
+        "library-waveform",
+        _val({"length": EvalValue("duration", resolved=2.5)}),
+        is_overridden=True,
+        resolved_label="Old snapshot",
+        error="old error",
+    )
+    old_val = _val({"nested": nested})
+
+    result = inherit_from(
+        old_val, _section({"nested": old_ref}), _section({"nested": new_ref})
+    )
+
+    inherited = result.fields["nested"]
+    assert isinstance(inherited, ReferenceValue)
+    assert inherited.chosen_key == "library-waveform"
+    assert inherited.is_overridden
+    assert inherited.error is None
+    assert inherited.value.fields == {
+        "length": EvalValue("duration"),
+        "sigma": DirectValue(0.0),
+    }
+    inherited.value.fields["sigma"] = DirectValue(7.0)
+    assert set(nested.value.fields) == {"length"}
+
+
+def test_nested_incompatible_reference_uses_new_initial_choice():
+    old_shape = CfgSectionSpec(label="Old", fields={"value": _scalar_spec(float)})
+    new_shape = CfgSectionSpec(label="New", fields={"value": _scalar_spec(float)})
+    old_ref = ReferenceSpec(kind="waveform", allowed=[old_shape])
+    new_ref = ReferenceSpec(kind="waveform", allowed=[new_shape])
+    old_val = _val(
+        {"nested": ReferenceValue("<Custom:Old>", _val({"value": DirectValue(8.0)}))}
+    )
+
+    result = inherit_from(
+        old_val, _section({"nested": old_ref}), _section({"nested": new_ref})
+    )
+
+    assert result.fields["nested"] == ReferenceValue(
+        "<Custom:New>", _val({"value": DirectValue(0.0)})
+    )
+
+
 def test_moduleref_type_mismatch_uses_default():
     inner = _section({"ch": _scalar_spec(int)})
     ref_spec = ReferenceSpec(kind="module", allowed=[inner])
@@ -315,8 +382,9 @@ def test_direct_to_pulse_injects_into_ro_cfg():
         old_val, make_direct_readout_spec(), make_pulse_readout_spec()
     )
 
-    # ro_cfg should be the old DirectReadout value verbatim
-    assert result.fields["ro_cfg"] is old_val
+    # The hook's result is detached, even when the hook returns old input.
+    assert result.fields["ro_cfg"] == old_val
+    assert result.fields["ro_cfg"] is not old_val
     # pulse_cfg should be default (CfgSectionValue present)
     assert isinstance(result.fields["pulse_cfg"], CfgSectionValue)
 
@@ -350,7 +418,8 @@ def test_pulse_to_direct_extracts_ro_cfg():
         old_val, make_pulse_readout_spec(), make_direct_readout_spec()
     )
 
-    assert result is ro_val
+    assert result == ro_val
+    assert result is not ro_val
 
 
 def test_pulse_to_direct_missing_ro_cfg_uses_default():

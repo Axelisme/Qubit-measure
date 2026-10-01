@@ -12,6 +12,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.cfg.resource import CfgRef
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -32,7 +33,7 @@ from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from .adapter import AnalysisMode, SessionEnv
+from .adapter import SessionEnv
 from .events.completion import (
     AnalyzeFailedPayload,
     SaveArtifactsFinishedPayload,
@@ -69,19 +70,21 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
-    from zcu_tools.resources.waveform_assets import ArbWaveformData, ArbWaveformInfo
 
+    from .arb_waveform import ArbWaveformPort
     from .artifact_tracker import ArtifactKey
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
+    from .services.tab_cfg import TabCfgLookup
     from .services.tab_control import TabControlPort
     from .services.writeback_control import WritebackControlPort, WritebackPane
 
@@ -281,10 +284,8 @@ class Controller(SessionControllerMixin):
         # The progress transport is the Qt marshal (a driven adapter). Default to
         # the Qt one so GUI/agent processes (which run a Qt event loop) work
         # without the entry point wiring it; tests inject a synchronous fake.
-        transport: ProgressTransport
-        if progress_transport is not None:
-            transport = progress_transport
-        else:
+        transport = progress_transport
+        if transport is None:
             from zcu_tools.gui.session.adapters.qt_progress_transport import (
                 QtProgressTransport,
             )
@@ -329,6 +330,7 @@ class Controller(SessionControllerMixin):
         self._ctx_svc = services.context
         self._context_control = services.context_control
         self._setup_control = services.setup_control
+        self._tab_cfg = services.tab_cfg
         self._tab_svc = services.tab
         self._tab_control = services.tab_control
         self._run_analyze_control = services.run_analyze_control
@@ -418,21 +420,19 @@ class Controller(SessionControllerMixin):
             and self._state.get_tab(tab_id).run.result is None
         ):
             return
-        # State is already updated in RunService. Only adapters that do
-        # analysis (mode != NONE) are routed into analyze-params init; the NONE
-        # 2D sweeps (flux_dep / power_dep) have no analyze step, and their base
-        # ``get_analyze_params`` is a Fast-Fail guard — never call it for them.
-        if (
-            self._state.get_tab(tab_id).adapter.capabilities.analysis
-            is not AnalysisMode.NONE
-        ):
-            self._tab_svc.initialize_tab_analyze_params(tab_id)
+        preparation = self._tab_svc.prepare_result_analysis(tab_id)
         self._bus.emit(
             TabContentChangedPayload(
                 tab_id=tab_id,
                 fact=TabContentFact.RUN_RESULT_COMMITTED,
             )
         )
+        if preparation.error is not None:
+            self._notify(
+                "error",
+                "Analysis preparation failed",
+                f"Run result retained. Analysis preparation failed: {preparation.error}",
+            )
 
     def _on_analyze_finished(self, tab_id: str) -> None:
         # A fresh primary analyze result seeds the post-analysis params (mirrors
@@ -535,6 +535,10 @@ class Controller(SessionControllerMixin):
     @property
     def setup_control(self) -> SetupControlPort:
         return self._setup_control
+
+    @property
+    def cfg_resources(self) -> TabCfgLookup:
+        return self._tab_cfg
 
     @property
     def tab_control(self) -> TabControlPort:
@@ -679,8 +683,8 @@ class Controller(SessionControllerMixin):
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()
 
-    def start_run(self, tab_id: str) -> int:
-        return self._run_analyze_control.start_run(tab_id)
+    def start_run(self, tab_id: str, expected: CfgRef) -> int:
+        return self._run_analyze_control.start_run(tab_id, expected)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)
@@ -783,10 +787,9 @@ class Controller(SessionControllerMixin):
             if operation.token is not None:
                 self._operation_handles.stop(operation.token, reason=message)
             return operation.tag()
-        else:
-            if operation.token is not None:
-                self._operation_handles.message(operation.token, message)
-            return None
+        if operation.token is not None:
+            self._operation_handles.message(operation.token, message)
+        return None
 
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0066)
@@ -867,7 +870,9 @@ class Controller(SessionControllerMixin):
         """
         self._services.experiment_access.shutting_down = False
 
-    def get_operation_progress(self, operation_id: int) -> tuple:
+    def get_operation_progress(
+        self, operation_id: int
+    ) -> tuple[tuple[int, ProgressBarModel], ...]:
         return self._operation_control.get_operation_progress(operation_id)
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
@@ -1046,32 +1051,9 @@ class Controller(SessionControllerMixin):
     # Arbitrary waveform assets (qubit-scoped repository)
     # ------------------------------------------------------------------
 
-    def list_arb_waveforms(self) -> list[str]:
-        return self._arb_waveform_svc.list_data_keys()
-
-    def list_arb_waveform_infos(self) -> list[ArbWaveformInfo]:
-        return self._arb_waveform_svc.list_infos()
-
-    def load_arb_waveform_data(self, data_key: str) -> ArbWaveformData:
-        return self._arb_waveform_svc.load_data(data_key)
-
-    def get_arb_waveform_preview(self, data_key: str) -> dict[str, object]:
-        return self._arb_waveform_svc.get_preview(data_key)
-
-    def set_arb_waveform(
-        self, data_key: str, recipe: Any, *, overwrite: bool = False
-    ) -> dict[str, object]:
-        return self._arb_waveform_svc.set_formula(
-            data_key,
-            recipe,
-            overwrite=overwrite,
-        )
-
-    def delete_arb_waveform(self, data_key: str) -> None:
-        self._arb_waveform_svc.delete(data_key)
-
-    def rename_arb_waveform(self, old_data_key: str, new_data_key: str) -> None:
-        self._arb_waveform_svc.rename(old_data_key, new_data_key)
+    @property
+    def arb_waveforms(self) -> ArbWaveformPort:
+        return self._arb_waveform_svc
 
     # ------------------------------------------------------------------
     # Role templates — one-shot "create blank ml entry from a named role"
@@ -1327,28 +1309,6 @@ class Controller(SessionControllerMixin):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab_control.get_tab_snapshot(tab_id)
 
-    def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        """Store an explicit tab cfg replacement through TabControl.
-
-        Editor changes already publish synchronously through CfgEditorService;
-        viewers must not call this method to replay a delayed model snapshot.
-        Dialog and writeback drafts stay off tab State until their own Apply.
-        """
-        self._tab_control.update_tab_cfg(tab_id, schema)
-
-    def reset_tab_cfg(self, tab_id: str) -> CfgSchema:
-        """Regenerate the tab's cfg to the adapter's default and commit it.
-
-        Discards the whole current cfg: builds a fresh default CfgSchema from the
-        adapter (under the live context) and writes it back as the committed
-        truth, returning it so the caller can re-seed its cfg form.
-
-        Running gate: editing/replacing a running tab's cfg is forbidden (the
-        worker captured the cfg at launch) — fail fast, mirroring the
-        ``tab.update_cfg`` RPC guard.
-        """
-        return self._tab_control.reset_tab_cfg(tab_id)
-
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
         self._bus.emit(
@@ -1382,6 +1342,6 @@ class Controller(SessionControllerMixin):
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
 
-    def get_adapter_guide(self, adapter_name: str) -> dict:
+    def get_adapter_guide(self, adapter_name: str) -> dict[str, str]:
         """Static human-facing orientation guide of an adapter (no tab needed)."""
         return self._tab_svc.adapter_guide(adapter_name)

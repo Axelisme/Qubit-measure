@@ -24,6 +24,7 @@ from zcu_tools.gui.app.measure.remote.wire_version import (
     GUI_VERSION,
     WIRE_VERSION,
 )
+from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.measure.assembly import build_measure_tools
@@ -390,7 +391,17 @@ def test_run_start_then_running_tab_then_finishes(fx):
         )
 
         _send(
-            sock, {"id": "2", "method": "tab.run_start", "params": {"tab_id": tab_id}}
+            sock,
+            {
+                "id": "2",
+                "method": "tab.run_start",
+                "params": {
+                    "tab_id": tab_id,
+                    "expected": encode_ref(
+                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                    ),
+                },
+            },
         )
         assert _recv_response(sock)["ok"] is True
 

@@ -1,6 +1,6 @@
 # `waveform_assets` 參考
 
-**Last updated:** 2026-09-27 — method table verified against waveform_assets.py
+**Last updated:** 2026-10-01 — formula writes separate from inspection
 
 本檔是 [`waveform_assets.py`](waveform_assets.py) 的 owner 參考，記錄 `ArbWaveformDatabase` 的檔案格式、方法與約束。家族導覽見 [resources README](README.md)。
 
@@ -40,6 +40,10 @@ data = ArbWaveformDatabase.load("my_pulse")
 | `create_from_formula(data_key, recipe, *, overwrite=False)` / `update_formula(data_key, recipe)` | 渲染 formula recipe，並把 arrays 與 recipe 寫進同一個 `.npz`。`create_from_formula` 在 key 已存在且 `overwrite=False` 時拋 `data_key_exists`；`update_formula` 只更新已存在的 asset，不存在時拋 not found。建立新 recipe 或依 recipe 重新渲染，只能經這兩個方法；`import_file` 例外，會原樣保存來源 `.npz` 已有的 recipe |
 | `import_file(data_key, source_path, *, overwrite=False)` / `import_data(data_key, *, idata, qdata, time, overwrite=False)` | `import_file` 只接受 `.npz`，原檔若含 recipe 會一併保留；`import_data` 接受記憶體中的三條 1D array，不寫 recipe。兩者在 key 已存在且 `overwrite=False` 時拋 `data_key_exists` |
 | `delete(...)` / `rename(...)` | 只操作 asset 檔案，不掃描 `ModuleLibrary` references |
+
+Formula 寫入方法 `create_from_formula`／`update_formula` 成功返回 `None`，不在寫檔後
+重新載入資產或產生預覽。需要 metadata 時，caller 另呼叫 `inspect`；該讀取失敗不
+撤銷已成功的寫入。`import_data`／`import_file` 的既有回傳契約不在這次變更範圍。
 
 **約束**：
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
-    _bool_default,
-    _json,
-    _str,
+    default_boolean,
+    required_json,
+    required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -29,7 +29,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Load one arbitrary waveform asset and render a normalized I/Q/Abs preview "
             "PNG. Returns {recipe, preview_figure}; recipe is null for raw imported "
             "assets.",
-            (_str("name", "Arbitrary waveform data_key"),),
+            (required_string("name", "Arbitrary waveform data_key"),),
         ),
         agent=AgentMethodPolicy(reveals=("arb_waveforms",)),
     ),
@@ -40,12 +40,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             10.0,
             "Create or overwrite an arbitrary waveform from a formula recipe. The recipe "
             "fully replaces waveform data and is embedded into the single .npz asset. "
-            "Returns {success, status, preview_figure}.",
+            "Returns {success, status}; saving does not render a preview. "
+            "Call arb_waveform.preview separately when a PNG is needed.",
             (
-                _str("name", "Arbitrary waveform data_key"),
-                _json("recipe", "Formula recipe object"),
-                _bool_default(
-                    "overwrite", False, "Allow replacing an existing data_key"
+                required_string("name", "Arbitrary waveform data_key"),
+                required_json("recipe", "Formula recipe object"),
+                default_boolean(
+                    "overwrite",
+                    default=False,
+                    desc="Allow replacing an existing data_key",
                 ),
             ),
         ),

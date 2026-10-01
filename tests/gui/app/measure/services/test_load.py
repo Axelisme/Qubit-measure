@@ -22,6 +22,8 @@ from zcu_tools.gui.expected_error import (
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.gui.app.measure._cfg_fakes import make_cfg
+
 
 def _empty_schema() -> CfgSchema:
     return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
@@ -34,7 +36,7 @@ def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
     adapter.capabilities = AdapterCapabilities(load_data=load_data)
     state.add_tab(
         tab_id,
-        Session(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
+        Session(adapter_name="any", adapter=adapter, cfg=make_cfg(_empty_schema())),
     )
     return state, tab_id, adapter
 
@@ -45,7 +47,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
     bus.emit = emit  # type: ignore[method-assign]
     writeback = MagicMock()
     return (
-        LoadService(state, writeback, cfg_editor=MagicMock(), bus=bus),
+        LoadService(state, writeback, provide_options=lambda source_id: ()),
         emit,
         writeback,
     )

@@ -5,11 +5,11 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
-    _bool_default,
-    _int_opt,
-    _obj,
-    _str,
-    _str_opt,
+    default_boolean,
+    optional_integer,
+    optional_string,
+    required_object,
+    required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -29,9 +29,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "is_mock}} once connected (the structured cfg is read on demand via "
             "soc.info). A remote connect fails fast (~1s) if the board is unreachable.",
             (
-                _str("kind", "'mock' or 'remote'"),
-                _str_opt("ip", "Board IP (required when kind='remote')"),
-                _int_opt("port", "Board port (required when kind='remote')"),
+                required_string("kind", "'mock' or 'remote'"),
+                optional_string("ip", "Board IP (required when kind='remote')"),
+                optional_integer("port", "Board port (required when kind='remote')"),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
@@ -51,10 +51,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "project: {chip_name, qub_name, res_name, result_dir, database_path, "
             "params_path, scope_id}.",
             (
-                _str_opt("chip_name", "Chip identity; required for first project"),
-                _str_opt("qub_name", "Qubit identity; required for first project"),
-                _str_opt("res_name", "Resonator identity; required for first project"),
-                _str_opt(
+                optional_string(
+                    "chip_name", "Chip identity; required for first project"
+                ),
+                optional_string(
+                    "qub_name", "Qubit identity; required for first project"
+                ),
+                optional_string(
+                    "res_name", "Resonator identity; required for first project"
+                ),
+                optional_string(
                     "scope_id",
                     "Optional scope_id returned by result_scope.list",
                 ),
@@ -73,15 +79,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "status before reading device.snapshot. 'remember' persists the "
             "device across sessions (default true).",
             (
-                _str(
+                required_string(
                     "type_name", "Driver class name, e.g. 'YOKOGS200' or 'FakeDevice'"
                 ),
-                _str("name", "Friendly name for this device"),
-                _str("address", "VISA, GPIB, or IP address"),
-                _bool_default(
+                required_string("name", "Friendly name for this device"),
+                required_string("address", "VISA, GPIB, or IP address"),
+                default_boolean(
                     "remember",
-                    True,
-                    "Persist device across sessions (default true)",
+                    default=True,
+                    desc="Persist device across sessions (default true)",
                 ),
             ),
         ),
@@ -99,11 +105,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "wait(op=handle) for the terminal status. 'remember' keeps the "
             "device in persistent storage (default true).",
             (
-                _str("name", "Device name"),
-                _bool_default(
+                required_string("name", "Device name"),
+                default_boolean(
                     "remember",
-                    True,
-                    "Keep device in persistent storage (default true)",
+                    default=True,
+                    desc="Keep device in persistent storage (default true)",
                 ),
             ),
         ),
@@ -120,7 +126,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "type/address. Call via rpc_call with name; the asynchronous "
             "operation returns an MCP handle. Use wait(op=handle) for its "
             "terminal status, then rpc_call on device.snapshot for state.",
-            (_str("name", "Device name"),),
+            (required_string("name", "Device name"),),
         ),
         agent=AgentMethodPolicy(
             operation_key="device:{name}", refresh_after_write=True
@@ -132,7 +138,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Forget a memory-only device (synchronous). Echoes {forgotten: name}.",
-            (_str("name", "Device name"),),
+            (required_string("name", "Device name"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -145,7 +151,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "The GUI starts an asynchronous setup operation; MCP returns a "
             "handle. Use wait(op=handle) for terminal status and Stop feedback, "
             "then rpc_call on device.snapshot for current values.",
-            (_str("name", "Device name"), _obj("updates", "Field updates")),
+            (
+                required_string("name", "Device name"),
+                required_object("updates", "Field updates"),
+            ),
         ),
         agent=AgentMethodPolicy(
             operation_key="device:{name}", refresh_after_write=True
@@ -162,7 +171,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "current value, and whether it is settable (the protected type/address are "
             "reported settable=false). Use this RPC before rpc_call on "
             "device.setup. The device must be connected.",
-            (_str("name", "Device name"),),
+            (required_string("name", "Device name"),),
         ),
     ),
     method_entry(
@@ -174,7 +183,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{ok: true, cancelled: true}. Note: only a device APPLY (setup ramp) has a "
             "cancellation point; a connect/disconnect has none and cannot be "
             "cancelled (it raises PRECONDITION_FAILED).",
-            (_str("name", "Device name"),),
+            (required_string("name", "Device name"),),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -217,7 +226,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "During setting_up these remain readable without driver I/O. "
             "'status' uses the same vocabulary as device.list. An unknown device "
             "name raises INVALID_PARAMS.",
-            (_str("name", "Device name"),),
+            (required_string("name", "Device name"),),
         ),
         agent=AgentMethodPolicy(reveals=("device:{name}",)),
     ),

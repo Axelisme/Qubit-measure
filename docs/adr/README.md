@@ -18,7 +18,7 @@
 
 ## Cfg / Value Model
 
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：Qt-free 編輯機制、實驗側 conversion、app 資源 owner 與 frontend／使用邊界的現況；未落實的核准目標見 [Cfg draft](draft/cfg-editing-boundaries.md)。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用機制、measure tab resource 的原子 publication／固定 Run acceptance、Custom reference 繼承及獨立 draft 的現況分界；library conversion、selected Apply 與其他 app 的剩餘目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，measure slice 的設計與驗收邊界見 [resource contract](draft/cfg-resource-contract.md)。
 - [0008 — Measure CfgEditor session](0008-cfg-editor-session.md)：measure headless session 與 opaque writeback 的局部契約仍有效；其中 tab auto-commit／雙樹不是共用目標。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec／Value 和角色預設的局部契約，概要見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)。
 - [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：完整 Value tree 與停用表示的局部契約。
@@ -63,7 +63,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
-- [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：editing port、refresh／override、revision 與 atomic batch／Apply 尚待實作。
+- [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：measure tab 的 resource、refresh／override、revision 與 atomic batch 已落實；library-entry editing port、selected Apply 與其他 app 仍待收斂。
+- [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：measure tab 的 resource-bound editing、可寫節點、同步 publication、expression capture 與 explicit revision 設計及驗收記錄；其他 app 未因這條接線完成而全面遷移。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 

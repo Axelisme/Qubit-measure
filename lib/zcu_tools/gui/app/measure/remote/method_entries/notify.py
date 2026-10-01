@@ -5,9 +5,9 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
-    _int,
-    _num_default,
-    _str,
+    default_number,
+    required_integer,
+    required_string,
 )
 from ._registry import RemoteMethodEntry, method_entry
 
@@ -19,8 +19,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             30.0,
             "Open a non-modal agent-prompt dialog on the main thread. Returns {token}.",
             (
-                _str("message", "Message to display to the user"),
-                _num_default("timeout", 600.0, "Prompt auto-close timeout in seconds"),
+                required_string("message", "Message to display to the user"),
+                default_number(
+                    "timeout", 600.0, "Prompt auto-close timeout in seconds"
+                ),
             ),
         ),
     ),
@@ -35,8 +37,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Block the IO worker until the notify prompt settles. Returns "
             "{reason, reply?}. reason in {'reply', 'dismiss', 'timeout'}.",
             (
-                _int("token", "Token returned by notify.open"),
-                _num_default("timeout", 600.0, "Consumer backstop in seconds (0–600)"),
+                required_integer("token", "Token returned by notify.open"),
+                default_number(
+                    "timeout", 600.0, "Consumer backstop in seconds (0–600)"
+                ),
             ),
             off_main_thread=True,
         ),

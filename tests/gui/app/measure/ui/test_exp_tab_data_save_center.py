@@ -44,6 +44,7 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.gui.app.measure._cfg_fakes import cfg_resources, configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 _DATA = ArtifactKey(ArtifactKind.DATA)
@@ -71,6 +72,7 @@ def _plots_for(figure: Figure) -> Plots:
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
@@ -220,14 +222,6 @@ def _snapshot(
 def exp_tab_factory(qapp, monkeypatch):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    orig = mod.ExpTabWidget._populate_cfg
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe-editor"
-        self.cfg_form.is_valid = lambda: True  # type: ignore[method-assign]
-        self.cfg_form.first_invalid_reason = lambda: None  # type: ignore[method-assign]
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
     orig_attach = mod.attach_existing_figure_to_container
 
     def mock_attach(fig, container):
@@ -241,7 +235,6 @@ def exp_tab_factory(qapp, monkeypatch):
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     yield mod.ExpTabWidget
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
@@ -623,6 +616,7 @@ def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
@@ -870,6 +864,7 @@ def test_remote_save_completion_refreshes_state_owned_status(exp_tab_factory, qa
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
@@ -950,7 +945,7 @@ def _live_save_ui(tmp_path: Path):
     )
     registry = Registry()
     registry.register("fake", FakeAdapter)
-    tabs = TabService(state, registry, MagicMock())
+    tabs = TabService(state, registry, MagicMock(), cfg_resources(state))
     tab_id = tabs.new_tab("fake")
     state.update_tab_result(tab_id, object())
     save = MagicMock()
@@ -1206,6 +1201,52 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     assert center.is_save_all_enabled()
     tab.deleteLater()
     _require_qapp().processEvents()
+
+
+def test_individual_image_save_dispatch_requires_figure(qapp):
+    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    window = MainWindow(ctrl)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
+    )
+    snap_no_fig = _snapshot(
+        "tab-1",
+        has_run=True,
+        has_analysis=True,
+        analysis_mode=AnalysisMode.FIT,
+        post_cap=False,
+        load_cap=False,
+        has_active_context=True,
+        analysis_has_figure=False,
+    )
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
+
+    tab_ctrl = _mock_ctrl()
+    tab = ExpTabWidget("tab-1", tab_ctrl, caps)
+    tab.attach(snap_no_fig, MagicMock())
+    ctrl.get_tab_snapshot.return_value = snap_no_fig
+    ctrl.has_tab.return_value = True
+    window._tab_widgets["tab-1"] = tab
+    tab.update_interaction_state(snap_no_fig)
+    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
+    btn = tab._save_center.save_button(ArtifactKind.ANALYSIS)
+    assert not btn.isEnabled()
+    btn.click()
+    ctrl.save_image.assert_not_called()
+    ctrl.save_data.assert_not_called()
+
+    # ---------------------------------------------------------------------------
+    # Monotonic revision regression (correction 1)
+    # ---------------------------------------------------------------------------
+    window.deleteLater()
+    tab.deleteLater()
+    qapp.processEvents()
 
 
 def test_tab_close_query_reads_only_data_artifact(exp_tab_factory):

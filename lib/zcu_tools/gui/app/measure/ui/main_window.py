@@ -42,11 +42,32 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
+from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
+from zcu_tools.gui.app.measure.services.load import LoadDataError
+from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.plotting import set_shutting_down
+from zcu_tools.gui.project import nearest_existing
+from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
+
 from .exp_tab_widget import ExpTabWidget, TabActions
 from .feedback_dock import FeedbackDockController
 from .main_dialog_registry import MainDialogRegistry
+from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
 from .main_window_toolbar import MainWindowToolbar
+
+_SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
+    ArtifactKind.DATA: "Save data failed",
+    ArtifactKind.ANALYSIS: "Save image failed",
+    ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
+}
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -71,31 +92,31 @@ class _MainWindowTabActions:
         self._window.refresh_tab_interaction(tab_id)
 
     def run_or_stop(self, tab_id: str) -> None:
-        self._window._on_run_stop_clicked(tab_id)
+        self._window.run_or_stop_tab(tab_id)
 
     def load_data(self, tab_id: str) -> None:
-        self._window._on_load_data_clicked(tab_id)
+        self._window.load_tab_data_dialog(tab_id)
 
     def analyze(self, tab_id: str) -> None:
-        self._window._on_analyze_clicked(tab_id)
+        self._window.analyze_tab(tab_id)
 
     def post_analyze(self, tab_id: str) -> None:
-        self._window._on_post_analyze_clicked(tab_id)
+        self._window.post_analyze_tab(tab_id)
 
     def apply_writeback(self, tab_id: str) -> None:
-        self._window._on_writeback_inline_apply(tab_id, pane="analysis")
+        self._window.apply_tab_writeback(tab_id, pane="analysis")
 
     def apply_post_writeback(self, tab_id: str) -> None:
-        self._window._on_writeback_inline_apply(tab_id, pane="post_analysis")
+        self._window.apply_tab_writeback(tab_id, pane="post_analysis")
 
     def save_data(self, tab_id: str) -> None:
-        self._window._on_save_data_clicked(tab_id)
+        self._window.save_tab_data(tab_id)
 
     def save_image(self, tab_id: str, key: ArtifactKey) -> None:
         self._window._on_save_image_clicked(tab_id, key)
 
     def save_all(self, tab_id: str) -> None:
-        self._window._on_save_all_clicked(tab_id)
+        self._window.save_tab_artifacts(tab_id)
 
 
 class MainWindow(QMainWindow):
@@ -269,15 +290,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # ViewProtocol implementation
     # ------------------------------------------------------------------
-
-    def refresh_tab_cfg(self, tab_id: str) -> None:
-        widget = self._resolve_tab_widget(tab_id, "refresh_tab_cfg")
-        if widget is None:
-            return
-        editor_id = self._ctrl.editor_id_for_owner(tab_id)
-        if editor_id is None:
-            raise RuntimeError(f"Tab {tab_id!r} has no replacement cfg editor")
-        widget.attach_cfg_editor(editor_id)
 
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -740,31 +752,36 @@ class MainWindow(QMainWindow):
             return None
         return tab_w
 
-    def _on_run_stop_clicked(self, tab_id: str) -> None:
-        tab_w = self._resolve_tab_widget(tab_id, "_on_run_stop_clicked")
+    def run_or_stop_tab(self, tab_id: str) -> None:
+        tab_w = self._resolve_tab_widget(tab_id, "run_or_stop_tab")
         if tab_w is None:
             return
         interaction = self._ctrl.get_tab_snapshot(tab_id).interaction
         assert interaction is not None  # render snapshot fills live fields
         if interaction.is_running:
-            logger.info("_on_run_stop_clicked: stop requested tab_id=%r", tab_id)
+            logger.info("run_or_stop_tab: stop requested tab_id=%r", tab_id)
             self._ctrl.cancel_run()
             return
-        logger.info("_on_run_stop_clicked: run requested tab_id=%r", tab_id)
+        logger.info("run_or_stop_tab: run requested tab_id=%r", tab_id)
+        try:
+            submitted_ref = tab_w.cfg_form.submit_pending()
+        except ExpectedError as exc:
+            self.show_status_message(f"Config submission failed: {exc}")
+            return
         if not tab_w.cfg_form.is_valid():
             reason = tab_w.cfg_form.first_invalid_reason()
             if reason:
                 msg = f"Config invalid: {reason}"
             else:
                 msg = "Config has unset fields — fill required values before running"
-            logger.warning("_on_run_stop_clicked: blocked — %s", msg)
+            logger.warning("run_or_stop_tab: blocked — %s", msg)
             self.show_status_message(msg)
             return
-        self._ctrl.start_run(tab_id)
+        self._ctrl.start_run(tab_id, submitted_ref)
 
-    def _on_analyze_clicked(self, tab_id: str) -> None:
-        logger.info("_on_analyze_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_analyze_clicked")
+    def analyze_tab(self, tab_id: str) -> None:
+        logger.info("analyze_tab: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "analyze_tab")
         if tab_w is None:
             return
         self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
@@ -772,9 +789,9 @@ class MainWindow(QMainWindow):
     def _load_data_dialog_start_dir(self) -> str:
         return nearest_existing(self._ctrl.get_session_env().database_path)
 
-    def _on_load_data_clicked(self, tab_id: str) -> None:
-        logger.info("_on_load_data_clicked: tab_id=%r", tab_id)
-        if self._resolve_tab_widget(tab_id, "_on_load_data_clicked") is None:
+    def load_tab_data_dialog(self, tab_id: str) -> None:
+        logger.info("load_tab_data_dialog: tab_id=%r", tab_id)
+        if self._resolve_tab_widget(tab_id, "load_tab_data_dialog") is None:
             return
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -788,7 +805,7 @@ class MainWindow(QMainWindow):
             outcome = self._ctrl.load_tab_result(tab_id, path)
         except LoadDataError as exc:
             logger.warning(
-                "_on_load_data_clicked rejected data file: tab_id=%r path=%r reason=%s",
+                "load_tab_data_dialog rejected data file: tab_id=%r path=%r reason=%s",
                 tab_id,
                 path,
                 exc.reason_code,
@@ -796,34 +813,36 @@ class MainWindow(QMainWindow):
             self.show_error_dialog("Load data failed", str(exc))
             return
         except Exception as exc:
-            logger.exception("_on_load_data_clicked failed: tab_id=%r", tab_id)
+            logger.exception("load_tab_data_dialog failed: tab_id=%r", tab_id)
             self.show_error_dialog("Load data failed", str(exc))
             return
         message = f"Loaded data from {path}"
         if outcome.cfg_backfill == "not_applied":
             message += "; Config was not backfilled"
         self.show_status_message(message)
+        if outcome.analysis_error is not None:
+            self._dialog_presenter.warning(
+                self,
+                "Analysis preparation failed",
+                f"Data loaded successfully. Analysis preparation failed: {outcome.analysis_error}",
+            )
 
-    def _on_post_analyze_clicked(self, tab_id: str) -> None:
-        logger.info("_on_post_analyze_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_post_analyze_clicked")
+    def post_analyze_tab(self, tab_id: str) -> None:
+        logger.info("post_analyze_tab: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "post_analyze_tab")
         if tab_w is None:
             return
         self._ctrl.start_post_analyze(tab_id, tab_w.read_post_analyze_params())
 
-    def _on_writeback_inline_apply(
+    def apply_tab_writeback(
         self, tab_id: str, pane: WritebackPane = "analysis"
     ) -> None:
-        logger.info("_on_writeback_inline_apply: tab_id=%r pane=%r", tab_id, pane)
+        logger.info("apply_tab_writeback: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
-            logger.warning(
-                "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
-            )
+            logger.warning("apply_tab_writeback: unknown tab_id=%r — ignoring", tab_id)
             return
         result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
-        applied_ids = (
-            result.get("applied_ids", []) if isinstance(result, dict) else result
-        )
+        applied_ids = result.get("applied_ids", [])
         if applied_ids:
             self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")
 
@@ -848,9 +867,9 @@ class MainWindow(QMainWindow):
         self.refresh_tab_interaction(tab_w.tab_id)
         return True
 
-    def _on_save_data_clicked(self, tab_id: str) -> None:
-        logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_save_data_clicked")
+    def save_tab_data(self, tab_id: str) -> None:
+        logger.info("save_tab_data: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "save_tab_data")
         if tab_w is None:
             return
         # Path/comment read is invariant; let exception propagate (Fast Fail)
@@ -872,9 +891,9 @@ class MainWindow(QMainWindow):
             tab_w, key.kind, lambda: self._ctrl.save_image(tab_id, key, path)
         )
 
-    def _on_save_all_clicked(self, tab_id: str) -> None:
-        logger.info("_on_save_all_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_save_all_clicked")
+    def save_tab_artifacts(self, tab_id: str) -> None:
+        logger.info("save_tab_artifacts: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "save_tab_artifacts")
         if tab_w is None:
             return
         try:

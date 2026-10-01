@@ -20,8 +20,8 @@ from __future__ import annotations
 #   GUI_VERSION  — this GUI code's *revision*. Reported, never compared. Bump on
 #     any meaningful GUI change you want to be able to spot a reload of,
 #     INCLUDING pure-internal logic changes that don't touch the wire.
-WIRE_VERSION = 6  # event envelopes carry seq/origin
+WIRE_VERSION = 7  # terminal events separate derived output errors
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 10  # owner-thread guards and runtime adapters
+GUI_VERSION = 11  # canonical run completion survives derived output failure

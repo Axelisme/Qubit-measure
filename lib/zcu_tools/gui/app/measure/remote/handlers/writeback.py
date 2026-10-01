@@ -11,6 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
     WaveformWriteback,
+    WritebackItem,
 )
 from zcu_tools.gui.app.measure.services.writeback import WritebackEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 from ._common import follow_tab
-from ._wire_values import _coerce_wire_value, context_wire_value
+from ._wire_values import coerce_wire_value, context_wire_value
 
 _VALID_WRITEBACK_SUBTABS = frozenset({"analysis", "post_analysis"})
 
@@ -171,7 +172,7 @@ def h_tab_writeback_set(
     if has_proposed:
         # Structured tags (e.g. {"__complex__": [re, im]}) coerce back to their
         # Python type so the applied md value matches what preview serialized.
-        changes["proposed_value"] = _coerce_wire_value(params["proposed_value"])
+        changes["proposed_value"] = coerce_wire_value(params["proposed_value"])
     if has_edits:
         raw_edits = params["edits"]
         if not isinstance(raw_edits, list):
@@ -202,9 +203,9 @@ def h_tab_writeback_set(
 
 def _find_writeback_item_for_pane(
     adapter: RemoteControlAdapter, tab_id: str, pane: str, session_id: str
-):
+) -> WritebackItem:
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
-    items: list = []
+    items: list[WritebackItem] = []
     if pane == "analysis" and snap.analysis is not None:
         items = list(snap.analysis.writeback_items)
     elif pane == "post_analysis" and snap.post_analysis is not None:
@@ -250,7 +251,7 @@ def _batch_change(raw: object) -> WritebackEdit:
         edits=_batch_cfg_edits(raw["edits"]) if "edits" in raw else None,
     )
     if "value" in raw:
-        change = replace(change, proposed_value=_coerce_wire_value(raw["value"]))
+        change = replace(change, proposed_value=coerce_wire_value(raw["value"]))
     return change
 
 

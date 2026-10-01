@@ -21,6 +21,7 @@ def make_readout_module_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[
             _module_shape("readout/direct"),
             _module_shape("readout/pulse"),
@@ -35,6 +36,7 @@ def make_pulse_readout_module_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[_module_shape("readout/pulse")],
         label=label,
         optional=optional,
@@ -46,6 +48,7 @@ def make_pulse_module_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[_module_shape("pulse")],
         label=label,
         optional=optional,
@@ -57,6 +60,7 @@ def make_reset_module_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[
             _module_shape("reset/none"),
             _module_shape("reset/pulse"),
@@ -85,6 +89,7 @@ def make_pulse_reset_module_spec(
     """Single-shape ``reset/pulse`` ref (the tested reset of a one-pulse sweep)."""
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[_module_shape("reset/pulse")],
         label=label,
         optional=optional,
@@ -97,6 +102,7 @@ def make_two_pulse_reset_module_spec(
     """Single-shape ``reset/two_pulse`` ref (the tested reset of a two-pulse sweep)."""
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[_module_shape("reset/two_pulse")],
         label=label,
         optional=optional,
@@ -109,6 +115,7 @@ def make_bath_reset_module_spec(
     """Single-shape ``reset/bath`` ref (the tested reset of a bath-reset sweep)."""
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[_module_shape("reset/bath")],
         label=label,
         optional=optional,

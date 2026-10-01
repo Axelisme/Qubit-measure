@@ -52,7 +52,7 @@ def _make_reference_resolver(ml: ModuleLibrary) -> ReferenceResolver:
     return resolve_reference
 
 
-def _make_sweep_range(start: float, stop: float, /, *, expts: int) -> SweepCfg:
+def make_sweep_range(start: float, stop: float, /, *, expts: int) -> SweepCfg:
     if expts == 1:
         assert stop == start, (
             f"for expts == 1, stop must equal start, got start={start}, stop={stop}"
@@ -89,7 +89,7 @@ def validate_schema(schema: CfgSchema, ml: ModuleLibrary | None) -> None:
 def schema_to_resolved_dict(schema: CfgSchema) -> dict[str, object]:
     """Freeze displayed values with measure range policy, without live resolvers."""
     validate_reference_kinds(schema, _REFERENCE_KINDS)
-    return lower_resolved_cfg(schema, make_range=_make_sweep_range)
+    return lower_resolved_cfg(schema, make_range=make_sweep_range)
 
 
 def schema_to_raw_dict(
@@ -103,5 +103,5 @@ def schema_to_raw_dict(
         schema,
         resolve_expression=None if md is None else _make_expression_resolver(md),
         resolve_reference=None if ml is None else _make_reference_resolver(ml),
-        make_range=_make_sweep_range,
+        make_range=make_sweep_range,
     )

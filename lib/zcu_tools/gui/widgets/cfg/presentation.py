@@ -9,7 +9,7 @@ is implemented once.
 from __future__ import annotations
 
 import logging
-from typing import cast
+from collections.abc import Callable
 
 from qtpy.QtGui import QBrush, QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -46,14 +46,13 @@ def _ensure_tone_colors() -> None:
             continue
 
 
-def choice_visible_keys(field: SectionField) -> set[str] | None:
-    spec = field.spec
-    if not isinstance(spec, ChoiceSectionSpec):
-        return None
+def active_choice_keys(
+    spec: ChoiceSectionSpec, selection_for_key: Callable[[str], object]
+) -> set[str]:
+    """Project active choice fields from published selector inputs."""
     visible = set(spec.fields)
     for binding in spec.bindings:
-        selector = field.fields.get(binding.selector_key)
-        value = selector.get_value() if selector is not None else None
+        value = selection_for_key(binding.selector_key)
         choice = str(value.value) if isinstance(value, DirectValue) else ""
         try:
             active_spec = binding.choices[choice]
@@ -63,9 +62,18 @@ def choice_visible_keys(field: SectionField) -> set[str] | None:
                 f"ChoiceSectionSpec selector {binding.selector_key!r} has unknown "
                 f"value {choice!r}; expected one of: {expected}"
             ) from exc
-        active = set(active_spec.fields)
-        visible -= binding.controlled_field_keys() - active
+        visible -= binding.controlled_field_keys() - set(active_spec.fields)
     return visible
+
+
+def choice_visible_keys(field: SectionField) -> set[str] | None:
+    spec = field.spec
+    if not isinstance(spec, ChoiceSectionSpec):
+        return None
+    return active_choice_keys(
+        spec,
+        lambda key: field.fields[key].get_value() if key in field.fields else None,
+    )
 
 
 def resolve_decoration(
@@ -75,7 +83,7 @@ def resolve_decoration(
     if resolver is None:
         return None
     try:
-        return cast(FieldDecorationProtocol, resolver(path, field))
+        return resolver(path, field)
     except Exception:
         logger.debug("decoration resolver failed for %r", path, exc_info=True)
         return None

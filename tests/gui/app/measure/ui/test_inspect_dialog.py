@@ -48,7 +48,7 @@ def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
     ctrl.get_current_md.return_value = None
     ctrl.get_bus.return_value = MagicMock()
     ctrl.list_device_names.return_value = []
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     _wire_cfg_editor(ctrl)
     return ctrl
 

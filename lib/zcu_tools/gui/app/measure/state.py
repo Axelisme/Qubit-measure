@@ -5,26 +5,29 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
-from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.session.state import (
-    DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,  # noqa: F401  (re-export)
+    DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,
 )
 from zcu_tools.gui.session.state import (
-    DEVICE_SET_VERSION_KEY as DEVICE_SET_VERSION_KEY,  # noqa: F401  (re-export)
+    DEVICE_SET_VERSION_KEY as DEVICE_SET_VERSION_KEY,
 )
 from zcu_tools.gui.session.state import (
-    DeviceState as DeviceState,  # noqa: F401  (re-export)
+    DeviceState as DeviceState,
 )
 from zcu_tools.gui.session.state import (
-    DeviceStatus as DeviceStatus,  # noqa: F401  (re-export)
+    DeviceStatus as DeviceStatus,
 )
 from zcu_tools.gui.session.state import (
-    SessionPreferences as SessionPreferences,  # noqa: F401  (re-export)
+    SessionPreferences as SessionPreferences,
 )
 from zcu_tools.gui.session.state import (
     SessionState,
 )
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.version_table import (
+    VersionTable as VersionTable,
+)
 
 from .adapter import (
     AnalysisMode,
@@ -47,13 +50,13 @@ logger = logging.getLogger(__name__)
 # VersionTable is the shared optimistic-concurrency mechanism (app-agnostic);
 # re-exported so ``state.VersionTable`` stays resolvable. The session-core keys +
 # bump↔drop contract live on SessionState; tab keys are bumped by State below.
-from zcu_tools.gui.version_table import (
-    VersionTable as VersionTable,  # noqa: E402  (re-export)
-)
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from zcu_tools.gui.app.measure.adapter import WritebackItem
     from zcu_tools.plotting.plots import Plots
+
 
 T_Result = TypeVar("T_Result")
 T_AnalyzeResult = TypeVar("T_AnalyzeResult")
@@ -153,10 +156,8 @@ _UNSET: object = object()
 class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
     adapter: ExpAdapterProtocol
-    # The service-owned CfgDraft publishes an isolated snapshot here on every
-    # change, including invalid input. Run / Save / persistence read this field;
-    # widget timers never participate in publication or resource versioning.
-    cfg_schema: CfgSchema
+    # A handle to the tab's sole cfg authority, not a second input tree.
+    cfg: CfgResource
 
     # Canonical pane-owned resources.
     run: RunPaneState[T_Result] = field(
@@ -295,7 +296,7 @@ class State(SessionState):
             self.running_tab_id = None
         return retired
 
-    def get_tab(self, tab_id: str) -> Session:
+    def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]:
         return self.tabs[tab_id]
 
     def has_tab(self, tab_id: str) -> bool:
@@ -670,12 +671,6 @@ class State(SessionState):
         self._assert_owner()
         self.tabs[tab_id].save.comment = comment
         self.version.bump(f"tab:{tab_id}:save")
-
-    def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
-        self._assert_owner()
-        logger.debug("update_tab_cfg_schema: tab_id=%r", tab_id)
-        self.tabs[tab_id].cfg_schema = schema
-        self.version.bump(f"tab:{tab_id}:cfg")
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._assert_owner()

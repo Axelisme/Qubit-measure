@@ -3,7 +3,7 @@ from typing import ClassVar
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
+from qtpy.QtWidgets import QFileDialog, QLineEdit, QPushButton, QTabWidget
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -15,17 +15,17 @@ from zcu_tools.gui.app.measure.app import _make_empty_ctx
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import DirectValue
+from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.types import ContextReadiness
-from zcu_tools.gui.widgets.cfg import CfgFormWidget
+from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -34,8 +34,6 @@ from tests.gui.app.measure.remote._helpers import (
     call,
     mcp_client,
     open_client,
-    recv_response,
-    send,
 )
 
 
@@ -84,39 +82,38 @@ def flush_form_timers():
     loop.exec()
 
 
-def test_local_load_rebinds_form_and_drops_pending_old_snapshot(app):
+def test_local_load_publishes_to_the_same_resource_and_form(app):
     ctrl, window, state, tab_id = app
-    original = ctrl.editor_id_for_owner(tab_id)
-    assert original is not None
-    ctrl.cfg_editor_set_field(original, "knob", 99)
+    resource = ctrl.cfg_resources.lookup(tab_id)
+    resource.edit(resource.observe().ref.revision, (CfgEdit(("knob",), 99),))
+    before = resource.observe().ref
     outcome = ctrl.load_tab_result(tab_id, "result.hdf5")
     assert outcome.cfg_backfill == "applied"
+    after = resource.observe().ref
+    assert after.cfg_id == before.cfg_id
+    assert after.revision == before.revision + 1
     version = state.version.get(f"tab:{tab_id}:cfg")
-    tab = window.findChild(ExpTabWidget)
-    assert tab is not None
-    form = tab.findChild(CfgFormWidget)
+    form = window.findChild(ResourceCfgFormWidget)
     assert form is not None
-    assert form.read_schema().value.fields["knob"] == DirectValue(42)
+    entry = form.findChild(QLineEdit)
+    assert entry is not None and entry.text() == "42"
     flush_form_timers()
-    assert state.get_tab(tab_id).cfg_schema.value.fields["knob"] == DirectValue(42)
+    assert resource.observe().ref == after
     assert state.version.get(f"tab:{tab_id}:cfg") == version
-    with pytest.raises(CfgEditorError):
-        ctrl.cfg_editor_set_field(original, "knob", 100)
-    replacement = ctrl.editor_id_for_owner(tab_id)
-    assert replacement is not None
-    ctrl.cfg_editor_set_field(replacement, "knob", 43)
-    flush_form_timers()
-    assert form.read_schema().value.fields["knob"] == DirectValue(43)
-    assert state.get_tab(tab_id).cfg_schema.value.fields["knob"] == DirectValue(43)
+    resource.edit(after.revision, (CfgEdit(("knob",), 43),))
+    assert entry.text() == "43"
+    assert state.get_tab(tab_id).cfg.snapshot_inputs().value.fields[
+        "knob"
+    ] == DirectValue(43)
 
 
 @pytest.mark.parametrize(
     "path, disposition", [("result.hdf5", "applied"), ("missing.hdf5", "not_applied")]
 )
 def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, disposition):
-    ctrl, window, state, tab_id = app
-    original = ctrl.editor_id_for_owner(tab_id)
-    assert original is not None
+    ctrl, window, _, tab_id = app
+    resource = ctrl.cfg_resources.lookup(tab_id)
+    before = resource.observe().ref
     remote = RemoteControlAdapter(
         controller=ctrl,
         opts=ControlOptions(port=0),
@@ -130,45 +127,35 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
                 ("tab.snapshot", {"tab_id": tab_id}),
                 ("context.snapshot", {}),
             ):
-                send(client, {"id": method, "method": method, "params": params})
-                observed = recv_response(client, method)
-                assert observed["ok"], observed
-            send(
-                client,
-                {
-                    "id": "load",
-                    "method": "tab.load_data",
-                    "params": {"tab_id": tab_id, "data_path": path},
-                },
-            )
-            reply = recv_response(client, "load")
+                assert call(client, method, params)["ok"]
+            reply = call(client, "tab.load_data", {"tab_id": tab_id, "data_path": path})
             assert reply["ok"], reply
             assert reply["result"]["cfg_backfill"] == disposition
-            form = window.findChild(CfgFormWidget)
+            form = window.findChild(ResourceCfgFormWidget)
             assert form is not None
-            assert form.read_schema() == state.get_tab(tab_id).cfg_schema
-            assert form.read_schema().value.fields["knob"] == DirectValue(
-                42 if disposition == "applied" else 7
-            )
-            current = ctrl.editor_id_for_owner(tab_id)
+            entry = form.findChild(QLineEdit)
+            assert entry is not None
+            assert entry.text() == ("42" if disposition == "applied" else "7")
+            after = resource.observe().ref
+            assert after.cfg_id == before.cfg_id
             if disposition == "applied":
-                assert current is not None and current != original
-                send(
+                assert after.revision == before.revision + 1
+                rejected = call(
                     client,
+                    "tab.edit_cfg",
                     {
-                        "id": "stale",
-                        "method": "editor.set_field",
-                        "params": {
-                            "editor_id": original,
-                            "path": "knob",
-                            "value": 99,
+                        "tab_id": tab_id,
+                        "expected": {
+                            "cfg_id": str(before.cfg_id),
+                            "revision": str(before.revision),
                         },
+                        "edits": [{"path": ["knob"], "value": 99}],
                     },
                 )
-                assert not recv_response(client, "stale")["ok"]
-                assert form.read_schema().value.fields["knob"] == DirectValue(42)
+                assert rejected["error"]["reason"] == "stale_revision"
+                assert entry.text() == "42"
             else:
-                assert current == original
+                assert after == before
     finally:
         remote.stop()
 
@@ -195,7 +182,9 @@ def test_mcp_tab_open_from_file_loads_and_backfills_gui(
         ]
         assert tab != previous
         assert state.active_tab_id == tab
-        assert state.get_tab(tab).cfg_schema.value.fields["knob"] == DirectValue(42)
+        assert state.get_tab(tab).cfg.snapshot_inputs().value.fields[
+            "knob"
+        ] == DirectValue(42)
         summary = invoke("tab_get", {"tab": tab, "include": ["summary"]})["summary"]
         assert summary["state"]["has_result"] is True
         assert state.active_tab_id == tab
@@ -288,4 +277,6 @@ def test_reload_captures_backfilled_config_not_retired_editor(app):
     restored = ctrl.list_tab_ids()
     assert len(restored) == 1
     assert restored[0] != tab_id
-    assert state.get_tab(restored[0]).cfg_schema.value.fields["knob"] == DirectValue(42)
+    assert state.get_tab(restored[0]).cfg.snapshot_inputs().value.fields[
+        "knob"
+    ] == DirectValue(42)

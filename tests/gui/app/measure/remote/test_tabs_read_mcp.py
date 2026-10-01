@@ -26,8 +26,10 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
     monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     # The real render view follows State focus; this fixture's view is a stub.
-    live_gui.view.get_view_snapshot.side_effect = lambda: {
-        **live_gui.view.get_view_snapshot.return_value,
+    view = live_gui.view
+    assert view is not None
+    view.get_view_snapshot.side_effect = lambda: {
+        **view.get_view_snapshot.return_value,
         "active_tab_id": live_gui.state.active_tab_id,
     }
     sock = open_client(live_gui.service.port)

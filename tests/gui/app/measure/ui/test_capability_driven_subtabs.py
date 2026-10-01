@@ -12,6 +12,7 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, make_cfg
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -28,6 +29,7 @@ class DummyPostParams:
 
 def make_ctrl():
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
@@ -153,14 +155,6 @@ def exp_tab_widget(qapp, monkeypatch):
     """Provide ExpTabWidget with cfg population stubbed for isolation."""
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    orig = mod.ExpTabWidget._populate_cfg
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe-editor"
-        self.cfg_form.is_valid = lambda: True  # type: ignore[method-assign]
-        self.cfg_form.first_invalid_reason = lambda: None  # type: ignore[method-assign]
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
     # Mock figure attachment to avoid host lifecycle
     orig_attach = mod.attach_existing_figure_to_container
 
@@ -175,7 +169,6 @@ def exp_tab_widget(qapp, monkeypatch):
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     yield mod.ExpTabWidget
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
@@ -394,7 +387,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
         Session(
             adapter_name="fake",
             adapter=adapter,
-            cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),
+            cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
         ),
     )
     state.set_tab_analyzing("tab-1", True)
@@ -707,7 +700,7 @@ def test_render_host_routes_to_correct_pane_container(qapp):
         render_host=lambda: host,
         owner_scheduler=ManualOwnerScheduler(),
     )  # type: ignore[arg-type]
-    facet.start_run("tab-1")
+    facet.start_run("tab-1", state.get_tab.return_value.cfg.observe.return_value.ref)
     assert log[-1] == "run"
     facet.analyze("tab-1", MagicMock())
     assert log[-1] == "analysis"

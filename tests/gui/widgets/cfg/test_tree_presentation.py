@@ -57,7 +57,7 @@ def ctrl():
     c.get_current_ml.return_value = MagicMock()
     c.get_current_ml.return_value.modules = {}
     c.get_current_ml.return_value.waveforms = {}
-    c.list_arb_waveforms.return_value = []
+    c.arb_waveforms.list_data_keys.return_value = []
     c.list_device_names.return_value = []
     return c
 

@@ -17,13 +17,13 @@ from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionValue,
     DirectValue,
     schema_to_raw,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
+from tests.gui.app.measure._cfg_fakes import cfg_resources
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
 
 
@@ -48,7 +48,7 @@ def app() -> App:
     registry = Registry()
     registry.register("demo", OldAdapter)
     writeback = MagicMock()
-    tabs = TabService(state, registry, writeback)
+    tabs = TabService(state, registry, writeback, cfg_resources(state))
     workspace = WorkspaceService(state, tabs, bus)
     loader = Loader()
     operations = MagicMock(return_value=0)
@@ -294,14 +294,12 @@ def test_new_reload_discard_is_explicit_in_preview(app: App) -> None:
 def test_ram_snapshot_is_detached_from_retired_cfg(app: App) -> None:
     key = app.controls.new_tab("demo")
     retired = app.state.get_tab(key)
-    expected = schema_to_raw(retired.cfg_schema)
+    detached = retired.cfg.snapshot_inputs()
+    expected = schema_to_raw(detached)
     app.loader.failure = CatalogReloadError("bad import")
     app.reload.reload_confirmed(app.reload.prepare_reload())
-    retired.cfg_schema = CfgSchema(
-        spec=retired.cfg_schema.spec,
-        value=CfgSectionValue(fields={"knob": DirectValue(99)}),
-    )
+    detached.value.fields["knob"] = DirectValue(99)
     app.loader.failure = None
     app.reload.retry_failed_reload()
     fresh = app.state.get_tab(app.state.list_tab_ids()[0])
-    assert schema_to_raw(fresh.cfg_schema) == expected
+    assert schema_to_raw(fresh.cfg.snapshot_inputs()) == expected

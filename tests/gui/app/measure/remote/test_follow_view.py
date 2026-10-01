@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
     h_tab_run_start,
     h_tab_save_artifacts,
 )
-from zcu_tools.gui.app.measure.remote.handlers.tab import h_tab_set_cfg
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     h_tab_writeback_write,
 )
@@ -32,7 +31,6 @@ class Params:
         (h_tab_run_start, "run", "start_run"),
         (h_tab_analyze, "analysis", "analyze"),
         (h_tab_post_analyze, "post_analysis", "start_post_analyze"),
-        (h_tab_set_cfg, "run", "cfg_editor_set_fields"),
     ],
 )
 def test_write_follow_precedes_mutation_and_headless_still_works(
@@ -49,7 +47,7 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
         ),
     )
     adapter.tab_control.get_running_tab_id.return_value = None
-    owner = adapter.ctrl if method == "cfg_editor_set_fields" else control
+    owner = control
     order = []
     if headless:
         adapter.render_view = None
@@ -60,7 +58,16 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
     getattr(owner, method).side_effect = lambda *args, **kwargs: (
         order.append("mutation") or MagicMock()
     )
-    handler(adapter, {"tab_id": "t", "updates": {}, "edits": [], "agent_edit": True})
+    handler(
+        adapter,
+        {
+            "tab_id": "t",
+            "expected": {"cfg_id": "cfg-t", "revision": "0"},
+            "updates": {},
+            "edits": [],
+            "agent_edit": True,
+        },
+    )
     assert order == (["mutation"] if headless else [("t", pane), "mutation"])
 
 
@@ -157,6 +164,8 @@ def test_failed_view_selection_does_not_start_an_operation():
     failure = ValueError("unavailable pane")
     adapter.render_view.select_tab_pane.side_effect = failure
     with pytest.raises(ValueError, match="unavailable pane") as caught:
-        h_tab_run_start(adapter, {"tab_id": "t"})
+        h_tab_run_start(
+            adapter, {"tab_id": "t", "expected": {"cfg_id": "cfg-t", "revision": "0"}}
+        )
     assert caught.value is failure
     adapter.run_analyze_control.start_run.assert_not_called()

@@ -359,7 +359,7 @@ def test_reference_discriminator_single_allowed_needs_no_literal() -> None:
     assert asset.value.fields == {"payload": DirectValue(7)}
 
 
-def test_reference_discriminator_multi_allowed_uses_distinct_literals() -> None:
+def test_reference_discriminator_multi_allowed_uses_declared_literal() -> None:
     left = CfgSectionSpec(
         label="Left",
         fields={
@@ -375,7 +375,11 @@ def test_reference_discriminator_multi_allowed_uses_distinct_literals() -> None:
         },
     )
     spec = CfgSectionSpec(
-        fields={"asset": ReferenceSpec(kind="asset", allowed=[left, right])}
+        fields={
+            "asset": ReferenceSpec(
+                kind="asset", allowed=[left, right], discriminator="shape"
+            )
+        }
     )
     schema = CfgSchema(
         spec=spec,
@@ -607,7 +611,9 @@ def _multi_shape_module_spec() -> ReferenceSpec:
         },
         label="Pulse Readout",
     )
-    return ReferenceSpec(kind="module", allowed=[direct, pulse], label="Readout")
+    return ReferenceSpec(
+        kind="module", allowed=[direct, pulse], label="Readout", discriminator="type"
+    )
 
 
 def test_linked_multi_shape_ref_uses_value_discriminator_not_allowed0():

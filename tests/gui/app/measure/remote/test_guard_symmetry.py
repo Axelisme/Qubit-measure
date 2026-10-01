@@ -20,6 +20,8 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.guard import GuardError
 from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.cfg.edit_codec import encode_ref
+from zcu_tools.gui.cfg.resource import CfgRevision
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import (
@@ -88,23 +90,30 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
         raise remote_error_from_expected(exc) from exc
 
 
-def test_run_start_draft_context_symmetry(qapp):  # noqa: ARG001
+def test_run_start_draft_context_symmetry(qapp):
     """DRAFT context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
     ctrl = _make_controller(ContextReadiness.DRAFT)
     tab_id = ctrl.new_tab("fake")
 
     # UI path
     with pytest.raises(GuardError, match="active file-backed context"):
-        ctrl.start_run(tab_id)
+        ctrl.start_run(tab_id, ctrl.cfg_resources.lookup(tab_id).observe().ref)
 
     # Remote path — same precondition, mapped to a typed wire error.
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "tab.run_start", {"tab_id": tab_id})
+        _dispatch(
+            ctrl,
+            "tab.run_start",
+            {
+                "tab_id": tab_id,
+                "expected": encode_ref(ctrl.cfg_resources.lookup(tab_id).observe().ref),
+            },
+        )
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert "active file-backed context" in excinfo.value.message
 
 
-def test_save_data_draft_context_symmetry(qapp):  # noqa: ARG001
+def test_save_data_draft_context_symmetry(qapp):
     ctrl = _make_controller(ContextReadiness.DRAFT)
     tab_id = ctrl.new_tab("fake")
 
@@ -120,7 +129,7 @@ def test_save_data_draft_context_symmetry(qapp):  # noqa: ARG001
     assert excinfo.value.reason == "no_active_context"
 
 
-def test_analyze_without_run_result_symmetry(qapp):  # noqa: ARG001
+def test_analyze_without_run_result_symmetry(qapp):
     """ACTIVE context but no run result: both paths reject on the same guard."""
     ctrl = _make_controller(ContextReadiness.ACTIVE)
     tab_id = ctrl.new_tab("fake")
@@ -137,7 +146,7 @@ def test_analyze_without_run_result_symmetry(qapp):  # noqa: ARG001
     assert excinfo.value.reason == "no_run_result"
 
 
-def test_save_no_run_result_carries_reason(qapp):  # noqa: ARG001
+def test_save_no_run_result_carries_reason(qapp):
     """ACTIVE context, no run result: save fails with reason='no_run_result'."""
     ctrl = _make_controller(ContextReadiness.ACTIVE)
     tab_id = ctrl.new_tab("fake")
@@ -148,12 +157,14 @@ def test_save_no_run_result_carries_reason(qapp):  # noqa: ARG001
     assert excinfo.value.reason == "no_run_result"
 
 
-def test_run_permit_issued_for_active_valid_context(qapp):  # noqa: ARG001
+def test_run_permit_issued_for_active_valid_context(qapp):
     """Sanity: with ACTIVE context + valid cfg, the guard issues a RunPermit
     rather than raising. (We assert permit issuance instead of spawning a real
     run worker, which would race teardown in a headless test.)"""
     ctrl = _make_controller(ContextReadiness.ACTIVE)
     tab_id = ctrl.new_tab("fake")
 
-    permit = ctrl._guard_svc.acquire_run_permit(tab_id)
+    permit = ctrl._guard_svc.acquire_run_permit(
+        tab_id, expected_revision=CfgRevision(0)
+    )
     assert permit.tab_id == tab_id

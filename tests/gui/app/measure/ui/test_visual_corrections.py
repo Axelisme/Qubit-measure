@@ -22,7 +22,6 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -35,6 +34,7 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget, TreeCfgWidget
 from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS, _branch_color
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -53,6 +53,7 @@ _CANDIDATE_PASTELS = ("#e2ebf6", "#e3f0e6", "#f4e9d2", "#eadff1", "#dceeee")
 
 def make_ctrl():
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
@@ -143,14 +144,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
 def exp_tab_widget(qapp, monkeypatch):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    orig = mod.ExpTabWidget._populate_cfg
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe-editor"
-        self.cfg_form.is_valid = lambda: True
-        self.cfg_form.first_invalid_reason = lambda: None
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
     orig_attach = mod.attach_existing_figure_to_container
 
     def mock_attach(fig, container):
@@ -164,7 +157,6 @@ def exp_tab_widget(qapp, monkeypatch):
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     yield mod.ExpTabWidget
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
@@ -212,10 +204,11 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
     schema = CfgSchema(spec=root_spec, value=root_val)
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_current_md.return_value = MetaDict()
     ctrl.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     ctrl.list_device_names.return_value = []
 
     w = CfgFormWidget()
@@ -230,7 +223,6 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
 
     # Rows should NOT have depth background colors
     depth_set = {c.lower() for c in TREE_DEPTH_COLORS}
-    from qtpy.QtWidgets import QTreeWidgetItem
 
     items = []
     cur = tree.topLevelItem(0)
@@ -343,10 +335,11 @@ def test_A2_sole_tree_has_no_structure_selector(qapp):
     assert not hasattr(cfg_pkg, "tree_structure")
     # Default construction is tree
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_current_md.return_value = MetaDict()
     ctrl.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     ctrl.list_device_names.return_value = []
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
@@ -374,7 +367,7 @@ def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget):
     ctrl2.get_bus.return_value = EventBus()
     ctrl2.get_current_md.return_value = MetaDict()
     ctrl2.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl2.list_arb_waveforms.return_value = []
+    ctrl2.arb_waveforms.list_data_keys.return_value = []
     ctrl2.list_device_names.return_value = []
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),

@@ -9,6 +9,9 @@ batch. The CfgSchema lowering itself is experiment-coupled and lives app-side
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any
+
 import pytest
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.cfg_schemas import (
@@ -20,6 +23,7 @@ from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
 from zcu_tools.gui.session.services.context import (
     ContextService,
     MlEntryValidationError,
@@ -37,17 +41,17 @@ _READOUT_RAW = {
 _WAVEFORM_RAW = {"style": "gauss", "length": 0.1, "sigma": 0.02}
 
 
-def _module_schema(raw: dict) -> CfgSchema:
+def _module_schema(raw: dict[str, Any]) -> CfgSchema:
     spec, value = module_cfg_to_value(raw)
     return CfgSchema(spec=spec, value=value)
 
 
-def _waveform_schema(raw: dict) -> CfgSchema:
+def _waveform_schema(raw: dict[str, Any]) -> CfgSchema:
     spec, value = waveform_cfg_to_value(raw)
     return CfgSchema(spec=spec, value=value)
 
 
-def _make_svc_with_state() -> tuple[ContextService, State]:
+def _make_svc_with_state(bus: EventBus | None = None) -> tuple[ContextService, State]:
     state = State(
         SessionEnv(
             md=MetaDict(),
@@ -58,7 +62,9 @@ def _make_svc_with_state() -> tuple[ContextService, State]:
             readiness=ContextReadiness.DRAFT,
         )
     )
-    return ContextService(state, IOManager(), EventBus()), state
+    return ContextService(
+        state, IOManager(), bus if bus is not None else EventBus()
+    ), state
 
 
 def _make_svc() -> ContextService:
@@ -68,9 +74,9 @@ def _make_svc() -> ContextService:
 def _apply(
     svc: ContextService,
     *,
-    md: dict | None = None,
-    modules: dict | None = None,
-    waveforms: dict | None = None,
+    md: dict[str, Any] | None = None,
+    modules: dict[str, Any] | None = None,
+    waveforms: dict[str, Any] | None = None,
     dump: bool = True,
 ) -> None:
     svc.apply_ml_writes(
@@ -81,6 +87,125 @@ def _apply(
         lower_waveform=lower_waveform,
         dump=dump,
     )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"__complex__": [1, 2]},
+        {"__metadict_string__": "literal"},
+        {"nested": [{"__complex__": [1, 2]}]},
+        {"nested": [{"__metadict_string__": "literal"}]},
+    ],
+)
+def test_create_md_attr_rejects_reserved_value_without_publication(bad):
+    bus = EventBus()
+    svc, state = _make_svc_with_state(bus)
+    events: list[object] = []
+    bus.subscribe(MdChangedPayload, events.append)
+    svc.get_current_md().update(stable=1)
+    before = state.version.get("context")
+
+    with pytest.raises(ValueError, match="reserved MetaDict tag"):
+        svc.create_md_attr("bad", bad)
+
+    assert dict(svc.get_current_md().snapshot().items()) == {"stable": 1}
+    assert state.version.get("context") == before
+    assert events == []
+
+
+@pytest.mark.parametrize("failure_stage", ["module", "waveform"])
+def test_failed_late_preparation_keeps_live_context_and_version(failure_stage):
+    bus = EventBus()
+    svc, state = _make_svc_with_state(bus)
+    events: list[object] = []
+    bus.subscribe(MdChangedPayload, events.append)
+    bus.subscribe(MlChangedPayload, events.append)
+    svc.get_current_md().update(offset=1.0)
+    before = state.version.get("context")
+
+    def reject(entry, library, metadata):
+        assert metadata.offset == 9.0
+        assert svc.get_current_md().offset == 1.0
+        assert svc.get_current_ml().modules == {}
+        raise MlEntryValidationError("injected later preparation failure")
+
+    with pytest.raises(MlEntryValidationError, match="later preparation"):
+        svc.apply_ml_writes(
+            {"offset": 9.0},
+            {"first": _module_schema(_READOUT_RAW)},
+            {"later": _waveform_schema(_WAVEFORM_RAW)},
+            lower_module=reject if failure_stage == "module" else lower_module,
+            lower_waveform=reject,
+            dump=False,
+        )
+    assert svc.get_current_md().offset == 1.0
+    assert svc.get_current_ml().modules == {}
+    assert svc.get_current_ml().waveforms == {}
+    assert state.version.get("context") == before
+    assert events == []
+
+
+def test_candidate_lowering_sees_earlier_writes_without_publishing_them():
+    svc, state = _make_svc_with_state()
+    library = svc.get_current_ml()
+    metadata = svc.get_current_md()
+    metadata.update(offset=1.0)
+
+    def lower(entry, candidate_ml, candidate_md):
+        assert candidate_md.offset == 9.0
+        assert metadata.offset == 1.0
+        assert library.modules == {}
+        if entry == "second":
+            assert "first" in candidate_ml.modules
+        return _READOUT_RAW
+
+    svc.apply_ml_writes(
+        {"offset": 9.0},
+        {"first": "first", "second": "second"},
+        {},
+        lower_module=lower,
+        lower_waveform=lower_waveform,
+        dump=False,
+    )
+    assert svc.get_current_md() is metadata
+    assert svc.get_current_ml() is library
+    assert metadata.offset == 9.0
+    assert set(library.modules) == {"first", "second"}
+    assert state.version.get("context") == 1
+
+
+def test_storage_failure_reports_applied_and_preserves_published_batch(
+    tmp_path, monkeypatch, caplog
+):
+    bus = EventBus()
+    svc, state = _make_svc_with_state(bus)
+    events: list[tuple[int, bool]] = []
+
+    def observe(_payload: object) -> None:
+        events.append((state.version.get("context"), "first" in library.modules))
+
+    bus.subscribe(MdChangedPayload, observe)
+    bus.subscribe(MlChangedPayload, observe)
+    library = ModuleLibrary(tmp_path / "modules.yaml")
+    state.set_context(replace(state.session_env, ml=library))
+    defect = OSError("disk full")
+    saves = []
+
+    def fail_save():
+        saves.append(state.version.get("context"))
+        raise defect
+
+    monkeypatch.setattr(library, "dump", fail_save)
+    with pytest.raises(RuntimeError, match="applied, but saving failed") as caught:
+        _apply(svc, md={"offset": 9.0}, modules={"first": _module_schema(_READOUT_RAW)})
+    assert caught.value.__cause__ is defect
+    assert svc.get_current_md().offset == 9.0
+    assert "first" in library.modules
+    assert state.version.get("context") == 1
+    assert saves == [1]
+    assert events == [(1, True), (1, True)]
+    assert "Context settings applied, but saving failed" in caplog.text
 
 
 def test_apply_ml_writes_registers_module():
@@ -139,9 +264,8 @@ def test_apply_ml_writes_empty_is_noop():
 
 
 def test_apply_ml_writes_emits_once_per_kind():
-    svc = _make_svc()
-    from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
-
+    bus = EventBus()
+    svc, _ = _make_svc_with_state(bus)
     md_events = 0
     ml_events = 0
 
@@ -153,8 +277,8 @@ def test_apply_ml_writes_emits_once_per_kind():
         nonlocal ml_events
         ml_events += 1
 
-    svc._bus.subscribe(MdChangedPayload, _on_md)
-    svc._bus.subscribe(MlChangedPayload, _on_ml)
+    bus.subscribe(MdChangedPayload, _on_md)
+    bus.subscribe(MlChangedPayload, _on_ml)
     _apply(
         svc,
         md={"r_f": 6000.0, "rf_w": 1.0},
@@ -166,17 +290,16 @@ def test_apply_ml_writes_emits_once_per_kind():
 
 
 def test_replace_ml_module_is_one_atomic_content_mutation():
-    svc, state = _make_svc_with_state()
+    bus = EventBus()
+    svc, state = _make_svc_with_state(bus)
     _apply(svc, modules={"readout_rf": _module_schema(_READOUT_RAW)}, dump=False)
     ml_events = 0
-
-    from zcu_tools.gui.session.events import MlChangedPayload
 
     def _on_ml(_payload: object) -> None:
         nonlocal ml_events
         ml_events += 1
 
-    svc._bus.subscribe(MlChangedPayload, _on_ml)
+    bus.subscribe(MlChangedPayload, _on_ml)
     before = state.version.get("context")
     replacement = dict(_READOUT_RAW, ro_freq=6123.0)
     svc.replace_ml_module_from_schema(

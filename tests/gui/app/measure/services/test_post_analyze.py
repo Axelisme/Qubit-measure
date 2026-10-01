@@ -57,7 +57,7 @@ def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
     state = State(ctx)
     state.add_tab(
         tab_id,
-        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     state.update_tab_result(tab_id, object())
     if with_analyze:
@@ -108,14 +108,14 @@ def _make_two_tab_state() -> State:
     state = _make_state("tab1")
     state.add_tab(
         "tab2",
-        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     state.update_tab_result("tab2", object())
     state.update_tab_analyze("tab2", object(), None)
     return state
 
 
-def test_start_post_analyze_submits_to_bg(qapp):  # noqa: ARG001
+def test_start_post_analyze_submits_to_bg(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
 
@@ -127,7 +127,7 @@ def test_start_post_analyze_submits_to_bg(qapp):  # noqa: ARG001
     assert state.get_tab("tab1").is_analyzing is True
 
 
-def test_start_post_analyze_emits_interaction_event(qapp):  # noqa: ARG001
+def test_start_post_analyze_emits_interaction_event(qapp):
     state = _make_state()
     bus = EventBus()
     received: list[TabInteractionFact] = []
@@ -141,7 +141,7 @@ def test_start_post_analyze_emits_interaction_event(qapp):  # noqa: ARG001
     assert received == [TabInteractionFact.POST_ANALYZE_STARTED]
 
 
-def test_start_post_analyze_submit_rejection_preserves_figures(qapp):  # noqa: ARG001
+def test_start_post_analyze_submit_rejection_preserves_figures(qapp):
     state = _make_state()
     old_primary = _plots(Figure())
     old_primary.finish()
@@ -166,7 +166,7 @@ def test_start_post_analyze_submit_rejection_preserves_figures(qapp):  # noqa: A
     assert tab.is_analyzing is False
 
 
-def test_start_post_analyze_gates_on_missing_primary_result(qapp):  # noqa: ARG001
+def test_start_post_analyze_gates_on_missing_primary_result(qapp):
     state = _make_state(with_analyze=False)
     svc, bg = _make_service(state, EventBus())
 
@@ -181,7 +181,7 @@ def test_start_post_analyze_gates_on_missing_primary_result(qapp):  # noqa: ARG0
     assert bg.submit_count == 0
 
 
-def test_start_post_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
+def test_start_post_analyze_rejects_busy_tab(qapp):
     state = _make_state()
     state.set_tab_running("tab1", True)
     svc, _ = _make_service(state, EventBus())
@@ -211,7 +211,7 @@ def test_post_worker_receives_explicit_operation_plots(qapp):
     assert result is adapter.post_analyze.return_value
 
 
-def test_on_post_analyze_finished_updates_state(qapp):  # noqa: ARG001
+def test_on_post_analyze_finished_updates_state(qapp):
     state = _make_state()
     bus = EventBus()
     received: list[TabInteractionFact] = []
@@ -255,7 +255,7 @@ def test_on_post_analyze_finished_updates_state(qapp):  # noqa: ARG001
     ]
 
 
-def test_on_post_analyze_failed_resets_state(qapp):  # noqa: ARG001
+def test_on_post_analyze_failed_resets_state(qapp):
     state = _make_state()
     bus = EventBus()
     received: list[TabInteractionFact] = []
@@ -288,7 +288,7 @@ def test_on_post_analyze_failed_resets_state(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
+def test_two_tabs_settle_their_own_tokens(qapp):
     state = _make_two_tab_state()
     svc, bg = _make_service(state, EventBus())
     handles = svc._handles
@@ -336,7 +336,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
 
 def test_on_post_analyze_finished_post_processing_raise_settles_failed(
     qapp, monkeypatch
-):  # noqa: ARG001
+):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     handles = svc._handles

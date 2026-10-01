@@ -13,6 +13,7 @@ dependencies = [
   "jupytext",
   "pydantic>=2",
   "typing-extensions",
+  "simpleeval>=1.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -70,7 +71,7 @@ dev = [
   "ruff",
   "import-linter>=2.15",
 ]
-# Opt-in diagnostics; ordinary development does not need audit/network tools.
+# Development diagnostics; include this group when bootstrapping dev environments.
 quality = ["pytest-randomly", "deptry", "pip-audit", "radon>=6.0.1,<7"]
 
 [build-system]

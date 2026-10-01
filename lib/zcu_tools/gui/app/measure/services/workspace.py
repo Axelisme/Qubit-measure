@@ -73,7 +73,7 @@ class WorkspaceService:
         payload_tabs = tuple(
             PersistedTab(
                 adapter_name=tab.adapter_name,
-                cfg_raw=schema_to_raw(tab.cfg_schema),
+                cfg_raw=schema_to_raw(tab.cfg.snapshot_inputs()),
             )
             for _, tab in tabs
         )

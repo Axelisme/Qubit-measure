@@ -26,6 +26,10 @@ from zcu_tools.gui.session.value_lookup import (
     resolve_value_ref,
 )
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.content import (
+    replace_context_contents,
+    snapshot_context_contents,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,42 +99,14 @@ def _coerce_scalar(text: str, current: Any) -> Any:
     )
 
 
-def _validate_md_key(key: str) -> None:
+def _validate_md_key(key: object) -> None:
     """Validate a user-facing MetaDict key before any content mutation."""
-    if not isinstance(key, str):
-        raise FailedPreconditionError(
-            f"MetaDict keys must be str, got {type(key).__name__}"
-        )
-    if not key.strip():
-        raise FailedPreconditionError("MetaDict key must not be empty.")
     try:
-        MetaDict._ensure_data_key(key)
+        validated = MetaDict.validate_data_key(key)
     except (AttributeError, TypeError) as exc:
         raise FailedPreconditionError(str(exc)) from exc
-
-
-def _commit_md_snapshot(md: MetaDict, snapshot: Mapping[str, Any]) -> None:
-    """Commit one already-validated MetaDict snapshot as a single mutation.
-
-    MetaDict exposes attribute-level writes but no rename primitive. Replacing
-    its data mapping under ContextService ownership avoids a caller-visible
-    set-then-delete window and lets the service publish one version/event pair.
-    The old in-memory mapping is restored if the underlying write fails.
-    """
-    previous = dict(md.items())
-    previous_dirty = md._dirty
-    try:
-        md._check_can_write()
-        md.sync()
-        md._data.clear()
-        md._data.update(snapshot)
-        md._dirty = True
-        md.sync()
-    except Exception:
-        md._data.clear()
-        md._data.update(previous)
-        md._dirty = previous_dirty
-        raise
+    if not validated.strip():
+        raise FailedPreconditionError("MetaDict key must not be empty.")
 
 
 class ContextService:
@@ -336,7 +312,7 @@ class ContextService:
         if key in snapshot:
             raise FailedPreconditionError(f"MetaDict already has attribute {key!r}.")
         snapshot[key] = value
-        _commit_md_snapshot(md, snapshot)
+        md.replace_contents(snapshot)
         self._state.version.bump("context")
         self._bus.emit(MdChangedPayload(md=md))
 
@@ -353,7 +329,7 @@ class ContextService:
         if new in snapshot:
             raise FailedPreconditionError(f"MetaDict already has attribute {new!r}.")
         snapshot[new] = snapshot.pop(old)
-        _commit_md_snapshot(md, snapshot)
+        md.replace_contents(snapshot)
         self._state.version.bump("context")
         self._bus.emit(MdChangedPayload(md=md))
 
@@ -373,8 +349,8 @@ class ContextService:
         # paths (ADR-0067 collapsed writeback's direct write into path 1):
         #   1. ContextService writes: create_md_attr / rename_md_attr / set_md_attr /
         #      del_md_attr / replace_ml_*_from_schema / del_ml_* (field-level, each
-        #      bumps+emits) and apply_ml_writes (batch: on success one bump +
-        #      one emit per kind; a failed batch leaves an unpublished prefix). Writeback / editor commit / inspect /
+        #      bumps+emits) and apply_ml_writes (batch: prepare without live writes, then one bump +
+        #      one emit per kind; persistence errors occur after publication). Writeback / editor commit / inspect /
         #      create_from_role all route here — the single write authority.
         #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
         # Both bump "context"; only set_context() itself does NOT (pure swap).
@@ -415,39 +391,52 @@ class ContextService:
         lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
         dump: bool,
     ) -> None:
-        """Apply md/ml content writes as one batch (ADR-0067).
+        """Prepare a whole batch in memory, publish once, then persist.
 
-        This groups version/event publication, not rollback: a later lowering,
-        registration or dump failure leaves earlier live changes in place with
-        no version bump and no event.
-
-        ``md`` maps attr → value; ``modules`` / ``waveforms`` map entry name → an
-        opaque un-lowered entry (a ``CfgSchema``), lowered here via the injected
-        ``lower_module`` / ``lower_waveform`` (app-side; the cfg-tree never enters
-        this module). Lowering is interleaved with registration so a later entry
-        sees an earlier one. On success: one ``version.bump("context")`` and at most
-        one MD_CHANGED + one ML_CHANGED (a batch avoids N redundant full-refreshes).
-        ``dump`` persists the ml when it has persistence (writeback batch persists;
-        a single editor commit does not). Raises MlEntryValidationError (from the
-        lowering callback) on a bad entry."""
+        Later entries see earlier candidate writes, never partial live writes.
+        Preparation failures leave both stores and their version untouched.
+        Storage failures after publication report that settings were applied;
+        they do not roll back or retry the batch. ``dump`` requests an explicit
+        library dump in addition to the stores' normal synchronization policy.
+        """
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
+        if not (md or modules or waveforms):
+            return
         ctx = self._state.session_env
-        for key, value in md.items():
-            setattr(ctx.md, key, value)
+        candidate_md, candidate_ml = snapshot_context_contents(ctx.md, ctx.ml)
+        candidate_md.update(md)
         for name, entry in modules.items():
-            ctx.ml.register_module(**{name: lower_module(entry, ctx.ml, ctx.md)})
+            candidate_ml.register_module(
+                **{name: lower_module(entry, candidate_ml, candidate_md)}
+            )
         for name, entry in waveforms.items():
-            ctx.ml.register_waveform(**{name: lower_waveform(entry, ctx.ml, ctx.md)})
+            candidate_ml.register_waveform(
+                **{name: lower_waveform(entry, candidate_ml, candidate_md)}
+            )
         touched_ml = bool(modules or waveforms)
-        if dump and touched_ml and ctx.ml.has_persistence:
-            ctx.ml.dump()
-        if md or touched_ml:
-            self._state.version.bump("context")
+        replace_context_contents(
+            ctx.md,
+            ctx.ml,
+            metadata=candidate_md if md else None,
+            library=candidate_ml if touched_ml else None,
+        )
+        self._state.version.bump("context")
         if md:
             self._bus.emit(MdChangedPayload(md=ctx.md))
-        if modules or waveforms:
+        if touched_ml:
             self._bus.emit(MlChangedPayload(ml=ctx.ml))
+        try:
+            if md:
+                ctx.md.sync()
+            if touched_ml:
+                if dump and ctx.ml.has_persistence:
+                    ctx.ml.dump()
+                else:
+                    ctx.ml.sync()
+        except Exception as exc:
+            logger.exception("Context settings applied, but saving failed")
+            raise RuntimeError("Settings were applied, but saving failed.") from exc
 
     def replace_ml_module_from_schema(
         self,
