@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -17,14 +14,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     Module,
@@ -50,7 +47,6 @@ class RabiCheckResult:
     reset_states: NDArray[np.int64] = field(
         default_factory=lambda: np.array([0, 1, 2], dtype=np.int64)
     )
-    cfg_snapshot: RabiCheckCfg | None = None
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -114,17 +110,15 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
         tag="twotone/reset/rabi_check",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: RabiCheckCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> RabiCheckResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run(self, cfg: RabiCheckCfg, *, context: RunContext) -> RabiCheckResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         gains = sweep2array(
@@ -133,40 +127,38 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
             {"soccfg": soccfg, "gen_ch": modules.rabi_pulse.ch},
         )
 
-        with LivePlot1D(
-            "Pulse gain", "Amplitude", segment_kwargs=dict(num_lines=3)
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (3, len(gains)),
-                on_update=lambda data: viewer.update(
-                    gains, reset_rabi_signal2real(data)
-                ),
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Pulse gain", "Amplitude", num_lines=3
+        )
+        signals_buffer = SignalBuffer(
+            (3, len(gains)),
+            on_update=lambda data: viewer.update(gains, reset_rabi_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(*_rabi_check_sequence(sched.cfg.modules, sched.cfg.sweep.gain))
+                .declare_sweep("reset_sel", 3)
+                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .build_and_acquire()
             )
-            with Schedule(cfg, signals_buffer) as sched:
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(*_rabi_check_sequence(sched.cfg.modules, sched.cfg.sweep.gain))
-                    .declare_sweep("reset_sel", 3)
-                    .declare_sweep("gain", sched.cfg.sweep.gain)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-                signals = signals_buffer.array
 
-        return RabiCheckResult(gains, signals, cfg_snapshot=orig_cfg)
+        return RabiCheckResult(gains, signals_buffer.array)
 
-    @retrieve_result
     def analyze(
-        self, result: RabiCheckResult | None = None
-    ) -> tuple[RabiCheckFit, Figure]:
-        """Return descriptive contrast fits and a figure, without reset fidelity.
+        self,
+        source: RunRecord[RabiCheckCfg, RabiCheckResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> RabiCheckFit:
+        """Return descriptive contrast fits and publish fit, without reset fidelity.
 
         Frequency is fitted only to the before-reset branch. All branches share
         its IQ projection and frequency; after-reset also includes a 2f term.
         """
-        if result is None:
-            raise ValueError("No reset-check result found")
+        del options
+        result = source.result
         gains, signals = result.gains, result.signals
         if gains.ndim != 1 or signals.shape != (3, gains.size):
             raise ValueError("Reset-check signals must have shape (3, number of gains)")
@@ -176,14 +168,16 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
             raise ValueError("Reset-check signals must not contain infinities")
         real_signals = reset_rabi_signal2real(signals)
         fit = fit_reset_rabi(gains, real_signals)
-        fig, (ax, residual_ax) = plt.subplots(
-            2,
-            1,
+        fig, _ = plots.subplots(
+            "fit",
+            nrows=2,
+            ncols=1,
             sharex=True,
             figsize=(max(config.figsize[0], 9), max(config.figsize[1], 6)),
             gridspec_kw={"height_ratios": [3, 1]},
             layout="constrained",
         )
+        ax, residual_ax = fig.axes
         dense_gains = np.linspace(np.min(gains), np.max(gains), 600)
         branches = (fit.before, fit.reset, fit.after)
         labels = ("Before reset", "Reset only", "Reset + Rabi")
@@ -215,4 +209,4 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
         for axes in (ax, residual_ax):
             axes.legend(fontsize=9)
             axes.grid(True)
-        return fit, fig
+        return fit

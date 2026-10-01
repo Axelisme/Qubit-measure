@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — Reset tone records
+**Last updated:** 2026-10-02 — Reset Rabi check records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -95,7 +95,7 @@ frequency維持local，兩個slope各自固定為零。Chi/kappa uncertainty直�
 covariance投影，包含local frequency cross-covariance；analysis不重建per-trace covariance
 blocks。Backend minimum或covariance無效時fast-fail；`CKPAnalysis`只含chi、kappa與res_freq，圖交本次Plots。
 
-`twotone/reset/RabiCheckExp.analyze()`回傳`(RabiCheckFit, Figure)`。reset前分支決定
+`twotone/reset/RabiCheckExp` 以 explicit RunContext 執行，回傳純 Result，發布三分支 measurement。Analyze 接 RunRecord 與 None options，回傳純 `RabiCheckFit`，另向本次 Plots 發布 fit；接受 cfg=None。reset前分支決定
 共同IQ投影與基頻，reset-only以同基頻擬合，reset後追加Rabi的分支包含基頻與二次諧波。
 半峰對峰振幅、相位、相對contrast與殘差只描述平均IQ資料，不推導reset fidelity。
 數值分析由同目錄`rabi_check_fit`擁有，GUI adapter只投影其純量；acquisition與持久化
