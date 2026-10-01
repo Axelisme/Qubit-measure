@@ -198,9 +198,6 @@ class GEAnalyzeOptions:
     angle: float | None = None
 
 
-GE_ANALYZE_DEFAULTS = GEAnalyzeOptions()
-
-
 @dataclass(frozen=True)
 class GEAnalysis:
     initial_state: Literal["ground", "excited"]
@@ -241,9 +238,6 @@ class GEAnalysis:
 class GEPostAnalyzeOptions:
     radius: float | None = None
     consider_other: bool = False
-
-
-GE_POST_ANALYZE_DEFAULTS = GEPostAnalyzeOptions()
 
 
 @dataclass(frozen=True)
