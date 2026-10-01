@@ -14,8 +14,7 @@ from zcu_tools.experiment.v2.singleshot.ge import (
     GEPostAnalyzeOptions,
 )
 from zcu_tools.notebook.experiments import GEPostAnalyzer, GEPrimaryRecord
-from zcu_tools.plotting.figures import NamedFigures
-from zcu_tools.plotting.plots import NonPresentingHost
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 def primary_record() -> GEPrimaryRecord:
@@ -40,7 +39,7 @@ def primary_record() -> GEPrimaryRecord:
             e_center=1 + 0.4j,
             init_pops=np.eye(2),
         ),
-        figures=NamedFigures({}),
+        figures=Plots(NonPresentingHost()).finish(),
     )
 
 
