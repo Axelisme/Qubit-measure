@@ -84,9 +84,6 @@ class T1AnalyzeOptions:
     skip: int = 0
 
 
-T1_ANALYZE_DEFAULTS = T1AnalyzeOptions()
-
-
 @dataclass(frozen=True)
 class T1Analysis:
     t1: float
