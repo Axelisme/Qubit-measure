@@ -121,11 +121,13 @@ class FluxDepInteraction:
         try:
             ipython_display.display(self.widget)
             host.present(self.figure)
-        except BaseException:
+        except BaseException as error:
             try:
-                host.release(self.figure)
-            finally:
-                self._close_controls()
+                self._retire_preview()
+            except BaseException as cleanup_error:  # noqa: BLE001 - retain both operation failures
+                raise BaseExceptionGroup(
+                    "Flux interaction start and cleanup failed", [error, cleanup_error]
+                ) from None
             raise
         self.figure.canvas.mpl_connect("button_press_event", self._on_press)
         self.figure.canvas.mpl_connect("motion_notify_event", self._on_move)
