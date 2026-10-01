@@ -51,10 +51,10 @@ MEASUREMENT 只套用本節與語言規則。以下規則屬於 DEVELOPMENT。
 
 ### 3. 使用正確環境
 
-受管理 lane 是協作流程建立的 worktree。Orchestrator 建立 lane 後、派發任何 role 前執行：
+開發環境建立或重新同步時，一律包含 `quality` dependency group。受管理 lane 是協作流程建立的 worktree。Orchestrator 建立 lane 後、派發任何 role 前執行：
 
 ```bash
-uv sync --directory <lane> --locked
+uv sync --directory <lane> --locked --group quality
 ```
 
 成功後才派發 role；失敗時停止。所有 worktree 的 Python interpreter 與 Python entry-point 工具一律使用：
@@ -69,7 +69,7 @@ uv run --directory <worktree> --no-sync -- <command>
 
 Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 port 等共享資源。並行工作若會用到同一個 live resource，先安排使用順序，不能因為在不同 lane 就假定互不影響。Worktree 也不帶來硬體操作授權。
 
-完成條件：指定 interpreter 可用；受管理 lane 的 locked bootstrap 成功。
+完成條件：指定 interpreter 可用且已安裝 `quality` group；受管理 lane 的 locked bootstrap 成功。
 
 ### 4. 實作與測試
 
