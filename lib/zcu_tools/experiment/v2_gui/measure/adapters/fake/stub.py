@@ -12,7 +12,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
@@ -66,7 +66,7 @@ class FakeAnalysis:
 class FakeExp:
     """Fixed seeded harness with explicit records and intentionally inert save."""
 
-    def run(self, config: FakeExpCfg, *, context: QickContext) -> FakeResult:
+    def run(self, config: FakeExpCfg, *, context: RunContext) -> FakeResult:
         del context  # The fixed harness has no hardware or live Run presentation.
         rng = np.random.default_rng(seed=42)
         signals = rng.normal(0.0, config.noise_scale, size=11)
@@ -178,10 +178,10 @@ class FakeAdapter(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> FakeRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FakeExp().run(cfg, context=QickContext(req.soc, req.soccfg, plots))
+        result = FakeExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(

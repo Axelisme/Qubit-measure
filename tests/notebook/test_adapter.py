@@ -6,8 +6,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -26,11 +27,11 @@ class _Core:
     def __init__(self) -> None:
         self.fail_analysis = False
         self.fail_run = False
-        self.contexts: list[QickContext] = []
+        self.contexts: list[RunContext] = []
         self.saved: list[tuple[RunRecord[_Cfg, float], Path]] = []
         self.metadata: tuple[str | None, str | None, str | None, int] | None = None
 
-    def run(self, config: _Cfg, *, context: QickContext) -> float:
+    def run(self, config: _Cfg, *, context: RunContext) -> float:
         self.contexts.append(context)
         result = config.scale
         _, axes = context.plots.subplots("raw")
@@ -163,11 +164,17 @@ def test_analyze_requires_a_source_before_starting_operation() -> None:
 def test_run_isolates_config_and_replaces_only_current_records() -> None:
     core = _Core()
     soc, soccfg = object(), object()
-    adapter = NotebookAdapter(core, soc=soc, soccfg=soccfg, host=_Host())
+    devices = {"flux": FakeDevice(fast_mode=True)}
+    adapter = NotebookAdapter(
+        core, soc=soc, soccfg=soccfg, devices=devices, host=_Host()
+    )
     cfg = _Cfg(scale=3.0)
     first = adapter.run(cfg)
     previous = adapter.analyze(_Options(weights=[2.0]))
     cfg.scale = 7.0
+    first_device = devices["flux"]
+    devices["flux"] = FakeDevice(fast_mode=True)
+    core.contexts[0].cancel_signal.set_error("failed", "old run", None)
 
     second = adapter.run(cfg)
 
@@ -182,6 +189,11 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     first_context, second_context = core.contexts
     assert first_context is not second_context
     assert first_context.plots is not second_context.plots
+    assert first_context.cancel_signal is not second_context.cancel_signal
+    assert not second_context.cancel_signal.is_set()
+    assert second_context.cancel_signal.error is None
+    assert first_context.devices["flux"] is first_device
+    assert second_context.devices["flux"] is devices["flux"]
     assert first_context.soc is soc and second_context.soc is soc
     assert first_context.soccfg is soccfg and second_context.soccfg is soccfg
     assert adapter.run_presentation is second_context.plots
@@ -234,7 +246,9 @@ def test_save_uses_explicit_source_and_returns_exact_or_unique_path(
 def test_producer_and_cleanup_failures_remain_observable(operation: str) -> None:
     core = _Core()
     host = _Host()
-    adapter = NotebookAdapter(core, soc=object(), soccfg=object(), host=host)
+    adapter = NotebookAdapter(
+        core, soc=object(), soccfg=object(), devices={}, host=host
+    )
     previous_run = adapter.run(_Cfg(scale=3.0))
     previous_analysis = adapter.analyze(_Options(weights=[2.0]))
     core.fail_run = operation == "run"
@@ -274,11 +288,24 @@ def test_run_requires_handles_before_starting_operation(missing: str) -> None:
     assert adapter.run_presentation is None
 
 
+def test_run_requires_explicit_device_mapping_before_starting_operation() -> None:
+    core = _Core()
+    adapter = NotebookAdapter(core, soc=object(), soccfg=object(), host=_Host())
+
+    with pytest.raises(ValueError, match="explicit devices mapping"):
+        adapter.run(_Cfg())
+
+    assert core.contexts == []
+    assert adapter.last_run is None
+
+
 @pytest.mark.parametrize("failure", ["core", "finish"])
 def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     core = _Core()
     host = _Host()
-    adapter = NotebookAdapter(core, soc=object(), soccfg=object(), host=host)
+    adapter = NotebookAdapter(
+        core, soc=object(), soccfg=object(), devices={}, host=host
+    )
     previous_run = adapter.run(_Cfg(scale=3.0))
     previous_run_presentation = adapter.run_presentation
     previous_analysis = adapter.analyze(_Options(weights=[2.0]))

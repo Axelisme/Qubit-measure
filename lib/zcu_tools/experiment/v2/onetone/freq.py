@@ -18,7 +18,7 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -182,14 +182,19 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         self,
         cfg: FreqCfg,
         *,
-        context: QickContext,
+        context: RunContext,
     ) -> FreqResult:
         soc, soccfg = context.soc, context.soccfg
 
         # Predicted frequency points (before mapping to ADC domain)
         freqs = sweep2array(cfg.sweep.freq, "freq", self._round_info(cfg, soccfg))
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         viewer = context.plots.liveplot_1d(
             "measurement", "Frequency (MHz)", "Amplitude"
@@ -199,7 +204,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             on_update=lambda data: viewer.update(freqs, freq_signal2real(data)),
         )
 
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             cfg = sched.cfg
             modules = cfg.modules
 
@@ -220,7 +225,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         self,
         cfg: FreqCfg,
         *,
-        context: QickContext,
+        context: RunContext,
     ) -> FreqResult:
         soc, soccfg = context.soc, context.soccfg
         params = cfg.homophasal
@@ -231,7 +236,12 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg.sweep.freq, params, self._round_info(cfg, soccfg)
         )
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         viewer = context.plots.liveplot_1d(
             "measurement", "Frequency (MHz)", "Amplitude"
@@ -241,7 +251,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             on_update=lambda data: viewer.update(freqs, freq_signal2real(data)),
         )
 
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             cfg = sched.cfg
             modules = cfg.modules
             modules.readout.set_param("freq", float(freqs[0]))
@@ -274,7 +284,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
         return FreqResult(freqs=freqs, signals=signals_buffer.array)
 
-    def run(self, config: FreqCfg, *, context: QickContext) -> FreqResult:
+    def run(self, config: FreqCfg, *, context: RunContext) -> FreqResult:
         cfg = deepcopy(config)
         if cfg.sampling_mode == "linear":
             return self._run_uniform(cfg, context=context)

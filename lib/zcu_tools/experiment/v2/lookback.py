@@ -18,7 +18,7 @@ from zcu_tools.experiment import (
     config,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -76,15 +76,20 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         tag="lookback",
     )
 
-    def run(self, config: LookbackCfg, *, context: QickContext) -> LookbackResult:
+    def run(self, config: LookbackCfg, *, context: RunContext) -> LookbackResult:
         run_cfg = deepcopy(config)
         if run_cfg.reps != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
             run_cfg.reps = 1
 
-        setup_devices(run_cfg, progress=True)
+        setup_devices(
+            run_cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         viewer = context.plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
-        with Schedule(run_cfg) as sched:
+        with Schedule(run_cfg, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             builder = sched.prog_builder(context.soc, context.soccfg).add(
                 Reset("reset", cfg=modules.reset),

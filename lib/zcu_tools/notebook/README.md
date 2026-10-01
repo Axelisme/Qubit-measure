@@ -1,12 +1,12 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-01 — Lookback 與共用 NotebookAdapter
+**Last updated:** 2026-10-02 — 顯式 RunContext 與單次取消
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
 ## 工作家族
 
-- [`adapter.py`](adapter.py)：`NotebookAdapter` 綁定 experiment instance、可選 hardware handles 與 host。`run()` 需要 soc／soccfg，每次新建 QickContext 與 Plots；`load()`／同步 `analyze()` 可離線使用。RunRecord 組合 nullable cfg 與純資料，AnalysisRecord 組合 explicit source、typed options／analysis 與純具名 figures。同步分析入口只適用於提供 analyze 的核心，不替互動核心補空方法。`save(source, destination)` 不依目前 run，提供 unique path 並回傳實際目的地；canonical cfg 要求仍由核心決定。
+- [`adapter.py`](adapter.py)：`NotebookAdapter` 綁定 experiment instance、可選 hardware handles、devices mapping 與 host。`run()` 需要 soc／soccfg 及顯式 devices，無裝置傳 `{}`。每次新建 RunContext、Plots 與 StopSignal，借用當次 mapping 中的 drivers；`load()`／同步 `analyze()` 可離線使用。RunRecord 組合 nullable cfg 與純資料，AnalysisRecord 組合 explicit source、typed options／analysis 與純具名 figures。同步分析入口只適用於提供 analyze 的核心，不替互動核心補空方法。`save(source, destination)` 不依目前 run，提供 unique path 並回傳實際目的地；canonical cfg 要求仍由核心決定。
 - [fluxdep](analysis/fluxdep/README.md)：通量依賴光譜的資料處理、擬合、圖表與互動選點。`fitting.py` 保留 `fit_spectrum` 與組合搜尋、診斷圖的 `search_in_database` 入口；數值搜尋由 analysis 擁有。
 - [t1_curve](analysis/t1_curve/README.md) 與 [t2_curve](analysis/t2_curve/README.md)：各自保留 Notebook 的曲線分析、擬合與分階段工作流程。模型選擇與保存條件見各自的 README。
 - [fit_tools](analysis/fit_tools/README.md)：支援 Notebook 分析中的校正、資料接合、loss、weights 與溫度模型；不把這些能力一概視為共用分析核心。

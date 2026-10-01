@@ -12,7 +12,7 @@ from typing import (
     runtime_checkable,
 )
 
-from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.events import (
@@ -649,7 +649,7 @@ class DeviceService:
             error=dev.error,
         )
 
-    def get_connected_devices(self) -> dict[str, DeviceProtocol]:
+    def get_connected_devices(self) -> dict[str, BaseDevice[Any]]:
         """Borrow the registered drivers without transferring lifecycle ownership."""
         return dict(self._registry.get_all_devices())
 

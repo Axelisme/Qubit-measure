@@ -16,7 +16,7 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
@@ -71,10 +71,15 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
         tag="onetone/power_dep",
     )
 
-    def run(self, config: PowerDepCfg, *, context: QickContext) -> PowerDepResult:
+    def run(self, config: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         gain_sweep = cfg.sweep.gain
@@ -114,7 +119,7 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
                 title=f"snr = {current_snr:.1f}" if current_snr else None,
             ),
         )
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
                 modules = cfg.modules

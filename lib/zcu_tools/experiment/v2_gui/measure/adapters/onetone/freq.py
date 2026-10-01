@@ -8,7 +8,7 @@ from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
 
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.freq import (
     FreqAnalyzeOptions,
@@ -36,7 +36,6 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.gui.cfg import ScalarSpec
 from zcu_tools.plotting.plots import Plots
@@ -303,11 +302,10 @@ class OneToneFreqAdapter(
         return super().build_exp_cfg(cfg_raw, req)
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> OneToneFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        soc, soccfg = require_soc_handles(req)
-        result = FreqExp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = FreqExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(

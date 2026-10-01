@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-01 — Loaded RunRecord cfg 回填
+**Last updated:** 2026-10-02 — 顯式 RunContext 與取消訊號
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -327,8 +327,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
    settings for a live device reject the permit without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
-4. The operation policy builds worker thunks with the needed ambient scopes:
-   plotting, progress, `Schedule` cancellation, and device setup cancellation.
+4. RunService captures borrowed drivers and creates a fresh RunContext with
+   operation plots and one StopSignal. The adapter passes this context to the core;
+   Schedule uses its StopSignal and device setup uses the same signal's event.
+   Only progress remains ambient. Driver lookup does not refresh accepted cfg.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /

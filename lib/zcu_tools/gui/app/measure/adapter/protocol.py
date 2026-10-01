@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
+    from zcu_tools.experiment.context import RunContext
     from zcu_tools.plotting.plots import Plots
 
 from .interactive import InteractivePluginProvider
@@ -82,7 +83,9 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Validate adapter-specific run constraints before opening an operation."""
         ...
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots) -> Any:
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> Any:
         """Execute detached resolved inputs; never resolve from live context."""
         ...
 

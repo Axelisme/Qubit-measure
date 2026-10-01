@@ -19,7 +19,7 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -291,10 +291,15 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         tag="singleshot/ge",
     )
 
-    def run(self, config: GE_Cfg, *, context: QickContext) -> GE_Result:
+    def run(self, config: GE_Cfg, *, context: RunContext) -> GE_Result:
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         # Validate and setup configuration
         if cfg.rounds != 1:
@@ -306,7 +311,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         cfg.reps = cfg.shots
 
         signals_buffer = SignalBuffer((2, cfg.shots))
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
                 modules = step.cfg.modules
                 probe_cfg = modules.probe_pulse if with_probe else None

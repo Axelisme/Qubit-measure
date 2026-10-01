@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1Analysis,
@@ -30,7 +30,6 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 
 if TYPE_CHECKING:
@@ -137,11 +136,10 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> T1RunResult:
-        soc, soccfg = require_soc_handles(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = T1Exp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(

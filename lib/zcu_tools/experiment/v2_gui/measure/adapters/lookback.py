@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.lookback import (
     LookbackAnalyzeOptions,
@@ -31,7 +31,6 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.plotting.plots import Plots
 
@@ -134,11 +133,10 @@ class LookbackAdapter(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> LookbackRunResult:
-        soc, soccfg = require_soc_handles(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = LookbackExp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = LookbackExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(

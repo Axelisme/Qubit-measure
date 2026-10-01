@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-01 — Fake shared records
+**Last updated:** 2026-10-02 — RunContext 接線
 
 # measure experiment adapters
 
@@ -27,7 +27,7 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 - Reload experiments 會重建 concrete adapters 及 family helpers，但保留 `base.py` 與 `_support/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
-已遷移adapter的`run(req, raw_cfg, *, plots)`使用Guard凍結的resolved cfg，
+已遷移adapter的`run(req, raw_cfg, *, context)`使用Guard凍結的resolved cfg，RunService 提供單次 RunContext，adapter 與核心共用其 devices、plots 和取消訊號。
 `analyze(req, *, plots)`將圖寫入本次具名Plots，不把Figure塞入數值結果。
 T1／GE／Lookback／OneTone Freq、PowerDep／FakeFrequency／Fake stub 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
 BaseAdapter 的 load/save 直接傳遞核心 records；load 不用目前 cfg 補來源，save 將 explicit source 和 exact path 交給核心，override 可接受 cfg=None。

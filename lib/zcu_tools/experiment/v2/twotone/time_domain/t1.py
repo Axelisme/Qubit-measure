@@ -25,7 +25,7 @@ from zcu_tools.experiment import (
     retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -108,10 +108,15 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         tag="twotone/ge/t1",
     )
 
-    def _run_non_uniform(self, cfg: T1Cfg, context: QickContext) -> T1Result:
+    def _run_non_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
         soc, soccfg, plots = context.soc, context.soccfg, context.plots
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         delay_table = materialize_nonuniform_t1_delays(
             cfg.sweep.length,
@@ -125,7 +130,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             cfg = sched.cfg
             modules = cfg.modules
 
@@ -150,10 +155,15 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
         return T1Result(times=lengths, signals=signals_buffer.array)
 
-    def _run_uniform(self, cfg: T1Cfg, context: QickContext) -> T1Result:
+    def _run_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
         soc, soccfg, plots = context.soc, context.soccfg, context.plots
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
 
@@ -164,7 +174,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             cfg = sched.cfg
             modules = cfg.modules
             length_sweep = cfg.sweep.length
@@ -186,7 +196,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
         return T1Result(times=lengths, signals=signals_buffer.array)
 
-    def run(self, config: T1Cfg, *, context: QickContext) -> T1Result:
+    def run(self, config: T1Cfg, *, context: RunContext) -> T1Result:
         cfg = deepcopy(config)
         if cfg.uniform:
             if not isinstance(cfg.sweep.length, SweepCfg):

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.device import device_setup_cancel_scope
-from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
+from zcu_tools.device.base import BaseDevice
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
     TabClosedPayload,
@@ -53,13 +55,13 @@ class _RunOperation:
 
 class RunService:
     """Encapsulates execution of an experiment adapter via BackgroundRunner
-    (OffMain-thread strategy with explicit plots and progress/cancel scopes — ADR-0066).
+    (OffMain-thread strategy with explicit RunContext and ambient progress — ADR-0066).
 
     Uses OperationRunner (ADR-0066) for the lifecycle mechanism; domain
     policy (cancel-partial interpretation, State writes, facts) stays here.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - explicit operation owners and borrowed driver source
         self,
         state: RunStatePort,
         runner: OperationRunner,
@@ -68,8 +70,10 @@ class RunService:
         writeback: WritebackLifecyclePort,
         *,
         gate: ExclusionGate,
+        devices: Callable[[], Mapping[str, BaseDevice[Any]]],
     ) -> None:
         self._state = state
+        self._devices = devices
         self._runner = runner
         self._gate = gate
         self._bus = bus
@@ -228,20 +232,22 @@ class RunService:
         adapter = permit.adapter
         request = permit.request
         raw_cfg = permit.accepted_cfg.values
+        context = RunContext(
+            soc=request.soc,
+            soccfg=request.soccfg,
+            plots=plots,
+            devices=self._devices(),
+            cancel_signal=stop_signal,
+        )
 
         def request_cancel() -> None:
             cancel_requested.set()
             stop_event.set()
 
         def work(factory: Any) -> Any:
-            # The caller supplies operation plots; progress and cancel remain
-            # scoped to this worker (ADR-0066).
-            with (
-                progress_ambient(factory),
-                schedule_stop_scope(stop_signal),
-                device_setup_cancel_scope(stop_event),
-            ):
-                result = adapter.run(request, raw_cfg, plots=plots)
+            # Progress alone is ambient; execution dependencies are run-owned.
+            with progress_ambient(factory):
+                result = adapter.run(request, raw_cfg, context=context)
                 stop_signal.raise_if_error()
                 return result
 

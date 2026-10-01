@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepCfg,
@@ -23,10 +23,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     RunRequest,
     SessionEnv,
-    require_soc_handles,
 )
 from zcu_tools.gui.cfg import SweepValue
-from zcu_tools.plotting.plots import Plots
 
 OneTonePowerDepRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
 
@@ -126,11 +124,10 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         return snr
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> OneTonePowerDepRunResult:
-        soc, soccfg = require_soc_handles(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = PowerDepExp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = PowerDepExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

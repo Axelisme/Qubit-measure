@@ -19,7 +19,7 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
@@ -83,7 +83,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         self,
         config: FluxDepCfg,
         *,
-        context: QickContext,
+        context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FluxDepResult:
         """Run one sweep using this operation's instruments and named plots."""
@@ -105,7 +105,12 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         )
 
         set_flux_in_dev_cfg(cfg.dev, dev_values[0])
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         viewer = context.plots.liveplot_2d_with_line(
             "measurement",
@@ -123,11 +128,16 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                 fluxdep_signal2real(data),
             ),
         )
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 cfg = step.cfg
                 set_flux_in_dev_cfg(cfg.dev, step.value)
-                setup_devices(cfg, progress=False)
+                setup_devices(
+                    cfg,
+                    context.devices,
+                    progress=False,
+                    cancel_signal=context.cancel_signal.event,
+                )
                 modules = cfg.modules
 
                 freq_sweep = cfg.sweep.freq

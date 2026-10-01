@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
 from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -30,7 +30,6 @@ from zcu_tools.gui.app.measure.adapter import (
     T_Result,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
@@ -462,16 +461,10 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return ret
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> T_Result:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        if self.capabilities.requires_soc:
-            soc, soccfg = require_soc_handles(req)
-        else:
-            soc, soccfg = req.soc, req.soccfg
-        return cast(
-            T_Result, self.exp_cls().run(cfg, context=QickContext(soc, soccfg, plots))
-        )
+        return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
     def load(self, req: LoadDataRequest) -> T_Result:
         if not _can_construct_without_args(self.exp_cls):

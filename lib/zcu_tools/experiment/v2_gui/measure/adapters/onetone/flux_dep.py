@@ -8,7 +8,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickState,
     fold_initial_lines,
 )
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
@@ -46,7 +46,6 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import (
@@ -179,11 +178,10 @@ class OneToneFluxDepAdapter(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> OneToneFluxDepRunResult:
-        soc, soccfg = require_soc_handles(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FluxDepExp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = FluxDepExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     # -- interactive analysis: user picks the half/integer flux lines ----------

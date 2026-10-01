@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from zcu_tools.datafile import format_ext, reserve_labber_filepath
+from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.interfaces import RecordExperiment, SynchronousExperiment
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import PlotHost, Plots
 
@@ -25,7 +28,7 @@ class NotebookAdapter(Generic[CoreT]):
     """Bind handles and presentation while retaining only successful records.
 
     Analyze is statically available only for SynchronousExperiment instances.
-    Load and analysis work without hardware. Run requires both handles before
+    Load and analysis work without hardware. Run requires handles and devices before
     starting an operation. Each operation owns fresh plots; retaining a prior
     record or presentation handle does not let later operations close its figures.
     """
@@ -36,11 +39,13 @@ class NotebookAdapter(Generic[CoreT]):
         *,
         soc: Any = None,
         soccfg: Any = None,
+        devices: Mapping[str, BaseDevice[Any]] | None = None,
         host: PlotHost | None = None,
     ) -> None:
         self._core = experiment
         self._soc = soc
         self._soccfg = soccfg
+        self._devices = devices
         self._host = NotebookPlotHost() if host is None else host
         self._last_run: RunRecord[Any, Any] | None = None
         self._analysis: AnalysisRecord[Any, Any, Any, Any] | None = None
@@ -67,9 +72,19 @@ class NotebookAdapter(Generic[CoreT]):
     ) -> RunRecord[CfgT, ResultT]:
         if self._soc is None or self._soccfg is None:
             raise ValueError("Run requires both soc and soccfg handles")
+        if self._devices is None:
+            raise ValueError(
+                "Run requires an explicit devices mapping; use {} for no devices"
+            )
         retained_cfg = deepcopy(cfg)
         plots = Plots(self._host)
-        context = QickContext(soc=self._soc, soccfg=self._soccfg, plots=plots)
+        context = RunContext(
+            soc=self._soc,
+            soccfg=self._soccfg,
+            plots=plots,
+            devices=self._devices,
+            cancel_signal=StopSignal(),
+        )
         try:
             result = self._core.run(deepcopy(retained_cfg), context=context)
             plots.finish()

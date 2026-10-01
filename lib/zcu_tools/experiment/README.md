@@ -8,7 +8,7 @@
 
 - `records.py` 的 `RunRecord` 將 nullable cfg 與純 Result 配對。建立時複製 cfg，隔離 caller 之後對輸入 cfg 的修改；record 內 cfg 與 Result 仍可修改。`interfaces.py` 的 `RecordExperiment` 定義 run／save／load，`SynchronousExperiment` 另加同步 analyze，不要求 interactive 實驗提供 analyze。
 - `base.py` 的 `PersistableExperiment` 透過 `AXES_SPEC` 提供無操作狀態的 `save(source, destination)`／`load(source)`，路徑使用 `Path`。保存接明確 `RunRecord`，cfg 缺失時拒絕。載入回傳 `RunRecord`，cfg 無效時 warning 並保留有效資料，不更新 `last_result`。Notebook convenience 的引用管理由 caller 負責。`ExperimentProtocol`、`AbsExperiment` 與 `record_result`／`retrieve_result` 仍服務尚未遷移的實驗，不代表新核心契約。舊 caller 的 filepath-first 保存與依賴載入快取的用法尚待逐項遷移，本模組不偵測新舊簽名。
-- `context.py` 的 `QickContext` 明確提供單次 run 的 soc、soccfg 與 plots。Caller 可重用硬體 handle，但每次操作建立新 plots；核心不管理前端的 last_result 或呈現資源生命週期。
+- `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 cancel_signal。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。每次操作建立新 context、plots 與 `stop_signal.py` 的 StopSignal；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。
 - `axes_spec.py` 用 `AxesSpec`、`Axis`、`ZSpec` 描述 Result 欄位如何對應檔案中的軸與資料 channel。`AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。RunRecord 的 cfg 經 comment 保存，載入時由 cfg 型別驗證還原。`PersistableExperiment.save` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Dataset Role 的單一 Result，`GroupedAxesSpec`／`RoleSpec` 描述 role 與欄位的映射，載入後由 typed builder 重建 Result；這條 grouped 路徑仍使用 Result 的 `cfg_snapshot`，另待遷移。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
 ## Cfg 與父層支援

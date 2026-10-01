@@ -6,7 +6,7 @@ from typing import Protocol, TypeVar
 from zcu_tools.plotting.plots import Plots
 
 from .cfg_model import ExpCfgModel
-from .context import QickContext
+from .context import RunContext
 from .records import RunRecord
 
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
@@ -18,7 +18,7 @@ AnalysisT = TypeVar("AnalysisT", covariant=True)
 class RecordExperiment(Protocol[CfgT, ResultT]):
     """A stateless core with explicit acquisition and persistence sources."""
 
-    def run(self, config: CfgT, *, context: QickContext) -> ResultT: ...
+    def run(self, config: CfgT, *, context: RunContext) -> ResultT: ...
 
     def save(
         self,

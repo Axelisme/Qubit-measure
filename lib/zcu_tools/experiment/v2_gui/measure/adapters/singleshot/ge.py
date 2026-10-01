@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import (
@@ -36,7 +36,6 @@ from zcu_tools.gui.app.measure.adapter import (
     T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 
 if TYPE_CHECKING:
@@ -155,11 +154,10 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> GERunResult:
-        soc, soccfg = require_soc_handles(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = GE_Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = GE_Exp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(

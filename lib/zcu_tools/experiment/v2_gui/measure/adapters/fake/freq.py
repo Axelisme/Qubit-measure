@@ -24,7 +24,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.axes_spec import MHZ_TO_HZ, AxesSpec, Axis, ZSpec
 from zcu_tools.experiment.base import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.freq import (
     FreqAnalysis,
@@ -200,7 +200,7 @@ class FakeFreqExp(PersistableExperiment[FreqResult, FakeFreqCfg]):
         assert isinstance(p, TransmissionSimParams)
         return TransmissionModel.calc_signals(freqs, p.freq, p.Ql, a0, p.edelay)
 
-    def run(self, config: FakeFreqCfg, *, context: QickContext) -> FreqResult:
+    def run(self, config: FakeFreqCfg, *, context: RunContext) -> FreqResult:
         cfg = deepcopy(config)
         sweep = cfg.sweep.freq
         freqs = np.linspace(sweep.start, sweep.stop, sweep.expts)
@@ -216,7 +216,7 @@ class FakeFreqExp(PersistableExperiment[FreqResult, FakeFreqCfg]):
             (len(freqs),),
             on_update=lambda data: viewer.update(freqs, np.abs(data)),
         )
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             accumulated = np.zeros(len(freqs), dtype=np.complex128)
             rounds_done = 0
             for _round_idx, _step in sched.repeat("round", cfg.rounds):
@@ -356,12 +356,10 @@ class FakeFreqAdapter(
         return super().build_exp_cfg({**raw_cfg, "fast_mode": self._fast_mode}, req)
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> FakeFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FakeFreqExp(self._model_type, self._params).run(
-            cfg, context=QickContext(req.soc, req.soccfg, plots)
-        )
+        result = FakeFreqExp(self._model_type, self._params).run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
     def load(self, req: LoadDataRequest) -> FakeFreqRunResult:
