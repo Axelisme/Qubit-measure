@@ -108,13 +108,9 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         tag="twotone/ge/t1",
     )
 
-    def _run_non_uniform(
-        self,
-        soc,
-        soccfg,
-        cfg: T1Cfg,
-        plots: Plots,
-    ) -> T1Result:
+    def _run_non_uniform(self, cfg: T1Cfg, context: QickContext) -> T1Result:
+        soc, soccfg, plots = context.soc, context.soccfg, context.plots
+
         setup_devices(cfg, progress=True)
 
         delay_table = materialize_nonuniform_t1_delays(
@@ -154,13 +150,9 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
         return T1Result(times=lengths, signals=signals_buffer.array)
 
-    def _run_uniform(
-        self,
-        soc,
-        soccfg,
-        cfg: T1Cfg,
-        plots: Plots,
-    ) -> T1Result:
+    def _run_uniform(self, cfg: T1Cfg, context: QickContext) -> T1Result:
+        soc, soccfg, plots = context.soc, context.soccfg, context.plots
+
         setup_devices(cfg, progress=True)
 
         lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
@@ -177,7 +169,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             modules = cfg.modules
             length_sweep = cfg.sweep.length
             if not isinstance(length_sweep, SweepCfg):
-                raise ValueError("uniform mode requires SweepCfg")
+                raise TypeError("uniform mode requires SweepCfg")
             length_param = sweep2param("length", length_sweep)
 
             _ = (
@@ -199,8 +191,8 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         if cfg.uniform:
             if not isinstance(cfg.sweep.length, SweepCfg):
                 raise ValueError("uniform mode requires SweepCfg")
-            return self._run_uniform(context.soc, context.soccfg, cfg, context.plots)
-        return self._run_non_uniform(context.soc, context.soccfg, cfg, context.plots)
+            return self._run_uniform(cfg, context)
+        return self._run_non_uniform(cfg, context)
 
     def analyze(
         self,
@@ -343,10 +335,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
             t1berr = 0.0
 
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
-        if dual_exp:
-            t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
-        else:
-            t1b_str = "N/A"
+        t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us" if dual_exp else "N/A"
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -476,7 +465,7 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
 
         gains, ts, signals = result.values, result.times, result.signals
 
-        signals: NDArray[np.complex128] = gaussian_filter(signals, sigma=1)  # type: ignore
+        signals = np.asarray(gaussian_filter(signals, sigma=1), dtype=np.complex128)
         real_signals = t1_with_tone_signal2real(signals)
 
         t1s = np.full(len(gains), np.nan, dtype=np.float64)
