@@ -55,10 +55,16 @@ import matplotlib
 # never display them (the autouse _close_matplotlib_figures fixture cleans up).
 matplotlib.use("Agg")
 
+from collections.abc import Mapping
+from threading import Event
+from typing import Any
+
 import numpy as np
 import pytest
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.device.base import BaseDevice
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.lookback import (
     LookbackAnalyzeOptions,
     LookbackCfg,
@@ -409,7 +415,12 @@ def test_t1_recovers_t1(uniform: bool) -> None:
     cfg.uniform = uniform
     original_cfg = cfg.model_copy(deep=True)
     run_plots = Plots(NonPresentingHost())
-    result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
+    result = exp.run(
+        cfg,
+        context=RunContext(
+            soc, soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
     run_plots.finish()
     fit_plots = Plots(NonPresentingHost())
     source = RunRecord(cfg=cfg, result=result)
@@ -455,7 +466,10 @@ def test_t1_interrupted_acquire_returns_partial_result(
     monkeypatch.setattr(
         "zcu_tools.experiment.v2.runtime.schedule.ModularProgramV2.acquire", interrupt
     )
-    result = T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+    result = T1Exp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
     plots.finish()
     assert result.signals.shape == result.times.shape == (30,)
     assert np.all(np.isnan(result.signals))
@@ -470,7 +484,13 @@ def test_t1_setup_failure_leaves_caller_config_unchanged(
     original = cfg.model_copy(deep=True)
     plots = Plots(NonPresentingHost())
 
-    def fail_setup(config: T1Cfg, *, progress: bool) -> None:
+    def fail_setup(
+        config: T1Cfg,
+        devices: Mapping[str, BaseDevice[Any]],
+        *,
+        progress: bool,
+        cancel_signal: Event,
+    ) -> None:
         config.reps = 999
         raise RuntimeError("setup failed")
 
@@ -478,7 +498,12 @@ def test_t1_setup_failure_leaves_caller_config_unchanged(
         "zcu_tools.experiment.v2.twotone.time_domain.t1.setup_devices", fail_setup
     )
     with pytest.raises(RuntimeError, match="setup failed"):
-        T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+        T1Exp().run(
+            cfg,
+            context=RunContext(
+                soc, soccfg, plots, devices={}, cancel_signal=StopSignal()
+            ),
+        )
     plots.finish(present=False)
     assert cfg == original
     plots.release()
@@ -491,7 +516,10 @@ def test_t1_nonuniform_preserves_direct_delay_list() -> None:
 
     cfg.uniform = False
     plots = Plots(NonPresentingHost())
-    result = T1Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+    result = T1Exp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
     plots.finish()
 
     expected_times = _quantized_times(soccfg, direct_times)
@@ -937,7 +965,12 @@ def test_lookback_recovers_timefly_as_trig_offset() -> None:
 
     exp = LookbackExp()
     run_plots = Plots(NonPresentingHost())
-    result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
+    result = exp.run(
+        cfg,
+        context=RunContext(
+            soc, soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
     run_plots.finish()
     fit_plots = Plots(NonPresentingHost())
     answer = exp.analyze(
@@ -1008,7 +1041,12 @@ def _run_ge(
     )
     exp = GE_Exp()
     run_plots = Plots(NonPresentingHost())
-    result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
+    result = exp.run(
+        cfg,
+        context=RunContext(
+            soc, soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
     run_plots.finish()
     fit_plots = Plots(NonPresentingHost())
     fit = exp.analyze(

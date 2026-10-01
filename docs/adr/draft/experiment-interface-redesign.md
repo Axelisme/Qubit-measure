@@ -29,7 +29,11 @@ analyze(source: RunRecord, options, *, plots) -> Analysis
 
 直接呼叫 core.run 不自動建立 record，也不保存 last state。共用 Notebook 包裝層建立 RunRecord，同步分析成功後建立 AnalysisRecord。Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分析工具各自負責。最低共用 core 契約不能強制 analyze，不補空方法、不探測新舊簽名，也不建立互動 capability registry 或通用 callback framework。
 
-QICK context 先只有 soc、soccfg、plots。每次操作另建 context 與 plots，不重用已結束的繪圖操作狀態。Load／analyze 不要求硬體；run 在缺少必要 handles 時先拒絕，不操作儀器。單次 buffer、tracker 與 cache 歸 run。中斷、pbar、硬體互斥、重試與 GUI operation 沿現有機制，不以新 outcome 或 runner 取代。
+RunContext 提供單次 run 的 soc、soccfg、具名 devices、plots 與 cancel_signal，不保留 QickContext alias。Caller 在 run 前固定名稱到 BaseDevice 的綁定，核心只借用 driver。核心仍決定每個 sweep point 何時 setup；setup helper 在整批 setup 前驗證所有必要名稱，不查全域 manager。Connect、disconnect、registry 與 ResourceManager 生命週期留在前端 owner。Hardware handles 不進 cfg 或 records。
+
+每次 run 建立新的 context、Plots 與 StopSignal，硬體 handles 可以重用，停止與錯誤狀態不能沿用。Executor、子實驗與 Schedule 共用這個 StopSignal，device setup 使用其 Event。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。既有 retry、partial result、raise_if_error 與 GUI operation 分類保持不變，不引入另一個 outcome 或 runner。Progress bar 暫留環境注入。
+
+Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒絕，不自行查找或建立資源。單次 buffer、tracker 與 cache 歸 run。NotebookAdapter 每次 run 由 caller 提供的硬體與 driver mapping 建立 context；GUI 的 RunService 與 workflow RunSession 各自在 operation 邊界建立 context。
 
 影響 acquisition 的實驗選項全部進 typed config，包括 T1 uniform。核心擁有設定驗證及環境無關預設；GUI 擁有編輯表示、標籤、expression 與 md／module library seed。核心分析不讀 live GUI 狀態。Hardware handles 不進 cfg 或 record。
 
@@ -88,6 +92,20 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 最終範圍是所有實驗及其 Notebook／GUI caller，不以現有 GUI catalog 為上限。先以一般 T1、singleshot/ge、onetone/flux_dep 驗證同步、post 與互動分析，再分批遷移其餘實驗及必要的共用 helper。
 
 過渡期間允許尚未遷移的實驗因舊契約而報錯，不為了保持它們可用而加入 pyplot 相容層。報錯須對應到未遷移項目，不能忽略已遷移路徑的 regression，也不能把過渡狀態當成最終交付。這不授權重寫 executor 或動畫框架，既有 acquisition、排程與硬體鎖機制保持。
+
+## 顯式 cfg 與裝置環境
+
+DeviceManager 的 registry、lock 與 close claims 屬於 instance，不提供預設 singleton。Notebook 與 GUI composition 持有或接收 manager；共享 driver 的 caller 共享同一 manager，不各自取得關閉權。既有 alias、close failure 與 driver lock 契約保留，不以 destructor 自動關閉，不把 disconnect 當作歸零或 RF off。
+
+Notebook 使用 `CfgEnv(md, ml, device_manager)` 集中借用資源。顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時取得當次 device snapshot，再組裝 typed cfg。讀取失敗直接報錯，不退回舊 snapshot，不執行 setup。md 目前只作資源引用，raw cfg 中的 `md.foo` 在建立 dict 時取值，不新增 expression 或延遲求值。
+
+CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 md、ml 或 registry 管理權。底層 `assemble_experiment_cfg` 仍接顯式 snapshot，不讀硬體。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
+
+GUI 的 Use Simulate Env 入口由獨立 coordinator 編排，不由一般 soc_changed 通知偷偷註冊 FakeDevice。通過既有互斥檢查後，先經 owner disconnect 已連線的真實 devices，FakeDevice 保留。全部成功才確認或建立 FakeDevice、註冊、將其即時數值 reader 綁定 MockSoc，再交給 SoC owner。既有有效 mock source 不重設；matching predictor 的配套亦由 coordinator 組裝。
+
+任一 disconnect 或組裝失敗就回報未完成，不自動重連，不假裝 ready。清理只處理本次建立的資源。綁定時確認 source 存在且可用，不接受先綁名稱、acquire 才查 registry。MockSoc 與 SimEngine 不持有 manager；每次 acquire 讀取 reader 一次，同次 acquire 保持固定 operating point。Reader 失敗不降級固定 flux。低層未綁 source 的固定 flux 與白雜訊模式仍可明確使用。
+
+此入口允許之後再連線真實 device，不保證持續隔離，也不在每次 run 前自動斷線。自動建立 context 是後續方向，不納入本次 coordinator，也不預建 plugin registry 或空 hook。
 
 ## 取捨
 
