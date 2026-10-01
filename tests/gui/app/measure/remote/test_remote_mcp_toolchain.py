@@ -13,6 +13,7 @@ from matplotlib import rc_context
 from matplotlib.figure import Figure
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactKey,
@@ -302,11 +303,11 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
     release = threading.Event()
     original_run = FakeAdapter.run
 
-    def held_run(self, request, schema, *, plots: Plots):
+    def held_run(self, request, schema, *, context: RunContext):
         entered.set()
         if not release.wait(4):
             raise TimeoutError("fake run release was not signalled")
-        return original_run(self, request, schema, plots=plots)
+        return original_run(self, request, schema, context=context)
 
     try:
         monkeypatch.setattr(FakeAdapter, "run", held_run)

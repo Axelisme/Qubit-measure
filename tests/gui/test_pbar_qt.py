@@ -294,6 +294,8 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 
     raw_cfg = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    from zcu_tools.experiment.context import RunContext
+    from zcu_tools.experiment.stop_signal import StopSignal
     from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
     plots = Plots(NonPresentingHost())
@@ -301,7 +303,9 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
         run_result = adapter.run(
             RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
             raw_cfg,
-            plots=plots,
+            context=RunContext(
+                ctx.soc, ctx.soccfg, plots, devices={}, cancel_signal=StopSignal()
+            ),
         )
         QApplication.processEvents()
     plots.finish()

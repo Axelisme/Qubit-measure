@@ -613,8 +613,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
     release = threading.Event()
     original_run = FakeAdapter.run
 
-    def held_run(self, request, schema, *, plots):
-        result = original_run(self, request, schema, plots=plots)
+    def held_run(self, request, schema, *, context):
+        result = original_run(self, request, schema, context=context)
         entered.set()
         if not release.wait(4):
             raise TimeoutError("fake run release was not signalled")

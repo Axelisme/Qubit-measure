@@ -13,6 +13,8 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QTableWidget,
 )
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
@@ -55,7 +57,9 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     result = adapter.run(
         RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
         schema_to_raw_dict(schema, ctx.md, ctx.ml),
-        plots=run_plots,
+        context=RunContext(
+            ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
     )
     run_plots.finish()
     run_plots.release()

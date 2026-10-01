@@ -5,6 +5,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import (
     FakeAdapter,
     FakeAnalyzeParams,
@@ -50,7 +52,11 @@ def test_fake_adapter_full_flow():
     run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={})
     run_plots = Plots(NonPresentingHost())
     result = adapter.run(
-        run_req, schema_to_raw_dict(schema, ctx.md, ctx.ml), plots=run_plots
+        run_req,
+        schema_to_raw_dict(schema, ctx.md, ctx.ml),
+        context=RunContext(
+            ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
     )
     run_plots.finish()
     run_plots.release()
