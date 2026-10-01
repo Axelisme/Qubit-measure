@@ -13,9 +13,7 @@ from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
     FluxDepExp,
-    FluxDepModuleCfg,
     FluxDepResult,
-    FluxDepSweepCfg,
 )
 from zcu_tools.experiment.v2.runtime.schedule import (
     ScheduleOutcomeError,
@@ -23,49 +21,9 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     SignalBuffer,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sweep import SweepCfg
 
-
-def make_source() -> FluxDepResult:
-    values = np.linspace(-0.5, 0.5, 9)
-    freqs = np.linspace(4.8, 5.4, 7)
-    signals = np.asarray(
-        np.sin(values[:, None] * 7 + freqs[None, :] * 9)
-        + 1j * np.cos(values[:, None] * 3 - freqs[None, :] * 7),
-        dtype=np.complex128,
-    )
-    return FluxDepResult(values, freqs, signals)
-
-
-def make_cfg() -> FluxDepCfg:
-    pulse = PulseCfg(
-        ch=0,
-        nqz=1,
-        gain=0.2,
-        freq=7000.0,
-        phase=0.0,
-        waveform=ConstWaveformCfg(length=1.0),
-    )
-    return FluxDepCfg(
-        reps=1,
-        rounds=1,
-        dev={},
-        modules=FluxDepModuleCfg(
-            readout=PulseReadoutCfg(
-                pulse_cfg=pulse,
-                ro_cfg=DirectReadoutCfg(
-                    ro_ch=0, gen_ch=0, ro_length=1.0, ro_freq=7000.0, trig_offset=0.0
-                ),
-            ),
-        ),
-        sweep=FluxDepSweepCfg(
-            flux=SweepCfg(start=-0.5, stop=0.5, step=0.125, expts=9),
-            freq=SweepCfg(start=4.8, stop=5.4, step=0.1, expts=7),
-        ),
-    )
+from tests.experiment.v2.onetone.flux_dep_support import make_cfg, make_result
 
 
 @pytest.mark.parametrize("reverse_flux", [False, True])
@@ -79,7 +37,7 @@ def test_simulated_run_publishes_acquired_rows_in_final_measurement(
     import zcu_tools.experiment.v2.onetone.flux_dep as core_module
 
     cfg = make_cfg()
-    source = make_source()
+    source = make_result()
     if reverse_flux:
         cfg.sweep.flux = SweepCfg(start=0.5, stop=-0.5, step=-0.125, expts=9)
         source = FluxDepResult(
@@ -162,7 +120,7 @@ def test_failed_schedule_acquisition_reports_failed_and_closes_progress(
 
     monkeypatch.setattr("IPython.display.display", lambda _widget: None)
     existing_widgets = set(widgets.Widget.widgets)
-    source = make_source()
+    source = make_result()
     plots = Plots(NonPresentingHost())
     real_builder = ScheduleStep.prog_builder
 

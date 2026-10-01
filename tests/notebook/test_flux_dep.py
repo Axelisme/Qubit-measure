@@ -1,144 +1,139 @@
-"""OneTone notebook publishes only completed, numeric interactive picks."""
+"""FluxDep Notebook analysis retains explicit sources across canonical loads."""
 
 from __future__ import annotations
 
-from functools import partial
+import json
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
 
-import ipywidgets as widgets
 import numpy as np
 import pytest
-from ipympl.backend_nbagg import Canvas, Toolbar
-from matplotlib.backend_bases import MouseEvent
-from matplotlib.figure import Figure
-from zcu_tools.experiment.v2.onetone.flux_dep import (
-    FluxDepAnalysis,
-    FluxDepAnalyzeOptions,
-    FluxDepCfg,
-    FluxDepModuleCfg,
-    FluxDepResult,
-    FluxDepSweepCfg,
-)
-from zcu_tools.experiment.v2.onetone.flux_dep import (
-    FluxDepExp as FluxDepCore,
-)
-from zcu_tools.experiment.v2.runtime.schedule import (
-    ScheduleOutcomeError,
-    ScheduleStep,
-    SignalBuffer,
-)
-from zcu_tools.notebook.experiments import FluxDepNotebookExp
-from zcu_tools.notebook.plotting import NotebookPlotHost
-from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.sweep import SweepCfg
+from zcu_tools.datafile import LabberData
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepExp, FluxDepResult
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.notebook.experiments import FluxDepAnalyzer, FluxDepPickerOptions
+
+from tests.experiment.v2.onetone.flux_dep_support import make_cfg, make_result
 
 
-def make_source() -> FluxDepResult:
-    values = np.linspace(-0.5, 0.5, 9)
-    freqs = np.linspace(4.8, 5.4, 7)
-    signals = np.asarray(
-        np.sin(values[:, None] * 7 + freqs[None, :] * 9)
-        + 1j * np.cos(values[:, None] * 3 - freqs[None, :] * 7),
-        dtype=np.complex128,
-    )
-    return FluxDepResult(values, freqs, signals)
+@pytest.fixture(autouse=True)
+def suppress_display(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("IPython.display.display", lambda _widget: None)
 
 
-def make_cfg() -> FluxDepCfg:
-    pulse = PulseCfg(
-        ch=0,
-        nqz=1,
-        gain=0.2,
-        freq=7000.0,
-        phase=0.0,
-        waveform=ConstWaveformCfg(length=1.0),
-    )
-    return FluxDepCfg(
-        reps=1,
-        rounds=1,
-        dev={},
-        modules=FluxDepModuleCfg(
-            readout=PulseReadoutCfg(
-                pulse_cfg=pulse,
-                ro_cfg=DirectReadoutCfg(
-                    ro_ch=0, gen_ch=0, ro_length=1.0, ro_freq=7000.0, trig_offset=0.0
-                ),
-            ),
-        ),
-        sweep=FluxDepSweepCfg(
-            flux=SweepCfg(start=-0.5, stop=0.5, step=0.125, expts=9),
-            freq=SweepCfg(start=4.8, stop=5.4, step=0.1, expts=7),
-        ),
-    )
-
-
-def test_canonical_save_load_resets_current_analysis_but_retains_old_pick(
+def test_canonical_load_keeps_pending_pick_source_and_retains_old_figure(
     tmp_path: Path,
 ) -> None:
-    measured = make_source()
-    cfg = make_cfg()
-    source = FluxDepResult(measured.values, measured.freqs, measured.signals, cfg)
-    original = tmp_path / "original.hdf5"
-    FluxDepCore().save(source, original)
-    exp = FluxDepNotebookExp(present=False)
-    loaded = exp.load(original)
-    np.testing.assert_array_equal(loaded.signals, source.signals)
-    assert loaded.cfg_snapshot is not None
-    assert loaded.cfg_snapshot.model_dump() == cfg.model_dump()
-    exp.analyze(flux_half=-0.2, flux_int=0.3).done()
-    previous = exp.analysis
-    old_pick = exp.analysis_plots
+    cfg_a = make_cfg()
+    source_a = RunRecord(cfg=cfg_a, result=make_result())
+    source_b = RunRecord(
+        cfg=cfg_a.model_copy(update={"reps": 3}, deep=True),
+        result=FluxDepResult(
+            source_a.result.values,
+            source_a.result.freqs + 1.0,
+            np.asarray(source_a.result.signals * (2 + 1j), dtype=np.complex128),
+        ),
+    )
+    core = FluxDepExp()
+    path_a, path_b = tmp_path / "source-a.hdf5", tmp_path / "source-b.hdf5"
+    core.save(source_a, path_a)
+    core.save(source_b, path_b)
+    data = LabberData.from_file(path_a)
+    np.testing.assert_array_equal(
+        data.get_x("Frequency", "Hz"), source_a.result.freqs * 1e6
+    )
+    np.testing.assert_array_equal(
+        data.get_x("Flux device value", "a.u."), source_a.result.values
+    )
+    np.testing.assert_array_equal(data.get_z("Signal", "a.u."), source_a.result.signals)
+    assert data.axis_order == ("Frequency", "Flux device value")
+
+    adapter = NotebookAdapter(core)
+    loaded_a = adapter.load(path_a)
+    assert loaded_a.cfg is not None
+    assert loaded_a.cfg.model_dump() == cfg_a.model_dump()
+    np.testing.assert_array_equal(loaded_a.result.signals, source_a.result.signals)
+    tool = FluxDepAnalyzer()
+    previous = tool.start(loaded_a, FluxDepPickerOptions(-0.2, 0.3)).done()
+    old_plots = tool.analysis_plots
+    assert old_plots is not None
+    pending = tool.start(loaded_a, FluxDepPickerOptions(-0.2, 0.3))
+    pending.set_positions(-0.1, 0.4)
+    loaded_b = adapter.load(path_b)
+    assert adapter.last_run is loaded_b
+    assert loaded_b.cfg is not None and loaded_b.cfg.reps == 3
+    np.testing.assert_array_equal(loaded_b.result.signals, source_b.result.signals)
+    assert tool.analysis is previous and tool.analysis_plots is old_plots
     with pytest.raises(FileNotFoundError):
-        exp.load(tmp_path / "missing.hdf5")
-    assert exp.analysis is previous
-    assert exp.last_result is loaded
-    saved = tmp_path / "saved.hdf5"
-    exp.save(saved, comment="Notebook flux map")
-    replaced = exp.load(saved)
-    assert exp.last_result is replaced
-    assert exp.analysis is None
-    assert previous is not None and previous.source is loaded
-    np.testing.assert_array_equal(replaced.values, source.values)
-    np.testing.assert_array_equal(replaced.freqs, source.freqs)
-    old_pick["pick"].savefig(tmp_path / "old-pick.png")
+        adapter.load(tmp_path / "missing.hdf5")
+    assert adapter.last_run is loaded_b
+    assert tool.analysis is previous and tool.analysis_plots is old_plots
+
+    completed = pending.done()
+    assert completed.source is loaded_a
+    assert completed.options.flux_half == pytest.approx(-0.1)
+    assert completed.options.flux_int == pytest.approx(0.4)
+    assert completed.analysis.flux_period == pytest.approx(1.0)
+    assert adapter.last_run is loaded_b
+    saved = adapter.save(loaded_a, tmp_path / "saved-a.hdf5", unique=False)
+    round_trip = core.load(saved)
+    assert adapter.last_run is loaded_b
+    assert round_trip.cfg is not None
+    assert round_trip.cfg.model_dump() == cfg_a.model_dump()
+    np.testing.assert_array_equal(round_trip.result.values, loaded_a.result.values)
+    np.testing.assert_array_equal(round_trip.result.freqs, loaded_a.result.freqs)
+    np.testing.assert_array_equal(round_trip.result.signals, loaded_a.result.signals)
+    old_plots.release()
+    previous.figures["pick"].savefig(tmp_path / "old-pick.png")
     assert (tmp_path / "old-pick.png").stat().st_size > 0
-    assert old_pick is previous.plots
+    assert previous.source is loaded_a
+    current_plots = tool.analysis_plots
+    assert current_plots is not None
+    current_plots.release()
 
 
-def test_failed_run_keeps_published_analysis_and_releases_its_partial_plot(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("cfg_kind", ["missing", "invalid"])
+def test_loaded_data_without_valid_cfg_can_be_picked_but_not_saved(
+    cfg_kind: str, tmp_path: Path
 ) -> None:
-    from zcu_tools.experiment.context import QickContext
-
-    exp = FluxDepNotebookExp(present=False)
-    source = make_source()
-    exp.analyze(source, flux_half=-0.2, flux_int=0.3).done()
-    old = exp.analysis
-    old_pick = exp.analysis_plots
-    captures = []
-
-    def fail_run(self: FluxDepCore, cfg: FluxDepCfg, *, context: QickContext):
-        del self, cfg
-        viewer = context.plots.liveplot_2d_with_line(
-            "measurement", "Flux", "Frequency", uniform=False
-        )
-        viewer.update(
-            source.values,
-            source.freqs,
-            np.asarray(np.abs(source.signals), dtype=np.float64),
-        )
-        captures.append(context.plots)
-        raise RuntimeError("simulated acquisition stopped")
-
-    monkeypatch.setattr(FluxDepCore, "run", fail_run)
-    with pytest.raises(RuntimeError, match="simulated acquisition stopped"):
-        exp.run("sim-soc", "sim-cfg", make_cfg())
-    assert exp.last_result is None
-    assert exp.analysis is old
-    assert exp.analysis_plots is old_pick
-    assert len(captures) == 1
-    captures[0]["measurement"].savefig(tmp_path / "stopped-map.png")
-    assert (tmp_path / "stopped-map.png").stat().st_size > 0
+    source = RunRecord(cfg=make_cfg(), result=make_result())
+    core = FluxDepExp()
+    original = tmp_path / "original.hdf5"
+    core.save(source, original)
+    data = LabberData.from_file(original)
+    metadata = json.loads(data.comment)
+    if cfg_kind == "missing":
+        del metadata["cfg"]
+    else:
+        metadata["cfg"]["reps"] = "not-an-integer"
+    data.comment = json.dumps(metadata)
+    altered = tmp_path / "without-valid-cfg.hdf5"
+    data.write(altered)
+    adapter = NotebookAdapter(core)
+    expected_warning = (
+        pytest.warns(UserWarning, match="Config validation failed")
+        if cfg_kind == "invalid"
+        else nullcontext()
+    )
+    with expected_warning:
+        loaded = adapter.load(altered)
+    assert loaded.cfg is None and adapter.last_run is loaded
+    np.testing.assert_array_equal(loaded.result.values, source.result.values)
+    np.testing.assert_array_equal(loaded.result.freqs, source.result.freqs)
+    np.testing.assert_array_equal(loaded.result.signals, source.result.signals)
+    tool = FluxDepAnalyzer()
+    completed = tool.start(loaded, FluxDepPickerOptions(-0.2, 0.3)).done()
+    assert completed.source is loaded and completed.cfg is None
+    assert completed.analysis.flux_half == pytest.approx(-0.2)
+    assert completed.analysis.flux_int == pytest.approx(0.3)
+    assert completed.analysis.flux_period == pytest.approx(1.0)
+    with pytest.raises(ValueError, match="RunRecord.cfg is None"):
+        adapter.save(loaded, tmp_path / "rejected.hdf5", unique=False)
+    assert not (tmp_path / "rejected.hdf5").exists()
+    assert tool.analysis is completed
+    plots = tool.analysis_plots
+    assert plots is not None
+    plots.release()
+    completed.figures["pick"].savefig(tmp_path / "nullable-pick.png")
+    assert (tmp_path / "nullable-pick.png").stat().st_size > 0

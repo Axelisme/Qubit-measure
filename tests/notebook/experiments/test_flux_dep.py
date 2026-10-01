@@ -21,16 +21,11 @@ from zcu_tools.notebook.experiments import (
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import NonPresentingHost, PlotHost, Plots
 
+from tests.experiment.v2.onetone.flux_dep_support import make_result
+
 
 def make_source() -> RunRecord[FluxDepCfg, FluxDepResult]:
-    values = np.linspace(-0.5, 0.5, 9)
-    freqs = np.linspace(4.8, 5.4, 7)
-    signals = np.asarray(
-        np.sin(values[:, None] * 7 + freqs[None, :] * 9)
-        + 1j * np.cos(values[:, None] * 3 - freqs[None, :] * 7),
-        dtype=np.complex128,
-    )
-    return RunRecord(cfg=None, result=FluxDepResult(values, freqs, signals))
+    return RunRecord(cfg=None, result=make_result())
 
 
 @pytest.fixture(autouse=True)
