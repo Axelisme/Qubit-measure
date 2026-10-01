@@ -15,6 +15,7 @@ from zcu_tools.experiment import (
     AxesSpec,
     Axis,
     PersistableExperiment,
+    RunRecord,
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -342,11 +343,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         )
 
     def analyze(
-        self, result: GE_Result, options: GEAnalyzeOptions, *, plots: Plots
+        self, source: RunRecord[GE_Cfg, GE_Result], options: GEAnalyzeOptions, *, plots: Plots
     ) -> GEAnalysis:
         """Fit probe-off/on shots, recording a named fit figure in this operation."""
         # Acquisition order is always probe off/on; fit in physical g/e order.
-        signals = ge_signals_by_state(result.signals, options.initial_state)
+        signals = ge_signals_by_state(source.signals, options.initial_state)
         if options.backend not in ("pca", "center"):
             raise ValueError(f"Unknown backend: {options.backend}")
         fidelity, init_pops, fit = singleshot_ge_analysis(

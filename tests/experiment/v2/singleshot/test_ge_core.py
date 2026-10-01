@@ -5,6 +5,8 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
+from zcu_tools.experiment import RunRecord
+from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.experiment.v2.singleshot.ge import (
     GE_Cfg,
     GE_Exp,
@@ -57,6 +59,19 @@ def ge_result() -> GE_Result:
         ),
     )
     return GE_Result(signals, np.arange(6000), np.array([0, 1]), cfg)
+
+
+def test_explicit_source_can_fit_without_cfg() -> None:
+    source = RunRecord[GE_Cfg, GE_Result](cfg=None, result=ge_result())
+    notebook = NotebookAdapter(GE_Exp(), host=NonPresentingHost())
+
+    record = notebook.analyze(GEAnalyzeOptions(length_ratio=0.01), source=source)
+
+    assert record.source is source
+    assert record.cfg is None
+    assert record.result.g_center == pytest.approx(-1 - 0.4j, abs=0.1)
+    assert record.result.e_center == pytest.approx(1 + 0.4j, abs=0.1)
+    assert list(record.figures) == ["fit"]
 
 
 @pytest.mark.parametrize("backend", ["pca", "center"])
