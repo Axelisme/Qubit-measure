@@ -10,10 +10,8 @@ from .schedule import (
     ScheduleOutcome,
     ScheduleStep,
     SignalBuffer,
-    current_stop_signal,
     default_decimated_raw2signal_fn,
     default_raw2signal_fn,
-    schedule_stop_scope,
 )
 from .task import (
     Acquirer,
@@ -44,8 +42,6 @@ __all__ = [
     "StopSignal",
     "TaskPersister",
     "TaskPlotter",
-    "current_stop_signal",
     "default_decimated_raw2signal_fn",
     "default_raw2signal_fn",
-    "schedule_stop_scope",
 ]

@@ -1,10 +1,10 @@
 # `experiment/v2/autofluxdep/` — executor workflow
 
-**Last updated:** 2026-09-27 — executor entry clarified
+**Last updated:** 2026-10-02 — explicit run context
 
 `FluxDepExecutor` 在 `executor.py` 繼承 `MultiMeasurementExecutor`，以 flux values、
 `FluxDepCfg` 與 `FluxDepEnv` 執行一組 `MeasurementTask`。`run()` 接收 device cfg、
-predictor、SoC、SoC cfg 與 ModuleLibrary；每個 flux point 更新 tracker、設定 flux，
+predictor、RunContext 與 ModuleLibrary；每個 flux point 更新 tracker、設定 flux，
 再執行 measurement batch。`save()` 將每個已註冊 measurement 的結果分別保存。
 各實驗檔案定義這套 executor 使用的 task、cfg 與結果處理。
 

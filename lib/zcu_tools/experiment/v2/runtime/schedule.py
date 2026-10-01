@@ -12,8 +12,6 @@ from collections.abc import (
     Sequence,
     Sized,
 )
-from contextlib import contextmanager
-from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, cast, overload
@@ -133,24 +131,6 @@ class ScheduleOutcome:
         return self.status != "completed"
 
 
-_current_stop_signal: ContextVar[StopSignal | None] = ContextVar(
-    "zcu_tools_schedule_stop_signal", default=None
-)
-
-
-@contextmanager
-def schedule_stop_scope(stop: StopSignal) -> Iterator[StopSignal]:
-    token = _current_stop_signal.set(stop)
-    try:
-        yield stop
-    finally:
-        _current_stop_signal.reset(token)
-
-
-def current_stop_signal() -> StopSignal | None:
-    return _current_stop_signal.get()
-
-
 class SignalBuffer:
     """Array-backed result buffer with runner-aware update hooks."""
 
@@ -215,7 +195,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         init_cfg: T_Cfg,
         *buffers: BufferProtocol,
         env: T_Env | None = None,
-        stop: StopSignal | None = None,
+        stop: StopSignal,
     ) -> None:
         self._ensure_single_root_buffer_count(len(buffers))
         self.cfg = deepcopy(init_cfg)
@@ -225,8 +205,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._outcome = ScheduleOutcome()
         self._is_active = False
         self._is_closed = False
-        resolved_stop = stop if stop is not None else _current_stop_signal.get()
-        self._stop = resolved_stop if resolved_stop is not None else StopSignal()
+        self._stop = stop
 
     def __enter__(self) -> Schedule[T_Cfg, T_Env]:
         if self._is_closed:

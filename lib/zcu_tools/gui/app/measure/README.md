@@ -576,15 +576,11 @@ controlled fields.
   reports status, progress and feedback but no result payload. Figures and fit
   summaries are read through typed getters.
 
-Cancellation is operation-specific through the registered cancel hook. Run
-cancellation sets the operation `stop_event`; worker thunks expose it to
-Schedule-based experiments and executors through
-`schedule_stop_scope(StopSignal(stop_event))`, so `ProgramBuilder`,
-`Schedule.repeat/scan/batch`, and executor root schedules observe Stop without a
-global task runner context. The same run-local `stop_event` is explicitly bridged
-into `device_setup_cancel_scope(stop_event)`, so experiment-internal
-`setup_devices(...)` calls can stop long device ramps without making the runner
-module know about device policy. Run terminal policy treats the cancel hook as
+Cancellation is operation-specific through the registered cancel hook. Each run
+owns a fresh RunContext and StopSignal. Adapters pass that context to the core;
+Schedule and executor roots receive its cancel_signal explicitly. Device setup
+receives context.devices and cancel_signal.event, so ramps observe the same stop
+request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
 the source of user cancellation intent; `Schedule` may also set the same stop flag
 for internal failed/interrupted outcomes, and those are surfaced as failed
 operation outcomes instead of cancelled.

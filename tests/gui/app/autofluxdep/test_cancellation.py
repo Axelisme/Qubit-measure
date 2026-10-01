@@ -413,10 +413,10 @@ def test_schedule_acquire_failure_inside_run_session_does_not_emit_run_stopped()
         del snapshot
         cfg = ProgramV2Cfg(rounds=1)
         signal_buffer = SignalBuffer((1,), dtype=np.float64)
-        with Schedule(cfg, signal_buffer) as sched:
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
             builder = sched.prog_builder(
-                env.soc,
-                env.soccfg,
+                env.context.soc,
+                env.context.soccfg,
                 cfg=cfg,
                 program_cls=FailingProgram,
             )
@@ -428,11 +428,8 @@ def test_schedule_acquire_failure_inside_run_session_does_not_emit_run_stopped()
                 progress_label="probe failure",
                 progress_leave=False,
             )
-            outcome = sched.outcome
-        if outcome.status == "failed":
-            reason = outcome.reason or "probe Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        raise AssertionError("Schedule acquire should raise on failed outcome")
+        # A Node returning partial data must not hide the shared error channel.
+        return Patch()
 
     ctrl.state.nodes = []
     ctrl.add_node(make_builder("probe", produce_fn=produce))
@@ -518,6 +515,14 @@ def test_run_operation_progress_is_live_until_terminal():
 
 def test_pause_then_continue_preserves_results_and_finalizes_artifact():
     ctrl = _build_ready_controller()
+    contexts = []
+
+    def capture_context(env, _snapshot):
+        contexts.append(env.context)
+        assert env.context.cancel_signal.error is None
+        return Patch()
+
+    ctrl.add_node(make_builder("context_probe", produce_fn=capture_context))
 
     events: list[RunEvent] = []
     ctrl.bus.subscribe(RunPausedPayload, lambda p: events.append(p.EVENT))
@@ -561,6 +566,8 @@ def test_pause_then_continue_preserves_results_and_finalizes_artifact():
     with pytest.raises(RuntimeError, match="predictor is locked while a run is paused"):
         ctrl.predictor_control.clear_predictor()
 
+    previous = contexts[-1]
+    previous.cancel_signal.set_error("failed", "stale segment error", None)
     token2 = ctrl.continue_run()
     assert ctrl.is_running
     pump_controller_until_idle(ctrl)
@@ -568,6 +575,13 @@ def test_pause_then_continue_preserves_results_and_finalizes_artifact():
     assert not ctrl.is_running
     assert not ctrl.is_paused
     assert points == [0, 1, 2, 3, 4]
+    assert contexts[0] is contexts[1]
+    assert contexts[2] is contexts[3] is contexts[4]
+    assert contexts[2] is not previous
+    assert contexts[2].cancel_signal is not previous.cancel_signal
+    assert contexts[2].plots is not previous.plots
+    assert contexts[2].soc is previous.soc
+    assert contexts[2].devices == previous.devices
     assert events == [
         RunEvent.RUN_PAUSED,
         RunEvent.RUN_CONTINUED,

@@ -30,6 +30,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field
 from typing import Any
 
+from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePlan,
@@ -55,8 +57,8 @@ class RunEnv:
 
     ``flux`` / ``flux_idx`` — this point. ``schema`` — the placed provider's typed
     param SSOT (its ``NodeCfgSchema``); a Node lowers it (``schema.lower(ml, md)``)
-    to the flat knob dict ``make_cfg`` reads. ``soc`` / ``soccfg`` / ``ml`` /
-    ``tools`` — sweep resources: the connected board + its QICK config, the active
+    to the flat knob dict ``make_cfg`` reads. ``context`` holds the explicit board,
+    devices, plots and cancellation signal; ``ml`` / ``tools`` hold the active
     ModuleLibrary (the Builder lowers it into the run cfg), and the stateful tools.
     ``flux_device`` — the name of the connected device the flux value is applied
     through (the user's flux-source pick, ``state.flux_device_name``); a real
@@ -67,17 +69,16 @@ class RunEnv:
     ``result`` — the sweep-lived Result this Node fills (its row ``flux_idx``);
     None for pure-compute Nodes. ``round_hook`` — called by acquire each round
     (fill row + notify); None for pure-compute Nodes. ``should_stop`` — the run's
-    cooperative cancel poll (the controller's stop flag), observed at flux/provider
-    boundaries and by the ambient Schedule stop flag; None for a pure-compute Node
-    or a headless run with no cancel.
+    cooperative cancel poll from the same context signal used by Schedule and
+    device setup. Pure-compute Nodes may ignore the hardware capabilities.
     """
 
     flux: float
     flux_idx: int
     schema: NodeCfgSchema
+    context: RunContext
+    device_snapshot: Mapping[str, DeviceInfo]
     node_name: str = ""
-    soc: Any = None
-    soccfg: Any = None
     ml: Any = None
     md: Any = None
     base_cfg: Mapping[str, object] | None = None
@@ -88,7 +89,9 @@ class RunEnv:
     flux_device: str | None = None
     result: Any = None
     round_hook: RoundHook | None = None
-    should_stop: Callable[[], bool] | None = None
+
+    def should_stop(self) -> bool:
+        return self.context.cancel_signal.is_set()
 
     def __post_init__(self) -> None:
         if self.knobs_snapshot is None:

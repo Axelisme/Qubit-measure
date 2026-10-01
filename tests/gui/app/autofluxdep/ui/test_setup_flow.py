@@ -125,7 +125,7 @@ def test_restored_settings_prefill_setup_until_the_user_applies_and_connects(
     mock = next(
         box
         for box in dialog.findChildren(QCheckBox)
-        if box.text().startswith("Use MockSoc")
+        if box.text().startswith("Use Simulate Env")
     )
     mock.setChecked(True)
     _button(dialog, "Connect").click()

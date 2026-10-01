@@ -39,6 +39,8 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
 )
 from zcu_tools.gui.cfg import FloatSpec
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 from ._helpers import make_builder, place
 
 
@@ -277,7 +279,9 @@ def test_orchestrator_keeps_library_fallback_at_run_start_across_points():
         )
     )
 
-    Orchestrator([consumer], ml=source).run([0.0, 1.0])
+    Orchestrator(
+        [consumer], ml=source, context=make_run_context(), device_snapshot={}
+    ).run([0.0, 1.0])
 
     assert seen == [0.25, 0.25]
 
@@ -300,7 +304,9 @@ def test_orchestrator_module_fallback_copy_isolated_from_consumer_mutation():
         )
     )
 
-    Orchestrator([consumer], ml=source).run([0.0, 1.0])
+    Orchestrator(
+        [consumer], ml=source, context=make_run_context(), device_snapshot={}
+    ).run([0.0, 1.0])
 
     assert seen == [0.25, 0.25]
 
@@ -356,7 +362,7 @@ def test_nodes_run_in_given_order():
         return fn
 
     providers = [place(make_builder(n, produce_fn=record(n))) for n in ("c", "a", "b")]
-    Orchestrator(providers).run([0.0])
+    Orchestrator(providers, context=make_run_context(), device_snapshot={}).run([0.0])
     assert seen == ["c", "a", "b"]  # exactly the declared order
 
 
@@ -381,7 +387,7 @@ def test_override_plan_provider_requires_run_cfg_snapshot():
     )
 
     with pytest.raises(RuntimeError, match="require run-start cfg snapshots"):
-        Orchestrator([provider])
+        Orchestrator([provider], context=make_run_context(), device_snapshot={})
 
     Orchestrator(
         [provider],
@@ -392,6 +398,8 @@ def test_override_plan_provider_requires_run_cfg_snapshot():
                 knobs={"freq": 1.0},
             )
         },
+        context=make_run_context(),
+        device_snapshot={},
     ).run([0.0, 1.0])
 
     assert seen == [2.0, 3.0]
@@ -416,7 +424,9 @@ def test_consumer_before_producer_reads_prev_point():
         )
     )
     # consumer FIRST, producer second
-    Orchestrator([consumer, producer]).run([0.0, 1.0, 2.0])
+    Orchestrator(
+        [consumer, producer], context=make_run_context(), device_snapshot={}
+    ).run([0.0, 1.0, 2.0])
     # point0: no prev → default None; point1: prev x@0; point2: prev x@1
     assert seen == [None, "x@0", "x@1"]
 
@@ -438,7 +448,9 @@ def test_prev_snapshot_carries_across_points():
         )
     )
     # producer FIRST: consumer reads THIS point's value
-    Orchestrator([producer, consumer]).run([0.0, 1.0, 2.0])
+    Orchestrator(
+        [producer, consumer], context=make_run_context(), device_snapshot={}
+    ).run([0.0, 1.0, 2.0])
     assert seen == [0, 1, 2]
 
 
@@ -460,9 +472,13 @@ def test_run_start_idx_preserves_original_rows_and_info_state():
             produce_fn=read_x,
         )
     )
-    info = Orchestrator([producer, consumer]).run([0.0, 1.0, 2.0], start_idx=0)
+    info = Orchestrator(
+        [producer, consumer], context=make_run_context(), device_snapshot={}
+    ).run([0.0, 1.0, 2.0], start_idx=0)
 
-    resumed = Orchestrator([consumer]).run(
+    resumed = Orchestrator(
+        [consumer], context=make_run_context(), device_snapshot={}
+    ).run(
         [0.0, 1.0, 2.0, 3.0],
         start_idx=3,
         info=info,
@@ -481,7 +497,7 @@ def test_skipped_provider_does_not_run():
         return Patch()
 
     p = place(make_builder("n", requires=(Dependency("missing"),), produce_fn=fn))
-    Orchestrator([p]).run([0.0])
+    Orchestrator([p], context=make_run_context(), device_snapshot={}).run([0.0])
     assert ran == []  # never built / produced
 
 
@@ -492,7 +508,9 @@ def test_observer_on_node_fires_for_each_resolved_provider_in_order():
     observer = _CollectingObserver()
     a = place(make_builder("a"))
     b = place(make_builder("b"))
-    Orchestrator([a, b]).run([0.0, 1.0], observer=observer)
+    Orchestrator([a, b], context=make_run_context(), device_snapshot={}).run(
+        [0.0, 1.0], observer=observer
+    )
     # both providers, both flux points, in list order
     assert observer.nodes == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
 
@@ -501,7 +519,9 @@ def test_observer_on_node_does_not_fire_for_a_skipped_provider():
     observer = _CollectingObserver()
     runnable = place(make_builder("ok"))
     skipped = place(make_builder("skip", requires=(Dependency("missing"),)))
-    Orchestrator([runnable, skipped]).run([0.0], observer=observer)
+    Orchestrator(
+        [runnable, skipped], context=make_run_context(), device_snapshot={}
+    ).run([0.0], observer=observer)
     # the skipped provider (required dep missing) never fires on_node
     assert observer.nodes == [("ok", 0)]
 
@@ -509,7 +529,9 @@ def test_observer_on_node_does_not_fire_for_a_skipped_provider():
 def test_observer_on_skip_fires_with_reason_for_skipped_provider():
     observer = _CollectingObserver()
     skipped = place(make_builder("skip", requires=(Dependency("missing"),)))
-    Orchestrator([skipped]).run([0.0], observer=observer)
+    Orchestrator([skipped], context=make_run_context(), device_snapshot={}).run(
+        [0.0], observer=observer
+    )
     assert [
         (name, idx, reason.missing_info_keys) for name, idx, reason in observer.skips
     ] == [("skip", 0, ("missing",))]
@@ -523,7 +545,9 @@ def test_observer_on_node_row_fires_after_validate_before_merge():
 
     provider = place(make_builder("prod", provides=("x",), produce_fn=produce_x))
 
-    info = Orchestrator([provider]).run([0.0], observer=observer)
+    info = Orchestrator([provider], context=make_run_context(), device_snapshot={}).run(
+        [0.0], observer=observer
+    )
 
     assert [
         (name, idx, patch.values(), "x" in point)
@@ -538,7 +562,7 @@ def test_observer_on_node_failed_fires_for_validate_patch_error():
 
     provider = place(make_builder("bad", provides=("x",), produce_fn=bad_patch))
     observer = _CollectingObserver()
-    orch = Orchestrator([provider])
+    orch = Orchestrator([provider], context=make_run_context(), device_snapshot={})
     orch.run([0.0], observer=observer)
 
     assert observer.failed == [("bad", 0, "validate_patch")]
@@ -552,12 +576,19 @@ def test_observer_on_node_failed_fires_for_validate_patch_error():
 def test_should_stop_before_a_flux_point_exits_early():
     # should_stop returns True once two points have completed → the sweep must
     # break before flux idx 2 and never start it.
-    observer = _CollectingObserver()
+    context = make_run_context()
+
+    class CancellingObserver(_CollectingObserver):
+        def on_point(self, idx, flux, info):
+            super().on_point(idx, flux, info)
+            if len(self.points) == 2:
+                context.cancel_signal.set()
+
+    observer = CancellingObserver()
     p = place(make_builder("n"))
-    info = Orchestrator([p]).run(
+    info = Orchestrator([p], context=context, device_snapshot={}).run(
         [0.0, 1.0, 2.0, 3.0],
         observer=observer,
-        should_stop=lambda: len(observer.points) >= 2,
     )
     # only points 0 and 1 ran; the sweep stopped before point 2
     assert observer.points == [0, 1]
@@ -572,11 +603,11 @@ def test_should_stop_within_a_point_skips_remaining_providers():
     # fire; the next flux point never starts (should_stop is re-checked at its
     # top).
     ran: list[str] = []
-    flip = {"stop": False}
+    context = make_run_context()
 
     def first(_env, _snap):
         ran.append("a")
-        flip["stop"] = True  # request stop after the first provider
+        context.cancel_signal.set()  # request stop after the first provider
         return Patch()
 
     def second(_env, _snap):
@@ -586,10 +617,9 @@ def test_should_stop_within_a_point_skips_remaining_providers():
     a = place(make_builder("a", produce_fn=first))
     b = place(make_builder("b", produce_fn=second))
     observer = _CollectingObserver()
-    Orchestrator([a, b]).run(
+    Orchestrator([a, b], context=context, device_snapshot={}).run(
         [0.0, 1.0],
         observer=observer,
-        should_stop=lambda: flip["stop"],
     )
     # only the first provider of point 0 ran; "b" was skipped by the break
     assert ran == ["a"]
@@ -600,11 +630,11 @@ def test_should_stop_within_a_point_skips_remaining_providers():
 
 def test_on_flux_committed_does_not_fire_for_stopped_partial_point():
     ran: list[str] = []
-    flip = {"stop": False}
+    context = make_run_context()
 
     def first(_env, _snap):
         ran.append("a")
-        flip["stop"] = True
+        context.cancel_signal.set()
         return Patch()
 
     def second(_env, _snap):
@@ -614,10 +644,9 @@ def test_on_flux_committed_does_not_fire_for_stopped_partial_point():
     a = place(make_builder("a", produce_fn=first))
     b = place(make_builder("b", produce_fn=second))
     observer = _CollectingObserver()
-    Orchestrator([a, b]).run(
+    Orchestrator([a, b], context=context, device_snapshot={}).run(
         [0.0, 1.0],
         observer=observer,
-        should_stop=lambda: flip["stop"],
     )
 
     assert ran == ["a"]
@@ -626,19 +655,18 @@ def test_on_flux_committed_does_not_fire_for_stopped_partial_point():
 
 
 def test_stop_set_inside_last_provider_produce_does_not_commit_row_or_flux():
-    flip = {"stop": False}
+    context = make_run_context()
 
     def last(_env, _snap):
-        flip["stop"] = True
+        context.cancel_signal.set()
         return Patch({"x": 1})
 
     provider = place(make_builder("last", provides=("x",), produce_fn=last))
     observer = _CollectingObserver()
 
-    info = Orchestrator([provider]).run(
+    info = Orchestrator([provider], context=context, device_snapshot={}).run(
         [0.0],
         observer=observer,
-        should_stop=lambda: flip["stop"],
     )
 
     assert observer.rows == []

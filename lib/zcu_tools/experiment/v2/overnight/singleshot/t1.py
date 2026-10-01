@@ -267,8 +267,6 @@ class T1Task(
     ) -> None:
         super().__init__(cfg, T1Cfg)
 
-        setup_devices(cfg, progress=True)
-
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
         self.acquire_kwargs = {
@@ -284,8 +282,14 @@ class T1Task(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop.event,
+        )
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env.soccfg}
+            self.cfg.sweep.length, "time", {"soccfg": state.env.context.soccfg}
         )
         populations_step = state.child("populations", cfg=self.cfg)
         _ = populations_step.buffer((2, len(self.lengths), 2), dtype=np.float64)
@@ -295,7 +299,9 @@ class T1Task(
         len_param = sweep2param("length", length_sweep)
 
         _ = (
-            populations_step.prog_builder(state.env.soc, state.env.soccfg)
+            populations_step.prog_builder(
+                state.env.context.soc, state.env.context.soccfg
+            )
             .add(
                 Reset("reset", modules.reset),
                 Branch(
@@ -376,8 +382,14 @@ class T1WithToneTask(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop.event,
+        )
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env.soccfg}
+            self.cfg.sweep.length, "time", {"soccfg": state.env.context.soccfg}
         )
         populations_step = state.child("populations", cfg=self.cfg)
         _ = populations_step.buffer((2, len(self.lengths), 2), dtype=np.float64)
@@ -388,7 +400,9 @@ class T1WithToneTask(
         modules.probe_pulse.set_param("length", length_param)
 
         _ = (
-            populations_step.prog_builder(state.env.soc, state.env.soccfg)
+            populations_step.prog_builder(
+                state.env.context.soc, state.env.context.soccfg
+            )
             .add(
                 Reset("reset", modules.reset),
                 Branch(

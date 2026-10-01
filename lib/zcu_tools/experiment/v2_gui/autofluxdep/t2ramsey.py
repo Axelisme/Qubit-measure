@@ -14,6 +14,7 @@ import numpy as np
 
 from zcu_tools.analysis.fitting import fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
@@ -154,10 +155,10 @@ class T2RamseyNode(Node):
             ),
             update_interval=None,
         )
-        with Schedule(cfg, signal_buffer) as sched:
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
             builder = sched.prog_builder(
-                env.soc,
-                env.soccfg,
+                env.context.soc,
+                env.context.soccfg,
                 cfg=cfg,
                 program_cls=ModularProgramV2,
             )
@@ -468,7 +469,9 @@ class T2RamseyBuilder(Builder):
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("detune_ratio", None)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
-        return ml.make_cfg(raw_cfg, T2RamseyCfgTemplate)
+        return assemble_experiment_cfg(
+            raw_cfg, T2RamseyCfgTemplate, ml=ml, device_snapshot=env.device_snapshot
+        )
 
 
 EXPERIMENT = T2RamseyBuilder()

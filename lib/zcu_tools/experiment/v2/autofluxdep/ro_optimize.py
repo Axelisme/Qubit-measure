@@ -144,7 +144,7 @@ class RO_OptTask(
             freq_sweep,
             "freq",
             {
-                "soccfg": state.env.soccfg,
+                "soccfg": state.env.context.soccfg,
                 "gen_ch": modules.readout.pulse_cfg.ch,
                 "ro_ch": modules.readout.ro_cfg.ro_ch,
             },
@@ -153,7 +153,7 @@ class RO_OptTask(
             gain_sweep,
             "gain",
             {
-                "soccfg": state.env.soccfg,
+                "soccfg": state.env.context.soccfg,
                 "gen_ch": modules.readout.pulse_cfg.ch,
             },
         )
@@ -162,7 +162,12 @@ class RO_OptTask(
         _ = raw_step.buffer((self.freq_expts, self.gain_expts), dtype=np.float64)
         cfg = raw_step.cfg
         modules = cfg.modules
-        setup_devices(cfg, progress=False)
+        setup_devices(
+            cfg,
+            progress=False,
+            cancel_signal=state.stop.event,
+            devices=state.env.context.devices,
+        )
 
         freq_sweep = cfg.sweep.freq
         gain_sweep = cfg.sweep.gain
@@ -176,7 +181,7 @@ class RO_OptTask(
             return snr_as_signal([tracker], ge_axis=0, skew_penalty=self.skew_penalty)
 
         _ = (
-            raw_step.prog_builder(state.env.soc, state.env.soccfg)
+            raw_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),

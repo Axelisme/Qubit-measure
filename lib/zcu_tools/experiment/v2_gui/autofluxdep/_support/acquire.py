@@ -160,7 +160,12 @@ def setup_flux_point(cfg: ExpCfgModel, env: RunEnv, exp_name: str) -> None:
         require_flux_device(env, exp_name),
         env.flux,
     )
-    setup_devices(cfg, progress=False)
+    setup_devices(
+        cfg,
+        env.context.devices,
+        progress=False,
+        cancel_signal=env.context.cancel_signal.event,
+    )
 
 
 def schedule_completed(outcome: ScheduleOutcome, exp_name: str) -> bool:

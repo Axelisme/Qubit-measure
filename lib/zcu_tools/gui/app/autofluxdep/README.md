@@ -1,6 +1,6 @@
 # `gui/app/autofluxdep/` — Autofluxdep app
 
-**Last updated:** 2026-10-01 — primary and derived completion
+**Last updated:** 2026-10-02 — explicit segment context
 
 這個 app 擁有 autofluxdep GUI shell、workflow 編排、run lifecycle、artifact 與 UI；
 [concrete experiment、catalog 與共用量測 mechanics](../../../experiment/v2_gui/autofluxdep/README.md)
@@ -30,6 +30,15 @@ control facets，並處理 workflow 編輯、run 操作與關閉。`app.py` 建�
 暫停並保留同程序 session；Continue 從 `next_flux_idx` 接續。Stop／Abort 是 terminal finalize，
 Restart 則建立新 run。Orchestrator 的 node 失敗會回報 run failure，不以空 Patch 代表取消。
 本 app 不提供跨 process resume。
+
+RunSession 在 owner thread 固定借用裝置的名稱對應。每個 execution segment 建立新的
+RunContext、Plots 與 StopSignal，Node 的 RunEnv 持有同一個 context。Schedule、device
+setup 及 provider boundary 共用這個停止來源。Orchestrator 在 Node 返回後讀取同一個
+error channel，不讓 partial data 掩蓋失敗。Pause 保留 workflow state，Continue 不沿用
+上一 segment 的 token 或錯誤。Run setup 同時固定 State 已觀測的 device snapshot，
+Builder 透過 assemble_experiment_cfg 使用它，不在 worker 組裝 cfg 時讀取裝置。Snapshot
+與借用的 driver mapping 分開保存。Context 的 plots 目前是 non-presenting；既有 workflow
+Result／Plotter 仍負責顯示，具名 figure 遷移由後續 workflow 票完成。
 
 `services/run_store.py` 和相關 export／report services 擁有 Run Result Artifact。
 Metadata root 保存 manifest、journal 和 report；data root 保存 committed node rows 與 exports。

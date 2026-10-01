@@ -21,7 +21,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     ScheduleOutcome,
     ScheduleStep,
     StopSignal,
-    current_stop_signal,
 )
 from zcu_tools.experiment.v2.runtime.task import MeasurementBundle
 from zcu_tools.experiment.v2.utils import Result
@@ -176,6 +175,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         *,
         cfg: T_Cfg,
         env: T_Env,
+        stop: StopSignal,
         outer_values: T_Axis,
         run_loop: Callable[[Schedule[T_Cfg, T_Env]], None],
     ) -> Mapping[str, Result]:
@@ -185,7 +185,6 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         init_result = [self._default_batch_result() for _ in range(len(outer_values))]
 
         fig, plotter, plotters_map, writer = self.make_plotter()
-        stop = current_stop_signal() or StopSignal()
         result_tree = self._make_result_tree(
             init_result,
             env=env,

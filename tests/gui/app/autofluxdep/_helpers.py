@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.device import BaseDevice
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePlan,
@@ -45,10 +48,28 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
     from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, Notify
+
+
+def make_run_context(
+    *,
+    soc: Any = None,
+    soccfg: Any = None,
+    devices: Mapping[str, BaseDevice[Any]] | None = None,
+    cancel_signal: StopSignal | None = None,
+) -> RunContext:
+    return RunContext(
+        soc=soc,
+        soccfg=soccfg,
+        devices={} if devices is None else devices,
+        plots=Plots(NonPresentingHost()),
+        cancel_signal=StopSignal() if cancel_signal is None else cancel_signal,
+    )
+
 
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
 NodeField = tuple[str, CfgNodeSpec, Any]
@@ -667,10 +688,10 @@ def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any)
     return RunEnv(
         flux=flux,
         flux_idx=flux_idx,
-        soc=ctx.soc,
-        soccfg=ctx.soccfg,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         **kw,
+        context=make_run_context(soc=ctx.soc, soccfg=ctx.soccfg),
+        device_snapshot={},
     )
 
 

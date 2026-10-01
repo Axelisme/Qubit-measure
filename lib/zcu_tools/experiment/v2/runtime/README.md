@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-09-27 — runtime rename; executor workflow ADR 分流
+**Last updated:** 2026-10-02 — explicit run cancellation
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -92,7 +92,7 @@ with Schedule(cfg, signals_buffer) as sched:
   result；batch 本身不做 per-child retry。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot，不需要 `into=` 參數。
-- `with Schedule(cfg, result_buffer) as sched` 可編排任何實作 `BufferProtocol` 的 result
+- `with Schedule(cfg, result_buffer, stop=context.cancel_signal) as sched` 可編排任何實作 `BufferProtocol` 的 result
   tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
@@ -168,8 +168,9 @@ executor leaf contract 由 `runtime/task.py` 擁有：
 
 ## Stop 與 Retry
 
-- `StopSignal` 是唯一 stop token；GUI worker 用 `schedule_stop_scope(StopSignal(event))`
-  讓 scope 內所有 `Schedule` 共用同一個 stop event。
+- `StopSignal` 是唯一 stop token，定義於 `experiment.stop_signal`。Caller 每次 run 建立一個，
+  必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Executor 與所有 leaf
+  共用同一個 token；runtime 不查 ambient scope，也不補建隱式 token。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
   stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。
@@ -185,7 +186,7 @@ executor leaf contract 由 `runtime/task.py` 擁有：
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
   以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
 - `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。這不改
-  `ProgramBuilder` 的 partial-result contract；它提供給 ambient consumer（例如
+  `ProgramBuilder` 的 partial-result contract；它提供給持有同一個 RunContext 的 consumer（例如
   measure-gui run policy）在 experiment adapter 回傳後呼叫 `raise_if_error()`，把
   runner 內部錯誤轉成 operation failure。`stopped` 不記錄 error cause；retry reset 會同時
   清掉 stop flag 與 transient error cause。

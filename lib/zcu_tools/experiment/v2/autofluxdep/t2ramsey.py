@@ -140,7 +140,9 @@ class T2RamseyTask(
             return  # skip this task
 
         len_sweep = make_sweep(*cfg_temp.sweep_range, self.num_expts)
-        self.lengths = sweep2array(len_sweep, "time", {"soccfg": state.env.soccfg})
+        self.lengths = sweep2array(
+            len_sweep, "time", {"soccfg": state.env.context.soccfg}
+        )
 
         cfg = cfg_temp.to_dict()
         del cfg["sweep_range"]
@@ -157,14 +159,19 @@ class T2RamseyTask(
         signals_buffer = raw_step.buffer(self.num_expts)
         cfg = raw_step.cfg
         modules = cfg.modules
-        setup_devices(cfg, progress=False)
+        setup_devices(
+            cfg,
+            progress=False,
+            cancel_signal=state.stop.event,
+            devices=state.env.context.devices,
+        )
 
         detune = cfg.activate_detune
         length_sweep = cfg.sweep.length
         length_param = sweep2param("length", length_sweep)
 
         _ = (
-            raw_step.prog_builder(state.env.soc, state.env.soccfg)
+            raw_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi2_pulse1", modules.pi2_pulse),

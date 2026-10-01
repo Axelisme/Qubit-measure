@@ -8,9 +8,14 @@ state machine; this module owns the setup graph.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from pydantic import TypeAdapter
+
+from zcu_tools.device import BaseDevice, DeviceInfo
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.autofluxdep.cfg import (
     RunCfgSnapshot,
     validate_override_plan_base_cfg,
@@ -32,6 +37,7 @@ from zcu_tools.gui.app.autofluxdep.tools import (
     SimplePredictor,
     Tools,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 class MlModuleSource:
@@ -40,7 +46,7 @@ class MlModuleSource:
     The run resolver wants ``get_module(name)`` to return None if absent, so the
     dependency resolver can fall back to a Node-produced module or dependency
     default. Node cfg builders still want the full ``ModuleLibrary`` surface
-    (``get_waveform`` / ``make_cfg``), which should raise on missing references.
+    (``get_waveform``), which should raise on missing references.
     This proxy overrides only ``get_module`` and forwards every other attribute.
     """
 
@@ -153,10 +159,18 @@ def create_run_session(
     notify: Notify | None,
     event_sink: RunEventSink,
     progress_label: str,
+    devices: Mapping[str, BaseDevice[Any]],
     flux_unit_resolver: Callable[[str], str] | None = None,
 ) -> RunSession:
     """Create the sweep-lived RunSession from the current State snapshot."""
     ctx = state.session_env
+    device_snapshot: dict[str, DeviceInfo] = {}
+    info_type = TypeAdapter(DeviceInfo)
+    for name in devices:
+        device = state.get_device(name)
+        if device is None or device.info is None:
+            raise ValueError(f"Device {name!r} has no observed settings")
+        device_snapshot[name] = info_type.validate_python(device.info)
     run_ml = ctx.ml.clone()
     enabled_names = {node.name for node in enabled_nodes}
     if not state.run_results or not set(state.run_results).issubset(enabled_names):
@@ -191,6 +205,8 @@ def create_run_session(
         ml=MlModuleSource(run_ml),
         soc=ctx.soc,
         soccfg=ctx.soccfg,
+        devices=devices,
+        device_snapshot=device_snapshot,
         md=ctx.md,
         notify=notify,
         event_sink=event_sink,
@@ -216,14 +232,26 @@ def run_dry(
         lowering_ml = ctx.ml.clone()
         run_ml = MlModuleSource(lowering_ml)
     cfg_snapshots = build_run_cfg_snapshots(state, enabled_nodes, ml=lowering_ml)
+    context = RunContext(
+        soc=None,
+        soccfg=None,
+        devices={},
+        plots=Plots(NonPresentingHost()),
+        cancel_signal=StopSignal(),
+    )
     orch = Orchestrator(
         providers=providers,
+        context=context,
+        device_snapshot={},
         tools=tools or build_run_tools(state, providers),
         ml=run_ml,
         md=ctx.md,
         cfg_snapshots=cfg_snapshots,
     )
-    return orch.run(flux_values)
+    try:
+        return orch.run(flux_values)
+    finally:
+        context.plots.finish()
 
 
 __all__ = [

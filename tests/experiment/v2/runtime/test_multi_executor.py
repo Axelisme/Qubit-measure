@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import (
     Acquirer,
     ComposedMeasurementBundle,
@@ -161,6 +162,7 @@ class FakeExecutor(
                     env=env,
                     outer_values=self.outer_values,
                     run_loop=run_loop,
+                    stop=StopSignal(),
                 )
             ),
         )
@@ -315,7 +317,7 @@ def test_composed_measurement_bundle_delegates_components() -> None:
     env = ExecEnv(current_index=0)
 
     bundle.init(dynamic_pbar=True)
-    with Schedule(ExecCfg(), tree, env=env) as sched:
+    with Schedule(ExecCfg(), tree, env=env, stop=StopSignal()) as sched:
         _, outer_step = next(sched.scan("outer", np.array([0.0], dtype=np.float64)))
         bundle.run(outer_step.child("bundle"))
     bundle.cleanup()

@@ -20,6 +20,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 from zcu_tools.gui.app.autofluxdep.orchestrator import Orchestrator
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 from ._helpers import make_builder, place
 
 # --- SmoothingService construction + dedup ---
@@ -89,9 +91,11 @@ def test_smoothed_and_raw_consumers_coexist_under_same_key():
     )
 
     # producer first so consumers see this point's value
-    info = Orchestrator([producer, smoothed_consumer, raw_consumer]).run(
-        [0.0, 1.0, 2.0]
-    )
+    info = Orchestrator(
+        [producer, smoothed_consumer, raw_consumer],
+        context=make_run_context(),
+        device_snapshot={},
+    ).run([0.0, 1.0, 2.0])
 
     # smoothed consumer reads the PREVIOUS point's smoothed t1 (this point's is
     # derived only after all Nodes run):
@@ -127,7 +131,9 @@ def test_smoothed_projection_carries_last_good_across_absent_raw_point():
         )
     )
 
-    info = Orchestrator([producer, consumer]).run([0.0, 1.0, 2.0])
+    info = Orchestrator(
+        [producer, consumer], context=make_run_context(), device_snapshot={}
+    ).run([0.0, 1.0, 2.0])
 
     assert smoothed_seen == [None, 10.0, 10.0]
     assert info.prev_smoothed["t1"] == 10.0
@@ -147,4 +153,6 @@ def test_orchestrator_raises_on_conflicting_declarations():
         )
     )
     with pytest.raises(SmoothConflictError):
-        Orchestrator([a, b])  # conflict detected at construction (__post_init__)
+        Orchestrator(
+            [a, b], context=make_run_context(), device_snapshot={}
+        )  # conflict detected at construction (__post_init__)

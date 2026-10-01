@@ -58,6 +58,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
@@ -216,7 +217,7 @@ class T1Node(Node):
         )
         length_cycles: list[int] | None = None
         if not uniform:
-            length_cycles, times = times_to_cycles_and_axis(env.soccfg, times)
+            length_cycles, times = times_to_cycles_and_axis(env.context.soccfg, times)
         result.x[:] = times
 
         setup_flux_point(cfg, env, "t1")
@@ -236,8 +237,8 @@ class T1Node(Node):
             ),
             update_interval=None,
         )
-        with Schedule(cfg, signal_buffer) as sched:
-            builder = sched.prog_builder(env.soc, env.soccfg, cfg=cfg)
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
+            builder = sched.prog_builder(env.context.soc, env.context.soccfg, cfg=cfg)
 
             # Sweep the relax delay over the relax-time axis. Uniform mode uses the
             # program sweep; non-uniform mode loads one delay cycle per point.
@@ -547,7 +548,9 @@ class T1Builder(Builder):
             patches["sweep.length.stop"] = sweep_range[1]
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
-        return ml.make_cfg(raw_cfg, T1CfgTemplate)
+        return assemble_experiment_cfg(
+            raw_cfg, T1CfgTemplate, ml=ml, device_snapshot=env.device_snapshot
+        )
 
 
 EXPERIMENT = T1Builder()

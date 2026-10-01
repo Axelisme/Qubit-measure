@@ -17,6 +17,9 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.device import FakeDevice, FakeDeviceInfo
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
@@ -91,6 +94,36 @@ def test_controller_run_drives_predictor_service_then_consumer():
     # consumer produced its derived key off it
     assert "predict_freq" in info.point
     assert info.point["measured"] == info.point["predict_freq"] + 0.5
+
+
+def test_run_cfg_uses_observed_device_snapshot_without_live_reads(monkeypatch):
+    ctrl = build_core()
+    connect_mock(ctrl)
+    observed = []
+
+    def reject_live_read(self):
+        raise AssertionError("run cfg assembly must not read device settings")
+
+    def produce(env, _snapshot):
+        cfg = assemble_experiment_cfg(
+            {}, ExpCfgModel, ml=env.ml, device_snapshot=env.device_snapshot
+        )
+        assert cfg.dev is not None
+        info = cfg.dev["fake_flux"]
+        assert isinstance(info, FakeDeviceInfo)
+        observed.append(info.value)
+        assert isinstance(env.context.devices["fake_flux"], FakeDevice)
+        return Patch()
+
+    monkeypatch.setattr(FakeDevice, "get_info", reject_live_read)
+    ctrl.add_node(make_builder("probe", produce_fn=produce))
+    ctrl.set_flux_values([0.0, 1.0])
+    token = ctrl.start_run()
+    pump_controller_until_idle(ctrl)
+    result = ctrl.await_operation(token, timeout=0.0)
+    assert result is not None and result.outcome is not None
+    assert result.outcome.status == "finished"
+    assert observed == [0.5, 0.5]
 
 
 def test_controller_run_writes_artifact_manifest_journal_and_node_hdf5(tmp_path):

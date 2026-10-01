@@ -3,10 +3,6 @@ from __future__ import annotations
 from typing import TypeAlias
 
 from .base import BaseDevice, BaseDeviceInfo, DeviceBusyError
-from .cancel_scope import (
-    current_device_setup_cancel_signal,
-    device_setup_cancel_scope,
-)
 from .fake import FakeDevice, FakeDeviceInfo
 from .manager import (
     DeviceCloseFailure,
@@ -27,8 +23,6 @@ __all__ = [
     "BaseDevice",
     "BaseDeviceInfo",
     "DeviceBusyError",
-    "current_device_setup_cancel_signal",
-    "device_setup_cancel_scope",
     # manager
     "DeviceManager",
     "DeviceCloseFailure",

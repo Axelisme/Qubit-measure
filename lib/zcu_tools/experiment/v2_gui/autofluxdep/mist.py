@@ -15,6 +15,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
@@ -144,10 +145,10 @@ class MistNode(Node):
             on_update=on_update,
             update_interval=None,
         )
-        with Schedule(cfg, signal_buffer) as sched:
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
             builder = sched.prog_builder(
-                env.soc,
-                env.soccfg,
+                env.context.soc,
+                env.context.soccfg,
                 cfg=cfg,
                 program_cls=ModularProgramV2,
             )
@@ -324,7 +325,9 @@ class MistBuilder(Builder):
         patches.update(readout_module_patches(readout))
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
-        return ml.make_cfg(raw_cfg, MistCfgTemplate)
+        return assemble_experiment_cfg(
+            raw_cfg, MistCfgTemplate, ml=ml, device_snapshot=env.device_snapshot
+        )
 
 
 EXPERIMENT = MistBuilder()

@@ -159,21 +159,26 @@ class QubitFreqTask(
                 step=cfg.sweep.detune.step,
             ),
             "freq",
-            {"soccfg": state.env.soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": state.env.context.soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
         raw_step = state.child("raw_signals", cfg=cfg)
         signals_buffer = raw_step.buffer(self.detune_sweep.expts)
         cfg = raw_step.cfg
         modules = cfg.modules
-        setup_devices(cfg, progress=False)
+        setup_devices(
+            cfg,
+            progress=False,
+            cancel_signal=state.stop.event,
+            devices=state.env.context.devices,
+        )
 
         detune_sweep = cfg.sweep.detune
         detune_param = sweep2param("detune", detune_sweep)
         modules.qub_pulse.set_param("freq", modules.qub_pulse.freq + detune_param)
 
         _ = (
-            raw_step.prog_builder(state.env.soc, state.env.soccfg)
+            raw_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add_reset("reset", modules.reset)
             .add_pulse("init_pulse", modules.init_pulse)
             .add_pulse("qubit_pulse", modules.qub_pulse)

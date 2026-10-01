@@ -129,7 +129,7 @@ class MistTask(
             cfg.sweep.gain,
             "gain",
             {
-                "soccfg": state.env.soccfg,
+                "soccfg": state.env.context.soccfg,
                 "gen_ch": cfg.modules.mist_pulse.ch,
             },
         )
@@ -138,13 +138,18 @@ class MistTask(
         _ = raw_step.buffer(self.gain_sweep.expts)
         cfg = raw_step.cfg
         modules = cfg.modules
-        setup_devices(cfg, progress=False)
+        setup_devices(
+            cfg,
+            progress=False,
+            cancel_signal=state.stop.event,
+            devices=state.env.context.devices,
+        )
 
         gain_sweep = cfg.sweep.gain
         modules.mist_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
         _ = (
-            raw_step.prog_builder(state.env.soc, state.env.soccfg)
+            raw_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add_reset("reset", modules.reset)
             .add_pulse("pi_pulse", modules.pi_pulse)
             .add_pulse("mist_pulse", modules.mist_pulse)

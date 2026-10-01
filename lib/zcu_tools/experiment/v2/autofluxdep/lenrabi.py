@@ -170,13 +170,18 @@ class LenRabiTask(
         signals_buffer = raw_step.buffer(self.num_expts)
         cfg = raw_step.cfg
         modules = cfg.modules
-        setup_devices(cfg, progress=False)
+        setup_devices(
+            cfg,
+            progress=False,
+            cancel_signal=state.stop.event,
+            devices=state.env.context.devices,
+        )
 
         len_sweep = cfg.sweep.length
         modules.rabi_pulse.set_param("length", sweep2param("length", len_sweep))
 
         _ = (
-            raw_step.prog_builder(state.env.soc, state.env.soccfg)
+            raw_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add_reset("reset", modules.reset)
             .add_pulse("rabi_pulse", modules.rabi_pulse)
             .add_readout("readout", modules.readout)
@@ -194,7 +199,9 @@ class LenRabiTask(
         real_signals = lenrabi_signal2real(raw_signals)
 
         self.lengths = sweep2array(
-            len_sweep, "time", {"soccfg": state.env.soccfg, "gen_ch": rabi_pulse.ch}
+            len_sweep,
+            "time",
+            {"soccfg": state.env.context.soccfg, "gen_ch": rabi_pulse.ch},
         )
 
         (pi_len, _, pi2_len, _, rabi_freq, _, mean_err, fit_signals) = auto_fit_lenrabi(

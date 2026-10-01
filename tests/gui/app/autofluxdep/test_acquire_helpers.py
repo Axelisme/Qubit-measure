@@ -20,6 +20,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.program.v2 import SweepCfg
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 
 def test_run_env_knob_reads_run_start_snapshot() -> None:
     env = RunEnv(
@@ -28,6 +30,8 @@ def test_run_env_knob_reads_run_start_snapshot() -> None:
         schema=QubitFreqBuilder().make_default_schema(),
         node_name="qubit_freq",
         knobs_snapshot={"acquire_retry": 2},
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     assert env.knob("acquire_retry") == 2
@@ -139,12 +143,16 @@ def test_sweep_cfg_snapshot_is_frozen_and_thaws_to_real_sweep_cfg() -> None:
         flux_idx=0,
         schema=schema,
         knobs_snapshot=snapshot.knobs,
+        context=make_run_context(),
+        device_snapshot={},
     )
     second = RunEnv(
         flux=0.1,
         flux_idx=1,
         schema=schema,
         knobs_snapshot=snapshot.knobs,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     first_sweep = first.knob("sweep")
@@ -222,6 +230,8 @@ def test_run_env_reuses_internal_frozen_knobs_but_freezes_external_mappings() ->
         flux_idx=0,
         schema=schema,
         knobs_snapshot=snapshot.knobs,
+        context=make_run_context(),
+        device_snapshot={},
     )
     assert from_snapshot.knobs_view() is snapshot.knobs
 
@@ -232,6 +242,8 @@ def test_run_env_reuses_internal_frozen_knobs_but_freezes_external_mappings() ->
         flux_idx=1,
         schema=schema,
         knobs_snapshot=external,
+        context=make_run_context(),
+        device_snapshot={},
     )
     assert from_external.knobs_view() is not external
     backing["feedback"]["gain"] = 0.9
@@ -246,12 +258,16 @@ def test_run_env_direct_knobs_snapshot_is_immutable_and_flux_independent() -> No
         flux_idx=0,
         schema=schema,
         knobs_snapshot=source,
+        context=make_run_context(),
+        device_snapshot={},
     )
     second = RunEnv(
         flux=0.1,
         flux_idx=1,
         schema=schema,
         knobs_snapshot=source,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     source["feedback"]["gain"] = 0.9
@@ -276,6 +292,8 @@ def test_snr_stop_condition_reads_cached_snr_at_original_cadence(
         flux_idx=0,
         schema=QubitFreqBuilder().make_default_schema(),
         knobs_snapshot={"earlystop_snr": 50.0},
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     stop_condition = acquire_mod.build_stop_condition(env, probe)
@@ -304,6 +322,8 @@ def test_snr_stop_condition_uses_run_start_knob_snapshot() -> None:
         flux_idx=0,
         schema=QubitFreqBuilder().make_default_schema(),
         knobs_snapshot={"earlystop_snr": None},
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     stop_condition = acquire_mod.build_stop_condition(env, acquire_mod.SnrProbe())
@@ -320,10 +340,16 @@ def test_setup_flux_point_updates_selected_device_before_setup(
         flux_idx=0,
         schema=QubitFreqBuilder().make_default_schema(),
         flux_device="flux",
+        context=make_run_context(),
+        device_snapshot={},
     )
     setup_calls: list[tuple[ExpCfgModel, bool]] = []
 
-    def record_setup(value: ExpCfgModel, *, progress: bool) -> None:
+    def record_setup(
+        value: ExpCfgModel, devices, *, progress: bool, cancel_signal
+    ) -> None:
+        assert devices is env.context.devices
+        assert cancel_signal is env.context.cancel_signal.event
         setup_calls.append((value, progress))
 
     monkeypatch.setattr(acquire_mod, "setup_devices", record_setup)
@@ -342,6 +368,8 @@ def test_setup_flux_point_fast_fails_without_selected_device() -> None:
         flux_idx=0,
         schema=QubitFreqBuilder().make_default_schema(),
         flux_device=None,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     with pytest.raises(RuntimeError, match="needs a flux device picked"):
@@ -375,7 +403,14 @@ def test_schedule_completed_rejects_unknown_status() -> None:
 
 def test_acquire_retry_reads_default_and_validates_non_negative():
     schema = QubitFreqBuilder().make_default_schema()
-    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, knobs_snapshot={})
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        knobs_snapshot={},
+        context=make_run_context(),
+        device_snapshot={},
+    )
     assert acquire_mod.acquire_retry(env) == acquire_mod.DEFAULT_ACQUIRE_RETRY
 
     env = RunEnv(
@@ -383,6 +418,8 @@ def test_acquire_retry_reads_default_and_validates_non_negative():
         flux_idx=0,
         schema=schema,
         knobs_snapshot={"acquire_retry": 0},
+        context=make_run_context(),
+        device_snapshot={},
     )
     assert acquire_mod.acquire_retry(env) == 0
 
@@ -391,6 +428,8 @@ def test_acquire_retry_reads_default_and_validates_non_negative():
         flux_idx=0,
         schema=schema,
         knobs_snapshot={"acquire_retry": 2},
+        context=make_run_context(),
+        device_snapshot={},
     )
     assert acquire_mod.acquire_retry(env) == 2
 
@@ -400,6 +439,8 @@ def test_acquire_retry_reads_default_and_validates_non_negative():
         schema=schema,
         node_name="qubit_freq",
         knobs_snapshot={"acquire_retry": -1},
+        context=make_run_context(),
+        device_snapshot={},
     )
     with pytest.raises(RuntimeError, match="acquire_retry must be non-negative"):
         acquire_mod.acquire_retry(env)

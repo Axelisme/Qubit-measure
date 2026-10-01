@@ -329,8 +329,6 @@ class MistTask(
         self.cfg = cfg
         self.last_cfg = cfg.model_copy(deep=True)
 
-        setup_devices(self.cfg, progress=True)
-
         # initial values, may be rounded later
         self.gains = sweep2array(self.cfg.sweep.gain)
         self.acquire_kwargs = {
@@ -346,10 +344,19 @@ class MistTask(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop.event,
+        )
         self.gains = sweep2array(
             self.cfg.sweep.gain,
             "gain",
-            {"soccfg": state.env.soccfg, "gen_ch": self.cfg.modules.probe_pulse.ch},
+            {
+                "soccfg": state.env.context.soccfg,
+                "gen_ch": self.cfg.modules.probe_pulse.ch,
+            },
         )
         populations_step = state.child("populations", cfg=self.cfg)
         _ = populations_step.buffer((len(self.gains), 2), dtype=np.float64)
@@ -360,7 +367,9 @@ class MistTask(
         modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
         _ = (
-            populations_step.prog_builder(state.env.soc, state.env.soccfg)
+            populations_step.prog_builder(
+                state.env.context.soc, state.env.context.soccfg
+            )
             .add(
                 Reset("reset", modules.reset),
                 Pulse("init_pulse", cfg=modules.init_pulse),

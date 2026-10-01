@@ -208,8 +208,6 @@ class T1Task(
     ) -> None:
         super().__init__(cfg, T1Cfg)
 
-        setup_devices(self.cfg, progress=True)
-
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
         self.acquire_kwargs = acquire_kwargs or {}
@@ -221,8 +219,14 @@ class T1Task(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop.event,
+        )
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env.soccfg}
+            self.cfg.sweep.length, "time", {"soccfg": state.env.context.soccfg}
         )
         self.last_cfg = self.cfg
 
@@ -234,7 +238,7 @@ class T1Task(
         length_param = sweep2param("length", length_sweep)
 
         _ = (
-            signals_step.prog_builder(state.env.soc, state.env.soccfg)
+            signals_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.pi_pulse),
@@ -301,11 +305,17 @@ class T1WithToneTask(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop.event,
+        )
         self.lengths = sweep2array(
             self.cfg.sweep.length,
             "time",
             {
-                "soccfg": state.env.soccfg,
+                "soccfg": state.env.context.soccfg,
                 "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
@@ -320,7 +330,7 @@ class T1WithToneTask(
         modules.probe_pulse.set_param("length", length_param)
 
         _ = (
-            signals_step.prog_builder(state.env.soc, state.env.soccfg)
+            signals_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.pi_pulse),
