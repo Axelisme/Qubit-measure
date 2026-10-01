@@ -89,10 +89,13 @@ def analyze_flux_pick(
     Lines must meet the input axis's minimum separation. Invalid selections
     raise ValueError; successful selections have twice their distance as period.
     """
+    distance = abs(state.flux_int - state.flux_half)
+    if distance < inputs.min_distance:
+        raise ValueError("flux lines must remain separated")
     return FluxPickAnalysis(
         flux_half=state.flux_half,
         flux_int=state.flux_int,
-        flux_period=2 * abs(state.flux_int - state.flux_half),
+        flux_period=2 * distance,
     )
 
 
