@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.singleshot.ge import GE_Result
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Result
 from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
     GEAdapter,
     GEAnalyzeParams,
@@ -347,7 +348,7 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     assert old_post_draft in writeback.torn_down
 
 
-def _ge_source_with_excited_initial_state() -> GE_Result:
+def _ge_source_with_excited_initial_state() -> RunRecord[GE_Cfg, GE_Result]:
     rng = np.random.default_rng(83)
     excited = rng.random((2, 6000)) < np.array([0.1, 0.9])[:, None]
     signals = np.asarray(
@@ -356,7 +357,9 @@ def _ge_source_with_excited_initial_state() -> GE_Result:
         dtype=np.complex128,
     )
     # Probe-off/on rows are reversed for a predominantly excited initial state.
-    return GE_Result(signals[::-1].copy(), np.arange(6000), np.array([0, 1]))
+    return RunRecord[GE_Cfg, GE_Result](
+        None, GE_Result(signals[::-1].copy(), np.arange(6000), np.array([0, 1]))
+    )
 
 
 def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks() -> None:
