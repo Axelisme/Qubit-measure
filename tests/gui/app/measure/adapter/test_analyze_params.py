@@ -7,7 +7,7 @@ from typing import Annotated, Literal, get_type_hints
 import pytest
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.adapter.analyze_params import (
-    _resolve_field_info,
+    _resolve_field_info,  # type: ignore[reportPrivateUsage]
     describe_analyze_params,
     reconstruct_params,
 )
@@ -27,6 +27,34 @@ def test_resolve_bool_field():
     assert label == "flag"
     assert decimals is None
     assert optional is False
+
+
+@pytest.mark.parametrize("singleshot", [False, True])
+def test_len_rabi_phase_form_and_wire_contract(singleshot: bool) -> None:
+    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.len_rabi import (
+        SsLenRabiAnalyzeParams,
+    )
+    from zcu_tools.experiment.v2_gui.measure.adapters.twotone.rabi.len_rabi import (
+        LenRabiAnalyzeParams,
+    )
+
+    cls = SsLenRabiAnalyzeParams if singleshot else LenRabiAnalyzeParams
+    spec = next(
+        field for field in describe_analyze_params(cls) if field["name"] == "fit_phase"
+    )
+    assert spec == {
+        "name": "fit_phase",
+        "type": "bool",
+        "label": "Fit phase offset",
+        "default": False,
+    }
+    values = dataclasses.asdict(cls())
+    assert reconstruct_params(cls, values).fit_phase is False
+    values["fit_phase"] = True
+    assert reconstruct_params(cls, values).fit_phase is True
+    values["fit_phase"] = "true"
+    with pytest.raises(RuntimeError, match="expects bool"):
+        reconstruct_params(cls, values)
 
 
 @pytest.mark.parametrize("experiment", ["ge", "len_rabi", "amp_rabi"])
@@ -122,10 +150,10 @@ def test_mixed_literal_types_raise():
         _resolve_field_info(field, hints)
 
 
-def test_unsupported_annotation_raises(qapp):  # noqa: ARG001
+def test_unsupported_annotation_raises(qapp):
     @dataclass
     class P:
-        val: list
+        val: list[int]
 
     from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
 

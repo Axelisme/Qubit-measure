@@ -11,7 +11,8 @@ token.json
 
 .vscode
 .github
-.pi
+/.pi/*
+!/.pi/mcp.json
 .cursor
 .opencode/*
 .claude/*
@@ -22,6 +23,7 @@ token.json
 !.claude/settings.json
 
 agent_memory/
+/measure_knowledge
 Database/
 result/
 logs/

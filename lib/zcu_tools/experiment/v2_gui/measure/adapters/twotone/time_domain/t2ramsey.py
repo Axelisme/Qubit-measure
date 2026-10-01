@@ -47,6 +47,9 @@ T2RamseyRunResult: TypeAlias = T2RamseyResult
 @dataclass
 class T2RamseyAnalyzeParams:
     fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")] = True
+    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = (
+        False
+    )
 
 
 @dataclass
@@ -106,6 +109,8 @@ class T2RamseyAdapter(
             "'t2r'. No ModuleLibrary writeback."
         ),
         recommended=(
+            "Enable Fit phase offset to fit a free fringe phase; it defaults to "
+            "fixed phase and has no effect for decay-only analysis. "
             "Set the 'Detune ratio (fringes/step)' cfg knob to a small "
             "deliberate offset (default 0.05) — it is the number of fringe "
             "periods per delay-sweep step; the absolute detune (MHz) applied to "
@@ -172,7 +177,7 @@ class T2RamseyAdapter(
     ) -> T2RamseyAnalyzeResult:
         params = req.analyze_params
         t2r, t2r_err, detune, _, fig = T2RamseyExp().analyze(
-            req.run_result, fit_fringe=params.fit_fringe
+            req.run_result, fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
         )
         return T2RamseyAnalyzeResult(
             t2r=t2r,

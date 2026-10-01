@@ -2,7 +2,7 @@
 
 ``FigureOnlyAnalyzeResult`` is the look-at-the-curve analyze result: a single
 ``figure`` field and nothing else (no fitted scalar, hence no writeback). The
-reset check and length sweeps share this shape, so they subclass it rather than
+reset length sweeps share this shape, so they subclass it rather than
 redeclaring ``figure: Figure`` each.
 """
 

@@ -1,52 +1,56 @@
 {
   "mcpServers": {
     "measure-gui": {
-      "type": "stdio",
       "command": "uv",
       "args": [
         "run",
-        "--extra",
-        "gui",
+        "--directory",
+        ".",
+        "--no-sync",
+        "--",
         "python",
         "lib/zcu_tools/mcp/measure/server.py"
       ],
-      "env": {}
+      "exposure": "deferred"
     },
     "fluxdep-gui": {
-      "type": "stdio",
       "command": "uv",
       "args": [
         "run",
-        "--extra",
-        "gui",
+        "--directory",
+        ".",
+        "--no-sync",
+        "--",
         "python",
         "lib/zcu_tools/mcp/fluxdep/server.py"
       ],
-      "env": {}
+      "exposure": "deferred"
     },
     "dispersive-gui": {
-      "type": "stdio",
       "command": "uv",
       "args": [
         "run",
-        "--extra",
-        "gui",
+        "--directory",
+        ".",
+        "--no-sync",
+        "--",
         "python",
         "lib/zcu_tools/mcp/dispersive/server.py"
       ],
-      "env": {}
+      "exposure": "deferred"
     },
     "autofluxdep-gui": {
-      "type": "stdio",
       "command": "uv",
       "args": [
         "run",
-        "--extra",
-        "gui",
+        "--directory",
+        ".",
+        "--no-sync",
+        "--",
         "python",
         "lib/zcu_tools/mcp/autofluxdep/server.py"
       ],
-      "env": {}
+      "exposure": "deferred"
     }
   }
 }
