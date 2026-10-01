@@ -3,7 +3,6 @@ from __future__ import annotations
 import warnings
 from typing import TypedDict
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
@@ -296,6 +295,7 @@ class TransmissionModel:
         signals: NDArray[np.complex128],
         param_dict: TransmissionParams,
         *,
+        figure: Figure,
         fit_bg_amp_slope: bool = True,
         fit_bg_phase_curvature: bool = False,
     ) -> Figure:
@@ -327,7 +327,7 @@ class TransmissionModel:
         )
         norm_xc, norm_yc, norm_r0 = norm_circle_params
 
-        fig = plt.figure(figsize=(9, 8))
+        fig = figure
         spec = fig.add_gridspec(2, 2)
         ax1 = fig.add_subplot(spec[0, 0])
         ax2 = fig.add_subplot(spec[0, 1])
