@@ -6,10 +6,10 @@ import math
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Cfg, CKP_Exp, CKP_Result
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
@@ -27,11 +27,13 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.plotting.plots import Plots
 
 _CKP_SWEEP_EXPTS = 101
 _CKP_QUB_PULSE_LENGTH_US = 1.5
@@ -80,15 +82,17 @@ def _qub_freq_sweep_seed(ctx: SessionEnv) -> SweepValue:
     return SweepValue(start=start, stop=stop, expts=_CKP_SWEEP_EXPTS)
 
 
+CKPRunResult: TypeAlias = RunRecord[CKP_Cfg, CKP_Result]
+
+
 @dataclass
 class CKPAnalyzeResult(AnalyzeResultBase):
     chi: float
     kappa: float
     res_freq: float
-    figure: Figure
 
 
-class CKPAdapter(BaseAdapter[CKP_Cfg, CKP_Result, CKPAnalyzeResult, NoAnalyzeParams]):
+class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeParams]):
     exp_cls = CKP_Exp
     ExpCfg_cls: ClassVar[Any] = CKP_Cfg
 
@@ -125,6 +129,13 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKP_Result, CKPAnalyzeResult, NoAnalyzePar
             "can produce plausible-looking scalar values."
         ),
     )
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> CKPRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = CKP_Exp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
@@ -186,18 +197,17 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKP_Result, CKPAnalyzeResult, NoAnalyzePar
         )
 
     def analyze(
-        self, req: AnalyzeRequest[CKP_Result, NoAnalyzeParams]
+        self, req: AnalyzeRequest[CKPRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> CKPAnalyzeResult:
-        chi, kappa, res_freq, fig = CKP_Exp().analyze(req.run_result)
+        analysis = CKP_Exp().analyze(req.run_result, None, plots=plots)
         return CKPAnalyzeResult(
-            chi=chi,
-            kappa=kappa,
-            res_freq=res_freq,
-            figure=fig,
+            chi=analysis.chi,
+            kappa=analysis.kappa,
+            res_freq=analysis.res_freq,
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[CKP_Result, CKPAnalyzeResult]
+        self, req: WritebackRequest[CKPRunResult, CKPAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [

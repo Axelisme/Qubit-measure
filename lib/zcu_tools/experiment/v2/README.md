@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — TwoTone Rabi records
+**Last updated:** 2026-10-02 — TwoTone pulse calibration records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -43,6 +43,10 @@ FreqFlux 的 `fail_retry` 是 typed cfg 欄位；GUI 選線由 plugin 擁有。N
 
 `twotone.rabi` 的 AmpRabi／LenRabi 核心以 RunContext 執行量測，回傳純 Result。同步 analyze 接 explicit RunRecord 與各自的 typed AnalyzeOptions，回傳數值 Analysis，接受 cfg=None。量測與分析分別發布 `measurement`／`fit` 具名圖；caller 負責 finish／release。LenRabi 保留 const／flat_top 的板端 sweep 與 arb waveform 的 host scan、跨 rounds 平均及部分成果。Notebook callers 仍待遷移。
 
+## TwoTone pulse calibration records
+
+`AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 分別發布 measurement_ground／measurement_excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，Notebook callers 尚待遷移。
+
 ## 目錄佈局
 
 ```text
@@ -71,8 +75,7 @@ CKP numeric analysis先從ground/excited maps抽取resonance trace，再透過
 `analysis.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance
 frequency維持local，兩個slope各自固定為零。Chi/kappa uncertainty直接由named global
 covariance投影，包含local frequency cross-covariance；analysis不重建per-trace covariance
-blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
-`(chi, kappa, resonator frequency, Figure)`。
+blocks。Backend minimum或covariance無效時fast-fail；`CKPAnalysis`只含chi、kappa與res_freq，圖交本次Plots。
 
 `twotone/reset/RabiCheckExp.analyze()`回傳`(RabiCheckFit, Figure)`。reset前分支決定
 共同IQ投影與基頻，reset-only以同基頻擬合，reset後追加Rabi的分支包含基頻與二次諧波。

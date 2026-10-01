@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 
@@ -20,10 +17,10 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import (
@@ -31,7 +28,7 @@ from zcu_tools.experiment.v2.utils import (
     snr_checker,
     sweep2array,
 )
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
     ProgramV2Cfg,
@@ -53,7 +50,6 @@ class AcStarkResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: AcStarkCfg | None = None
 
 
 @dataclass(frozen=True)
@@ -61,7 +57,25 @@ class AcStarkRamseyResult:
     gains: NDArray[np.float64]
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: AcStarkRamseyCfg | None = None
+
+
+@dataclass(frozen=True)
+class AcStarkAnalyzeOptions:
+    chi: float
+    kappa: float
+    deg: int = 1
+    cutoff: float | None = None
+
+
+@dataclass(frozen=True)
+class AcStarkAnalysis:
+    ac_coeff: float
+
+
+@dataclass(frozen=True)
+class AcStarkRamseyAnalyzeOptions:
+    detune: float = 0.0
+    cutoff: float | None = None
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -90,7 +104,7 @@ def get_resonance_freq(
     s_freqs = []
 
     prev_freq = np.nan
-    for x, amp in zip(xs, amps):
+    for x, amp in zip(xs, amps, strict=False):
         if np.any(np.isnan(amp)):
             continue
 
@@ -123,6 +137,7 @@ class AcStarkSweepCfg(ConfigBase):
 class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkModuleCfg
     sweep: AcStarkSweepCfg
+    earlystop_snr: float | None = None
 
 
 class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
@@ -138,18 +153,20 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         tag="twotone/ge/ac_stark",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: AcStarkCfg,
         *,
-        earlystop_snr: float | None = None,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> AcStarkResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         gain_sweep = cfg.sweep.gain
@@ -171,68 +188,67 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        with LivePlot2DwithLine(
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement",
             "Stark Pulse Gain (a.u.)",
             "Frequency (MHz)",
             line_axis=1,
             num_lines=2,
             uniform=False,
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(gains), len(freqs)),
-                on_update=lambda data: viewer.update(
-                    gains,
-                    freqs,
-                    acstark_signal2real(data),
-                    title=f"snr = {current_snr:.1f}" if current_snr else None,
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for _, step in sched.scan("resonator gain", gains.tolist()):
-                    step_cfg = step.cfg
-                    modules = step_cfg.modules
+        )
+        signals_buffer = SignalBuffer(
+            (len(gains), len(freqs)),
+            on_update=lambda data: viewer.update(
+                gains,
+                freqs,
+                acstark_signal2real(data),
+                title=f"snr = {current_snr:.1f}" if current_snr else None,
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for _, step in sched.scan("resonator gain", gains.tolist()):
+                step_cfg = step.cfg
+                modules = step_cfg.modules
 
-                    modules.stark_pulse1.set_param("gain", step.value)
-                    freq_sweep = step_cfg.sweep.freq
-                    modules.stark_pulse2.set_param(
-                        "freq", sweep2param("freq", freq_sweep)
+                modules.stark_pulse1.set_param("gain", step.value)
+                freq_sweep = step_cfg.sweep.freq
+                modules.stark_pulse2.set_param("freq", sweep2param("freq", freq_sweep))
+
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
+                        Pulse("stark_pulse2", modules.stark_pulse2),
+                        Readout("readout", modules.readout),
                     )
-
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Pulse(
-                                "stark_pulse1", modules.stark_pulse1, block_mode=False
-                            ),
-                            Pulse("stark_pulse2", modules.stark_pulse2),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("freq", freq_sweep)
-                        .build_and_acquire(
-                            stop_condition=snr_checker(
-                                signals_buffer[step],
-                                earlystop_snr,
-                                lambda x: rotate2real(x).real,
-                                after_check=update_snr,
-                            ),
-                            **(acquire_kwargs or {}),
-                        )
+                    .declare_sweep("freq", freq_sweep)
+                    .build_and_acquire(
+                        stop_condition=snr_checker(
+                            signals_buffer[step],
+                            cfg.earlystop_snr,
+                            lambda x: rotate2real(x).real,
+                            after_check=update_snr,
+                        ),
                     )
+                )
 
-        return AcStarkResult(gains, freqs, signals_buffer.array, cfg_snapshot=orig_cfg)
+        return AcStarkResult(gains, freqs, signals_buffer.array)
 
-    @retrieve_result
     def analyze(
         self,
-        result: AcStarkResult | None = None,
+        source: RunRecord[AcStarkCfg, AcStarkResult],
+        options: AcStarkAnalyzeOptions,
         *,
-        chi: float,
-        kappa: float,
-        deg: int = 1,
-        cutoff: float | None = None,
-    ) -> tuple[float, Figure]:
-        assert result is not None, "No result found"
+        plots: Plots,
+    ) -> AcStarkAnalysis:
+        result = source.result
+        chi, kappa, deg, cutoff = (
+            options.chi,
+            options.kappa,
+            options.deg,
+            options.cutoff,
+        )
 
         gains, freqs, signals = result.gains, result.freqs, result.signals
 
@@ -266,8 +282,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         # plot the data and the fitted polynomial
         avg_n = ac_coeff * gains2
 
-        fig, ax1 = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax1 = plots.subplots("fit", figsize=config.figsize)
 
         # Use NonUniformImage for better visualization with gain^2 as x-axis
         im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
@@ -291,12 +306,11 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         ax2 = ax1.twiny()
 
         # main x-axis: avg_n, secondary x-axis: gain^2
-        # avg_n = ac_coeff * gains^2
+        # Average photon number equals ac_coeff times gain squared.
         ax1.set_xticks(ax1.get_xticks())
-        # ax1.set_xticklabels([f"{avg_n:.1f}" for avg_n in ax1.get_xticks()])
         ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
 
-        # 上方次 x 軸顯示 gain
+        # Show gain on the upper secondary axis.
         avgn_ticks = ax1.get_xticks()
         gain_ticks = np.sqrt(avgn_ticks / ac_coeff)
         ax2.set_xlim(ax1.get_xlim())
@@ -310,7 +324,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
 
         fig.tight_layout()
 
-        return ac_coeff, fig
+        return AcStarkAnalysis(ac_coeff)
 
 
 def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -333,6 +347,7 @@ class AcStarkRamseyCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkRamseyModuleCfg
     wait_delay: float
     sweep: AcStarkRamseySweepCfg
+    detune: float = 0.0
 
 
 class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
@@ -348,18 +363,20 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         tag="twotone/ge/ac_stark_ramsey",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: AcStarkRamseyCfg,
         *,
-        detune: float = 0.0,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> AcStarkRamseyResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         gain_sweep = cfg.sweep.gain
@@ -374,70 +391,67 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         )
         gains = round_zcu_gain(gains, soccfg, modules.stark_pulse.ch)
 
-        with LivePlot2DwithLine(
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement",
             "Stark Pulse Gain (a.u.)",
             "Time (us)",
             line_axis=1,
             num_lines=2,
             uniform=False,
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(gains), len(lengths)),
-                on_update=lambda data: viewer.update(
-                    gains,
-                    lengths,
-                    acstark_ramsey_signal2real(data),
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for _, step in sched.scan("resonator gain", gains.tolist()):
-                    step_cfg = step.cfg
-                    modules = step_cfg.modules
-
-                    modules.stark_pulse.set_param("gain", step.value)
-                    length_sweep = step_cfg.sweep.length
-                    length_param = sweep2param("length", length_sweep)
-
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Join(
-                                Pulse("stark_pulse", modules.stark_pulse),
-                                [
-                                    SoftDelay("wait_delay", delay=step_cfg.wait_delay),
-                                    Pulse("pi2_pulse1", modules.pi2_pulse),
-                                    SoftDelay("t2_delay", delay=length_param),
-                                    Pulse(
-                                        name="pi2_pulse2",
-                                        cfg=modules.pi2_pulse.with_updates(
-                                            phase=modules.pi2_pulse.phase
-                                            + 360 * detune * length_param
-                                        ),
-                                    ),
-                                ],
-                            ),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("length", length_sweep)
-                        .build_and_acquire(
-                            **(acquire_kwargs or {}),
-                        )
-                    )
-
-        return AcStarkRamseyResult(
-            gains, lengths, signals_buffer.array, cfg_snapshot=orig_cfg
         )
+        signals_buffer = SignalBuffer(
+            (len(gains), len(lengths)),
+            on_update=lambda data: viewer.update(
+                gains,
+                lengths,
+                acstark_ramsey_signal2real(data),
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for _, step in sched.scan("resonator gain", gains.tolist()):
+                step_cfg = step.cfg
+                modules = step_cfg.modules
 
-    @retrieve_result
+                modules.stark_pulse.set_param("gain", step.value)
+                length_sweep = step_cfg.sweep.length
+                length_param = sweep2param("length", length_sweep)
+
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Join(
+                            Pulse("stark_pulse", modules.stark_pulse),
+                            [
+                                SoftDelay("wait_delay", delay=step_cfg.wait_delay),
+                                Pulse("pi2_pulse1", modules.pi2_pulse),
+                                SoftDelay("t2_delay", delay=length_param),
+                                Pulse(
+                                    name="pi2_pulse2",
+                                    cfg=modules.pi2_pulse.with_updates(
+                                        phase=modules.pi2_pulse.phase
+                                        + 360 * cfg.detune * length_param
+                                    ),
+                                ),
+                            ],
+                        ),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire()
+                )
+
+        return AcStarkRamseyResult(gains, lengths, signals_buffer.array)
+
     def analyze(
         self,
-        result: AcStarkRamseyResult | None = None,
+        source: RunRecord[AcStarkRamseyCfg, AcStarkRamseyResult],
+        options: AcStarkRamseyAnalyzeOptions,
         *,
-        detune: float = 0.0,
-        cutoff: float | None = None,
-    ) -> Figure:
-        assert result is not None, "No result found"
+        plots: Plots,
+    ) -> None:
+        result = source.result
+        detune, cutoff = options.detune, options.cutoff
 
         gains, lens, signals = result.gains, result.lengths, result.signals
 
@@ -466,8 +480,8 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
 
         gains2 = gains**2
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        assert isinstance(fig, Figure)
+        fig, _ = plots.subplots("fit", nrows=2, ncols=1, sharex=True)
+        ax1, ax2 = fig.axes
 
         im1 = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
         im1.set_data(gains2, lens, real_signals.T)
@@ -486,5 +500,3 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         ax2.set_ylabel("FFT Detune (MHz)", fontsize=14)
 
         fig.tight_layout()
-
-        return fig
