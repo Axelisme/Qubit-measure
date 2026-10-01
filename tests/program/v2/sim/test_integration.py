@@ -60,6 +60,7 @@ import pytest
 from zcu_tools.experiment.context import QickContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.lookback import (
+    LookbackAnalyzeOptions,
     LookbackCfg,
     LookbackExp,
     LookbackModuleCfg,
@@ -935,12 +936,22 @@ def test_lookback_recovers_timefly_as_trig_offset() -> None:
     )
 
     exp = LookbackExp()
-    result = exp.run(soc, soccfg, cfg)
-    offset, _fig = exp.analyze(result, plot_fit=True)
+    run_plots = Plots(NonPresentingHost())
+    result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
+    run_plots.finish()
+    fit_plots = Plots(NonPresentingHost())
+    answer = exp.analyze(
+        RunRecord(cfg=cfg, result=result),
+        LookbackAnalyzeOptions(plot_fit=True),
+        plots=fit_plots,
+    )
+    fit_plots.finish()
+    run_plots.release()
+    fit_plots.release()
 
     # The rising edge sits at program-time == timeFly; analyze returns the last
     # sub-threshold time before the magnitude peak, i.e. just before timeFly.
-    assert offset == pytest.approx(_SIM.timeFly, abs=0.1)
+    assert answer.predict_offset == pytest.approx(_SIM.timeFly, abs=0.1)
 
 
 # --------------------------------------------------------------- singleshot GE

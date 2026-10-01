@@ -5,9 +5,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
-from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
+from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.lookback import (
+    LookbackAnalyzeOptions,
+    LookbackCfg,
+    LookbackExp,
+    LookbackResult,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -22,12 +27,15 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
+    require_soc_handles,
 )
+from zcu_tools.plotting.plots import Plots
 
-LookbackRunResult: TypeAlias = LookbackResult
+LookbackRunResult: TypeAlias = RunRecord[LookbackCfg, LookbackResult]
 
 
 @dataclass
@@ -40,7 +48,6 @@ class LookbackAnalyzeParams:
 @dataclass
 class LookbackAnalyzeResult(AnalyzeResultBase):
     predict_offset: float
-    figure: Figure
 
 
 class LookbackAdapter(
@@ -126,18 +133,31 @@ class LookbackAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+    ) -> LookbackRunResult:
+        soc, soccfg = require_soc_handles(req)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = LookbackExp().run(cfg, context=QickContext(soc, soccfg, plots))
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
         self,
         req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> LookbackAnalyzeResult:
         params = req.analyze_params
-        offset, figure = LookbackExp().analyze(
+        answer = LookbackExp().analyze(
             req.run_result,
-            ratio=params.ratio,
-            smooth=params.smooth,
-            plot_fit=params.plot_fit,
+            LookbackAnalyzeOptions(
+                ratio=params.ratio,
+                smooth=params.smooth,
+                plot_fit=params.plot_fit,
+            ),
+            plots=plots,
         )
-        return LookbackAnalyzeResult(predict_offset=offset, figure=figure)
+        return LookbackAnalyzeResult(predict_offset=answer.predict_offset)
 
     def get_writeback_items(
         self, req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult]

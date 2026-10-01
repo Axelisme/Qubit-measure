@@ -1,8 +1,8 @@
-**Last updated:** 2026-09-27 — measure branch relocation
+**Last updated:** 2026-10-01 — Lookback public contract owner
 
 # measure adapter tests
 
-**請不要寫實驗模塊的測試，比如onetone/twotone，此模塊測試僅限於各實驗模塊中使用的通用工具，比如optimizer**
+本目錄驗證 adapter 的公開 run／analyze／writeback 契約。核心數值演算法由 `tests/experiment/v2/` 擁有，硬體程式行為由 `tests/program/v2/` 擁有。不要直接測 private helpers 或 Notebook／腳本內容。
 
 測試目錄對應 `lib/zcu_tools/experiment/v2_gui/measure/adapters/`：concrete experiment behavior放在
 相同 domain path，跨 adapter mechanics放在 `_support/`。測試以 adapter/definition的observable
@@ -11,3 +11,5 @@ interface為主，不依賴 builder內部 declaration list；directory rename或
 
 單一 adapter 的 range fallback與 writeback target等 policy在對應 domain test驗證；`_support/`
 tests只覆蓋至少兩個 adapters 共用的 parameterized mechanics。
+
+`test_lookback.py` 擁有 captured context／formal cfg、complex smoothing 到 predict_offset 的 GUI 投影、具名 fit 與 timeFly writeback。
