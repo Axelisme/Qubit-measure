@@ -1,27 +1,30 @@
-"""Notebook GE FIT/post publication and retained native figures."""
+"""Real GE integration through the shared Notebook record boundary."""
 
+import json
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, cast
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.datafile import LabberData
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.ge import (
     GE_Cfg,
+    GE_Exp,
     GE_Result,
-    GEAnalysis,
     GEAnalyzeOptions,
     GEModuleCfg,
+    GEPostAnalyzeOptions,
 )
-from zcu_tools.experiment.v2.singleshot.ge import GE_Exp as GECore
-from zcu_tools.notebook.experiments import GEExp
-from zcu_tools.plotting.plots import Plots
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.notebook.experiments import GEPostAnalyzer
+from zcu_tools.plotting.plots import NonPresentingHost
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
-def make_result() -> GE_Result:
+def make_source() -> RunRecord[GE_Cfg, GE_Result]:
     rng = np.random.default_rng(83)
     excited = rng.random((2, 6000)) < np.array([0.1, 0.9])[:, None]
     signals = np.asarray(
@@ -58,32 +61,47 @@ def make_result() -> GE_Result:
             ),
         ),
     )
-    return GE_Result(signals, np.arange(6000), np.array([0, 1]), cfg)
+    return RunRecord(cfg, GE_Result(signals, np.arange(6000), np.array([0, 1])))
 
 
 def test_post_uses_adopted_fit_source_and_keeps_prior_figures(tmp_path: Path) -> None:
-    exp = GEExp(present=False)
-    source = make_result()
-    primary = exp.analyze(source, backend="pca", length_ratio=0.01)
-    fit_record = exp.analysis
-    assert fit_record is not None
-    assert fit_record.source is source
-    assert fit_record.result is primary
-    assert fit_record.options == GEAnalyzeOptions(backend="pca", length_ratio=0.01)
-    fit_plots = exp.analysis_plots
-    post = exp.post_analyze()
-    record = exp.post_analysis
-    assert record is not None
+    core, host = GE_Exp(), NonPresentingHost()
+    adapter = NotebookAdapter(core, host=host)
+    tool = GEPostAnalyzer(core, host=host)
+    source = make_source()
+    primary = adapter.analyze(
+        GEAnalyzeOptions(backend="pca", length_ratio=0.01), source=source
+    )
+    assert primary.source is source
+    assert primary.options == GEAnalyzeOptions(backend="pca", length_ratio=0.01)
+    fit_presentation = adapter.analysis_presentation
+
+    other = make_source()
+    shifted = GE_Result(
+        other.result.signals + 4.0,
+        other.result.shot_indices,
+        other.result.prepared_states,
+    )
+    path_b = adapter.save(RunRecord(other.cfg, shifted), tmp_path / "b.hdf5")
+    current = adapter.load(path_b)
+    assert adapter.last_run is current
+    assert adapter.analysis is None
+
+    record = tool.analyze(primary, GEPostAnalyzeOptions())
+
+    assert adapter.last_run is current
     assert record.source is source
     assert record.primary is primary
-    assert record.primary_options == fit_record.options
-    assert record.result is post
-    assert record.plots is exp.post_analysis_plots
-    assert list(fit_plots) == ["fit"]
-    assert list(exp.post_analysis_plots) == ["post"]
-    assert np.isfinite(post.confusion.matrix).all()
-    fit_plots["fit"].savefig(tmp_path / "fit.png")
-    exp.post_analysis_plots["post"].savefig(tmp_path / "post.png")
+    assert list(primary.figures) == ["fit"]
+    assert list(record.figures) == ["post"]
+    np.testing.assert_allclose(record.result.confusion.matrix, np.eye(3), atol=0.06)
+    assert fit_presentation is not None
+    post_presentation = tool.analysis_plots
+    assert post_presentation is not None
+    fit_presentation.release()
+    post_presentation.release()
+    primary.figures["fit"].savefig(tmp_path / "fit.png")
+    record.figures["post"].savefig(tmp_path / "post.png")
     assert (tmp_path / "fit.png").stat().st_size > 0
     assert (tmp_path / "post.png").stat().st_size > 0
 
@@ -91,67 +109,64 @@ def test_post_uses_adopted_fit_source_and_keeps_prior_figures(tmp_path: Path) ->
 def test_canonical_save_load_replaces_latest_and_preserves_retained_figures(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "source.hdf5"
-    GECore().save(make_result(), source)
-    exp = GEExp(present=False)
-    loaded = exp.load(source)
-    assert exp.last_result is loaded
-    exp.analyze(length_ratio=0.01)
-    exp.post_analyze()
-    old_fit, old_post = exp.analysis_plots, exp.post_analysis_plots
+    core, host = GE_Exp(), NonPresentingHost()
+    adapter = NotebookAdapter(core, host=host)
+    tool = GEPostAnalyzer(core, host=host)
+    path = adapter.save(make_source(), tmp_path / "source.hdf5")
+    loaded = adapter.load(path)
+    assert adapter.last_run is loaded
+    old_fit = adapter.analyze(GEAnalyzeOptions(length_ratio=0.01))
+    old_post = tool.analyze(old_fit, GEPostAnalyzeOptions())
 
-    destination = tmp_path / "saved.hdf5"
-    exp.save(destination, comment="GE notebook")
-    replaced = exp.load(destination)
-    assert exp.last_result is replaced
-    assert exp.analysis is None
-    assert exp.post_analysis is None
-    np.testing.assert_array_equal(replaced.signals, loaded.signals)
-    np.testing.assert_array_equal(replaced.prepared_states, [0, 1])
+    destination = adapter.save(loaded, tmp_path / "saved.hdf5", comment="GE notebook")
+    replaced = adapter.load(destination)
+    assert adapter.last_run is replaced
+    assert adapter.analysis is None
+    assert adapter.analysis_presentation is None
+    assert tool.analysis is old_post
+    np.testing.assert_array_equal(replaced.result.signals, loaded.result.signals)
+    np.testing.assert_array_equal(replaced.result.prepared_states, [0, 1])
+    assert replaced.cfg == loaded.cfg
     with pytest.raises(FileNotFoundError):
-        exp.load(tmp_path / "missing.hdf5")
-    assert exp.last_result is replaced
-    old_fit["fit"].savefig(tmp_path / "old-fit.png")
-    old_post["post"].savefig(tmp_path / "old-post.png")
+        adapter.load(tmp_path / "missing.hdf5")
+    assert adapter.last_run is replaced
+    old_fit.figures["fit"].savefig(tmp_path / "old-fit.png")
+    old_post.figures["post"].savefig(tmp_path / "old-post.png")
     assert (tmp_path / "old-fit.png").stat().st_size > 0
     assert (tmp_path / "old-post.png").stat().st_size > 0
 
 
-def test_failed_analysis_preserves_records_and_successful_run_clears_them(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("cfg_state", ["missing", "invalid"])
+def test_loaded_data_without_valid_cfg_supports_fit_and_post_but_not_save(
+    tmp_path: Path, cfg_state: str
 ) -> None:
-    exp = GEExp(present=False)
-    old = make_result()
-    exp.analyze(old, length_ratio=0.01)
-    exp.post_analyze()
-    primary_record, post_record = exp.analysis, exp.post_analysis
-    previous_fit, previous_post = exp.analysis_plots, exp.post_analysis_plots
+    core, host = GE_Exp(), NonPresentingHost()
+    adapter = NotebookAdapter(core, host=host)
+    original = make_source()
+    valid_path = adapter.save(original, tmp_path / "valid.hdf5")
+    payload = LabberData.load(str(valid_path))
+    metadata = json.loads(payload.comment)
+    if cfg_state == "missing":
+        metadata.pop("cfg")
+    else:
+        metadata["cfg"]["shots"] = "invalid"
+    payload.comment = json.dumps(metadata)
+    path = Path(payload.save(str(tmp_path / "without-cfg.hdf5")))
 
-    def fail_fit(
-        self: GECore, result: GE_Result, options: GEAnalyzeOptions, *, plots: Plots
-    ) -> GEAnalysis:
-        plots.subplots("failed-diagnostic")
-        raise ValueError("bad GE calibration")
+    warning = pytest.warns(UserWarning) if cfg_state == "invalid" else nullcontext()
+    with warning:
+        loaded = adapter.load(path)
+    assert loaded.cfg is None
+    np.testing.assert_array_equal(loaded.result.signals, original.result.signals)
+    primary = adapter.analyze(GEAnalyzeOptions(length_ratio=0.01))
+    post = GEPostAnalyzer(core, host=host).analyze(primary, GEPostAnalyzeOptions())
+    assert primary.source is loaded
+    assert post.source is loaded
+    np.testing.assert_allclose(post.result.confusion.matrix, np.eye(3), atol=0.06)
 
-    monkeypatch.setattr(GECore, "analyze", fail_fit)
-    with pytest.raises(ValueError, match="bad GE calibration"):
-        exp.analyze(make_result())
-    assert exp.analysis is primary_record
-    assert exp.post_analysis is post_record
-
-    newer = make_result()
-
-    def run(self: GECore, config: Any, *, context: QickContext) -> GE_Result:
-        assert context.soc == "sim-soc"
-        context.plots.subplots("measurement")
-        return newer
-
-    monkeypatch.setattr(GECore, "run", run)
-    assert exp.run("sim-soc", "sim-cfg", cast(Any, None)) is newer
-    assert exp.last_result is newer
-    assert exp.analysis is None
-    assert exp.post_analysis is None
-    previous_fit["fit"].savefig(tmp_path / "old-fit.png")
-    previous_post["post"].savefig(tmp_path / "old-post.png")
-    assert (tmp_path / "old-fit.png").stat().st_size > 0
-    assert (tmp_path / "old-post.png").stat().st_size > 0
+    destination = tmp_path / "rejected.hdf5"
+    with pytest.raises(ValueError, match=r"RunRecord\.cfg is None"):
+        adapter.save(loaded, destination)
+    assert not destination.exists()
+    assert adapter.last_run is loaded
+    assert adapter.analysis is primary
