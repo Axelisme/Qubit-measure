@@ -1000,7 +1000,9 @@ def _run_ge(
     result = exp.run(cfg, context=QickContext(soc, soccfg, run_plots))
     run_plots.finish()
     fit_plots = Plots(NonPresentingHost())
-    fit = exp.analyze(result, GEAnalyzeOptions(backend="pca"), plots=fit_plots)
+    fit = exp.analyze(
+        RunRecord(cfg, result), GEAnalyzeOptions(backend="pca"), plots=fit_plots
+    )
     fit_plots.finish()
     return fit.fidelity, fit.init_pops, fit.g_center, fit.e_center
 

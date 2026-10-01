@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui.measure` — measure-gui adapters
 
-**Last updated:** 2026-09-27 — measure branch relocation
+**Last updated:** 2026-10-01 — T1／GE records 與 canonical load
 
 `experiment/v2_gui/measure/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/measure/` →
@@ -114,7 +114,7 @@ ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內
 合法空值；可輸入 direct value 或 expression。linear 模式忽略合法校正值，
 但兩種模式都不忽略 expression 解析錯誤。homophasal 模式在 device I/O 前
 驗證必要欄位及正值條件，不從 live md 隱藏注入。
-`twotone/time_domain/t1` 的 `uniform` 是 run-only 欄位：預設 `True` 使用線性 delay
+`twotone/time_domain/t1` 的 `uniform` 是會隨 RunRecord 保存的 typed cfg 欄位：預設 `True` 使用線性 delay
 sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
 沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
 conversion 保留點數與順序，格點 collision 直接提示擴大 span 或減少 points，而不靜默減點。
@@ -131,14 +131,14 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 才是契約變更的紀錄，不在 runtime builder 內保留舊 fixture 相容邏輯。
 
 `BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
-`exp.load(filepath=...)`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
+`exp.load(Path(filepath), server_ip=..., port=...)`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
 參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
 adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
 adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
 直接回報原始錯誤。`BaseAdapter.load` 只讀取結果，不修改 tab cfg；GUI
-`LoadService.load_result` 會嘗試把相容的 `result.cfg_snapshot` 反填到 tab
-及 Config editor。缺少或不相容的快照不影響已載入的結果，tab cfg 保持不變；
-`cfg_snapshot is None` 時 module writeback 維持 graceful skip。
+`LoadService.load_result` 只從 loaded RunRecord.cfg 嘗試回填 tab 與 Config editor。
+缺失或不可採用的 cfg 不撤回有效資料，tab cfg 保持不變。已遷移的 T1／GE 用
+RunRecord 配對 cfg 與純 Result，分析不讀 current cfg；其他實驗仍待遷移。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
