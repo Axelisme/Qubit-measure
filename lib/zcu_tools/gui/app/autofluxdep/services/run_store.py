@@ -336,7 +336,6 @@ class RunStore:
         terminal = dict(self._manifest["terminal"])
         terminal["status"] = status
         terminal["finalized_at"] = _utc_now()
-        terminal["error"] = str(error) if error is not None else None
         lifecycle = dict(self._manifest["lifecycle"])
         lifecycle["status"] = status
         if next_flux_idx is not None:
