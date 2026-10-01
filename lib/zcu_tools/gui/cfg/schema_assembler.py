@@ -193,60 +193,62 @@ class CfgSchemaAssembler:
 
 
 def _wrap_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
-    if isinstance(spec, SweepSpec):
-        if not isinstance(default, SweepValue):
-            raise TypeError(
-                f"SweepSpec default must be SweepValue, got {type(default).__name__}"
-            )
-        return default
-    if isinstance(spec, CenteredSweepSpec):
-        if not isinstance(default, CenteredSweepValue):
-            raise TypeError(
-                "CenteredSweepSpec default must be CenteredSweepValue, "
-                f"got {type(default).__name__}"
-            )
-        return default
-    if isinstance(spec, ScalarSpec):
-        if isinstance(default, (DirectValue, EvalValue)):
+    match spec:
+        case SweepSpec():
+            if not isinstance(default, SweepValue):
+                raise TypeError(
+                    f"SweepSpec default must be SweepValue, got {type(default).__name__}"
+                )
             return default
-        return DirectValue(default)
-    if isinstance(spec, LiteralSpec):
-        if isinstance(default, DirectValue):
+        case CenteredSweepSpec():
+            if not isinstance(default, CenteredSweepValue):
+                raise TypeError(
+                    "CenteredSweepSpec default must be CenteredSweepValue, "
+                    f"got {type(default).__name__}"
+                )
             return default
-        return DirectValue(default)
-    if isinstance(spec, ReferenceSpec):
-        if default is None and spec.optional:
-            return None
-        if not isinstance(default, ReferenceValue):
-            raise TypeError(
-                "ReferenceSpec default must be ReferenceValue, "
-                f"got {type(default).__name__}"
+        case ScalarSpec():
+            return (
+                default
+                if isinstance(default, (DirectValue, EvalValue))
+                else DirectValue(default)
             )
-        return default
-    if isinstance(spec, CfgSectionSpec):
-        if not isinstance(default, CfgSectionValue):
-            raise TypeError(
-                "CfgSectionSpec default must be CfgSectionValue, "
-                f"got {type(default).__name__}"
-            )
-        return default
-    if default is None:
-        return None
-    if not isinstance(
-        default,
-        (
-            CenteredSweepValue,
-            CfgSectionValue,
-            DirectValue,
-            EvalValue,
-            ReferenceValue,
-            SweepValue,
-        ),
-    ):
-        raise TypeError(
-            f"unsupported default {type(default).__name__} for {type(spec).__name__}"
-        )
-    return default
+        case LiteralSpec():
+            return default if isinstance(default, DirectValue) else DirectValue(default)
+        case ReferenceSpec():
+            if default is None and spec.optional:
+                return None
+            if not isinstance(default, ReferenceValue):
+                raise TypeError(
+                    "ReferenceSpec default must be ReferenceValue, "
+                    f"got {type(default).__name__}"
+                )
+            return default
+        case CfgSectionSpec():
+            if not isinstance(default, CfgSectionValue):
+                raise TypeError(
+                    "CfgSectionSpec default must be CfgSectionValue, "
+                    f"got {type(default).__name__}"
+                )
+            return default
+        case _:
+            if default is None:
+                return None
+            if not isinstance(
+                default,
+                (
+                    CenteredSweepValue,
+                    CfgSectionValue,
+                    DirectValue,
+                    EvalValue,
+                    ReferenceValue,
+                    SweepValue,
+                ),
+            ):
+                raise TypeError(
+                    f"unsupported default {type(default).__name__} for {type(spec).__name__}"
+                )
+            return default
 
 
 def _ensure_parent(

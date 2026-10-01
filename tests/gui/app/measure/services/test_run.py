@@ -23,6 +23,8 @@ from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer, current_stop_signal
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeResult
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -44,10 +46,10 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.gui.cfg.resource import CfgRevision
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
@@ -62,6 +64,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure._cfg_fakes import make_cfg
 
 
 def _empty_schema() -> CfgSchema:
@@ -72,8 +75,10 @@ def _make_state(
     *,
     readiness: ContextReadiness = ContextReadiness.EMPTY,
 ) -> tuple[State, str, MagicMock]:
-    md = MagicMock()
-    ml = MagicMock()
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+    md = MetaDict(None)
+    ml = ModuleLibrary(None)
     state = State(
         SessionEnv(
             md=md,
@@ -88,7 +93,11 @@ def _make_state(
     adapter.capabilities = AdapterCapabilities(requires_soc=True)
     state.add_tab(
         tab_id,
-        Session(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
+        Session(
+            adapter_name="any",
+            adapter=adapter,
+            cfg=make_cfg(_empty_schema(), state=state),
+        ),
     )
     return state, tab_id, adapter
 
@@ -99,7 +108,9 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
         tab_id=tab_id,
         adapter_name=state.get_tab(tab_id).adapter_name,
         request=RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
-        raw_cfg={},
+        accepted_cfg=state.get_tab(tab_id).cfg.accept(
+            state.get_tab(tab_id).cfg.observe().ref.revision
+        ),
         adapter=adapter,
     )
 
@@ -192,7 +203,7 @@ def _make_run_service(
     writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, bg, bus)  # type: ignore[arg-type]
-    svc = RunService(state, runner, bus, handles, writeback)
+    svc = RunService(state, runner, bus, handles, writeback, gate=gate)
     return svc, gate, bg, handles
 
 
@@ -262,22 +273,69 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 
 def test_worker_executes_permit_after_model_changes_and_releases_lease():
     state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
-    schema = state.get_tab(tab_id).cfg_schema
-    schema.spec.fields["gain"] = ScalarSpec(label="Gain", type=float)
-    schema.value.fields["gain"] = EvalValue("gain", resolved=0.25)
-    permit = GuardService(state).acquire_run_permit(tab_id)
+    state.session_env.md.update(gain=0.25)
+    cfg = make_cfg(
+        CfgSchema(
+            CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
+            CfgSectionValue(fields={"gain": EvalValue("gain")}),
+        ),
+        state=state,
+    )
+    state.get_tab(tab_id).cfg = cfg
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=CfgRevision(0)
+    )
     svc, gate, bg, _ = _make_run_service(state)
     result = object()
     adapter.run.return_value = result
 
     svc.start_run(permit)
-    schema.value.fields["gain"] = DirectValue(0.75)
+    state.session_env.md.update(gain=0.75)
+    state.version.bump("context")
+    cfg.refresh(cfg.observe().ref.revision)
     bg.run_work()
 
     adapter.run.assert_called_once_with(permit.request, {"gain": 0.25})
     assert state.get_tab(tab_id).run.result is result
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
+
+
+def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
+    class RecordingSnapshotAdapter(FakeAdapter):
+        def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeResult:
+            # Controlled execution produces an artifact with the real domain cfg builder.
+            return FakeResult(np.empty(0), self.build_exp_cfg(raw_cfg, req))
+
+    state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    adapter = RecordingSnapshotAdapter()
+    state.session_env.md.update(gain=0.25)
+    schema = adapter.make_default_cfg(state.session_env)
+    schema.value.fields["gain"] = EvalValue("gain")
+    cfg = make_cfg(schema, state=state)
+    state.get_tab(tab_id).adapter = adapter
+    state.get_tab(tab_id).cfg = cfg
+    accepted_ref = cfg.observe().ref
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=accepted_ref.revision
+    )
+    accepted_basis = permit.accepted_cfg.source_basis
+    service, _gate, background, _handles = _make_run_service(state)
+
+    service.start_run(permit)
+    state.session_env.md.update(gain=0.75)
+    state.version.bump("context")
+    after = cfg.refresh(cfg.observe().ref.revision)
+    background.run_work()
+
+    result = state.get_tab(tab_id).run.result
+    assert isinstance(result, FakeResult)
+    assert result.cfg_snapshot is not None
+    assert result.cfg_snapshot.gain == 0.25
+    assert permit.accepted_cfg.ref == accepted_ref
+    assert permit.accepted_cfg.source_basis == accepted_basis
+    assert after.ref != accepted_ref
+    assert after.source_basis != accepted_basis
 
 
 def test_start_run_rejects_when_tab_busy():

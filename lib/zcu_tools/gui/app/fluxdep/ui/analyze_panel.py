@@ -10,18 +10,15 @@ steps that used to be separate buttons:
   the notebook's ``auto_derive_limits``), r_f / sample_f reference-line toggles,
   and a transition display subset.
 
-The search runs on a worker thread; its pyplot diagnostic figure is routed into
-a FigureContainer by the embedded matplotlib backend (see ``mpl_backend`` /
-``plot_host``). pyplot's global figure stack is cleared before each search so a
-stale figure cannot resurface.
+The search runs on a worker thread. After recording its numeric result, the main
+thread renders its diagnostic figure into a FigureContainer. Plot failures are
+reported separately and do not invalidate the fit.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,12 +46,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.services.fit import SearchResult
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
 from zcu_tools.gui.plotting import FigureContainer, routing_scope
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.progress_bar.interface import use_pbar_factory
+from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
@@ -106,21 +103,6 @@ def _parse_freq(edit: QLineEdit) -> float | None:
 def _set_freq(edit: QLineEdit, value: float | None) -> None:
     """Show ``value`` in the field (blank when None)."""
     edit.setText("" if value is None else f"{value:g}")
-
-
-@contextmanager
-def _search_scopes(container, pbar_factory) -> Iterator[None]:
-    """The ambient scopes the search runs inside, entered on the worker thread.
-
-    A ContextVar set on the main thread is not visible to a worker thread, so the
-    routing target (``compute_search``'s ``plot=True`` does ``plt.figure()`` on the
-    worker; the shared backend reads the current routing container) and the per-
-    search pbar factory must both be entered here, inside the worker thunk.
-    """
-    with ExitStack() as stack:
-        stack.enter_context(routing_scope(container))
-        stack.enter_context(use_pbar_factory(pbar_factory))
-        yield
 
 
 class AnalyzePanelWidget(QWidget):
@@ -470,23 +452,12 @@ class AnalyzePanelWidget(QWidget):
         self._progress.setRange(0, 0)
         self._status.setText("Searching…")
 
-        # Clear pyplot's global figure stack so a previous search's figure can't
-        # resurface (its embedded canvas already lives in the container).
-        import matplotlib.pyplot as plt
-
-        plt.close("all")
-        self._diag_container.clear_dynamic_canvases()
-
-        # Run the PURE ``compute_search`` off the main thread (it releases the GIL).
-        # The diagnostic figure is created on the worker thread, so routing +
-        # the Qt-signalling pbar factory must be entered there (R4) — passed as
-        # the runner's ``enter`` scope, entered inside the worker thunk.
+        pbar_factory = self._channel.factory()
         self._runner.submit(
-            lambda: self._ctrl.compute_search(plot=True),
+            lambda: self._ctrl.compute_search(pbar_factory=pbar_factory),
             on_done=self._on_search_done,
             on_error=self._on_search_error,
             run_in_pool=True,
-            enter=_search_scopes(self._diag_container, self._channel.factory()),
         )
 
     def _on_progress(self, n: float, total: float, desc: str) -> None:
@@ -498,13 +469,27 @@ class AnalyzePanelWidget(QWidget):
         if desc:
             self._status.setText(desc)
 
-    def _on_search_done(self, result: SearchResult) -> None:
+    def _on_search_done(self, result: DatabaseSearchResult) -> None:
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
         self._ctrl.record_search_result(result)
         EJ, EC, EL = result.params
         self._status.setText(f"EJ={EJ:.3f}  EC={EC:.3f}  EL={EL:.3f}")
         self._export_btn.setEnabled(True)
+        try:
+            import matplotlib.pyplot as plt
+
+            plt.close("all")
+            self._diag_container.clear_dynamic_canvases()
+            with routing_scope(self._diag_container):
+                make_search_diagnostic_figure(result)
+                plt.show()
+        except Exception as exc:
+            logger.exception("Search diagnostic rendering failed")
+            self._show_message(
+                "Diagnostic plot failed",
+                f"Search result retained; export is available.\n{exc}",
+            )
         self._apply_auto_limits()
         self._redraw_show()
         # The Show tab is rendered and ready, but stay on Search so the result

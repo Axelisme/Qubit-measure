@@ -5,7 +5,7 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
-    _bool_default,
+    default_boolean,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -70,7 +70,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "for a version guard; a summary does not. The SoC has no teardown "
             "(Pyro4-backed): there is no disconnect / reconnect / health-check "
             "tool (deferred, E3).",
-            (_bool_default("include_cfg", False, "Include the full ~2 KB QICK cfg"),),
+            (
+                default_boolean(
+                    "include_cfg", default=False, desc="Include the full ~2 KB QICK cfg"
+                ),
+            ),
         ),
         agent=AgentMethodPolicy(
             reveals=("soc",), reveals_when_nonempty=("include_cfg",)

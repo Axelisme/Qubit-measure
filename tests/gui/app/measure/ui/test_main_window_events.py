@@ -328,10 +328,6 @@ def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> Non
             ],
         ),
         (
-            TabContentFact.CFG_REPLACED,
-            ["refresh_tab_cfg"],
-        ),
-        (
             TabContentFact.PRIMARY_ANALYSIS_COMMITTED,
             [
                 "refresh_tab_post_analyze_form",

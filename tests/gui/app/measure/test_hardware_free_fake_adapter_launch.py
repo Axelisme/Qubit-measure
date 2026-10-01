@@ -90,29 +90,13 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert ctrl._render_host is window  # type: ignore[attr-defined]
     assert window in ctrl._diag_sinks  # type: ignore[attr-defined]
 
-    # A1/A2: sole tree — CfgFormWidget has no structure selector, always tree
-    import zcu_tools.gui.widgets.cfg as cfg_pkg
+    # The production form renders the caller-owned cfg publication.
+    from qtpy.QtWidgets import QTreeWidget
+    from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
-    assert not hasattr(cfg_pkg, "form_structure")
-    # CfgFormWidget should reject a structure kwarg
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    try:
-        CfgFormWidget(structure=object())  # type: ignore[call-arg]
-        assert False, "structure selector should be removed"
-    except TypeError:
-        pass
-
-    # Verify tree visuals via direct CfgFormWidget check (shared tree tests cover depth etc.)
-    from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS
-
-    assert len(TREE_DEPTH_COLORS) == 5
-    # Tree should have been attached via real CfgDraft (not stubbed)
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-
-    assert tab.cfg_form._root_widget is not None
-    assert isinstance(tab.cfg_form._root_widget, TreeCfgWidget)
-    tree = tab.cfg_form._root_widget._tree
+    assert isinstance(tab.cfg_form, ResourceCfgFormWidget)
+    tree = tab.cfg_form.findChild(QTreeWidget)
+    assert tree is not None
     assert tree.isHeaderHidden()
     assert tree.indentation() == 10
     assert tree.font().pixelSize() == 13
@@ -122,9 +106,6 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     from zcu_tools.gui.app.measure.ui.exp_tab_widget import _LedgerSection
 
     assert isinstance(tab._analyze_section, _LedgerSection)
-    assert not hasattr(tab, "_analysis_action_bar"), (
-        "fixed action bar should be removed for A4"
-    )
     assert tab.analyze_form.font().pixelSize() == 13
     # Verify Analyze is inside scroll area between params and writeback
     scroll = tab._analysis_panel.findChild(QScrollArea)
@@ -160,7 +141,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert idx_analyze is not None
     idx_writeback = widgets.index(tab.writeback_section)
     assert idx_params < idx_analyze < idx_writeback
-    # Post-Analysis should remain baseline _CollapsibleSection (not ledger)
+    # Post-Analysis should remain baseline CollapsibleSection (not ledger)
     # fake/freq does not have post_analysis, so post widgets should not exist
     assert not hasattr(tab, "post_writeback_widget") or tab._has_post is False
 

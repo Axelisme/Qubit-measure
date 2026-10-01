@@ -23,6 +23,12 @@ from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
 )
+from zcu_tools.gui.cfg.edit_codec import encode_ref
+from zcu_tools.gui.cfg.resource import (
+    CfgEdit,
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
 from zcu_tools.program.v2 import WaveformCfgFactory
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -197,17 +203,16 @@ def test_socket_self_write_advances_only_its_prior_seen_context(fx) -> None:
         second.close()
 
 
-@pytest.mark.parametrize("observe_cfg", [False, True])
-def test_context_self_write_advances_only_observed_dependent_cfg(
-    fx, observe_cfg
-) -> None:
+@pytest.mark.parametrize("stale_cfg", [False, True], ids=["current-ref", "old-ref"])
+def test_source_write_requires_the_explicit_current_cfg_ref(fx, stale_cfg) -> None:
     _prepare_guarded_context(fx)
     fx.ctrl.context_control.create_md_attr("count", 4)
     tab_id = fx.ctrl.new_tab("fake")
-    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(
-        fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
-    )
-    fx.ctrl.cfg_editor_set_field(editor_id, "reps", {"__kind": "eval", "expr": "count"})
+    from zcu_tools.gui.cfg import EvalValue
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), EvalValue("count")),))
     sock = _open_client(fx.service.port)
     try:
         for method, params in (
@@ -217,22 +222,70 @@ def test_context_self_write_advances_only_observed_dependent_cfg(
             ("device.list", {}),
         ):
             assert _raw_call(sock, method, params)["ok"] is True
-        if observe_cfg:
-            assert _raw_call(sock, "tab.get_cfg", {"tab_id": tab_id})["ok"] is True
-        before = fx.state.version.get(f"tab:{tab_id}:cfg")
+        expected = encode_ref(cfg.observe().ref)
+        before = cfg.observe().ref
         assert (
             _raw_call(sock, "context.md_set_attr", {"key": "count", "value": 7})["ok"]
             is True
         )
-        assert fx.state.version.get(f"tab:{tab_id}:cfg") > before
-        started = _raw_call(sock, "tab.run_start", {"tab_id": tab_id})
-        if observe_cfg:
-            assert started["ok"] is True
+        assert cfg.observe().ref != before
+        started = _raw_call(
+            sock,
+            "tab.run_start",
+            {
+                "tab_id": tab_id,
+                "expected": expected if stale_cfg else encode_ref(cfg.observe().ref),
+            },
+        )
+        if stale_cfg:
+            assert started["error"]["reason"] == "stale_revision"
+            assert started["error"]["data"] == {
+                "expected": expected,
+                "actual": encode_ref(cfg.observe().ref),
+            }
         else:
-            assert started["error"]["reason"] == "stale_version"
-            assert f"tab:{tab_id}:cfg" in started["error"]["data"]["stale"]
+            assert started["ok"] is True
+            result = _raw_call(
+                sock,
+                "operation.await",
+                {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
+            )
+            assert result["result"]["status"] == "finished"
     finally:
         sock.close()
+
+
+def test_cross_connection_cfg_ref_runs_only_after_other_full_reads(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    source = _open_client(fx.service.port)
+    runner = _open_client(fx.service.port)
+    try:
+        publication = _raw_call(source, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        args = {"tab_id": tab_id, "expected": publication["cfg_ref"]}
+        unread = _raw_call(runner, "tab.run_start", args)
+        assert unread["error"]["reason"] == "stale_version"
+        assert "soc" in unread["error"]["data"]["stale"]
+        for method, params in (
+            ("tab.snapshot", {"tab_id": tab_id}),
+            ("soc.info", {"include_cfg": True}),
+        ):
+            assert _raw_call(runner, method, params)["ok"]
+        devices = _raw_call(runner, "device.list")["result"]["devices"]
+        for device in devices:
+            assert _raw_call(runner, "device.snapshot", {"name": device["name"]})["ok"]
+        # Only the other connection read cfg. This request supplies that ref.
+        started = _raw_call(runner, "tab.run_start", args)
+        assert started["ok"]
+        result = _raw_call(
+            runner,
+            "operation.await",
+            {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
+        )
+        assert result["result"]["status"] == "finished"
+    finally:
+        source.close()
+        runner.close()
 
 
 def test_editor_consecutive_self_writes_preserve_commit_observation(fx) -> None:
@@ -349,7 +402,16 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
             ),
         )
         started = call(
-            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
+            "rpc_call",
+            {
+                "method": "tab.run_start",
+                "params": {
+                    "tab_id": tab_id,
+                    "expected": encode_ref(
+                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                    ),
+                },
+            },
         )
         assert started["handle"] > 0
         _await_completed_run(call, started["handle"])
@@ -381,7 +443,16 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
             ),
         )
         handle = call(
-            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
+            "rpc_call",
+            {
+                "method": "tab.run_start",
+                "params": {
+                    "tab_id": tab_id,
+                    "expected": encode_ref(
+                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                    ),
+                },
+            },
         )["handle"]
         assert handle > 0
         _await_completed_run(call, handle)
@@ -408,7 +479,15 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
                 "rpc_call", {"method": method, "params": params}
             ),
         )
-        started = call("tab_run", {"tab": tab_id})
+        started = call(
+            "tab_run",
+            {
+                "tab": tab_id,
+                "expected": encode_ref(
+                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                ),
+            },
+        )
         _await_completed_run(call, started["op"])
         assert call("tab_get", {"tab": tab_id})["summary"]["state"]["has_result"]
         analyzed = call("tab_analyze", {"tab": tab_id})
@@ -471,7 +550,15 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
                 "rpc_call", {"method": method, "params": params}
             ),
         )
-        started = call("tab_run", {"tab": tab_id})
+        started = call(
+            "tab_run",
+            {
+                "tab": tab_id,
+                "expected": encode_ref(
+                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                ),
+            },
+        )
         assert set(started) == {"op"}
         assert isinstance(started["op"], int) and started["op"] > 0
         _await_completed_run(call, started["op"])
@@ -501,15 +588,24 @@ def test_tab_run_rejects_missing_active_context_without_starting(
             ),
         )
         with pytest.raises(RuntimeError) as exc:
-            call("tab_run", {"tab": tab_id})
+            call(
+                "tab_run",
+                {
+                    "tab": tab_id,
+                    "expected": encode_ref(
+                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                    ),
+                },
+            )
         assert getattr(exc.value, "reason", None) == "no_active_context"
         assert fx.state.get_tab(tab_id).run.result is None
     finally:
         bridge.disconnect()
 
 
-def test_tab_run_busy_and_cancel_keep_the_gui_partial_result(
-    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("terminal", ["finished", "cancelled"])
+def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: str
 ) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
@@ -538,14 +634,53 @@ def test_tab_run_busy_and_cancel_keep_the_gui_partial_result(
                 "rpc_call", {"method": method, "params": params}
             ),
         )
-        op = call("tab_run", {"tab": tab_id})["op"]
+        op = call(
+            "tab_run",
+            {
+                "tab": tab_id,
+                "expected": encode_ref(
+                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                ),
+            },
+        )["op"]
         assert entered.wait(1)
         with pytest.raises(RuntimeError, match="busy"):
-            call("tab_run", {"tab": tab_id})
-        assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
+            call(
+                "tab_run",
+                {
+                    "tab": tab_id,
+                    "expected": encode_ref(
+                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                    ),
+                },
+            )
+        editor = fx.ctrl.cfg_resources.lookup(tab_id)
+        accepted_ref = editor.observe().ref
+        for command in (
+            lambda: editor.edit(accepted_ref.revision, (CfgEdit(("gain",), 0.2),)),
+            lambda: editor.reset(accepted_ref.revision),
+        ):
+            with pytest.raises(CfgPreconditionError) as blocked:
+                command()
+            assert blocked.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
+        with pytest.raises(RuntimeError, match="busy"):
+            fx.ctrl.close_tab(tab_id)
+        other = fx.ctrl.new_tab("fake")
+        other_editor = fx.ctrl.cfg_resources.lookup(other)
+        other_editor.edit(
+            other_editor.observe().ref.revision, (CfgEdit(("gain",), 0.3),)
+        )
+        _edit_context_as_gui(fx, "run_source", 17)
+        assert editor.observe().ref != accepted_ref
+        if terminal == "cancelled":
+            assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
         release.set()
-        assert call("wait", {"op": op, "timeout": 3})["status"] == "cancelled"
+        assert call("wait", {"op": op, "timeout": 3})["status"] == terminal
         assert fx.state.get_tab(tab_id).run.result is not None
+        fx.ctrl.close_tab(tab_id)
+        with pytest.raises(CfgPreconditionError) as gone:
+            editor.observe()
+        assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
     finally:
         release.set()
         fx.ctrl._background_svc.quiesce()
@@ -574,7 +709,16 @@ def test_restarted_gui_requires_new_full_reads_before_running(
             ),
         )
         old_handle = call(
-            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": first_tab}}
+            "rpc_call",
+            {
+                "method": "tab.run_start",
+                "params": {
+                    "tab_id": first_tab,
+                    "expected": encode_ref(
+                        first.ctrl.cfg_resources.lookup(first_tab).observe().ref
+                    ),
+                },
+            },
         )["handle"]
         _await_completed_run(call, old_handle)
 
@@ -596,7 +740,15 @@ def test_restarted_gui_requires_new_full_reads_before_running(
         with pytest.raises(RuntimeError) as stale:
             call(
                 "rpc_call",
-                {"method": "tab.run_start", "params": {"tab_id": second_tab}},
+                {
+                    "method": "tab.run_start",
+                    "params": {
+                        "tab_id": second_tab,
+                        "expected": encode_ref(
+                            second.ctrl.cfg_resources.lookup(second_tab).observe().ref
+                        ),
+                    },
+                },
             )
         assert getattr(stale.value, "reason", None) == "stale_version"
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": second_tab}})
@@ -610,7 +762,16 @@ def test_restarted_gui_requires_new_full_reads_before_running(
             ),
         )
         new_handle = call(
-            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": second_tab}}
+            "rpc_call",
+            {
+                "method": "tab.run_start",
+                "params": {
+                    "tab_id": second_tab,
+                    "expected": encode_ref(
+                        second.ctrl.cfg_resources.lookup(second_tab).observe().ref
+                    ),
+                },
+            },
         )["handle"]
         assert new_handle > old_handle
         _await_completed_run(call, new_handle)
@@ -695,9 +856,9 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
 ) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
-    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(
-        fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
-    )
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -710,19 +871,25 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
         call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
         _edit_context_as_gui(fx, "unrelated", 17)
+        # Every source publication advances cfg; a small complete cfg read
+        # establishes the new baseline without exporting the large context.
+        call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
+        expected = encode_ref(cfg.observe().ref)
         if mutate_cfg:
-            fx.ctrl.cfg_editor_set_field(editor_id, "reps", 42)
-        args = {"method": "tab.run_start", "params": {"tab_id": tab_id}}
+            cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
+        args = {
+            "method": "tab.run_start",
+            "params": {"tab_id": tab_id, "expected": expected},
+        }
         if mutate_cfg:
             with pytest.raises(RuntimeError) as stale:
                 call("rpc_call", args)
-            assert getattr(stale.value, "reason", None) == "stale_version"
+            assert getattr(stale.value, "reason", None) == "stale_revision"
         else:
             started = call("rpc_call", args)
             _await_completed_run(call, started["handle"])
     finally:
         bridge.disconnect()
-        fx.ctrl.teardown_cfg_editor(editor_id)
 
 
 @pytest.mark.parametrize("value_bytes", [2 << 20, MAX_LINE_BYTES - 2048])

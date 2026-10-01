@@ -52,7 +52,7 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
             cast(
                 Any, SimpleNamespace(run_analyze_control=run_control, render_view=None)
             ),
-            {"tab_id": "t1"},
+            {"tab_id": "t1", "expected": {"cfg_id": "cfg-t1", "revision": "0"}},
         ),
         run_error,
     )

@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-29 — project.apply wire method
+**Last updated:** 2026-10-01, independent analysis preparation outcome
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,22 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 72`, `GUI_VERSION = 104`, and
-`MCP_VERSION = 96` (defined in `zcu_tools.mcp.measure.server`). WIRE 72 renames the
+Current measure-gui values are `WIRE_VERSION = 77`, `GUI_VERSION = 109`, and
+`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 77 adds
+`analysis_error` to load outcomes; failed analysis preparation preserves the loaded
+result and the new tab from `tab.open_file`. GUI 109 publishes committed result facts
+independently of analysis preparation and reports its failure separately. WIRE 76
+separates waveform save from preview; GUI 108 treats asset persistence as save success.
+WIRE 75 uses explicit
+cfg refs across connections instead of a per-connection cfg seen guard. GUI 107
+retains tab, SoC, device and authentication guards. WIRE 74 requires
+`expected` on `tab.run_start`, using the common cfg_ref codec. GUI 106 runs only the
+specified Valid publication. MCP 98 forwards that expectation once without
+hidden reads, refresh or retry. WIRE 73 replaces
+`tab.set_cfg` with atomic `tab.edit_cfg` and returns cfg_ref in tab snapshots.
+GUI 105 uses one persistent tab cfg resource across Qt, remote, Load and Run.
+MCP 97 forwards explicit cfg_ref expectations without hidden reads or retries.
+WIRE 72 renames the
 project wire method `startup.apply` to `project.apply` with the same params and
 result. GUI 104 opens one Setup dialog identity for launch and toolbar; MCP 96
 makes the `project` tool apply through `project.apply`. MCP 95 finalizes
@@ -180,8 +194,10 @@ an empty seen map. The adapter compares it with current versions on the State
 owner thread before calling the controller. Missing observations, including
 version zero, are stale. Wire methods do not accept `expected_versions`.
 
-Run uses the observed cfg and device snapshots, not live md/ml. Its guard does
-not require exporting the entire context. Load, editor commit and writeback still
+Run uses the explicit cfg ref and observed device snapshots, not live md/ml.
+Cfg admission uses only the resource identity and revision. A ref observed by
+another connection is valid, but tab, SoC and device seen guards still belong to
+the requesting connection. Run does not require exporting the entire context. Load, editor commit and writeback still
 use live context and retain their context guard; Run's change does not authorize
 removing those dependencies.
 
@@ -259,7 +275,23 @@ terminal status, not removed aliases. No tool inventory is generated from
 changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
 field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
-`tab.get_cfg`, `editor.get`, and `editor.new` return the same typed `tree` format.
+`tab.get_cfg` returns cfg_ref, status, tree, source_basis and diagnostics from the
+persistent tab resource. It has no prefix or widget prerequisite. Tree paths are
+string arrays. `tab.edit_cfg` requires expected cfg_id and canonical decimal-string
+revision, decodes the common editing codec, then performs one atomic batch.
+Stale errors include expected/actual; input errors can include path/edit_index.
+The adapter does not retry or publish a successful prefix. Plain strings are typed
+strings; __text, __expr, __complex and __ref carry the declared editing intents.
+Source publications advance revision and update all affected cfg before notification.
+
+`tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
+not require a second per-connection cfg observation. Tab, SoC, device and
+authentication guards remain independent. A stale identity or revision returns expected/actual
+without starting an operation. An Invalid publication cannot run. Active Run
+blocks manual edits, reset, replacement and close on that tab; source publications
+and edits to other tabs remain allowed. Close becomes available after termination.
+
+`editor.get` and `editor.new` retain the independent draft tree with dotted paths.
 Nodes contain kind/path/label/valid. Sections and active references have named
 children, including locked literals. Scalar/literal input and sweep inputs retain
 mode/raw/resolved/error/validation_error. Reference nodes include their chosen key,
@@ -267,8 +299,8 @@ cached shape label, error, override flag, and choices. Reads do not resolve sour
 Unknown objects, non-string object keys, and nonfinite numbers fail serialization;
 complex numbers use the shared reversible tag, with no string fallback.
 
-Prefix reads select a node while preserving its full path; sweep edges and reference
-keys select their parent node. Unknown prefixes return an empty object. Only a
+Independent editor prefix reads select a node while preserving its full path;
+sweep edges and reference keys select their parent node. Unknown prefixes return an empty object. Only a
 successful read with no prefix parameter establishes the full cfg observation.
 Wire keys children/input/inputs are not mutation-path segments.
 
@@ -278,14 +310,16 @@ through the session value lookup and then become direct scalars.
 
 Sweep nodes appear as editable subtrees, not as lowered `SweepCfg` objects.
 `SweepSpec` exposes `start` / `stop` / `expts` / `step`; `CenteredSweepSpec`
-exposes `center` / `span` / `expts` / `step`. `editor.set_field` accepts the same
-dotted edge paths that `tab.get_cfg` reports.
+exposes `center` / `span` / `expts` / `step`. Independent `editor.set_field`
+accepts dotted edge paths from the editor read model. Tab cfg observations and
+`tab.edit_cfg` use string-array paths instead.
 
-Headless editor sessions are owned by `CfgEditorService`. Agent-created sessions
-are garbage-collected on commit/discard/client drop; UI-owned sessions are tied
-to their owner widget or tab. Each owner session has a fresh id; Load's successful
-Config replacement retires the old id, so clients rediscover the new session
-before editing.
+`TabCfgResources` owns tab cfg identity. Tab creation provides the resource before
+any view attaches; close revokes its identity. Qt detach only stops watching.
+Load backfill preserves cfg_id and advances revision on the same resource.
+`CfgEditorService` owns separate library, inspect and writeback drafts.
+Agent-created sessions are garbage-collected on commit/discard/client drop;
+UI-owned independent drafts follow their own owner lifetime.
 
 ## Operation Handles
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -238,7 +238,7 @@ def h_value_read(
     raw_type = params.get("type")
     if raw_type is not None and not isinstance(raw_type, str):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'type' must be a string")
-    type_name = cast(str | None, raw_type)
+    type_name = raw_type
     try:
         info, value = adapter.context_control.read_value_source(key, type_name)
     except ValueError as exc:

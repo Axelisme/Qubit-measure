@@ -31,6 +31,7 @@ from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
+from tests.gui.app.measure._cfg_fakes import cfg_resources, configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 
@@ -47,6 +48,7 @@ def _require_qapp() -> QApplication:
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = {}
@@ -183,14 +185,6 @@ def _snapshot(
 def exp_tab_factory(qapp, monkeypatch):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
-    orig = mod.ExpTabWidget._populate_cfg
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe-editor"
-        self.cfg_form.is_valid = lambda: True  # type: ignore[method-assign]
-        self.cfg_form.first_invalid_reason = lambda: None  # type: ignore[method-assign]
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
     orig_attach = mod.attach_existing_figure_to_container
 
     def mock_attach(fig, container):
@@ -204,7 +198,6 @@ def exp_tab_factory(qapp, monkeypatch):
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
     yield mod.ExpTabWidget
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
@@ -507,6 +500,7 @@ def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
@@ -735,6 +729,7 @@ def test_remote_save_completion_refreshes_state_owned_status(exp_tab_factory, qa
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
@@ -817,7 +812,7 @@ def _live_save_ui(tmp_path: Path):
     )
     registry = Registry()
     registry.register("fake", FakeAdapter)
-    tabs = TabService(state, registry, MagicMock())
+    tabs = TabService(state, registry, MagicMock(), cfg_resources(state))
     tab_id = tabs.new_tab("fake")
     state.update_tab_result(tab_id, object())
     save = MagicMock()
@@ -1059,6 +1054,7 @@ def test_individual_image_save_dispatch_requires_figure(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False

@@ -2,32 +2,57 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, Qt
+from qtpy.QtCore import QCoreApplication, QEvent, Qt
+from qtpy.QtGui import QKeyEvent
+from qtpy.QtWidgets import QApplication, QLineEdit, QWidget
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     MetaDictWriteback,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
-from zcu_tools.gui.app.measure.state import TabInteractionState
+from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+)
+from zcu_tools.gui.cfg.resource import (
+    AcceptedConfig,
+    CfgEdit,
+    CfgRef,
+    CfgResolution,
+    CfgResource,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     return ctrl
 
@@ -576,8 +601,12 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     assert tab._save_center.is_load_enabled() is False
 
 
-def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_path):
+@pytest.mark.parametrize("analysis_error", [None, "analysis defaults unavailable"])
+def test_main_window_load_data_dialog_calls_controller(
+    qapp, monkeypatch, tmp_path, analysis_error
+):
     from qtpy.QtWidgets import QFileDialog
+    from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -592,7 +621,16 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
         soccfg=None,
         database_path=str(database_root / "2026" / "06" / "Data_0625"),
     )
-    window = MainWindow(ctrl)
+    ctrl.load_tab_result.return_value = LoadTabResultOutcome(
+        tab_id="tab-1",
+        data_path="/tmp/result.hdf5",
+        result_type="Result",
+        has_cfg_snapshot=False,
+        has_analyze_params=analysis_error is None,
+        analysis_error=analysis_error,
+    )
+    dialogs = RecordingDialogPresenter()
+    window = MainWindow(ctrl, dialog_presenter=dialogs)
     window._tab_widgets["tab-1"] = MagicMock()
     window.show_status_message = MagicMock()
 
@@ -608,11 +646,19 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
         fake_get_open_file_name,
     )
 
-    window._on_load_data_clicked("tab-1")
+    window.load_tab_data_dialog("tab-1")
 
     ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
     window.show_status_message.assert_called_once()
     assert captured_dir["directory"] == str(database_root)
+    if analysis_error is not None:
+        assert [(call.kind, call.title) for call in dialogs.calls] == [
+            ("warning", "Analysis preparation failed"),
+        ]
+        assert "Data loaded successfully" in dialogs.consume_message_containing(
+            "warning", analysis_error
+        )
+    dialogs.assert_no_unexpected_messages()
 
 
 def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp):
@@ -630,7 +676,7 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp)
     window.refresh_tab_writeback = MagicMock()
     window.show_status_message = MagicMock()
 
-    window._on_writeback_inline_apply("tab-1", pane="analysis")
+    window.apply_tab_writeback("tab-1", pane="analysis")
 
     ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
     window.refresh_tab_writeback.assert_not_called()
@@ -660,14 +706,14 @@ def test_main_window_tab_actions_forward_to_private_handlers(qapp, monkeypatch):
     window = MainWindow(ctrl)
     handlers = {
         "refresh_tab_interaction": MagicMock(),
-        "_on_run_stop_clicked": MagicMock(),
-        "_on_load_data_clicked": MagicMock(),
-        "_on_analyze_clicked": MagicMock(),
-        "_on_post_analyze_clicked": MagicMock(),
-        "_on_writeback_inline_apply": MagicMock(),
-        "_on_save_data_clicked": MagicMock(),
-        "_on_save_image_clicked": MagicMock(),
-        "_on_post_save_image_clicked": MagicMock(),
+        "run_or_stop_tab": MagicMock(),
+        "load_tab_data_dialog": MagicMock(),
+        "analyze_tab": MagicMock(),
+        "post_analyze_tab": MagicMock(),
+        "apply_tab_writeback": MagicMock(),
+        "save_tab_data": MagicMock(),
+        "save_tab_analysis_image": MagicMock(),
+        "save_tab_post_analysis_image": MagicMock(),
     }
     for name, handler in handlers.items():
         monkeypatch.setattr(window, name, handler)
@@ -676,28 +722,26 @@ def test_main_window_tab_actions_forward_to_private_handlers(qapp, monkeypatch):
     window._tab_actions.refresh_interaction("tab-1")
     handlers["refresh_tab_interaction"].assert_called_once_with("tab-1")
     window._tab_actions.run_or_stop("tab-1")
-    handlers["_on_run_stop_clicked"].assert_called_once_with("tab-1")
+    handlers["run_or_stop_tab"].assert_called_once_with("tab-1")
     window._tab_actions.load_data("tab-1")
-    handlers["_on_load_data_clicked"].assert_called_once_with("tab-1")
+    handlers["load_tab_data_dialog"].assert_called_once_with("tab-1")
     window._tab_actions.analyze("tab-1")
-    handlers["_on_analyze_clicked"].assert_called_once_with("tab-1")
+    handlers["analyze_tab"].assert_called_once_with("tab-1")
     window._tab_actions.post_analyze("tab-1")
-    handlers["_on_post_analyze_clicked"].assert_called_once_with("tab-1")
+    handlers["post_analyze_tab"].assert_called_once_with("tab-1")
     window._tab_actions.apply_writeback("tab-1")
-    handlers["_on_writeback_inline_apply"].assert_called_once_with(
-        "tab-1", pane="analysis"
-    )
-    handlers["_on_writeback_inline_apply"].reset_mock()
+    handlers["apply_tab_writeback"].assert_called_once_with("tab-1", pane="analysis")
+    handlers["apply_tab_writeback"].reset_mock()
     window._tab_actions.apply_post_writeback("tab-1")
-    handlers["_on_writeback_inline_apply"].assert_called_once_with(
+    handlers["apply_tab_writeback"].assert_called_once_with(
         "tab-1", pane="post_analysis"
     )
     window._tab_actions.save_data("tab-1")
-    handlers["_on_save_data_clicked"].assert_called_once_with("tab-1")
+    handlers["save_tab_data"].assert_called_once_with("tab-1")
     window._tab_actions.save_image("tab-1")
-    handlers["_on_save_image_clicked"].assert_called_once_with("tab-1")
+    handlers["save_tab_analysis_image"].assert_called_once_with("tab-1")
     window._tab_actions.save_post_image("tab-1")
-    handlers["_on_post_save_image_clicked"].assert_called_once_with("tab-1")
+    handlers["save_tab_post_analysis_image"].assert_called_once_with("tab-1")
 
 
 def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
@@ -786,7 +830,7 @@ def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
         QFileDialog, "getOpenFileName", lambda *args, **kwargs: ("", "")
     )
 
-    window._on_load_data_clicked("tab-1")
+    window.load_tab_data_dialog("tab-1")
 
     ctrl.load_tab_result.assert_not_called()
 
@@ -812,7 +856,7 @@ def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch)
         lambda *args, **kwargs: ("/tmp/bad.hdf5", ""),
     )
 
-    window._on_load_data_clicked("tab-1")
+    window.load_tab_data_dialog("tab-1")
 
     window.show_error_dialog.assert_called_once()
     title, message = window.show_error_dialog.call_args.args
@@ -825,6 +869,7 @@ def test_main_window_run_lock_keeps_new_tab_available(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
@@ -1269,38 +1314,14 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
 
 
 def _editor_wiring_ctrl() -> MagicMock:
-    """Mock ctrl that supplies measure cfg binding ports for a real attach()."""
-    ctrl = MagicMock()
-    ctrl.get_left_panel_width.return_value = 500
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.get_current_md.return_value = MagicMock()
-    ctrl.get_current_ml.return_value = MagicMock()
-    ctrl.list_device_names.return_value = []
-    ctrl.list_arb_waveforms.return_value = []
-    ctrl.has_soc.return_value = False
-    # MainWindow reads both during bus-event handlers (ADR-0066 gate).
+    """A view facade over a real, caller-owned cfg resource."""
+    from tests.gui.app.measure._cfg_fakes import make_cfg
+
+    ctrl = _mock_ctrl()
+    cfg = make_cfg(_pulse_schema())
+    ctrl.cfg_resources.lookup.side_effect = lambda _tab: cfg
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
-
-    # populate_cfg now opens a service-owned (gc=False) seeded session and
-    # attaches the widget to the service-owned model (ADR-0008). Build a real
-    # CfgDraft for get_cfg_editor_draft so attach() works.
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.measure.specs import make_pulse_spec
-    from zcu_tools.gui.cfg import (
-        CfgSchema,
-        make_default_value,
-    )
-
-    spec = make_pulse_spec()
-    draft = MeasureCfgBindings(ctrl).new_draft(
-        CfgSchema(spec, make_default_value(spec))
-    )
-    ctrl.open_seeded_cfg_editor.return_value = ("editor-tab1", [])
-    ctrl.editor_id_for_owner.side_effect = lambda _owner: (
-        ctrl.open_seeded_cfg_editor.return_value[0]
-    )
-    ctrl.get_cfg_editor_draft.return_value = draft
     return ctrl
 
 
@@ -1315,57 +1336,46 @@ def _pulse_schema():
     return CfgSchema(spec=spec, value=make_default_value(spec))
 
 
-def test_exp_tab_opens_cfg_editor_on_attach(qapp):
-    import dataclasses
-
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
-
-    ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget(
-        "tab-1",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
-    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, _RecordingTabActions())
-
-    # Opened a gc=False seeded session keyed by the tab id, and attached the
-    # widget to the service-owned model.
-    ctrl.open_seeded_cfg_editor.assert_called_once()
-    kwargs = ctrl.open_seeded_cfg_editor.call_args.kwargs
-    assert kwargs["owner_key"] == "tab-1"
-    assert kwargs["gc"] is False
-    assert tab._cfg_editor_id == "editor-tab1"
-    assert tab.cfg_form._draft is ctrl.get_cfg_editor_draft.return_value
-
-
-def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
-    import dataclasses
-
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
+def test_exp_tab_attach_projects_existing_resource(qapp):
+    from qtpy.QtWidgets import QLineEdit, QWidget
+    from zcu_tools.gui.cfg.resource import CfgEdit
 
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget(
-        "tab-1",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
-    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, _RecordingTabActions())
+    cfg = ctrl.cfg_resources.lookup("tab-1")
+    before = cfg.observe().ref
+    tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    tab.attach(_snapshot("tab-1"), _RecordingTabActions())
+    assert cfg.observe().ref == before
+    cfg.edit(before.revision, (CfgEdit(("gain",), 0.45),))
+    widget = tab.cfg_form.findChild(QWidget, "cfgInput:gain")
+    assert widget is not None
+    entry = widget.findChild(QLineEdit)
+    assert entry is not None and float(entry.text()) == 0.45
+
+
+def test_exp_tab_detach_preserves_resource_for_later_views(qapp):
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    ctrl = _editor_wiring_ctrl()
+    cfg = ctrl.cfg_resources.lookup("tab-1")
+    tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    tab.attach(_snapshot("tab-1"), _RecordingTabActions())
     tab.detach()
+    after = cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.45),))
+    other = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    other.attach(_snapshot("tab-1"), _RecordingTabActions())
+    assert cfg.observe().ref == after.ref
+    assert other.cfg_form.is_valid() == (after.status.value == "Valid")
 
-    ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
-    assert tab._cfg_editor_id is None
 
-
-def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp):
-    import dataclasses
+def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
+    from dataclasses import replace
     from typing import Any, cast
 
+    from qtpy.QtWidgets import QComboBox, QWidget
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
     from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-    from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
     from zcu_tools.gui.app.measure.specs import make_pulse_spec
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
     from zcu_tools.gui.cfg import (
         CfgSchema,
         CfgSectionSpec,
@@ -1374,27 +1384,14 @@ def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp)
         ReferenceValue,
     )
     from zcu_tools.gui.session.events import MlChangedPayload
-    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    ctrl = _editor_wiring_ctrl()
-    bus = EventBus()
-    ml = ModuleLibrary()
-    ctrl.get_bus.return_value = bus
-    ctrl.get_current_md.return_value = MetaDict()
-    ctrl.get_current_ml.return_value = ml
-    service = CfgEditorService(
-        ctrl,
-        read_port=ctrl,
-        write_port=ctrl,
-        versions=ctrl,
-        bus=bus,
-    )
-    ctrl.open_seeded_cfg_editor.side_effect = service.open_seeded
-    ctrl.get_cfg_editor_draft.side_effect = service.get_draft
-    ctrl.teardown_cfg_editor.side_effect = service.teardown
+    from tests.gui.app.measure.remote._helpers import Fixture
 
-    raw_pulse = {
+    fx = Fixture(headless=True)
+    ml = ModuleLibrary(None)
+    fx.state.set_context(replace(fx.state.session_env, md=MetaDict(None), ml=ml))
+    raw = {
         "type": "pulse",
         "waveform": {"style": "const", "length": 1.0},
         "ch": 0,
@@ -1406,52 +1403,35 @@ def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp)
         "post_delay": 0.0,
         "mixer_freq": None,
     }
-    pulse_spec = make_pulse_spec()
-    _, pulse_value = module_cfg_to_value(raw_pulse)
+    _, value = module_cfg_to_value(raw)
+    spec = make_pulse_spec()
     schema = CfgSchema(
-        spec=CfgSectionSpec(
-            fields={
-                "drive": ReferenceSpec(
-                    kind="module", allowed=[pulse_spec], label="Drive"
-                )
-            }
+        CfgSectionSpec(
+            fields={"drive": ReferenceSpec("module", [spec], label="Drive")}
         ),
-        value=CfgSectionValue(
-            fields={
-                "drive": ReferenceValue(
-                    chosen_key="drive-pulse",
-                    value=pulse_value,
-                )
-            }
-        ),
+        CfgSectionValue({"drive": ReferenceValue("drive-pulse", value)}),
     )
-    snapshot = dataclasses.replace(
-        _snapshot("tab-1", has_run_result=False),
-        cfg_schema=schema,
-    )
-    tab = ExpTabWidget(
-        "tab-1",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
+    cfg = fx.prepare_tab("tab-1", FakeAdapter(), schema)
+    tab = ExpTabWidget("tab-1", fx.ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    snapshot = _snapshot("tab-1", has_run_result=False)
 
-    class _GateRefreshingActions(_RecordingTabActions):
-        def refresh_interaction(self, tab_id: str) -> None:
+    class GateActions(_RecordingTabActions):
+        def refresh_interaction(self, tab_id):
             super().refresh_interaction(tab_id)
             tab.update_interaction_state(snapshot)
 
-    tab.attach(snapshot, _GateRefreshingActions())
-    assert tab.cfg_form.is_valid() is False
-    assert tab.run_btn.isEnabled() is False
-
-    ml.modules["drive-pulse"] = cast(Any, raw_pulse)
-    bus.emit(MlChangedPayload(ml))
-
-    ref_widget = tab.cfg_form.findChild(ReferenceWidget)
-    assert ref_widget is not None
-    assert ref_widget._combo.currentText() == "Lib: drive-pulse"
-    assert tab.cfg_form.is_valid() is True
-    assert tab.run_btn.isEnabled() is True
+    tab.attach(snapshot, GateActions())
+    assert not tab.cfg_form.is_valid()
+    assert not tab.run_btn.isEnabled()
+    ml.modules["drive-pulse"] = cast(Any, raw)
+    fx.bus.emit(MlChangedPayload(ml))
+    widget = tab.cfg_form.findChild(QWidget, "cfgInput:drive")
+    assert widget is not None
+    combo = widget.findChild(QComboBox)
+    assert combo is not None and combo.currentText() == "Lib: drive-pulse"
+    assert tab.cfg_form.is_valid()
+    assert tab.run_btn.isEnabled()
+    assert cfg.observe().status.value == "Valid"
 
 
 def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
@@ -1515,91 +1495,47 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     ]
 
 
-def _make_pulse_model(ctrl):
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.measure.specs import make_pulse_spec
-    from zcu_tools.gui.cfg import (
-        CfgSchema,
-        make_default_value,
-    )
-
-    spec = make_pulse_spec()
-    return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, make_default_value(spec)))
-
-
-def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
-    """Reset tears down the old cfg-editor session and re-seeds a fresh one over
-    the controller's regenerated default schema (user confirms the dialog)."""
-    import dataclasses
-
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
+def test_exp_tab_reset_publishes_defaults_on_same_resource(qapp):
+    from zcu_tools.gui.cfg.resource import CfgEdit
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
-    first_model = ctrl.get_cfg_editor_draft.return_value
+    cfg = ctrl.cfg_resources.lookup("tab-1")
+    defaults = cfg.snapshot_inputs()
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.45),))
+    before = cfg.observe().ref
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(analysis=AnalysisMode.FIT),
         dialog_presenter=dialogs,
     )
     actions = _RecordingTabActions()
-    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, actions)
-
-    # After attach: a second session for the reset, returning a NEW model.
-    reset_schema = _pulse_schema()
-    second_model = _make_pulse_model(ctrl)
-    ctrl.reset_tab_cfg.return_value = reset_schema
-    ctrl.open_seeded_cfg_editor.reset_mock()
-    ctrl.open_seeded_cfg_editor.return_value = ("editor-tab1-v2", [])
-    ctrl.get_cfg_editor_draft.return_value = second_model
-
-    tab._on_reset_cfg_clicked()
-
-    assert dialogs.calls[-1].title == "Reset config"
-    ctrl.reset_tab_cfg.assert_called_once_with("tab-1")
-    # Old session torn down, new one opened keyed by the same tab.
-    ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
-    ctrl.open_seeded_cfg_editor.assert_called_once()
-    kwargs = ctrl.open_seeded_cfg_editor.call_args.kwargs
-    assert kwargs["owner_key"] == "tab-1"
-    assert kwargs["gc"] is False
-    assert tab._cfg_editor_id == "editor-tab1-v2"
-    # The form now views the new model (root widget rebuilt).
-    assert tab.cfg_form._draft is second_model
-    assert tab.cfg_form._draft is not first_model
+    tab.attach(_snapshot("tab-1"), actions)
+    tab.reset_btn.click()
+    after = cfg.observe().ref
+    assert after.cfg_id == before.cfg_id
+    assert after.revision == before.revision + 1
+    assert cfg.snapshot_inputs() == defaults
     assert actions.calls[-1] == ("refresh_interaction", "tab-1")
 
 
 def test_exp_tab_reset_confirm_no_does_not_reset(qapp):
-    """Clicking No in the confirmation dialog must not reset the cfg."""
-    import dataclasses
-
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
-
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = _editor_wiring_ctrl()
+    cfg = ctrl.cfg_resources.lookup("tab-1")
+    before = cfg.observe()
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(analysis=AnalysisMode.FIT),
         dialog_presenter=dialogs,
     )
     actions = _RecordingTabActions()
-    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, actions)
-
-    ctrl.reset_tab_cfg.reset_mock()
-    ctrl.open_seeded_cfg_editor.reset_mock()
+    tab.attach(_snapshot("tab-1"), actions)
     actions.calls.clear()
-
-    tab._on_reset_cfg_clicked()
-
-    assert dialogs.calls[-1].title == "Reset config"
-    # Controller must not be touched when the user cancels.
-    ctrl.reset_tab_cfg.assert_not_called()
-    ctrl.open_seeded_cfg_editor.assert_not_called()
+    tab.reset_btn.click()
+    assert cfg.observe() == before
     assert actions.calls == []
 
 
@@ -1639,6 +1575,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 2
     window = MainWindow(ctrl, dialog_presenter=dialogs)
@@ -1658,6 +1595,7 @@ def test_main_window_declining_confirmation_keeps_window_open(qapp):
 
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 1
     window = MainWindow(ctrl, dialog_presenter=dialogs)
@@ -1680,6 +1618,7 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     # The real coordinator runs on_closed once nothing is pending; here drive it
@@ -1725,6 +1664,7 @@ def test_main_window_close_removes_event_bus_subscriptions(qapp):
     )
 
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.active_operation_count.return_value = 0
@@ -1761,6 +1701,7 @@ def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
 
     del qapp
     ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_adapter_names.return_value = [
         "fake",
@@ -2459,3 +2400,286 @@ def test_programmatic_request_shutdown_bypasses_unsaved_guard(qapp):
     assert len(dialogs.calls) == 0
     QCoreApplication.processEvents()
     ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
+
+
+@dataclass
+class RunFormFixture:
+    window: MainWindow
+    ctrl: MagicMock
+    owner: CfgResource
+    tab: ExpTabWidget
+    line: QLineEdit
+    runs: list[tuple[CfgRef, AcceptedConfig]]
+    source_fault: list[bool]
+
+
+@pytest.fixture
+def run_form(
+    qapp: QApplication, request: pytest.FixtureRequest
+) -> Iterator[RunFormFixture]:
+    ctrl = _apply_window_defaults(_mock_ctrl())
+    ctrl.bus = EventBus()
+    snapshot = _snapshot(
+        "pending-tab",
+        supports_analysis=False,
+        has_run_result=False,
+        has_analyze_result=False,
+        has_figure=False,
+    )
+    ctrl.get_tab_snapshot.return_value = snapshot
+    sources = State(
+        SessionEnv(md=MetaDict(None), ml=ModuleLibrary(None), soc=None, soccfg=None)
+    )
+    bindings = MeasureCfgBindings(PublishedHost(sources))
+    source_fault = [False]
+
+    def resolution() -> CfgResolution:
+        if source_fault[0]:
+            raise RuntimeError("Source snapshot failed")
+        return bindings.snapshot_from_state(sources, captured_values={})
+
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
+        CfgSectionValue({"value": DirectValue(2.0)}),
+    )
+    range_mode = getattr(request, "param", None)
+    if range_mode is not None:
+        centered = range_mode == "center-span"
+        schema = CfgSchema(
+            CfgSectionSpec(
+                fields={
+                    "value": ScalarSpec("Value", float),
+                    "range": CenteredSweepSpec() if centered else SweepSpec(),
+                }
+            ),
+            CfgSectionValue(
+                {
+                    "value": DirectValue(2.0),
+                    "range": CenteredSweepValue(1.0, 2.0, 3)
+                    if centered
+                    else SweepValue(0.0, 2.0, 3),
+                }
+            ),
+        )
+    owner = CfgResource(
+        lambda: schema,
+        resolution=resolution,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    ctrl.cfg_resources.lookup.side_effect = lambda tab_id: owner
+    runs: list[tuple[CfgRef, AcceptedConfig]] = []
+
+    def start(tab_id: str, ref: CfgRef) -> None:
+        runs.append((ref, owner.accept(ref.revision)))
+
+    ctrl.start_run.side_effect = start
+    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window.add_tab_widget("pending-tab", "fake")
+    window.resize(1100, 700)
+    window.show()
+    qapp.processEvents()
+    tabs = window.findChildren(ExpTabWidget)
+    assert len(tabs) == 1
+    tab = tabs[0]
+    widget = tab.cfg_form.findChild(QWidget, "cfgInput:value")
+    assert widget is not None
+    line = widget.findChild(QLineEdit)
+    assert line is not None
+    try:
+        yield RunFormFixture(window, ctrl, owner, tab, line, runs, source_fault)
+    finally:
+        window.remove_tab_widget("pending-tab")
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def edit_run_input(fx: RunFormFixture, text: str) -> None:
+    fx.line.setFocus()
+    fx.line.selectAll()
+    for char in text:
+        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            QApplication.sendEvent(
+                fx.line, QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char)
+            )
+
+
+def test_run_submits_local_input_and_uses_returned_ref(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    base = fx.owner.observe().ref
+    edit_run_input(fx, "3.5")
+    assert fx.owner.observe().ref == base
+    assert fx.tab.run_btn.isEnabled()
+    fx.tab.run_btn.click()
+    assert len(fx.runs) == 1
+    ref, accepted = fx.runs[0]
+    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
+    assert ref.revision == base.revision + 1
+    assert accepted.values == {"value": 3.5}
+    assert not fx.tab.cfg_form.has_pending()
+
+
+@pytest.mark.parametrize("run_form", ["endpoints", "center-span"], indirect=True)
+def test_run_uses_the_last_pending_sampling_operation(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    widget = fx.tab.cfg_form.findChild(QWidget, "cfgInput:range")
+    assert widget is not None
+    points = widget.findChild(QLineEdit, "expts")
+    step = widget.findChild(QLineEdit, "step")
+    assert points is not None and step is not None
+    for line, text in ((points, "9"), (step, "0.5"), (points, "7")):
+        line.setFocus()
+        line.selectAll()
+        for char in text:
+            for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                QApplication.sendEvent(
+                    line, QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char)
+                )
+    fx.tab.run_btn.click()
+    assert len(fx.runs) == 1
+    ref, accepted = fx.runs[0]
+    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
+    assert accepted.values == {"value": 2.0, "range": (0, 2, 7)}
+    assert not fx.tab.cfg_form.has_pending()
+
+
+@pytest.mark.parametrize("text", ["-", "nan"], ids=["incomplete", "nonfinite"])
+def test_run_publishes_invalid_input_but_never_runs_old_values(
+    run_form: RunFormFixture,
+    text: str,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, text)
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.runs == []
+    assert not fx.tab.cfg_form.is_valid()
+    assert fx.line.text() == text
+
+
+def test_run_stale_keeps_input_focus_selection_and_does_not_retry(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.51")
+    fx.line.setSelection(1, 2)
+    current = fx.owner.edit(
+        fx.owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),)
+    )
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.runs == []
+    assert fx.owner.observe().ref == current.ref
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.line.text() == "3.51"
+    assert fx.line.hasFocus() and fx.line.selectedText() == ".5"
+
+
+def test_run_unavailable_stops_without_discarding_input(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.5")
+    fx.owner.revoke()
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.runs == []
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.line.text() == "3.5"
+
+
+def test_run_submission_fault_propagates_without_using_old_values(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.5")
+    base = fx.owner.observe().ref
+    fx.source_fault[0] = True
+    with pytest.raises(RuntimeError, match="Source snapshot failed"):
+        fx.window.run_or_stop_tab("pending-tab")
+    assert fx.owner.observe().ref == base
+    assert fx.runs == []
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.line.text() == "3.5"
+
+
+def test_run_can_submit_a_repair_to_invalid_published_config(
+    run_form: RunFormFixture,
+) -> None:
+    fx = run_form
+    fx.owner.edit(
+        fx.owner.observe().ref.revision,
+        (CfgEdit(("value",), DirectValue(None, raw="-")),),
+    )
+    assert not fx.tab.run_btn.isEnabled()
+    edit_run_input(fx, "4.5")
+    assert fx.tab.run_btn.isEnabled()
+    fx.tab.run_btn.click()
+    assert len(fx.runs) == 1
+    assert fx.runs[0][1].values == {"value": 4.5}
+
+
+@pytest.mark.parametrize("block", ["busy", "context", "soc", "global-run"])
+def test_pending_input_does_not_bypass_other_run_gates(
+    run_form: RunFormFixture,
+    block: str,
+) -> None:
+    fx = run_form
+    fx.ctrl.get_tab_snapshot.return_value = _snapshot(
+        "pending-tab",
+        supports_analysis=False,
+        has_run_result=False,
+        has_analyze_result=False,
+        has_figure=False,
+        is_analyzing=block == "busy",
+        has_active_context=block != "context",
+        has_soc=block != "soc",
+        global_run_active=block == "global-run",
+    )
+    edit_run_input(fx, "3.5")
+    assert not fx.tab.run_btn.isEnabled()
+    assert fx.runs == []
+
+
+def test_stop_does_not_submit_local_input(run_form: RunFormFixture) -> None:
+    fx = run_form
+    edit_run_input(fx, "3.5")
+    base = fx.owner.observe().ref
+    fx.ctrl.get_tab_snapshot.return_value = _snapshot(
+        "pending-tab",
+        supports_analysis=False,
+        is_running=True,
+    )
+    fx.window.run_or_stop_tab("pending-tab")
+    assert fx.owner.observe().ref == base
+    assert fx.tab.cfg_form.has_pending()
+    assert fx.runs == []
+    fx.ctrl.cancel_run.assert_called_once_with()
+
+
+def test_reset_explicitly_discards_pending_input(run_form: RunFormFixture) -> None:
+    fx = run_form
+    # Reset's confirmation is the explicit authorization to discard local input.
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
+    # Reopen through the public view lifecycle using the same cfg owner.
+    fx.window.remove_tab_widget("pending-tab")
+    fx.window.deleteLater()
+    fx.window = MainWindow(fx.ctrl, dialog_presenter=dialogs)
+    fx.window.add_tab_widget("pending-tab", "fake")
+    tab = fx.window.findChildren(ExpTabWidget)[0]
+    line = tab.cfg_form.findChild(QLineEdit)
+    assert line is not None
+    line.selectAll()
+    for char in "3.5":
+        QApplication.sendEvent(
+            line,
+            QKeyEvent(QEvent.Type.KeyPress, 0, Qt.KeyboardModifier.NoModifier, char),
+        )
+        QApplication.sendEvent(
+            line,
+            QKeyEvent(QEvent.Type.KeyRelease, 0, Qt.KeyboardModifier.NoModifier, char),
+        )
+    assert tab.cfg_form.has_pending()
+    tab.reset_btn.click()
+    assert not tab.cfg_form.has_pending()
+    assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 2.0}

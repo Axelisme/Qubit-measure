@@ -87,14 +87,12 @@ def _ser_point_done(payload: BasePayload) -> WirePayload:
 
 def _ser_run_finished(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, RunFinishedPayload)
-    del payload
-    return {"requery": _RUN_REQUERY}
+    return {"output_errors": list(payload.output_errors), "requery": _RUN_REQUERY}
 
 
 def _ser_run_stopped(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, RunStoppedPayload)
-    del payload
-    return {"requery": _RUN_REQUERY}
+    return {"output_errors": list(payload.output_errors), "requery": _RUN_REQUERY}
 
 
 def _ser_run_failed(payload: BasePayload) -> WirePayload:
@@ -104,6 +102,7 @@ def _ser_run_failed(payload: BasePayload) -> WirePayload:
         "node": payload.node,
         "flux_idx": payload.flux_idx,
         "stage": payload.stage,
+        "output_errors": list(payload.output_errors),
         "requery": _RUN_REQUERY,
     }
 

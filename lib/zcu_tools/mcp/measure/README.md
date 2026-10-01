@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-29 — reconciled MCP behavior and module layout
+**Last updated:** 2026-10-01, specified cfg Run
 
 # `zcu_tools/mcp/measure/`
 
@@ -25,10 +25,18 @@ Shared SocketTransport 送出前與接收逐幀使用 shared framing 的8 MiB UT
 
 ## Cfg 讀取
 
-`tab.get_cfg`／`editor.get` 回完整 typed observation，包含 locked 欄位、raw/resolved/error、
-validity 與 cached choices；GUI model 是來源，讀取不重新解析 md/ml。Prefix 回指定 node，
-保留其完整 path；即使 prefix 是空字串也不更新整份 cfg 觀察版本。失敗讀取與裸版本表
-不推進基線，其他 cfg 的更新不影響目標 cfg。Wire 格式與描述由 GUI catalog 擁有。
+`tab_get(include=['cfg'])` 回完整 cfg publication，含 cfg_ref、status、tree、source_basis
+及 diagnostics。讀取不重新解析 md/ml，也不暗中讀 tab snapshot。`tab_edit` 將觀察到的
+cfg_ref 作為 expected，原樣送一次 `tab.edit_cfg`。Path 是 string array，revision 是
+canonical decimal string。GUI 原子接受整批，或保持上一份 publication。成功可以發布
+Invalid；stale、busy 和 malformed batch 不重試。Cfg expected/actual 與其他資源的 seen guard 分開。
+
+`tab_run(tab, expected)` 必須帶入觀察到的 cfg_ref。工具原樣轉送一次，不預讀、refresh 或
+自動重試。GUI 只接受指定的 Valid publication，stale 會回 expected/actual；Run 使用固定的
+cfg 與 source_basis，不因後續來源變更而替換輸入。
+
+`editor.get` 保留獨立 library draft 的 typed tree 與 prefix 規則。失敗讀取及裸版本表不推進
+基線。Wire 格式與描述由 GUI catalog 擁有。
 
 ## 關閉
 

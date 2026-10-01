@@ -61,7 +61,9 @@ def test_complete_md_values_survive_preview_and_write_socket(
     try:
         tab = fx.ctrl.new_tab("fake")
         for operation in (
-            lambda: fx.ctrl.start_run(tab),
+            lambda: fx.ctrl.start_run(
+                tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref
+            ),
             lambda: fx.ctrl.analyze(tab, FakeAnalyzeParams()),
         ):
             assert (
@@ -181,7 +183,9 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypa
     try:
         tab = fx.ctrl.new_tab("fake")
         for operation in (
-            lambda: fx.ctrl.start_run(tab),
+            lambda: fx.ctrl.start_run(
+                tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref
+            ),
             lambda: fx.ctrl.analyze(tab, FakeAnalyzeParams()),
         ):
             assert (
@@ -252,7 +256,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
     sock = open_client(fx.service.port)
     try:
         tab = fx.ctrl.new_tab("fake")
-        run = fx.ctrl.start_run(tab)
+        run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
         assert (
             call(sock, "operation.await", {"operation_id": run, "timeout": 2})[
                 "result"

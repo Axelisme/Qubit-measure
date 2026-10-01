@@ -6,8 +6,11 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.cfg.edit_codec import decode_ref
+from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ..cfg_observation import cfg_error_to_remote
 from ._common import follow_tab
 
 if TYPE_CHECKING:
@@ -21,8 +24,12 @@ def h_tab_run_start(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    follow_tab(adapter, tab_id, "run")
-    operation_id = control.start_run(tab_id)
+    try:
+        expected = decode_ref(params["expected"])
+        follow_tab(adapter, tab_id, "run")
+        operation_id = control.start_run(tab_id, expected)
+    except (CfgInputError, CfgPreconditionError) as exc:
+        raise cfg_error_to_remote(exc) from exc
     return {"operation_id": operation_id}
 
 

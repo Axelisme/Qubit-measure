@@ -16,6 +16,7 @@ from .registry import (
     TextInputEnhancer,
     default_cfg_renderers,
 )
+from .resource_form import ResourceCfgFormWidget
 from .structure import (
     TREE_DEPTH_COLORS,
     TreeCfgWidget,
@@ -23,6 +24,7 @@ from .structure import (
 
 __all__ = [
     "CfgFormWidget",
+    "ResourceCfgFormWidget",
     "FieldDecoration",
     "FieldDecorationPatch",
     "FieldDecorationProvider",

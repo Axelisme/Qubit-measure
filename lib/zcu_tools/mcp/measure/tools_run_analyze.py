@@ -13,11 +13,13 @@ from zcu_tools.mcp.measure.tools_tab import tab_get
 
 
 def tab_run(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, int]:
-    """Start the attached tab's current GUI draft; completion belongs to wait()."""
+    """Start exactly the supplied cfg ref once; completion belongs to wait()."""
     tab = arguments.get("tab")
     if not isinstance(tab, str) or not tab:
         raise ValueError("tab must be a non-empty string")
-    reply = ctx.send_gui_rpc("tab.run_start", {"tab_id": tab})
+    reply = ctx.send_gui_rpc(
+        "tab.run_start", {"tab_id": tab, "expected": arguments["expected"]}
+    )
     return {"op": reply["handle"]}
 
 
@@ -107,11 +109,14 @@ def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]
         },
         "tab_run": {
             "handler": partial(tab_run, ctx),
-            "description": "Start a run with the GUI tab's current cfg and return a waitable operation.",
+            "description": "Start a run with the explicitly observed cfg ref {cfg_id,revision} and return a waitable operation. revision is a canonical decimal string. Stale or non-Valid cfg is rejected; no hidden reads, refresh or retry.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"tab": {"type": "string"}},
-                "required": ["tab"],
+                "properties": {
+                    "tab": {"type": "string"},
+                    "expected": {"type": "object"},
+                },
+                "required": ["tab", "expected"],
             },
         },
     }

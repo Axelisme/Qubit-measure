@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -8,11 +10,24 @@ from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,
     ArbWaveformError,
+    ArbWaveformInfo,
     ArbWaveformPreview,
     FormulaRecipe,
     prepare_preview_series,
     render_formula_recipe,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def repository_state_guard() -> Iterator[None]:
+    before = vars(ArbWaveformDatabase)["_database_path"]
+    yield
+    assert vars(ArbWaveformDatabase)["_database_path"] == before
+
+
+@pytest.fixture(autouse=True)
+def isolated_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
 
 
 def _init_db(tmp_path):
@@ -105,7 +120,8 @@ def test_create_from_formula_embeds_loadable_recipe_and_preserves_formula_text(
         "normalize": "none",
     }
 
-    info = ArbWaveformDatabase.create_from_formula("formula1", recipe)
+    ArbWaveformDatabase.create_from_formula("formula1", recipe)
+    info = ArbWaveformDatabase.inspect("formula1")
 
     assert info.sample_count == 1001
     assert info.duration == pytest.approx(1.0)
@@ -116,6 +132,36 @@ def test_create_from_formula_embeds_loadable_recipe_and_preserves_formula_text(
     with np.load(root / "formula1.npz", allow_pickle=False) as archive:
         saved = json.loads(str(archive["recipe_json"].item()))
     assert saved == recipe
+
+
+def test_formula_writes_succeed_when_inspection_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _init_db(tmp_path)
+    recipe: dict[str, object] = {
+        "segments": [{"duration": 0.002, "formula": "0.5"}],
+        "normalize": "none",
+    }
+
+    def unavailable(*_args: object, **_kwargs: object) -> ArbWaveformInfo:
+        raise OSError("inspection unavailable")
+
+    monkeypatch.setattr(ArbWaveformDatabase, "inspect", unavailable)
+    ArbWaveformDatabase.create_from_formula("pulse", recipe)
+    saved = ArbWaveformDatabase.load("pulse")
+    assert saved.recipe is not None
+    assert saved.recipe.to_dict() == recipe
+    replacement: dict[str, object] = {
+        "segments": [{"duration": 0.003, "formula": "0.25"}],
+        "normalize": "none",
+    }
+    ArbWaveformDatabase.update_formula("pulse", replacement)
+    updated = ArbWaveformDatabase.load("pulse")
+    assert updated.recipe is not None
+    assert updated.recipe.to_dict() == replacement
+    assert updated.duration == pytest.approx(0.003)
+    with pytest.raises(OSError, match="inspection unavailable"):
+        ArbWaveformDatabase.inspect("pulse")
 
 
 def test_formula_sample_count_and_non_grid_segment_durations():

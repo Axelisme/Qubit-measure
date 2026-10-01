@@ -151,7 +151,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     device_adapter = SimpleNamespace(device_control=device_control)
 
     arb_ctrl = MagicMock()
-    arb_ctrl.list_arb_waveforms.side_effect = FailedPreconditionError(
+    arb_ctrl.arb_waveforms.list_data_keys.side_effect = FailedPreconditionError(
         "No project database_path is configured.", reason_code="no_project"
     )
     arb_adapter = SimpleNamespace(ctrl=arb_ctrl)
@@ -289,7 +289,10 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
 
     cases: list[tuple[Callable[[], object], WireTuple]] = [
         (
-            lambda: h_tab_run_start(cast(Any, run_adapter), {"tab_id": "t1"}),
+            lambda: h_tab_run_start(
+                cast(Any, run_adapter),
+                {"tab_id": "t1", "expected": {"cfg_id": "cfg-t1", "revision": "0"}},
+            ),
             (
                 ErrorCode.PRECONDITION_FAILED,
                 "No run result",

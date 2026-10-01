@@ -87,6 +87,7 @@ class RunFinishedPayload(_RunPayload):
     """Payload for RUN_FINISHED."""
 
     EVENT: ClassVar[RunEvent] = RunEvent.RUN_FINISHED
+    output_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ class RunStoppedPayload(_RunPayload):
     """Payload for RUN_STOPPED."""
 
     EVENT: ClassVar[RunEvent] = RunEvent.RUN_STOPPED
+    output_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -110,3 +112,4 @@ class RunFailedPayload(_RunPayload):
     node: str | None = None
     flux_idx: int | None = None
     stage: str | None = None
+    output_errors: tuple[str, ...] = ()

@@ -11,25 +11,25 @@ does not trigger a search.
 a Qt-signalling ``BaseProgressBar`` via ``use_pbar_factory``; without one,
 ``search_database`` falls back to its tqdm default.
 
-The search kernel is shared with the Notebook wrapper; the diagnostic builder
-returns a pyplot-managed figure under the GUI worker's routing scope.
+The search kernel and its numeric result are shared with the Notebook wrapper.
+The GUI owns diagnostic rendering after recording the result.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import ParamBounds, search_database
+from zcu_tools.analysis.fluxdep.search import (
+    DatabaseSearchResult,
+    ParamBounds,
+    search_database,
+)
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
-from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
     FluxDepFit,
@@ -41,19 +41,6 @@ from zcu_tools.resources.qubit_params import (
 logger = logging.getLogger(__name__)
 
 PbarFactory = Callable[..., BaseProgressBar]
-
-
-@dataclass(frozen=True)
-class SearchResult:
-    """A completed database search — a pure value, no State touched.
-
-    Returned by ``compute_search`` (runnable off the main thread) and handed to
-    ``record_result`` (main thread) to write onto State. The diagnostic Figure is
-    None when ``plot=False`` and present in the GUI worker path (``plot=True``).
-    """
-
-    params: tuple[float, float, float]  # (EJ, EC, EL)
-    figure: Figure | None = None
 
 
 def default_params_path(result_dir: str) -> str:
@@ -125,8 +112,7 @@ class FitService:
         self,
         *,
         pbar_factory: PbarFactory | None = None,
-        plot: bool = False,
-    ) -> SearchResult:
+    ) -> DatabaseSearchResult:
         """Run the database search and return its result — WITHOUT touching State.
 
         This is the pure, runnable-anywhere core: it snapshots the inputs and the
@@ -135,11 +121,10 @@ class FitService:
         write, so it is safe to run on a worker thread — the result is recorded
         separately on the main thread via ``record_result``.
 
-        ``plot=True`` asks the search for its native diagnostic Figure (frequency
-        comparison + per-parameter distance scatter). ``pbar_factory`` installs a
-        custom progress-bar factory for the duration (a Qt-signalling bar in the
-        GUI worker); without one, tqdm is used. Fast-fails when no database path
-        is set or the selected cloud is empty.
+        The result includes numeric diagnostics, not a Figure. Rendering belongs
+        to the caller after recording the result. ``pbar_factory`` installs a
+        custom progress-bar factory for the duration; without one, tqdm is used.
+        Fast-fails when no database path is set or the selected cloud is empty.
         """
         fit = self._state.fit
         if not fit.database_path:
@@ -155,35 +140,31 @@ class FitService:
         transitions = transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
         EJb, ECb, ELb = fit.EJb, fit.ECb, fit.ELb
 
-        def _run() -> tuple[tuple[float, float, float], Figure | None]:
-            result = search_database(
+        def _run() -> DatabaseSearchResult:
+            return search_database(
                 s_fluxs,
                 s_freqs,
                 database_path,
                 transitions,
                 ParamBounds(EJ=EJb, EC=ECb, EL=ELb),
             )
-            figure = make_search_diagnostic_figure(result) if plot else None
-            if plot:
-                plt.show()
-            return result.params, figure
 
         if pbar_factory is not None:
             with use_pbar_factory(pbar_factory):
-                params, figure = _run()
+                result = _run()
         else:
-            params, figure = _run()
+            result = _run()
 
-        logger.debug("compute_search: params=%s", params)
-        return SearchResult(params=params, figure=figure)
+        logger.debug("compute_search: params=%s", result.params)
+        return result
 
-    def record_result(self, result: SearchResult) -> None:
+    def record_result(self, result: DatabaseSearchResult) -> None:
         """Write a computed search result onto State (MAIN THREAD only).
 
         Separated from ``compute_search`` so the heavy search can run on a worker
         thread while this single State write happens on the Qt main thread, per
         the main-thread State invariant. ``search_database`` raises if no
-        candidate is feasible, so a ``SearchResult`` here always carries a real
+        candidate is feasible, so a ``DatabaseSearchResult`` here always carries a real
         result.
         """
         self._state.set_fit_result(result.params)

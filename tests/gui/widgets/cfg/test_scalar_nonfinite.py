@@ -32,7 +32,7 @@ def test_form_preserves_nonfinite_scalar_error_until_corrected(
     ctrl.get_bus.return_value = BaseEventBus()
     ctrl.get_current_md.return_value = MagicMock()
     ctrl.get_current_ml.return_value = MagicMock()
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={"value": ScalarSpec("Value", type_, optional=True)}

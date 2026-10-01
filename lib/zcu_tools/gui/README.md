@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-29 — Setup 去除 startup 特化
+**Last updated:** 2026-10-01, resource form local input
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -201,6 +201,15 @@ cleanup runs.
 
 ## Shared Qt Cfg Widgets (`widgets/cfg/`)
 
+`ResourceCfgFormWidget` renders a caller-owned `CfgEditing` handle. Text input
+stays in the view until `submit_pending()` sends one batch against the first
+input\'s publication ref. External publications keep pending controls, focus and
+selection intact. Stale submission retains that input. The user can discard it
+or confirm the displayed differences before reapplying to the shown revision.
+Selectors submit pending input before changing the selection. Detach unsubscribes
+and discards view input without revoking the resource or rerunning defaults.
+This local-input behavior does not change `CfgFormWidget`\'s draft binding contract.
+
 `zcu_tools.gui.widgets.cfg`擁有`CfgFormWidget`、field widgets與presentation-only
 decoration contract。widget attach service-owned `CfgDraft`並render `draft.root`；detach會
 unsubscribe並刪除Qt tree，但不會close draft。shared widget只import Qt、`gui.cfg`、
@@ -209,6 +218,13 @@ experiment policy。
 
 shared Qt leaf同時集中scalar input的write/connect dispatch與純`QWidget`→PNG encoding；
 app仍擁有visibility、target lookup、main-thread marshal與remote wire policy。
+`ScalarInputWidget`只顯示已發布的scalar value/options並提交輸入，不解析數字或求值；
+`ScalarWidget`將既有binding field連到同一presentation。
+`SweepInputWidget`與`CenteredSweepInputWidget`同樣只提交edge輸入、顯示publication；
+Points／Step同步仍由cfg owner計算。既有range binding widgets共用這些presentation。
+`ReferenceInputWidget`只呈現已發布的選項、有效性與missing hint，提交Custom選擇、library key或None意圖；既有`ReferenceWidget`是共用renderer的binding adapter。Custom繼承與nested linkage由cfg owner負責，widget不另存可寫value tree。
+`ResourceCfgFormWidget`以`CfgEditing.observe/watch`建立同款dense tree，透過最新revision提交scalar、range與reference輸入；choice可見欄位只投影已發布selector。結構變更在Qt輸入signal結束後重建，穩定欄位則原位刷新。detach解除觀察但不revoke caller的owner；它不建立可寫`CfgDraft`鏡像。既有`CfgFormWidget`的binding caller維持原來路徑。
+Measure tab 使用同一 caller-owned resource；view attach/detach 不建立或撤銷 tab cfg。
 
 Sweep renderers use one balanced two-column Range/Sampling grammar: `SweepWidget` places Start/Stop in the first row and Points/Step in the second, while `CenteredSweepWidget` places Center/Span in the first row and Points/Step in the second. The displayed Points label is presentation-only for the canonical `expts` value; field update methods continue to own synchronization and preserve validation, decoration, snapshot, lowering, and persistence behavior.
 

@@ -115,3 +115,98 @@ def test_experiment_manager_str_without_active_context(tmp_path) -> None:
     em = ContextManager(tmp_path)
 
     assert "active=None" in str(em)
+
+
+def test_replace_contents_persists_complete_mapping_once(tmp_path, monkeypatch):
+    path = tmp_path / "meta.json"
+    md = MetaDict(path)
+    md.update({"old": 1})
+    written = []
+    original_dump = MetaDict.dump
+
+    def record_dump(store: MetaDict) -> None:
+        written.append(dict(store.snapshot().items()))
+        original_dump(store)
+
+    monkeypatch.setattr(MetaDict, "dump", record_dump)
+    candidate = {"new": 2}
+    md.replace_contents(candidate)
+    candidate.clear()
+
+    assert written == [{"new": 2}]
+    assert dict(md.snapshot().items()) == {"new": 2}
+    assert dict(MetaDict(path).items()) == {"new": 2}
+
+
+def test_replace_contents_rejects_protected_key_without_writing(tmp_path):
+    path = tmp_path / "meta.json"
+    md = MetaDict(path)
+    md.update({"stable": 1})
+    before = path.read_bytes()
+
+    with pytest.raises(AttributeError, match="protected"):
+        md.replace_contents({"first": 2, "sync": 3})
+
+    assert dict(md.snapshot().items()) == {"stable": 1}
+    assert path.read_bytes() == before
+
+
+def test_replace_contents_restores_memory_when_storage_fails(tmp_path, monkeypatch):
+    path = tmp_path / "meta.json"
+    md = MetaDict(path)
+    md.update({"stable": 1})
+    before = path.read_bytes()
+
+    def fail_dump(_store: MetaDict) -> None:
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr(MetaDict, "dump", fail_dump)
+    with pytest.raises(OSError, match="storage unavailable"):
+        md.replace_contents({"new": 2})
+
+    assert dict(md.snapshot().items()) == {"stable": 1}
+    assert path.read_bytes() == before
+
+
+def test_replace_contents_rejects_readonly_store(tmp_path):
+    path = tmp_path / "meta.json"
+    md = MetaDict(path)
+    md.update({"stable": 1})
+    readonly = MetaDict(path, readonly=True)
+
+    with pytest.raises(RuntimeError, match="read-only"):
+        readonly.replace_contents({"new": 2})
+
+    assert dict(readonly.snapshot().items()) == {"stable": 1}
+
+
+@pytest.mark.parametrize("key", ["_private", "sync", 123])
+def test_validate_data_key_rejects_invalid_names(key):
+    with pytest.raises((AttributeError, TypeError)):
+        MetaDict.validate_data_key(key)
+
+
+def test_validate_data_key_returns_user_key():
+    assert MetaDict.validate_data_key("gain") == "gain"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"__complex__": [1, 2]},
+        {"__metadict_string__": "literal"},
+        {"nested": [{"__complex__": [1, 2]}]},
+        {"nested": [{"__metadict_string__": "literal"}]},
+    ],
+)
+def test_replace_contents_rejects_reserved_values_before_mutation(tmp_path, bad):
+    path = tmp_path / "meta.json"
+    md = MetaDict(path)
+    md.update({"stable": 1})
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match="reserved MetaDict tag"):
+        md.replace_contents({"first": 2, "bad": bad})
+
+    assert dict(md.snapshot().items()) == {"stable": 1}
+    assert path.read_bytes() == before

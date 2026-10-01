@@ -120,6 +120,33 @@ class _TreeBranchStyle(QProxyStyle):
         painter.restore()
 
 
+def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
+    """Create the shared dense tree viewport and keep its branch style alive."""
+    tree = QTreeWidget()
+    tree.setObjectName("cfgTree")
+    tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
+    tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+    tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+    tree.setHeaderHidden(True)
+    tree.setColumnCount(2)
+    tree.setRootIsDecorated(False)
+    tree.setIndentation(_INDENTATION_PX)
+    tree.setAlternatingRowColors(False)
+    tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)  # type: ignore[attr-defined]
+    tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
+    font = tree.font()
+    font.setPixelSize(_TREE_FONT_SIZE_PX)
+    tree.setFont(font)
+    style = _TreeBranchStyle()
+    style.setParent(tree)
+    tree.setStyle(style)
+    header = tree.header()
+    assert header is not None
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # type: ignore[attr-defined]
+    header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+    return tree, style
+
+
 # choice_visible_keys, is_hidden, decorated_label now imported from presentation (single source)
 
 
@@ -147,34 +174,9 @@ class TreeCfgWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         # A2: viewport follows available panel height — tree expands, no fixed threshold
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
-        self._tree = QTreeWidget()
-        self._tree.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )  # type: ignore[attr-defined]
-        self._tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-        self._tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+        self._tree, self._branch_style = make_dense_cfg_tree()
         layout.addWidget(self._tree, stretch=1)
-
-        self._tree.setObjectName("cfgTree")
-        self._tree.setHeaderHidden(True)
-        self._tree.setColumnCount(2)
-        self._tree.setRootIsDecorated(False)
-        self._tree.setIndentation(_INDENTATION_PX)
-        self._tree.setAlternatingRowColors(False)
-        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)  # type: ignore[attr-defined]
-        self._tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
-        # 13 px field text per spec; use pixel-size font to avoid masking the branch proxy.
-        font = self._tree.font()
-        font.setPixelSize(_TREE_FONT_SIZE_PX)
-        self._tree.setFont(font)
-        self.setFont(font)
-        self._branch_style = _TreeBranchStyle()
-        self._branch_style.setParent(self._tree)
-        self._tree.setStyle(self._branch_style)
-        header = self._tree.header()
-        assert header is not None
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # type: ignore[attr-defined]
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+        self.setFont(self._tree.font())
 
         self._path_to_item: dict[str, QTreeWidgetItem] = {}
         self._item_depth: dict[int, int] = {}  # id(item) -> depth
@@ -248,7 +250,6 @@ class TreeCfgWidget(QWidget):
         # Reference-elided subtree: rebuild only descendants of the reference item,
         # preserving the reference header, ancestors and unrelated branches.
         if ref_field is not None:
-            sub = ref_field.sub_field
             # Collect descendants under the reference (excludes the reference itself)
             descendant_item_paths = [
                 p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
@@ -294,11 +295,11 @@ class TreeCfgWidget(QWidget):
                         except Exception:
                             pass
                         try:
-                            cast(QWidget, header).setParent(None)
+                            header.setParent(None)
                         except Exception:
                             pass
                         try:
-                            cast(QWidget, header).deleteLater()
+                            header.deleteLater()
                         except Exception:
                             pass
                         try:
@@ -393,11 +394,11 @@ class TreeCfgWidget(QWidget):
                     except Exception:
                         pass
                     try:
-                        cast(QWidget, header).setParent(None)
+                        header.setParent(None)
                     except Exception:
                         pass
                     try:
-                        cast(QWidget, header).deleteLater()
+                        header.deleteLater()
                     except Exception:
                         pass
                     try:
@@ -464,7 +465,7 @@ class TreeCfgWidget(QWidget):
             if not path.startswith(self._path):
                 return None
             if path == self._path:
-                return cast(SectionField, cur)
+                return cur
             remaining = path.removeprefix(self._path + ".")
             parts = remaining.split(".") if remaining else []
         for part in parts:
@@ -563,7 +564,7 @@ class TreeCfgWidget(QWidget):
                 return None, None
             entries.append((key, child_path, child_field))
         if len(entries) == 1 and isinstance(entries[0][2], SectionField):
-            wrapper_field = cast(SectionField, entries[0][2])
+            wrapper_field = entries[0][2]
             wrapper_path = entries[0][1]
             # Do not elide a wrapper that carries observable decoration
             if self._context.decoration_for_path is not None:

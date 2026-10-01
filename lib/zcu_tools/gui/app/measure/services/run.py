@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.ports import ExclusionGate
 
     from ..state import RetiredPaneResources
     from .ports import RunStatePort, WritebackLifecyclePort
@@ -52,9 +53,12 @@ class RunService:
         bus: EventBus,
         handles: OperationHandles,
         writeback: WritebackLifecyclePort,
+        *,
+        gate: ExclusionGate,
     ) -> None:
         self._state = state
         self._runner = runner
+        self._gate = gate
         self._bus = bus
         # handles is used by cancel_run (handles.cancel) and for live_count queries
         # by the controller. The runner also holds a reference to the same handles
@@ -66,13 +70,25 @@ class RunService:
         self._active_token: int | None = None
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:
-        if retired is None:
-            return
         for draft in retired.writeback_drafts:
             try:
                 self._writeback.teardown_draft(draft)
             except Exception:
                 logger.exception("retired run draft teardown failed")
+
+    def _prepare_tab_for_run(self, tab_id: str) -> None:
+        # Reject conflicts before reserving State or clearing results. Runner
+        # checks the same gate again when opening the operation.
+        self._gate.ensure_can_start(OperationKind.RUN)
+        # Reserve State's existing busy flag before cleanup or synchronous gate
+        # notifications can reenter tab editing and closing.
+        self._state.set_tab_running(tab_id, True)
+        try:
+            retired = self._state.clear_tab_results(tab_id)
+            self._teardown_retired(retired)
+        except Exception:
+            self._state.set_tab_running(tab_id, False)
+            raise
 
     def start_run(
         self,
@@ -91,8 +107,7 @@ class RunService:
         # PRE-OPEN: Starting a run invalidates the previous run/analyze/writeback
         # result. State performs one owner-thread swap and returns every detached
         # draft; cleanup happens only after the new empty panes are committed.
-        retired = self._state.clear_tab_results(tab_id)
-        self._teardown_retired(retired)
+        self._prepare_tab_for_run(tab_id)
 
         # A single StopSignal owns the Schedule-visible stop flag for this run.
         # ``cancel_requested`` is separate: Schedule failures also set the stop
@@ -102,7 +117,7 @@ class RunService:
         cancel_requested = threading.Event()
         adapter = permit.adapter
         request = permit.request
-        raw_cfg = permit.raw_cfg
+        raw_cfg = permit.accepted_cfg.values
 
         def request_cancel() -> None:
             cancel_requested.set()
@@ -113,13 +128,12 @@ class RunService:
             # figure routing+liveplot (figure_ambient, app layer), progress
             # (progress_ambient, session layer), and cancel (Schedule StopSignal
             # plus device setup cancel scope).
-            with figure_ambient(live_container):
-                with progress_ambient(factory):
-                    with schedule_stop_scope(stop_signal):
-                        with device_setup_cancel_scope(stop_event):
-                            result = adapter.run(request, raw_cfg)
-                            stop_signal.raise_if_error()
-                            return result
+            with figure_ambient(live_container), progress_ambient(factory):
+                with schedule_stop_scope(stop_signal):
+                    with device_setup_cancel_scope(stop_event):
+                        result = adapter.run(request, raw_cfg)
+                        stop_signal.raise_if_error()
+                        return result
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # Interpret bg outcome: we own stop_event, so we decide cancelled vs
@@ -197,6 +211,7 @@ class RunService:
         try:
             token = self._runner.begin(spec)
         except Exception:
+            self._state.set_tab_running(tab_id, False)
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id=tab_id,
@@ -205,10 +220,8 @@ class RunService:
             )
             raise
 
-        # POST-BEGIN: tab is marked running and started events are emitted only
-        # after begin() succeeds (a begin-raise means no worker started — ADR-0066).
+        # Started events are emitted only after begin() succeeds (ADR-0066).
         self._active_token = token
-        self._state.set_tab_running(tab_id, True)
         with self._bus.origin(self._handles.event_origin(token)):
             self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token

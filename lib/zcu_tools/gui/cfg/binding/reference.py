@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from typing import cast
 
@@ -18,7 +18,7 @@ from ..reference_key import (
     make_custom_reference_key,
     parse_custom_reference_key,
 )
-from .fields import CallbackList, CfgField, SectionField, _validate_section_keys
+from .fields import CallbackList, CfgField, SectionField, validate_section_keys
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 
 logger = logging.getLogger(__name__)
@@ -66,9 +66,10 @@ class ReferenceField(CfgField):
         initial_val: object = None,
     ) -> None:
         super().__init__(spec)
+        initial_spec: CfgSectionSpec | None = None
         if isinstance(initial_val, ReferenceValue):
             initial_spec = select_ref_value_spec(spec, initial_val)
-            _validate_section_keys(
+            validate_section_keys(
                 initial_spec,
                 initial_val.value,
                 path=spec.label or "<reference>",
@@ -85,7 +86,7 @@ class ReferenceField(CfgField):
             init_overridden = initial_val.is_overridden
         else:
             first_label = spec.allowed[0].label
-            self._chosen_key = make_custom_reference_key(first_label)
+            self._chosen_key = make_custom_reference_key(first_label or "Custom")
             initial_section = None
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
@@ -100,6 +101,7 @@ class ReferenceField(CfgField):
             binding_state=self._binding_state,
             is_enabled=self._is_enabled,
             hint=initial_section,
+            chosen_resolution=(initial_spec, None) if init_overridden else _UNRESOLVED,
         )
         self._commit_rebuild(prepared)
 
@@ -146,7 +148,7 @@ class ReferenceField(CfgField):
             self._commit_rebuild(prepared)
             self.on_change.emit()
 
-    def set_enabled(self, enabled: bool) -> None:
+    def set_enabled(self, enabled: bool) -> None:  # noqa: FBT001 - binding API
         self._require_open()
         if not self.spec.optional:
             return
@@ -187,23 +189,27 @@ class ReferenceField(CfgField):
                 f"ReferenceField expects ReferenceValue or None, got {type(value).__name__}"
             )
         chosen_spec = select_ref_value_spec(self.spec, value)
-        _validate_section_keys(
+        validate_section_keys(
             chosen_spec,
             value.value,
             path=self.spec.label or "<reference>",
         )
         binding_state = _binding_state_for_key(value.chosen_key)
-        if value.is_overridden and binding_state is LibraryBindingState.LINKED:
-            binding_state = LibraryBindingState.MODIFIED
-        elif (
-            binding_state is LibraryBindingState.LINKED
-            and value.chosen_key == self._chosen_key
-            and self._binding_state is LibraryBindingState.LINKED
-            and self.sub_field is not None
-            and self.sub_field.get_value() != value.value
+        if binding_state is LibraryBindingState.LINKED and (
+            value.is_overridden
+            or (
+                value.chosen_key == self._chosen_key
+                and self._binding_state is LibraryBindingState.LINKED
+                and self.sub_field is not None
+                and self.sub_field.get_value() != value.value
+            )
         ):
             binding_state = LibraryBindingState.MODIFIED
-        resolved = self._resolve_key(value.chosen_key)
+        resolved = (
+            (chosen_spec, None)
+            if binding_state is LibraryBindingState.MODIFIED
+            else self._resolve_key(value.chosen_key)
+        )
         prepared = self._prepare_rebuild(
             chosen_key=value.chosen_key,
             binding_state=binding_state,
@@ -228,17 +234,39 @@ class ReferenceField(CfgField):
 
     def refresh_references(self, kind: str | None = None) -> None:
         self._require_open()
-        if kind is None or kind == self.spec.kind:
-            new_keys = self._load_available_keys()
-            keys_changed = new_keys != self._available_keys
-            self._available_keys = new_keys
-            resolved = self._resolve_chosen()
-            binding_emitted = self._refresh_catalog_binding(resolved)
-            if self._binding_state is LibraryBindingState.CUSTOM and self.sub_field:
+        if self._binding_state in (
+            LibraryBindingState.CUSTOM,
+            LibraryBindingState.MODIFIED,
+        ):
+            if kind is None or kind == self.spec.kind:
+                new_keys = self._load_available_keys()
+                changed = new_keys != self._available_keys
+                self._available_keys = new_keys
+                if (
+                    self._binding_state is LibraryBindingState.MODIFIED
+                    and self._chosen_key not in new_keys
+                    and self.sub_field is not None
+                ):
+                    self._chosen_key = make_custom_reference_key(
+                        self.sub_field.spec.label
+                    )
+                    self._binding_state = LibraryBindingState.CUSTOM
+                    changed = True
+                if changed:
+                    self.on_change.emit()
+            if self.sub_field:
                 self.sub_field.refresh_references(kind)
                 self._refresh_validity()
-            if keys_changed and not binding_emitted:
-                self.on_change.emit()
+            return
+        if kind is None or kind == self.spec.kind:
+            self._available_keys = self._load_available_keys()
+            prepared = self._prepare_rebuild(
+                chosen_key=self._chosen_key,
+                binding_state=LibraryBindingState.LINKED,
+                is_enabled=self._is_enabled,
+            )
+            self._commit_rebuild(prepared)
+            self.on_change.emit()
             return
         if self.sub_field:
             self.sub_field.refresh_references(kind)
@@ -263,8 +291,6 @@ class ReferenceField(CfgField):
     ) -> _PreparedRebuild:
         old_spec = self.sub_field.spec if self.sub_field else None
         old_value = self.sub_field.get_value() if self.sub_field else None
-        final_key = chosen_key
-        final_binding_state = binding_state
         missing_library_ref = False
         chosen_spec: CfgSectionSpec | None = None
         catalog_value: CfgSectionValue | None = None
@@ -273,36 +299,21 @@ class ReferenceField(CfgField):
         else:
             resolved = cast(_ResolvedChoice | None, chosen_resolution)
         if resolved is None:
-            if binding_state is LibraryBindingState.MODIFIED and old_spec is not None:
-                kept_value = old_value if old_value is not None else hint
-                label = self._custom_label_for_value(
-                    old_spec,
-                    kept_value,
-                    chosen_key=chosen_key,
-                )
-                final_key = make_custom_reference_key(label)
-                final_binding_state = LibraryBindingState.CUSTOM
-                resolved = self._resolve_key(final_key)
-                if resolved is None:
-                    raise RuntimeError(
-                        "Custom reference resolution unexpectedly returned missing"
-                    )
-                if hint is None:
-                    hint = kept_value
-            else:
-                missing_library_ref = True
-                chosen_spec = self._spec_for_missing_ref_value(
-                    old_spec,
-                    hint,
-                    chosen_key=chosen_key,
-                )
-                catalog_value = None
+            missing_library_ref = True
+            chosen_spec = self._spec_for_missing_ref_value(
+                old_spec, hint, chosen_key=chosen_key
+            )
         if resolved is not None:
             chosen_spec, catalog_value = resolved
 
         replacement: SectionField | None = None
         if chosen_spec is not None:
-            if hint is not None:
+            if (
+                binding_state is LibraryBindingState.LINKED
+                and catalog_value is not None
+            ):
+                value = catalog_value
+            elif hint is not None:
                 value = hint
             elif catalog_value is not None:
                 value = catalog_value
@@ -320,22 +331,12 @@ class ReferenceField(CfgField):
                 initial_val=value,
             )
 
-        if (
-            final_binding_state is LibraryBindingState.CUSTOM
-            and chosen_key != final_key
-        ):
-            logger.warning(
-                "Reference %r (modified) no longer exists; converting to "
-                "inline %s, keeping edits",
-                chosen_key,
-                final_key,
-            )
-        elif missing_library_ref:
+        if missing_library_ref:
             logger.warning("Reference %r no longer exists in the catalog", chosen_key)
 
         return _PreparedRebuild(
-            chosen_key=final_key,
-            binding_state=final_binding_state,
+            chosen_key=chosen_key,
+            binding_state=binding_state,
             missing_library_ref=missing_library_ref,
             is_enabled=is_enabled,
             sub_field=replacement,
@@ -362,11 +363,6 @@ class ReferenceField(CfgField):
         if enabled_changed:
             self.on_enabled_changed.emit(prepared.is_enabled)
 
-    def _resolve_chosen(
-        self,
-    ) -> _ResolvedChoice | None:
-        return self._resolve_key(self._chosen_key)
-
     def _resolve_key(self, chosen_key: str) -> _ResolvedChoice | None:
         try:
             label = parse_custom_reference_key(chosen_key)
@@ -374,7 +370,7 @@ class ReferenceField(CfgField):
             raise RuntimeError(str(exc)) from exc
         if label is not None:
             for spec in self.spec.allowed:
-                if spec.label == label:
+                if (spec.label or "Custom") == label:
                     return spec, None
             raise RuntimeError(f"Unknown custom reference label: {label!r}")
 
@@ -417,30 +413,18 @@ class ReferenceField(CfgField):
                 return None
         return None
 
-    def _custom_label_for_value(
-        self,
-        old_spec: CfgNodeSpec | None,
-        value: CfgSectionValue | None,
-        *,
-        chosen_key: str,
-    ) -> str:
-        if isinstance(old_spec, CfgSectionSpec) and any(
-            spec.label == old_spec.label for spec in self.spec.allowed
-        ):
-            return old_spec.label
-        if isinstance(value, CfgSectionValue):
-            try:
-                return select_ref_value_spec(
-                    self.spec, ReferenceValue(chosen_key, value)
-                ).label
-            except RuntimeError:
-                pass
-        return self.spec.allowed[0].label
+    def detach(self) -> None:
+        """Preserve current input without following this reference's source key."""
+        self._require_open()
+        if self._binding_state is LibraryBindingState.LINKED:
+            self._binding_state = LibraryBindingState.MODIFIED
+            self.on_change.emit()
 
     def _on_sub_change(self, *_: object) -> None:
         if self._binding_state is LibraryBindingState.LINKED:
-            self._binding_state = LibraryBindingState.MODIFIED
-        self.on_change.emit()
+            self.detach()
+        else:
+            self.on_change.emit()
 
     def _on_sub_validity_change(self, *_: object) -> None:
         self._refresh_validity()
@@ -453,34 +437,3 @@ class ReferenceField(CfgField):
             self._set_valid(False)
             return
         self._set_valid(self.sub_field is None or self.sub_field.is_valid())
-
-    def _refresh_catalog_binding(self, resolved: _ResolvedChoice | None) -> bool:
-        if self._binding_state is LibraryBindingState.CUSTOM:
-            return False
-        if self._missing_library_ref:
-            previous_state = self._binding_state
-            prepared = self._prepare_rebuild(
-                chosen_key=self._chosen_key,
-                binding_state=LibraryBindingState.LINKED,
-                is_enabled=self._is_enabled,
-                chosen_resolution=resolved,
-            )
-            if prepared.missing_library_ref:
-                prepared = replace(prepared, binding_state=previous_state)
-            self._commit_rebuild(prepared)
-            self.on_change.emit()
-            return True
-        if (
-            resolved is not None
-            and self._binding_state is not LibraryBindingState.LINKED
-        ):
-            return False
-        prepared = self._prepare_rebuild(
-            chosen_key=self._chosen_key,
-            binding_state=self._binding_state,
-            is_enabled=self._is_enabled,
-            chosen_resolution=resolved,
-        )
-        self._commit_rebuild(prepared)
-        self.on_change.emit()
-        return True

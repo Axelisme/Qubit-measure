@@ -28,7 +28,6 @@ from .model import (
     ScalarValue,
     SweepSpec,
     SweepValue,
-    _reference_discriminator_key,
 )
 from .reference_key import parse_custom_reference_key
 
@@ -117,67 +116,69 @@ def _node_value_to_raw(
     *,
     fill_missing_literals: bool = False,
 ) -> object:
-    if isinstance(spec, LiteralSpec):
-        # Fixed-value field; the literal value is canonical.
-        return {"__kind": "direct", "value": _to_json_compatible(spec.value)}
-    if isinstance(spec, ScalarSpec):
-        assert isinstance(value, (DirectValue, EvalValue))
-        if isinstance(value, EvalValue):
-            return {
-                "__kind": "eval",
-                "expr": value.expr,
+    match spec:
+        case LiteralSpec():
+            # Fixed-value field; the literal value is canonical.
+            return {"__kind": "direct", "value": _to_json_compatible(spec.value)}
+        case ScalarSpec():
+            assert isinstance(value, (DirectValue, EvalValue))
+            if isinstance(value, EvalValue):
+                return {
+                    "__kind": "eval",
+                    "expr": value.expr,
+                }
+            payload: dict[str, object] = {
+                "__kind": "direct",
+                "value": _to_json_compatible(value.value),
             }
-        payload: dict[str, object] = {
-            "__kind": "direct",
-            "value": _to_json_compatible(value.value),
-        }
-        if value.raw is not None:
-            payload["raw"] = value.raw
-        if value.error is not None:
-            payload["error"] = value.error
-        return payload
-    if isinstance(spec, SweepSpec):
-        assert isinstance(value, SweepValue)
-        return {
-            "start": _sweep_edge_to_raw(value.start),
-            "stop": _sweep_edge_to_raw(value.stop),
-            "expts": _range_input_to_raw(value.expts),
-            "step": _range_input_to_raw(value.step),
-        }
-    if isinstance(spec, CenteredSweepSpec):
-        assert isinstance(value, CenteredSweepValue)
-        return {
-            "center": _sweep_edge_to_raw(value.center),
-            "span": _range_input_to_raw(value.span),
-            "expts": _range_input_to_raw(value.expts),
-            "step": _range_input_to_raw(value.step),
-        }
-    if isinstance(spec, CfgSectionSpec):
-        assert isinstance(value, CfgSectionValue)
-        return _section_value_to_raw(
-            spec,
-            value,
-            fill_missing_literals=fill_missing_literals,
-        )
-    if isinstance(spec, ReferenceSpec):
-        assert isinstance(value, ReferenceValue)
-        disc_key = _reference_discriminator_key(spec)
-        return {
-            "__kind": f"{spec.kind}_ref",
-            "chosen_key": value.chosen_key,
-            "is_overridden": value.is_overridden,
-            "value": _section_value_to_raw(
-                _select_allowed_spec(
-                    spec,
-                    value.chosen_key,
-                    _value_discriminator(value.value, disc_key),
-                    value_fields=value.value.fields.keys(),
+            if value.raw is not None:
+                payload["raw"] = value.raw
+            if value.error is not None:
+                payload["error"] = value.error
+            return payload
+        case SweepSpec():
+            assert isinstance(value, SweepValue)
+            return {
+                "start": _sweep_edge_to_raw(value.start),
+                "stop": _sweep_edge_to_raw(value.stop),
+                "expts": _range_input_to_raw(value.expts),
+                "step": _range_input_to_raw(value.step),
+            }
+        case CenteredSweepSpec():
+            assert isinstance(value, CenteredSweepValue)
+            return {
+                "center": _sweep_edge_to_raw(value.center),
+                "span": _range_input_to_raw(value.span),
+                "expts": _range_input_to_raw(value.expts),
+                "step": _range_input_to_raw(value.step),
+            }
+        case CfgSectionSpec():
+            assert isinstance(value, CfgSectionValue)
+            return _section_value_to_raw(
+                spec,
+                value,
+                fill_missing_literals=fill_missing_literals,
+            )
+        case ReferenceSpec():
+            assert isinstance(value, ReferenceValue)
+            disc_key = spec.discriminator
+            return {
+                "__kind": f"{spec.kind}_ref",
+                "chosen_key": value.chosen_key,
+                "is_overridden": value.is_overridden,
+                "value": _section_value_to_raw(
+                    _select_allowed_spec(
+                        spec,
+                        value.chosen_key,
+                        _value_discriminator(value.value, disc_key),
+                        value_fields=value.value.fields.keys(),
+                    ),
+                    value.value,
+                    fill_missing_literals=True,
                 ),
-                value.value,
-                fill_missing_literals=True,
-            ),
-        }
-    return _to_json_compatible(value)
+            }
+        case _:
+            return _to_json_compatible(value)
 
 
 def _range_input_to_raw(value: int | float | DirectValue) -> object:
@@ -190,6 +191,15 @@ def _parse_range_input[T: (int, float)](raw: object, type_: type[T]) -> T | Dire
     if not isinstance(raw, (int, float, str)):
         raise TypeError("Sweep input must be numeric or a direct carrier")
     return type_(raw)
+
+
+def _parse_required_range_step(
+    raw: dict[str, object], *, label: str
+) -> float | DirectValue:
+    step = raw.get("step")
+    if step is None:
+        raise RuntimeError(f"{label} step is required in session payload")
+    return _parse_range_input(step, float)
 
 
 def _sweep_edge_to_raw(value: float | ScalarValue) -> object:
@@ -225,53 +235,50 @@ def _node_value_from_raw(
     spec: CfgNodeSpec,
     raw: object,
 ) -> CfgNodeValue:
-    if isinstance(spec, LiteralSpec):
-        # Locked field: the value is canonical from the spec, ignore the payload.
-        return DirectValue(spec.value)
-    if isinstance(spec, ScalarSpec):
-        eval_value = decode_eval_wire(raw)
-        if eval_value is not None:
-            return eval_value
-        if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            return _decode_direct_wire(raw, spec)
-        if isinstance(raw, str) and raw.strip().startswith("="):
-            raise RuntimeError("Legacy scalar '=expr' payload is unsupported")
-        return DirectValue(raw)
-    if isinstance(spec, SweepSpec):
-        if isinstance(raw, dict):
-            start = _parse_sweep_edge(raw["start"])
-            stop = _parse_sweep_edge(raw["stop"])
-            expts = _parse_range_input(raw["expts"], int)
-            step_raw = raw.get("step")
-            if step_raw is None:
-                raise RuntimeError("Sweep step is required in session payload")
-            step = _parse_range_input(step_raw, float)
-            return SweepValue(start=start, stop=stop, expts=expts, step=step)
-        raise RuntimeError("Sweep payload must be an object")
-    if isinstance(spec, CenteredSweepSpec):
-        if isinstance(raw, dict):
-            center = _parse_sweep_edge(raw["center"])
-            span = _parse_range_input(raw["span"], float)
-            expts = _parse_range_input(raw["expts"], int)
-            step_raw = raw.get("step")
-            if step_raw is None:
-                raise RuntimeError("Centered sweep step is required in session payload")
-            step = _parse_range_input(step_raw, float)
-            return CenteredSweepValue(
-                center=center,
-                span=span,
-                expts=expts,
-                step=step,
+    match spec:
+        case LiteralSpec():
+            # Locked field: the value is canonical from the spec, ignore the payload.
+            return DirectValue(spec.value)
+        case ScalarSpec():
+            eval_value = decode_eval_wire(raw)
+            if eval_value is not None:
+                return eval_value
+            if isinstance(raw, dict) and raw.get("__kind") == "direct":
+                return _decode_direct_wire(raw, spec)
+            if isinstance(raw, str) and raw.strip().startswith("="):
+                raise RuntimeError("Legacy scalar '=expr' payload is unsupported")
+            return DirectValue(raw)
+        case SweepSpec():
+            if isinstance(raw, dict):
+                start = _parse_sweep_edge(raw["start"])
+                stop = _parse_sweep_edge(raw["stop"])
+                expts = _parse_range_input(raw["expts"], int)
+                step = _parse_required_range_step(raw, label="Sweep")
+                return SweepValue(start=start, stop=stop, expts=expts, step=step)
+            raise RuntimeError("Sweep payload must be an object")
+        case CenteredSweepSpec():
+            if isinstance(raw, dict):
+                center = _parse_sweep_edge(raw["center"])
+                span = _parse_range_input(raw["span"], float)
+                expts = _parse_range_input(raw["expts"], int)
+                step = _parse_required_range_step(raw, label="Centered sweep")
+                return CenteredSweepValue(
+                    center=center,
+                    span=span,
+                    expts=expts,
+                    step=step,
+                )
+            raise RuntimeError("Centered sweep payload must be an object")
+        case CfgSectionSpec():
+            if not isinstance(raw, dict):
+                raise RuntimeError("Section payload must be an object")
+            return _section_value_from_raw(spec, raw)
+        case ReferenceSpec():
+            return _ref_value_from_raw(spec, raw)
+        case _:
+            raise RuntimeError(
+                f"Unsupported spec node for restore: {type(spec).__name__}"
             )
-        raise RuntimeError("Centered sweep payload must be an object")
-        raise RuntimeError("Device reference must use direct payload encoding")
-    if isinstance(spec, CfgSectionSpec):
-        if not isinstance(raw, dict):
-            raise RuntimeError("Section payload must be an object")
-        return _section_value_from_raw(spec, raw)
-    if isinstance(spec, ReferenceSpec):
-        return _ref_value_from_raw(spec, raw)
-    raise RuntimeError(f"Unsupported spec node for restore: {type(spec).__name__}")
 
 
 def _decode_direct_wire(raw: dict[str, object], spec: ScalarSpec) -> DirectValue:
@@ -337,7 +344,7 @@ def _ref_value_from_raw(
     ):
         chosen_key = raw["chosen_key"]
         raw_value = raw["value"]
-        disc_key = _reference_discriminator_key(spec)
+        disc_key = spec.discriminator
         value_spec = _select_allowed_spec(
             spec,
             chosen_key,
@@ -407,7 +414,7 @@ def _select_allowed_spec(
     # shape need not even carry one).
     if len(spec.allowed) == 1:
         return spec.allowed[0]
-    disc_key = _reference_discriminator_key(spec)
+    disc_key = spec.discriminator
     disc_label = disc_key or "discriminator"
     for allowed_spec in spec.allowed:
         leaf = allowed_spec.fields.get(disc_label)

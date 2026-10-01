@@ -36,7 +36,7 @@ class ModuleDumper(yaml.SafeDumper):
 
     # --- 邏輯 2：將字典類型的 Value 排到最後 ---
     def represent_dict(self, data) -> MappingNode:
-        data = cast(dict, data)
+        data = cast(dict[object, object], data)
         # 將 dict 拆解為 (key, value)
         items = list(data.items())
 
@@ -85,6 +85,22 @@ class ModuleLibrary(SyncFile):
             ml.dump()
 
         return ml
+
+    def snapshot(self) -> ModuleLibrary:
+        """Copy current memory without loading or saving the backing file."""
+        result = ModuleLibrary()
+        result.modules = deepcopy(self.modules)
+        result.waveforms = deepcopy(self.waveforms)
+        return result
+
+    def swap_contents(self, candidate: ModuleLibrary) -> None:
+        """Exchange prepared memory only; keep each store's identity and path."""
+        self.require_writable()
+        candidate.require_writable()
+        self.modules, candidate.modules = candidate.modules, self.modules
+        self.waveforms, candidate.waveforms = candidate.waveforms, self.waveforms
+        self._dirty = True
+        candidate._dirty = True
 
     def _load(self, path: str) -> None:
         with open(path, "r") as f:
@@ -140,7 +156,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("write")
     def register_waveform(self, **wav_kwargs: dict[str, Any] | WaveformCfg) -> None:
-        self._check_can_write()
+        self.require_writable()
         wav_kwargs = deepcopy(wav_kwargs)
 
         # filter out non-waveform attributes
@@ -152,7 +168,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("write")
     def register_module(self, **mod_kwargs: dict[str, Any] | ModuleCfg) -> None:
-        self._check_can_write()
+        self.require_writable()
         mod_kwargs = deepcopy(mod_kwargs)
 
         for name, mod_cfg in mod_kwargs.items():
@@ -164,14 +180,14 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("write")
     def delete_waveform(self, name: str) -> None:
-        self._check_can_write()
+        self.require_writable()
         if name in self.waveforms:
             del self.waveforms[name]
             self._dirty = True
 
     @auto_sync("write")
     def delete_module(self, name: str) -> None:
-        self._check_can_write()
+        self.require_writable()
         if name in self.modules:
             del self.modules[name]
             self._dirty = True
@@ -220,7 +236,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("write")
     def update_module(self, name: str, override_cfg: dict[str, Any]) -> None:
-        self._check_can_write()
+        self.require_writable()
         self.modules[name] = self.modules[name].with_updates(
             context=dict(ml=self), **override_cfg
         )

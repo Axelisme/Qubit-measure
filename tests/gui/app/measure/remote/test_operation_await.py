@@ -57,7 +57,7 @@ def test_off_main_thread_flag_set():
     assert METHOD_REGISTRY["operation.await"].off_main_thread is True
 
 
-@pytest.mark.parametrize("method", ["tab.get_cfg", "tab.load_data"])
+@pytest.mark.parametrize("method", ["tab.snapshot", "tab.load_data"])
 def test_remote_registry_rejects_off_main_reveal_or_guard(method: str) -> None:
     entry = next(item for item in METHOD_ENTRIES if item.method == method)
     # Suppress the old write-receipt restriction so this tests the guard/reveal

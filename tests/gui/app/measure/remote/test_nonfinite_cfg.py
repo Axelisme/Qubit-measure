@@ -4,13 +4,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from qtpy.QtWidgets import QLineEdit
+from qtpy.QtWidgets import QLineEdit, QWidget
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.gui.app.measure.state import Session
 from zcu_tools.gui.cfg import CfgSchema, DirectValue, ScalarSpec
-from zcu_tools.gui.cfg.binding import ScalarField
-from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget
+from zcu_tools.gui.cfg.edit_codec import encode_ref
+from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 
@@ -33,25 +31,16 @@ def live_cfg_form(qapp):
         value=cfg.value,
     )
     tab_id = "tab-live"
-    fx.state.add_tab(
-        tab_id, Session(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg)
-    )
-    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(cfg, gc=False, owner_key=tab_id)
-    draft = fx.ctrl.get_cfg_editor_draft(editor_id)
-    gain = draft.root.fields["gain"]
-    assert isinstance(gain, ScalarField)
-    form = CfgFormWidget()
-    form.attach(draft)
-    gain_widget = next(
-        field_widget
-        for field_widget in form.findChildren(ScalarWidget)
-        if field_widget.field is gain
-    )
+    resource = fx.prepare_tab(tab_id, FakeAdapter(), cfg)
+    form = ResourceCfgFormWidget()
+    form.attach(resource)
+    gain_widget = form.findChild(QWidget, "cfgInput:gain")
+    assert gain_widget is not None
     entry = gain_widget.findChild(QLineEdit)
     assert entry is not None
     fx.start()
     try:
-        yield fx, tab_id, editor_id, form, entry
+        yield fx, tab_id, resource, form, entry
     finally:
         form.detach()
         form.close()
@@ -66,34 +55,29 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
     # The MCP connect status orientation is unrelated to cfg observation.
     monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
-    fx, tab_id, editor_id, form, entry = live_cfg_form
+    fx, tab_id, resource, form, entry = live_cfg_form
     entry.setText(text)
-    observed_form = form.read_values().fields["gain"]
+    form.submit_pending()
+    observed_form = resource.observe().tree.children["gain"].value
     assert isinstance(observed_form, DirectValue)
     assert observed_form.raw == text
     assert observed_form.value is None
     assert observed_form.error is not None
-    published = fx.state.get_tab(tab_id).cfg_schema.value.fields["gain"]
-    assert published == observed_form
+    assert form.is_valid() is False
 
     sock = open_client(fx.service.port)
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
     try:
         tab = call(sock, "tab.get_cfg", {"tab_id": tab_id}, rid="tab")
-        editor = call(sock, "editor.get", {"editor_id": editor_id}, rid="editor")
-        assert tab["ok"] and editor["ok"]
+        assert tab["ok"]
         tree = tab["result"]["tree"]
-        assert tree == editor["result"]["tree"]
         assert not tree["children"]["gain"]["valid"]
         assert tree["children"]["gain"]["input"]["raw"] == text
         assert tree["children"]["gain"]["input"]["resolved"] is None
         assert "finite" in tree["children"]["gain"]["input"]["error"]
 
         invoke("connect", {"port": fx.service.port})
-        for method, params in (
-            ("tab.get_cfg", {"tab_id": tab_id}),
-            ("editor.get", {"editor_id": editor_id}),
-        ):
+        for method, params in (("tab.get_cfg", {"tab_id": tab_id}),):
             assert (
                 invoke("rpc_call", {"method": method, "params": params})["tree"] == tree
             )
@@ -101,10 +85,20 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
         observe_run_inputs(
             fx, tab_id, lambda method, params: call(sock, method, params)["result"]
         )
-        rejected = call(sock, "tab.run_start", {"tab_id": tab_id}, rid="run")
+        rejected = call(
+            sock,
+            "tab.run_start",
+            {
+                "tab_id": tab_id,
+                "expected": encode_ref(
+                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                ),
+            },
+            rid="run",
+        )
         assert not rejected["ok"]
-        assert rejected["error"]["reason"] == "invalid_cfg"
-        assert "gain" in rejected["error"]["message"]
+        assert rejected["error"]["reason"] == "not_valid"
+        assert tab["result"]["diagnostics"][0]["path"] == ["gain"]
     finally:
         bridge.disconnect()
         sock.close()

@@ -1,26 +1,22 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, LoadDataRequest
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
-from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
-from zcu_tools.gui.app.measure.events.tab import (
-    TabContentChangedPayload,
-    TabContentFact,
-)
+from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .guard import LoadPermit
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import RetiredPaneResources, State
-    from zcu_tools.gui.event_bus import BaseEventBus
 
-    from .ports import CfgEditorReplacementPort, WritebackLifecyclePort
+    from .ports import WritebackLifecyclePort
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +30,7 @@ class LoadTabResultOutcome:
     has_analyze_params: bool
     source_kind: str = "loaded"
     cfg_backfill: Literal["applied", "not_applied"] = "not_applied"
+    analysis_error: str | None = None
 
 
 class LoadDataError(FailedPreconditionError):
@@ -65,13 +62,11 @@ class LoadService:
         state: State,
         writeback: WritebackLifecyclePort,
         *,
-        cfg_editor: CfgEditorReplacementPort,
-        bus: BaseEventBus,
+        provide_options: Callable[[str], Sequence[object]],
     ) -> None:
         self._state = state
         self._writeback = writeback
-        self._cfg_editor = cfg_editor
-        self._bus = bus
+        self._provide_options = provide_options
 
     @staticmethod
     def _supports_load_data(adapter: object) -> bool:
@@ -85,6 +80,7 @@ class LoadService:
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
+        tab.cfg.require_mutation_allowed()
         if not self._supports_load_data(tab.adapter):
             raise LoadDataError(
                 "This tab does not support loading data files.",
@@ -112,7 +108,7 @@ class LoadService:
             ) from exc
 
         retired = self._state.update_tab_loaded_result(tab_id, result, data_path)
-        self._teardown_retired(retired, tab_id=tab_id)
+        self._teardown_retired(retired)
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,
@@ -129,48 +125,27 @@ class LoadService:
     ) -> Literal["applied", "not_applied"]:
         if not isinstance(snapshot, ExpCfgModel):
             return "not_applied"
+        cfg = self._state.get_tab(tab_id).cfg
+        revision = cfg.observe().ref.revision
         try:
-            current = self._cfg_editor.snapshot_owner(tab_id)
-            if current is None:
-                current = self._state.get_tab(tab_id).cfg_schema
             candidate = project_loaded_cfg(
-                current, snapshot, provide_options=self._cfg_editor.provide_options
+                cfg.snapshot_inputs(), snapshot, provide_options=self._provide_options
             )
             if candidate is None:
                 return "not_applied"
-            validate_schema(candidate, self._state.session_env.ml)
-            prepared = self._cfg_editor.prepare_replacement(tab_id, candidate)
-        except Exception:
+            cfg.replace_inputs(revision, candidate, require_valid=True)
+        except (
+            CfgInputError,
+            CfgPreconditionError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+        ):
             logger.exception("loaded config was not applied: tab_id=%r", tab_id)
             return "not_applied"
-
-        # Activation checks token/owner identity before any State mutation.
-        # Both publications run synchronously without observer callbacks.
-        try:
-            retired = self._cfg_editor.activate_replacement(prepared)
-        except Exception:
-            self._cfg_editor.discard_prepared(prepared)
-            raise
-        try:
-            self._state.update_tab_cfg_schema(tab_id, candidate)
-            self._bus.emit(
-                TabContentChangedPayload(
-                    tab_id=tab_id, fact=TabContentFact.CFG_REPLACED
-                )
-            )
-        finally:
-            if retired is not None:
-                try:
-                    self._cfg_editor.retire_replaced(retired)
-                except Exception:
-                    logger.exception(
-                        "retired cfg editor cleanup failed: tab_id=%r", tab_id
-                    )
         return "applied"
 
-    def _teardown_retired(
-        self, retired: RetiredPaneResources, *, tab_id: str | None = None
-    ) -> None:
+    def _teardown_retired(self, retired: RetiredPaneResources) -> None:
         for draft in retired.writeback_drafts:
             try:
                 self._writeback.teardown_draft(draft)

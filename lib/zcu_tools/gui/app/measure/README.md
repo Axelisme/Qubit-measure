@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-29 — Setup 開啟入口與 project settings 名稱
+**Last updated:** 2026-10-01, result commit and analysis preparation
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -23,27 +23,32 @@ analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬�
 
 `CfgEditorService` 按 `editor_id` 保存 cfg draft。可回收的 library-entry
 session 受 LRU／disconnect 回收；由 UI owner 建立的 seeded session 由 owner
-顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。Tab session
-的編輯會嘗試 auto-commit 至 `State.cfg_schema`；使用前仍經成品 cfg
-驗證。`WritebackService` 以 opaque draft 保存候選項及 item-local editor
+顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
+Tab cfg 由 `Session.cfg` 的 `CfgResource` 擁有，不建立 editor session 或
+`State.cfg_schema` 鏡像。Qt 與 remote 都向同一資源提交指定 revision 的命令。
+`WritebackService` 以 opaque draft 保存候選項及 item-local editor
 session，不能把 preview 當成再次計算候選項的指令。`CfgDraft` 的共用
 Spec／Value、`None`、locked literal、reference binding 與 lowering 契約見
 [Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md)、
 [GUI cfg README](../../cfg/README.md) 與
 [experiment cfg editing README](../../../experiment/cfg_editing/README.md)。
-目前 edit batch 及 context Apply 可能留下成功前綴，不能宣稱原子提交；
-refresh／override／revision 的未落實條件見
-[cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
+Tab cfg edit batch 在完整候選準備成功後一次發布，拒絕不改舊 publication。
+獨立 library editor 的 draft batch 不具有這項原子保證。Source refresh 使用
+已發布快照，不把 live provider 當成 observation 的第二個 owner。Measure tab、
+Run、Qt 與 remote 的資源契約現況見 Cfg ADR；library conversion、selected Apply
+與其他 app 的剩餘目標見 [cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 
 `State` 保存可觀察的 app 資料，`ContextService` 寫入 md／ml；services
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
 版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
 `SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
-不同時 bump device version，caller 再發布變更。Remote adapter 在
-GUI owner thread 比對每條連線的 seen 與目前資源版本；
-受護 RPC 的依賴與讀取揭露資源由 GUI method entries 宣告。未讀過的 key
-即使版本為 0 也不能寫入。MCP 不保存 seen、不傳 `expected_versions`，
-也不隱藏預讀或自動重試；agent 收到 stale 後需明確重讀對應資源。
+不同時 bump device version，caller 再發布變更。Tab cfg edit／Run 使用明示
+`CfgRef`，不另要求每條連線的 cfg seen；它不取代 authentication 或其他 guards。
+其他受護 RPC 由 remote adapter 在 GUI owner thread 比對該連線的 seen 與目前
+版本，依賴與讀取揭露資源由 method entries 宣告。這些 key 未讀過時，即使
+版本為 0 也不能寫入。MCP 原樣轉送 supplied cfg ref，不保存第二份 seen，
+不傳 `expected_versions`，不隱藏預讀或自動重試。Stale 由 caller 明確重讀
+对应完整 publication／snapshot，再決定是否重送。
 GUI 事件與 service 協作見 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)，
 wire guard 與 off-owner await 見 [Remote README](remote/README.md)。
 
@@ -206,7 +211,7 @@ for setup/context/device/predictor/progress domains.
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
-active/running identity, tab read model, cfg schema commits, save path overrides)
+active/running identity, tab read model, cfg resource lookup, save path overrides)
 by composing `WorkspaceService`, `TabService`, `State`, and `EventBus`; remote
 tab handlers use this facet instead of the giant `Controller` surface.
 `RunAnalyzeControlPort` / `RunAnalyzeControlFacet` expose the run/load/analyze
@@ -306,13 +311,16 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 ## Run / Analyze Workflow
 
 1. A tab is created from a registered experiment adapter.
-2. The tab owns a service-managed cfg editor session backed by `CfgDraft`.
-   Run renders that draft through the sole shared cfg tree (S1); Analysis
+2. The tab owns a persistent `CfgResource`, independent of widget lifetime.
+   Run renders its publications through `ResourceCfgFormWidget`; Analysis
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
-3. `GuardService` validates static preconditions and freezes a permit containing
-   cached resolved cfg and detached State-owned device settings. Missing observed
+3. `Controller.start_run(tab_id, expected)` requires the observed `CfgRef`.
+   Qt supplies the form's displayed ref; remote callers supply their observed ref.
+   A different cfg identity or revision rejects Run without refresh or fallback.
+   `GuardService` accepts that exact Valid revision and freezes a permit with
+   `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
    settings for a live device reject the permit without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
 4. The operation policy builds worker thunks with the needed ambient scopes:
@@ -332,16 +340,26 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 `tab.load_data` installs a canonical result into an existing adapter tab and clears
 stale analysis/writeback state. When the result carries a compatible execution
 snapshot, Load best-effort projects its concrete values into the current tab Config.
-It validates a complete detached candidate, replaces the service-owned editor and
-State Config once, and reports `cfg_backfill=applied|not_applied` to Qt and remote.
-Failed backfill keeps Config and its draft unchanged without undoing the loaded
-result. Fields without a reliable runtime inverse keep the current draft value;
+It validates a complete detached candidate, publishes once on the same cfg resource,
+and reports `cfg_backfill=applied|not_applied` to Qt and remote. Successful backfill
+preserves cfg identity and advances its revision. Failed backfill keeps the previous
+cfg publication without undoing the loaded result. Fields without a reliable runtime inverse keep the current draft value;
 dynamic selectors must match live options and the new complete draft must be valid
 before publication. A failed lookup or malformed option list rejects the entire
 backfill rather than silently skipping that selector. Module/waveform references
 become custom values rather than guessed library keys.
 The Guard and LoadService both enforce the adapter's import-validated
 `capabilities.load_data` gate.
+
+Run and Load retain committed results even when adapter analysis-parameter
+preparation fails. `TabService.prepare_result_analysis` owns the capability check
+and returns typed readiness or an error after logging the failure. Both workflows
+publish their committed content fact once, with downstream panes cleared and
+successful params already installed. Run sends a separate diagnostic to attached
+views without changing its finished or cancelled outcome. Load returns
+`analysis_error` and `has_analyze_params=false`; Qt warns after confirming the load,
+and remote returns the same outcome. `tab.open_file` retains the new tab on this
+partial success. A genuine load or run failure keeps its existing failure contract.
 
 ### Pane-owned lifecycle
 
@@ -395,28 +413,39 @@ bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
 
-`CfgEditorService` 在 active draft 變更時同步發布完整 `CfgSchema`，composition 將 tab owner
-投影到 `State.cfg_schema` 並更新整份 cfg 的 resource revision。Invalid raw 同樣發布，不依賴
-viewer 是否 attach 或 Qt timer 是否執行。Widget 只輸入與渲染，不重送 schema 到 State。
-Inspect/writeback owner 不寫 tab cfg；prepared replacement 保留原有 owner State swap 邊界。
-Run permit 使用此 snapshot 的 cached resolved 值，不重新解析來源。
+Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
+The form keeps text input local and captures its first publication ref. Run
+submits that input once, then starts only with a Valid returned publication ref.
+Invalid, Stale, Unavailable or failed submission never runs the previous values.
+Pending input can repair an Invalid publication, but cannot bypass busy,
+context or SoC gates. External updates preserve local text, focus and selection.
+Discard uses the latest delivered publication. Reapply asks for confirmation of
+the differences and submits against the revision shown in that confirmation.
+Library editors and writeback keep their existing `CfgDraft` binding behavior.
 
-CfgEditor在app seam解碼`ValueRef`，並以typed `CfgEdit` batch依序操作binding target。
-Batch維持fail-fast/non-atomic；只有reference shape edit列出前後path set，成功回final net diff，
-每筆成功edit仍各自bump version與觸發subscriber-aware lazy push。
+`Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
+CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
+Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
+發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
+`TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
+`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。
 
-The GUI uses a two-tree model:
+獨立 library／inspect／writeback 的 CfgEditor 在 app seam 解碼 `ValueRef`，
+並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
+每筆成功 edit 各自 bump version。它不適用於 tab cfg resource 的原子 batch。
+
+Shared `CfgSchema` pairs two trees. The resource owns these inputs; the form
+renders publications and keeps only unsubmitted input locally:
 
 - Spec tree: static shape, labels, variants, literal locks, optional/ref rules.
-- Value tree: mutable draft data shown by the editor.
+- Value tree: authored inputs, including expressions and reference identities.
 
-`adapter.lowering.schema_to_resolved_dict(schema)` freezes cached values for Run;
-unresolved or invalid fields reject the entire cfg. Legal optional `None` remains
-valid. `schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
-non-Run consumers. `CfgSchema` 保存 shared spec/value data；`CfgDraft` 擁有 expression
-解析與 cached validity，Run 不重新讀取 `MetaDict` 或 `ModuleLibrary`。 `ValueRef` is
-resolve-once: it reads the session `ValueLookup` immediately and stores the
-resolved direct scalar in the value tree.
+Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
+remains valid. Run does not reread `MetaDict` or `ModuleLibrary`.
+`schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
+non-Run draft consumers. `CfgSchema` stores shared spec/value data and `CfgDraft`
+provides draft expression evaluation and cached validity. `ValueRef` resolves
+once through the session `ValueLookup` and stores a direct scalar input.
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter只把current
@@ -426,6 +455,16 @@ factory組成三個窄ports；adapter package不import或forward shared cfg publ
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
+`services.tab_cfg.TabCfgResources` 管理 tab 到 cfg resource 的身份關聯。TabService 建立及關閉
+資源，lookup 直接回傳 resource-bound editing，不轉送命令。建立失敗不留下關聯，retire
+先撤銷舊 handle，再移除關聯。Widget detach 只停止觀察，不改資源 lifetime。
+
+`MeasureCfgBindings.snapshot_from_state` 複製 metadata、library 與 options，並記錄 context、
+device set、每個 device 及 value cache 的 source basis。Bare capture 使用同一 metadata。
+Dotted capture 只讀 `ValueSourceBinder` 已發布的 detached cache，不查 live provider 或硬體。
+Source 更新先準備及安裝所有 tab 的新 publication，再通知任何 subscriber。
+來源故障發布 Unavailable，不保留舊 Valid。通知期間拒絕 cfg mutation、acceptance 和 tab lifetime mutation。
+
 `MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
 dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些
 app-local policy。device selector是required string `ScalarSpec`，wire value維持`DirectValue(str)`。
@@ -456,8 +495,8 @@ Linked module / waveform reference fields preserve their embedded value snapshot
 when the library key is missing. The field stays library-keyed and invalid so
 re-adding the same key relinks it, while persistence can still serialize the snapshot without consulting
 `ModuleLibrary`. Restored overridden refs whose key is missing can instead
-become custom references; this does not implement the approved override dependency
-semantics (see [Cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)).
+retain their overridden inline input without depending on the old key. Nested linked
+references keep their own dependencies; explicit relink restores this layer's dependency.
 
 Adapter cfg authoring lives in `experiment/v2_gui` as a context-free
 `MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
@@ -467,7 +506,8 @@ The framework protocol does not expose a static spec query. Shared
 `CfgSchemaAssembler` owns only paired-tree mechanics and has no measure domain/context
 knowledge (ADR-0012、ADR-0065).
 
-`CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
+Measure tab 使用 shared `ResourceCfgFormWidget`，只 watch publication 並提交 typed input。
+以下 `CfgFormWidget` binding 路徑供獨立 library／inspect／writeback draft 使用。
 每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
 `default_cfg_renderers()` 為五個 non-section exact field types
 （`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
@@ -521,6 +561,10 @@ controlled fields.
 - `FeedbackDockController` owns the docked feedback panel, target-tab
   resolution, and op-count plus agent-presence gate; `MainWindow` keeps the
   public render-view refresh façade.
+- Run reserves the existing tab busy state before cleanup and registration.
+  Active-operation reads project domain-admitted handles. A startup reservation
+  has no domain handle until submission succeeds; failed submission releases busy
+  without publishing one. Reads remain valid during synchronous gate notifications.
 - GUI domain owners project live run/analyze/device handles for `status`, including
   GUI-started work. Shared `OperationHandles` own the wait channel; unknown or
   evicted handles are errors to measure MCP, not finished operations. `wait`
@@ -665,7 +709,12 @@ Esc, focus loss, hide, invalid placement or an external commit drop it.
 
 ### Arbitrary waveform remote contract
 
-`arb_waveform.set` 成功才回傳 `success=true`、`status` 與 preview figure。
+`Controller.arb_waveforms` 直接提供既有資產 owner 的窄 port，不再逐項轉接。
+GUI dialog 只接收此 domain port；cfg source 僅依賴列出 keys 的 read port。
+`arb_waveform.set` 成功只回傳 `success=true` 與 `status=created|overwritten`。
+保存不請求 preview；需要 PNG 時另呼叫 `arb_waveform.preview`，回傳 recipe 與
+preview figure。Preview 失敗不撤銷已保存的資產或 revision。GUI 自行繪圖，
+remote handler 只將 owner 的 typed status／preview result 投影為 wire payload。
 Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩定 `reason` 的
 `RemoteError`，走失敗的 RPC/tool call，不將 `success=false` 當一般 payload。
 寫入受 `arb_waveforms` resource version 的 expected-version guard 約束；GUI 和 agent
@@ -678,13 +727,11 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   Measure 的 `ContextWritePort` 從 cfg schema 產生 app-side lowering callbacks，
   交給共用 service 在寫入時呼叫；`CfgEditorService` 只交未 lower 的 schema。
   Writeback 選出的 md／ml entries 交給一次 `apply_ml_writes()`，每批至多
-  bump 一次、每種變更事件至多送一次。這不是失敗時整批 rollback 的保證：
-  lower 與 register 依序執行，dump 也先於 version bump 與事件；後項 lower、
-  register 或 dump 失敗時，前項可能已改動 live md／ml，卻沒有這次 batch 的
-  `context` version bump 或變更事件。成功完成後才發布版本及事件；失敗前綴
-  不是已發布的完整提交。尚待實作的無失敗前綴 Apply 見
-  [Cfg 編輯 draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md#observationrun-與-apply)。
-  寫入與 crash durability 是不同責任，磁碟保存見 ADR-0063。
+  bump 一次、每種變更事件至多送一次。整批 lower／register 先在隔離候選
+  完成，後項可讀前項候選，但不能改 live md／ml。準備失敗保留舊內容與版本。
+  成功後一次套用內容、更新版本並通知，最後保存。保存失敗明確回報已套用
+  但未保存，不 rollback 或自動重試。寫入與 crash durability 是不同責任，
+  磁碟保存見 ADR-0063。
 - `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
   宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表
   SoC 已連線。Run guard 檢查 context、cfg、SoC 與 preflight；operation owner 另

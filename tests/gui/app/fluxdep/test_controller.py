@@ -216,7 +216,7 @@ def test_compute_search_does_not_emit_or_record(tmp_path):
         0.0,
     )
     seen = _record(ctrl, FitChangedPayload)
-    result = ctrl.compute_search(plot=False)
+    result = ctrl.compute_search()
     # compute_search is pure: no event, no recorded result
     assert seen == []
     assert ctrl.state.fit.params is None
@@ -242,7 +242,7 @@ def test_search_database_records_and_emits(tmp_path):
         0.0,
     )
     seen = _record(ctrl, FitChangedPayload)
-    result = ctrl.search_database(plot=False)
+    result = ctrl.search_database()
     assert len(result.params) == 3
     assert ctrl.state.fit.has_result
     assert len(seen) == 1

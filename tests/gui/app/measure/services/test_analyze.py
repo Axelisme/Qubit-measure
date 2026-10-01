@@ -52,7 +52,7 @@ def _make_state(tab_id: str = "tab1") -> State:
     state = State(ctx)
     state.add_tab(
         tab_id,
-        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     # Provide a fake run_result so the tab is not empty
     state.update_tab_result(tab_id, object())
@@ -104,7 +104,7 @@ def _make_two_tab_state() -> State:
     state = _make_state("tab1")
     state.add_tab(
         "tab2",
-        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     state.update_tab_result("tab2", object())
     return state

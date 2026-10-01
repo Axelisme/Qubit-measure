@@ -60,6 +60,7 @@ def pulse_module_ref_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[_make_pulse_spec()],
         label=label,
         optional=optional,
@@ -72,6 +73,7 @@ def pulse_readout_module_ref_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
+        discriminator="type",
         allowed=[_make_pulse_readout_spec()],
         label=label,
         optional=optional,

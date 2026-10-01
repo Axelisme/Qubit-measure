@@ -60,3 +60,39 @@ def test_internal_read_returns_full_operational_snapshot(tmp_path: Path) -> None
         == snapshot
     )
     assert client.transport.sent == [("tab.snapshot", {"tab_id": "tab-1"})]
+
+
+def test_waveform_save_and_preview_are_explicit_independent_calls(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+    client.transport.replies["arb_waveform.set"] = {
+        "ok": True,
+        "result": {"success": True, "status": "created"},
+    }
+    client.transport.replies["arb_waveform.preview"] = {
+        "ok": False,
+        "error": {"code": "internal_error", "message": "PNG export unavailable"},
+    }
+    params = {
+        "name": "pulse",
+        "recipe": {
+            "segments": [{"duration": 1.0, "formula": "0"}],
+            "normalize": "none",
+        },
+    }
+
+    assert client.call(
+        "rpc_call", {"method": "arb_waveform.set", "params": params}
+    ) == {"success": True, "status": "created"}
+    assert client.transport.sent == [("arb_waveform.set", params)]
+    with pytest.raises(GuiRpcError, match="PNG export unavailable"):
+        client.call(
+            "rpc_call", {"method": "arb_waveform.preview", "params": {"name": "pulse"}}
+        )
+    assert client.transport.sent == [
+        ("arb_waveform.set", params),
+        ("arb_waveform.preview", {"name": "pulse"}),
+    ]

@@ -141,7 +141,7 @@ class ControllerFixture:
 
 
 @pytest.fixture()
-def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:  # noqa: ARG001
+def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
     # Scope persistence to a temp dir so tests never read/write the real cache.
     fixture = ControllerFixture(cache_dir=tmp_path)
     yield fixture
@@ -195,7 +195,7 @@ def _make_figure_container() -> FigureContainer:
 # ---------------------------------------------------------------------------
 
 
-def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
+def test_get_project_root_returns_injected_root(qapp, tmp_path):
     """The entry script injects the repo root; the Controller exposes it so the
     setup dialog / project RPC anchor default paths there instead of cwd (the
     .bat launcher cd's into scripts/, so cwd is the wrong base)."""
@@ -204,7 +204,7 @@ def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
     assert fixture.ctrl.get_project_root() == injected
 
 
-def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):  # noqa: ARG001
+def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):
     """No injection (tests / `python -m` from the repo root) → cwd, the existing
     behaviour, so nothing regresses for callers that don't pass a root."""
     import os
@@ -395,23 +395,22 @@ def test_cancel_active_operation_returns_interactive_tag(cf):
 
 def test_start_run_sets_is_running(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert cf.state.is_tab_running(tab_id)
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))  # cleanup
 
 
 def test_start_run_passes_lowered_committed_state_cfg(cf):
-    """start_run delivers concrete values from the committed State cfg."""
+    """start_run delivers values accepted from the tab cfg resource."""
     tab_id = cf.ctrl.new_tab("fake")
 
-    # Mutate committed cfg in State after tab creation.
-    base = cf.state.get_tab(tab_id).cfg_schema
-    mutated_value = dataclasses.replace(
-        base.value,
-        fields={**base.value.fields, "reps": DirectValue(42)},
-    )
-    mutated = dataclasses.replace(base, value=mutated_value)
-    cf.ctrl.update_tab_cfg(tab_id, mutated)
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
 
     # Observe the payload at the worker-to-adapter boundary.
     captured: dict[str, dict[str, object]] = {}
@@ -426,7 +425,10 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     spy.run.side_effect = _capture_run
     cf.state.get_tab(tab_id).adapter = spy
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     assert captured["cfg"]["reps"] == 42
@@ -434,21 +436,30 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
 
 def test_start_run_emits_run_started(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     cf.bus.emit.assert_any_call(RunStartedPayload(tab_id=tab_id))
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
 def test_run_finished_updates_tab_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.get_tab(tab_id).run.result is not None
 
 
 def test_run_finished_emits_run_finished(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
@@ -462,7 +473,10 @@ def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
     from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
 
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.state.update_tab_analyze(tab_id, object(), Figure())
 
@@ -504,11 +518,81 @@ def test_save_data_completion_reports_only_data_artifact(cf):
 
 def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         TabContentChangedPayload(tab_id, TabContentFact.RUN_RESULT_COMMITTED)
     )
+
+
+@pytest.mark.parametrize("source", ["run", "cancelled", "load"])
+def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, source):
+    tab_id = cf.ctrl.new_tab("fake")
+    adapter = cf.state.get_tab(tab_id).adapter
+    monkeypatch.setattr(
+        adapter,
+        "capabilities",
+        dataclasses.replace(adapter.capabilities, load_data=True),
+    )
+
+    def fail_params(*_args):
+        raise ValueError("analysis defaults unavailable")
+
+    loaded = SimpleNamespace(cfg_snapshot=None)
+    monkeypatch.setattr(adapter, "get_analyze_params", fail_params)
+    monkeypatch.setattr(adapter, "load", lambda _request: loaded)
+    cf.state.update_tab_analyze_param_instance(tab_id, object())
+    facts = []
+    cf.bus.subscribe(TabContentChangedPayload, facts.append)
+    if source != "load":
+        terminal = []
+        cf.bus.subscribe(RunFinishedPayload, terminal.append)
+        entered, release = threading.Event(), threading.Event()
+
+        def partial_run(*_args):
+            entered.set()
+            if not release.wait(3):
+                raise RuntimeError("test did not release partial run")
+            return loaded
+
+        if source == "cancelled":
+            monkeypatch.setattr(adapter, "run", partial_run)
+        cf.ctrl.start_run(tab_id, cf.ctrl.cfg_resources.lookup(tab_id).observe().ref)
+        if source == "cancelled":
+            try:
+                assert _wait_for(entered.is_set)
+                cf.ctrl.cancel_run()
+            finally:
+                release.set()
+        assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+        assert terminal == [
+            RunFinishedPayload(
+                tab_id=tab_id,
+                outcome="cancelled" if source == "cancelled" else "finished",
+            )
+        ]
+        expected_fact = TabContentFact.RUN_RESULT_COMMITTED
+        cf.view.notify_diagnostic.assert_any_call(
+            "error",
+            "Analysis preparation failed",
+            "Run result retained. Analysis preparation failed: analysis defaults unavailable",
+        )
+    else:
+        outcome = cf.ctrl.load_tab_result(tab_id, "loaded.hdf5")
+        assert outcome.analysis_error == "analysis defaults unavailable"
+        assert outcome.has_analyze_params is False
+        expected_fact = TabContentFact.LOADED_RESULT_COMMITTED
+    snapshot = cf.ctrl.get_tab_snapshot(tab_id)
+    assert snapshot.run.result is not None
+    if source == "load":
+        assert snapshot.run.result is loaded
+    assert snapshot.analysis.params is None
+    assert snapshot.analysis.result is None
+    assert snapshot.post_analysis.result is None
+    assert facts == [TabContentChangedPayload(tab_id, expected_fact)]
 
 
 def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
@@ -529,7 +613,10 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     no_analysis.make_save_paths.return_value = None
     cf.state.get_tab(tab_id).adapter = no_analysis
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     # The non-analysis adapter's analyze-params builder is never touched, so the
     # run completes without surfacing an error dialog.
@@ -551,7 +638,10 @@ def test_run_failed_shows_status_message(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.view.show_error_dialog.called
     msg = cf.view.show_error_dialog.call_args[0][1]
@@ -564,7 +654,10 @@ def test_run_failed_clears_run_lock(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.is_run_active() is False
 
@@ -581,16 +674,22 @@ def test_start_run_while_running_raises(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
 
-    assert cf.state.is_tab_running(tab_id)
-    other_tab_id = cf.ctrl.new_tab("fake")
-    with pytest.raises(OperationConflictError, match="run is active"):
-        cf.ctrl.start_run(other_tab_id)
-
-    # cleanup
-    ev.set()
-    _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
+    try:
+        assert cf.state.is_tab_running(tab_id)
+        other_tab_id = cf.ctrl.new_tab("fake")
+        with pytest.raises(OperationConflictError, match="run is active"):
+            cf.ctrl.start_run(
+                other_tab_id,
+                cf.ctrl.cfg_resources.lookup(other_tab_id).observe().ref,
+            )
+    finally:
+        ev.set()
+        _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
 
 
 def test_start_run_while_device_setup_active_raises(cf):
@@ -605,7 +704,10 @@ def test_start_run_while_device_setup_active_raises(cf):
     )
 
     with pytest.raises(OperationConflictError, match="device_setup is active"):
-        cf.ctrl.start_run(tab_id)
+        cf.ctrl.start_run(
+            tab_id,
+            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+        )
 
     cf.ctrl._operation_gate.release(1)
 
@@ -621,7 +723,10 @@ def test_draft_context_rejects_real_run_and_save(cf):
     )
 
     with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.start_run(tab_id)
+        cf.ctrl.start_run(
+            tab_id,
+            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+        )
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_data(tab_id, "/tmp/data.h5")
     with pytest.raises(RuntimeError, match="active file-backed context"):
@@ -683,7 +788,10 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     )
 
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
-        cf.ctrl.start_run(tab_id)
+        cf.ctrl.start_run(
+            tab_id,
+            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+        )
 
     cf.ctrl._operation_gate.release(1)
 
@@ -721,7 +829,10 @@ def test_run_clears_active_figure_container_after_finish(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.view.make_run_container.return_value = _make_figure_container()
 
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
 
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert has_current_container() is False
@@ -729,7 +840,10 @@ def test_run_clears_active_figure_container_after_finish(cf):
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     snapshot = cf.ctrl.get_tab_snapshot(tab_id)
@@ -739,23 +853,19 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
     assert snapshot.analysis.params is not None
 
 
-def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
-    """cfg keystrokes must not trigger a full snapshot rebuild.
+def test_cfg_edit_publishes_without_full_tab_interaction_rebuild(cf):
+    from zcu_tools.gui.cfg.resource import CfgEdit
 
-    update_tab_cfg writes to State but emits no TAB_INTERACTION_CHANGED;
-    validity refreshes come from CfgFormWidget.validity_changed instead.
-    """
     tab_id = cf.ctrl.new_tab("fake")
-    base = cf.state.get_tab(tab_id).cfg_schema
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    published = []
+    cfg.watch(published.append)
+    before = cfg.observe().ref
     cf.bus.emit.reset_mock()
-
-    cf.ctrl.update_tab_cfg(tab_id, base)
-
-    for call in cf.bus.emit.call_args_list:
-        payload = call.args[0] if call.args else None
-        assert not isinstance(payload, TabInteractionChangedPayload), (
-            f"update_tab_cfg emitted TAB_INTERACTION_CHANGED unexpectedly: {call}"
-        )
+    after = cfg.edit(before.revision, (CfgEdit(("reps",), 42),))
+    assert published[-1].ref == after.ref
+    assert after.ref.revision == before.revision + 1
+    assert cf.bus.emit.call_args_list == []
 
 
 def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
@@ -776,26 +886,21 @@ def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
     ]
 
 
-def test_reset_tab_cfg_restores_adapter_default(cf):
-    """reset_tab_cfg commits the adapter default and returns that same schema."""
+def test_tab_cfg_reset_restores_adapter_default_on_same_resource(cf):
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
     tab_id = cf.ctrl.new_tab("fake")
-
-    # Mutate the committed cfg away from the default.
-    base = cf.state.get_tab(tab_id).cfg_schema
-    mutated_value = dataclasses.replace(
-        base.value,
-        fields={**base.value.fields, "reps": DirectValue(123)},
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 123),))
+    before = cfg.observe().ref
+    returned = cfg.reset(before.revision)
+    defaults = _default_fake_schema(cf.state.session_env)
+    assert returned.ref.cfg_id == before.cfg_id
+    assert returned.ref.revision == before.revision + 1
+    assert (
+        cf.state.get_tab(tab_id).cfg.snapshot_inputs().value.fields["reps"]
+        == defaults.value.fields["reps"]
     )
-    cf.ctrl.update_tab_cfg(tab_id, dataclasses.replace(base, value=mutated_value))
-
-    returned = cf.ctrl.reset_tab_cfg(tab_id)
-
-    default = _default_fake_schema(cf.state.session_env)
-    assert returned.value.fields["reps"] == default.value.fields["reps"]
-    # State now holds the returned default, not the mutated draft.
-    committed = cf.state.get_tab(tab_id).cfg_schema
-    assert committed is returned
-    assert committed.value.fields["reps"] == default.value.fields["reps"]
 
 
 def test_reset_tab_cfg_while_running_raises(cf):
@@ -805,11 +910,17 @@ def test_reset_tab_cfg_while_running_raises(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(tab_id)
+    cf.ctrl.start_run(
+        tab_id,
+        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    )
     assert cf.state.is_tab_running(tab_id)
 
-    with pytest.raises(RuntimeError, match="currently running"):
-        cf.ctrl.reset_tab_cfg(tab_id)
+    from zcu_tools.gui.cfg.resource import CfgPreconditionError
+
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    with pytest.raises(CfgPreconditionError, match="blocked"):
+        cfg.reset(cfg.observe().ref.revision)
 
     # cleanup
     ev.set()
@@ -905,8 +1016,10 @@ def test_persist_then_restore_app_state(tmp_path):
     capture (flush) on one Controller, restore on a fresh one sharing the dir."""
     cf = ControllerFixture(cache_dir=tmp_path)
     tab_id = cf.ctrl.new_tab("fake")
-    schema = _default_fake_schema(cf.state.session_env)
-    cf.ctrl.update_tab_cfg(tab_id, schema)
+    from zcu_tools.gui.cfg.resource import CfgEdit
+
+    cfg = cf.ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
     resolved = cf.ctrl.apply_project(ProjectRequest("chip", "qub", "res"))
     cf.ctrl.setup_control.remember_connection(
         ConnectionPreferences(ip="10.0.0.2", port=7000)
@@ -919,6 +1032,7 @@ def test_persist_then_restore_app_state(tmp_path):
     assert len(cf_restored.state.tabs) == 1
     restored_tab = next(iter(cf_restored.state.tabs.values()))
     assert restored_tab.adapter_name == "fake"
+    assert restored_tab.cfg.snapshot_inputs().value.fields["reps"] == DirectValue(42)
     # remembered settings round-tripped (prefill values; project not auto-applied).
     prefs = cf_restored.ctrl.setup_control.get_setup_preferences()
     assert prefs.chip_name == "chip"

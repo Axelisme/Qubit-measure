@@ -6,8 +6,8 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    _str,
-    _str_opt,
+    optional_string,
+    required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
@@ -28,7 +28,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "assumes is already in the MetaDict/ModuleLibrary, what a run tends to "
             "write back, and recommended analysis settings. How you actually use it "
             "is your call. Empty fields mean the adapter has no guide written yet.",
-            (_str("adapter_name", "Adapter to introspect"),),
+            (required_string("adapter_name", "Adapter to introspect"),),
         ),
     ),
     method_entry(
@@ -54,8 +54,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             10.0,
             "Capture a named dialog as base64 PNG, or write PNG to out_path and return its path/byte count.",
             (
-                _str("name", "Dialog name"),
-                _str_opt("out_path", "Write PNG here instead of returning base64"),
+                required_string("name", "Dialog name"),
+                optional_string(
+                    "out_path", "Write PNG here instead of returning base64"
+                ),
             ),
         ),
     ),
@@ -77,7 +79,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "PNG. Runs MainWindow.grab() on the main thread (auto-marshalled, like "
             "dialog.screenshot). Optional out_path writes a PNG file instead of "
             "returning base64 bytes.",
-            (_str_opt("out_path", "Write PNG here instead of returning base64"),),
+            (
+                optional_string(
+                    "out_path", "Write PNG here instead of returning base64"
+                ),
+            ),
         ),
     ),
     method_entry(
@@ -91,9 +97,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "values run|analysis|post_analysis. The PNG is rendered at a fixed "
             "small geometry (token-light), independent of the GUI window size.",
             (
-                _str("tab_id"),
-                _str("subtab_id", "Pane: run|analysis|post_analysis"),
-                _str_opt("out_path", "Write PNG here instead of returning base64"),
+                required_string("tab_id"),
+                required_string("subtab_id", "Pane: run|analysis|post_analysis"),
+                optional_string(
+                    "out_path", "Write PNG here instead of returning base64"
+                ),
             ),
         ),
     ),

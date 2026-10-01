@@ -19,8 +19,8 @@ from tests.gui.app.measure._app_launch import (
 def test_arb_waveform_named_dialog_captures_only_while_open(qapp) -> None:
     parent = QWidget()
     ctrl = MagicMock()
-    ctrl.list_arb_waveform_infos.return_value = []
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_infos.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     registry = MainDialogRegistry(ctrl, parent=parent, dialog_refs=DialogRefStore())
 
     with pytest.raises(RuntimeError, match="not currently open"):

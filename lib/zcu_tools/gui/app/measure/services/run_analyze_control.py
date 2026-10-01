@@ -13,6 +13,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
 )
+from zcu_tools.gui.cfg.resource import CfgRef, CfgStaleError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 logger = logging.getLogger(__name__)
@@ -73,10 +74,13 @@ class RunAnalyzeControlPort(Protocol):
 
     def has_tab(self, tab_id: str) -> bool: ...
     def get_running_tab_id(self) -> str | None: ...
-    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]: ...
+    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]:
+        """Domain-admitted handles; busy may also include a start reservation."""
+        ...
+
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
-    def start_run(self, tab_id: str) -> int: ...
+    def start_run(self, tab_id: str, expected: CfgRef) -> int: ...
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome: ...
     def cancel_run(self) -> bool: ...
 
@@ -139,12 +143,14 @@ class RunAnalyzeControlFacet:
         return self._state.running_tab_id
 
     def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]:
+        """Read admitted handles, including during synchronous startup notifications."""
         operations: list[ActiveTabOperation] = []
         running = self._state.running_tab_id
-        if running is not None:
-            token = self._run.active_token
-            if token is None:
-                raise RuntimeError("running tab has no operation handle")
+        # State also reserves busy during start. Run publishes its domain handle
+        # only after begin succeeds; registration and failed-submit cleanup can
+        # synchronously notify before that transfer. Reads omit the reservation.
+        token = self._run.active_token
+        if running is not None and token is not None:
             operations.append(ActiveTabOperation(token, running, "run"))
         operations.extend(
             ActiveTabOperation(token, tab, "analyze")
@@ -156,9 +162,15 @@ class RunAnalyzeControlFacet:
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
 
-    def start_run(self, tab_id: str) -> int:
+    def start_run(self, tab_id: str, expected: CfgRef) -> int:
+        """Accept exactly the caller's publication, without refresh or substitution."""
         self._access.require_available()
-        permit = self._guard.acquire_run_permit(tab_id)
+        actual = self._state.get_tab(tab_id).cfg.observe().ref
+        if expected != actual:
+            raise CfgStaleError(expected, actual)
+        permit = self._guard.acquire_run_permit(
+            tab_id, expected_revision=expected.revision
+        )
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
@@ -168,18 +180,18 @@ class RunAnalyzeControlFacet:
         self._access.require_available()
         permit = self._guard.acquire_load_permit(tab_id)
         outcome = self._load.load_result(permit, data_path)
-        tab = self._state.get_tab(tab_id)
-        has_analyze_params = False
-        if tab.adapter.capabilities.analysis is not AnalysisMode.NONE:
-            self._tab.initialize_tab_analyze_params(tab_id)
-            has_analyze_params = True
+        preparation = self._tab.prepare_result_analysis(tab_id)
         self._bus.emit(
             TabContentChangedPayload(
                 tab_id=tab_id,
                 fact=TabContentFact.LOADED_RESULT_COMMITTED,
             )
         )
-        return replace(outcome, has_analyze_params=has_analyze_params)
+        return replace(
+            outcome,
+            has_analyze_params=preparation.has_params,
+            analysis_error=preparation.error,
+        )
 
     def cancel_run(self) -> bool:
         return self._run.cancel_run()

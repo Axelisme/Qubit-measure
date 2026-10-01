@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import InitVar, dataclass, field, replace
 from typing import Any, Self, TypeAlias
 
 
 def default_value_for_type(type_: type) -> object:
     defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
-    return defaults.get(type_, None)
+    return defaults.get(type_)
 
 
 def require_finite_scalar(value: float | complex) -> None:
@@ -20,11 +20,9 @@ def require_finite_scalar(value: float | complex) -> None:
 # Spec tree — static, defined by Adapter, never mutated
 # ---------------------------------------------------------------------------
 
+
 # A transform applied to the leaf spec node reached by a dotted path. Returns a
 # replacement node (e.g. a LiteralSpec for lock_literal).
-_LeafTransform = Callable[["CfgNodeSpec"], "CfgNodeSpec"]
-
-
 def _split_spec_path(path: str) -> list[str]:
     parts = [p for p in path.split(".") if p]
     if not parts:
@@ -54,7 +52,7 @@ class ScalarSpec:
     label: str
     type: type
     editable: bool = True
-    choices: list | None = None
+    choices: Sequence[object] | None = None
     choices_source: str = ""
     decimals: int | None = None
     required: bool = False
@@ -82,7 +80,7 @@ def IntSpec(
     label: str,
     *,
     editable: bool = True,
-    choices: list | None = None,
+    choices: Sequence[object] | None = None,
     required: bool = False,
     optional: bool = False,
     group: str = "",
@@ -111,7 +109,7 @@ def FloatSpec(
     *,
     decimals: int | None = None,
     editable: bool = True,
-    choices: list | None = None,
+    choices: Sequence[object] | None = None,
     required: bool = False,
     optional: bool = False,
     group: str = "",
@@ -174,30 +172,38 @@ class ReferenceSpec:
     allowed: list[CfgSectionSpec]
     label: str = "Reference"
     optional: bool = False
+    discriminator: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if not self.kind:
             raise RuntimeError("ReferenceSpec.kind must be non-empty")
         if not self.allowed:
             raise RuntimeError("ReferenceSpec.allowed must be non-empty")
+        if self.discriminator is not None:
+            values: list[object] = []
+            for shape in self.allowed:
+                literal = shape.fields.get(self.discriminator)
+                if not isinstance(literal, LiteralSpec):
+                    raise ValueError(
+                        "Reference discriminator must name a literal in every shape"
+                    )
+                if literal.value in values:
+                    raise ValueError(
+                        "Reference discriminator must uniquely identify each shape"
+                    )
+                values.append(literal.value)
 
     def lock_literal(self, path: str, value: object) -> Self:
         """Lock a leaf of this ref's allowed shapes (path is relative to the
         shape, e.g. ``pulse_cfg.freq``). Lets an adapter lock fields on the
         sub-tree as it is built, instead of from the root section. Returns a new
         frozen ReferenceSpec; chains stay on this type."""
-        return self._with_override(
-            _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
-        )
-
-    def _with_override(self, parts: list[str], fn: _LeafTransform) -> Self:
-        # Duck-type descent: apply to every allowed shape that contains the path,
-        # skip those that don't. Fail only if no allowed shape matches (real typo).
+        parts = _split_spec_path(path)
         new_allowed: list[CfgSectionSpec] = []
         matched = False
         for shape in self.allowed:
             if _path_exists(shape, parts):
-                new_allowed.append(shape._with_override(parts, fn))
+                new_allowed.append(shape.lock_literal(path, value))
                 matched = True
             else:
                 new_allowed.append(shape)
@@ -208,28 +214,6 @@ class ReferenceSpec:
                 f"shape of ReferenceSpec (allowed: {allowed_labels})"
             )
         return replace(self, allowed=new_allowed)
-
-
-def _reference_discriminator_key(spec: ReferenceSpec) -> str | None:
-    """Return the unique literal field that distinguishes all allowed shapes."""
-    first = spec.allowed[0]
-    common_keys = set(first.fields)
-    for allowed in spec.allowed[1:]:
-        common_keys.intersection_update(allowed.fields)
-    for key in first.fields:
-        if key not in common_keys:
-            continue
-        leaves = [allowed.fields[key] for allowed in spec.allowed]
-        if not all(isinstance(leaf, LiteralSpec) for leaf in leaves):
-            continue
-        values = [leaf.value for leaf in leaves if isinstance(leaf, LiteralSpec)]
-        if all(
-            value != other
-            for idx, value in enumerate(values)
-            for other in values[idx + 1 :]
-        ):
-            return key
-    return None
 
 
 @dataclass(frozen=True)
@@ -252,12 +236,7 @@ class CfgSectionSpec:
         The locked field shows no widget and always lowers to ``value`` (notebook
         ``freq: 0.0, # not used``). Returns a new frozen spec.
         """
-        return self._with_override(
-            _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
-        )
-
-    def _with_override(self, parts: list[str], fn: _LeafTransform) -> Self:
-        head, rest = parts[0], parts[1:]
+        head, *rest = _split_spec_path(path)
         if head not in self.fields:
             raise RuntimeError(
                 f"Spec override path segment {head!r} not found "
@@ -265,9 +244,9 @@ class CfgSectionSpec:
             )
         child = self.fields[head]
         if not rest:
-            new_child: CfgNodeSpec = fn(child)
+            new_child: CfgNodeSpec = LiteralSpec(value=value)
         elif isinstance(child, (CfgSectionSpec, ReferenceSpec)):
-            new_child = child._with_override(rest, fn)
+            new_child = child.lock_literal(".".join(rest), value)
         else:
             raise RuntimeError(
                 f"Spec override path cannot descend into {type(child).__name__} "
