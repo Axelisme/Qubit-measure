@@ -5,9 +5,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
-from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqResult
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.freq import (
+    FreqAnalyzeOptions,
+    FreqCfg,
+    FreqExp,
+    FreqResult,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -21,12 +26,14 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.plotting.plots import Plots
 
-FreqRunResult: TypeAlias = FreqResult
+FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 @dataclass
@@ -41,8 +48,6 @@ class FreqAnalyzeResult(AnalyzeResultBase):
     freq_err: float
     fwhm: float
     fwhm_err: float
-    params: dict[str, Any]
-    figure: Figure
 
 
 class FreqAdapter(
@@ -97,6 +102,13 @@ class FreqAdapter(
         ),
     )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> FreqRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FreqExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -123,21 +135,19 @@ class FreqAdapter(
         )
 
     def analyze(
-        self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeParams]
+        self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeParams], *, plots: Plots
     ) -> FreqAnalyzeResult:
         params = req.analyze_params
-        freq, freq_err, fwhm, fwhm_err, fig = FreqExp().analyze(
+        analysis = FreqExp().analyze(
             req.run_result,
-            model_type=params.model_type,
-            plot_fit=params.plot_fit,
+            FreqAnalyzeOptions(model_type=params.model_type, plot_fit=params.plot_fit),
+            plots=plots,
         )
         return FreqAnalyzeResult(
-            freq=freq,
-            freq_err=freq_err,
-            fwhm=fwhm,
-            fwhm_err=fwhm_err,
-            params={},
-            figure=fig,
+            freq=analysis.freq,
+            freq_err=analysis.freq_err,
+            fwhm=analysis.fwhm,
+            fwhm_err=analysis.fwhm_err,
         )
 
     def get_writeback_items(

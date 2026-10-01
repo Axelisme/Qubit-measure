@@ -17,6 +17,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepResult
+from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend import (
     FluxPickFrontend,
@@ -106,7 +107,7 @@ def _start_mounted(
     run_result = (
         RunRecord(cfg=None, result=FluxDepResult(devs, freqs, signals))
         if adapter == "onetone/flux_dep"
-        else SimpleNamespace(signals=signals, values=devs, freqs=freqs)
+        else RunRecord(cfg=None, result=FreqFluxResult(devs, freqs, signals))
     )
     fx.state.get_tab(tab_id).run.result = run_result
     tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation

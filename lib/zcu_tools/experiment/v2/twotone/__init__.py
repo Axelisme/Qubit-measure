@@ -2,9 +2,14 @@ from . import rabi, reset, ro_optimize, time_domain
 from .ac_stark import AcStarkCfg, AcStarkExp, AcStarkRamseyCfg, AcStarkRamseyExp
 from .allxy import AllXY_Exp, AllXYCfg
 from .ckp import CKP_Cfg, CKP_Exp
-from .dispersive import DispersiveCfg, DispersiveExp
+from .dispersive import (
+    DispersiveAnalysis,
+    DispersiveAnalyzeOptions,
+    DispersiveCfg,
+    DispersiveExp,
+)
 from .fluxdep import FreqFluxCfg, FreqFluxExp
-from .freq import FreqCfg, FreqExp
+from .freq import FreqAnalysis, FreqAnalyzeOptions, FreqCfg, FreqExp
 from .power_dep import PowerCfg, PowerExp
 from .rb import RB_Exp, RBCfg
 from .zigzag import ZigZagCfg, ZigZagExp
@@ -30,12 +35,16 @@ __all__ = [
     # dispersive
     "DispersiveExp",
     "DispersiveCfg",
+    "DispersiveAnalysis",
+    "DispersiveAnalyzeOptions",
     # flux dep
     "FreqFluxExp",
     "FreqFluxCfg",
     # freq
     "FreqExp",
     "FreqCfg",
+    "FreqAnalysis",
+    "FreqAnalyzeOptions",
     # power dep
     "PowerExp",
     "PowerCfg",

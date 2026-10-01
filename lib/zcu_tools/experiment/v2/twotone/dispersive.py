@@ -4,7 +4,6 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -26,14 +25,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -53,7 +52,6 @@ class DispersiveResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
     ge: NDArray[np.int64] = field(default_factory=lambda: np.array([0, 1]))
-    cfg_snapshot: DispersiveCfg | None = None
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -76,6 +74,17 @@ class DispersiveCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: DispersiveSweepCfg
 
 
+@dataclass(frozen=True)
+class DispersiveAnalyzeOptions:
+    fit_bg_amp_slope: bool = False
+
+
+@dataclass(frozen=True)
+class DispersiveAnalysis:
+    chi: float
+    avg_fwhm: float
+
+
 class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
     # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ; outer ge index -> IDENTITY
     AXES_SPEC = AxesSpec(
@@ -89,18 +98,21 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         tag="twotone/ge/dispersive",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: DispersiveCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> DispersiveResult:
-        orig_cfg = deepcopy(cfg)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         freq_sweep = cfg.sweep.freq
@@ -111,45 +123,42 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        with LivePlot1D(
-            "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (2, len(freqs)),
-                on_update=lambda data: viewer.update(
-                    freqs, dispersive_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
-                freq_sweep = cfg.sweep.freq
-                modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
-
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
-                        PulseReadout("readout", modules.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-
-        return DispersiveResult(
-            freqs=freqs, signals=signals_buffer.array, cfg_snapshot=orig_cfg
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Frequency (MHz)", "Amplitude", num_lines=2
         )
+        signals_buffer = SignalBuffer(
+            (2, len(freqs)),
+            on_update=lambda data: viewer.update(freqs, dispersive_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            freq_sweep = cfg.sweep.freq
+            modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
-    @retrieve_result
-    def analyze(
-        self, result: DispersiveResult | None = None, fit_bg_amp_slope: bool = False
-    ) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
+                    PulseReadout("readout", modules.readout),
+                )
+                .declare_sweep("ge", 2)
+                .declare_sweep("freq", freq_sweep)
+                .build_and_acquire()
+            )
+
+        return DispersiveResult(freqs=freqs, signals=signals_buffer.array)
+
+    def analyze(  # noqa: PLR0915 - joint ground/excited fit and three diagnostic panels
+        self,
+        source: RunRecord[DispersiveCfg, DispersiveResult],
+        options: DispersiveAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> DispersiveAnalysis:
+        result = source.result
 
         freqs = result.freqs
         signals = result.signals
@@ -166,26 +175,28 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
             freqs,
             g_signals,
             edelay=edelay,
-            fit_bg_amp_slope=fit_bg_amp_slope,
+            fit_bg_amp_slope=options.fit_bg_amp_slope,
         )
         e_params = model.fit(
             freqs,
             e_signals,
             edelay=edelay,
-            fit_bg_amp_slope=fit_bg_amp_slope,
+            fit_bg_amp_slope=options.fit_bg_amp_slope,
         )
 
         g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
         e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]
 
-        g_fit = np.abs(model.calc_signals(freqs, **g_params))  # type: ignore
-        e_fit = np.abs(model.calc_signals(freqs, **e_params))  # type: ignore
+        # Each fitted parameter mapping belongs to the selected resonance model.
+        g_fit = np.abs(model.calc_signals(freqs, **g_params))  # pyright: ignore[reportArgumentType]
+        e_fit = np.abs(model.calc_signals(freqs, **e_params))  # pyright: ignore[reportArgumentType]
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_fwhm = (g_fwhm + e_fwhm) / 2  # average linewidth κ/2π
 
-        fig = plt.figure(figsize=(8, 4))
+        fig = Figure(figsize=(8, 4))
+        plots.adopt("fit", fig)
         spec = fig.add_gridspec(2, 3, wspace=0.2)
         ax_main = fig.add_subplot(spec[:, :2])
         ax_g = fig.add_subplot(spec[0, 2])
@@ -244,7 +255,6 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
             ax.axhline(0, color="k", linestyle="--")
             ax.set_aspect("equal")
             ax.grid(True)
-            # ax.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
             ax.set_ylabel(r"$Im[S_{21}]$", fontsize=14)
             ax.yaxis.set_label_position("right")
             ax.legend()
@@ -254,6 +264,4 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         _plot_circle_fit(ax_e, e_signals, dict(e_params), "r", "Excited")
         ax_e.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
 
-        # fig.tight_layout()
-
-        return chi, avg_fwhm, fig
+        return DispersiveAnalysis(chi, avg_fwhm)

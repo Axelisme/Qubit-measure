@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,14 +14,12 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -39,7 +36,6 @@ class PowerResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: PowerCfg | None = None
 
 
 def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -76,17 +72,20 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         tag="twotone/power_dep",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: PowerCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> PowerResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         gain_sweep = cfg.sweep.gain
@@ -104,48 +103,38 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        with LivePlot2DwithLine(
-            "Pulse Gain (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=2
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(gains), len(freqs)),
-                on_update=lambda data: viewer.update(
-                    gains, freqs, gain_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for _, step in sched.scan("gain", gains.tolist()):
-                    cfg = step.cfg
-                    modules = cfg.modules
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement",
+            "Pulse Gain (a.u.)",
+            "Frequency (MHz)",
+            line_axis=1,
+            num_lines=2,
+        )
+        signals_buffer = SignalBuffer(
+            (len(gains), len(freqs)),
+            on_update=lambda data: viewer.update(gains, freqs, gain_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for _, step in sched.scan("gain", gains.tolist()):
+                cfg = step.cfg
+                modules = cfg.modules
 
-                    modules.qub_pulse.set_param("gain", step.value)
-                    freq_sweep = cfg.sweep.freq
-                    modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+                modules.qub_pulse.set_param("gain", step.value)
+                freq_sweep = cfg.sweep.freq
+                modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add_reset("reset", modules.reset)
-                        .add_pulse("init_pulse", modules.init_pulse)
-                        .add_pulse("qubit_pulse", modules.qub_pulse)
-                        .add_readout("readout", modules.readout)
-                        .declare_sweep("freq", freq_sweep)
-                        .build_and_acquire(
-                            **(acquire_kwargs or {}),
-                        )
-                    )
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_pulse("qubit_pulse", modules.qub_pulse)
+                    .add_readout("readout", modules.readout)
+                    .declare_sweep("freq", freq_sweep)
+                    .build_and_acquire()
+                )
 
         return PowerResult(
             gains=gains,
             freqs=freqs,
             signals=signals_buffer.array,
-            cfg_snapshot=orig_cfg,
-        )
-
-    @retrieve_result
-    def analyze(
-        self,
-        result: PowerResult | None = None,
-    ) -> None:
-        raise NotImplementedError(
-            "Analysis not implemented for two-tone power dependence"
         )

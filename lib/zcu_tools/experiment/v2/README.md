@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — FastFlux records
+**Last updated:** 2026-10-02 — TwoTone spectroscopy records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -30,6 +30,14 @@ FastFlux 六個核心使用 `run(config, *, context) -> Result`，不保存跨�
 `None`。三個 distortion 需要來源 cfg 來取得 pulse 時間，缺少時明確拒絕。共用
 NotebookAdapter 建立 records；核心保留既有 canonical axes、單位與分析公式。
 下面的舊 run 範本亦不適用 FastFlux。
+
+## TwoTone spectroscopy records
+
+`twotone` 的 Freq、FreqFlux、Power 與 Dispersive 使用 explicit RunContext，run 回傳純 Result。
+Freq 與 Dispersive 同步 analyze 接 RunRecord 與各自 typed options，回傳數值 Analysis，
+向本次 Plots 發布 `fit` 圖。FreqFlux 與 Power 只提供量測及保存／載入，不提供 core analyze。
+FreqFlux 的 `fail_retry` 是 typed cfg 欄位；GUI 選線由 plugin 擁有。Notebook 的互動 caller
+仍待遷移，不由核心轉接。下面的舊 run 範本不適用這四個核心。
 
 ## 目錄佈局
 

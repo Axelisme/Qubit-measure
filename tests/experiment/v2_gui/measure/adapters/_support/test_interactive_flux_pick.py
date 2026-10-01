@@ -11,6 +11,7 @@ import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepResult
+from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     FluxPickParams,
     FluxPickResult,
@@ -117,19 +118,21 @@ def test_both_adapters_seed_projection_and_publish_named_result_figure(
     md.flx_int = 2.0
     plots = Plots(NonPresentingHost())
     request = _request(md)
-    if adapter_type is OneToneFluxDepAdapter:
-        bare = request.run_result
-        request = replace(
-            request,
-            run_result=RunRecord(
-                cfg=None,
-                result=FluxDepResult(
-                    bare.values,
-                    bare.freqs,
-                    np.asarray(bare.signals, dtype=np.complex128),
-                ),
+    bare = request.run_result
+    result_type = (
+        FluxDepResult if adapter_type is OneToneFluxDepAdapter else FreqFluxResult
+    )
+    request = replace(
+        request,
+        run_result=RunRecord(
+            cfg=None,
+            result=result_type(
+                bare.values,
+                bare.freqs,
+                np.asarray(bare.signals, dtype=np.complex128),
             ),
-        )
+        ),
+    )
     plugin = adapter_type().make_interactive_plugin(request, plots=plots)
     assert isinstance(plugin, FluxPickPlugin)
     session = plugin.open(ManualOwnerScheduler())
