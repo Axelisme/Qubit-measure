@@ -3,8 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
+from zcu_tools.analysis.fluxdep.line_state import (
+    FluxPickInputs,
+    FluxPickState,
+    fold_initial_lines,
+)
+from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import (
-    FluxDepAnalyzeOptions,
     FluxDepCfg,
     FluxDepExp,
     FluxDepResult,
@@ -26,7 +32,8 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend im
     make_flux_pick_frontend,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
-    make_flux_pick_plugin,
+    FluxPickPlugin,
+    render_flux_pick,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
@@ -39,6 +46,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
+    require_soc_handles,
 )
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import (
@@ -52,7 +60,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.plotting.plots import Plots
 
-OneToneFluxDepRunResult: TypeAlias = FluxDepResult
+OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
 
 
 def _readout_length_default() -> Seed[float | EvalValue]:
@@ -170,6 +178,14 @@ class OneToneFluxDepAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+    ) -> OneToneFluxDepRunResult:
+        soc, soccfg = require_soc_handles(req)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FluxDepExp().run(cfg, context=QickContext(soc, soccfg, plots))
+        return RunRecord(cfg=cfg, result=result)
+
     # -- interactive analysis: user picks the half/integer flux lines ----------
 
     def make_interactive_plugin(
@@ -177,27 +193,20 @@ class OneToneFluxDepAdapter(
         req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams],
         *,
         plots: Plots,
-    ) -> PluginDefinition[Any, Any]:
-        def build_result(_inputs, state, output: Plots) -> FluxPickResult:
-            core_result = self.exp_cls().analyze(
-                req.run_result,
-                FluxDepAnalyzeOptions(
-                    flux_half=state.flux_half,
-                    flux_int=state.flux_int,
-                    conjugate=state.conjugate,
-                    magnitude_only=state.magnitude_only,
-                ),
-                plots=output,
-            )
-            return FluxPickResult(
-                flx_half=core_result.flux_half,
-                flx_int=core_result.flux_int,
-                flx_period=core_result.flux_period,
-            )
-
+    ) -> FluxPickPlugin:
+        result = req.run_result.result
+        inputs = FluxPickInputs(result.signals, result.values, result.freqs)
+        half, integer = fold_initial_lines(
+            inputs.dev_values,
+            req.md.get("flx_half"),
+            req.md.get("flx_int"),
+        )
         # One-tone resonator spectra have uninformative phase.
-        return make_flux_pick_plugin(
-            req, force_magnitude=True, plots=plots, result_builder=build_result
+        return FluxPickPlugin(
+            inputs,
+            FluxPickState(half, integer, conjugate=False, magnitude_only=True),
+            plots=plots,
+            result_builder=render_flux_pick,
         )
 
     def make_interactive_frontend(

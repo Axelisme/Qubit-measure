@@ -131,14 +131,14 @@ Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value
 才是契約變更的紀錄，不在 runtime builder 內保留舊 fixture 相容邏輯。
 
 `BaseAdapter.load` 是 GUI load path 的 canonical result seam：預設建構 `exp_cls()` 並呼
-`exp.load(Path(filepath), server_ip=..., port=...)`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
+`exp.load(Path(filepath))`，與 `BaseAdapter.save` 的 canonical persistence 對稱。需要 constructor
 參數、非 canonical/manual save、grouped data，或需要額外 metadata 才能安全分析/writeback 的
 adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedError` fast-fail。
 adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
 直接回報原始錯誤。`BaseAdapter.load` 只讀取結果，不修改 tab cfg；GUI
 `LoadService.load_result` 只從 loaded RunRecord.cfg 嘗試回填 tab 與 Config editor。
-缺失或不可採用的 cfg 不撤回有效資料，tab cfg 保持不變。已遷移的 T1／GE 用
-RunRecord 配對 cfg 與純 Result，分析不讀 current cfg；其他實驗仍待遷移。
+缺失或不可採用的 cfg 不撤回有效資料，tab cfg 保持不變。已遷移的 T1／GE／OneTone FluxDep 用
+RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。OneTone FluxDep 的互動分析由 frontend 擁有，其他實驗仍待遷移。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；

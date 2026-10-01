@@ -15,6 +15,8 @@ import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend import (
     FluxPickFrontend,
@@ -101,9 +103,12 @@ def _start_mounted(
     )
     # Synthetic run input is fixture setup; starting analysis, mounting, RPC,
     # result publication and writeback must all use their production seams.
-    fx.state.get_tab(tab_id).run.result = SimpleNamespace(
-        signals=signals, values=devs, freqs=freqs
+    run_result = (
+        RunRecord(cfg=None, result=FluxDepResult(devs, freqs, signals))
+        if adapter == "onetone/flux_dep"
+        else SimpleNamespace(signals=signals, values=devs, freqs=freqs)
     )
+    fx.state.get_tab(tab_id).run.result = run_result
     tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
     if pane is not None:
         tab_widget.select_pane(pane)

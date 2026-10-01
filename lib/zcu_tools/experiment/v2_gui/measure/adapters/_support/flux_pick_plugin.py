@@ -7,15 +7,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
-
-from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxLineRole,
     FluxPickInputs,
     FluxPickState,
     align_lines,
+    analyze_flux_pick,
     fold_initial_lines,
     move_line,
     swap_lines,
@@ -30,6 +27,7 @@ from zcu_tools.gui.app.measure.interactive import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
+from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import Plots
 
 from .interactive_flux_pick import FluxPickResult
@@ -48,24 +46,13 @@ class FluxPickActions:
 def render_flux_pick(
     inputs: FluxPickInputs, state: FluxPickState, plots: Plots
 ) -> FluxPickResult:
-    """Render the unchanged TwoTone terminal pick until its core is migrated."""
-    figure = Figure(figsize=(8, 5))
-    FigureCanvasAgg(figure)
-    picker = TwoLinePicker(
-        figure,
-        inputs.signals,
-        inputs.dev_values,
-        inputs.freqs,
-        flux_half=state.flux_half,
-        flux_int=state.flux_int,
-        force_magnitude=state.magnitude_only,
-    )
-    picker.show_state(state)
-    plots.adopt("pick", figure)
+    """Build a GUI-owned terminal result from captured inputs and committed state."""
+    analysis = analyze_flux_pick(inputs, state)
+    plots.adopt("pick", make_flux_pick_figure(inputs, state))
     return FluxPickResult(
-        flx_half=state.flux_half,
-        flx_int=state.flux_int,
-        flx_period=2 * abs(state.flux_int - state.flux_half),
+        flx_half=analysis.flux_half,
+        flx_int=analysis.flux_int,
+        flx_period=analysis.flux_period,
     )
 
 
