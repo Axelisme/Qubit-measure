@@ -89,7 +89,11 @@ def analyze_flux_pick(
     Lines must meet the input axis's minimum separation. Invalid selections
     raise ValueError; successful selections have twice their distance as period.
     """
-    raise NotImplementedError("flux-pick analysis is not implemented")
+    return FluxPickAnalysis(
+        flux_half=state.flux_half,
+        flux_int=state.flux_int,
+        flux_period=2 * abs(state.flux_int - state.flux_half),
+    )
 
 
 def _mirror_inbounds_mask(
