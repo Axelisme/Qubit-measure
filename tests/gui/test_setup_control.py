@@ -142,6 +142,7 @@ def _facet(
             settings=cast(Any, settings),
             context=cast(Any, context),
             connection=cast(Any, connection),
+            simulated_environment=cast(Any, connection),
             device=cast(Any, device),
             on_project_applied=on_project_applied,
         ),

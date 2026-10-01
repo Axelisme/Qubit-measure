@@ -156,7 +156,7 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 ### Device manager tests
 
-`tests/device/test_manager_lock.py` 覆蓋 `GlobalDeviceManager` registry lock 只保護
+`tests/device/test_manager_lock.py` 覆蓋 instance `DeviceManager` registry lock 只保護
 registry dict、`get_info` 不被其它 device 的 setup ramp 阻塞、整批 name validation
 fast-fail、以及 `setup_devices(..., cancel_signal=...)` / `device_setup_cancel_scope(...)`
 的協作取消語意。取消測試使用真 `FakeDevice`，不註冊 MagicMock driver。
@@ -297,9 +297,9 @@ UI mechanics tests 的 `make_measurement_builder("qubit_freq")` 仍使用 produc
 
 ### GUI device service tests
 
-`GlobalDeviceManager` 是 production singleton，入口只接受 `BaseDevice` instance。GUI service unit tests 若用
-`MagicMock` driver 來驗證 call interaction，應注入 `tests/gui/session/services/_device_fakes.py::FakeDeviceRegistry`，
-不要把 mock driver 註冊進 global singleton。需要測 singleton CRUD 時改用真 `FakeDevice`。
+`DeviceManager` 是 instance registry，入口只接受 `BaseDevice` instance。GUI service unit tests 若用
+`MagicMock` driver 驗證 call interaction，注入 `tests/gui/session/services/_device_fakes.py::FakeDeviceRegistry`。
+Registry CRUD 使用真 `FakeDevice`。`test_simulated_environment.py` 經真 session owners 驗證明確組裝、部分斷線失敗與來源綁定，不靠一般 SoC change 通知補建資源。
 
 `DeviceService.poll_device_info(name)` 測試應視為 best-effort off-main live-read contract：memory-only、
 connect/disconnect 等非 setup mutation 會 skip；`SETTING_UP` 的 selected device 可 poll current driver

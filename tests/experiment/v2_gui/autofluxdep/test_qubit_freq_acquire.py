@@ -22,7 +22,7 @@ import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.cfg import CenteredSweepValue
-from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+from zcu_tools.gui.session.services.simulated_environment import FAKE_FLUX_DEVICE_NAME
 
 from tests.gui.app.autofluxdep._helpers import (
     connect_mock,

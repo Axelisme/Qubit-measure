@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop
-from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -62,15 +62,6 @@ def _quiesce_services():
     for bg in _LIVE_BG:
         bg.quiesce()
     _LIVE_BG.clear()
-
-
-@pytest.fixture(autouse=True)
-def _clean_devices():
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
-    yield
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
 
 
 def _drain_until(
@@ -294,7 +285,9 @@ def test_devicemanager_get_all_info(qapp):
     dev.set_value(1.0)
     svc, _ = _make_real_svc(driver=dev)
     _register(svc, "flux")
-    info = GlobalDeviceManager.get_all_info()
+    info = {
+        name: driver.get_info() for name, driver in svc.get_connected_devices().items()
+    }
     assert "flux" in info
     flux_info = info["flux"]
     assert isinstance(flux_info, FakeDeviceInfo)

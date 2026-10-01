@@ -39,6 +39,7 @@ class SessionEvent(str, Enum):
     )
     HARDWARE_GATE_CHANGED = "hardware_gate_changed"
     CONNECTION_FINISHED = "connection_finished"
+    SIMULATED_ENVIRONMENT_FINISHED = "simulated_environment_finished"
     DEVICE_OPERATION_FINISHED = "device_operation_finished"
 
 
@@ -47,6 +48,15 @@ class SessionPayload(BasePayload):
     """Base for all session-core EventBus payloads. Subclasses set ``EVENT``."""
 
     EVENT: ClassVar[SessionEvent]
+
+
+@dataclass(frozen=True)
+class SimulatedEnvironmentFinishedPayload(SessionPayload):
+    """The complete simulated-environment attempt has reached a terminal state."""
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.SIMULATED_ENVIRONMENT_FINISHED
+    success: bool
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)

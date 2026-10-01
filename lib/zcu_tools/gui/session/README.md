@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-30 — Context Apply 候選與儲存邊界
+**Last updated:** 2026-10-02 — Explicit simulated environment
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -25,7 +25,7 @@ session/
 ├── types.py            — SocProtocol/SocCfgProtocol/SocHandle/SocCfgHandle/ContextReadiness/SessionEnv（P-a 值型別）
 ├── events.py           — SessionEvent enum + SessionPayload base + 11 payload（Md/Ml/ContextSwitched/Soc/Predictor/Device{Changed,SetupStarted,SetupFinished} + GateChanged/ConnectionFinished/DeviceOperationFinished）
 ├── state.py            — SessionState（session_env+devices/DeviceState+preferences/SessionPreferences+shared VersionTable+device mutators）；DeviceStatus
-├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（GlobalDeviceManager classmethod 面的 instance 化，DeviceService 依契約存取、測試注 in-memory fake，ADR-0066）、ProjectIOPort、ContextReadPort、ProjectContextPort
+├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ProjectIOPort、ContextReadPort、ProjectContextPort
 ├── hardware_gate.py    — RunBlocksHardwareGate：measure/autofluxdep 共用硬體互斥矩陣（RUN 擋 RUN/SoC/device mutation；device mutation 依 resource id 互斥；SoC connect 擋 RUN/SoC）；每個lease另保存captured origin、human note與monotonic start，register/release emit `GateChangedPayload`，`snapshot()`只投影active duration、不曝露raw epoch
 ├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0066）+ captured EventOrigin operation record；`create(cancel_hook=, origin=)`要求caller顯式capture，`event_origin(token)`在live/retained-done record上投影string operation id；`has_cancel_hook`/channel.`can_cancel` gate 'Send & Stop'鈕；cancel hook例外只log，Stop事件仍入列且cancel_all繼續處理其它operation
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0066：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
@@ -56,7 +56,7 @@ session/
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）
 │   ├── shutdown.py     — ShutdownCoordinator（Qt-free cancel-all + poll state machine，吃 OperationHandles，ADR-0066；QTimer driver 在 adapters/）
 │   ├── io_manager.py   — IOManager（ContextManager 包裝，實作 ProjectIOPort；**共用**；把 project `result_dir` 映射到 `result_dir/exps` 作為 context root）
-│   ├── mock_flux.py    — MockFluxProvisioner（FLUX-AWARE-MOCK：訂閱 SOC_CHANGED，mock connect 時 ① 綁定/provision fake_flux 源 ② 從 mock soc 自身 SimParams 建 FluxoniumPredictor 經 connection seam 安裝——不蓋使用者已載入的 predictor）
+│   ├── simulated_environment.py — Use Simulate Env coordinator：經 DeviceService 斷開真實裝置，註冊／初始化 FakeDevice，再綁定 MockSoc 並由 SoC owner 發布；保留既有 predictor
 │   ├── predictor_from_sim.py — build_predictor_from_simparams(SimParams)→FluxoniumPredictor（純函式；橋接兩個彼此獨立的 lib leaf，放 session 層避免在 program/simulate 間造新跨依賴；測試共用）
 │   ├── value_sources.py — ValueSourceBinder：訂閱 Context/Predictor/Device event，把 live SessionState 投影註冊進 `ValueRegistry`；provider 只讀 cached state（device value 只看 `DeviceState.info`，不 poll hardware），並用 owner-level replace/unregister 維護 lifecycle
 │   └── build.py        — SessionServices bundle（soc_connection/predictor/predictor_control/progress_control/context/context_control/device/device_control/setup_control/settings）+ build_session_services(state,bus,gate,handles,background,progress,io_manager,runner,driver_factory?,device_registry?,on_project_applied?)
@@ -70,6 +70,8 @@ session/
     ├── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook `_build_extra_toolbar_buttons` 讓子類在 Refresh 左側加 app-specific 入口，hook `_build_extra_ml_buttons` / `_on_ml_selection_changed` 讓子類加 app-local actions。**consumers**：autofluxdep **直接用不 subclass**（保留 read-only wrapper）；measure subclass 自己擁有 embedded CfgEditor Modules presentation，不改 base。
     └── value_source_input.py — QLineEdit value-source helper：`@{prefix` 顯示分段 completion（`@{`→頂層、`dev`→`device.` 並展開下一段、`device.`→下一段），Tab/Backtab 接受預設候選時若當前候選全是 namespace 會自動補 `.` drill down，補到完整 key 才加 `}`；在 `@{full.key} ` 後輸入空格才立即 resolve 並以文字替換；token 完成或解析後明確 hide popup；依賴 `ValueSourceInputHost` port，不知道 ContextService/LiveModel
 ```
+
+`Use Simulate Env` 是明確的環境組裝入口，不是 `SOC_CHANGED` 的副作用。它只在啟用時斷開真實 devices，允許之後混用。任一斷線失敗就停止並回報部分成果，不自動重連、歸零或 RF off。低層 SoC connect 不建立 FakeDevice；重複啟用保留有效 mock 的資源與數值。
 
 ## Operation markers
 

@@ -649,6 +649,10 @@ class DeviceService:
             error=dev.error,
         )
 
+    def get_connected_devices(self) -> dict[str, DeviceProtocol]:
+        """Borrow the registered drivers without transferring lifecycle ownership."""
+        return dict(self._registry.get_all_devices())
+
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
         return tuple(self._project(dev) for dev in self._state.list_devices())
 

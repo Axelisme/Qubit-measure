@@ -10,7 +10,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
@@ -68,15 +67,6 @@ def _quiesce_services():
     for bg in _LIVE_BG:
         bg.quiesce()
     _LIVE_BG.clear()
-
-
-@pytest.fixture(autouse=True)
-def _clean_devices():
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
-    yield
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
 
 
 def _drain_until(
@@ -1034,8 +1024,6 @@ def test_registry_port_connect_registers_in_fake_not_global(qapp):
 
     # Device registered in the fake registry.
     assert "dev1" in registry.get_all_devices()
-    # Real singleton untouched.
-    assert "dev1" not in GlobalDeviceManager.get_all_devices()
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
 
 
@@ -1084,8 +1072,6 @@ def test_registry_port_connect_failure_rollback_still_correct(qapp):
     assert errors and "boom" in errors[0]
     # Fake registry must be clean after rollback (drop_device was called).
     assert "dev1" not in registry.get_all_devices()
-    # Real singleton untouched throughout.
-    assert "dev1" not in GlobalDeviceManager.get_all_devices()
     device.close.assert_called_once_with()
 
 

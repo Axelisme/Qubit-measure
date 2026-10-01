@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
 from zcu_tools.device.yoko import YOKOGS200Info
@@ -45,15 +44,6 @@ def _quiesce_services():
     for bg in _LIVE_BG:
         bg.quiesce()
     _LIVE_BG.clear()
-
-
-@pytest.fixture(autouse=True)
-def _clean_devices():
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
-    yield
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
 
 
 def _drain_until(
