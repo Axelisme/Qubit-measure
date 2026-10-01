@@ -15,10 +15,10 @@ import h5py
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
-    SearchResult,
     default_params_path,
 )
 from zcu_tools.gui.app.fluxdep.state import (
@@ -147,10 +147,10 @@ def test_compute_search_does_not_touch_state(tiny_database):
     )
     fit_version_before = st.version.get(FIT_VERSION_KEY)
 
-    result = svc.compute_search(plot=False)
+    result = svc.compute_search()
 
     # compute_search must NOT write State (no result recorded, no extra bump).
-    assert isinstance(result, SearchResult)
+    assert isinstance(result, DatabaseSearchResult)
     assert len(result.params) == 3
     assert st.fit.params is None  # still no result on State
     assert st.version.get(FIT_VERSION_KEY) == fit_version_before
@@ -168,7 +168,7 @@ def test_record_result_writes_state(tiny_database):
         0.0,
     )
     before = st.version.get(FIT_VERSION_KEY)
-    result = svc.compute_search(plot=False)
+    result = svc.compute_search()
     svc.record_result(result)
     assert st.fit.params == result.params
     assert st.fit.has_result

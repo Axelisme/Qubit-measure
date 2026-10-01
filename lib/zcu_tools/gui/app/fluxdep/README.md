@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — shared database search and diagnostic renderer
+**Last updated:** 2026-10-01. Search completion and diagnostic rendering
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -99,7 +99,7 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
 
 **v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：
 [search kernel](../../../analysis/fluxdep/README.md) 只算數值；
-[診斷圖 builder](../../../plotting/fluxdep/README.md) 使用 `plt.figure()`，service 在 worker 中呼叫 `plt.show()`。
+[診斷圖 builder](../../../plotting/fluxdep/README.md) 使用 `plt.figure()`。Qt 在主執行緒記錄搜尋結果後，才呼叫 builder 與 `plt.show()`。診斷圖失敗另報 warning，結果與 export 仍可用。
 沿用 pyplot 路由內嵌。共用套件:
 - `plotting/backend.py`（client）：`module://zcu_tools.gui.plotting.backend`，攔 `plt.figure()` →
   attach 到當前 `FigureContainer`；`plt.show()` → activate（**未 attach 則 raise**，Fast-Fail 統一）；
@@ -113,9 +113,8 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   behavior 只做 controller/window/adapter wiring；process entrypoint 只在
   `scripts/run_fluxdep_gui.py`。
 - **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
-  `enter=` CM 組合 `routing_scope(diag_container)` + `use_pbar_factory(factory)`，由 runner
-  在 worker 執行緒**於 thunk 內**進入（ContextVar 在 QThreadPool worker 裡看不到主執行緒的
-  `.set()`，故必須在 worker 端設），避免 worker 裡 `plt.show()` 找不到 attached figure 或彈出獨立視窗。
+  worker 經 `compute_search(pbar_factory=...)` 安裝進度通知。主執行緒的成功 callback 先記錄結果，
+  再於 `routing_scope(diag_container)` 內繪製診斷圖。
 
 ### 編輯區階段驅動
 MainWindow 編輯區依 active 譜的 pipeline 階段 swap widget：未定線→LinePicker；
@@ -188,11 +187,11 @@ MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `Remote
 search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 唯一的長阻塞作業。
 拆成**純計算 vs State 寫入**兩半，守住 main-thread State 不變式：
 - `FitService.compute_search`：純函式，先 snapshot State 的輸入（db 路徑/bounds/transitions/
-  選中點雲），再跑 search，**不寫 State**，回 `SearchResult(params, figure)`。可在 worker 跑。
+  選中點雲），再跑 search，不寫 State、不繪圖。直接回傳 kernel 的 `DatabaseSearchResult`，含 params 與數值診斷陣列，可在 worker 跑。
 - `FitService.record_result`：唯一寫 State 處（`set_fit_result`），只在主執行緒呼。
 - **GUI 路徑（唯一觸發路徑）**：`AnalyzePanelWidget` 經 `BackgroundRunner` 跑 `Controller.compute_search`（off-main，
-  GIL 釋放不卡 UI），完成 emit `SearchResult` → 主執行緒 slot `record_search_result` 寫 State +
-  畫圖。**不可中斷**（單一確定性掃描，只 disable Search 鈕 + 進度條，無 Cancel）。
+  GIL 釋放不卡 UI）。完成後，主執行緒先透過 `record_search_result` 寫 State、發出 fit fact，再畫圖。
+  數值成功不依賴診斷圖成功。**不可中斷**（單一確定性掃描，只 disable Search 鈕 + 進度條，無 Cancel）。
   - search 是 user 在 GUI 裡按的，**沒有 RPC 觸發路徑**（remote view 只讀）。`Controller.
     search_database` 是主執行緒上 compute + record 的便利入口，GUI worker 不用它；沒有 `fit.search` handler。compute/record
     分拆仍是守 main-thread State 不變式的關鍵。
