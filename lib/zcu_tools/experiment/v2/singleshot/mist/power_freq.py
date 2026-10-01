@@ -3,9 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import field_serializer
 
@@ -19,10 +17,12 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -47,7 +47,6 @@ class FreqPowerResult:
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
-    cfg_snapshot: FreqPowerCfg | None = None
 
 
 class FreqPowerModuleCfg(ConfigBase):
@@ -74,6 +73,11 @@ class FreqPowerCfg(ProgramV2Cfg, ExpCfgModel):
         return str(value)
 
 
+@dataclass(frozen=True)
+class FreqPowerAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
+
+
 class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
     AXES_SPEC = AxesSpec(
         axes=(
@@ -95,12 +99,18 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
 
     def run(
         self,
-        soc,
-        soccfg,
         cfg: FreqPowerCfg,
+        *,
+        context: RunContext,
     ) -> FreqPowerResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        soc, soccfg = context.soc, context.soccfg
+        cfg = deepcopy(cfg)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         freq_sweep = cfg.sweep.freq
@@ -118,101 +128,68 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
-        fig, axs = make_plot_frame(3, 1, plot_instant=True, figsize=(12, 6))
-
-        with MultiLivePlot(
-            fig,
-            dict(
-                plot_2d_g=LivePlot2D(
-                    "gain (a.u.)",
-                    "freq (MHz)",
-                    uniform=False,
-                    existed_axes=[[axs[0][0]]],
-                ),
-                plot_2d_e=LivePlot2D(
-                    "gain (a.u.)",
-                    "freq (MHz)",
-                    uniform=False,
-                    existed_axes=[[axs[1][0]]],
-                ),
-                plot_2d_o=LivePlot2D(
-                    "gain (a.u.)",
-                    "freq (MHz)",
-                    uniform=False,
-                    existed_axes=[[axs[2][0]]],
-                ),
-            ),
-        ) as viewer:
-
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                populations = calc_populations(data)
-
-                viewer.get_plotter("plot_2d_g").update(
-                    gains, freqs, populations[..., 0], refresh=False
-                )
-                viewer.get_plotter("plot_2d_e").update(
-                    gains, freqs, populations[..., 1], refresh=False
-                )
-                viewer.get_plotter("plot_2d_o").update(
-                    gains, freqs, populations[..., 2], refresh=False
-                )
-
-                viewer.refresh()
-
-            buffer = SignalBuffer(
-                (len(gains), len(freqs), 2),
-                dtype=np.float64,
-                on_update=plot_fn,
+        viewers = tuple(
+            context.plots.liveplot_2d(
+                f"measurement_{state}",
+                "gain (a.u.)",
+                "freq (MHz)",
+                title=state.capitalize(),
+                uniform=False,
             )
-            with Schedule(cfg, buffer) as sched:
-                sched.cfg.modules.probe_pulse.set_param(
-                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
-                )
-                for gain, step in sched.scan("gain", gains.tolist()):
-                    modules = step.cfg.modules
-                    modules.probe_pulse.set_param("gain", gain)
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add_reset("reset", modules.reset)
-                        .add_pulse("init_pulse", modules.init_pulse)
-                        .add_pulse("probe_pulse", modules.probe_pulse)
-                        .add_readout("readout", modules.readout)
-                        .declare_sweep("freq", step.cfg.sweep.freq)
-                        .build_and_acquire(
-                            raw2signal_fn=raw_population_signal,
-                            g_center=orig_cfg.g_center,
-                            e_center=orig_cfg.e_center,
-                            ge_radius=orig_cfg.radius,
-                        )
-                    )
-            signals = buffer.array
-
-        # record the last result
-        self.last_result = FreqPowerResult(
-            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+            for state in ("ground", "excited", "other")
         )
 
-        return self.last_result
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            populations = calc_populations(data)
+            for i, viewer in enumerate(viewers):
+                viewer.update(gains, freqs, populations[..., i])
+
+        buffer = SignalBuffer(
+            (len(gains), len(freqs), 2),
+            dtype=np.float64,
+            on_update=plot_fn,
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            sched.cfg.modules.probe_pulse.set_param(
+                "freq", sweep2param("freq", sched.cfg.sweep.freq)
+            )
+            for gain, step in sched.scan("gain", gains.tolist()):
+                modules = step.cfg.modules
+                modules.probe_pulse.set_param("gain", gain)
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_pulse("probe_pulse", modules.probe_pulse)
+                    .add_readout("readout", modules.readout)
+                    .declare_sweep("freq", step.cfg.sweep.freq)
+                    .build_and_acquire(
+                        raw2signal_fn=raw_population_signal,
+                        g_center=cfg.g_center,
+                        e_center=cfg.e_center,
+                        ge_radius=cfg.radius,
+                    )
+                )
+        signals = buffer.array
+
+        return FreqPowerResult(gains=gains, freqs=freqs, signals=signals)
 
     def analyze(
         self,
-        result: FreqPowerResult | None = None,
+        source: RunRecord[FreqPowerCfg, FreqPowerResult],
+        options: FreqPowerAnalyzeOptions,
         *,
-        ac_coeff=None,
-        log_scale=False,
-        confusion_matrix: NDArray[np.float64] | None = None,
-    ) -> Figure:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
+        plots: Plots,
+    ) -> None:
+        result = source.result
         gains, freqs, populations = result.gains, result.freqs, result.signals
 
         populations = calc_populations(populations)
 
-        populations = correct_populations(populations, confusion_matrix)
+        populations = correct_populations(populations, options.confusion_matrix)
 
-        fig, (ax_g, ax_e, ax_o) = plt.subplots(3, 1, figsize=(8, 10))
+        fig, _ = plots.subplots("fit", nrows=3, ncols=1, figsize=(8, 10))
+        ax_g, ax_e, ax_o = fig.axes
 
         im_g = ax_g.imshow(
             populations[..., 0],
@@ -248,5 +225,3 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
         fig.colorbar(im_o, ax=ax_o, label="Population (a.u.)")
 
         fig.tight_layout()
-
-        return fig

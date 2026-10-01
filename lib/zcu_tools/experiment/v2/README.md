@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — Singleshot decay records
+**Last updated:** 2026-10-02 — Singleshot MIST records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -134,14 +134,16 @@ Singleshot T1／T1WithTone／T1WithToneSweep 使用 explicit RunContext，unifor
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
 - **single-role 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
 
+Singleshot MIST 的 Freq／Power／PreFreq／FreqPower 使用 explicit RunContext，回傳純 Result。所有 classification 校準值屬於 typed cfg。同步 analyze 接 RunRecord、對應 AnalyzeOptions 與 Plots，允許 cfg=None，只發布 fit 圖。Power 支援 photon 軸與 log scale；FreqPower 不宣告未實作的軸選項。單 sweep 即時圖使用 measurement，二維掃描的 Ground／Excited／Other 熱圖各自具名；canonical population shapes 不變。
+
 Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個program只擷取
 單一length的`shots`筆raw IQ，再寫入sweep-first Result row，避免FPGA同時配置完整
 `Nlength × Nshot` raw buffer。stop保留已完成rows，其餘維持partial-result NaN。
 
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
-Singleshot Amp／Len Rabi、ResetCheck、T1 family、AC Stark 及 MIST freq/power/power_freq 的 classification
-校正值由各自 cfg 的 `g_center/e_center/radius` 提供，run 不接受獨立校正參數。已遷移核心由 RunRecord.cfg 保存這次校正值，未遷移的 MIST 仍使用 Result.cfg_snapshot。Complex centers 在 experiment comment 中以可逆 complex literal 序列化，還原由 Pydantic complex 欄位處理。
+Singleshot Amp／Len Rabi、ResetCheck、T1 family、AC Stark 及 MIST freq/power/power_freq/pre_freq 的 classification
+校正值由各自 cfg 的 `g_center/e_center/radius` 提供，run 不接受獨立校正參數。RunRecord.cfg 保存這次校正值。Complex centers 在 experiment comment 中以可逆 complex literal 序列化，還原由 Pydantic complex 欄位處理。
 
 Singleshot Rabi joint fit依analysis選擇有衰減或純cosine population dynamics：
 `len_rabi`預設擬合衰減包絡，也可選擇純cosine。純cosine模型不擬合

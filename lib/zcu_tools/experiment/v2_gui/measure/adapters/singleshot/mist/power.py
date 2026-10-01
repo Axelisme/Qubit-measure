@@ -4,9 +4,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.mist import PowerCfg, PowerExp, PowerResult
+from zcu_tools.experiment.v2.singleshot.mist.power import PowerAnalyzeOptions
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
@@ -17,7 +19,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.cfg import (
@@ -25,17 +29,15 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from .._shared import readout_probe_freq
 
-MistPowerRunResult: TypeAlias = PowerResult
+MistPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 
 @dataclass
-class MistPowerAnalyzeResult(FigureOnlyAnalyzeResult):
-    # MIST gain sweep is look-at-the-curve: the domain analyze renders the
-    # population-vs-gain (or vs photon-number when ac_coeff is known) traces and
-    # extracts no scalar, so there is no writeback. ``figure`` is inherited.
+class MistPowerAnalyzeResult(AnalyzeResultBase):
     pass
 
 
@@ -126,23 +128,29 @@ class MistPowerAdapter(
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> MistPowerRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, PowerExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[MistPowerRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[MistPowerRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> MistPowerAnalyzeResult:
-        # ``ac_coeff`` (= md 'ac_stark_coeff', the AC-Stark experiment's product),
-        # ``log_scale`` and ``confusion_matrix`` are analyze inputs read from md,
-        # not user knobs; absent → the domain defaults (linear gain x-axis, no
-        # readout correction).
-        ac_coeff = req.md.get("ac_stark_coeff")
-        log_scale = bool(req.md.get("log_scale", False))
-        confusion = req.md.get("confusion_matrix")
-        fig = PowerExp().analyze(
-            req.run_result,
-            ac_coeff=ac_coeff,
-            log_scale=log_scale,
-            confusion_matrix=confusion,
+        options = PowerAnalyzeOptions(
+            ac_coeff=req.md.get("ac_stark_coeff"),
+            log_scale=bool(req.md.get("log_scale", False)),
+            confusion_matrix=req.md.get("confusion_matrix"),
         )
-        return MistPowerAnalyzeResult(figure=fig)
+        PowerExp().analyze(req.run_result, options, plots=plots)
+        return MistPowerAnalyzeResult()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_mist_power_{time.strftime('%m%d')}"
