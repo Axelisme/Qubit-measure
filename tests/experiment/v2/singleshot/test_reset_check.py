@@ -189,7 +189,14 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
         if completed == 1:
             assert np.isnan(result.signals[:, 6:]).all()
     assert result.cfg_snapshot is not None and result.cfg_snapshot.rounds == 2
-    path = tmp_path / "population.hdf5"
+    _assert_population_roundtrip(exp, result, tmp_path / "population.hdf5")
+
+
+def _assert_population_roundtrip(
+    exp: ResetCheckExp | AmpRabiExp,
+    result: ResetCheckResult | AmpRabiResult,
+    path: Path,
+) -> None:
     if isinstance(exp, ResetCheckExp):
         assert isinstance(result, ResetCheckResult)
         exp.save(RunRecord(cfg=result.cfg_snapshot, result=result), path)
