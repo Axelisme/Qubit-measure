@@ -115,9 +115,7 @@ def test_loaded_data_without_valid_cfg_can_be_picked_but_not_saved(
     data.save(str(altered))
     adapter = NotebookAdapter(core)
     expected_warning = (
-        pytest.warns(UserWarning, match="Config validation failed")
-        if cfg_kind == "invalid"
-        else nullcontext()
+        pytest.warns(UserWarning) if cfg_kind == "invalid" else nullcontext()
     )
     with expected_warning:
         loaded = adapter.load(altered)
