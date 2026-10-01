@@ -484,7 +484,7 @@ class AnalyzePanelWidget(QWidget):
             with routing_scope(self._diag_container):
                 make_search_diagnostic_figure(result)
                 plt.show()
-        except Exception as exc:  # noqa: BLE001 — isolate optional presentation
+        except Exception as exc:
             logger.exception("Search diagnostic rendering failed")
             self._show_message(
                 "Diagnostic plot failed",

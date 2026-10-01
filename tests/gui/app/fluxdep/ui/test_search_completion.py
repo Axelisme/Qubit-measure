@@ -19,14 +19,8 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 
 
-@pytest.mark.parametrize("failure", [None, "builder", "show", "search"])
-def test_search_button_commits_before_rendering(
-    qapp, tmp_path, spectrum_hdf5, monkeypatch, failure
-):
-    import matplotlib.pyplot as plt
-    from zcu_tools.gui.app.fluxdep.services import fit
-    from zcu_tools.gui.app.fluxdep.ui import analyze_panel
-
+@pytest.fixture
+def search_input(tmp_path, spectrum_hdf5):
     ctrl = Controller(FluxDepState())
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="TwoTone")
     ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
@@ -55,6 +49,16 @@ def test_search_button_commits_before_rendering(
         predicted_freqs=np.array([5.0, 5.1]),
         bounds=bounds,
     )
+    return ctrl, result
+
+
+@pytest.fixture
+def completed_search(qapp, search_input, monkeypatch, failure):
+    import matplotlib.pyplot as plt
+    from zcu_tools.gui.app.fluxdep.services import fit
+    from zcu_tools.gui.app.fluxdep.ui import analyze_panel
+
+    ctrl, result = search_input
     facts: list[FitChangedPayload] = []
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
     calls: list[str] = []
@@ -104,32 +108,36 @@ def test_search_button_commits_before_rendering(
     try:
         buttons["Search database"].click()
         panel.quiesce()
-        assert buttons["Search database"].isEnabled()
-        if failure == "search":
-            assert calls == ["search"]
-            assert ctrl.state.fit.params is None
-            assert not any(p.has_result for p in facts)
-            assert not buttons["Export params.json"].isEnabled()
-            assert warnings[0][0] == "Search failed"
-        else:
-            assert ctrl.state.fit.params == result.params
-            assert [p.has_result for p in facts if p.has_result] == [True]
-            assert buttons["Export params.json"].isEnabled()
-            assert any(
-                "EJ=5.000" in label.text() for label in panel.findChildren(QLabel)
-            )
-            assert calls == (
-                ["search", "builder"]
-                if failure == "builder"
-                else ["search", "builder", "show"]
-            )
-            if failure:
-                assert len(warnings) == 1
-                assert warnings[0][0] == "Diagnostic plot failed"
-                assert "Search result retained" in warnings[0][1]
-                assert f"diagnostic {failure} failed" in warnings[0][1]
-            else:
-                assert warnings == []
+        yield panel, ctrl, result, facts, calls, warnings, buttons
     finally:
         panel.quiesce()
         panel.deleteLater()
+
+
+@pytest.mark.parametrize("failure", [None, "builder", "show", "search"])
+def test_search_button_commits_before_rendering(completed_search, failure):
+    panel, ctrl, result, facts, calls, warnings, buttons = completed_search
+    assert buttons["Search database"].isEnabled()
+    if failure == "search":
+        assert calls == ["search"]
+        assert ctrl.state.fit.params is None
+        assert not any(p.has_result for p in facts)
+        assert not buttons["Export params.json"].isEnabled()
+        assert warnings[0][0] == "Search failed"
+    else:
+        assert ctrl.state.fit.params == result.params
+        assert [p.has_result for p in facts if p.has_result] == [True]
+        assert buttons["Export params.json"].isEnabled()
+        assert any("EJ=5.000" in label.text() for label in panel.findChildren(QLabel))
+        assert calls == (
+            ["search", "builder"]
+            if failure == "builder"
+            else ["search", "builder", "show"]
+        )
+        if failure:
+            assert len(warnings) == 1
+            assert warnings[0][0] == "Diagnostic plot failed"
+            assert "Search result retained" in warnings[0][1]
+            assert f"diagnostic {failure} failed" in warnings[0][1]
+        else:
+            assert warnings == []
