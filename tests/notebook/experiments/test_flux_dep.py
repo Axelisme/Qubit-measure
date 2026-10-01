@@ -201,6 +201,44 @@ def test_failed_final_pick_publication_retires_preview_without_losing_old_record
     assert set(widgets.Widget.widgets) == initial_widgets
 
 
+def test_failed_final_pick_and_preview_cleanup_preserve_both_causes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exp, old_record, old_plots = completed_analyzer()
+    before_new = set(widgets.Widget.widgets)
+    control = exp.start(make_source(), FluxDepPickerOptions(-0.1, 0.4))
+    release = NotebookPlotHost.release
+
+    def fail_final(_widget: object) -> None:
+        raise RuntimeError("final canvas failed")
+
+    def fail_preview(self: NotebookPlotHost, figure: Figure) -> None:
+        release(self, figure)
+        if figure is control.figure:
+            raise RuntimeError("preview release failed")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr("IPython.display.display", fail_final)
+            patch.setattr(NotebookPlotHost, "release", fail_preview)
+            with pytest.raises(BaseExceptionGroup) as failure:
+                control.done()
+        assert [str(error) for error in failure.value.exceptions] == [
+            "final canvas failed",
+            "preview release failed",
+        ]
+        assert control.is_finished
+        assert control.record is None
+        assert control.plots is None
+        assert exp.analysis is old_record
+        assert exp.analysis_plots is old_plots
+        assert set(widgets.Widget.widgets) == before_new
+    finally:
+        if not control.is_finished:
+            control.cancel()
+        old_plots.release()
+
+
 @pytest.mark.parametrize("terminal", ["done", "cancel"])
 def test_terminal_preview_release_failure_closes_controls_and_retains_record(
     monkeypatch: pytest.MonkeyPatch, terminal: str
