@@ -6,7 +6,6 @@ from typing import Any, Literal, cast
 import numpy as np
 import pytest
 from zcu_tools.experiment import RunRecord
-from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.experiment.v2.singleshot.ge import (
     GE_Cfg,
     GE_Exp,
@@ -16,6 +15,7 @@ from zcu_tools.experiment.v2.singleshot.ge import (
     GEModuleCfg,
     GEPostAnalyzeOptions,
 )
+from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
@@ -68,7 +68,7 @@ def test_explicit_source_can_fit_without_cfg() -> None:
     record = notebook.analyze(GEAnalyzeOptions(length_ratio=0.01), source=source)
 
     assert record.source is source
-    assert record.cfg is None
+    assert record.source.cfg is None
     assert record.result.g_center == pytest.approx(-1 - 0.4j, abs=0.1)
     assert record.result.e_center == pytest.approx(1 + 0.4j, abs=0.1)
     assert list(record.figures) == ["fit"]
@@ -150,7 +150,9 @@ def test_canonical_round_trip_keeps_prepared_axes_and_cfg(
     exp.save(source, path)
     loaded = exp.load(path)
     np.testing.assert_array_equal(loaded.result.signals, source.result.signals)
-    np.testing.assert_array_equal(loaded.result.shot_indices, source.result.shot_indices)
+    np.testing.assert_array_equal(
+        loaded.result.shot_indices, source.result.shot_indices
+    )
     np.testing.assert_array_equal(loaded.result.prepared_states, [0, 1])
     assert isinstance(loaded.cfg, GE_Cfg)
     assert loaded.cfg.shots == 6000

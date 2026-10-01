@@ -4,8 +4,8 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
-from zcu_tools.experiment import RunRecord
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
+from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.v2.singleshot.ge import (
     GE_Cfg,
     GE_Exp,
@@ -34,7 +34,9 @@ def test_ge_initial_state_keeps_fit_and_post_calibration_consistent(
         state = initial_state
         raw = signals.copy() if state == "ground" else signals[::-1].copy()
         before = raw.copy()
-        source = RunRecord[GE_Cfg, GE_Result](None, GE_Result(raw, np.arange(6000), np.array([0, 1])))
+        source = RunRecord[GE_Cfg, GE_Result](
+            None, GE_Result(raw, np.arange(6000), np.array([0, 1]))
+        )
         fit_plots = Plots(NonPresentingHost())
         primary = GE_Exp().analyze(
             source,
@@ -81,7 +83,9 @@ def test_strong_transition_data_relabels_both_populations_and_confusion(
     ]
     shots = np.stack([rng.choice(xs, size=15000, p=pdf / pdf.sum()) for pdf in pdfs])
     signals = (shots + 0.3j * rng.normal(size=shots.shape)) * np.exp(0.4j)
-    source = RunRecord[GE_Cfg, GE_Result](None, GE_Result(signals, np.arange(shots.shape[1]), np.array([0, 1])))
+    source = RunRecord[GE_Cfg, GE_Result](
+        None, GE_Result(signals, np.arange(shots.shape[1]), np.array([0, 1]))
+    )
     outputs = []
     posts = []
     for state in ("ground", "excited"):

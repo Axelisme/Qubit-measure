@@ -341,7 +341,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         )
 
     def analyze(
-        self, source: RunRecord[GE_Cfg, GE_Result], options: GEAnalyzeOptions, *, plots: Plots
+        self,
+        source: RunRecord[GE_Cfg, GE_Result],
+        options: GEAnalyzeOptions,
+        *,
+        plots: Plots,
     ) -> GEAnalysis:
         """Fit probe-off/on shots, recording a named fit figure in this operation."""
         # Acquisition order is always probe off/on; fit in physical g/e order.
