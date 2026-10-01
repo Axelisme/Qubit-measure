@@ -137,9 +137,6 @@ def batch_save_service(qapp):
     state = State(MagicMock())
     adapter = MagicMock()
     adapter.make_save_paths.return_value = SavePaths("/db/data.h5", "/result/base.png")
-    state.add_tab(
-        "tab", Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock())
-    )
     state.add_tab("tab", Session(adapter_name="fake", adapter=adapter, cfg=MagicMock()))
     state.update_tab_result("tab", object())
     primary, post = _make_figure(), _make_figure()

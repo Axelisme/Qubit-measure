@@ -372,8 +372,7 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
             "load", "load_result", SimpleNamespace(tab_id="tab-1"), "/tmp/result.hdf5"
         ),
         call("run", "release_view_plots", "tab-1"),
-        call("state", "get_tab", "tab-1"),
-        call("tab", "initialize_tab_analyze_params", "tab-1"),
+        call("tab", "prepare_result_analysis", "tab-1"),
         call("bus", "emit", "TabContentChangedPayload"),
     ]
     payload = bus.payloads[0]

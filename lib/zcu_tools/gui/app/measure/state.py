@@ -52,8 +52,6 @@ logger = logging.getLogger(__name__)
 # bump↔drop contract live on SessionState; tab keys are bumped by State below.
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from zcu_tools.gui.app.measure.adapter import WritebackItem
     from zcu_tools.plotting.plots import Plots
 

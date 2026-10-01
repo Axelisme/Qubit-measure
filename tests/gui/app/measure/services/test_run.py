@@ -46,6 +46,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DirectValue,
     EvalValue,
     ScalarSpec,
 )

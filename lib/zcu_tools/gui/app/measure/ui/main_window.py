@@ -9,26 +9,6 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from zcu_tools.gui.app.measure.adapter import AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
-from zcu_tools.gui.app.measure.remote.dialogs import DialogName
-from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
-from zcu_tools.gui.app.measure.services.load import LoadDataError
-from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
-
-from .main_window_activity import activity_marker_presentation
-
-_SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
-    ArtifactKind.DATA: "Save data failed",
-    ArtifactKind.ANALYSIS: "Save image failed",
-    ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
-}
-from zcu_tools.gui.project import nearest_existing
-from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
-
-logger = logging.getLogger(__name__)
-
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -43,7 +23,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport

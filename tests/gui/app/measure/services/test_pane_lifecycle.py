@@ -211,7 +211,9 @@ def test_named_panes_project_paths_and_retire_original_collections() -> None:
     diagnostic = ArtifactKey(ArtifactKind.ANALYSIS, "diagnostic")
     post_fit = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
     state.update_tab_image_path_override(tab_id, diagnostic, "/custom/diagnostic.png")
-    snapshot = TabService(state, MagicMock(), MagicMock()).get_snapshot(tab_id)
+    snapshot = TabService(
+        state, MagicMock(), MagicMock(), cfg_resources(state)
+    ).get_snapshot(tab_id)
     assert snapshot.analysis is not None and snapshot.analysis.figures is replacement
     assert snapshot.post_analysis is not None and snapshot.post_analysis.figures is post
     assert snapshot.analysis.figures is not None
@@ -240,7 +242,9 @@ def test_named_panes_project_paths_and_retire_original_collections() -> None:
     detached = state.replace_analysis_pane(tab_id, result="newest", plots=newer)
     assert detached.plots == (replacement, post)
     assert state.get_tab(tab_id).post_analysis.plots is None
-    current = TabService(state, MagicMock(), MagicMock()).get_snapshot(tab_id)
+    current = TabService(
+        state, MagicMock(), MagicMock(), cfg_resources(state)
+    ).get_snapshot(tab_id)
     assert current.paths is not None
     assert tuple(current.paths.analysis_images) == ("fit",)
     assert (
@@ -417,7 +421,9 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks() -> N
         "ge_radius",
         "confusion_matrix",
     }
-    snapshot = TabService(state, MagicMock(), cast(Any, writeback)).get_snapshot(tab_id)
+    snapshot = TabService(
+        state, MagicMock(), cast(Any, writeback), cfg_resources(state)
+    ).get_snapshot(tab_id)
     assert snapshot.analysis is not None and snapshot.post_analysis is not None
     assert snapshot.analysis.figures is fit_plots
     assert snapshot.post_analysis.figures is post_plots

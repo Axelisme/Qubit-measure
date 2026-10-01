@@ -33,6 +33,7 @@ from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_resolved_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import DirectValue, EvalValue
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -112,17 +113,44 @@ def calibration(request, monkeypatch):
         draft.close()
 
 
-def test_population_run_uses_cfg_calibration_and_preserves_result_snapshot(calibration):
+def test_population_gui_run_passes_resolved_calibration_and_explicit_context(
+    calibration, monkeypatch
+):
+    adapter, md, _ml, draft, _acquisition = calibration
+    snapshot = draft.snapshot()
+    md.g_center = 100j
+    observed = []
+
+    def record_run(self, cfg, *, context):
+        observed.append((cfg, context))
+        return "acquired"
+
+    monkeypatch.setattr(adapter.exp_cls, "run", record_run)
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    plots = Plots(NonPresentingHost())
+    try:
+        result = adapter.run(request, schema_to_resolved_dict(snapshot), plots=plots)
+        assert result == "acquired"
+        cfg, context = observed[0]
+        assert context.soc is request.soc
+        assert context.soccfg is request.soccfg
+        assert context.plots is plots
+        assert (cfg.g_center, cfg.e_center, cfg.radius) == (-1 + 0.25j, 2 - 0.5j, 0.75)
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+def test_population_experiment_preserves_calibration_used_for_acquisition(calibration):
     adapter, md, _ml, draft, acquisition = calibration
     snapshot = draft.snapshot()
     assert snapshot.value.fields["g_center"] == EvalValue(
         "g_center", resolved=-1 + 0.25j
     )
     md.g_center = 100j
-    result = adapter.run(
-        RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
-        schema_to_resolved_dict(snapshot),
-    )
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    cfg = adapter.build_exp_cfg(schema_to_resolved_dict(snapshot), request)
+    result = adapter.exp_cls().run(request.soc, request.soccfg, cfg)
     acquisition.assert_called()
     for call in acquisition.call_args_list:
         assert (

@@ -141,7 +141,6 @@ def test_open_file_backfill_failure_retains_loaded_result(app, monkeypatch):
     assert fx.state.get_tab(tab).run.result == RunRecord(
         cfg=LoadedCfg(), result=LoadedResult("saved.h5")
     )
-    assert fx.state.get_tab(tab).cfg_schema.value.fields["knob"] == DirectValue(7)
     assert fx.state.get_tab(tab).run.result == LoadedResult(LoadedCfg())
     assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
         "knob"

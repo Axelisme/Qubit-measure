@@ -6,40 +6,6 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
-from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
-from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
-from zcu_tools.gui.session.ui.progress_stack import ProgressStack
-from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
-from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.cfg.fields.containers import _CollapsibleSection
-
-logger = logging.getLogger(__name__)
-
-# Approved prototype blue primary treatment (A3)
-_BLUE_PRIMARY_STYLESHEET = (
-    "QPushButton#primaryButton { background-color: #286ac7; color: white; "
-    "font-weight: 600; border: 1px solid #205aa9; border-radius: 4px; }"
-    "QPushButton#primaryButton:disabled { background-color: #a0b8d9; color: #e6edf7; border-color: #8da6c9; }"
-    "QPushButton#primaryButton:hover:!disabled { background-color: #2f76dc; }"
-)
-_RED_STOP_STYLESHEET = (
-    "background-color: #f44336; color: white; font-weight: bold; "
-    "border: 1px solid #d32f2f; border-radius: 4px;"
-)
-_GREEN_RESET_STYLESHEET = (
-    "QPushButton#resetButton { background-color: #2e8b57; color: white; "
-    "font-weight: 600; border: 1px solid #246f46; border-radius: 4px; }"
-    "QPushButton#resetButton:hover:!disabled { background-color: #369d65; }"
-    "QPushButton#resetButton:pressed:!disabled { background-color: #226b43; }"
-    "QPushButton#resetButton:disabled { background-color: #9dbdaa; color: #eef5f0; "
-    "border-color: #8eab99; }"
-)
-
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
     QColor,
@@ -64,7 +30,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend

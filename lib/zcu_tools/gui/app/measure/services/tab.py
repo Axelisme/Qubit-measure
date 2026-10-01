@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
     Session,
     TabInteractionState,
 )

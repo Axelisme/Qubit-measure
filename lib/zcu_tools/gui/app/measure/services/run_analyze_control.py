@@ -181,11 +181,6 @@ class RunAnalyzeControlFacet:
         permit = self._guard.acquire_load_permit(tab_id)
         outcome = self._load.load_result(permit, data_path)
         self._run.release_view_plots(tab_id)
-        tab = self._state.get_tab(tab_id)
-        has_analyze_params = False
-        if tab.adapter.capabilities.analysis is not AnalysisMode.NONE:
-            self._tab.initialize_tab_analyze_params(tab_id)
-            has_analyze_params = True
         preparation = self._tab.prepare_result_analysis(tab_id)
         self._bus.emit(
             TabContentChangedPayload(

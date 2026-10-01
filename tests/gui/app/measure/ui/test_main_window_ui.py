@@ -16,7 +16,11 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     MetaDictWriteback,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKey,
+    ArtifactKind,
+    SaveStatus,
+)
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
@@ -47,8 +51,10 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
