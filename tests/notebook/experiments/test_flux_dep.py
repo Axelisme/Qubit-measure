@@ -154,6 +154,37 @@ def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> No
         old_plots.release()
 
 
+def test_failed_start_and_preview_cleanup_preserve_both_causes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exp, old_record, old_plots = completed_analyzer()
+    before_new = set(widgets.Widget.widgets)
+    release = NotebookPlotHost.release
+
+    def fail_display(_widget: object) -> None:
+        raise RuntimeError("frontend publisher failed")
+
+    def fail_release(self: NotebookPlotHost, figure: Figure) -> None:
+        release(self, figure)
+        raise RuntimeError("preview cleanup failed")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr("IPython.display.display", fail_display)
+            patch.setattr(NotebookPlotHost, "release", fail_release)
+            with pytest.raises(BaseExceptionGroup) as failure:
+                exp.start(make_source(), FluxDepPickerOptions(-0.1, 0.4))
+        assert [str(error) for error in failure.value.exceptions] == [
+            "frontend publisher failed",
+            "preview cleanup failed",
+        ]
+        assert exp.analysis is old_record
+        assert exp.analysis_plots is old_plots
+        assert set(widgets.Widget.widgets) == before_new
+    finally:
+        old_plots.release()
+
+
 @pytest.mark.parametrize("fail_on", [1, 2])
 def test_failed_notebook_publication_cleans_up_widgets_and_keeps_record(
     monkeypatch: pytest.MonkeyPatch, fail_on: int
