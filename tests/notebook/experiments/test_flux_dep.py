@@ -73,6 +73,37 @@ def test_done_publishes_source_options_numeric_result_and_named_figure(
             analyzer.analysis_plots.release()
 
 
+def test_unexpected_numeric_failure_retires_preview_and_keeps_published_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analyzer = FluxDepAnalyzer(NonPresentingHost())
+    old = analyzer.start(make_source(), FluxDepPickerOptions(-0.2, 0.3)).done()
+    old_plots = analyzer.analysis_plots
+    assert old_plots is not None
+    before_new = set(widgets.Widget.widgets)
+    control = analyzer.start(make_source(), FluxDepPickerOptions(-0.1, 0.4))
+
+    def fail_analysis(*_args: object) -> FluxPickAnalysis:
+        raise RuntimeError("numeric analysis failed")
+
+    monkeypatch.setattr(
+        "zcu_tools.notebook.experiments.flux_dep.analyze_flux_pick", fail_analysis
+    )
+    try:
+        with pytest.raises(RuntimeError, match="numeric analysis failed"):
+            control.done()
+        assert control.is_finished
+        assert control.record is None
+        assert control.plots is None
+        assert analyzer.analysis is old
+        assert analyzer.analysis_plots is old_plots
+        assert set(widgets.Widget.widgets) == before_new
+    finally:
+        if not control.is_finished:
+            control.cancel()
+        old_plots.release()
+
+
 def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> None:
     analyzer = FluxDepAnalyzer(NonPresentingHost())
     first = analyzer.start(make_source(), FluxDepPickerOptions(-0.2, 0.3))
