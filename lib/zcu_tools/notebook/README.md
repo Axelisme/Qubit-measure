@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-01 — GE post 與獨立 FluxDep analysis records
+**Last updated:** 2026-10-01 — Lookback 與共用 NotebookAdapter
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -27,7 +27,7 @@ NotebookAdapter 隔離 caller cfg／options 與核心工作輸入，不深拷貝
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。
 已有 manager 的 Figure 不能由另一 host 接管。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
 呼叫 `Plots.release()` 才釋放 canvas／toolbar，原 Figure 仍可 `savefig`。直接建立
-widget 而不登記 pyplot manager，避免 cell 結束時額外自動呈現。T1／GE／OneTone FluxDep convenience 使用此 host；其他實驗與舊互動分析入口仍待遷移。Host 不取代
+widget 而不登記 pyplot manager，避免 cell 結束時額外自動呈現。T1／GE／Lookback／OneTone FluxDep convenience 使用此 host；其他實驗與舊互動分析入口仍待遷移。Host 不取代
 那些入口的狀態與分析契約。
 
 共用原始頻譜型別與座標整理位於 [`analysis/spectrum.py`](../analysis/spectrum.py)。Fluxdep 的共用 transition 型別、轉換及頻譜集合 I/O 位於 [`analysis/fluxdep`](../analysis/fluxdep/README.md) 的 `models.py`、`io.py`。共用 database search 位於 [`analysis/fluxdep/search.py`](../analysis/fluxdep/search.py)；Notebook 保留 `search_in_database` 組合入口與 `fit_spectrum` 微調。診斷圖由 [`plotting/fluxdep`](../plotting/fluxdep/README.md) 建立。

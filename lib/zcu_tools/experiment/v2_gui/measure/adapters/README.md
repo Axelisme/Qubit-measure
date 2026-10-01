@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-01 — T1／GE／OneTone FluxDep RunRecord 與前端分析
+**Last updated:** 2026-10-01 — Lookback RunRecord 與具名 fit
 
 # measure experiment adapters
 
@@ -29,12 +29,12 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 
 已遷移adapter的`run(req, raw_cfg, *, plots)`使用Guard凍結的resolved cfg，
 `analyze(req, *, plots)`將圖寫入本次具名Plots，不把Figure塞入數值結果。
-T1／GE 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
+T1／GE／Lookback 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
 BaseAdapter 的 load/save 直接傳遞核心 records；load 不用目前 cfg 補來源，save 將 explicit source 和 exact path 交給核心，override 可接受 cfg=None。
 GUI LoadService 只從 loaded record.cfg 回填，缺失或不可採用時保留 Config/editor，不撤回有效 loaded data。
 OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interactive plugin 明確取該 source 的資料並捕捉成唯讀 inputs。
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
-OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone 共用這條終止 renderer，其核心與 bare Result 入口仍待遷移。其餘 adapter 逐項遷移。舊簽名在過渡期可能報錯，framework 不提供 pyplot 或簽名 fallback。
+OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone 共用這條終止 renderer，其核心與 bare Result 入口仍待遷移。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapter 逐項遷移。舊簽名在過渡期可能報錯，framework 不提供 pyplot 或簽名 fallback。
 `RunRequest`只提供SoC handles與detached device snapshot；Base assembler
 以此snapshot和`ml=None`建立experiment cfg。自訂builder若委派Base，
 須宣告 `ExpCfg_cls`；domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。

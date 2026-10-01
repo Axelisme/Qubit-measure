@@ -8,7 +8,6 @@ VISA, no result data.
 from __future__ import annotations
 
 import ast
-import inspect
 import sys
 import types
 from pathlib import Path
@@ -19,7 +18,6 @@ import pandas as pd
 import pytest
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
-from zcu_tools.experiment.v2.lookback import LookbackExp
 from zcu_tools.resources.sample_table import (
     SampleTable,
     SampleTableV2Error,
@@ -236,35 +234,6 @@ def _run_full_init(log: list[str]) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 # A1 — Lookback
 # ---------------------------------------------------------------------------
-
-
-def test_lookback_analyze_cell_drops_stale_ro_cfg_keeps_ratio_smooth() -> None:
-    from IPython.core.inputtransformer2 import TransformerManager
-
-    cell = _cell("lookback_exp.analyze")
-    tree = ast.parse(TransformerManager().transform_cell(cell))
-    calls = [
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Attribute)
-        and n.func.attr == "analyze"
-    ]
-    assert len(calls) == 1
-    call = calls[0]
-    assert call.args == []
-    kwargs = {kw.arg: kw for kw in call.keywords}
-    assert "ro_cfg" not in kwargs
-    assert ast.literal_eval(kwargs["ratio"].value) == 0.1
-    assert ast.literal_eval(kwargs["smooth"].value) == 1.0
-
-
-def test_lookback_analyze_binds_to_current_signature() -> None:
-    sig = inspect.signature(LookbackExp.analyze)
-    assert "ro_cfg" not in sig.parameters
-    sig.bind(None, ratio=0.1, smooth=1.0)
-    with pytest.raises(TypeError):
-        sig.bind(None, ratio=0.1, smooth=1.0, ro_cfg=object())
 
 
 # ---------------------------------------------------------------------------

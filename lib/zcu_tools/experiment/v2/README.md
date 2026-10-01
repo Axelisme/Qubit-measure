@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-01 — 三標準 records、resolved calibration 與 local analysis
+**Last updated:** 2026-10-01 — Lookback explicit source 與三標準 records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -235,7 +235,7 @@ executor leaf contract 由 `runtime/task.py` 擁有：`Acquirer`、`TaskPlotter`
 
 ## Lookback & Tracker
 
-- **`LookbackExp`**（`lookback.py`）：用 `Schedule` + `run_program_decimated(...)` 拿 RO time trace，用來判斷 `trig_offset` 是否對齊 readout pulse；因 time axis 來自 built program，先 build program 後用 `sched.register_buffer(...)` 註冊 buffer。`analyze()` 從最大點往回找第一個低於 `ratio * max` 的點當作建議 offset。**`reps` 會在 runner-owned cfg 內強制改成 1**（decimated 不支援多 rep 平均）。
+- `LookbackExp`（`lookback.py`）使用 `run(config, *, context)` 與 `analyze(source, options, *, plots)`。Result 只含 us time axis 與 complex signals，cfg 隨 RunRecord 保存。Run 沿 Schedule 的 decimated acquire，runner reps 強制為1，caller cfg 不改。LookbackAnalyzeOptions 保留 core ratio0.3／smoothNone，分析回傳只有 predict_offset 的 LookbackAnalysis，fit 圖寫入本次 Plots。分析從 magnitude 峰值向前找最後一個低於門檻的 sample，Gaussian smoothing 先作用於 complex signals。Cfg None 仍可分析，預設 saver 則拒絕；canonical Time 軸在磁碟上仍為 seconds。Notebook 使用共用 NotebookAdapter，沒有核心 last_result。
 - **`KMeansTracker`**（`utils/tracker/kmeans.py`）：線上維護 `(..., 2)` IQ 樣本的動態多群統計（每群 `cluster_mean` / `cluster_covariance` / `cluster_center` / `cluster_weight`），支援 leading dims 與 `share_axis` 共用群組。內部以增量統計維護每群矩，無需保留原始樣本；singleshot 家族可直接用其 cluster 統計估計 SNR。
 
 ---

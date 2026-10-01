@@ -4,9 +4,7 @@ import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
@@ -18,13 +16,13 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -40,7 +38,18 @@ from zcu_tools.program.v2 import (
 class LookbackResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: LookbackCfg | None = None
+
+
+@dataclass(frozen=True)
+class LookbackAnalyzeOptions:
+    ratio: float = 0.3
+    smooth: float | None = None
+    plot_fit: bool = True
+
+
+@dataclass(frozen=True)
+class LookbackAnalysis:
+    predict_offset: float
 
 
 class LookbackModuleCfg(ConfigBase):
@@ -67,75 +76,62 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         tag="lookback",
     )
 
-    @record_result
-    def run(self, soc, soccfg, cfg: LookbackCfg) -> LookbackResult:
-        orig_cfg = deepcopy(cfg)
-        run_cfg = deepcopy(cfg)
-
+    def run(self, config: LookbackCfg, *, context: QickContext) -> LookbackResult:
+        run_cfg = deepcopy(config)
         if run_cfg.reps != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
             run_cfg.reps = 1
 
         setup_devices(run_cfg, progress=True)
+        viewer = context.plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
+        with Schedule(run_cfg) as sched:
+            modules = sched.cfg.modules
+            builder = sched.prog_builder(context.soc, context.soccfg).add(
+                Reset("reset", cfg=modules.reset),
+                Pulse("init_pulse", cfg=modules.init_pulse),
+                Readout("readout", cfg=modules.readout),
+            )
+            program = builder.build()
+            times = (
+                program.get_time_axis(ro_index=0)
+                + sched.cfg.modules.readout.ro_cfg.trig_offset
+            )
+            assert isinstance(times, np.ndarray)
 
-        with LivePlot1D("Time (us)", "Amplitude") as viewer:
-            with Schedule(run_cfg) as sched:
-                modules = sched.cfg.modules
-                builder = sched.prog_builder(soc, soccfg).add(
-                    Reset("reset", cfg=modules.reset),
-                    Pulse("init_pulse", cfg=modules.init_pulse),
-                    Readout("readout", cfg=modules.readout),
-                )
-                program = builder.build()
-                Ts = (
-                    program.get_time_axis(ro_index=0)
-                    + sched.cfg.modules.readout.ro_cfg.trig_offset
-                )
-                assert isinstance(Ts, np.ndarray)
+            signals_buffer = SignalBuffer(
+                (len(times),),
+                on_update=lambda data: viewer.update(times, lookback_signal2real(data)),
+            )
+            sched.register_buffer(signals_buffer)
+            _ = builder.run_program_decimated(program)
+            return LookbackResult(times=times, signals=signals_buffer.array)
 
-                signals_buffer = SignalBuffer(
-                    (len(Ts),),
-                    on_update=lambda data: viewer.update(
-                        Ts, lookback_signal2real(data)
-                    ),
-                )
-                sched.register_buffer(signals_buffer)
-                _ = builder.run_program_decimated(program)
-                return LookbackResult(
-                    times=Ts,
-                    signals=signals_buffer.array,
-                    cfg_snapshot=orig_cfg,
-                )
-
-    @retrieve_result
     def analyze(
         self,
-        result: LookbackResult | None = None,
+        source: RunRecord[LookbackCfg, LookbackResult],
+        options: LookbackAnalyzeOptions,
         *,
-        ratio: float = 0.3,
-        smooth: float | None = None,
-        plot_fit: bool = True,
-    ) -> tuple[float, Figure]:
-        assert result is not None, "no result found"
-
+        plots: Plots,
+    ) -> LookbackAnalysis:
+        result = source.result
         Ts = result.times
         signals = result.signals
-        cfg = result.cfg_snapshot
+        cfg = source.cfg
         ro_cfg = cfg.modules.readout.ro_cfg if cfg is not None else None
 
-        if smooth is not None:
-            signals = gaussian_filter1d(signals, smooth)
+        if options.smooth is not None:
+            signals = gaussian_filter1d(signals, options.smooth)
         y = np.abs(signals)
 
         # start from max point, find largest idx where y is smaller than ratio * max_y
         max_idx = np.argmax(y)
-        candidate_mask = y[:max_idx] < ratio * y[max_idx]
+        candidate_mask = y[:max_idx] < options.ratio * y[max_idx]
         if not np.any(candidate_mask):
             offset = float(Ts[0])
         else:
             offset = float(Ts[np.nonzero(candidate_mask)[0][-1]])
 
-        fig, ax = plt.subplots(figsize=config.figsize)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         # np.real/np.imag are used instead of .real/.imag because numpy 2.4
         # stubs narrow the overloaded descriptor in a way that confuses pyright
@@ -143,7 +139,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
         ax.plot(Ts, np.real(signals), label="I value")
         ax.plot(Ts, np.imag(signals), label="Q value")
         ax.plot(Ts, y, label="mag")
-        if plot_fit:
+        if options.plot_fit:
             ax.axvline(offset, color="r", linestyle="--", label="predict_offset")
         if ro_cfg is not None:
             trig_offset = float(ro_cfg.trig_offset)
@@ -159,4 +155,4 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
 
         fig.tight_layout()
 
-        return offset, fig
+        return LookbackAnalysis(predict_offset=offset)
