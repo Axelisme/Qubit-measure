@@ -1003,7 +1003,7 @@ class Controller(SessionControllerMixin):
         self._remember_terminal_sample_artifact(session, "stopped")
         self._run_session = None
         self.persist_all()
-        self._bus.emit(RunStoppedPayload())
+        self._bus.emit(RunStoppedPayload(output_errors=session.output_errors))
 
     def request_pause(self) -> bool:
         """Request a non-terminal pause at the next flux boundary."""
@@ -1280,7 +1280,9 @@ class Controller(SessionControllerMixin):
             return
         self._remember_terminal_sample_artifact(session, "finished")
         self._settle_run_segment(
-            settle, OperationOutcome("finished"), RunFinishedPayload()
+            settle,
+            OperationOutcome("finished"),
+            RunFinishedPayload(output_errors=session.output_errors),
         )
 
     def _on_run_paused(
@@ -1317,7 +1319,9 @@ class Controller(SessionControllerMixin):
             return
         self._remember_terminal_sample_artifact(session, "stopped")
         self._settle_run_segment(
-            settle, OperationOutcome("cancelled"), RunStoppedPayload()
+            settle,
+            OperationOutcome("cancelled"),
+            RunStoppedPayload(output_errors=session.output_errors),
         )
 
     def _on_run_failed(
@@ -1356,6 +1360,7 @@ class Controller(SessionControllerMixin):
                 node=node,
                 flux_idx=flux_idx,
                 stage=stage,
+                output_errors=session.output_errors,
             ),
         )
 

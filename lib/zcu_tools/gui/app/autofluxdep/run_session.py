@@ -109,6 +109,7 @@ class RunSession(RunObserver):
         self._smoothing = SmoothingService.from_specs(specs) if specs else None
         self._next_flux_idx = 0
         self._status = RunSessionStatus.READY
+        self.output_errors: tuple[str, ...] = ()
         self._progress_bar: Any | None = None
 
     @property
@@ -232,7 +233,9 @@ class RunSession(RunObserver):
         self._status = RunSessionStatus.PAUSED
 
     def finalize(self, status: str, *, error: Exception | None = None) -> None:
-        self.store.finalize(status, error=error, next_flux_idx=self._next_flux_idx)
+        self.output_errors = self.store.finalize(
+            status, error=error, next_flux_idx=self._next_flux_idx
+        )
         if status == "finished":
             self._status = RunSessionStatus.FINISHED
         elif status == "stopped":
