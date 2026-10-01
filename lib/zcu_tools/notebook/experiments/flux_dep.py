@@ -156,7 +156,18 @@ class FluxDepInteraction:
             conjugate=self.conjugate_checkbox.value,
             magnitude_only=self.magnitude_checkbox.value,
         )
-        result = analyze_flux_pick(self._inputs, state)
+        try:
+            result = analyze_flux_pick(self._inputs, state)
+        except ValueError:
+            raise
+        except BaseException as error:
+            try:
+                self._retire_preview()
+            except BaseException as cleanup_error:  # noqa: BLE001 - retain both operation failures
+                raise BaseExceptionGroup(
+                    "Flux analysis and preview cleanup failed", [error, cleanup_error]
+                ) from None
+            raise
         plots = Plots(self._host)
         try:
             plots.adopt("pick", make_flux_pick_figure(self._inputs, state))
