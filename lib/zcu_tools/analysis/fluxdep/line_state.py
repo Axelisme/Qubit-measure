@@ -72,6 +72,26 @@ class FluxPickInputs:
         return 0.01 * abs(float(self.dev_values[-1] - self.dev_values[0]))
 
 
+@dataclass(frozen=True)
+class FluxPickAnalysis:
+    """Accepted line positions and period, in device-axis units."""
+
+    flux_half: float
+    flux_int: float
+    flux_period: float
+
+
+def analyze_flux_pick(
+    inputs: FluxPickInputs, state: FluxPickState
+) -> FluxPickAnalysis:
+    """Validate a terminal selection without mutating inputs or state.
+
+    Lines must meet the input axis's minimum separation. Invalid selections
+    raise ValueError; successful selections have twice their distance as period.
+    """
+    raise NotImplementedError("flux-pick analysis is not implemented")
+
+
 def _mirror_inbounds_mask(
     dev_values: NDArray[np.float64], center: float
 ) -> NDArray[np.bool_]:

@@ -15,6 +15,7 @@ from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
     FluxPickState,
+    analyze_flux_pick,
     fold_initial_lines,
 )
 from zcu_tools.experiment.context import QickContext
@@ -64,6 +65,7 @@ class FluxDepInteraction:
             magnitude_only=magnitude_only,
         )
         self._source = source
+        self._inputs = inputs
         self._core = core
         self._host = host
         self._publish = publish
@@ -152,6 +154,15 @@ class FluxDepInteraction:
             integer,
             conjugate=self.conjugate_checkbox.value,
             magnitude_only=self.magnitude_checkbox.value,
+        )
+        analyze_flux_pick(
+            self._inputs,
+            FluxPickState(
+                flux_half=half,
+                flux_int=integer,
+                conjugate=options.conjugate,
+                magnitude_only=options.magnitude_only,
+            ),
         )
         plots = Plots(self._host)
         try:
