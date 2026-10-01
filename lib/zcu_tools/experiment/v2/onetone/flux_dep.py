@@ -6,13 +6,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 
-from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
-from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
@@ -30,7 +26,6 @@ from zcu_tools.experiment.utils import (
 )
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseReadout,
@@ -46,22 +41,6 @@ class FluxDepResult:
     values: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: FluxDepCfg | None = None
-
-
-@dataclass(frozen=True)
-class FluxDepAnalyzeOptions:
-    flux_half: float
-    flux_int: float
-    conjugate: bool = False
-    magnitude_only: bool = False
-
-
-@dataclass(frozen=True)
-class FluxDepAnalysis:
-    flux_half: float
-    flux_int: float
-    flux_period: float
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -109,7 +88,6 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
     ) -> FluxDepResult:
         """Run one sweep using this operation's instruments and named plots."""
         soc, soccfg = context.soc, context.soccfg
-        orig_cfg = deepcopy(config)
         cfg = deepcopy(config)
         modules = cfg.modules
         freq_sweep = cfg.sweep.freq
@@ -171,42 +149,4 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             values=dev_values,
             freqs=freqs,
             signals=signals_buffer.array,
-            cfg_snapshot=orig_cfg,
-        )
-
-    def analyze(
-        self,
-        result: FluxDepResult,
-        options: FluxDepAnalyzeOptions,
-        *,
-        plots: Plots,
-    ) -> FluxDepAnalysis:
-        """Validate and render a committed selection without retaining run state."""
-        inputs = FluxPickInputs(result.signals, result.values, result.freqs)
-        state = FluxPickState(
-            flux_half=options.flux_half,
-            flux_int=options.flux_int,
-            conjugate=options.conjugate,
-            magnitude_only=options.magnitude_only,
-        )
-        if abs(state.flux_int - state.flux_half) < inputs.min_distance:
-            raise ValueError("flux lines must remain separated")
-
-        figure = Figure(figsize=(8, 5))
-        FigureCanvasAgg(figure)
-        picker = TwoLinePicker(
-            figure,
-            inputs.signals,
-            inputs.dev_values,
-            inputs.freqs,
-            flux_half=state.flux_half,
-            flux_int=state.flux_int,
-            force_magnitude=state.magnitude_only,
-        )
-        picker.show_state(state)
-        plots.adopt("pick", figure)
-        return FluxDepAnalysis(
-            flux_half=state.flux_half,
-            flux_int=state.flux_int,
-            flux_period=2 * abs(state.flux_int - state.flux_half),
         )

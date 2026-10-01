@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-01 — T1／GE 共用 records
+**Last updated:** 2026-10-01 — T1／GE records 與 FluxDep pure core
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -14,9 +14,9 @@
 
 `singleshot.ge.GE_Exp` 的 run 回傳純 GE_Result，只有 signals／shot_indices／prepared_states。Analyze 接收 RunRecord；`post_analyze(source, primary, options, *, plots)` 使用同筆來源與已採用的 FIT 校準，不重新擬合。FIT 與 post 分別向本次 Plots 發布 `fit`／`post` 圖，analysis 只含數值。兩種分析都接受 cfg=None；預設 canonical saver 拒絕缺 cfg。Notebook 使用共用 NotebookAdapter 與獨立 GEPostAnalyzer，不由核心持有上次操作狀態。
 
-`onetone.flux_dep.FluxDepExp` 用 explicit context 執行同步 run。`measurement` 使用共用 2D 熱圖與掃描線 handle，也能繪製反向通量掃描。`analyze(result, FluxDepAnalyzeOptions, *, plots)` 建立具名 `pick` Figure，回傳只有 half/int/period 的數值。核心不建立 widget，也不保留上次 Result。Canonical 保存使用 cfg snapshot 與量測軸。Notebook 和 GUI 各自控制互動；GUI preview 不作結果圖。
+`onetone.flux_dep.FluxDepExp` 用 explicit context 執行同步 run，回傳只有 values／freqs／signals 的純 Result。`measurement` 使用共用 2D 熱圖與掃描線 handle，也能繪製反向通量掃描。核心只負責 acquisition 與 RunRecord 的 canonical save／load，不提供互動 analyze。Notebook 與 GUI 各自捕捉來源並完成選線，重用 Qt-free kernel 與原生圖 builder。GUI preview 不作結果圖。
 
-一般 T1 與 GE 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具在 `zcu_tools.notebook.experiments`。OneTone FluxDep 的專用 Notebook 入口尚未接上新版共用 records。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用已接上 explicit context 的三個入口。T1WithTone 共用純 T1Result，但 acquisition／analysis／record bookkeeping 仍待遷移；ScanT1WithTone 使用另一 Result，也尚未遷移。
+一般 T1 與 GE 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用已接上 explicit context 的三個入口。T1WithTone 共用純 T1Result，但 acquisition／analysis／record bookkeeping 仍待遷移；ScanT1WithTone 使用另一 Result，也尚未遷移。
 
 ## 目錄佈局
 
