@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — Singleshot calibration records
+**Last updated:** 2026-10-02 — Singleshot decay records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -124,6 +124,8 @@ Amp額外由joint frequency及其covariance推導pi/pi2 gain與誤差，保留�
 
 ---
 
+Singleshot T1／T1WithTone／T1WithToneSweep 使用 explicit RunContext，uniform 歸 typed cfg。同步分析接 RunRecord、typed options 與本次 Plots，允許 cfg=None。Tone 回傳純 t1／t1_b，其餘兩者只發布 fit 圖。即時 ground／excited traces 各自具名；Tone sweep 的六張 population 熱圖與兩張 current trace 各自具名。Transition-rate fitting、host rounds 與完整 outer-row 篩選保持不變。
+
 ### 版本實驗的資料形狀
 
 `PersistableExperiment`、`AxesSpec`、inner-first 軸序及 grouped roles 的共同映射見[父層 README](../README.md#實驗介面與資料)。以下保留 v2 實驗的具體資料形狀。
@@ -139,7 +141,7 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
 Singleshot Amp／Len Rabi、ResetCheck、T1 family、AC Stark 及 MIST freq/power/power_freq 的 classification
-校正值由各自 cfg 的 `g_center/e_center/radius` 提供，run 不接受獨立校正參數。已遷移核心由 RunRecord.cfg 保存這次校正值，未遷移的 T1／MIST 仍使用 Result.cfg_snapshot。Complex centers 在 experiment comment 中以可逆 complex literal 序列化，還原由 Pydantic complex 欄位處理。
+校正值由各自 cfg 的 `g_center/e_center/radius` 提供，run 不接受獨立校正參數。已遷移核心由 RunRecord.cfg 保存這次校正值，未遷移的 MIST 仍使用 Result.cfg_snapshot。Complex centers 在 experiment comment 中以可逆 complex literal 序列化，還原由 Pydantic complex 欄位處理。
 
 Singleshot Rabi joint fit依analysis選擇有衰減或純cosine population dynamics：
 `len_rabi`預設擬合衰減包絡，也可選擇純cosine。純cosine模型不擬合

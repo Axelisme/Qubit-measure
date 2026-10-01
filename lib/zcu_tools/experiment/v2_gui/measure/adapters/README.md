@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02 — Singleshot calibration records
+**Last updated:** 2026-10-02 — Singleshot decay records
 
 # measure experiment adapters
 
@@ -44,6 +44,7 @@ CKP 的 run 配對 cfg 與純 Result 為 RunRecord，兩張 measurement 熱圖�
 Bath reset 的 FreqGain／Length／Phase adapter 將同次 cfg／Result 配成 RunRecord，FIT 使用 explicit source 與本次 Plots，僅提交 scalar 或空數值結果。三者的 reset_bath／reset_bath_e module writeback 使用來源 cfg，缺 cfg 時略過；md 欄位與 phase gating 不變。
 Single／dual-tone reset 的五個 adapters 將同次 cfg／Result 配成 RunRecord，FIT 僅提交 scalar 或空結果，圖交本次 Plots。Dual Freq 的 GUI hard-sweep policy 在 build_exp_cfg 寫入 cfg.method，不由 run kwargs 隱藏。reset_10／reset_120 module writeback 使用來源 cfg，缺 cfg 時略過，既有 md gating 保留。
 Singleshot Amp／Len Rabi、Check、ResetCheck、AC Stark 的 run 回傳 RunRecord，FIT 使用 explicit source／typed options／Plots，不在 GUI 數值結果保存 Figure。Rabi 保留完整 numeric fit 供共同 calibration writeback 判斷；ResetCheck 只投影 populations summary，不推導 reset fidelity。Check 的 GE centers 與 AC Stark 的 chi／kappa 仍由分析當次 md 讀取，再交 core options。
+Singleshot T1／Tone／Tone sweep adapters 直接組裝含 uniform 的 typed cfg，將同次 cfg／Result 配成 RunRecord。FIT 向本次 Plots 發布 fit 圖；Tone 保留 t1_with_tone writeback，其餘兩者只提交空數值結果。Correction／photon-axis 參數仍從分析當次 md 讀取。
 `RunRequest`只提供SoC handles與detached device snapshot；Base assembler
 以此snapshot和`ml=None`建立experiment cfg。自訂builder若委派Base，
 須宣告 `ExpCfg_cls`；domain preflight 在硬體 I/O 前拒絕不合法的必要欄位。

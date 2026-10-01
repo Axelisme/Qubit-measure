@@ -616,12 +616,30 @@ def _singleshot_t1_tone_sweep_cfg(
     )
 
 
-def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
+@pytest.fixture
+def singleshot_context():
+    sessions = []
+
+    def make(soc, soccfg):
+        plots = Plots(NonPresentingHost())
+        sessions.append(plots)
+        return RunContext(soc, soccfg, plots, {}, StopSignal())
+
+    yield make
+    for plots in sessions:
+        plots.finish(present=False)
+        plots.release()
+
+
+def test_singleshot_t1_nonuniform_uses_shared_delay_axis(singleshot_context) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
     cfg = _singleshot_t1_cfg(length_sweep)
 
-    result = singleshot_t1.T1Exp().run(soc, soccfg, cfg, uniform=False)
+    result = singleshot_t1.T1Exp().run(
+        cfg.model_copy(update={"uniform": False}),
+        context=singleshot_context(soc, soccfg),
+    )
 
     ideal_times = t1_delay_axis(
         start=length_sweep.start,
@@ -634,15 +652,11 @@ def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
     np.testing.assert_array_equal(result.lengths, expected_times)
     assert len(result.lengths) == length_sweep.expts
     assert result.signals.shape == (length_sweep.expts, 2, 2)
-    assert result.cfg_snapshot is not None
-    assert (
-        result.cfg_snapshot.g_center,
-        result.cfg_snapshot.e_center,
-        result.cfg_snapshot.radius,
-    ) == (cfg.g_center, cfg.e_center, cfg.radius)
 
 
-def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
+def test_singleshot_t1_nonuniform_rejects_quantized_collisions(
+    singleshot_context,
+) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     cfg = _singleshot_t1_cfg([0.0, 0.0001, 1.0])
 
@@ -650,22 +664,31 @@ def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
         ValueError,
         match="delay sweep collapsed after cycle quantization",
     ):
-        singleshot_t1.T1Exp().run(soc, soccfg, cfg, uniform=False)
+        singleshot_t1.T1Exp().run(
+            cfg.model_copy(update={"uniform": False}),
+            context=singleshot_context(soc, soccfg),
+        )
 
 
 @pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
-def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> None:
+def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(
+    variant: str, singleshot_context
+) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
 
     if variant == "tone":
         cfg = _singleshot_t1_tone_cfg(length_sweep)
-        result = singleshot_t1_tone.T1WithToneExp().run(soc, soccfg, cfg, uniform=False)
+        result = singleshot_t1_tone.T1WithToneExp().run(
+            cfg.model_copy(update={"uniform": False}),
+            context=singleshot_context(soc, soccfg),
+        )
         expected_signal_shape = (length_sweep.expts, 2, 2)
     else:
         cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
         result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-            soc, soccfg, cfg, uniform=False
+            cfg.model_copy(update={"uniform": False}),
+            context=singleshot_context(soc, soccfg),
         )
         expected_signal_shape = (2, 2, length_sweep.expts, 2)
 
@@ -689,6 +712,7 @@ def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> N
 
 def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
     monkeypatch: pytest.MonkeyPatch,
+    singleshot_context,
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
@@ -704,19 +728,25 @@ def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
 
     monkeypatch.setattr(soc, "next_sim_acquire_seed", counted_next_seed)
 
-    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(soc, soccfg, cfg, uniform=False)
+    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+        cfg.model_copy(update={"uniform": False}),
+        context=singleshot_context(soc, soccfg),
+    )
 
     assert cfg.sweep.gain is not None
     assert acquire_count == cfg.sweep.gain.expts
 
 
-def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires() -> None:
+def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires(
+    singleshot_context,
+) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=0.6, expts=6, step=0.1)
     cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
 
     result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-        soc, soccfg, cfg, uniform=True
+        cfg.model_copy(update={"uniform": True}),
+        context=singleshot_context(soc, soccfg),
     )
 
     assert result.signals.shape == (2, 2, length_sweep.expts, 2)
@@ -724,7 +754,7 @@ def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires() -> None:
 
 @pytest.mark.parametrize("uniform", [False, True])
 def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
-    uniform: bool, monkeypatch: pytest.MonkeyPatch
+    uniform: bool, monkeypatch: pytest.MonkeyPatch, singleshot_context
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     cfg = _singleshot_t1_tone_sweep_cfg(
@@ -739,13 +769,15 @@ def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
 
     with pytest.raises(ValueError, match="strictly positive"):
         singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-            soc, soccfg, cfg, uniform=uniform
+            cfg.model_copy(update={"uniform": uniform}),
+            context=singleshot_context(soc, soccfg),
         )
 
 
 @pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
 def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
     variant: str,
+    singleshot_context,
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     direct_times = [0.008, 0.009, 1.0]
@@ -756,11 +788,15 @@ def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
     ):
         if variant == "tone":
             singleshot_t1_tone.T1WithToneExp().run(
-                soc, soccfg, _singleshot_t1_tone_cfg(direct_times), uniform=False
+                _singleshot_t1_tone_cfg(direct_times),
+                context=singleshot_context(soc, soccfg),
             )
         else:
             singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-                soc, soccfg, _singleshot_t1_tone_sweep_cfg(direct_times), uniform=False
+                _singleshot_t1_tone_sweep_cfg(direct_times).model_copy(
+                    update={"uniform": False}
+                ),
+                context=singleshot_context(soc, soccfg),
             )
 
 

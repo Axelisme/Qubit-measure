@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Literal, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -22,6 +21,8 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.singleshot.util import (
@@ -33,13 +34,7 @@ from zcu_tools.experiment.v2.utils import (
     materialize_nonuniform_t1_pulse_lengths,
     sweep2array,
 )
-from zcu_tools.plotting.liveplot import (
-    LivePlot1D,
-    LivePlot2D,
-    MultiLivePlot,
-    make_plot_frame,
-)
-from zcu_tools.plotting.liveplot.backend import close_figure
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -81,7 +76,6 @@ class T1WithToneSweepResult:
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
-    cfg_snapshot: T1WithToneSweepCfg | None = None
 
 
 class T1WithToneSweepSweepCfg(ConfigBase):
@@ -91,6 +85,7 @@ class T1WithToneSweepSweepCfg(ConfigBase):
 
 
 class T1WithToneSweepCfg(ProgramV2Cfg, ExpCfgModel):
+    uniform: bool = True
     modules: T1WithToneSweepModuleCfg
     sweep: T1WithToneSweepSweepCfg
     g_center: complex
@@ -107,6 +102,13 @@ class T1WithToneSweepModuleCfg(ConfigBase):
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
+
+
+@dataclass(frozen=True)
+class T1WithToneSweepAnalyzeOptions:
+    ac_coeff: float | None = None
+    confusion_matrix: NDArray[np.float64] | None = None
+    xlabel: str = ""
 
 
 class T1WithToneSweepExp(
@@ -155,66 +157,58 @@ class T1WithToneSweepExp(
             x_sweep = SweepCfg.model_validate(x_sweep)
         xs = sweep2array(
             x_sweep,
-            sweep_name,  # type: ignore
+            cast(Literal["gain", "freq"], sweep_name),
             round_info={"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
             allow_array=True,
         )
         return sweep_name, xs
 
-    def _make_viewer_ctx(self, sweep_name: str):
-        fig, axs = make_plot_frame(4, 2, plot_instant=True, figsize=(12, 10))
-        axs[3][0].set_ylim(0.0, 1.0)
-        axs[3][1].set_ylim(0.0, 1.0)
+    def _make_viewers(self, plots: Plots, sweep_name: str):
+        def configure_axes(ax: Axes) -> None:
+            ax.set_ylim(0.0, 1.0)
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
 
-        def make_plotter2d(ax: Axes, show_ylabel=True) -> LivePlot2D:
-            return LivePlot2D(
+        heatmaps = tuple(
+            plots.liveplot_2d(
+                f"measurement_{initial}{state}",
                 sweep_name,
-                "Time (us)" if show_ylabel else "",
-                uniform=False,
-                existed_axes=[[ax]],
-                segment_kwargs=dict(vmin=0.0, vmax=1.0),
-            )
-
-        def make_plotter1d(ax: Axes, show_ylabel=True) -> LivePlot1D:
-            return LivePlot1D(
                 "Time (us)",
-                "Population" if show_ylabel else "",
-                existed_axes=[[ax]],
-                segment_kwargs=dict(
-                    num_lines=3,
-                    line_kwargs=[
-                        dict(label="Ground"),
-                        dict(label="Excited"),
-                        dict(label="Other"),
-                    ],
-                ),
+                uniform=False,
+                clim=(0.0, 1.0),
             )
-
-        viewer = MultiLivePlot(
-            fig,
-            dict(
-                gg_2d=make_plotter2d(axs[0][0]),
-                ge_2d=make_plotter2d(axs[1][0]),
-                go_2d=make_plotter2d(axs[2][0]),
-                g_1d=make_plotter1d(axs[3][0]),
-                eg_2d=make_plotter2d(axs[0][1], show_ylabel=False),
-                ee_2d=make_plotter2d(axs[1][1], show_ylabel=False),
-                eo_2d=make_plotter2d(axs[2][1], show_ylabel=False),
-                e_1d=make_plotter1d(axs[3][1], show_ylabel=False),
-            ),
+            for initial in ("g", "e")
+            for state in ("g", "e", "o")
         )
-        return fig, viewer
+        current_g = plots.liveplot_1d(
+            "measurement_current_ground",
+            "Time (us)",
+            "Population",
+            num_lines=3,
+            configure_axes=configure_axes,
+        )
+        current_e = plots.liveplot_1d(
+            "measurement_current_excited",
+            "Time (us)",
+            "",
+            num_lines=3,
+            configure_axes=configure_axes,
+        )
+        return (*heatmaps, current_g, current_e)
 
     def _run_uniform(
         self,
-        soc,
-        soccfg,
         cfg: T1WithToneSweepCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
+        *,
+        context: RunContext,
     ) -> T1WithToneSweepResult:
-        orig_cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
 
         length_sweep = cfg.sweep.length
@@ -228,93 +222,84 @@ class T1WithToneSweepExp(
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
         _require_positive_lengths(lengths)
-        setup_devices(cfg, progress=True)
-
-        fig, viewer = self._make_viewer_ctx(sweep_name)
-
-        with viewer:
-            gg_2d = cast(LivePlot2D, viewer.get_plotter("gg_2d"))
-            ge_2d = cast(LivePlot2D, viewer.get_plotter("ge_2d"))
-            go_2d = cast(LivePlot2D, viewer.get_plotter("go_2d"))
-            g_1d = cast(LivePlot1D, viewer.get_plotter("g_1d"))
-            eg_2d = cast(LivePlot2D, viewer.get_plotter("eg_2d"))
-            ee_2d = cast(LivePlot2D, viewer.get_plotter("ee_2d"))
-            eo_2d = cast(LivePlot2D, viewer.get_plotter("eo_2d"))
-            e_1d = cast(LivePlot1D, viewer.get_plotter("e_1d"))
-            current_index = 0
-
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                i = current_index
-                populations = calc_populations(data)
-
-                gg_2d.update(xs, lengths, populations[:, 0, :, 0], refresh=False)
-                ge_2d.update(xs, lengths, populations[:, 0, :, 1], refresh=False)
-                go_2d.update(xs, lengths, populations[:, 0, :, 2], refresh=False)
-                g_1d.update(lengths, populations[i, 0].T, refresh=False)
-                eg_2d.update(xs, lengths, populations[:, 1, :, 0], refresh=False)
-                ee_2d.update(xs, lengths, populations[:, 1, :, 1], refresh=False)
-                eo_2d.update(xs, lengths, populations[:, 1, :, 2], refresh=False)
-                e_1d.update(lengths, populations[i, 1].T, refresh=False)
-
-                viewer.refresh()
-
-            buffer = SignalBuffer(
-                (len(xs), 2, len(lengths), 2),
-                dtype=np.float64,
-                on_update=plot_fn,
-            )
-            with Schedule(cfg, buffer) as sched:
-                for value_idx, (value, step) in enumerate(
-                    sched.scan(sweep_name, xs.tolist())
-                ):
-                    modules = step.cfg.modules
-                    inner_length_sweep = step.cfg.sweep.length
-                    assert isinstance(inner_length_sweep, SweepCfg), (
-                        "uniform mode requires SweepCfg"
-                    )
-                    modules.probe_pulse.set_param(sweep_name, value)
-                    current_index = value_idx
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                            TableLengthPulse(
-                                "probe_pulse",
-                                modules.probe_pulse,
-                                lengths=lengths,
-                                idx_reg="length",
-                            ),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("ge", 2)
-                        .declare_sweep("length", len(lengths))
-                        .build_and_acquire(
-                            raw2signal_fn=raw_population_signal,
-                            g_center=g_center,
-                            e_center=e_center,
-                            ge_radius=radius,
-                        )
-                    )
-            populations = buffer.array
-        close_figure(fig)
-
-        self.last_result = T1WithToneSweepResult(
-            xs=xs, lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
         )
 
-        return self.last_result
+        gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
+            context.plots, sweep_name
+        )
+
+        current_index = 0
+
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            i = current_index
+            populations = calc_populations(data)
+
+            gg_2d.update(xs, lengths, populations[:, 0, :, 0])
+            ge_2d.update(xs, lengths, populations[:, 0, :, 1])
+            go_2d.update(xs, lengths, populations[:, 0, :, 2])
+            g_1d.update(lengths, populations[i, 0].T)
+            eg_2d.update(xs, lengths, populations[:, 1, :, 0])
+            ee_2d.update(xs, lengths, populations[:, 1, :, 1])
+            eo_2d.update(xs, lengths, populations[:, 1, :, 2])
+            e_1d.update(lengths, populations[i, 1].T)
+
+        buffer = SignalBuffer(
+            (len(xs), 2, len(lengths), 2),
+            dtype=np.float64,
+            on_update=plot_fn,
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            for value_idx, (value, step) in enumerate(
+                sched.scan(sweep_name, xs.tolist())
+            ):
+                modules = step.cfg.modules
+                inner_length_sweep = step.cfg.sweep.length
+                assert isinstance(inner_length_sweep, SweepCfg), (
+                    "uniform mode requires SweepCfg"
+                )
+                modules.probe_pulse.set_param(sweep_name, value)
+                current_index = value_idx
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        TableLengthPulse(
+                            "probe_pulse",
+                            modules.probe_pulse,
+                            lengths=lengths,
+                            idx_reg="length",
+                        ),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("ge", 2)
+                    .declare_sweep("length", len(lengths))
+                    .build_and_acquire(
+                        raw2signal_fn=raw_population_signal,
+                        g_center=g_center,
+                        e_center=e_center,
+                        ge_radius=radius,
+                    )
+                )
+        populations = buffer.array
+
+        return T1WithToneSweepResult(xs=xs, lengths=lengths, signals=populations)
 
     def _run_non_uniform(
         self,
-        soc,
-        soccfg,
         cfg: T1WithToneSweepCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
+        *,
+        context: RunContext,
     ) -> T1WithToneSweepResult:
-        orig_cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
 
         sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
@@ -324,107 +309,95 @@ class T1WithToneSweepExp(
             gen_ch=modules.probe_pulse.ch,
         )
         _require_positive_lengths(lengths)
-        setup_devices(cfg, progress=True)
-
-        fig, viewer = self._make_viewer_ctx(sweep_name)
-
-        with viewer:
-            gg_2d = cast(LivePlot2D, viewer.get_plotter("gg_2d"))
-            ge_2d = cast(LivePlot2D, viewer.get_plotter("ge_2d"))
-            go_2d = cast(LivePlot2D, viewer.get_plotter("go_2d"))
-            g_1d = cast(LivePlot1D, viewer.get_plotter("g_1d"))
-            eg_2d = cast(LivePlot2D, viewer.get_plotter("eg_2d"))
-            ee_2d = cast(LivePlot2D, viewer.get_plotter("ee_2d"))
-            eo_2d = cast(LivePlot2D, viewer.get_plotter("eo_2d"))
-            e_1d = cast(LivePlot1D, viewer.get_plotter("e_1d"))
-            current_index = 0
-
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                i = current_index
-                populations = calc_populations(data)
-
-                gg_2d.update(xs, lengths, populations[:, 0, :, 0], refresh=False)
-                ge_2d.update(xs, lengths, populations[:, 0, :, 1], refresh=False)
-                go_2d.update(xs, lengths, populations[:, 0, :, 2], refresh=False)
-                g_1d.update(lengths, populations[i, 0].T, refresh=False)
-                eg_2d.update(xs, lengths, populations[:, 1, :, 0], refresh=False)
-                ee_2d.update(xs, lengths, populations[:, 1, :, 1], refresh=False)
-                eo_2d.update(xs, lengths, populations[:, 1, :, 2], refresh=False)
-                e_1d.update(lengths, populations[i, 1].T, refresh=False)
-
-                viewer.refresh()
-
-            buffer = SignalBuffer(
-                (len(xs), 2, len(lengths), 2),
-                dtype=np.float64,
-                on_update=plot_fn,
-            )
-            with Schedule(cfg, buffer) as sched:
-                for value_idx, (value, x_step) in enumerate(
-                    sched.scan(sweep_name, xs.tolist())
-                ):
-                    modules = x_step.cfg.modules
-                    modules.probe_pulse.set_param(sweep_name, value)
-                    current_index = value_idx
-                    _ = (
-                        x_step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                            TableLengthPulse(
-                                "probe_pulse",
-                                modules.probe_pulse,
-                                lengths=lengths,
-                                idx_reg="length",
-                            ),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("ge", 2)
-                        .declare_sweep("length", len(lengths))
-                        .build_and_acquire(
-                            raw2signal_fn=raw_population_signal,
-                            g_center=g_center,
-                            e_center=e_center,
-                            ge_radius=radius,
-                        )
-                    )
-            populations = buffer.array
-        close_figure(fig)
-
-        self.last_result = T1WithToneSweepResult(
-            xs=xs, lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
         )
 
-        return self.last_result
+        gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
+            context.plots, sweep_name
+        )
+
+        current_index = 0
+
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            i = current_index
+            populations = calc_populations(data)
+
+            gg_2d.update(xs, lengths, populations[:, 0, :, 0])
+            ge_2d.update(xs, lengths, populations[:, 0, :, 1])
+            go_2d.update(xs, lengths, populations[:, 0, :, 2])
+            g_1d.update(lengths, populations[i, 0].T)
+            eg_2d.update(xs, lengths, populations[:, 1, :, 0])
+            ee_2d.update(xs, lengths, populations[:, 1, :, 1])
+            eo_2d.update(xs, lengths, populations[:, 1, :, 2])
+            e_1d.update(lengths, populations[i, 1].T)
+
+        buffer = SignalBuffer(
+            (len(xs), 2, len(lengths), 2),
+            dtype=np.float64,
+            on_update=plot_fn,
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            for value_idx, (value, x_step) in enumerate(
+                sched.scan(sweep_name, xs.tolist())
+            ):
+                modules = x_step.cfg.modules
+                modules.probe_pulse.set_param(sweep_name, value)
+                current_index = value_idx
+                _ = (
+                    x_step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        TableLengthPulse(
+                            "probe_pulse",
+                            modules.probe_pulse,
+                            lengths=lengths,
+                            idx_reg="length",
+                        ),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("ge", 2)
+                    .declare_sweep("length", len(lengths))
+                    .build_and_acquire(
+                        raw2signal_fn=raw_population_signal,
+                        g_center=g_center,
+                        e_center=e_center,
+                        ge_radius=radius,
+                    )
+                )
+        populations = buffer.array
+
+        return T1WithToneSweepResult(xs=xs, lengths=lengths, signals=populations)
 
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: T1WithToneSweepCfg,
-        *,
-        uniform: bool = True,
+        self, cfg: T1WithToneSweepCfg, *, context: RunContext
     ) -> T1WithToneSweepResult:
-        if uniform:
+        cfg = deepcopy(cfg)
+        if cfg.uniform:
             return self._run_uniform(
-                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
+                cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
             )
-        else:
-            return self._run_non_uniform(
-                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
-            )
+        return self._run_non_uniform(
+            cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
+        )
 
     def analyze(
         self,
-        result: T1WithToneSweepResult | None = None,
+        source: RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult],
+        options: T1WithToneSweepAnalyzeOptions,
         *,
-        ac_coeff: float | None = None,
-        confusion_matrix: NDArray[np.float64] | None = None,
-        xlabel: str = "",
-    ) -> Figure:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> None:
+        result = source.result
+        ac_coeff, confusion_matrix, xlabel = (
+            options.ac_coeff,
+            options.confusion_matrix,
+            options.xlabel,
+        )
 
         xs, Ts, populations = result.xs, result.lengths, result.signals
 
@@ -432,13 +405,11 @@ class T1WithToneSweepExp(
         xs = xs[valid_mask]
         populations = populations[valid_mask]
 
-        # populations = gaussian_filter(populations, sigma=0.5, axes=(0, 2))
-
         populations = calc_populations(populations)  # (xs, 2, Ts, 3)
 
         populations = correct_populations(populations, confusion_matrix)
 
-        # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
+        # Rate order: ge, eg, eo, oe, go, og.
         N = populations.shape[0]
         rates = np.zeros((N, 6), dtype=np.float64)
         rate_Covs = np.zeros((N, 6, 6), dtype=np.float64)
@@ -452,9 +423,7 @@ class T1WithToneSweepExp(
         finally:
             pbar.close()
 
-        if ac_coeff is None:
-            xs = xs
-        else:
+        if ac_coeff is not None:
             xs = ac_coeff * xs**2
 
         # default the rate-panel x-label to the photon-number symbol when xs is in
@@ -462,7 +431,8 @@ class T1WithToneSweepExp(
         if not xlabel:
             xlabel = r"$\bar n$" if ac_coeff is not None else "probe gain (a.u.)"
 
-        fig = plt.figure(figsize=(12, 8))
+        fig = Figure(figsize=(12, 8))
+        plots.adopt("fit", fig)
         grid_spec = fig.add_gridspec(3, 3)
         ax_gg = fig.add_subplot(grid_spec[0, 0])
         ax_ge = fig.add_subplot(grid_spec[0, 1])
@@ -491,7 +461,7 @@ class T1WithToneSweepExp(
         _plot_population(ax_ee, populations[:, 1, :, 1], "Excited")
         _plot_population(ax_eo, populations[:, 1, :, 2], "Other")
 
-        # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
+        # Rate order: ge, eg, eo, oe, go, og.
         R_go = rates[:, 4]
         R_ge = rates[:, 0]
         R_eo = rates[:, 2]
@@ -500,10 +470,6 @@ class T1WithToneSweepExp(
         Rerr_ge = np.sqrt(rate_Covs[:, 0, 0])
         Rerr_eo = np.sqrt(rate_Covs[:, 2, 2])
         Rerr_eg = np.sqrt(rate_Covs[:, 1, 1])
-        # R_go[R_go < 2 * Rerr_go] = np.nan
-        # R_ge[R_ge < 2 * Rerr_ge] = np.nan
-        # R_eo[R_eo < 2 * Rerr_eo] = np.nan
-        # R_eg[R_eg < 2 * Rerr_eg] = np.nan
         for i in range(rates.shape[0]):
             if i % 5 == 0:
                 continue
@@ -543,5 +509,3 @@ class T1WithToneSweepExp(
         ax_Tg.set_ylabel("Rate (μs⁻¹)")
 
         fig.tight_layout()
-
-        return fig

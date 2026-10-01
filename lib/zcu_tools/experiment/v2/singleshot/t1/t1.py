@@ -3,9 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import field_serializer
 
@@ -23,14 +22,20 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.singleshot.util import (
+    calc_populations,
+    correct_populations,
+    raw_population_signal,
+)
 from zcu_tools.experiment.v2.utils import (
     materialize_nonuniform_t1_delays,
     sweep2array,
 )
-from zcu_tools.plotting.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
-from zcu_tools.plotting.liveplot.backend import close_figure
+from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
@@ -46,8 +51,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-
-from ..util import calc_populations, correct_populations, raw_population_signal
 
 
 def _default_initial_states() -> NDArray[np.int64]:
@@ -66,7 +69,6 @@ class T1Result:
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
-    cfg_snapshot: T1Cfg | None = None
 
 
 class T1ModuleCfg(ConfigBase):
@@ -80,6 +82,7 @@ class T1SweepCfg(ConfigBase):
 
 
 class T1Cfg(ProgramV2Cfg, ExpCfgModel):
+    uniform: bool = False
     modules: T1ModuleCfg
     sweep: T1SweepCfg
     g_center: complex
@@ -89,6 +92,12 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     @field_serializer("g_center", "e_center")
     def serialize_center(self, value: complex) -> str:
         return str(value)
+
+
+@dataclass(frozen=True)
+class T1AnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
+    skip: int = 0
 
 
 class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
@@ -122,115 +131,110 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
     to measure the qubit's energy relaxation.
     """
 
-    def _make_viewer_ctx(self):
-        fig, axs = make_plot_frame(1, 2, plot_instant=True, figsize=(12, 5))
-        axs[0][0].set_ylim(0, 1)
-        axs[0][1].set_ylim(0, 1)
+    def _make_viewers(self, plots: Plots) -> tuple[LinePlot, LinePlot]:
+        def configure_axes(ax: Axes) -> None:
+            ax.set_ylim(0.0, 1.0)
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
 
-        line_kwargs = [
-            dict(label="Ground"),
-            dict(label="Excited"),
-            dict(label="Other"),
-        ]
-        viewer = MultiLivePlot(
-            fig,
-            dict(
-                init_g=LivePlot1D(
-                    "Time (us)",
-                    "Amplitude",
-                    existed_axes=[[axs[0][0]]],
-                    segment_kwargs=dict(num_lines=3, line_kwargs=line_kwargs),
-                ),
-                init_e=LivePlot1D(
-                    "Time (us)",
-                    "Amplitude",
-                    existed_axes=[[axs[0][1]]],
-                    segment_kwargs=dict(num_lines=3, line_kwargs=line_kwargs),
-                ),
+        return (
+            plots.liveplot_1d(
+                "measurement_ground",
+                "Time (us)",
+                "Amplitude",
+                num_lines=3,
+                configure_axes=configure_axes,
+            ),
+            plots.liveplot_1d(
+                "measurement_excited",
+                "Time (us)",
+                "Amplitude",
+                num_lines=3,
+                configure_axes=configure_axes,
             ),
         )
-        return fig, viewer
 
     def _run_uniform(
         self,
-        soc,
-        soccfg,
         cfg: T1Cfg,
         g_center: complex,
         e_center: complex,
         radius: float,
+        *,
+        context: RunContext,
     ) -> T1Result:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         length_sweep = cfg.sweep.length
         assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
 
-        fig, viewer = self._make_viewer_ctx()
+        init_g, init_e = self._make_viewers(context.plots)
 
-        with viewer:
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            populations = calc_populations(data)  # (N, 2, 3)
+            init_g.update(lengths, populations[:, 0].T)
+            init_e.update(lengths, populations[:, 1].T)
 
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                populations = calc_populations(data)  # (N, 2, 3)
-                viewer.get_plotter("init_g").update(
-                    lengths, populations[:, 0].T, refresh=False
-                )
-                viewer.get_plotter("init_e").update(
-                    lengths, populations[:, 1].T, refresh=False
-                )
-                viewer.refresh()
-
-            buffer = SignalBuffer(
-                (len(lengths), 2, 2),
-                dtype=np.float64,
-                on_update=plot_fn,
-            )
-            with Schedule(cfg, buffer) as sched:
-                run_cfg = sched.cfg
-                modules = run_cfg.modules
-                inner_length_sweep = run_cfg.sweep.length
-                assert isinstance(inner_length_sweep, SweepCfg), (
-                    "uniform mode requires SweepCfg"
-                )
-                length_param = sweep2param("length", inner_length_sweep)
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        Delay("t1_delay", delay=length_param),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length", inner_length_sweep)
-                    .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=raw_population_signal,
-                        g_center=g_center,
-                        e_center=e_center,
-                        ge_radius=radius,
-                    )
-                )
-            populations = buffer.array
-        close_figure(fig)
-
-        self.last_result = T1Result(
-            lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
+        buffer = SignalBuffer(
+            (len(lengths), 2, 2),
+            dtype=np.float64,
+            on_update=plot_fn,
         )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            run_cfg = sched.cfg
+            modules = run_cfg.modules
+            inner_length_sweep = run_cfg.sweep.length
+            assert isinstance(inner_length_sweep, SweepCfg), (
+                "uniform mode requires SweepCfg"
+            )
+            length_param = sweep2param("length", inner_length_sweep)
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                    Delay("t1_delay", delay=length_param),
+                    Readout("readout", modules.readout),
+                )
+                .declare_sweep("length", inner_length_sweep)
+                .declare_sweep("ge", 2)
+                .build_and_acquire(
+                    raw2signal_fn=raw_population_signal,
+                    g_center=g_center,
+                    e_center=e_center,
+                    ge_radius=radius,
+                )
+            )
+        populations = buffer.array
 
-        return self.last_result
+        return T1Result(lengths=lengths, signals=populations)
 
     def _run_non_uniform(
         self,
-        soc,
-        soccfg,
         cfg: T1Cfg,
         g_center: complex,
         e_center: complex,
         radius: float,
+        *,
+        context: RunContext,
     ) -> T1Result:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
         delay_table = materialize_nonuniform_t1_delays(
             cfg.sweep.length,
@@ -239,88 +243,68 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         length_cycles = delay_table.cycles
         lengths = delay_table.times_us
 
-        fig, viewer = self._make_viewer_ctx()
+        init_g, init_e = self._make_viewers(context.plots)
 
-        with viewer:
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            populations = calc_populations(data)  # (N, 2, 3)
+            init_g.update(lengths, populations[:, 0].T)
+            init_e.update(lengths, populations[:, 1].T)
 
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                populations = calc_populations(data)  # (N, 2, 3)
-                viewer.get_plotter("init_g").update(
-                    lengths, populations[:, 0].T, refresh=False
-                )
-                viewer.get_plotter("init_e").update(
-                    lengths, populations[:, 1].T, refresh=False
-                )
-                viewer.refresh()
-
-            buffer = SignalBuffer(
-                (len(lengths), 2, 2),
-                dtype=np.float64,
-                on_update=plot_fn,
-            )
-            with Schedule(cfg, buffer) as sched:
-                run_cfg = sched.cfg
-                modules = run_cfg.modules
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        LoadValue(
-                            "load_t1_delay",
-                            values=list(length_cycles),
-                            idx_reg="length_idx",
-                            val_reg="t1_delay_cycle",
-                            auto_compress=False,
-                        ),
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        DelayAuto("t1_delay", t="t1_delay_cycle"),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length_idx", len(length_cycles))
-                    .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=raw_population_signal,
-                        g_center=g_center,
-                        e_center=e_center,
-                        ge_radius=radius,
-                    )
-                )
-            populations = buffer.array
-        close_figure(fig)
-
-        self.last_result = T1Result(
-            lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
+        buffer = SignalBuffer(
+            (len(lengths), 2, 2),
+            dtype=np.float64,
+            on_update=plot_fn,
         )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            run_cfg = sched.cfg
+            modules = run_cfg.modules
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    LoadValue(
+                        "load_t1_delay",
+                        values=list(length_cycles),
+                        idx_reg="length_idx",
+                        val_reg="t1_delay_cycle",
+                        auto_compress=False,
+                    ),
+                    Reset("reset", modules.reset),
+                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                    DelayAuto("t1_delay", t="t1_delay_cycle"),
+                    Readout("readout", modules.readout),
+                )
+                .declare_sweep("length_idx", len(length_cycles))
+                .declare_sweep("ge", 2)
+                .build_and_acquire(
+                    raw2signal_fn=raw_population_signal,
+                    g_center=g_center,
+                    e_center=e_center,
+                    ge_radius=radius,
+                )
+            )
+        populations = buffer.array
 
-        return self.last_result
+        return T1Result(lengths=lengths, signals=populations)
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: T1Cfg,
-        *,
-        uniform: bool = False,
-    ) -> T1Result:
-        if uniform:
+    def run(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        cfg = deepcopy(cfg)
+        if cfg.uniform:
             return self._run_uniform(
-                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
+                cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
             )
-        else:
-            return self._run_non_uniform(
-                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
-            )
+        return self._run_non_uniform(
+            cfg, cfg.g_center, cfg.e_center, cfg.radius, context=context
+        )
 
     def analyze(
         self,
-        result: T1Result | None = None,
+        source: RunRecord[T1Cfg, T1Result],
+        options: T1AnalyzeOptions,
         *,
-        confusion_matrix: NDArray[np.float64] | None = None,
-        skip: int = 0,
-    ) -> Figure:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> None:
+        result = source.result
+        skip, confusion_matrix = options.skip, options.confusion_matrix
 
         lens, populations = result.lengths, result.signals
 
@@ -343,17 +327,41 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
+        fig, _ = plots.subplots("fit", nrows=1, ncols=2, figsize=(12, 6), sharey=True)
+        ax1, ax2 = fig.axes
 
         fig.suptitle(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
-        plot_kwargs = dict(ls="-", marker=".", markersize=3)
 
         ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
         ax1.plot(lens, fit_pops1[:, 1], color="red", ls="--", label="Excited Fit")
         ax1.plot(lens, fit_pops1[:, 2], color="green", ls="--", label="Other Fit")
-        ax1.plot(lens, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax1.plot(lens, populations1[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax1.plot(lens, populations1[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax1.plot(
+            lens,
+            populations1[:, 0],
+            color="blue",
+            label="Ground",
+            ls="-",
+            marker=".",
+            markersize=3,
+        )
+        ax1.plot(
+            lens,
+            populations1[:, 1],
+            color="red",
+            label="Excited",
+            ls="-",
+            marker=".",
+            markersize=3,
+        )
+        ax1.plot(
+            lens,
+            populations1[:, 2],
+            color="green",
+            label="Other",
+            ls="-",
+            marker=".",
+            markersize=3,
+        )
         ax1.set_xlabel("Time (μs)")
         ax1.legend(loc=4)
         ax1.grid(True)
@@ -361,14 +369,36 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         ax2.plot(lens, fit_pops2[:, 0], color="blue", ls="--", label="Ground Fit")
         ax2.plot(lens, fit_pops2[:, 1], color="red", ls="--", label="Excited Fit")
         ax2.plot(lens, fit_pops2[:, 2], color="green", ls="--", label="Other Fit")
-        ax2.plot(lens, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax2.plot(lens, populations2[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax2.plot(lens, populations2[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax2.plot(
+            lens,
+            populations2[:, 0],
+            color="blue",
+            label="Ground",
+            ls="-",
+            marker=".",
+            markersize=3,
+        )
+        ax2.plot(
+            lens,
+            populations2[:, 1],
+            color="red",
+            label="Excited",
+            ls="-",
+            marker=".",
+            markersize=3,
+        )
+        ax2.plot(
+            lens,
+            populations2[:, 2],
+            color="green",
+            label="Other",
+            ls="-",
+            marker=".",
+            markersize=3,
+        )
         ax2.set_xlabel("Time (μs)")
         ax2.set_ylabel("Population")
         ax2.legend(loc=4)
         ax2.grid(True)
 
         fig.tight_layout()
-
-        return fig
