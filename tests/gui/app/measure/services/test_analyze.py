@@ -18,13 +18,13 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.onetone.flux_dep import (
-    FluxDepAnalysis,
-    FluxDepAnalyzeOptions,
-    FluxDepExp,
-    FluxDepResult,
+from zcu_tools.analysis.fluxdep.line_state import (
+    FluxPickAnalysis,
+    FluxPickInputs,
+    FluxPickState,
 )
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepResult
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Result
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     FluxPickParams,
@@ -268,7 +268,7 @@ def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(qapp) -> 
 
 def _start_onetone_plugin(
     state: State,
-    source: FluxDepResult,
+    source: RunRecord[FluxDepCfg, FluxDepResult],
     plots: Plots,
     handles: OperationHandles,
     *,
@@ -294,7 +294,7 @@ def _start_onetone_plugin(
     return service, plugin, token
 
 
-def test_onetone_gui_done_uses_core_result_and_retains_named_pick(qapp) -> None:
+def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(qapp) -> None:
     state = _make_state()
     tab = state.get_tab("tab1")
     tab.adapter = OneToneFluxDepAdapter()
@@ -305,7 +305,7 @@ def test_onetone_gui_done_uses_core_result_and_retains_named_pick(qapp) -> None:
         + 1j * np.cos(values[:, None] * 3 - freqs[None, :] * 7),
         dtype=np.complex128,
     )
-    source = FluxDepResult(values, freqs, signals)
+    source = RunRecord(cfg=None, result=FluxDepResult(values, freqs, signals))
     state.update_tab_result("tab1", source)
     ctx = state.session_env
     ctx.md.flx_half = -0.2
@@ -365,7 +365,10 @@ def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None
     previous_plots.finish()
     values = np.linspace(-0.5, 0.5, 9)
     freqs = np.linspace(4.8, 5.4, 7)
-    source = FluxDepResult(values, freqs, np.ones((9, 7), dtype=np.complex128))
+    source = RunRecord(
+        cfg=None,
+        result=FluxDepResult(values, freqs, np.ones((9, 7), dtype=np.complex128)),
+    )
     state.update_tab_result("tab1", source)
     state.update_tab_analyze("tab1", previous, previous_plots)
     plots = _plots()
@@ -384,16 +387,19 @@ def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None
     previous_plots.release()
 
 
-def test_onetone_gui_failed_core_analysis_settles_without_replacing_old_pane(
+def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane(
     qapp, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = _make_state()
     tab = state.get_tab("tab1")
     tab.adapter = OneToneFluxDepAdapter()
-    source = FluxDepResult(
-        np.linspace(-0.5, 0.5, 9),
-        np.linspace(4.8, 5.4, 7),
-        np.ones((9, 7), dtype=np.complex128),
+    source = RunRecord(
+        cfg=None,
+        result=FluxDepResult(
+            np.linspace(-0.5, 0.5, 9),
+            np.linspace(4.8, 5.4, 7),
+            np.ones((9, 7), dtype=np.complex128),
+        ),
     )
     state.update_tab_result("tab1", source)
     previous = object()
@@ -406,19 +412,17 @@ def test_onetone_gui_failed_core_analysis_settles_without_replacing_old_pane(
     ctx.md.flx_int = 0.3
     plots = _plots()
 
-    def fail_core(
-        self: FluxDepExp,
-        result: FluxDepResult,
-        options: FluxDepAnalyzeOptions,
-        *,
-        plots: Plots,
-    ) -> FluxDepAnalysis:
-        del self, plots
-        assert result is source
-        assert options.flux_half == pytest.approx(-0.2)
-        raise RuntimeError("core analysis failed")
+    def fail_kernel(
+        inputs: FluxPickInputs, committed: FluxPickState
+    ) -> FluxPickAnalysis:
+        np.testing.assert_array_equal(inputs.signals, source.result.signals)
+        assert committed.flux_half == pytest.approx(-0.2)
+        raise RuntimeError("frontend analysis failed")
 
-    monkeypatch.setattr(FluxDepExp, "analyze", fail_core)
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin.analyze_flux_pick",
+        fail_kernel,
+    )
     handles = OperationHandles()
     service, _plugin, token = _start_onetone_plugin(state, source, plots, handles)
     assert service.finish_plugin("tab1") is True

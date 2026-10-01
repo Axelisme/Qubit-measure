@@ -204,7 +204,9 @@ class OneToneFluxDepAdapter(
         # One-tone resonator spectra have uninformative phase.
         return FluxPickPlugin(
             inputs,
-            FluxPickState(half, integer, conjugate=False, magnitude_only=True),
+            FluxPickState(
+                flux_half=half, flux_int=integer, conjugate=False, magnitude_only=True
+            ),
             plots=plots,
             result_builder=render_flux_pick,
         )

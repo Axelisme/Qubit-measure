@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -32,7 +33,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
-def _request(md: MetaDict | None = None):
+def _request(md: MetaDict | None = None) -> AnalyzeRequest[Any, FluxPickParams]:
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
