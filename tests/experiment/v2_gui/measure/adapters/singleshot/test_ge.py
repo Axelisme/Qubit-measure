@@ -5,7 +5,8 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.singleshot.ge import GE_Result
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Result
 from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
     GEAdapter,
     GEAnalyzeParams,
@@ -29,7 +30,9 @@ def test_primary_post_and_writebacks_use_adopted_calibration_not_edited_form() -
         dtype=np.complex128,
     )
     # Probe-off/on acquisition rows are reversed for predominantly excited init.
-    source = GE_Result(signals[::-1].copy(), np.arange(6000), np.array([0, 1]))
+    source = RunRecord[GE_Cfg, GE_Result](
+        None, GE_Result(signals[::-1].copy(), np.arange(6000), np.array([0, 1]))
+    )
     adapter = GEAdapter()
     params = GEAnalyzeParams(initial_state="excited", length_ratio=0.01)
     fit_plots = Plots(NonPresentingHost())

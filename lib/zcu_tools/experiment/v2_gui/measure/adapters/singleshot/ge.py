@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
+from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import (
     GE_Result,
@@ -29,16 +31,18 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     PostWritebackRequest,
+    RunRequest,
     SessionEnv,
     T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
+    require_soc_handles,
 )
 
 if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
-GERunResult: TypeAlias = GE_Result
+GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 
 
 @dataclass
@@ -149,6 +153,14 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             .rounds(1, locked=True)
             .build()
         )
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+    ) -> GERunResult:
+        soc, soccfg = require_soc_handles(req)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = GE_Exp().run(cfg, context=QickContext(soc, soccfg, plots))
+        return RunRecord(cfg=cfg, result=result)
 
     def analyze(
         self, req: AnalyzeRequest[GERunResult, GEAnalyzeParams], *, plots: Plots
