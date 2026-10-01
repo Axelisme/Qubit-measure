@@ -37,7 +37,7 @@ def _bindings(ml: ModuleLibrary | None = None) -> tuple[MeasureCfgBindings, Magi
     host.get_current_md.return_value = MetaDict()
     host.get_current_ml.return_value = ml or ModuleLibrary()
     host.list_device_names.return_value = ["flux"]
-    host.list_arb_waveforms.return_value = ["asset"]
+    host.arb_waveforms.list_data_keys.return_value = ["asset"]
     return MeasureCfgBindings(host), host
 
 
@@ -67,7 +67,7 @@ def test_measure_snapshot_detaches_metadata_options_and_captures() -> None:
     md.update(offset=9.0)
     captures["device.flux.value"] = 0.7
     host.list_device_names.return_value.append("later")
-    host.list_arb_waveforms.return_value.clear()
+    host.arb_waveforms.list_data_keys.return_value.clear()
 
     assert frozen.source_basis == basis
     assert frozen.evaluate_expression("offset * 2") == 4.0

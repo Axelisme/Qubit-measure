@@ -23,7 +23,7 @@ def service():
     host.get_current_md.return_value = {}
     host.get_current_ml.return_value = None
     host.list_device_names.return_value = []
-    host.list_arb_waveforms.return_value = []
+    host.arb_waveforms.list_data_keys.return_value = []
     return CfgEditorService(host, host, host, host, BaseEventBus())
 
 

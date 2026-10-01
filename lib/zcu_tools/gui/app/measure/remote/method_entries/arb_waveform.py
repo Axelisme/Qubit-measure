@@ -40,7 +40,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             10.0,
             "Create or overwrite an arbitrary waveform from a formula recipe. The recipe "
             "fully replaces waveform data and is embedded into the single .npz asset. "
-            "Returns {success, status, preview_figure}.",
+            "Returns {success, status}; saving does not render a preview. "
+            "Call arb_waveform.preview separately when a PNG is needed.",
             (
                 required_string("name", "Arbitrary waveform data_key"),
                 required_json("recipe", "Formula recipe object"),

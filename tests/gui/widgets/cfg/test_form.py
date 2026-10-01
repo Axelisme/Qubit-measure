@@ -161,7 +161,7 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    ctrl.list_arb_waveforms.return_value = ["asset_a", "asset_b"]
+    ctrl.arb_waveforms.list_data_keys.return_value = ["asset_a", "asset_b"]
     schema = section_schema(
         {
             "data": ScalarSpec(
@@ -195,7 +195,7 @@ def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    ctrl.list_arb_waveforms.return_value = ["asset_a"]
+    ctrl.arb_waveforms.list_data_keys.return_value = ["asset_a"]
     schema = section_schema(
         {
             "data": ScalarSpec(
@@ -225,7 +225,7 @@ def test_dynamic_choice_renders_inactive_current_value_but_remains_invalid(qapp,
     from qtpy.QtWidgets import QComboBox
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     schema = section_schema(
         {
             "data": ScalarSpec(

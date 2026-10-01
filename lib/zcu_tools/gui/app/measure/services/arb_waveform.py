@@ -4,6 +4,10 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.measure.arb_waveform import (
+    ArbWaveformPreviewResult,
+    ArbWaveformWriteStatus,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
@@ -49,13 +53,12 @@ class ArbWaveformService:
         self._init_database()
         return ArbWaveformDatabase.load(data_key)
 
-    def get_preview(self, data_key: str) -> dict[str, object]:
-        self._init_database()
-        data = ArbWaveformDatabase.load(data_key)
-        return {
-            "recipe": data.recipe.to_dict() if data.recipe is not None else None,
-            "preview_figure": render_preview_png(data, data_key=data_key),
-        }
+    def get_preview(self, data_key: str) -> ArbWaveformPreviewResult:
+        data = self.load_data(data_key)
+        return ArbWaveformPreviewResult(
+            recipe=data.recipe,
+            figure_path=render_preview_png(data, data_key=data_key),
+        )
 
     def set_formula(
         self,
@@ -63,16 +66,12 @@ class ArbWaveformService:
         recipe: FormulaRecipe | dict[str, object],
         *,
         overwrite: bool,
-    ) -> dict[str, object]:
+    ) -> ArbWaveformWriteStatus:
         self._init_database()
         existed = ArbWaveformDatabase.exists(data_key)
         ArbWaveformDatabase.create_from_formula(data_key, recipe, overwrite=overwrite)
         self._state.version.bump(ARB_WAVEFORMS_VERSION_KEY)
-        data = ArbWaveformDatabase.load(data_key)
-        return {
-            "status": "overwritten" if existed else "created",
-            "preview_figure": render_preview_png(data, data_key=data_key),
-        }
+        return "overwritten" if existed else "created"
 
     def delete(self, data_key: str) -> None:
         self._init_database()

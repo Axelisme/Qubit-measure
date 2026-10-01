@@ -38,7 +38,7 @@ from zcu_tools.resources.waveform_assets import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.app.measure.arb_waveform import ArbWaveformPort
 
 
 _DATA_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -199,9 +199,9 @@ class _PreviewCanvas(QWidget):
 class ArbWaveformDialog(QDialog):
     """Qubit-scoped arbitrary waveform asset manager."""
 
-    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
+    def __init__(self, assets: ArbWaveformPort, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._ctrl = ctrl
+        self._assets = assets
         self._current_data_key: str | None = None
         self._suppress_segment_change = False
         # Cheap path state: updated synchronously on every structure/data_key change.
@@ -250,7 +250,7 @@ class ArbWaveformDialog(QDialog):
 
     def refresh(self) -> None:
         selected = self._current_data_key
-        infos = self._ctrl.list_arb_waveform_infos()
+        infos = self._assets.list_infos()
         self._asset_table.setRowCount(0)
         for row, info in enumerate(infos):
             self._asset_table.insertRow(row)
@@ -514,7 +514,7 @@ class ArbWaveformDialog(QDialog):
         # global exception hook. On failure we must not leave the editor
         # pointing at an unloadable key with the previous draft still saveable.
         try:
-            data = self._ctrl.load_arb_waveform_data(data_key)
+            data = self._assets.load_data(data_key)
         except ArbWaveformError as exc:
             self._preview.clear(str(exc))
             self._set_warning(str(exc))
@@ -644,7 +644,7 @@ class ArbWaveformDialog(QDialog):
                 return
         # Save try: service renders the recipe once and persists it.
         try:
-            self._ctrl.set_arb_waveform(data_key, recipe, overwrite=exists)
+            self._assets.set_formula(data_key, recipe, overwrite=exists)
         except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
             QMessageBox.critical(self, "Save failed", str(exc))
             return
@@ -654,7 +654,7 @@ class ArbWaveformDialog(QDialog):
         self._preview_timer.stop()
         # Reload try (separate): reload failure is distinct from save failure.
         try:
-            data = self._ctrl.load_arb_waveform_data(data_key)
+            data = self._assets.load_data(data_key)
         except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
             QMessageBox.critical(self, "Reload failed", str(exc))
             self.refresh()
@@ -698,7 +698,7 @@ class ArbWaveformDialog(QDialog):
             )
             return
         try:
-            self._ctrl.rename_arb_waveform(old_key, new_key)
+            self._assets.rename(old_key, new_key)
         except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
             QMessageBox.critical(self, "Rename failed", str(exc))
             return
@@ -719,7 +719,7 @@ class ArbWaveformDialog(QDialog):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            self._ctrl.delete_arb_waveform(data_key)
+            self._assets.delete(data_key)
         except Exception as exc:  # noqa: BLE001 — user-facing dialog boundary
             QMessageBox.critical(self, "Delete failed", str(exc))
             return
@@ -746,4 +746,4 @@ class ArbWaveformDialog(QDialog):
         return f"arb_data{index}"
 
     def _known_data_keys(self) -> set[str]:
-        return set(self._ctrl.list_arb_waveforms())
+        return set(self._assets.list_data_keys())

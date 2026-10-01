@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-01, measure tab resource and independent draft boundaries
+**Last updated:** 2026-10-01, independent waveform save and preview
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -699,7 +699,12 @@ Esc, focus loss, hide, invalid placement or an external commit drop it.
 
 ### Arbitrary waveform remote contract
 
-`arb_waveform.set` 成功才回傳 `success=true`、`status` 與 preview figure。
+`Controller.arb_waveforms` 直接提供既有資產 owner 的窄 port，不再逐項轉接。
+GUI dialog 只接收此 domain port；cfg source 僅依賴列出 keys 的 read port。
+`arb_waveform.set` 成功只回傳 `success=true` 與 `status=created|overwritten`。
+保存不請求 preview；需要 PNG 時另呼叫 `arb_waveform.preview`，回傳 recipe 與
+preview figure。Preview 失敗不撤銷已保存的資產或 revision。GUI 自行繪圖，
+remote handler 只將 owner 的 typed status／preview result 投影為 wire payload。
 Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩定 `reason` 的
 `RemoteError`，走失敗的 RPC/tool call，不將 `success=false` 當一般 payload。
 寫入受 `arb_waveforms` resource version 的 expected-version guard 約束；GUI 和 agent

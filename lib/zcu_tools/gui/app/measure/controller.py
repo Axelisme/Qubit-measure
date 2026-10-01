@@ -76,8 +76,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
-    from zcu_tools.resources.waveform_assets import ArbWaveformData, ArbWaveformInfo
 
+    from .arb_waveform import ArbWaveformPort
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
@@ -1053,32 +1053,9 @@ class Controller(SessionControllerMixin):
     # Arbitrary waveform assets (qubit-scoped repository)
     # ------------------------------------------------------------------
 
-    def list_arb_waveforms(self) -> list[str]:
-        return self._arb_waveform_svc.list_data_keys()
-
-    def list_arb_waveform_infos(self) -> list[ArbWaveformInfo]:
-        return self._arb_waveform_svc.list_infos()
-
-    def load_arb_waveform_data(self, data_key: str) -> ArbWaveformData:
-        return self._arb_waveform_svc.load_data(data_key)
-
-    def get_arb_waveform_preview(self, data_key: str) -> dict[str, object]:
-        return self._arb_waveform_svc.get_preview(data_key)
-
-    def set_arb_waveform(
-        self, data_key: str, recipe: Any, *, overwrite: bool = False
-    ) -> dict[str, object]:
-        return self._arb_waveform_svc.set_formula(
-            data_key,
-            recipe,
-            overwrite=overwrite,
-        )
-
-    def delete_arb_waveform(self, data_key: str) -> None:
-        self._arb_waveform_svc.delete(data_key)
-
-    def rename_arb_waveform(self, old_data_key: str, new_data_key: str) -> None:
-        self._arb_waveform_svc.rename(old_data_key, new_data_key)
+    @property
+    def arb_waveforms(self) -> ArbWaveformPort:
+        return self._arb_waveform_svc
 
     # ------------------------------------------------------------------
     # Role templates — one-shot "create blank ml entry from a named role"

@@ -28,7 +28,7 @@ def _fake_ctrl():
     c.get_bus.return_value = EventBus()
     c.get_current_md.return_value = MetaDict()
     c.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    c.list_arb_waveforms.return_value = []
+    c.arb_waveforms.list_data_keys.return_value = []
     c.list_device_names.return_value = []
     return c
 

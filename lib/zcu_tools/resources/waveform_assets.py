@@ -437,7 +437,8 @@ class ArbWaveformDatabase:
         recipe: FormulaRecipe | dict[str, object],
         *,
         overwrite: bool = False,
-    ) -> ArbWaveformInfo:
+    ) -> None:
+        """Persist a recipe and its arrays; inspect/preview are separate reads."""
         path = cls.path_for(data_key)
         if path.exists() and not overwrite:
             raise ArbWaveformError(
@@ -447,18 +448,17 @@ class ArbWaveformDatabase:
             )
         data = render_formula_recipe(recipe)
         _write_npz(path, data)
-        return cls.inspect(data_key)
 
     @classmethod
     def update_formula(
         cls, data_key: str, recipe: FormulaRecipe | dict[str, object]
-    ) -> ArbWaveformInfo:
+    ) -> None:
+        """Replace an existing recipe asset without a post-write inspection."""
         path = cls.path_for(data_key)
         if not path.exists():
             raise cls._not_found(data_key, path)
         data = render_formula_recipe(recipe)
         _write_npz(path, data)
-        return cls.inspect(data_key)
 
     @classmethod
     def validate_formula(

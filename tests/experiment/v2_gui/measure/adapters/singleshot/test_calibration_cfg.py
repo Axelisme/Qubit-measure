@@ -75,7 +75,7 @@ def calibration(request, monkeypatch):
     host.get_current_md.return_value = md
     host.get_current_ml.return_value = ml
     host.list_device_names.return_value = []
-    host.list_arb_waveforms.return_value = []
+    host.arb_waveforms.list_data_keys.return_value = []
     schema = adapter_type.cfg_definition().instantiate(
         SessionEnv(md=md, ml=ml, soc=None, soccfg=None)
     )

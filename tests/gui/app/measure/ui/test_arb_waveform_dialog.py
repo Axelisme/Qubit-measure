@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
+from zcu_tools.gui.app.measure.services import arb_waveform
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.arb_waveform_dialog import (
     ArbWaveformDialog,
     _PreviewCanvas,
 )
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
+    ArbWaveformDatabase,
     ArbWaveformInfo,
     FormulaRecipe,
     render_formula_recipe,
@@ -21,7 +28,7 @@ class _FakeController:
     def __init__(self) -> None:
         self.assets: dict[str, ArbWaveformData] = {}
 
-    def list_arb_waveform_infos(self) -> list[ArbWaveformInfo]:
+    def list_infos(self) -> list[ArbWaveformInfo]:
         return [
             ArbWaveformInfo(
                 data_key=name,
@@ -37,13 +44,13 @@ class _FakeController:
             for name, data in sorted(self.assets.items())
         ]
 
-    def list_arb_waveforms(self) -> list[str]:
+    def list_data_keys(self) -> list[str]:
         return sorted(self.assets)
 
-    def load_arb_waveform_data(self, data_key: str) -> ArbWaveformData:
+    def load_data(self, data_key: str) -> ArbWaveformData:
         return self.assets[data_key]
 
-    def set_arb_waveform(
+    def set_formula(
         self, data_key: str, recipe: Any, *, overwrite: bool = False
     ) -> dict[str, object]:
         if data_key in self.assets and not overwrite:
@@ -51,11 +58,18 @@ class _FakeController:
         self.assets[data_key] = render_formula_recipe(recipe)
         return {"success": True, "status": "overwritten" if overwrite else "created"}
 
-    def rename_arb_waveform(self, old_data_key: str, new_data_key: str) -> None:
+    def rename(self, old_data_key: str, new_data_key: str) -> None:
         self.assets[new_data_key] = self.assets.pop(old_data_key)
 
-    def delete_arb_waveform(self, data_key: str) -> None:
+    def delete(self, data_key: str) -> None:
         del self.assets[data_key]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def repository_state_guard() -> Iterator[None]:
+    before = vars(ArbWaveformDatabase)["_database_path"]
+    yield
+    assert vars(ArbWaveformDatabase)["_database_path"] == before
 
 
 @pytest.fixture(autouse=True)
@@ -388,9 +402,9 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
     _qwait(300)
 
-    # Fail only the first call to load_arb_waveform_data after save (simulates a
+    # Fail only the first call to load_data after save (simulates a
     # transient disk error exactly at reload time, not at subsequent selection loads).
-    original_load = ctrl.load_arb_waveform_data
+    original_load = ctrl.load_data
     fail_next: list[bool] = [True]  # mutable cell; no nonlocal needed
 
     def failing_load_once(data_key: str) -> ArbWaveformData:
@@ -399,7 +413,7 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
             raise RuntimeError("disk read failure")
         return original_load(data_key)
 
-    monkeypatch.setattr(ctrl, "load_arb_waveform_data", failing_load_once)
+    monkeypatch.setattr(ctrl, "load_data", failing_load_once)
 
     critical_calls: list[tuple[str, str]] = []
 
@@ -440,7 +454,7 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:  # no
     def _raise_load(data_key: str) -> ArbWaveformData:
         raise ArbWaveformError("corrupt asset", reason="load_failed")
 
-    monkeypatch.setattr(ctrl, "load_arb_waveform_data", _raise_load)
+    monkeypatch.setattr(ctrl, "load_data", _raise_load)
 
     dlg._on_asset_selection_changed()
 
@@ -465,3 +479,46 @@ def test_E12_recipe_from_ui_returns_formula_recipe(qapp) -> None:  # noqa: ARG00
     assert isinstance(result, FormulaRecipe)
     assert len(result.segments) == 3
     assert result.normalize in ("peak", "none")
+
+
+def test_save_button_persists_without_remote_png(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from qtpy.QtWidgets import QPushButton
+
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+    state = State(
+        SessionEnv(
+            md=MetaDict(),
+            ml=ModuleLibrary(),
+            soc=None,
+            soccfg=None,
+            database_path=str(tmp_path),
+        )
+    )
+    assets = arb_waveform.ArbWaveformService(state)
+    errors: list[tuple[str, str]] = []
+
+    def unavailable(*_args: object, **_kwargs: object) -> str:
+        raise OSError("PNG export unavailable")
+
+    monkeypatch.setattr(arb_waveform, "render_preview_png", unavailable)
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.ui.arb_waveform_dialog.QMessageBox.critical",
+        lambda _parent, title, message: errors.append((title, message)),
+    )
+    dialog = ArbWaveformDialog(assets)
+    try:
+        save = next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "Save"
+        )
+        assert save.isEnabled()
+        save.click()
+        assert assets.list_data_keys() == ["arb_data1"]
+        assert assets.load_data("arb_data1").recipe is not None
+        assert state.version.get("arb_waveforms") == 1
+        assert errors == []
+    finally:
+        dialog.close()

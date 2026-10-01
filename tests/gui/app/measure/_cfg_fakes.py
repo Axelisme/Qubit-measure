@@ -28,7 +28,11 @@ class PublishedHost:
     def list_device_names(self) -> list[str]:
         return [device.name for device in self.state.list_devices()]
 
-    def list_arb_waveforms(self) -> list[str]:
+    @property
+    def arb_waveforms(self) -> "PublishedHost":
+        return self
+
+    def list_data_keys(self) -> list[str]:
         return []
 
     def read_value_source(

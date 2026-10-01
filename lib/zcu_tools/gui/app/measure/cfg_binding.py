@@ -34,6 +34,7 @@ from zcu_tools.gui.session.value_lookup import (
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 from zcu_tools.resources.context.content import snapshot_context_contents
 
+from .arb_waveform import ArbWaveformKeys
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
 _DEVICES_SOURCE = "devices"
@@ -49,7 +50,8 @@ class MeasureCfgBindingHost(Protocol):
 
     def list_device_names(self) -> list[str]: ...
 
-    def list_arb_waveforms(self) -> list[str]: ...
+    @property
+    def arb_waveforms(self) -> ArbWaveformKeys: ...
 
     def read_value_source(
         self, key: str, type_name: str | None = None
@@ -80,7 +82,7 @@ class MeasureCfgBindings:
         references = _SnapshotReferences(ml)
         options = {
             _DEVICES_SOURCE: tuple(self._host.list_device_names()),
-            _ARB_WAVEFORMS_SOURCE: tuple(self._host.list_arb_waveforms()),
+            _ARB_WAVEFORMS_SOURCE: tuple(self._host.arb_waveforms.list_data_keys()),
         }
         captures = deepcopy(dict(captured_values))
         metadata = dict(md.items())
@@ -158,7 +160,7 @@ class MeasureCfgBindings:
         if source_id == _DEVICES_SOURCE:
             return self._host.list_device_names()
         if source_id == _ARB_WAVEFORMS_SOURCE:
-            return self._host.list_arb_waveforms()
+            return self._host.arb_waveforms.list_data_keys()
         raise RuntimeError(f"Unsupported measure cfg option source {source_id!r}")
 
     def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:

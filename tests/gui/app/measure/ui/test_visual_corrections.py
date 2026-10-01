@@ -208,7 +208,7 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_current_md.return_value = MetaDict()
     ctrl.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     ctrl.list_device_names.return_value = []
 
     w = CfgFormWidget()
@@ -339,7 +339,7 @@ def test_A2_sole_tree_has_no_structure_selector(qapp):
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_current_md.return_value = MetaDict()
     ctrl.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl.list_arb_waveforms.return_value = []
+    ctrl.arb_waveforms.list_data_keys.return_value = []
     ctrl.list_device_names.return_value = []
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
@@ -367,7 +367,7 @@ def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget):
     ctrl2.get_bus.return_value = EventBus()
     ctrl2.get_current_md.return_value = MetaDict()
     ctrl2.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    ctrl2.list_arb_waveforms.return_value = []
+    ctrl2.arb_waveforms.list_data_keys.return_value = []
     ctrl2.list_device_names.return_value = []
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
