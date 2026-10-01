@@ -106,7 +106,7 @@ def test_rabi_experiment_result_preserves_calibration_used_for_live_classificati
 
     _, cfg_type, experiment_type, experiment_module = rabi_api
     md, ml, draft = calibration_draft
-    draft.set_target("shots", 2)
+    draft.set_target("reps" if cfg_type is AmpRabiCfg else "shots", 2)
     cfg = assemble_experiment_cfg(
         schema_to_raw_dict(draft.snapshot(), md, ml),
         cfg_type,
@@ -126,10 +126,17 @@ def test_rabi_experiment_result_preserves_calibration_used_for_live_classificati
     monkeypatch.setattr(
         experiment_module,
         "raw_shots_to_signal",
-        lambda _program: np.array([-1 + 0.25j, 2 - 0.5j]),
+        lambda _program: (
+            np.array([[-1 + 0.25j], [2 - 0.5j]])
+            if cfg_type is AmpRabiCfg
+            else np.array([-1 + 0.25j, 2 - 0.5j])
+        ),
     )
-    with pytest.warns(UserWarning, match="reps will be overwritten"):
+    if cfg_type is AmpRabiCfg:
         result = experiment_type().run(MagicMock(), MagicMock(), cfg)
+    else:
+        with pytest.warns(UserWarning, match="reps will be overwritten"):
+            result = experiment_type().run(MagicMock(), MagicMock(), cfg)
     np.testing.assert_array_equal(
         viewer.update.call_args.args[1], [[0.5], [0.5], [0.0]]
     )

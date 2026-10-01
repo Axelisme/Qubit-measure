@@ -318,7 +318,7 @@ def test_len_rabi_recovers_gain_scaling() -> None:
     """len_rabi Rabi frequency scales linearly with the drive gain.
 
     The mock soccfg's const length register is too coarse for a hard length
-    sweep to compile, so this uses a gauss pulse (soft-sweep path).  A gauss
+    sweep to compile, so this uses a gauss pulse and free-phase fit. A gauss
     envelope is area-weighted, so the absolute const formula pi_len ==
     pi_gain_len/gain does not apply; the injection-faithful invariant that *does*
     hold for any envelope is that the Rabi frequency is proportional to gain
@@ -355,7 +355,7 @@ def test_len_rabi_recovers_gain_scaling() -> None:
         exp = LenRabiExp()
         result = exp.run(soc, soccfg, cfg)
         pi_len, _pi_len_err, _pi2_len, _pi2_len_err, rabi_freq, _rabi_f_err, _fig = (
-            exp.analyze(result, decay=False)
+            exp.analyze(result, decay=False, fit_phase=True)
         )
         return pi_len, rabi_freq
 

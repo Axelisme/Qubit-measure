@@ -34,6 +34,24 @@ _COARSE_BIN_COUNT = 96
 _NORMAL_MAD_SCALE = 1.482602218505602
 
 
+def _parameter_names(*, decay: bool, fit_phase: bool) -> tuple[str, ...]:
+    names = _PARAMETER_NAMES if decay else _NO_DECAY_PARAMETER_NAMES
+    return (*names[:-1], "phase", names[-1]) if fit_phase else names
+
+
+def _baseline_bounds(p_e0: float) -> tuple[float, float]:
+    # Keep the oscillation direction tied to the initial state and both extrema
+    # inside [0, 1], including between sampled lengths.
+    return (p_e0, (1.0 + p_e0) / 2) if p_e0 < 0.5 else (p_e0 / 2, p_e0)
+
+
+@dataclass(frozen=True)
+class _RabiModel:
+    decay: bool
+    fit_phase: bool
+    initial_state: Literal["ground", "excited"]
+
+
 @dataclass(frozen=True)
 class RabiProjection:
     projected: NDArray[np.float64]
@@ -46,6 +64,8 @@ class RabiProjection:
 
 @dataclass(frozen=True)
 class RabiPhysicalParams:
+    """p_e0 is the pre-pulse population, before the phase offset acts."""
+
     p_e0: float
     p_inf: float
     center_g: float
@@ -55,6 +75,8 @@ class RabiPhysicalParams:
     length_ratio: float
     t_r: float | None
     omega: float
+    # Residual angle in radians relative to the pre-pulse state direction.
+    phase: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -73,6 +95,7 @@ class RabiBackendResult:
 
 @dataclass(frozen=True)
 class RabiJointFitResult:
+    # Pre-pulse populations, before the residual rotation from pulse shaping.
     initial_populations: NDArray[np.float64]
     p_inf: float
     t_r: float | None
@@ -91,6 +114,15 @@ class RabiJointFitResult:
     fitted_populations: NDArray[np.float64]
     projection: RabiProjection
     backend: RabiBackendResult
+    phase: float = 0.0
+
+    @property
+    def zero_length_populations(self) -> NDArray[np.float64]:
+        """Model extrapolation at length zero, distinct from initial_populations."""
+        p_e = self.p_inf + (self.initial_populations[1] - self.p_inf) * np.cos(
+            self.phase
+        )
+        return np.array([1.0 - p_e, p_e, 0.0])
 
 
 def _cluster_projected_iq(
@@ -111,7 +143,7 @@ def _cluster_projected_iq(
             break
         cluster_centers = updated
     if np.unique(labels).size != 2:
-        raise ValueError("Len Rabi projected IQ requires two non-empty clusters")
+        raise ValueError("Rabi projected IQ requires two non-empty clusters")
     return cluster_centers, labels
 
 
@@ -120,9 +152,9 @@ def project_rabi_iq(
 ) -> RabiProjection:
     raw = np.asarray(signals, dtype=np.complex128)
     if raw.ndim != 2 or raw.shape[0] < 2 or raw.shape[1] < 2:
-        raise ValueError("Len Rabi joint fit requires a two-dimensional raw-IQ sweep")
+        raise ValueError("Rabi joint fit requires a two-dimensional raw-IQ sweep")
     if np.any(~np.isfinite(raw)):
-        raise ValueError("Len Rabi joint fit requires finite raw IQ")
+        raise ValueError("Rabi joint fit requires finite raw IQ")
 
     points = np.column_stack((raw.real.ravel(), raw.imag.ravel()))
     mean = points.mean(axis=0)
@@ -130,7 +162,7 @@ def project_rabi_iq(
     _, singular_values, right = np.linalg.svd(centered, full_matrices=False)
     scale = max(float(np.linalg.norm(centered)), 1.0)
     if singular_values.size == 0 or singular_values[0] <= np.finfo(float).eps * scale:
-        raise ValueError("Len Rabi pooled PCA has no identifiable projection axis")
+        raise ValueError("Rabi pooled PCA has no identifiable projection axis")
 
     axis_vector = right[0]
     projected = (centered @ axis_vector).reshape(raw.shape)
@@ -149,7 +181,7 @@ def project_rabi_iq(
         np.histogram_bin_edges(projected.ravel(), bins="auto"), dtype=np.float64
     )
     if bin_edges.size < 3 or np.any(np.diff(bin_edges) <= 0.0):
-        raise ValueError("Len Rabi projected histogram bins are not identifiable")
+        raise ValueError("Rabi projected histogram bins are not identifiable")
     counts = np.stack(
         [np.histogram(row, bins=bin_edges)[0] for row in projected], axis=0
     ).astype(np.int64)
@@ -170,28 +202,34 @@ def rabi_excited_population(
     times = np.asarray(lengths, dtype=np.float64)
     envelope = 1.0 if params.t_r is None else np.exp(-times / params.t_r)
     return params.p_inf + (params.p_e0 - params.p_inf) * envelope * np.cos(
-        params.omega * times
+        params.omega * times + params.phase
     )
 
 
 def _unpack(
     values: NDArray[np.float64],
     *,
-    decay: bool,
-    initial_state: Literal["ground", "excited"],
+    model: _RabiModel,
 ) -> RabiPhysicalParams:
     separation = float(np.exp(values[3]))
+    p_e0 = 0.5 * float(expit(values[0])) + (
+        0.5 if model.initial_state == "excited" else 0.0
+    )
+    p_inf = float(expit(values[1]))
+    if model.fit_phase:
+        lower, upper = _baseline_bounds(p_e0)
+        p_inf = lower + (upper - lower) * p_inf
     return RabiPhysicalParams(
-        p_e0=0.5 * float(expit(values[0]))
-        + (0.5 if initial_state == "excited" else 0.0),
-        p_inf=float(expit(values[1])),
+        p_e0=p_e0,
+        p_inf=p_inf,
         center_g=float(values[2] - 0.5 * separation),
         center_e=float(values[2] + 0.5 * separation),
         sigma=float(np.exp(values[4])),
         p_avg=float(expit(values[5])),
         length_ratio=float(np.exp(values[6])),
-        t_r=float(np.exp(values[7])) if decay else None,
+        t_r=float(np.exp(values[7])) if model.decay else None,
         omega=float(np.exp(values[-1])),
+        phase=float(values[-2]) if model.fit_phase else 0.0,
     )
 
 
@@ -245,8 +283,7 @@ def _quantile_initial_values(
     lengths: NDArray[np.float64],
     projection: RabiProjection,
     *,
-    decay: bool,
-    initial_state: Literal["ground", "excited"],
+    model: _RabiModel,
 ) -> NDArray[np.float64]:
     projected = projection.projected
     lower, upper = np.quantile(projected, [0.2, 0.8])
@@ -260,8 +297,7 @@ def _quantile_initial_values(
         center_mid=0.5 * float(lower + upper),
         separation=separation,
         sigma=sigma,
-        decay=decay,
-        initial_state=initial_state,
+        model=model,
     )
 
 
@@ -272,41 +308,19 @@ def _initial_values_from_crude_populations(
     center_mid: float,
     separation: float,
     sigma: float,
-    decay: bool,
-    initial_state: Literal["ground", "excited"],
+    model: _RabiModel,
 ) -> NDArray[np.float64]:
-    span = float(np.ptp(lengths))
-    omega_grid = np.linspace(0.5 * np.pi / span, 8.0 * np.pi / span, 96)
-    # Fit zero-phase candidates at the actual sweep coordinates, not at row zero.
-    # This also handles signed gains and sweeps starting after a population flip.
-    envelope = np.exp(-lengths / span) if decay else np.ones_like(lengths)
-    offset = 0.5 if initial_state == "excited" else 0.0
-    candidates = []
-    for omega_candidate in omega_grid:
-        wave = envelope * np.cos(omega_candidate * lengths)
-        design = np.column_stack((1.0 - wave, wave))
-        estimated_inf, estimated_initial = np.linalg.lstsq(design, crude_e, rcond=None)[
-            0
-        ]
-        estimated_initial = float(
-            np.clip(estimated_initial, offset + 0.02, offset + 0.48)
-        )
-        estimated_inf = float(
-            np.clip(estimated_inf, estimated_initial / 2, (1 + estimated_initial) / 2)
-        )
-        residual = design @ np.array([estimated_inf, estimated_initial]) - crude_e
-        candidates.append(
-            (
-                float(residual @ residual),
-                float(omega_candidate),
-                estimated_initial,
-                estimated_inf,
-            )
-        )
-    _, omega, p_e0, p_inf = min(candidates)
+    omega, p_e0, p_inf, phase = _seed_population_oscillation(
+        lengths, crude_e, model=model
+    )
+    offset = 0.5 if model.initial_state == "excited" else 0.0
+    baseline_fraction = p_inf
+    if model.fit_phase:
+        lower, upper = _baseline_bounds(p_e0)
+        baseline_fraction = (p_inf - lower) / (upper - lower)
     values = [
         _logit(2.0 * (p_e0 - offset)),
-        _logit(p_inf),
+        _logit(baseline_fraction),
         center_mid,
         log(separation),
         log(sigma),
@@ -314,17 +328,53 @@ def _initial_values_from_crude_populations(
         log(0.1),
         log(omega),
     ]
-    if decay:
-        values.insert(-1, log(max(span, np.finfo(float).eps)))
+    if model.decay:
+        values.insert(-1, log(max(float(np.ptp(lengths)), np.finfo(float).eps)))
+    if model.fit_phase:
+        values.insert(-1, phase)
     return np.array(values, dtype=np.float64)
+
+
+def _seed_population_oscillation(
+    lengths: NDArray[np.float64],
+    crude_e: NDArray[np.float64],
+    *,
+    model: _RabiModel,
+) -> tuple[float, float, float, float]:
+    span = float(np.ptp(lengths))
+    omega_grid = np.linspace(0.5 * np.pi / span, 8.0 * np.pi / span, 96)
+    phase_grid = (
+        np.linspace(-0.45 * np.pi, 0.45 * np.pi, 13) if model.fit_phase else [0.0]
+    )
+    envelope = np.exp(-lengths / span) if model.decay else np.ones_like(lengths)
+    offset = 0.5 if model.initial_state == "excited" else 0.0
+    candidates: list[tuple[float, float, float, float, float]] = []
+    # Use the actual coordinates: the first acquired point need not be zero.
+    for omega in omega_grid:
+        for phase in phase_grid:
+            wave = envelope * np.cos(omega * lengths + phase)
+            design = np.column_stack((1.0 - wave, wave))
+            p_inf, p_e0 = np.linalg.lstsq(design, crude_e, rcond=None)[0]
+            p_e0 = float(np.clip(p_e0, offset + 0.02, offset + 0.48))
+            lower, upper = (
+                _baseline_bounds(p_e0)
+                if model.fit_phase
+                else (p_e0 / 2, (1 + p_e0) / 2)
+            )
+            p_inf = float(np.clip(p_inf, lower, upper))
+            residual = design @ np.array([p_inf, p_e0]) - crude_e
+            candidates.append(
+                (float(residual @ residual), float(omega), p_e0, p_inf, float(phase))
+            )
+    _, omega, p_e0, p_inf, phase = min(candidates)
+    return omega, p_e0, p_inf, phase
 
 
 def _initial_values(
     lengths: NDArray[np.float64],
     projection: RabiProjection,
     *,
-    decay: bool,
-    initial_state: Literal["ground", "excited"],
+    model: _RabiModel,
 ) -> NDArray[np.float64]:
     projected = projection.projected
     cluster_centers, labels = _cluster_projected_iq(projected)
@@ -335,7 +385,7 @@ def _initial_values(
     center_e = float(np.median(projected[excited_mask]))
     separation = center_e - center_g
     if not np.isfinite(separation) or separation <= 0.0:
-        raise ValueError("Len Rabi projected cluster centers are not identifiable")
+        raise ValueError("Rabi projected cluster centers are not identifiable")
 
     residuals = np.empty_like(projected)
     residuals[ground_mask] = projected[ground_mask] - center_g
@@ -349,8 +399,7 @@ def _initial_values(
         center_mid=0.5 * (center_g + center_e),
         separation=separation,
         sigma=sigma,
-        decay=decay,
-        initial_state=initial_state,
+        model=model,
     )
 
 
@@ -358,16 +407,13 @@ def _fit_backend(
     lengths: NDArray[np.float64],
     projection: RabiProjection,
     *,
-    decay: bool,
-    initial_state: Literal["ground", "excited"],
+    model: _RabiModel,
     max_calls: int | None,
     initial: NDArray[np.float64] | None = None,
 ) -> tuple[RabiPhysicalParams, RabiBackendResult]:
-    parameter_names = _PARAMETER_NAMES if decay else _NO_DECAY_PARAMETER_NAMES
+    parameter_names = _parameter_names(decay=model.decay, fit_phase=model.fit_phase)
     if initial is None:
-        initial = _initial_values(
-            lengths, projection, decay=decay, initial_state=initial_state
-        )
+        initial = _initial_values(lengths, projection, model=model)
     elif initial.shape != (len(parameter_names),) or np.any(~np.isfinite(initial)):
         raise ValueError("Rabi initial parameters must match the selected model")
     calls = 0
@@ -379,7 +425,7 @@ def _fit_backend(
         probabilities = model_bin_probabilities(
             lengths,
             projection.bin_edges,
-            _unpack(values, decay=decay, initial_state=initial_state),
+            _unpack(values, model=model),
         )
         value = multinomial_nll(projection.counts, probabilities)
         return value if np.isfinite(value) else _PENALTY
@@ -406,7 +452,9 @@ def _fit_backend(
         log(2.0 * projected_span),
     )
     fit.limits["log_length_ratio"] = (-12.0, 4.0)
-    if decay:
+    if model.fit_phase:
+        fit.limits["phase"] = (-0.5 * np.pi, 0.5 * np.pi)
+    if model.decay:
         fit.limits["log_t_r"] = (log(time_span * 1e-3), log(time_span * 1e3))
     fit.limits["log_omega"] = (
         log(2.0 * np.pi / (time_span * 100.0)),
@@ -422,7 +470,7 @@ def _fit_backend(
     fmin = fit.fmin
     fval = fit.fval
     if fmin is None or fval is None:
-        raise RuntimeError("iminuit did not return a Len Rabi fit minimum")
+        raise RuntimeError("iminuit did not return a Rabi fit minimum")
 
     values = np.array([fit.values[name] for name in parameter_names], dtype=np.float64)
     covariance = np.full((len(parameter_names), len(parameter_names)), np.nan)
@@ -442,11 +490,11 @@ def _fit_backend(
         nll=float(fval),
         calls=calls,
     )
-    return _unpack(values, decay=decay, initial_state=initial_state), backend
+    return _unpack(values, model=model), backend
 
 
-def _failed_backend(*, decay: bool) -> RabiBackendResult:
-    parameter_names = _PARAMETER_NAMES if decay else _NO_DECAY_PARAMETER_NAMES
+def _failed_backend(*, decay: bool, fit_phase: bool) -> RabiBackendResult:
+    parameter_names = _parameter_names(decay=decay, fit_phase=fit_phase)
     size = len(parameter_names)
     return RabiBackendResult(
         parameter_names=parameter_names,
@@ -466,6 +514,7 @@ def _failed_result(
     projection: RabiProjection,
     *,
     decay: bool,
+    fit_phase: bool,
     backend: RabiBackendResult | None = None,
 ) -> RabiJointFitResult:
     rows = projection.projected.shape[0]
@@ -474,6 +523,7 @@ def _failed_result(
         p_inf=np.nan,
         t_r=np.nan if decay else None,
         omega=np.nan,
+        phase=np.nan if fit_phase else 0.0,
         projected_g_center=np.nan,
         projected_e_center=np.nan,
         sigma=np.nan,
@@ -488,7 +538,7 @@ def _failed_result(
         fitted_populations=np.full((rows, 3), np.nan),
         projection=projection,
         backend=(
-            _failed_backend(decay=decay)
+            _failed_backend(decay=decay, fit_phase=fit_phase)
             if backend is None
             else replace(backend, valid=False)
         ),
@@ -573,10 +623,22 @@ def fit_rabi_joint(
     signals: NDArray[np.complex128],
     *,
     decay: bool = True,
+    fit_phase: bool = False,
     initial_state: Literal["ground", "excited"] = "ground",
     max_calls: int | None = None,
 ) -> RabiJointFitResult:
-    """Fit both IQ orientations using the predominant state at zero drive.
+    """Fit both IQ orientations using the predominant pre-pulse state.
+
+    The sweep coordinate accepts pulse lengths or gains; omega is in radians
+    per coordinate unit. Gain callers use decay=False, including signed gains.
+
+    With fit_phase, fit a residual angle in [-pi/2, pi/2] radians. This selects
+    the branch near the initial-state direction instead of allowing a pi shift
+    to exchange g/e labels. p_e0 remains the pre-pulse population; the length-zero
+    model value is exposed separately as zero_length_populations. The baseline
+    is bounded to preserve that direction and physical populations for t >= 0.
+    Without fit_phase, retain the existing zero-phase model and parameterization.
+
 
     ``max_calls`` bounds each candidate's Migrad call, not the combined search.
     """
@@ -584,12 +646,12 @@ def fit_rabi_joint(
         raise ValueError(f"Unknown initial state: {initial_state!r}")
     times = np.asarray(lengths, dtype=np.float64)
     if times.ndim != 1 or times.size < 2 or np.any(~np.isfinite(times)):
-        raise ValueError("Len Rabi joint fit requires at least two finite lengths")
+        raise ValueError("Rabi joint fit requires at least two finite lengths")
     if np.any(np.diff(times) <= 0.0) or float(np.ptp(times)) <= 0.0:
-        raise ValueError("Len Rabi lengths must be strictly increasing")
+        raise ValueError("Rabi lengths must be strictly increasing")
     projection = project_rabi_iq(signals)
     if projection.projected.shape[0] != times.size:
-        raise ValueError("Len Rabi length and raw-IQ row counts do not match")
+        raise ValueError("Rabi length and raw-IQ row counts do not match")
 
     # Mirror the same bins exactly so both likelihoods describe the same data.
     reflected = replace(
@@ -600,12 +662,12 @@ def fit_rabi_joint(
         axis=-projection.axis,
         perpendicular_offset=-projection.perpendicular_offset,
     )
+    model = _RabiModel(decay=decay, fit_phase=fit_phase, initial_state=initial_state)
     candidates = [
         _fit_projected_rabi(
             times,
             candidate,
-            decay=decay,
-            initial_state=initial_state,
+            model=model,
             max_calls=max_calls,
         )
         for candidate in (projection, reflected)
@@ -624,8 +686,7 @@ def _fit_projected_rabi(
     times: NDArray[np.float64],
     projection: RabiProjection,
     *,
-    decay: bool,
-    initial_state: Literal["ground", "excited"],
+    model: _RabiModel,
     max_calls: int | None,
 ) -> RabiJointFitResult:
 
@@ -637,18 +698,13 @@ def _fit_projected_rabi(
             if coarse is not projection:
                 coarse_backends = []
                 for coarse_initial in (
-                    _initial_values(
-                        times, coarse, decay=decay, initial_state=initial_state
-                    ),
-                    _quantile_initial_values(
-                        times, coarse, decay=decay, initial_state=initial_state
-                    ),
+                    _initial_values(times, coarse, model=model),
+                    _quantile_initial_values(times, coarse, model=model),
                 ):
                     _, coarse_backend = _fit_backend(
                         times,
                         coarse,
-                        decay=decay,
-                        initial_state=initial_state,
+                        model=model,
                         max_calls=None,
                         initial=coarse_initial,
                     )
@@ -665,8 +721,7 @@ def _fit_projected_rabi(
         params, backend = _fit_backend(
             times,
             projection,
-            decay=decay,
-            initial_state=initial_state,
+            model=model,
             max_calls=max_calls,
             initial=initial_candidates[0],
         )
@@ -674,8 +729,7 @@ def _fit_projected_rabi(
             fallback_params, fallback_backend = _fit_backend(
                 times,
                 projection,
-                decay=decay,
-                initial_state=initial_state,
+                model=model,
                 max_calls=None,
                 initial=initial_candidates[1],
             )
@@ -684,7 +738,12 @@ def _fit_projected_rabi(
             ):
                 params, backend = fallback_params, fallback_backend
         if not backend.valid:
-            return _failed_result(projection, decay=decay, backend=backend)
+            return _failed_result(
+                projection,
+                decay=model.decay,
+                fit_phase=model.fit_phase,
+                backend=backend,
+            )
         physical = np.array(
             [
                 params.p_e0,
@@ -695,15 +754,20 @@ def _fit_projected_rabi(
                 params.p_avg,
                 params.length_ratio,
                 params.omega,
+                params.phase,
             ]
         )
         if np.any(~np.isfinite(physical)) or (
             params.t_r is not None and not np.isfinite(params.t_r)
         ):
-            return _failed_result(projection, decay=decay)
+            return _failed_result(
+                projection, decay=model.decay, fit_phase=model.fit_phase
+            )
         p_e = rabi_excited_population(times, params)
         if np.any((p_e < 0.0) | (p_e > 1.0)):
-            return _failed_result(projection, decay=decay)
+            return _failed_result(
+                projection, decay=model.decay, fit_phase=model.fit_phase
+            )
         qg, qe = transition_state_bin_probabilities(
             projection.bin_edges,
             params.center_g,
@@ -716,7 +780,9 @@ def _fit_projected_rabi(
         fitted = np.column_stack((1.0 - p_e, p_e, np.zeros_like(p_e)))
         radius, confusion, condition = _confusion_matrix(params)
     except (FloatingPointError, RuntimeError, ValueError):
-        return _failed_result(projection, decay=decay, backend=backend)
+        return _failed_result(
+            projection, decay=model.decay, fit_phase=model.fit_phase, backend=backend
+        )
 
     axis = projection.axis
     return RabiJointFitResult(
@@ -724,6 +790,7 @@ def _fit_projected_rabi(
         p_inf=params.p_inf,
         t_r=params.t_r,
         omega=params.omega,
+        phase=params.phase,
         projected_g_center=params.center_g,
         projected_e_center=params.center_e,
         sigma=params.sigma,

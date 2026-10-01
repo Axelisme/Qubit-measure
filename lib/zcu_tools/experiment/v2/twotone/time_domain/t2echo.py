@@ -163,7 +163,9 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         result: T2EchoResult | None = None,
         *,
         fit_method: Literal["fringe", "decay"] = "decay",
+        fit_phase: bool = False,
     ) -> tuple[float, float, float, float, Figure]:
+        """fit_phase frees the fringe phase; decay-only fits ignore this option."""
         assert result is not None, "no result found"
 
         xs, signals = result.times, result.signals
@@ -174,7 +176,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         real_signals = rotate2real(signals).real
 
         if fit_method == "fringe":
-            fixedparams = [None, None, None, 0.0, None]
+            fixedparams = None if fit_phase else [None, None, None, 0.0, None]
             t2e, t2eerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
                 xs, real_signals, fixedparams=fixedparams
             )
