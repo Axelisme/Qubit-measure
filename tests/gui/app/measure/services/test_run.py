@@ -21,10 +21,14 @@ import numpy as np
 import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer, current_stop_signal
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeResult
+from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import (
+    FakeResult,
+    FakeRunResult,
+)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -314,9 +318,11 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     class RecordingSnapshotAdapter(FakeAdapter):
         def run(
             self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
-        ) -> FakeResult:
+        ) -> FakeRunResult:
             # Controlled execution produces an artifact with the real domain cfg builder.
-            return FakeResult(np.empty(0), self.build_exp_cfg(raw_cfg, req))
+            return RunRecord(
+                cfg=self.build_exp_cfg(raw_cfg, req), result=FakeResult(np.empty(0))
+            )
 
     state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
     adapter = RecordingSnapshotAdapter()
@@ -340,9 +346,9 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     background.run_work()
 
     result = state.get_tab(tab_id).run.result
-    assert isinstance(result, FakeResult)
-    assert result.cfg_snapshot is not None
-    assert result.cfg_snapshot.gain == 0.25
+    assert isinstance(result, RunRecord)
+    assert result.cfg is not None
+    assert result.cfg.gain == 0.25
     assert permit.accepted_cfg.ref == accepted_ref
     assert permit.accepted_cfg.source_basis == accepted_basis
     assert after.ref != accepted_ref

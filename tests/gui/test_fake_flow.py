@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import DirectValue
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 def _make_ctx():
@@ -47,11 +48,17 @@ def test_fake_adapter_full_flow():
     # 3. run
     schema.value.fields["noise_scale"] = DirectValue(0.05)
     run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={})
-    result = adapter.run(run_req, schema_to_raw_dict(schema, ctx.md, ctx.ml))
-    assert isinstance(result.data, np.ndarray)
-    assert len(result.data) == 11
+    run_plots = Plots(NonPresentingHost())
+    result = adapter.run(
+        run_req, schema_to_raw_dict(schema, ctx.md, ctx.ml), plots=run_plots
+    )
+    run_plots.finish()
+    run_plots.release()
+    assert isinstance(result.result.data, np.ndarray)
+    assert len(result.result.data) == 11
 
     # 4. analyze
+    analyze_plots = Plots(NonPresentingHost())
     analyze_result = adapter.analyze(
         AnalyzeRequest(
             run_result=result,
@@ -59,10 +66,12 @@ def test_fake_adapter_full_flow():
             md=ctx.md,
             ml=ctx.ml,
             predictor=getattr(ctx, "predictor", None),
-        )
+        ),
+        plots=analyze_plots,
     )
     assert isinstance(analyze_result.peak, float)
-    assert analyze_result.figure is not None
+    assert analyze_plots.finish()["fit"] is not None
+    analyze_plots.release()
 
     # 5. get_writeback_items
     items = adapter.get_writeback_items(

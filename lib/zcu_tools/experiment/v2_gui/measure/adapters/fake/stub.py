@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
 import numpy as np
+from numpy.typing import NDArray
 
-from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -31,12 +34,12 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import SweepCfg
 
 
 @dataclass(frozen=True)
 class FakeResult:
-    data: np.ndarray
-    cfg_snapshot: FakeExpCfg | None = None
+    data: NDArray[np.float64]
 
 
 class FakeExpCfg(ExpCfgModel):
@@ -44,18 +47,53 @@ class FakeExpCfg(ExpCfgModel):
     rounds: int = 10
     gain: float = 0.1
     noise_scale: float = 0.1
-    sweep: object
+    sweep: SweepCfg
 
 
-class FakeExp(AbsExperiment[FakeResult, FakeExpCfg]):
-    def run(self, cfg: FakeExpCfg) -> FakeResult:
+FakeRunResult: TypeAlias = RunRecord[FakeExpCfg, FakeResult]
+
+
+@dataclass(frozen=True)
+class FakeAnalyzeOptions:
+    threshold: float = 0.5
+
+
+@dataclass(frozen=True)
+class FakeAnalysis:
+    peak: float
+
+
+class FakeExp:
+    """Fixed seeded harness with explicit records and intentionally inert save."""
+
+    def run(self, config: FakeExpCfg, *, context: QickContext) -> FakeResult:
+        del context  # The fixed harness has no hardware or live Run presentation.
         rng = np.random.default_rng(seed=42)
-        signals = rng.normal(0.0, cfg.noise_scale, size=11)
+        signals = rng.normal(0.0, config.noise_scale, size=11)
         return FakeResult(data=signals)
+
+    def analyze(
+        self, source: FakeRunResult, options: FakeAnalyzeOptions, *, plots: Plots
+    ) -> FakeAnalysis:
+        threshold = options.threshold
+        data = source.result.data
+        peak = float(np.max(np.abs(data)))
+        _, ax = plots.subplots("fit")
+        xs = np.arange(len(data))
+        ax.plot(xs, data, label="signal")
+        if peak > threshold:
+            idx = int(np.argmax(np.abs(data)))
+            ax.axvline(idx, color="red", linestyle="--", label=f"peak={peak:.3f}")
+        ax.axhline(
+            threshold, color="gray", linestyle=":", label=f"threshold={threshold}"
+        )
+        ax.set_title("FakeAdapter analysis")
+        ax.legend()
+        return FakeAnalysis(peak=peak)
 
     def save(
         self,
-        result: FakeResult,
+        source: FakeRunResult,
         destination: Path,
         *,
         comment: str | None = None,
@@ -64,10 +102,15 @@ class FakeExp(AbsExperiment[FakeResult, FakeExpCfg]):
         port: int = 4999,
     ) -> None:
         """The no-hardware harness intentionally leaves data persistence inert."""
-        _ = result, destination, comment, tag, server_ip, port
+        _ = source, destination, comment, tag, server_ip, port
 
-
-FakeRunResult: TypeAlias = FakeResult
+    def load(
+        self, source: Path, *, server_ip: str | None = None, port: int = 4999
+    ) -> FakeRunResult:
+        del source, server_ip, port
+        raise NotImplementedError(
+            "The inert FakeAdapter harness has no data file format"
+        )
 
 
 @dataclass
@@ -130,35 +173,26 @@ class FakeAdapter(
             rounds=_require_int(raw_cfg, "rounds"),
             gain=_require_float(raw_cfg, "gain"),
             noise_scale=_require_float(raw_cfg, "noise_scale"),
-            sweep=raw_cfg["sweep"],
+            sweep=SweepCfg.model_validate(raw_cfg["sweep"]),
+            dev=deepcopy(req.device_snapshot),
         )
 
     def run(
         self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
     ) -> FakeRunResult:
-        del plots  # This stub has no live Run presentation.
         cfg = self.build_exp_cfg(raw_cfg, req)
-        return FakeExp().run(cfg)
+        result = FakeExp().run(cfg, context=QickContext(req.soc, req.soccfg, plots))
+        return RunRecord(cfg=cfg, result=result)
 
     def analyze(
         self, req: AnalyzeRequest[FakeRunResult, FakeAnalyzeParams], *, plots: Plots
     ) -> FakeAnalyzeResult:
-        threshold = req.analyze_params.threshold
-        data = req.run_result.data
-
-        peak = float(np.max(np.abs(data)))
-        _, ax = plots.subplots("fit")
-        xs = np.arange(len(data))
-        ax.plot(xs, data, label="signal")
-        if peak > threshold:
-            idx = int(np.argmax(np.abs(data)))
-            ax.axvline(idx, color="red", linestyle="--", label=f"peak={peak:.3f}")
-        ax.axhline(
-            threshold, color="gray", linestyle=":", label=f"threshold={threshold}"
+        analysis = FakeExp().analyze(
+            req.run_result,
+            FakeAnalyzeOptions(threshold=req.analyze_params.threshold),
+            plots=plots,
         )
-        ax.set_title("FakeAdapter analysis")
-        ax.legend()
-        return FakeAnalyzeResult(peak=peak)
+        return FakeAnalyzeResult(peak=analysis.peak)
 
     def get_writeback_items(
         self, req: WritebackRequest[FakeRunResult, FakeAnalyzeResult]

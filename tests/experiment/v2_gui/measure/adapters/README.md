@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-01 — OneTone 與 FakeFrequency public owners
+**Last updated:** 2026-10-01 — Fake public owners
 
 # measure adapter tests
 
@@ -15,3 +15,4 @@ tests只覆蓋至少兩個 adapters 共用的 parameterized mechanics。
 `test_lookback.py` 擁有 captured context／formal cfg、complex smoothing 到 predict_offset 的 GUI 投影、具名 fit 與 timeFly writeback。
 `onetone/` 擁有 Freq delay／writeback 與 PowerDep typed SNR 的 GUI 投影。
 `fake/test_freq.py` 擁有同檔 FakeFrequency core／adapter 的 hardware-free run、噪聲平均、stop partial、blind fit、canonical records 與 Notebook source reuse。
+`fake/test_stub.py` 擁有固定 seeded samples、matching cfg／device record、threshold marker、peak writeback、inert save／unsupported load 與 Notebook source reuse。Gaussian Fake core 的 canonical／plots observations 在 `tests/experiment/v2/test_fake.py`。

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-01 — OneTone 同步與量測專用 records
+**Last updated:** 2026-10-01 — OneTone 與 Fake records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -18,7 +18,9 @@
 
 `onetone.freq.FreqExp` 的 run 回傳純 freqs／signals，支援 linear 與 homophasal 取樣。同步 analyze 接 explicit source 與 FreqAnalyzeOptions，回傳純 FreqAnalysis，向 Plots 發布 `fit` 圖。`onetone.power_dep.PowerDepExp` 只提供量測及保存／載入，earlystop_snr 歸 typed cfg。`onetone.sa.SA_FreqExp` 的 analyze 接 None options、回傳 None，向 Plots 發布 amplitude 圖。三者都用 explicit context 執行 run，保留 canonical Hz 與 complex data。
 
-一般 T1、GE 與 OneTone 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用上述 explicit context 入口。T1WithTone 共用純 T1Result，但 acquisition／analysis／record bookkeeping 仍待遷移；ScanT1WithTone 使用另一 Result，也尚未遷移。
+`fake.FakeExp` 使用 explicit context 產生純 freqs／signals。Acquisition controls 在 typed FakeCfg，measurement 與 abs fit 圖歸本次 Plots。Analyze 接 None options、回傳 None，接受 cfg=None。Save／load 使用 Frequency／Hz 與 complex data 的 canonical record，不再於 load 偽造資料。
+
+一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用上述 explicit context 入口。T1WithTone 共用純 T1Result，但 acquisition／analysis／record bookkeeping 仍待遷移；ScanT1WithTone 使用另一 Result，也尚未遷移。
 
 ## 目錄佈局
 
