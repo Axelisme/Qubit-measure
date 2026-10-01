@@ -9,6 +9,7 @@ from zcu_tools.experiment.v2.runtime import ProgramBuilder
 from zcu_tools.experiment.v2.singleshot import ac_stark
 from zcu_tools.experiment.v2.singleshot.mist import freq, power, power_freq
 from zcu_tools.experiment.v2.singleshot.t1 import t1, t1_with_tone, t1_with_tone_sweep
+from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ac_stark import (
     SsAcStarkAdapter,
 )
@@ -129,7 +130,9 @@ def test_population_gui_run_passes_resolved_calibration_and_explicit_context(
     request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
     plots = Plots(NonPresentingHost())
     try:
-        result = adapter.run(request, schema_to_resolved_dict(snapshot), plots=plots)
+        result = BaseAdapter.run(
+            adapter, request, schema_to_resolved_dict(snapshot), plots=plots
+        )
         assert result == "acquired"
         cfg, context = observed[0]
         assert context.soc is request.soc
@@ -150,7 +153,11 @@ def test_population_experiment_preserves_calibration_used_for_acquisition(calibr
     md.g_center = 100j
     request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
     cfg = adapter.build_exp_cfg(schema_to_resolved_dict(snapshot), request)
-    result = adapter.exp_cls().run(request.soc, request.soccfg, cfg)
+    # Uniform is a separate legacy run option, not a field in the source cfg.
+    options = (
+        {"uniform": True} if type(adapter) in (SsT1Adapter, SsT1ToneAdapter) else {}
+    )
+    result = adapter.exp_cls().run(request.soc, request.soccfg, cfg, **options)
     acquisition.assert_called()
     for call in acquisition.call_args_list:
         assert (
@@ -174,10 +181,12 @@ def test_population_experiment_preserves_calibration_used_for_acquisition(calibr
 def test_population_direct_override_does_not_write_md(calibration):
     adapter, md, _ml, draft, acquisition = calibration
     draft.set_target("g_center", DirectValue(3 + 4j))
-    result = adapter.run(
-        RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
-        schema_to_resolved_dict(draft.snapshot()),
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    cfg = adapter.build_exp_cfg(schema_to_resolved_dict(draft.snapshot()), request)
+    options = (
+        {"uniform": True} if type(adapter) in (SsT1Adapter, SsT1ToneAdapter) else {}
     )
+    result = adapter.exp_cls().run(request.soc, request.soccfg, cfg, **options)
     assert result.cfg_snapshot.g_center == 3 + 4j
     assert acquisition.call_args.kwargs["g_center"] == 3 + 4j
     assert md.g_center == -1 + 0.25j

@@ -29,7 +29,6 @@ from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
-from zcu_tools.gui.plotting import set_shutting_down
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 

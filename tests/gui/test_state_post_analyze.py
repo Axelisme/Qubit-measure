@@ -16,8 +16,17 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import make_cfg
+
+
+def _plots_for(figure: Figure) -> Plots:
+    plots = Plots(NonPresentingHost())
+    plots.adopt("fit", figure)
+    plots.finish()
+    plots.release()
+    return plots
 
 
 def _make_state(tab_id: str = "t1") -> State:
@@ -36,14 +45,14 @@ def _make_state(tab_id: str = "t1") -> State:
 def _seed_analyze(state: State, tab_id: str = "t1") -> None:
     """Put the tab in a state where a primary analyze result exists."""
     state.update_tab_result(tab_id, object())
-    state.update_tab_analyze(tab_id, MagicMock(), Figure())
+    state.update_tab_analyze(tab_id, MagicMock(), _plots_for(Figure()))
 
 
 def test_update_post_analyze_requires_primary_result() -> None:
     state = _make_state()
     state.update_tab_result("t1", object())  # run result but no analyze result
     with pytest.raises(RuntimeError, match="no primary analyze result"):
-        state.update_tab_post_analyze("t1", MagicMock(), Figure())
+        state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
 
 
 def test_update_post_analyze_records_result_and_figure() -> None:
@@ -51,49 +60,50 @@ def test_update_post_analyze_records_result_and_figure() -> None:
     _seed_analyze(state)
     fig = Figure()
     post_result = MagicMock()
-    state.update_tab_post_analyze("t1", post_result, fig)
+    state.update_tab_post_analyze("t1", post_result, _plots_for(fig))
 
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is post_result
-    assert tab.post_analysis.figure is fig
+    assert tab.post_analysis.plots is not None
+    assert tab.post_analysis.plots["fit"] is fig
     assert tab.has_post_analyze_result() is True
 
 
 def test_post_analyze_invalidated_on_reanalyze() -> None:
     state = _make_state()
     _seed_analyze(state)
-    state.update_tab_post_analyze("t1", MagicMock(), Figure())
+    state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
     assert state.get_tab("t1").has_post_analyze_result() is True
 
     # A re-analyze replaces the primary result the post built on → post cleared.
-    state.update_tab_analyze("t1", MagicMock(), Figure())
+    state.update_tab_analyze("t1", MagicMock(), _plots_for(Figure()))
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is None
-    assert tab.post_analysis.figure is None
+    assert tab.post_analysis.plots is None
     assert tab.has_post_analyze_result() is False
 
 
 def test_post_analyze_invalidated_on_rerun() -> None:
     state = _make_state()
     _seed_analyze(state)
-    state.update_tab_post_analyze("t1", MagicMock(), Figure())
+    state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
 
     # A new run result clears both the primary analyze and the post-analysis.
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is None
-    assert tab.post_analysis.figure is None
+    assert tab.post_analysis.plots is None
 
 
 def test_post_analyze_invalidated_on_clear_results() -> None:
     state = _make_state()
     _seed_analyze(state)
-    state.update_tab_post_analyze("t1", MagicMock(), Figure())
+    state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
 
     state.clear_tab_results("t1")
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is None
-    assert tab.post_analysis.figure is None
+    assert tab.post_analysis.plots is None
 
 
 def test_post_analyze_param_instance_round_trip() -> None:

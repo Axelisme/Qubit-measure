@@ -20,8 +20,17 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import make_cfg
+
+
+def _plots_for(figure: Figure) -> Plots:
+    plots = Plots(NonPresentingHost())
+    plots.adopt("fit", figure)
+    plots.finish()
+    plots.release()
+    return plots
 
 
 def _make_ctx():
@@ -212,12 +221,12 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state.get_tab("t1").run.source_path = "/tmp/loaded.hdf5"
     state.update_tab_analyze_param_instance("t1", _AnalyzeParams(threshold=0.5))
     fig = Figure()
-    state.update_tab_analyze("t1", object(), fig)
+    state.update_tab_analyze("t1", object(), _plots_for(fig))
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
     assert tab.run.source_path is None
     assert tab.analysis.result is None
-    assert tab.analysis.figure is None  # figure is cleared with stale analyze data
+    assert tab.analysis.plots is None  # stale analysis presentation is cleared
     assert tab.analysis.params is None
 
 
@@ -240,10 +249,11 @@ def test_update_tab_analyze_stores_analyze_result_and_figure():
     _add_tab(state, "t1", adapter)
     analyze_result = object()
     fig = Figure()
-    state.update_tab_analyze("t1", analyze_result, fig)
+    state.update_tab_analyze("t1", analyze_result, _plots_for(fig))
     tab = state.get_tab("t1")
     assert tab.analysis.result is analyze_result
-    assert tab.analysis.figure is fig
+    assert tab.analysis.plots is not None
+    assert tab.analysis.plots["fit"] is fig
 
 
 def test_update_tab_analyze_params_stores_instance():

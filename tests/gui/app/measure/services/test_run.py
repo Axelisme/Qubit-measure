@@ -280,13 +280,11 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 def test_worker_executes_permit_after_model_changes_and_releases_lease():
     state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
     state.session_env.md.update(gain=0.25)
-    cfg = make_cfg(
-        CfgSchema(
-            CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
-            CfgSectionValue(fields={"gain": EvalValue("gain")}),
-        ),
-        state=state,
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
+        CfgSectionValue(fields={"gain": EvalValue("gain")}),
     )
+    cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).cfg = cfg
     permit = GuardService(state).acquire_run_permit(
         tab_id, expected_revision=CfgRevision(0)
@@ -298,7 +296,6 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 
     svc.start_run(permit, plots=plots)
     schema.value.fields["gain"] = DirectValue(0.75)
-    svc.start_run(permit)
     state.session_env.md.update(gain=0.75)
     state.version.bump("context")
     cfg.refresh(cfg.observe().ref.revision)
@@ -315,7 +312,9 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
     class RecordingSnapshotAdapter(FakeAdapter):
-        def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeResult:
+        def run(
+            self, req: RunRequest, raw_cfg: dict[str, object], *, plots: Plots
+        ) -> FakeResult:
             # Controlled execution produces an artifact with the real domain cfg builder.
             return FakeResult(np.empty(0), self.build_exp_cfg(raw_cfg, req))
 
@@ -334,7 +333,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     accepted_basis = permit.accepted_cfg.source_basis
     service, _gate, background, _handles = _make_run_service(state)
 
-    service.start_run(permit)
+    service.start_run(permit, plots=_plots())
     state.session_env.md.update(gain=0.75)
     state.version.bump("context")
     after = cfg.refresh(cfg.observe().ref.revision)

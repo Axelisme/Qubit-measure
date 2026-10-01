@@ -305,6 +305,25 @@ class ExpTabWidget(QWidget):
         self._left_edge_handle = _PanelEdgeHandle(self._content_widget)
         self._left_edge_handle.clicked.connect(self._toggle_left_panel)
 
+        self._build_run_panel()
+        self._build_analysis_panel()
+        self._build_post_analysis_panel()
+        self._build_data_panel()
+        self._build_guide_panel()
+
+        splitter.addWidget(self._left_tabs)
+
+        splitter.addWidget(self._build_plot_area())
+
+        splitter.setCollapsible(0, True)
+        self._update_left_panel_controls()
+        self._schedule_handle_layout()
+        # Right pane follows left selection
+        self._left_tabs.currentChanged.connect(self._on_left_tab_changed)
+        # Initially show Run
+        self._on_left_tab_changed(self._left_tabs.currentIndex())
+
+    def _build_run_panel(self) -> None:
         # ── Tab: Run (always) ──────────────────────────────────────
         run_panel = QWidget()
         run_layout = QVBoxLayout(run_panel)
@@ -313,7 +332,7 @@ class ExpTabWidget(QWidget):
 
         self.cfg_form = ResourceCfgFormWidget(
             dialog_presenter=self._dialog_presenter,
-            text_input_enhancer=make_value_source_input_enhancer(ctrl),
+            text_input_enhancer=make_value_source_input_enhancer(self._ctrl),
         )
         run_layout.addWidget(self.cfg_form, stretch=1)
 
@@ -347,6 +366,7 @@ class ExpTabWidget(QWidget):
         self._run_panel = run_panel
         self._left_tabs.addTab(run_panel, "Run")
 
+    def _build_analysis_panel(self) -> None:
         # ── Tab: Analysis (only when analysis capability present) ──
         if self._has_analysis:
             # Single-column 13 px ledger with whole-header folding; Analyze sits
@@ -405,6 +425,8 @@ class ExpTabWidget(QWidget):
             self._analysis_tab_index = self._left_tabs.addTab(
                 analysis_container, "Analysis"
             )
+
+    def _build_post_analysis_panel(self) -> None:
         # ── Tab: Post-Analysis (only when post capability true) ────
         if self._has_post:
             post_scroll = QScrollArea()
@@ -447,8 +469,9 @@ class ExpTabWidget(QWidget):
             self._post_panel = post_scroll
             self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
 
+    def _build_data_panel(self) -> None:
         # ── Tab: Data (always) — save center ──────────────────────
-        self._save_center = ArtifactSaveCenter(self.tab_id, capabilities)
+        self._save_center = ArtifactSaveCenter(self.tab_id, self._capabilities)
         self._save_center.bind_comment_changed(self._on_comment_changed)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
@@ -456,6 +479,7 @@ class ExpTabWidget(QWidget):
         self._save_panel = save_scroll
         self._left_tabs.addTab(save_scroll, "Data")
 
+    def _build_guide_panel(self) -> None:
         # ── Tab: Guide (always) ──────────────────────────────────
         guide_scroll = QScrollArea()
         guide_scroll.setWidgetResizable(True)
@@ -469,21 +493,7 @@ class ExpTabWidget(QWidget):
         self._guide_panel = guide_scroll
         self._left_tabs.addTab(guide_scroll, "Guide")
 
-        splitter.addWidget(self._left_tabs)
-
-        # ── Right pane: per-pane figure containers ────────────────
-        plot_panel = QWidget()
-        self._plot_layout = QVBoxLayout(plot_panel)
-        self._plot_layout.setContentsMargins(0, 0, 0, 0)
-        self._right_stack = QStackedWidget()
-
-        # Run figure pane (always)
-        self._run_stack = QStackedWidget()
-        self._run_placeholder = QLabel("(no plot yet)")
-        self._run_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-        self._run_stack.addWidget(self._run_placeholder)
-        self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
-
+    def _build_analysis_figure_pane(self) -> None:
         # Analysis figure pane (only when analysis present)
         if self._has_analysis:
             self._analysis_stack = QStackedWidget()
@@ -506,6 +516,7 @@ class ExpTabWidget(QWidget):
             analysis_right.addWidget(self._analysis_selector)
             analysis_right.addWidget(self._analysis_stack, stretch=1)
 
+    def _build_post_figure_pane(self) -> None:
         # Post figure pane (only when post present)
         if self._has_post:
             self._post_stack = QStackedWidget()
@@ -528,6 +539,23 @@ class ExpTabWidget(QWidget):
             post_right.addWidget(self._post_selector)
             post_right.addWidget(self._post_stack, stretch=1)
 
+    def _build_plot_area(self) -> QWidget:
+        # ── Right pane: per-pane figure containers ────────────────
+        plot_panel = QWidget()
+        self._plot_layout = QVBoxLayout(plot_panel)
+        self._plot_layout.setContentsMargins(0, 0, 0, 0)
+        self._right_stack = QStackedWidget()
+
+        # Run figure pane (always)
+        self._run_stack = QStackedWidget()
+        self._run_placeholder = QLabel("(no plot yet)")
+        self._run_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._run_stack.addWidget(self._run_placeholder)
+        self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
+
+        self._build_analysis_figure_pane()
+        self._build_post_figure_pane()
+
         # Data preview gallery — Variant A stacked rail (S1, S3)
         self._data_gallery = DataFigurePreviewGallery(
             self._capabilities,
@@ -547,15 +575,7 @@ class ExpTabWidget(QWidget):
         self._right_stack.addWidget(self._right_placeholder)
 
         self._plot_layout.addWidget(self._right_stack, stretch=1)
-        splitter.addWidget(plot_panel)
-
-        splitter.setCollapsible(0, True)
-        self._update_left_panel_controls()
-        self._schedule_handle_layout()
-        # Right pane follows left selection
-        self._left_tabs.currentChanged.connect(self._on_left_tab_changed)
-        # Initially show Run
-        self._on_left_tab_changed(self._left_tabs.currentIndex())
+        return plot_panel
 
     # ------------------------------------------------------------------
     # Capability helpers

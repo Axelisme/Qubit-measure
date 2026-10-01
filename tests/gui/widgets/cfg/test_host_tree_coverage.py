@@ -14,6 +14,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
@@ -99,17 +100,17 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         analysis=AnalysisPaneSnapshot(
             params=P(),
             result=object(),
-            figure=Figure(),
+            figures=NamedFigures({"fit": Figure()}),
             writeback_items=(),
-            image_path=PathResourceSnapshot(override=None, path="/tmp/a"),
+            image_paths={"fit": PathResourceSnapshot(override=None, path="/tmp/a")},
             has_writeback_draft=False,
         ),
         post_analysis=PostAnalysisPaneSnapshot(
             params=None,
             result=None,
-            figure=None,
+            figures=None,
             writeback_items=(),
-            image_path=PathResourceSnapshot(override=None, path="/tmp/b"),
+            image_paths={},
             has_writeback_draft=False,
         ),
         save=SavePaneSnapshot(
@@ -117,8 +118,8 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         ),
         paths=TabPathsSnapshot(
             data=PathResourceSnapshot(override=None, path="/tmp/c"),
-            analysis_image=PathResourceSnapshot(override=None, path="/tmp/a"),
-            post_analysis_image=PathResourceSnapshot(override=None, path="/tmp/b"),
+            analysis_images={"fit": PathResourceSnapshot(override=None, path="/tmp/a")},
+            post_analysis_images={},
         ),
     )
 

@@ -167,7 +167,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("tab_id"),
                 required_string("subtab_id"),
                 required_string("figure_name"),
-                optional_string("imagepath"),
+                optional_string("image_path"),
             ),
         ),
         agent=AgentMethodPolicy(

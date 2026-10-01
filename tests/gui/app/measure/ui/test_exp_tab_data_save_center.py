@@ -1203,52 +1203,6 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     _require_qapp().processEvents()
 
 
-def test_individual_image_save_dispatch_requires_figure(qapp):
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
-    window = MainWindow(ctrl)
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
-    )
-    snap_no_fig = _snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-        has_active_context=True,
-        analysis_has_figure=False,
-    )
-    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
-
-    tab_ctrl = _mock_ctrl()
-    tab = ExpTabWidget("tab-1", tab_ctrl, caps)
-    tab.attach(snap_no_fig, MagicMock())
-    ctrl.get_tab_snapshot.return_value = snap_no_fig
-    ctrl.has_tab.return_value = True
-    window._tab_widgets["tab-1"] = tab
-    tab.update_interaction_state(snap_no_fig)
-    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
-    btn = tab._save_center.save_button(ArtifactKind.ANALYSIS)
-    assert not btn.isEnabled()
-    btn.click()
-    ctrl.save_image.assert_not_called()
-    ctrl.save_data.assert_not_called()
-
-    # ---------------------------------------------------------------------------
-    # Monotonic revision regression (correction 1)
-    # ---------------------------------------------------------------------------
-    window.deleteLater()
-    tab.deleteLater()
-    qapp.processEvents()
-
-
 def test_tab_close_query_reads_only_data_artifact(exp_tab_factory):
     tab = exp_tab_factory(
         "tab-1",

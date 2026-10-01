@@ -1106,7 +1106,7 @@ def test_save_image_delegates_to_save_control(fx):
                 "image_path": "/tmp/image.png",
             },
         )
-        assert resp["ok"] is True
+        assert resp["ok"] is True, resp
         assert resp["result"]["image_path"] == "/tmp/image.png"
         fx.service.save_control.save_image.assert_called_once_with(
             tab_id, ArtifactKey(ArtifactKind.ANALYSIS, "fit"), "/tmp/image.png"
