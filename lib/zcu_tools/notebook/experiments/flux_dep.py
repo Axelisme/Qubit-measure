@@ -21,6 +21,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepResult
 from zcu_tools.notebook.plotting import NotebookPlotHost
+from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import PlotHost, Plots
 
 
@@ -146,7 +147,36 @@ class FluxDepInteraction:
         Invalid separation leaves this interaction editable. Other failures retire
         this operation without replacing a previous successful record or plots.
         """
-        raise NotImplementedError("independent flux-pick Done is not implemented")
+        if self.is_finished:
+            raise RuntimeError("Flux interaction has finished")
+        half, integer = self.picker.positions()
+        state = FluxPickState(
+            flux_half=half,
+            flux_int=integer,
+            conjugate=self.conjugate_checkbox.value,
+            magnitude_only=self.magnitude_checkbox.value,
+        )
+        result = analyze_flux_pick(self._inputs, state)
+        plots = Plots(self._host)
+        try:
+            plots.adopt("pick", make_flux_pick_figure(self._inputs, state))
+            figures = plots.finish()
+            record = FluxDepAnalysisRecord(self._source, state, result, figures)
+            self._retire_preview()
+        except BaseException:
+            try:
+                plots.finish(present=False)
+            finally:
+                try:
+                    plots.release()
+                finally:
+                    if not self.is_finished:
+                        self._retire_preview()
+            raise
+        self._publish(record, plots)
+        self.record = record
+        self.plots = plots
+        return record
 
     def cancel(self) -> None:
         if self.is_finished:
