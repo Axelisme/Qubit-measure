@@ -59,6 +59,8 @@ blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
 sweep保存`(Ngain, 3, 2)` G/E populations。analysis可用外部confusion matrix修正，
 回傳reset-only平均／最差excited population，不提供IQ校準writeback。
 Other不是校準後leakage，這些population不是reset-channel fidelity。
+分析以必填的本次`Plots`建立具名`populations`圖，不使用pyplot建圖。這只是imported
+analysis seam對齊；ResetCheck的run、cfg_snapshot與跨次狀態尚未完成record遷移。
 
 `singleshot/AmpRabiExp`保留硬體gain sweep，每個host round擷取所有gain的Reps筆raw IQ；
 不同round的shots串接而不平均，canonical complex128 shape為`(Ngain, Reps * Rounds)`。

@@ -1,7 +1,10 @@
 """Explicit, reloadable experiment catalog; startup roles live in role_registry."""
 
+from typing import Any
+
 from zcu_tools.gui.app.measure.registry import Registry
 
+from .adapters.base import BaseAdapter
 from .adapters.fake.freq import FakeFreqAdapter
 from .adapters.jpa import (
     JpaAutoOptimizeAdapter,
@@ -62,7 +65,7 @@ from .adapters.twotone.time_domain.t1 import T1Adapter
 from .adapters.twotone.time_domain.t2echo import T2EchoAdapter
 from .adapters.twotone.time_domain.t2ramsey import T2RamseyAdapter
 
-ADAPTERS = {
+ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "lookback": LookbackAdapter,
     "fake/freq": FakeFreqAdapter,
     "onetone/freq": OneToneFreqAdapter,

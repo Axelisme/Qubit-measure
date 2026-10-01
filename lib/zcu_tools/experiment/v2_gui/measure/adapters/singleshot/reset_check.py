@@ -26,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.cfg import EvalValue, ScalarSpec
+from zcu_tools.plotting.plots import Plots
 
 
 @dataclass
@@ -92,10 +93,12 @@ class SsResetCheckAdapter(
         )
 
     def analyze(
-        self, req: AnalyzeRequest[ResetCheckResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[ResetCheckResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsResetCheckAnalyzeResult:
         analysis, figure = ResetCheckExp().analyze(
-            req.run_result, confusion_matrix=req.md.get("confusion_matrix")
+            req.run_result,
+            confusion_matrix=req.md.get("confusion_matrix"),
+            plots=plots,
         )
         return SsResetCheckAnalyzeResult(
             analysis.reset_mean_excited_population,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
 from typing import Any, Literal
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.datafile import save_labber_data
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
 from zcu_tools.experiment.v2.singleshot.amp_rabi import (
     AmpRabiCfg,
@@ -24,6 +26,7 @@ from zcu_tools.experiment.v2.singleshot.reset_check import (
     ResetCheckResult,
     ResetCheckSweepCfg,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import (
     Branch,
     DirectReadoutCfg,
@@ -35,6 +38,16 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.reset import NoneResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+
+@pytest.fixture
+def plots() -> Iterator[Plots]:
+    session = Plots(NonPresentingHost())
+    try:
+        yield session
+    finally:
+        session.finish(present=False)
+        session.release()
 
 
 def _cfg(reset: bool) -> ResetCheckCfg | AmpRabiCfg:
@@ -176,11 +189,17 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
         if completed == 1:
             assert np.isnan(result.signals[:, 6:]).all()
     assert result.cfg_snapshot is not None and result.cfg_snapshot.rounds == 2
-    path = str(tmp_path / "population.hdf5")
-    exp.save(path, result)  # type: ignore[arg-type]
-    loaded = exp.load(path)
+    path = tmp_path / "population.hdf5"
+    if isinstance(exp, ResetCheckExp):
+        assert isinstance(result, ResetCheckResult)
+        exp.save(RunRecord(cfg=result.cfg_snapshot, result=result), path)
+    else:
+        assert isinstance(result, AmpRabiResult)
+        exp.save(RunRecord(cfg=result.cfg_snapshot, result=result), path)
+    source = exp.load(path)
+    loaded = source.result
     np.testing.assert_array_equal(loaded.signals, result.signals)
-    assert loaded.cfg_snapshot == result.cfg_snapshot
+    assert source.cfg == result.cfg_snapshot
     if isinstance(loaded, ResetCheckResult):
         np.testing.assert_array_equal(loaded.population_states, [0, 1])
     else:
@@ -206,7 +225,9 @@ def test_invalid_snapshot_calibration_fails_before_device_setup(
 
 
 @pytest.mark.parametrize("correct", [False, True])
-def test_reset_population_analysis_and_stage_styles(correct: bool) -> None:
+def test_reset_population_analysis_and_stage_styles(
+    correct: bool, plots: Plots
+) -> None:
     gains = np.array([0.3, 0.1, 0.2, 0.4])
     true = np.tile([0.8, 0.15, 0.05], (4, 3, 1))
     true[0, 1] = [0.7, 0.25, 0.05]
@@ -215,9 +236,10 @@ def test_reset_population_analysis_and_stage_styles(correct: bool) -> None:
     measured[-1] = np.nan
     result = ResetCheckResult(gains, np.arange(3), measured[..., :2])
     analysis, figure = ResetCheckExp().analyze(
-        result, confusion_matrix=matrix if correct else None
+        result, confusion_matrix=matrix if correct else None, plots=plots
     )
     try:
+        assert plots.finish(present=False)["populations"] is figure
         np.testing.assert_allclose(analysis.populations[:3], true[:3])
         assert analysis.analyzed_reset_points == 3
         assert analysis.reset_max_excited_population == pytest.approx(0.25)
@@ -242,7 +264,7 @@ def test_amp_rejects_population_only_file(tmp_path: Path) -> None:
         [("GE Population", "None", [0, 1]), ("Gain", "a.u.", np.linspace(0, 1, 5))],
     )
     with pytest.raises(ValueError, match="Shot Index|Signal|axis"):
-        AmpRabiExp().load(path)
+        AmpRabiExp().load(Path(path))
 
 
 def test_amp_rejects_partial_raw_sweep() -> None:

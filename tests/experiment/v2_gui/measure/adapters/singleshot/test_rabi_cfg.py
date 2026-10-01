@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter.lowering import (
 )
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import DirectValue, EvalValue
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -86,15 +87,25 @@ def test_rabi_uses_cfg_calibration_after_md_changes(
     md.g_center = 100 + 100j
     observed = []
 
-    def record_run(self, soc, soccfg, cfg):
-        observed.append(cfg)
+    def record_run(self, cfg, *, context):
+        observed.append((cfg, context))
         return "acquired"
 
     monkeypatch.setattr(experiment_type, "run", record_run)
     request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
-    result = adapter_type().run(request, schema_to_resolved_dict(snapshot))
-    assert result == "acquired"
-    cfg = observed[0]
+    plots = Plots(NonPresentingHost())
+    try:
+        result = adapter_type().run(
+            request, schema_to_resolved_dict(snapshot), plots=plots
+        )
+        assert result == "acquired"
+        cfg, context = observed[0]
+        assert context.soc is request.soc
+        assert context.soccfg is request.soccfg
+        assert context.plots is plots
+    finally:
+        plots.finish(present=False)
+        plots.release()
     assert (cfg.g_center, cfg.e_center, cfg.radius) == (-1 + 0.25j, 2 - 0.5j, 0.75)
 
 

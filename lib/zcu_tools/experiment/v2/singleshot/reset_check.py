@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
@@ -23,6 +22,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     Module,
@@ -197,6 +197,7 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
         result: ResetCheckResult | None = None,
         *,
         confusion_matrix: NDArray[np.float64] | None = None,
+        plots: Plots,
     ) -> tuple[ResetCheckAnalysis, Figure]:
         if result is None:
             raise ValueError("No reset-check result found")
@@ -222,7 +223,7 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
             float(result.gains[worst]),
             int(valid.sum()),
         )
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plots.subplots("populations", figsize=(10, 6))
         order = np.argsort(result.gains)
         for values, kwargs in zip(
             populations[order].reshape(result.gains.size, 9).T,
