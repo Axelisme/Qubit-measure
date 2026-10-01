@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -17,14 +15,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2D, LivePlot2DwithLine
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -55,7 +53,6 @@ class FreqResult:
     freqs1: NDArray[np.float64]
     freqs2: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: FreqCfg | None = None
 
 
 class FreqModuleCfg(ConfigBase):
@@ -73,6 +70,24 @@ class FreqSweepCfg(ConfigBase):
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
+    method: Literal["soft", "hard"] = "soft"
+
+
+@dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    smooth: float = 1.0
+    smooth_method: SmoothMethod = "wavelet"
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+    xname: str | None = None
+    yname: str | None = None
+    corner_as_background: bool = False
+
+
+@dataclass(frozen=True)
+class FreqAnalysis:
+    freq1: float
+    freq2: float
 
 
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
@@ -90,11 +105,15 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         tag="twotone/reset/dual_tone/freq",
     )
 
-    def run_soft(
-        self, soc, soccfg, cfg: FreqCfg, *, acquire_kwargs: dict[str, Any] | None = None
-    ) -> FreqResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run_soft(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         freq1_sweep = cfg.sweep.freq1
@@ -113,48 +132,45 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             allow_array=True,
         )
 
-        with LivePlot2DwithLine(
-            "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs2), len(freqs1)),
-                on_update=lambda data: viewer.update(
-                    freqs1, freqs2, dual_reset_signal2real(data.T)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for freq2, step in sched.scan("freq2", freqs2.tolist()):
-                    modules = step.cfg.modules
-                    modules.tested_reset.set_param("freq2", freq2)
-                    modules.tested_reset.set_param(
-                        "freq1", sweep2param("freq1", step.cfg.sweep.freq1)
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement", "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs2), len(freqs1)),
+            on_update=lambda data: viewer.update(
+                freqs1, freqs2, dual_reset_signal2real(data.T)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for freq2, step in sched.scan("freq2", freqs2.tolist()):
+                modules = step.cfg.modules
+                modules.tested_reset.set_param("freq2", freq2)
+                modules.tested_reset.set_param(
+                    "freq1", sweep2param("freq1", step.cfg.sweep.freq1)
+                )
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        TwoPulseReset("tested_reset", modules.tested_reset),
+                        Readout("readout", modules.readout),
                     )
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Pulse("init_pulse", modules.init_pulse),
-                            TwoPulseReset("tested_reset", modules.tested_reset),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("freq1", step.cfg.sweep.freq1)
-                        .build_and_acquire(
-                            **(acquire_kwargs or {}),
-                        )
-                    )
+                    .declare_sweep("freq1", step.cfg.sweep.freq1)
+                    .build_and_acquire()
+                )
 
-        return FreqResult(freqs1, freqs2, signals_buffer.array.T, cfg_snapshot=orig_cfg)
+        return FreqResult(freqs1, freqs2, signals_buffer.array.T)
 
-    def run_hard(
-        self,
-        soc,
-        soccfg,
-        cfg: FreqCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> FreqResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run_hard(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         reset_cfg = modules.tested_reset
@@ -169,84 +185,66 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
-        with LivePlot2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs1), len(freqs2)),
-                on_update=lambda data: viewer.update(
-                    freqs1, freqs2, dual_reset_signal2real(data)
-                ),
+        viewer = context.plots.liveplot_2d(
+            "measurement", "Frequency1 (MHz)", "Frequency2 (MHz)"
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs1), len(freqs2)),
+            on_update=lambda data: viewer.update(
+                freqs1, freqs2, dual_reset_signal2real(data)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            modules.tested_reset.set_param(
+                "freq1", sweep2param("freq1", sched.cfg.sweep.freq1)
             )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                modules.tested_reset.set_param(
-                    "freq1", sweep2param("freq1", sched.cfg.sweep.freq1)
+            modules.tested_reset.set_param(
+                "freq2", sweep2param("freq2", sched.cfg.sweep.freq2)
+            )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    TwoPulseReset("tested_reset", modules.tested_reset),
+                    Readout("readout", modules.readout),
                 )
-                modules.tested_reset.set_param(
-                    "freq2", sweep2param("freq2", sched.cfg.sweep.freq2)
-                )
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        TwoPulseReset("tested_reset", modules.tested_reset),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("freq1", sched.cfg.sweep.freq1)
-                    .declare_sweep("freq2", sched.cfg.sweep.freq2)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-
-            return FreqResult(
-                freqs1, freqs2, signals_buffer.array, cfg_snapshot=orig_cfg
+                .declare_sweep("freq1", sched.cfg.sweep.freq1)
+                .declare_sweep("freq2", sched.cfg.sweep.freq2)
+                .build_and_acquire()
             )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: FreqCfg,
-        *,
-        method: Literal["soft", "hard"] = "soft",
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> FreqResult:
-        if method == "soft":
-            return self.run_soft(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
-        else:
-            return self.run_hard(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
+        return FreqResult(freqs1, freqs2, signals_buffer.array)
 
-    @retrieve_result
+    def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        if cfg.method == "soft":
+            return self.run_soft(cfg, context=context)
+        return self.run_hard(cfg, context=context)
+
     def analyze(
         self,
-        result: FreqResult | None = None,
+        source: RunRecord[FreqCfg, FreqResult],
+        options: FreqAnalyzeOptions,
         *,
-        smooth: float = 1.0,
-        smooth_method: SmoothMethod = "wavelet",
-        wavelet: str = "sym4",
-        wavelet_level: int = 0,
-        xname: str | None = None,
-        yname: str | None = None,
-        corner_as_background: bool = False,
-    ) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> FreqAnalysis:
+        result = source.result
 
         freqs1, freqs2, signals = result.freqs1, result.freqs2, result.signals
 
         # Apply smoothing for peak finding
         signals_smooth = smooth_signal_nd(
             signals,
-            method=smooth_method,
-            sigma=smooth,
+            method=options.smooth_method,
+            sigma=options.smooth,
             axes=(0, 1),
-            wavelet=wavelet,
-            wavelet_level=wavelet_level,
+            wavelet=options.wavelet,
+            wavelet_level=options.wavelet_level,
         )
 
         # Find peak in amplitude
-        if corner_as_background:
+        if options.corner_as_background:
             amps = np.abs(signals_smooth - signals_smooth[0, 0])
         else:
             amps = np.abs(minus_background(signals_smooth))
@@ -254,8 +252,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         freq1_opt = freqs1[np.argmax(np.max(amps, axis=1))]
         freq2_opt = freqs2[np.argmax(np.max(amps, axis=0))]
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.imshow(
             rotate2real(signals.T).real,
@@ -266,13 +263,13 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         )
         peak_label = f"({freq1_opt:.1f}, {freq2_opt:.1f}) MHz"
         ax.scatter(freq1_opt, freq2_opt, color="r", s=40, marker="*", label=peak_label)
-        if xname is not None:
-            ax.set_xlabel(f"{xname} Frequency (MHz)", fontsize=14)
-        if yname is not None:
-            ax.set_ylabel(f"{yname} Frequency (MHz)", fontsize=14)
+        if options.xname is not None:
+            ax.set_xlabel(f"{options.xname} Frequency (MHz)", fontsize=14)
+        if options.yname is not None:
+            ax.set_ylabel(f"{options.yname} Frequency (MHz)", fontsize=14)
         ax.legend(fontsize="x-large")
         ax.tick_params(axis="both", which="major", labelsize=12)
 
         fig.tight_layout()
 
-        return freq1_opt, freq2_opt, fig
+        return FreqAnalysis(freq1=float(freq1_opt), freq2=float(freq2_opt))

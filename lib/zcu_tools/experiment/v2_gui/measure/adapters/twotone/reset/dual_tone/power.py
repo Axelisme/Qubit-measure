@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.dual_tone.power import (
+    PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
     PowerResult,
@@ -25,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -32,10 +34,11 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import RESET_120_FIELD_MD_MAP
 
-DualTonePowerRunResult: TypeAlias = PowerResult
+DualTonePowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 
 @dataclass
@@ -50,7 +53,6 @@ class DualTonePowerAnalyzeParams:
 class DualTonePowerAnalyzeResult(AnalyzeResultBase):
     gain1: float
     gain2: float
-    figure: Figure
 
 
 class DualTonePowerAdapter(
@@ -131,14 +133,28 @@ class DualTonePowerAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> DualTonePowerRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = PowerExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[DualTonePowerRunResult, DualTonePowerAnalyzeParams]
+        self,
+        req: AnalyzeRequest[DualTonePowerRunResult, DualTonePowerAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> DualTonePowerAnalyzeResult:
         params = req.analyze_params
-        gain1, gain2, fig = PowerExp().analyze(
-            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        result = PowerExp().analyze(
+            req.run_result,
+            PowerAnalyzeOptions(
+                smooth=params.smooth, smooth_method=params.smooth_method
+            ),
+            plots=plots,
         )
-        return DualTonePowerAnalyzeResult(gain1=gain1, gain2=gain2, figure=fig)
+        return DualTonePowerAnalyzeResult(gain1=result.gain1, gain2=result.gain2)
 
     def get_writeback_items(
         self,
@@ -160,7 +176,7 @@ class DualTonePowerAdapter(
         items.extend(
             reset_module_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 target="reset_120",
                 field_md_map=RESET_120_FIELD_MD_MAP,
                 desc="Reset with two pulse from 1 to 2 to 0",

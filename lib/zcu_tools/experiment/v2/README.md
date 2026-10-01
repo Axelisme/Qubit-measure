@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — Bath reset records
+**Last updated:** 2026-10-02 — Reset tone records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -60,6 +60,10 @@ AllXY／RB／ZigZag／ZigZagScan 使用 explicit RunContext、純 Result 與具�
 ## Bath reset records
 
 Bath reset 的 FreqGain／Length／Phase 核心以 RunContext 執行，回傳純 Result。FreqGain analyze 接 smoothing options 並回傳 gain／freq；Phase 使用 None options、回傳 max_phase／min_phase；Length 使用 None options、只發布 fit。分析接受 cfg=None。四點 tomography、Length 的 host rounds 平均與 program cache、Phase 的 cosine fitting 不變。GUI 使用明確 RunRecord，數值結果與具名 fit 圖分開。
+
+## Reset tone records
+
+Single-tone 的 Freq／Length 與 dual-tone 的 Freq／Length／Power 使用 explicit RunContext、純 Result 和 measurement／fit 具名圖。Single Freq 分析回傳 freq／fwhm，兩 Length 只發布曲線。Dual Freq／Power 接 typed smoothing options，回傳兩軸最佳頻率／gain。分析皆允許 cfg=None。Dual Freq 的 method 歸 typed cfg，預設 soft；GUI 固定 hard 並保存於來源 cfg。Soft host scan 與 hard 雙軸 sweep 保留相同 canonical 軸序，雙 pulse 長度差與 gain 掃描的背景選擇不變。
 
 ## 目錄佈局
 
