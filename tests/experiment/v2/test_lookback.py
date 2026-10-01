@@ -5,8 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.datafile import load_labber_data
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.lookback import (
     LookbackAnalyzeOptions,
     LookbackCfg,
@@ -96,7 +97,12 @@ def test_run_keeps_original_reps_and_captured_trigger_offset() -> None:
     soc, soccfg = make_mock_soc()
     plots = Plots(NonPresentingHost())
     with pytest.warns(UserWarning, match="reps is not 1"):
-        result = LookbackExp().run(cfg, context=QickContext(soc, soccfg, plots))
+        result = LookbackExp().run(
+            cfg,
+            context=RunContext(
+                soc, soccfg, plots, devices={}, cancel_signal=StopSignal()
+            ),
+        )
     figures = plots.finish()
 
     assert cfg == original and cfg.reps == 3

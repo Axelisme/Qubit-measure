@@ -51,6 +51,8 @@ from zcu_tools.resources.sample_table import (
 from zcu_tools.notebook.utils import dump_device_info, gc_collect, make_sweep, savefig
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.datafile import create_datafolder, reserve_labber_filepath
+from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
+from zcu_tools.notebook import NotebookAdapter
 ```
 
 # Create data/result folder
@@ -103,11 +105,14 @@ md.ro_ch = 0
 
 ```python
 import pyvisa
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import DeviceManager
+
+if "device_manager" not in globals():
+    device_manager = DeviceManager()
 
 resource_manager = globals().get("resource_manager")
 if resource_manager is not None:
-    GlobalDeviceManager.close_all_devices()
+    device_manager.close_all_devices()
     resource_manager.close()
 resource_manager = pyvisa.ResourceManager()
 ```
@@ -123,12 +128,12 @@ resource_manager = pyvisa.ResourceManager()
 ```python
 from zcu_tools.device.yoko import YOKOGS200
 
-GlobalDeviceManager.close_device("flux_yoko", ignore_missing=True)
+device_manager.close_device("flux_yoko", ignore_missing=True)
 
 flux_yoko = YOKOGS200(
     address="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=resource_manager
 )
-GlobalDeviceManager.register_device("flux_yoko", flux_yoko)
+device_manager.register_device("flux_yoko", flux_yoko)
 
 flux_yoko.set_mode("current", rampstep=1e-6)
 # flux_yoko.set_mode("voltage", rampstep=1e-3)
@@ -150,12 +155,12 @@ cur_value * 1e3
 ```python
 from zcu_tools.device.yoko import YOKOGS200
 
-GlobalDeviceManager.close_device("jpa_yoko", ignore_missing=True)
+device_manager.close_device("jpa_yoko", ignore_missing=True)
 
 jpa_yoko = YOKOGS200(
     address="USB0::0x0B21::0x0039::91T810992::INSTR", rm=resource_manager
 )
-GlobalDeviceManager.register_device("jpa_yoko", jpa_yoko)
+device_manager.register_device("jpa_yoko", jpa_yoko)
 
 jpa_yoko.set_mode("current", rampstep=1e-6)
 ```
@@ -181,12 +186,12 @@ md.cur_jpa_A * 1e3
 ```python
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
 
-GlobalDeviceManager.close_device("jpa_sgs", ignore_missing=True)
+device_manager.close_device("jpa_sgs", ignore_missing=True)
 
 jpa_sgs = RohdeSchwarzSGS100A(
     address="TCPIP0::192.168.10.89::inst0::INSTR", rm=resource_manager
 )
-GlobalDeviceManager.register_device("jpa_sgs", jpa_sgs)
+device_manager.register_device("jpa_sgs", jpa_sgs)
 ```
 
 ```python
@@ -208,8 +213,15 @@ jpa_sgs.get_info()
 # ml, md = em.new_flux(cur_value, clone_from=(ml, md), unit="A")
 # ml, md = em.new_flux(cur_value, clone_from="032600_1.800mA", unit="A")
 ml, md = em.use_flux(label="051115_2.000mA")
+env = CfgEnv(md=md, ml=ml, device_manager=device_manager)
 ml, md
 ```
+
+`make_cfg(raw_cfg, CfgModel, env)` 每次讀取 manager 中裝置的當前資訊，再組裝 typed cfg。讀取失敗會直接報錯，不使用舊 snapshot，也不設定硬體。`env` 借用 md、ml 與 manager；切換 flux folder 並取得新的 md／ml 後，重新建立 env。raw cfg 中的 `md.foo` 在建立 dict 時取值，不會延遲求值。
+
+量測的 NotebookAdapter 另接 `devices=device_manager.get_all_devices()`。這是具名 driver 的綁定，不是 cfg snapshot。重新連線或替換 driver 後，重新建立 Adapter。每次 run 都建立新的 RunContext、Plots 與 StopSignal；load／analyze 可不提供硬體。裝置與 ResourceManager 的關閉仍由本 Notebook 的生命週期步驟負責。
+
+下列 Lookback、OneTone、T1 與 GE 已使用 records。其他家族仍待遷移，不要把其舊式 run／save 呼叫當作新核心範本。
 
 # Lookback
 
@@ -240,15 +252,23 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.LookbackCfg, rounds=500)
+cfg = make_cfg(exp_cfg, ze.LookbackCfg, env, overrides={'rounds': 500})
 
-lookback_exp = ze.LookbackExp()
-_ = lookback_exp.run(soc, soccfg, cfg)
+from zcu_tools.experiment.v2.lookback import LookbackAnalyzeOptions
+
+lookback_exp = NotebookAdapter(
+    ze.LookbackExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+lookback_run = lookback_exp.run(cfg)
 ```
 
 ```python
-%matplotlib inline
-predict_offset, fig = lookback_exp.analyze(ratio=0.1, smooth=1.0)
+lookback_analysis = lookback_exp.analyze(
+    LookbackAnalyzeOptions(ratio=0.1, smooth=1.0), source=lookback_run
+)
+predict_offset = lookback_analysis.result.predict_offset
+fig = lookback_analysis.figures["fit"]
 predict_offset
 ```
 
@@ -260,10 +280,10 @@ md.timeFly
 ```python
 filename = f"lookback_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
-lookback_exp.save(
-    filepath=reserve_labber_filepath(
-        os.path.join(database_path, f"{filename}@{em.label}")
-    ),
+lookback_filepath = lookback_exp.save(
+    lookback_run,
+    Path(database_path) / f"{filename}@{em.label}.hdf5",
+    unique=True,
     comment=f"timeFly = {md.timeFly}us",
 )
 ```
@@ -309,17 +329,25 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, 301),
     "relax_delay": 1.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.onetone.FreqCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.onetone.FreqCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-res_freq_exp = ze.onetone.FreqExp()
-_ = res_freq_exp.run(soc, soccfg, cfg)
+from zcu_tools.experiment.v2.onetone.freq import FreqAnalyzeOptions
+
+res_freq_exp = NotebookAdapter(
+    ze.onetone.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+res_freq_run = res_freq_exp.run(cfg)
 ```
 
 ```python
-%matplotlib inline
-f, kappa, params, fig = res_freq_exp.analyze(
-    model_type="hm", fit_bg_amp_slope=True
+res_freq_analysis = res_freq_exp.analyze(
+    FreqAnalyzeOptions(model_type="hm", fit_bg_amp_slope=True), source=res_freq_run
 )
+f = res_freq_analysis.result.freq
+kappa = res_freq_analysis.result.fwhm
+params = res_freq_analysis.result.params
+fig = res_freq_analysis.figures["fit"]
 ```
 
 ```python
@@ -330,10 +358,10 @@ md.rf_w = kappa
 ```python
 filename = f"{res_name}_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
-res_freq_exp.save(
-    filepath=reserve_labber_filepath(
-        os.path.join(database_path, f"{filename}@{em.label}")
-    ),
+res_freq_filepath = res_freq_exp.save(
+    res_freq_run,
+    Path(database_path) / f"{filename}@{em.label}.hdf5",
+    unique=True,
     comment=str(params),
 )
 ```
@@ -368,18 +396,24 @@ exp_cfg = {
     },
     "relax_delay": 10.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.onetone.PowerDepCfg, reps=100, rounds=10)
+cfg = make_cfg(
+    exp_cfg, ze.onetone.PowerDepCfg, env,
+    overrides={"reps": 100, "rounds": 10, "earlystop_snr": 100.0},
+)
 
-res_gain_exp = ze.onetone.PowerDepExp()
-_ = res_gain_exp.run(soc, soccfg, cfg, earlystop_snr=100.0)
+res_gain_exp = NotebookAdapter(
+    ze.onetone.PowerDepExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+res_gain_run = res_gain_exp.run(cfg)
 ```
 
 ```python
 filename = f"{res_name}_gain_{time.strftime('%H%M')}"
-res_gain_exp.save(
-    filepath=reserve_labber_filepath(
-        os.path.join(database_path, f"{filename}@{em.label}")
-    ),
+res_gain_filepath = res_gain_exp.save(
+    res_gain_run,
+    Path(database_path) / f"{filename}@{em.label}.hdf5",
+    unique=True,
 )
 ```
 
@@ -427,13 +461,13 @@ exp_cfg = {
     },
     "relax_delay": 1.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.onetone.FluxDepCfg, reps=1000, rounds=1)
+cfg = make_cfg(exp_cfg, ze.onetone.FluxDepCfg, env, overrides={'reps': 1000, 'rounds': 1})
 
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepExp
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.notebook.experiments import FluxDepAnalyzer, FluxDepPickerOptions
 
-res_flux_exp = NotebookAdapter(FluxDepExp(), soc=soc, soccfg=soccfg)
+res_flux_exp = NotebookAdapter(FluxDepExp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
 flux_run = res_flux_exp.run(cfg)
 flux_analyzer = FluxDepAnalyzer()
 ```
@@ -525,7 +559,7 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.jpa.OneToneFluxCfg, reps=100, rounds=10)
+cfg = make_cfg(exp_cfg, ze.jpa.OneToneFluxCfg, env, overrides={'reps': 100, 'rounds': 10})
 
 
 jpa_flux_onetone_exp = ze.jpa.OneToneFluxExp()
@@ -553,7 +587,7 @@ exp_cfg = {
     "sweep": make_sweep(11750, 11800, 501),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.jpa.FreqCfg, reps=10000, rounds=1)
+cfg = make_cfg(exp_cfg, ze.jpa.FreqCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
 jpa_freq_exp = ze.jpa.FreqExp()
 _ = jpa_freq_exp.run(soc, soccfg, cfg)
@@ -602,7 +636,7 @@ exp_cfg = {
     "sweep": make_sweep(-5.0e-3, 5.0e-3, 1001),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.jpa.FluxCfg, reps=10000, rounds=1)
+cfg = make_cfg(exp_cfg, ze.jpa.FluxCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
 jpa_flux_exp = ze.jpa.FluxExp()
 _ = jpa_flux_exp.run(soc, soccfg, cfg)
@@ -643,7 +677,7 @@ exp_cfg = {
     "sweep": make_sweep(-20, 1, 501),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.jpa.PowerCfg, reps=10000, rounds=1)
+cfg = make_cfg(exp_cfg, ze.jpa.PowerCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
 jpa_pdr_exp = ze.jpa.PowerExp()
 _ = jpa_pdr_exp.run(soc, soccfg, cfg)
@@ -691,7 +725,7 @@ exp_cfg = {
     },
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.jpa.JPAOptCfg, reps=1000, rounds=1)
+cfg = make_cfg(exp_cfg, ze.jpa.JPAOptCfg, env, overrides={'reps': 1000, 'rounds': 1})
 
 jpa_opt_exp = ze.jpa.AutoOptimizeExp()
 _ = jpa_opt_exp.run(soc, soccfg, cfg, num_points=10000)
@@ -737,7 +771,7 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 20, md.r_f + 20, 101),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.jpa.CheckCfg, reps=1000, rounds=5)
+cfg = make_cfg(exp_cfg, ze.jpa.CheckCfg, env, overrides={'reps': 1000, 'rounds': 5})
 
 jpa_check_exp = ze.jpa.CheckExp()
 _ = jpa_check_exp.run(soc, soccfg, cfg)
@@ -836,7 +870,7 @@ exp_cfg = {
     # "sweep": make_sweep(4000, 6000, step=1.00),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 qub_freq_exp = ze.twotone.FreqExp()
 _ = qub_freq_exp.run(soc, soccfg, cfg)
@@ -908,7 +942,7 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.3, 101),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 qub_lenrabi_exp = ze.twotone.rabi.LenRabiExp()
 _ = qub_lenrabi_exp.run(soc, soccfg, cfg)
@@ -977,7 +1011,7 @@ exp_cfg = {
     "sweep": make_sweep(-0.3, 0.6, 51),
     # "sweep": make_sweep(0.0, max_gain, 51),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.AmpRabiCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.rabi.AmpRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 qub_amprabi_exp = ze.twotone.rabi.AmpRabiExp()
 _ = qub_amprabi_exp.run(soc, soccfg, cfg)
@@ -1062,7 +1096,7 @@ exp_cfg = {
     # "relax_delay": 0.1,  # us
     "relax_delay": 1.0 * md.t1,
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.single_tone.FreqCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 single_reset_freq_exp = ze.twotone.reset.single_tone.FreqExp()
 _ = single_reset_freq_exp.run(soc, soccfg, cfg)
@@ -1115,9 +1149,7 @@ exp_cfg = {
     "sweep": make_sweep(0.1, 20.0, 50),
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(
-    exp_cfg, ze.twotone.reset.single_tone.LengthCfg, reps=1000, rounds=100
-)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.LengthCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 single_reset_length_exp = ze.twotone.reset.single_tone.LengthExp()
 _ = single_reset_length_exp.run(soc, soccfg, cfg)
@@ -1175,7 +1207,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 70.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, reps=1000, rounds=10)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
 single_reset_check_exp = ze.twotone.reset.RabiCheckExp()
 _ = single_reset_check_exp.run(soc, soccfg, cfg)
@@ -1234,7 +1266,7 @@ exp_cfg = {
     # "sweep": make_sweep(4680, 4710, step=0.1),
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqCfg, reps=1000, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.twotone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
 dualreset_freq1_exp = ze.twotone.FreqExp()
 _ = dualreset_freq1_exp.run(soc, soccfg, cfg)
@@ -1321,7 +1353,7 @@ exp_cfg = {
     # "relax_delay": 5 / rf_w,  # us
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.dual_tone.FreqCfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
 dualreset_freq2_exp = ze.twotone.reset.dual_tone.FreqExp()
 _ = dualreset_freq2_exp.run(soc, soccfg, cfg, method="hard")
@@ -1403,7 +1435,7 @@ exp_cfg = {
     "relax_delay": 0.5,  # us
     # "relax_delay": 3 * t1,
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.dual_tone.PowerCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 dualreset_gain_exp = ze.twotone.reset.dual_tone.PowerExp()
 _ = dualreset_gain_exp.run(soc, soccfg, cfg)
@@ -1453,7 +1485,7 @@ exp_cfg = {
     "sweep": make_sweep(0.05, 40.0, 51),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.dual_tone.LengthCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.LengthCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 dualreset_len_exp = ze.twotone.reset.dual_tone.LengthExp()
 _ = dualreset_len_exp.run(soc, soccfg, cfg)
@@ -1492,7 +1524,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, reps=1000, rounds=10)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
 dualreset_check_exp = ze.twotone.reset.RabiCheckExp()
 _ = dualreset_check_exp.run(soc, soccfg, cfg)
@@ -1534,7 +1566,7 @@ exp_cfg = {
     # "relax_delay": 3 * md.t1,  # us
     "sweep": make_sweep(0.03, 2 / md.rf_w, 151),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 rabifreq_exp = ze.twotone.rabi.LenRabiExp()
 _ = rabifreq_exp.run(soc, soccfg, cfg)
@@ -1606,7 +1638,7 @@ exp_cfg = {
     "relax_delay": 10.5,  # us
     # "relax_delay": 3 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.bath.FreqGainCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.FreqGainCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 bathreset_freq_exp = ze.twotone.reset.bath.FreqGainExp()
 _ = bathreset_freq_exp.run(soc, soccfg, cfg)
@@ -1670,7 +1702,7 @@ exp_cfg = {
     "relax_delay": 10.5,  # us
     # "relax_delay": 3 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.bath.LengthCfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.LengthCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
 bathreset_len_exp = ze.twotone.reset.bath.LengthExp()
 _ = bathreset_len_exp.run(soc, soccfg, cfg)
@@ -1729,7 +1761,7 @@ exp_cfg = {
     # "relax_delay": 10.5,  # us
     "relax_delay": 3 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.bath.PhaseCfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.PhaseCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
 bathreset_phase_exp = ze.twotone.reset.bath.PhaseExp()
 _ = bathreset_phase_exp.run(soc, soccfg, cfg)
@@ -1794,7 +1826,7 @@ exp_cfg = {
     # "relax_delay": 0.5,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 bathreset_rabicheck_exp = ze.twotone.reset.RabiCheckExp()
 _ = bathreset_rabicheck_exp.run(soc, soccfg, cfg)
@@ -1854,7 +1886,7 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, reps=2000, rounds=40)
+cfg = make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, env, overrides={'reps': 2000, 'rounds': 40})
 
 qub_flux_exp = ze.twotone.FreqFluxExp()
 _ = qub_flux_exp.run(soc, soccfg, cfg, fail_retry=3)
@@ -1913,7 +1945,7 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.PowerCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 qub_pdr_exp = ze.twotone.PowerExp()
 _ = qub_pdr_exp.run(soc, soccfg, cfg)
@@ -1962,7 +1994,7 @@ exp_cfg = {
     },
     "relax_delay": 10.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.CKP_Cfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.CKP_Cfg, env, overrides={'reps': 100, 'rounds': 100})
 
 ckp_exp = ze.twotone.CKP_Exp()
 _ = ckp_exp.run(soc, soccfg, cfg)
@@ -2014,7 +2046,7 @@ exp_cfg = {
     "relax_delay": 30.5,  # us
     # "relax_delay": 2 * t1, # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.DispersiveCfg, reps=1000, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.twotone.DispersiveCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
 dispersive_shift_exp = ze.twotone.DispersiveExp()
 _ = dispersive_shift_exp.run(soc, soccfg, cfg)
@@ -2076,7 +2108,7 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.AcStarkCfg, reps=1000, rounds=10)
+cfg = make_cfg(exp_cfg, ze.twotone.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
 ac_stark_exp = ze.twotone.AcStarkExp()
 _ = ac_stark_exp.run(soc, soccfg, cfg, earlystop_snr=50)
@@ -2120,7 +2152,7 @@ exp_cfg = {
     },
     "relax_delay": 10.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.AllXYCfg, reps=1000, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.twotone.AllXYCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
 allxy_exp = ze.twotone.AllXY_Exp()
 _ = allxy_exp.run(soc, soccfg, cfg)
@@ -2161,7 +2193,7 @@ exp_cfg = {
     "n_seeds": 100,
     "relax_delay": 10.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.RBCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.RBCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 rb_exp = ze.twotone.RB_Exp()
 _ = rb_exp.run(soc, soccfg, cfg)
@@ -2197,7 +2229,7 @@ exp_cfg = {
     "sweep": list(range(0, 11)),
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ZigZagCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.ZigZagCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 repeat_on = "X90_pulse"
 
@@ -2252,7 +2284,7 @@ elif repeat_on == "X180_pulse":
     exp_cfg["sweep"].update(gain=make_sweep(md.pi_gain * 0.8, md.pi_gain * 1.2, 101))
 else:
     raise ValueError(f"Invalid repeat_on: {repeat_on}")
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ZigZagScanCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.ZigZagScanCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 
 zigzag_scan_exp = ze.twotone.ZigZagScanExp()
@@ -2341,7 +2373,7 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, step=0.1),
     # "sweep": make_sweep(5450, 5460, step=0.1),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 opt_ro_freq_exp = ze.twotone.ro_optimize.FreqExp()
 _ = opt_ro_freq_exp.run(soc, soccfg, cfg)
@@ -2402,7 +2434,7 @@ exp_cfg = {
     "relax_delay": 5 * md.t1,  # us
     "sweep": make_sweep(0.001, 0.2, 101),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.PowerCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 opt_ro_pdr_exp = ze.twotone.ro_optimize.PowerExp()
 _ = opt_ro_pdr_exp.run(soc, soccfg, cfg)
@@ -2462,7 +2494,7 @@ exp_cfg = {
         "gain": make_sweep(0.0, 0.2, 31),
     },
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqGainCfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqGainCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
 opt_ro_freq_pdr_exp = ze.twotone.ro_optimize.FreqGainExp()
 _ = opt_ro_freq_pdr_exp.run(soc, soccfg, cfg)
@@ -2516,7 +2548,7 @@ exp_cfg = {
     "relax_delay": 5 * md.t1,  # us
     "sweep": make_sweep(0.01, 3.5, 51),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.LengthCfg, reps=10000, rounds=1)
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.LengthCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
 opt_ro_len_exp = ze.twotone.ro_optimize.LengthExp()
 _ = opt_ro_len_exp.run(soc, soccfg, cfg)
@@ -2585,7 +2617,7 @@ exp_cfg = {
         "length": make_sweep(5.0, 10.0, 51),
     },
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.AutoOptCfg, reps=1000, rounds=10)
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.AutoOptCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
 auto_opt_ro_exp = ze.twotone.ro_optimize.AutoOptExp()
 _ = auto_opt_ro_exp.run(soc, soccfg, cfg, num_points=1001)
@@ -2652,7 +2684,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 0.4, 101),  # us
     # "sweep": make_sweep(0.0, 1.5 * md.t2r, 101),  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T2RamseyCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T2RamseyCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 activate_detune = 0.05 / cfg.sweep.length.step
 
@@ -2713,9 +2745,9 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 5 * md.t1, 51),
     "uniform": False,
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T1Cfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T1Cfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-t1_exp = NotebookAdapter(T1Exp(), soc=soc, soccfg=soccfg)
+t1_exp = NotebookAdapter(T1Exp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
 t1_run = t1_exp.run(cfg)
 ```
 
@@ -2756,7 +2788,7 @@ exp_cfg = {
     "sweep": make_sweep(1.0, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T1WithToneCfg, reps=1000, rounds=10)
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
 t1_with_tone_exp = ze.twotone.time_domain.T1WithToneExp()
 _ = t1_with_tone_exp.run(soc, soccfg, cfg)
@@ -2805,9 +2837,7 @@ exp_cfg = {
         "length": make_sweep(1.0, 30, 501),
     },
 }
-cfg = ml.make_cfg(
-    exp_cfg, ze.twotone.time_domain.ScanT1WithToneCfg, reps=100, rounds=100
-)
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.ScanT1WithToneCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 t1_with_tone_sweep_exp = ze.twotone.time_domain.ScanT1WithToneExp()
 _ = t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
@@ -2845,7 +2875,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.5 * md.t2e, 101),
     # "sweep": make_sweep(0.01, 5.0, 101),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T2EchoCfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T2EchoCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 activate_detune = 0.1 / cfg.sweep.length.step
 
@@ -2892,7 +2922,7 @@ exp_cfg = {
     # "relax_delay": 30.0,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.CPMG_Cfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.CPMG_Cfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 detune_ratio = 0.1
 
@@ -2954,7 +2984,7 @@ sample_table.add_sample(
 ```python
 device_cfg_path = os.path.join(em.flux_dir, "device_info.json")
 
-dump_device_info(device_cfg_path)
+dump_device_info(device_cfg_path, device_manager)
 ```
 
 # Single shot
@@ -3005,11 +3035,11 @@ exp_cfg = {
     # "relax_delay": 70.5,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.GE_Cfg, shots=100000)
+cfg = make_cfg(exp_cfg, ze.singleshot.GE_Cfg, env, overrides={'shots': 100000})
 print("readout length: ", cfg.modules.readout.ro_cfg.ro_length)
 
 ge_core = GE_Exp()
-sh_ge_exp = NotebookAdapter(ge_core, soc=soc, soccfg=soccfg)
+sh_ge_exp = NotebookAdapter(ge_core, soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
 ge_run = sh_ge_exp.run(cfg)
 ge_post_analyzer = GEPostAnalyzer(ge_core)
 ```
@@ -3099,7 +3129,7 @@ exp_cfg = {
     },
     "relax_delay": 70.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.CheckCfg, shots=10000)
+cfg = make_cfg(exp_cfg, ze.singleshot.CheckCfg, env, overrides={'shots': 10000})
 
 sh_exp = ze.singleshot.CheckExp()
 _ = sh_exp.run(soc, soccfg, cfg)
@@ -3145,15 +3175,7 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.2, 51),
 }
-cfg = ml.make_cfg(
-    exp_cfg,
-    ze.singleshot.LenRabiCfg,
-    reps=1000,
-    rounds=100,
-    g_center=md.g_center,
-    e_center=md.e_center,
-    radius=md.ge_radius,
-)
+cfg = make_cfg(exp_cfg, ze.singleshot.LenRabiCfg, env, overrides={'reps': 1000, 'rounds': 100, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
 sh_lenrabi_exp = ze.singleshot.LenRabiExp()
 _ = sh_lenrabi_exp.run(soc, soccfg, cfg)
@@ -3198,10 +3220,7 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 50.1, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(
-    exp_cfg, ze.singleshot.t1.T1Cfg, reps=1000, rounds=10,
-    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
-)
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1Cfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
 sh_t1_exp = ze.singleshot.t1.T1Exp()
 _ = sh_t1_exp.run(soc, soccfg, cfg, uniform=True)
@@ -3246,10 +3265,7 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(
-    exp_cfg, ze.singleshot.t1.T1WithToneCfg, reps=1000, rounds=10,
-    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
-)
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
 sh_t1_with_tone_exp = ze.singleshot.t1.T1WithToneExp()
 _ = sh_t1_with_tone_exp.run(soc, soccfg, cfg, uniform=True)
@@ -3308,10 +3324,7 @@ exp_cfg = {
         "length": make_sweep(0.01, 15, 501),
     },
 }
-cfg = ml.make_cfg(
-    exp_cfg, ze.singleshot.t1.T1WithToneSweepCfg, reps=1000, rounds=1,
-    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
-)
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneSweepCfg, env, overrides={'reps': 1000, 'rounds': 1, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
 sh_t1_with_tone_sweep_exp = ze.singleshot.t1.T1WithToneSweepExp()
 _ = sh_t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
@@ -3371,10 +3384,7 @@ exp_cfg = {
     },
     "relax_delay": 20.5,  # us
 }
-cfg = ml.make_cfg(
-    exp_cfg, ze.singleshot.mist.PowerCfg, reps=1000, rounds=100,
-    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
-)
+cfg = make_cfg(exp_cfg, ze.singleshot.mist.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
 sh_mist_exp = ze.singleshot.mist.PowerExp()
 _ = sh_mist_exp.run(soc, soccfg, cfg)
@@ -3432,7 +3442,7 @@ exp_cfg = {
     },
     "relax_delay": 50.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.CheckCfg, shots=1000000)
+cfg = make_cfg(exp_cfg, ze.singleshot.CheckCfg, env, overrides={'shots': 1000000})
 
 sh_mist_exp = ze.singleshot.CheckExp()
 _ = sh_mist_exp.run(soc, soccfg, cfg)
@@ -3494,10 +3504,7 @@ exp_cfg = {
     },
     "relax_delay": 5.5,  # us
 }
-cfg = ml.make_cfg(
-    exp_cfg, ze.singleshot.AcStarkCfg, reps=1000, rounds=2,
-    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
-)
+cfg = make_cfg(exp_cfg, ze.singleshot.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 2, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
 sh_ac_stark_exp = ze.singleshot.AcStarkExp()
 _ = sh_ac_stark_exp.run(soc, soccfg, cfg)
@@ -3583,7 +3590,7 @@ exp_cfg = {
     },
     "relax_delay": 50.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.mist.PowerDepCfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, ze.mist.PowerDepCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 mist_exp = ze.mist.PowerDepExp()
 _ = mist_exp.run(soc, soccfg, cfg)
@@ -3650,7 +3657,7 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.fastflux.TwotoneCfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.fastflux.TwotoneCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
 lf_twotone_exp = ze.fastflux.TwoToneExp()
 _ = lf_twotone_exp.run(soc, soccfg, cfg)
@@ -3709,7 +3716,7 @@ exp_cfg = {
     "readout_t": 1.05,
     "relax_delay": 10.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.fastflux.distortion.AccPhaseCfg, reps=100, rounds=500)
+cfg = make_cfg(exp_cfg, ze.fastflux.distortion.AccPhaseCfg, env, overrides={'reps': 100, 'rounds': 500})
 
 lf_dt_ap_exp = ze.fastflux.distortion.AccPhaseExp()
 _ = lf_dt_ap_exp.run(soc, soccfg, cfg)
@@ -3761,7 +3768,7 @@ exp_cfg = {
     "readout_t": 0.95,
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.fastflux.distortion.PhaseCfg, reps=1000, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.fastflux.distortion.PhaseCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
 lf_dt_p_exp = ze.fastflux.distortion.PhaseExp()
 _ = lf_dt_p_exp.run(soc, soccfg, cfg)
@@ -3821,7 +3828,7 @@ exp_cfg = {
     "readout_t": 1.25,
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.fastflux.distortion.FreqCfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.fastflux.distortion.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
 lf_dt_freq_exp = ze.fastflux.distortion.FreqExp()
 _ = lf_dt_freq_exp.run(soc, soccfg, cfg)
@@ -3874,7 +3881,7 @@ exp_cfg = {
     },
     "relax_delay": 10.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.fastflux.T1Cfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, ze.fastflux.T1Cfg, env, overrides={'reps': 100, 'rounds': 1000})
 
 lf_t1_exp = ze.fastflux.T1Exp()
 _ = lf_t1_exp.run(soc, soccfg, cfg)
@@ -3898,11 +3905,9 @@ lf_t1_exp.save(
 # Disconnect
 
 ```python
-from zcu_tools.device import GlobalDeviceManager
-
 resource_manager = globals().get("resource_manager")
 if resource_manager is not None:
-    GlobalDeviceManager.close_all_devices()
+    device_manager.close_all_devices()
     resource_manager.close()
     resource_manager = None
 ```

@@ -6,8 +6,9 @@ from typing import Literal
 from unittest.mock import Mock
 
 import pytest
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.onetone.freq import (
     FreqAnalyzeOptions,
     FreqCfg,
@@ -42,14 +43,20 @@ def test_run_captures_matching_cfg_source_and_context(
     request = RunRequest(soc=soc, soccfg=soccfg, device_snapshot={})
     plots = Plots(NonPresentingHost())
     data = make_freq_result()
-    observed: list[tuple[FreqCfg, QickContext]] = []
+    observed: list[tuple[FreqCfg, RunContext]] = []
 
-    def run(_core: FreqExp, config: FreqCfg, *, context: QickContext) -> FreqResult:
+    def run(_core: FreqExp, config: FreqCfg, *, context: RunContext) -> FreqResult:
         observed.append((config, context))
         return data
 
     monkeypatch.setattr(FreqExp, "run", run)
-    source = OneToneFreqAdapter().run(request, raw_cfg, plots=plots)
+    source = OneToneFreqAdapter().run(
+        request,
+        raw_cfg,
+        context=RunContext(
+            request.soc, request.soccfg, plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
     config, context = observed[0]
     assert source.cfg == config
     assert source.result is data

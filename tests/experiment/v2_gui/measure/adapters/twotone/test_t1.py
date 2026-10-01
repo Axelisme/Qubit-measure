@@ -5,8 +5,9 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1Analysis,
     T1Cfg,
@@ -61,16 +62,22 @@ def test_t1_gui_run_passes_captured_context_and_formal_cfg(
     cfg = Mock(uniform=False)
     monkeypatch.setattr(adapter, "build_exp_cfg", lambda _raw, _req: cfg)
     result = _result()
-    observed: list[tuple[object, QickContext]] = []
+    observed: list[tuple[object, RunContext]] = []
 
-    def run(_exp: T1Exp, config: object, *, context: QickContext) -> T1Result:
+    def run(_exp: T1Exp, config: object, *, context: RunContext) -> T1Result:
         observed.append((config, context))
         return result
 
     monkeypatch.setattr(T1Exp, "run", run)
     plots = Plots(NonPresentingHost())
     req = RunRequest(soc=Mock(), soccfg=Mock(), device_snapshot={})
-    source = adapter.run(req, {"uniform": False}, plots=plots)
+    source = adapter.run(
+        req,
+        {"uniform": False},
+        context=RunContext(
+            req.soc, req.soccfg, plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
     assert source.result is result
     assert source.cfg is not None and source.cfg is not cfg
     assert source.cfg.uniform is False

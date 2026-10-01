@@ -5,8 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.datafile import load_labber_data
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.onetone.sa import SA_FreqCfg, SA_FreqExp, SA_FreqResult
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.mocksoc import make_mock_soc
@@ -19,7 +20,10 @@ def test_mock_soc_acquisition_preserves_readout_cfg_and_publishes_final_trace() 
     before = cfg.model_copy(deep=True)
     soc, soccfg = make_mock_soc()
     plots = Plots(NonPresentingHost())
-    result = SA_FreqExp().run(cfg, context=QickContext(soc, soccfg, plots))
+    result = SA_FreqExp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
     figures = plots.finish()
     assert cfg == before
     assert result.signals.shape == result.freqs.shape == (9,)

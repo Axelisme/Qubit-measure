@@ -4,8 +4,9 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
 from zcu_tools.experiment.v2_gui.measure.adapters.lookback import (
     LookbackAdapter,
@@ -68,17 +69,23 @@ def test_run_captures_formal_cfg_and_the_same_context(
     soc, soccfg = make_mock_soc()
     req = RunRequest(soc=soc, soccfg=soccfg, device_snapshot={})
     plots = Plots(NonPresentingHost())
-    observed: list[tuple[LookbackCfg, QickContext]] = []
+    observed: list[tuple[LookbackCfg, RunContext]] = []
     data = LookbackResult(np.array([0.4, 0.5]), np.array([1j, 2j]))
 
     def run(
-        self: LookbackExp, config: LookbackCfg, *, context: QickContext
+        self: LookbackExp, config: LookbackCfg, *, context: RunContext
     ) -> LookbackResult:
         observed.append((config, context))
         return data
 
     monkeypatch.setattr(LookbackExp, "run", run)
-    source = LookbackAdapter().run(req, raw_cfg, plots=plots)
+    source = LookbackAdapter().run(
+        req,
+        raw_cfg,
+        context=RunContext(
+            req.soc, req.soccfg, plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
 
     config, context = observed[0]
     assert context.soc is req.soc

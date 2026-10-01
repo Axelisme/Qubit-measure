@@ -6,8 +6,9 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 from zcu_tools.device import FakeDeviceInfo
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import (
     FakeAdapter,
     FakeAnalysis,
@@ -45,7 +46,10 @@ def test_core_run_keeps_seeded_eleven_samples_independent_of_sweep(
     cfg = make_cfg(noise_scale)
     before = cfg.model_copy(deep=True)
     plots = Plots(NonPresentingHost())
-    result = FakeExp().run(cfg, context=QickContext(None, None, plots))
+    result = FakeExp().run(
+        cfg,
+        context=RunContext(None, None, plots, devices={}, cancel_signal=StopSignal()),
+    )
     expected = np.random.default_rng(seed=42).normal(0.0, noise_scale, size=11)
     np.testing.assert_array_equal(result.data, expected)
     assert result.data.dtype == np.float64 and cfg == before
@@ -80,10 +84,22 @@ def test_adapter_run_keeps_matching_cfg_and_detached_device_after_b() -> None:
     device = FakeDeviceInfo(address="none", value=0.25)
     request = RunRequest(soc=None, soccfg=None, device_snapshot={"bias": device})
     plots = Plots(NonPresentingHost())
-    a = adapter.run(request, raw, plots=plots)
+    a = adapter.run(
+        request,
+        raw,
+        context=RunContext(
+            request.soc, request.soccfg, plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
     raw["noise_scale"] = 0.2
     device.value = 0.75
-    b = adapter.run(request, raw, plots=plots)
+    b = adapter.run(
+        request,
+        raw,
+        context=RunContext(
+            request.soc, request.soccfg, plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
     assert isinstance(a, RunRecord)
     assert a.cfg is not None and b.cfg is not None and a.cfg.dev is not None
     assert a.cfg.noise_scale == 0.05 and b.cfg.noise_scale == 0.2
@@ -133,7 +149,13 @@ def test_adapter_rejects_bad_raw_controls_before_acquisition(
     raw[field] = value
     plots = Plots(NonPresentingHost())
     with pytest.raises(RuntimeError, match=field):
-        FakeAdapter().run(RunRequest(None, None, {}), raw, plots=plots)
+        FakeAdapter().run(
+            RunRequest(None, None, {}),
+            raw,
+            context=RunContext(
+                None, None, plots, devices={}, cancel_signal=StopSignal()
+            ),
+        )
     assert tuple(plots.finish()) == ()
     plots.release()
 
@@ -164,7 +186,7 @@ def test_notebook_b_keeps_explicit_a_native_plot_and_last_success_on_failure(
     tmp_path: Path,
 ) -> None:
     adapter = NotebookAdapter(
-        FakeExp(), soc=object(), soccfg=object(), host=NonPresentingHost()
+        FakeExp(), devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
     )
     a = adapter.run(make_cfg(0.05))
     b = adapter.run(make_cfg(0.2))

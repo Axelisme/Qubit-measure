@@ -6,8 +6,9 @@ from typing import Literal
 import numpy as np
 import pytest
 from zcu_tools.datafile import load_labber_data
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.onetone.freq import (
     FreqAnalyzeOptions,
     FreqCfg,
@@ -66,7 +67,10 @@ def test_mock_soc_acquisition_preserves_cfg_and_publishes_final_trace(
     before = cfg.model_copy(deep=True)
     soc, soccfg = make_mock_soc()
     plots = Plots(NonPresentingHost())
-    answer = FreqExp().run(cfg, context=QickContext(soc, soccfg, plots))
+    answer = FreqExp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
     figures = plots.finish()
     assert cfg == before
     assert answer.freqs.shape == answer.signals.shape == (9,)

@@ -9,14 +9,14 @@ from typing import Any
 import ipywidgets as widgets
 import numpy as np
 import pytest
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
     FluxDepExp,
     FluxDepResult,
 )
 from zcu_tools.experiment.v2.runtime.schedule import (
-    ScheduleOutcomeError,
     ScheduleStep,
     SignalBuffer,
 )
@@ -86,7 +86,13 @@ def test_simulated_run_publishes_acquired_rows_in_final_measurement(
     plots = Plots(NonPresentingHost())
     result = FluxDepExp().run(
         cfg,
-        context=QickContext("simulated-soc", "simulated-soccfg", plots),
+        context=RunContext(
+            "simulated-soc",
+            "simulated-soccfg",
+            plots,
+            devices={},
+            cancel_signal=StopSignal(),
+        ),
     )
     plots.finish()
     assert cfg.model_dump() == before
@@ -153,7 +159,13 @@ def test_failed_schedule_acquisition_reports_failed_and_closes_progress(
         with pytest.raises(ScheduleOutcomeError, match="acquisition failed") as exc:
             FluxDepExp().run(
                 make_cfg(),
-                context=QickContext("simulated-soc", "simulated-soccfg", plots),
+                context=RunContext(
+                    "simulated-soc",
+                    "simulated-soccfg",
+                    plots,
+                    devices={},
+                    cancel_signal=StopSignal(),
+                ),
             )
         assert exc.value.status == "failed"
 

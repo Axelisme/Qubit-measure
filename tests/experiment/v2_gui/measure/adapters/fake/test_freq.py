@@ -8,15 +8,15 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fitting import HangerModel, TransmissionModel
 from zcu_tools.datafile import load_labber_data
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.onetone.freq import (
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqResult,
 )
-from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
 from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
@@ -72,7 +72,8 @@ def test_real_simulation_preserves_grid_round_averaging_and_native_trace(
     )
     plots = Plots(NonPresentingHost())
     result = FakeFreqExp(model_type, params).run(
-        cfg, context=QickContext(None, None, plots)
+        cfg,
+        context=RunContext(None, None, plots, devices={}, cancel_signal=StopSignal()),
     )
     freqs = np.linspace(cfg.sweep.freq.start, cfg.sweep.freq.stop, cfg.sweep.freq.expts)
     if model_type == "hm":
@@ -106,10 +107,10 @@ def test_stop_before_first_round_preserves_zero_buffer() -> None:
     stop = StopSignal()
     stop.set()
     plots = Plots(NonPresentingHost())
-    with schedule_stop_scope(stop):
-        result = FakeFreqExp("hm", HangerSimParams()).run(
-            make_cfg(), context=QickContext(None, None, plots)
-        )
+    result = FakeFreqExp("hm", HangerSimParams()).run(
+        make_cfg(),
+        context=RunContext(None, None, plots, devices={}, cancel_signal=stop),
+    )
     np.testing.assert_array_equal(result.signals, np.zeros(281, dtype=np.complex128))
     assert tuple(plots.finish()) == ("measurement",)
     plots.release()
@@ -135,10 +136,9 @@ def test_stop_after_first_round_preserves_completed_average(
     monkeypatch.setattr(np.random, "default_rng", InterruptingGenerator)
     cfg = make_cfg()
     plots = Plots(NonPresentingHost())
-    with schedule_stop_scope(stop):
-        result = FakeFreqExp("hm", HangerSimParams(noise_scale=0.0)).run(
-            cfg, context=QickContext(None, None, plots)
-        )
+    result = FakeFreqExp("hm", HangerSimParams(noise_scale=0.0)).run(
+        cfg, context=RunContext(None, None, plots, devices={}, cancel_signal=stop)
+    )
     expected = HangerModel.calc_signals(
         result.freqs, freq=6000.0, Ql=5000.0, Qc=6000.0, phi=0.0, a0=1.0, edelay=0.05
     )
@@ -181,7 +181,11 @@ def test_gui_run_captures_fake_cfg_and_works_without_soc(
     adapter = FakeFreqAdapter(model_type=model_type, fast_mode=True)
     raw_cfg = make_cfg().to_dict()
     plots = Plots(NonPresentingHost())
-    source = adapter.run(RunRequest(None, None, {}), raw_cfg, plots=plots)
+    source = adapter.run(
+        RunRequest(None, None, {}),
+        raw_cfg,
+        context=RunContext(None, None, plots, devices={}, cancel_signal=StopSignal()),
+    )
     expected_cfg = make_cfg()
     expected_cfg.dev = {}
     assert source.cfg == expected_cfg

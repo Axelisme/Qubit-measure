@@ -16,10 +16,12 @@
 一般 T1 使用 `NotebookAdapter(T1Exp())` 與核心的 typed config／options，不另提供扁平參數 wrapper。T1Result 只有資料；RunRecord 是保存與分析的 explicit 來源。Canonical load 可保留 cfg=None 的有效資料，T1 可離線分析，預設 saver 則拒絕缺 cfg 的來源。
 - GE 的 run／FIT／save／load 使用 `NotebookAdapter(GE_Exp())` 與核心 typed cfg／options。[`experiments/ge.py`](experiments/ge.py) 的 `GEPostAnalyzer` 是獨立 post 工具，明確接收 `GEPrimaryRecord` 與 post options。Primary 是共用 AnalysisRecord；post record 從 primary 取得同一來源，保留其 calibration、options 與純圖。工具不讀 Adapter 的 current run／FIT，不重新 fitting。成功收尾後才發布 post record 與 presentation handle；失敗保留舊成果，舊原生圖仍可保存。
 - [`experiments/flux_dep.py`](experiments/flux_dep.py)：`FluxDepAnalyzer.start(source, options)` 明確接收 RunRecord，建立選線 widgets 與可拖曳的預覽。工具不綁定 core 或 Adapter 的目前來源。Done 保存捕捉的 source、實際終態 FluxPickState、數值與純具名 `pick` Figure。工具另持有 Plots presentation handle。Cancel 或失敗保留舊成果；Adapter 的 run／load 不清除此工具的分析。預覽與成果圖分開。
-- [`utils.py`](utils.py)：提供 sweep、圖檔保存與設備資訊等 Notebook 輔助函式。
+- [`utils.py`](utils.py)：提供 sweep、圖檔保存與設備資訊等 Notebook 輔助函式。`dump_device_info` 與 `reconnect_devices` 接收 caller 的 DeviceManager，不查全域 registry。
 - [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。
 
 ## 共用責任與目前邊界
+
+Cfg 組裝使用 `experiment.cfg_assembler.CfgEnv(md, ml, device_manager)`。Notebook 顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時讀取當次裝置資訊，失敗直接報錯；底層 assembler 與 GUI 仍使用 caller 給定的 snapshot。Env 不執行 setup、不解析 md expression，也不關閉資源。切換 md／ml 後重新建立 env。Adapter 的 devices 是 driver 綁定，與這份 cfg snapshot 分開；替換 driver 後重新建立 Adapter。
 
 NotebookAdapter 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。失敗操作只收尾本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
 

@@ -15,7 +15,6 @@ import numpy as np
 import pytest
 from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
@@ -53,7 +52,10 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.gui.session.services.device import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+)
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -424,9 +426,9 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
 
     acquired = object()
 
-    def _capture_run(req, raw_cfg, *, plots):
+    def _capture_run(req, raw_cfg, *, context):
         captured["cfg"] = raw_cfg
-        assert isinstance(plots, Plots)
+        assert isinstance(context.plots, Plots)
         return acquired
 
     spy = MagicMock(spec=FakeAdapter)
@@ -842,7 +844,10 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
     dev = cf.state.get_device("flux")
     assert dev is not None and dev.status is DeviceStatus.CONNECTED
     cf.view.show_status_message.assert_called()
-    GlobalDeviceManager.drop_device("flux", ignore_error=True)
+    cf.ctrl._dev_svc.start_disconnect_device(
+        DisconnectDeviceRequest(name="flux", remember=False)
+    )
+    assert _wait_for(lambda: cf.state.get_device("flux") is None)
 
 
 def test_run_clears_active_figure_container_after_finish(cf):

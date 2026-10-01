@@ -9,8 +9,9 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.datafile import load_labber_data
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepCfg,
     PowerDepExp,
@@ -28,7 +29,10 @@ def test_mock_soc_run_preserves_cfg_and_gain_outer_frequency_inner() -> None:
     before = cfg.model_copy(deep=True)
     soc, soccfg = make_mock_soc()
     plots = Plots(NonPresentingHost())
-    result = PowerDepExp().run(cfg, context=QickContext(soc, soccfg, plots))
+    result = PowerDepExp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
     figures = plots.finish()
     assert cfg == before
     assert result.signals.shape == (len(result.gains), len(result.freqs)) == (3, 9)
@@ -79,7 +83,10 @@ def test_snr_callback_observes_current_row_and_abort_preserves_nan_rows(
     monkeypatch.setattr(ScheduleStep, "prog_builder", builder)
     soc, soccfg = make_mock_soc()
     plots = Plots(NonPresentingHost())
-    result = PowerDepExp().run(cfg, context=QickContext(soc, soccfg, plots))
+    result = PowerDepExp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
     plots.finish()
     visited = 3 if abort_after is None else abort_after
     np.testing.assert_allclose(gains, result.gains[:visited])

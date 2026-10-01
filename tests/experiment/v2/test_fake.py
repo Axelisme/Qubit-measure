@@ -2,16 +2,15 @@
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from pydantic import ValidationError
 from zcu_tools.datafile import load_labber_data, save_labber_data
-from zcu_tools.experiment.context import QickContext
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2 import fake
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.fake import FakeCfg, FakeExp, FakeResult
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -35,10 +34,13 @@ def test_run_preserves_scalar_complex_noise_round_mean_and_final_trace(
     before = cfg.model_copy(deep=True)
     rng = np.random.Generator(np.random.PCG64(23))
     monkeypatch.setattr(np.random, "randn", lambda: rng.standard_normal())
-    sleep = Mock()
-    monkeypatch.setattr(fake, "time", SimpleNamespace(sleep=sleep))
+    stop = StopSignal()
+    wait = Mock(return_value=False)
+    monkeypatch.setattr(stop.event, "wait", wait)
     plots = Plots(NonPresentingHost())
-    result = FakeExp().run(cfg, context=QickContext(None, None, plots))
+    result = FakeExp().run(
+        cfg, context=RunContext(None, None, plots, devices={}, cancel_signal=stop)
+    )
 
     freqs = np.linspace(4.8, 5.2, 9)
     clean = np.exp(-((freqs - 5.0) ** 2) / (2 * 0.1**2))
@@ -54,8 +56,8 @@ def test_run_preserves_scalar_complex_noise_round_mean_and_final_trace(
     assert result.signals.dtype == np.complex128
     np.testing.assert_array_equal(result.freqs, freqs)
     np.testing.assert_array_equal(result.signals, expected)
-    assert sleep.call_count == 3
-    sleep.assert_called_with(0.0)
+    assert wait.call_count == 3
+    wait.assert_called_with(0.0)
     figures = plots.finish()
     assert tuple(figures) == ("measurement",)
     line = figures["measurement"].axes[0].lines[0]
@@ -71,14 +73,18 @@ def test_run_uses_detached_cfg_through_all_rounds(
     cfg.round_delay = 0.2
     delays: list[float] = []
 
-    def sleep(delay: float) -> None:
+    def wait(delay: float) -> bool:
         delays.append(delay)
         cfg.noise_scale = 10.0
         cfg.round_delay = 0.4
+        return False
 
-    monkeypatch.setattr(fake, "time", SimpleNamespace(sleep=sleep))
+    stop = StopSignal()
+    monkeypatch.setattr(stop.event, "wait", wait)
     plots = Plots(NonPresentingHost())
-    result = FakeExp().run(cfg, context=QickContext(None, None, plots))
+    result = FakeExp().run(
+        cfg, context=RunContext(None, None, plots, devices={}, cancel_signal=stop)
+    )
     assert delays == [0.2, 0.2, 0.2]
     expected = np.exp(-((result.freqs - 5.0) ** 2) / (2 * 0.1**2))
     np.testing.assert_allclose(result.signals, expected, atol=1e-15)
@@ -106,7 +112,7 @@ def test_notebook_b_does_not_replace_explicit_a_or_its_native_figures(
 ) -> None:
     core = FakeExp()
     adapter = NotebookAdapter(
-        core, soc=object(), soccfg=object(), host=NonPresentingHost()
+        core, devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
     )
     a = adapter.run(make_cfg())
     b_cfg = make_cfg()
@@ -191,7 +197,7 @@ def test_failed_run_retains_previous_source_and_analysis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = NotebookAdapter(
-        FakeExp(), soc=object(), soccfg=object(), host=NonPresentingHost()
+        FakeExp(), devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
     )
     source = adapter.run(make_cfg())
     answer = adapter.analyze(None, source=source)
@@ -205,7 +211,7 @@ def test_failed_run_retains_previous_source_and_analysis(
 
 def test_bad_analysis_or_noncanonical_load_retains_success(tmp_path: Path) -> None:
     adapter = NotebookAdapter(
-        FakeExp(), soc=object(), soccfg=object(), host=NonPresentingHost()
+        FakeExp(), devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
     )
     source = adapter.run(make_cfg())
     answer = adapter.analyze(None, source=source)

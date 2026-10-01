@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.device import FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.device import DeviceManager, FakeDeviceInfo
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
     OneToneFluxDepAdapter,
 )
@@ -107,10 +109,10 @@ def test_flux_run_assembles_lowered_cfg_with_frozen_device_snapshot(
     device = FakeDeviceInfo(address="frozen", value=0.125)
     request = RunRequest(soc=None, soccfg=None, device_snapshot={"flux_yoko": device})
 
-    def unexpected_device_read():
+    def unexpected_device_read(_manager):
         pytest.fail("Frozen Run must not read live devices")
 
-    monkeypatch.setattr(GlobalDeviceManager, "get_all_info", unexpected_device_read)
+    monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
     cfg = adapter.build_exp_cfg(raw, request)
 
     assert cfg.dev["flux_yoko"].label == "flux_dev"
@@ -154,8 +156,6 @@ def test_resolved_calibration_is_assembled_from_cfg_not_metadict(
     ctx.md.r_f = 7000.0
     ctx.md.rf_w = 20.0
     ctx.md.theta0 = 0.2
-    monkeypatch.setattr(GlobalDeviceManager, "get_all_info", lambda: {})
-
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     cfg = adapter.build_exp_cfg(
         raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
@@ -176,7 +176,6 @@ def test_empty_optional_calibration_allows_linear_assembly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter, ctx, schema = _frequency_schema("linear")
-    monkeypatch.setattr(GlobalDeviceManager, "get_all_info", lambda: {})
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     cfg = adapter.build_exp_cfg(
         raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
@@ -208,15 +207,21 @@ def test_adapter_run_rejects_invalid_calibration_before_device_io(
     calibration.fields["theta0"] = DirectValue(0.1)
     calibration.fields[field] = DirectValue(value)
 
-    def unexpected_device_read():
+    def unexpected_device_read(_manager):
         pytest.fail("Invalid calibration reached device I/O")
 
-    monkeypatch.setattr(GlobalDeviceManager, "get_all_info", unexpected_device_read)
+    monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
     with pytest.raises(ValueError, match=field):
         adapter.run(
             RunRequest(soc=None, soccfg=None, device_snapshot={}),
             schema_to_raw_dict(schema, ctx.md, ctx.ml),
-            plots=Plots(NonPresentingHost()),
+            context=RunContext(
+                None,
+                None,
+                Plots(NonPresentingHost()),
+                devices={},
+                cancel_signal=StopSignal(),
+            ),
         )
 
 
