@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — Singleshot MIST records
+**Last updated:** 2026-10-02 — Readout optimization records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -64,6 +64,10 @@ Bath reset 的 FreqGain／Length／Phase 核心以 RunContext 執行，回傳純
 ## Reset tone records
 
 Single-tone 的 Freq／Length 與 dual-tone 的 Freq／Length／Power 使用 explicit RunContext、純 Result 和 measurement／fit 具名圖。Single Freq 分析回傳 freq／fwhm，兩 Length 只發布曲線。Dual Freq／Power 接 typed smoothing options，回傳兩軸最佳頻率／gain。分析皆允許 cfg=None。Dual Freq 的 method 歸 typed cfg，預設 soft；GUI 固定 hard 並保存於來源 cfg。Soft host scan 與 hard 雙軸 sweep 保留相同 canonical 軸序，雙 pulse 長度差與 gain 掃描的背景選擇不變。
+
+## Readout optimization records
+
+`twotone/ro_optimize` 的 Freq／FreqGain／Length／Power 核心使用 explicit RunContext，回傳純 SNR Result。Run 保留既有 acquire kwargs forwarding 與 MomentTracker／g-e branch；Length 用 host scan，其餘用硬體 sweep。同步分析接 RunRecord、typed AnalyzeOptions 與 Plots，允許 cfg=None，回傳純最佳 frequency／gain／length，另發布 fit 圖。Smoothing、length duration normalization、power penalty 與 canonical axes 不變。Auto optimizer 的 grouped record 另行遷移。
 
 ## 目錄佈局
 

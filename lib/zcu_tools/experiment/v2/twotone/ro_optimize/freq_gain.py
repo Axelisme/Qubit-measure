@@ -4,9 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 
@@ -19,15 +17,15 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.plotting.liveplot import LivePlot2D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -48,7 +46,6 @@ class FreqGainResult:
     freqs: NDArray[np.float64]
     gains: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: FreqGainCfg | None = None
 
 
 class FreqGainModuleCfg(ConfigBase):
@@ -68,6 +65,20 @@ class FreqGainCfg(ProgramV2Cfg, ExpCfgModel):
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
+@dataclass(frozen=True)
+class FreqGainAnalyzeOptions:
+    smooth: float = 1.0
+    smooth_method: SmoothMethod = "wavelet"
+    wavelet: str = "sym4"
+    wavelet_level: int = 0
+
+
+@dataclass(frozen=True)
+class FreqGainAnalysis:
+    best_freq: float
+    best_gain: float
+
+
 class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
     AXES_SPEC = AxesSpec(
         axes=(
@@ -80,17 +91,21 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         tag="twotone/ge/ro_optimize/freq",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: FreqGainCfg,
         *,
+        context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> FreqGainResult:
-        original_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        soc, soccfg = context.soc, context.soccfg
+        cfg = deepcopy(cfg)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         freqs = sweep2array(
@@ -104,59 +119,59 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
         )
 
-        with LivePlot2D("Frequency (MHz)", "Gain (a.u.)") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs), len(gains)),
-                dtype=np.float64,
-                on_update=lambda data: viewer.update(freqs, gains, np.abs(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                freq_sweep = sched.cfg.sweep.freq
-                freq_param = sweep2param("freq", freq_sweep)
-                modules.readout.set_param("freq", freq_param)
+        viewer = context.plots.liveplot_2d(
+            "measurement",
+            "Frequency (MHz)",
+            "Gain (a.u.)",
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs), len(gains)),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(freqs, gains, np.abs(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            freq_sweep = sched.cfg.sweep.freq
+            freq_param = sweep2param("freq", freq_sweep)
+            modules.readout.set_param("freq", freq_param)
 
-                gain_sweep = sched.cfg.sweep.gain
-                gain_param = sweep2param("gain", gain_sweep)
-                modules.readout.set_param("gain", gain_param)
-                tracker = MomentTracker()
+            gain_sweep = sched.cfg.sweep.gain
+            gain_param = sweep2param("gain", gain_sweep)
+            modules.readout.set_param("gain", gain_param)
+            tracker = MomentTracker()
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", cfg=modules.reset),
-                        Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                        Readout("readout", cfg=modules.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .declare_sweep("freq", freq_sweep)
-                    .declare_sweep("gain", gain_sweep)
-                    .build_and_acquire(
-                        raw2signal_fn=lambda _raw: snr_as_signal(
-                            [tracker],
-                            ge_axis=1,
-                            skew_penalty=sched.cfg.skew_penalty,
-                        ),
-                        trackers=[tracker],
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", cfg=modules.reset),
+                    Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
+                    Readout("readout", cfg=modules.readout),
                 )
-                signals = signals_buffer.array
+                .declare_sweep("ge", 2)
+                .declare_sweep("freq", freq_sweep)
+                .declare_sweep("gain", gain_sweep)
+                .build_and_acquire(
+                    raw2signal_fn=lambda _raw: snr_as_signal(
+                        [tracker],
+                        ge_axis=1,
+                        skew_penalty=sched.cfg.skew_penalty,
+                    ),
+                    trackers=[tracker],
+                    **(acquire_kwargs or {}),
+                )
+            )
+            signals = signals_buffer.array
 
-        return FreqGainResult(freqs, gains, signals, cfg_snapshot=original_cfg)
+        return FreqGainResult(freqs, gains, signals)
 
-    @retrieve_result
     def analyze(
         self,
-        result: FreqGainResult | None = None,
+        source: RunRecord[FreqGainCfg, FreqGainResult],
+        options: FreqGainAnalyzeOptions,
         *,
-        smooth: float = 1.0,
-        smooth_method: SmoothMethod = "wavelet",
-        wavelet: str = "sym4",
-        wavelet_level: int = 0,
-    ) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
-
+        plots: Plots,
+    ) -> FreqGainAnalysis:
+        result = source.result
         freqs, gains, signals = result.freqs, result.gains, result.signals
 
         snrs = np.abs(signals)
@@ -166,11 +181,11 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
 
         snrs = smooth_signal_nd(
             snrs,
-            method=smooth_method,
-            sigma=smooth,
+            method=options.smooth_method,
+            sigma=options.smooth,
             axes=(0, 1),
-            wavelet=wavelet,
-            wavelet_level=wavelet_level,
+            wavelet=options.wavelet,
+            wavelet_level=options.wavelet_level,
         )
 
         max_freq_id, max_gain_id = np.unravel_index(np.argmax(snrs), snrs.shape)
@@ -178,7 +193,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         max_gain = float(gains[max_gain_id])
         max_snr = float(snrs[max_freq_id, max_gain_id])
 
-        fig, ax = plt.subplots(figsize=config.figsize)
+        _, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.imshow(
             snrs.T,
@@ -192,4 +207,4 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         ax.set_ylabel("Gain (a.u.)")
         ax.legend()
 
-        return max_freq, max_gain, fig
+        return FreqGainAnalysis(max_freq, max_gain)
