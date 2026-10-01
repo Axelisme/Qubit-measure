@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
+    AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiExp,
     AmpRabiResult,
@@ -26,6 +27,7 @@ from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -34,8 +36,9 @@ from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
 )
+from zcu_tools.plotting.plots import Plots
 
-AmpRabiRunResult: TypeAlias = AmpRabiResult
+AmpRabiRunResult: TypeAlias = RunRecord[AmpRabiCfg, AmpRabiResult]
 
 
 @dataclass
@@ -52,7 +55,6 @@ class AmpRabiAnalyzeResult(AnalyzeResultBase):
     pi_gain_err: float
     pi2_gain: float
     pi2_gain_err: float
-    figure: Figure
 
 
 class AmpRabiAdapter(
@@ -98,7 +100,7 @@ class AmpRabiAdapter(
             "gains). Also proposes ModuleLibrary modules 'pi_amp' and "
             "'pi2_amp' — copies of the qubit drive module with gain "
             "overridden to the fitted pi / pi/2 value. Module items are "
-            "skipped when no cfg_snapshot is available (e.g. loaded from "
+            "skipped when no source cfg is available (e.g. loaded from "
             "file)."
         ),
         recommended=(
@@ -109,6 +111,13 @@ class AmpRabiAdapter(
             "no full period is visible."
         ),
     )
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> AmpRabiRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = AmpRabiExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
@@ -147,19 +156,22 @@ class AmpRabiAdapter(
         )
 
     def analyze(
-        self, req: AnalyzeRequest[AmpRabiRunResult, AmpRabiAnalyzeParams]
+        self,
+        req: AnalyzeRequest[AmpRabiRunResult, AmpRabiAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> AmpRabiAnalyzeResult:
         params = req.analyze_params
-        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fig = AmpRabiExp().analyze(
+        analysis = AmpRabiExp().analyze(
             req.run_result,
-            skip=params.skip,
+            AmpRabiAnalyzeOptions(skip=params.skip),
+            plots=plots,
         )
         return AmpRabiAnalyzeResult(
-            pi_gain=pi_amp,
-            pi_gain_err=pi_amp_err,
-            pi2_gain=pi2_amp,
-            pi2_gain_err=pi2_amp_err,
-            figure=fig,
+            pi_gain=analysis.pi_amp,
+            pi_gain_err=analysis.pi_amp_err,
+            pi2_gain=analysis.pi2_amp,
+            pi2_gain_err=analysis.pi2_amp_err,
         )
 
     def get_writeback_items(
@@ -182,11 +194,11 @@ class AmpRabiAdapter(
             ),
         ]
 
-        # Emit module writeback items when the run captured a cfg_snapshot.
+        # Emit module writeback items when the source record has a cfg.
         # Each item is a copy of qub_pulse with gain overridden to the fitted
         # pi / pi/2 value, registered as a library module for subsequent
         # experiments that reference the calibrated pulse by name.
-        snapshot = req.run_result.cfg_snapshot
+        snapshot = req.run_result.cfg
         if snapshot is not None:
             qub_pulse_cfg = snapshot.modules.qub_pulse
             # Module targets keep the 'pi_amp'/'pi2_amp' names; the gain values come

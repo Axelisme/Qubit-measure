@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_rabi
@@ -17,14 +14,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -40,7 +37,19 @@ from zcu_tools.utils.process import rotate2real
 class AmpRabiResult:
     amps: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: AmpRabiCfg | None = None
+
+
+@dataclass(frozen=True)
+class AmpRabiAnalyzeOptions:
+    skip: int = 0
+
+
+@dataclass(frozen=True)
+class AmpRabiAnalysis:
+    pi_amp: float
+    pi_amp_err: float
+    pi2_amp: float
+    pi2_amp_err: float
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -72,18 +81,21 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         tag="twotone/ge/rabi_gain",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: AmpRabiCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> AmpRabiResult:
-        orig_cfg = deepcopy(cfg)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         gains = sweep2array(
@@ -92,43 +104,42 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        with LivePlot1D("Pulse gain", "Amplitude") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(gains),),
-                on_update=lambda data: viewer.update(gains, rabi_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
+        viewer = context.plots.liveplot_1d("measurement", "Pulse gain", "Amplitude")
+        signals_buffer = SignalBuffer(
+            (len(gains),),
+            on_update=lambda data: viewer.update(gains, rabi_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
 
-                gain_sweep = cfg.sweep.gain
-                modules.qub_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+            gain_sweep = cfg.sweep.gain
+            modules.qub_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
-                    .declare_sweep("gain", gain_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-
-            return AmpRabiResult(
-                amps=gains, signals=signals_buffer.array, cfg_snapshot=orig_cfg
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add_reset("reset", modules.reset)
+                .add_pulse("init_pulse", modules.init_pulse)
+                .add_pulse("qubit_pulse", modules.qub_pulse)
+                .add_readout("readout", modules.readout)
+                .declare_sweep("gain", gain_sweep)
+                .build_and_acquire()
             )
 
-    @retrieve_result
+        return AmpRabiResult(amps=gains, signals=signals_buffer.array)
+
     def analyze(
-        self, result: AmpRabiResult | None = None, skip: int = 0
-    ) -> tuple[float, float, float, float, Figure]:
-        assert result is not None, "no result found"
+        self,
+        source: RunRecord[AmpRabiCfg, AmpRabiResult],
+        options: AmpRabiAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> AmpRabiAnalysis:
+        result = source.result
 
         gains, signals = result.amps, result.signals
-        gains = gains[skip:]
-        signals = signals[skip:]
+        gains = gains[options.skip :]
+        signals = signals[options.skip :]
 
         real_signals = rabi_signal2real(signals)
 
@@ -142,8 +153,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             gains, real_signals, decay=False, init_phase=init_phase
         )
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(gains, y_fit, label="fit")
@@ -167,4 +177,4 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
 
         # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
         # summary carries the gain errors (the figure labels already show them).
-        return pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fig
+        return AmpRabiAnalysis(pi_amp, pi_amp_err, pi2_amp, pi2_amp_err)

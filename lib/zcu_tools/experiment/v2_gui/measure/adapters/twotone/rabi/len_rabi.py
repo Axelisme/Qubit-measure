@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
+    LenRabiAnalyzeOptions,
     LenRabiCfg,
     LenRabiExp,
     LenRabiResult,
@@ -37,8 +38,9 @@ from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
 )
+from zcu_tools.plotting.plots import Plots
 
-LenRabiRunResult: TypeAlias = LenRabiResult
+LenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
 
 
 @dataclass
@@ -56,7 +58,6 @@ class LenRabiAnalyzeResult(AnalyzeResultBase):
     # Rabi oscillation frequency in MHz (1/us), preserved for writeback as 'rabi_f'.
     rabi_f: float
     rabi_f_err: float
-    figure: Figure
 
 
 class LenRabiAdapter(
@@ -104,7 +105,7 @@ class LenRabiAdapter(
             "overridden to the fitted pi / pi/2 value. amp_rabi produces the "
             "separate 'pi_amp'/'pi2_amp' gain-calibrated modules and seeds its "
             "gain sweep from the 'pi_len' scalar written here. Module items are "
-            "skipped when no cfg_snapshot is available (e.g. loaded from file)."
+            "skipped when no source cfg is available (e.g. loaded from file)."
         ),
         recommended=(
             "Phase defaults to fixed 0/180 degrees; enable Fit phase offset "
@@ -116,6 +117,13 @@ class LenRabiAdapter(
             "oscillation; widen it if no full period is visible."
         ),
     )
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> LenRabiRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = LenRabiExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
@@ -157,24 +165,24 @@ class LenRabiAdapter(
         )
 
     def analyze(
-        self, req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams]
+        self,
+        req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> LenRabiAnalyzeResult:
         params = req.analyze_params
-        pi_len, pi_len_err, pi2_len, pi2_len_err, rabi_f, rabi_f_err, fig = (
-            LenRabiExp().analyze(
-                req.run_result,
-                decay=params.decay,
-                fit_phase=params.fit_phase,
-            )
+        analysis = LenRabiExp().analyze(
+            req.run_result,
+            LenRabiAnalyzeOptions(decay=params.decay, fit_phase=params.fit_phase),
+            plots=plots,
         )
         return LenRabiAnalyzeResult(
-            pi_len=pi_len,
-            pi_len_err=pi_len_err,
-            pi2_len=pi2_len,
-            pi2_len_err=pi2_len_err,
-            rabi_f=rabi_f,
-            rabi_f_err=rabi_f_err,
-            figure=fig,
+            pi_len=analysis.pi_len,
+            pi_len_err=analysis.pi_len_err,
+            pi2_len=analysis.pi2_len,
+            pi2_len_err=analysis.pi2_len_err,
+            rabi_f=analysis.rabi_f,
+            rabi_f_err=analysis.rabi_f_err,
         )
 
     def get_writeback_items(
@@ -199,7 +207,7 @@ class LenRabiAdapter(
             ),
         ]
 
-        # Emit module writeback items when the run captured a cfg_snapshot.
+        # Emit module writeback items when the source record has a cfg.
         # Each item is a copy of qub_pulse with waveform.length overridden to
         # the fitted pi / pi/2 value, registered as a library module for
         # subsequent experiments that reference the calibrated pulse by name.
@@ -207,7 +215,7 @@ class LenRabiAdapter(
         # by this adapter (single_qubit.md); amp_rabi produces the separate
         # gain-calibrated 'pi_amp'/'pi2_amp' modules and reads the 'pi_len'
         # SCALAR (also written above) as its gain-sweep default-value seed.
-        snapshot = req.run_result.cfg_snapshot
+        snapshot = req.run_result.cfg
         if snapshot is not None:
             qub_pulse_cfg = snapshot.modules.qub_pulse
             for target, length, desc in [

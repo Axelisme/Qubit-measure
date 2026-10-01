@@ -4,9 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_rabi
@@ -18,14 +16,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -41,7 +39,22 @@ from zcu_tools.utils.process import rotate2real
 class LenRabiResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: LenRabiCfg | None = None
+
+
+@dataclass(frozen=True)
+class LenRabiAnalyzeOptions:
+    decay: bool = True
+    fit_phase: bool = False
+
+
+@dataclass(frozen=True)
+class LenRabiAnalysis:
+    pi_len: float
+    pi_len_err: float
+    pi2_len: float
+    pi2_len_err: float
+    rabi_f: float
+    rabi_f_err: float
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -76,14 +89,19 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
 
     def _run_for_flat(
         self,
-        soc,
-        soccfg,
         cfg: LenRabiCfg,
-        acquire_kwargs: dict[str, Any] | None = None,
+        *,
+        context: RunContext,
     ) -> LenRabiResult:
-        orig_cfg = deepcopy(cfg)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
@@ -97,46 +115,46 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        with LivePlot1D("Length (us)", "Signal") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
-                length_sweep = cfg.sweep.length
-                modules.qub_pulse.set_param(
-                    "length", sweep2param("length", length_sweep)
-                )
+        viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Signal")
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+            length_sweep = cfg.sweep.length
+            modules.qub_pulse.set_param("length", sweep2param("length", length_sweep))
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-            return LenRabiResult(
-                lengths=lengths,
-                signals=signals_buffer.array,
-                cfg_snapshot=orig_cfg,
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add_reset("reset", modules.reset)
+                .add_pulse("init_pulse", modules.init_pulse)
+                .add_pulse("qubit_pulse", modules.qub_pulse)
+                .add_readout("readout", modules.readout)
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire()
             )
+        return LenRabiResult(
+            lengths=lengths,
+            signals=signals_buffer.array,
+        )
 
     def _run_for_arb(
         self,
-        soc,
-        soccfg,
         cfg: LenRabiCfg,
-        acquire_kwargs: dict[str, Any] | None = None,
+        *,
+        context: RunContext,
     ) -> LenRabiResult:
-        orig_cfg = deepcopy(cfg)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         rounds = cfg.rounds
@@ -161,67 +179,60 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
             return mean_signals
 
-        with LivePlot1D("Length (us)", "Signal") as viewer:
-            length_values = lengths.tolist()
-            signals_buffer = SignalBuffer(
-                (rounds, len(lengths)),
-                on_update=lambda data: viewer.update(
-                    lengths, rabi_signal2real(average_round(data))
-                ),
-            )
-            with Schedule(_cfg, signals_buffer) as sched:
-                for _, rep in sched.repeat("round", rounds):
-                    for length, step in rep.scan("length", length_values):
-                        modules = step.cfg.modules
-                        modules.qub_pulse.set_param("length", length)
-                        builder = (
-                            step.prog_builder(soc, soccfg)
-                            .add_reset("reset", modules.reset)
-                            .add_pulse("init_pulse", modules.init_pulse)
-                            .add_pulse("qubit_pulse", modules.qub_pulse)
-                            .add_readout("readout", modules.readout)
-                        )
-                        length_key = float(length)
-                        if length_key not in programs:
-                            programs[length_key] = builder.build()
-                        _ = builder.run_program(
-                            programs[length_key],
-                            **(acquire_kwargs or {}),
-                        )
-            return LenRabiResult(
-                lengths=lengths,
-                signals=average_round(signals_buffer.array),
-                cfg_snapshot=orig_cfg,
-            )
+        viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Signal")
+        length_values = lengths.tolist()
+        signals_buffer = SignalBuffer(
+            (rounds, len(lengths)),
+            on_update=lambda data: viewer.update(
+                lengths, rabi_signal2real(average_round(data))
+            ),
+        )
+        with Schedule(_cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for _, rep in sched.repeat("round", rounds):
+                for length, step in rep.scan("length", length_values):
+                    modules = step.cfg.modules
+                    modules.qub_pulse.set_param("length", length)
+                    builder = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add_pulse("init_pulse", modules.init_pulse)
+                        .add_pulse("qubit_pulse", modules.qub_pulse)
+                        .add_readout("readout", modules.readout)
+                    )
+                    length_key = float(length)
+                    if length_key not in programs:
+                        programs[length_key] = builder.build()
+                    _ = builder.run_program(
+                        programs[length_key],
+                    )
+        return LenRabiResult(
+            lengths=lengths,
+            signals=average_round(signals_buffer.array),
+        )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: LenRabiCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> LenRabiResult:
         modules = cfg.modules
         qub_waveform = modules.qub_pulse.waveform
 
         if qub_waveform.style in ["const", "flat_top"]:
             # use hard sweep for flat top pulse
-            return self._run_for_flat(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
-        else:
-            # use soft sweep for arb pulse
-            return self._run_for_arb(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
+            return self._run_for_flat(cfg, context=context)
+        # use soft sweep for arb pulse
+        return self._run_for_arb(cfg, context=context)
 
-    @retrieve_result
     def analyze(
         self,
-        result: LenRabiResult | None = None,
+        source: RunRecord[LenRabiCfg, LenRabiResult],
+        options: LenRabiAnalyzeOptions,
         *,
-        decay: bool = True,
-        fit_phase: bool = False,
-    ) -> tuple[float, float, float, float, float, float, Figure]:
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> LenRabiAnalysis:
+        result = source.result
 
         lens, signals = result.lengths, result.signals
 
@@ -238,12 +249,11 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             # Signed amplitude covers both zero-drive extrema when phase is fixed.
             lens,
             real_signals,
-            decay=decay,
-            init_phase=None if fit_phase else 0.0,
+            decay=options.decay,
+            init_phase=None if options.fit_phase else 0.0,
         )
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(lens, y_fit, label="fit")
@@ -272,4 +282,4 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         # fit_rabi computes the per-quantity fit uncertainties; surface them so the
         # GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
         # labels already show pi/pi2 errors and the title shows the freq error).
-        return pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, fig
+        return LenRabiAnalysis(pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err)
