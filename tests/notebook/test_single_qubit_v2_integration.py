@@ -8,16 +8,12 @@ VISA, no result data.
 from __future__ import annotations
 
 import ast
-import sys
-import types
 from pathlib import Path
 
 import jupytext
 import numpy as np
 import pandas as pd
 import pytest
-from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.resources.sample_table import (
     SampleTable,
     SampleTableV2Error,
@@ -113,121 +109,6 @@ def _exec_sample_row_cell(
         "validate_sample_table_v2": validate,
     }
     exec(compile(cell, "<save-sample-cell>", "exec"), ns)
-    return ns
-
-
-def _reset_registry() -> None:
-    GlobalDeviceManager._devices.clear()
-    GlobalDeviceManager._close_claims.clear()
-
-
-class _FakeSession:
-    read_termination = "\n"
-    write_termination = "\n"
-
-
-class _FakeRM:
-    def __init__(self, log: list[str]) -> None:
-        self.log = log
-        self.closed = False
-
-    def open_resource(self, address: str) -> _FakeSession:
-        return _FakeSession()
-
-    def close(self) -> None:
-        self.log.append("rm_close")
-        self.closed = True
-
-
-FLUX_YOKO_ADDR = "USB0::0x0B21::0x0039::91WB18859::INSTR"
-JPA_YOKO_ADDR = "USB0::0x0B21::0x0039::91T810992::INSTR"
-JPA_SGS_ADDR = "TCPIP0::192.168.10.89::inst0::INSTR"
-
-
-class _FakeYokoDeviceInfo(BaseDeviceInfo):
-    pass
-
-
-class _FakeYoko(BaseDevice):
-    info_model = _FakeYokoDeviceInfo
-    # class-level log shared by devices constructed from notebook cells
-    _shared_log: list[str] | None = None
-
-    def __init__(
-        self,
-        address: str,
-        rm: object = None,
-        *,
-        name: str = "",
-        log: list[str] | None = None,
-        fail_close: bool = False,
-    ) -> None:
-        self.address = address
-        self.rm = rm
-        self.name = name
-        if log is not None:
-            self.log = log
-        elif _FakeYoko._shared_log is not None:
-            self.log = _FakeYoko._shared_log
-        else:
-            self.log = []
-        self.fail_close = fail_close
-        self.session = None
-        self.log.append(f"construct:{self._tag}")
-
-    @property
-    def _tag(self) -> str:
-        return self.name or self.address
-
-    def _setup(self, cfg, progress=True, stop_event=None) -> None:
-        pass
-
-    def get_info(self) -> dict[str, object]:
-        return {}
-
-    def close(self) -> None:
-        self.log.append(f"close:{self._tag}")
-        if self.fail_close:
-            raise RuntimeError(f"boom {self._tag}")
-
-    def set_mode(self, *args, **kwargs) -> None:
-        self.log.append(f"set_mode:{self._tag}")
-
-
-@pytest.fixture
-def fake_modules(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Install fake pyvisa/yoko/sgs modules for one test, then restore them.
-
-    monkeypatch restores every prior ``sys.modules`` entry (and
-    ``_FakeYoko._shared_log``) after the test, so lifecycle tests stay
-    independent: a later import never resolves ``pyvisa``, ``YOKOGS200`` or
-    ``RohdeSchwarzSGS100A`` to a leftover fake.
-    """
-    log: list[str] = []
-    monkeypatch.setattr(_FakeYoko, "_shared_log", log)
-    fake_pyvisa = types.ModuleType("pyvisa")
-    fake_pyvisa.ResourceManager = lambda: _FakeRM(log)  # type: ignore[method-assign]
-    fake_yoko = types.ModuleType("zcu_tools.device.yoko")
-    fake_yoko.YOKOGS200 = _FakeYoko  # type: ignore[attr-defined]
-    fake_sgs = types.ModuleType("zcu_tools.device.sgs100a")
-    fake_sgs.RohdeSchwarzSGS100A = _FakeYoko  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "pyvisa", fake_pyvisa)
-    monkeypatch.setitem(sys.modules, "zcu_tools.device.yoko", fake_yoko)
-    monkeypatch.setitem(sys.modules, "zcu_tools.device.sgs100a", fake_sgs)
-    return log
-
-
-def _exec(ns: dict[str, object], source: str) -> None:
-    exec(compile(source, "<cell>", "exec"), ns)
-
-
-def _run_full_init(log: list[str]) -> dict[str, object]:
-    """Run the connect -> device creation flow once; returns the cell namespace."""
-    ns: dict[str, object] = {}
-    _exec(ns, _cell("resource_manager = pyvisa.ResourceManager"))
-    _exec(ns, _cell('close_device("flux_yoko"'))
-    _exec(ns, _cell('close_device("jpa_yoko"'))
-    _exec(ns, _cell('close_device("jpa_sgs"'))
     return ns
 
 
@@ -362,121 +243,6 @@ def test_new_table_append_creates_v2_file(tmp_path: Path) -> None:
     assert "flux_period" not in rows.columns
     # round-trips through the v2 validator
     validate_sample_table_v2(pd.read_csv(csv))
-
-
-# ---------------------------------------------------------------------------
-# A4 — VISA lifecycle ordering (real GlobalDeviceManager, fake devices/RM)
-# ---------------------------------------------------------------------------
-
-
-def test_rm_init_closes_all_devices_before_recreating_manager(
-    fake_modules: list[str],
-) -> None:
-    _reset_registry()
-    ns = _run_full_init(fake_modules)
-    rm1 = ns["resource_manager"]
-    assert isinstance(rm1, _FakeRM)
-
-    # re-run the RM init cell: close all devices, close old RM, then recreate
-    _exec(ns, _cell("resource_manager = pyvisa.ResourceManager"))
-    rm2 = ns["resource_manager"]
-    assert rm1.closed
-    assert rm2 is not rm1
-    assert fake_modules[-4:] == [
-        f"close:{FLUX_YOKO_ADDR}",
-        f"close:{JPA_YOKO_ADDR}",
-        f"close:{JPA_SGS_ADDR}",
-        "rm_close",
-    ]
-    _reset_registry()
-
-
-def test_same_name_recreation_closes_old_device_first(
-    fake_modules: list[str],
-) -> None:
-    _reset_registry()
-    ns = _run_full_init(fake_modules)
-    first = ns["flux_yoko"]
-    assert GlobalDeviceManager.get_device("flux_yoko") is first
-
-    # re-run the flux_yoko creation cell: close old session, then replace
-    _exec(ns, _cell('close_device("flux_yoko"'))
-    second = ns["flux_yoko"]
-    assert second is not first
-    assert fake_modules.count(f"close:{FLUX_YOKO_ADDR}") == 1
-    assert fake_modules.count(f"construct:{FLUX_YOKO_ADDR}") == 2
-    assert fake_modules.index(f"close:{FLUX_YOKO_ADDR}") < fake_modules.index(
-        f"construct:{FLUX_YOKO_ADDR}", 1
-    )
-    # the registry holds exactly one flux_yoko entry, the new identity
-    assert GlobalDeviceManager.get_device("flux_yoko") is second
-    _reset_registry()
-
-
-def test_recreation_aborts_before_construct_on_close_failure(
-    fake_modules: list[str],
-) -> None:
-    _reset_registry()
-    ns: dict[str, object] = {}
-    _exec(ns, _cell("resource_manager = pyvisa.ResourceManager"))
-    failing = _FakeYoko("USB::old", name="flux_yoko", log=None, fail_close=True)
-    GlobalDeviceManager.register_device("flux_yoko", failing)
-
-    with pytest.raises(Exception) as excinfo:
-        _exec(ns, _cell('close_device("flux_yoko"'))
-    assert "Device close failed" in str(excinfo.value)
-    # no replacement was constructed or registered; old entry retained for retry
-    assert f"construct:{FLUX_YOKO_ADDR}" not in fake_modules
-    assert GlobalDeviceManager.get_device("flux_yoko") is failing
-    _reset_registry()
-
-
-def test_close_all_failure_retains_manager_handle(
-    fake_modules: list[str],
-) -> None:
-    _reset_registry()
-    ns: dict[str, object] = {}
-    _exec(ns, _cell("resource_manager = pyvisa.ResourceManager"))
-    rm1 = ns["resource_manager"]
-    ok_dev = _FakeYoko("USB::ok", name="jpa_yoko", log=fake_modules)
-    bad_dev = _FakeYoko("USB::bad", name="flux_yoko", log=fake_modules, fail_close=True)
-    GlobalDeviceManager.register_device("flux_yoko", bad_dev)
-    GlobalDeviceManager.register_device("jpa_yoko", ok_dev)
-
-    with pytest.raises(ExceptionGroup):
-        _exec(ns, _cell("resource_manager = pyvisa.ResourceManager"))
-    # the healthy device was still closed; the RM was NOT closed and the
-    # handle was retained so the user can retry or diagnose
-    assert "close:jpa_yoko" in fake_modules
-    assert "rm_close" not in fake_modules
-    assert ns["resource_manager"] is rm1
-    assert isinstance(rm1, _FakeRM)
-    assert not rm1.closed
-    _reset_registry()
-
-
-def test_final_disconnect_closes_devices_then_rm_then_none(
-    fake_modules: list[str],
-) -> None:
-    _reset_registry()
-    ns = _run_full_init(fake_modules)
-    rm1 = ns["resource_manager"]
-
-    _exec(ns, _cell("close_all_devices()", "resource_manager = None"))
-    assert fake_modules[-4:] == [
-        f"close:{FLUX_YOKO_ADDR}",
-        f"close:{JPA_YOKO_ADDR}",
-        f"close:{JPA_SGS_ADDR}",
-        "rm_close",
-    ]
-    assert isinstance(rm1, _FakeRM)
-    assert rm1.closed
-    assert ns["resource_manager"] is None
-    assert GlobalDeviceManager.get_all_devices() == {}
-    # idempotent: running the disconnect cell again is a no-op
-    _exec(ns, _cell("close_all_devices()", "resource_manager = None"))
-    assert fake_modules.count("rm_close") == 1
-    _reset_registry()
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 Two driver styles coexist deliberately: the setup / progress tests use a
 ``MagicMock`` driver (they assert on call interactions), while the registry CRUD
 tests use a real ``FakeDevice`` (they read/write real values through the
-GlobalDeviceManager registry).
+DeviceManager registry).
 """
 
 from __future__ import annotations
@@ -171,7 +171,7 @@ def test_device_service_emits_started_and_finished_events(qapp):
 
 
 # ---------------------------------------------------------------------------
-# Registry CRUD (real FakeDevice through GlobalDeviceManager)
+# Registry CRUD (real FakeDevice through DeviceManager)
 # ---------------------------------------------------------------------------
 
 

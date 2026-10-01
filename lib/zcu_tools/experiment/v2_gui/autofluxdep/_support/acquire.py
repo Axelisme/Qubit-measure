@@ -122,7 +122,7 @@ def set_flux_by_name(
 ) -> None:
     """Write ``value`` into ``cfg.dev[name]`` (the picked flux device, by NAME).
 
-    ``cfg.dev`` is keyed by device name (``GlobalDeviceManager.get_all_info``); the
+    ``cfg.dev`` is keyed by device name (``DeviceManager.get_all_info``); the
     GUI flux picker stores a device *name* (e.g. the auto-provisioned ``fake_flux``).
     The lower layer's ``set_flux_in_dev_cfg`` resolves by ``label`` (``flux_dev``),
     a different dimension the GUI's picked device need not carry — writing by name

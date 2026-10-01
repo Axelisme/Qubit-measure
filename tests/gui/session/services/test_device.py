@@ -983,7 +983,7 @@ def test_concurrent_setups_cancel_independently(qapp):
 
 # ---------------------------------------------------------------------------
 # DeviceRegistryPort injection: fake in-memory registry replaces the real
-# GlobalDeviceManager singleton so these tests never touch it.
+# DeviceManager instance with no driver ownership outside the injected port.
 # ---------------------------------------------------------------------------
 
 
@@ -991,7 +991,7 @@ def _make_svc_with_fake_registry(
     driver: MagicMock | None = None,
     gate: OperationGate | None = None,
 ) -> tuple[DeviceService, MagicMock, FakeDeviceRegistry]:
-    """Like ``_make_svc`` but injects a ``_FakeRegistry`` instead of the real singleton."""
+    """Like ``_make_svc`` but injects a ``FakeDeviceRegistry``."""
     from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
@@ -1018,7 +1018,7 @@ def _make_svc_with_fake_registry(
 
 
 def test_registry_port_connect_registers_in_fake_not_global(qapp):
-    """connect goes through the injected port; the real GlobalDeviceManager stays clean."""
+    """Connect registers the driver through the injected registry port."""
     svc, device, registry = _make_svc_with_fake_registry()
     _connect(svc, _req())
 
@@ -1076,7 +1076,7 @@ def test_registry_port_connect_failure_rollback_still_correct(qapp):
 
 
 def test_registry_port_setup_reads_driver_from_fake(qapp):
-    """start_setup_device fetches the driver from the port (get_device → fake), not the real singleton."""
+    """Setup fetches the driver through the injected registry port."""
     svc, device, registry = _make_svc_with_fake_registry()
     _connect(svc, _req())
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=5.0)
