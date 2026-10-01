@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-01 — Lookback RunRecord 與具名 fit
+**Last updated:** 2026-10-01 — OneTone 與 FakeFrequency records
 
 # measure experiment adapters
 
@@ -29,9 +29,11 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 
 已遷移adapter的`run(req, raw_cfg, *, plots)`使用Guard凍結的resolved cfg，
 `analyze(req, *, plots)`將圖寫入本次具名Plots，不把Figure塞入數值結果。
-T1／GE／Lookback 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
+T1／GE／Lookback／OneTone Freq、PowerDep／FakeFrequency 的 GUI run 將同次 cfg 與純 Result 配成 RunRecord，analyze 使用該 source。GE post 另接已採用的 primary calibration，不使用未重新分析的表單。
 BaseAdapter 的 load/save 直接傳遞核心 records；load 不用目前 cfg 補來源，save 將 explicit source 和 exact path 交給核心，override 可接受 cfg=None。
 GUI LoadService 只從 loaded record.cfg 回填，缺失或不可採用時保留 Config/editor，不撤回有效 loaded data。
+OneTone Freq 保 route-qualified delay calibration 與 readout writeback。PowerDep 把 SNR stop control 放進 typed cfg，不提供 analysis。
+FakeFrequency core 與 adapter 留在 `fake/freq.py`。Core 重用 FreqExp 的資料分析，不讀 simulation truth，圖歸本次 Plots。RunRecord 保留 FakeFreqCfg；readout 使用可解碼的 concrete union。GUI 支援 canonical load，save 使用 exact path；persist_data=False 仍是明確 noop。
 OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interactive plugin 明確取該 source 的資料並捕捉成唯讀 inputs。
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
 OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone 共用這條終止 renderer，其核心與 bare Result 入口仍待遷移。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapter 逐項遷移。舊簽名在過渡期可能報錯，framework 不提供 pyplot 或簽名 fallback。

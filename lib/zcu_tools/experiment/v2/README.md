@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-01 — Lookback explicit source 與三標準 records
+**Last updated:** 2026-10-01 — OneTone 同步與量測專用 records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -8,7 +8,7 @@
 
 ---
 
-## T1、singleshot GE 與 OneTone FluxDep 的核心入口
+## T1、singleshot GE 與 OneTone 的核心入口
 
 `twotone.time_domain.T1Exp` 使用無跨次狀態的 `run(config, *, context)` 和 `analyze(source, options, *, plots)`。T1Result 只含 times／signals；RunRecord 將 typed cfg 與資料配成來源，`T1Cfg.uniform` 隨 record cfg 保存。T1AnalyzeOptions 提供 skip 與 dual_exp 的 defaults，T1Analysis 只含數值。T1 分析接受 cfg=None 的來源，預設 canonical saver 則拒絕缺 cfg。Run 建立具名 measurement liveplot，分析建立 fit 圖；caller 負責操作結束後 finish 及釋放呈現，不以新操作關閉舊圖。
 
@@ -16,7 +16,9 @@
 
 `onetone.flux_dep.FluxDepExp` 用 explicit context 執行同步 run，回傳只有 values／freqs／signals 的純 Result。`measurement` 使用共用 2D 熱圖與掃描線 handle，也能繪製反向通量掃描。核心只負責 acquisition 與 RunRecord 的 canonical save／load，不提供互動 analyze。Notebook 與 GUI 各自捕捉來源並完成選線，重用 Qt-free kernel 與原生圖 builder。GUI preview 不作結果圖。
 
-一般 T1 與 GE 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用已接上 explicit context 的三個入口。T1WithTone 共用純 T1Result，但 acquisition／analysis／record bookkeeping 仍待遷移；ScanT1WithTone 使用另一 Result，也尚未遷移。
+`onetone.freq.FreqExp` 的 run 回傳純 freqs／signals，支援 linear 與 homophasal 取樣。同步 analyze 接 explicit source 與 FreqAnalyzeOptions，回傳純 FreqAnalysis，向 Plots 發布 `fit` 圖。`onetone.power_dep.PowerDepExp` 只提供量測及保存／載入，earlystop_snr 歸 typed cfg。`onetone.sa.SA_FreqExp` 的 analyze 接 None options、回傳 None，向 Plots 發布 amplitude 圖。三者都用 explicit context 執行 run，保留 canonical Hz 與 complex data。
+
+一般 T1、GE 與 OneTone 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用上述 explicit context 入口。T1WithTone 共用純 T1Result，但 acquisition／analysis／record bookkeeping 仍待遷移；ScanT1WithTone 使用另一 Result，也尚未遷移。
 
 ## 目錄佈局
 
