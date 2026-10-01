@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Literal, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -157,7 +156,7 @@ class T1WithToneSweepExp(
             x_sweep = SweepCfg.model_validate(x_sweep)
         xs = sweep2array(
             x_sweep,
-            cast(Literal["gain", "freq"], sweep_name),
+            sweep_name,
             round_info={"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
             allow_array=True,
         )
