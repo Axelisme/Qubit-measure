@@ -81,9 +81,7 @@ class FluxPickAnalysis:
     flux_period: float
 
 
-def analyze_flux_pick(
-    inputs: FluxPickInputs, state: FluxPickState
-) -> FluxPickAnalysis:
+def analyze_flux_pick(inputs: FluxPickInputs, state: FluxPickState) -> FluxPickAnalysis:
     """Validate a terminal selection without mutating inputs or state.
 
     Lines must meet the input axis's minimum separation. Invalid selections

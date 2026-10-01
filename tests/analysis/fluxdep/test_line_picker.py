@@ -56,7 +56,9 @@ def test_flux_pick_inputs_own_read_only_data_with_axis_separation() -> None:
     assert inputs.min_distance == pytest.approx(0.1)
 
 
-def test_analyze_flux_pick_returns_terminal_positions_and_period_without_mutation() -> None:
+def test_analyze_flux_pick_returns_terminal_positions_and_period_without_mutation() -> (
+    None
+):
     signals, devs, freqs = _spectrum()
     inputs = FluxPickInputs(signals, devs, freqs)
     state = FluxPickState(
