@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 
@@ -21,8 +17,6 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -33,7 +27,6 @@ from zcu_tools.experiment.v2.utils import (
     materialize_nonuniform_t1_delays,
     sweep2array,
 )
-from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
@@ -268,6 +261,11 @@ class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: T1WithToneSweepAxisCfg
 
 
+@dataclass(frozen=True)
+class T1WithToneAnalyzeOptions:
+    dual_exp: bool = False
+
+
 class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
     # times stored as seconds on disk -> scale=US_TO_S
     AXES_SPEC = AxesSpec(
@@ -278,16 +276,15 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
         tag="twotone/ge/t1_with_tone",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: T1WithToneCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> T1Result:
-        setup_devices(cfg, progress=True)
+    def run(self, cfg: T1WithToneCfg, *, context: RunContext) -> T1Result:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         lengths = sweep2array(
@@ -296,42 +293,44 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        with LivePlot1D(
-            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+        )
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
 
-                length_sweep = cfg.sweep.length
-                length_param = sweep2param("length", length_sweep)
-                modules.test_pulse.set_param("length", length_param)
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+            modules.test_pulse.set_param("length", length_param)
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse(name="pi_pulse", cfg=modules.pi_pulse),
-                        Pulse(name="test_pulse", cfg=modules.test_pulse),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse(name="pi_pulse", cfg=modules.pi_pulse),
+                    Pulse(name="test_pulse", cfg=modules.test_pulse),
+                    Readout("readout", modules.readout),
                 )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire()
+            )
 
         return T1Result(times=lengths, signals=signals_buffer.array)
 
-    @retrieve_result
     def analyze(
-        self, result: T1Result | None = None, *, dual_exp: bool = False
-    ) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
+        self,
+        source: RunRecord[T1WithToneCfg, T1Result],
+        options: T1WithToneAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> T1Analysis:
+        result = source.result
+        dual_exp = options.dual_exp
 
         xs, signals = result.times, result.signals
 
@@ -347,8 +346,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us" if dual_exp else "N/A"
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
@@ -364,7 +362,12 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
 
         fig.tight_layout()
 
-        return t1, t1err, fig
+        return T1Analysis(
+            t1=float(t1),
+            t1_err=float(t1err),
+            t1b=float(t1b) if dual_exp else None,
+            t1b_err=float(t1berr) if dual_exp else None,
+        )
 
 
 @dataclass(frozen=True)
@@ -372,7 +375,6 @@ class ScanT1WithToneResult:
     values: NDArray[np.float64]
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: ScanT1WithToneCfg | None = None
 
 
 def t1_with_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -389,6 +391,13 @@ class ScanT1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: ScanT1WithToneSweepCfg
 
 
+@dataclass(frozen=True)
+class ScanT1WithToneAnalysis:
+    gains: NDArray[np.float64]
+    t1s: NDArray[np.float64]
+    t1errs: NDArray[np.float64]
+
+
 class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
     # inner = times (result_shape, s on disk -> US_TO_S); outer = values (gain, a.u.)
     AXES_SPEC = AxesSpec(
@@ -402,17 +411,17 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
         tag="twotone/ge/t1_with_tone_sweep",
     )
 
-    @record_result
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: ScanT1WithToneCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        self, cfg: ScanT1WithToneCfg, *, context: RunContext
     ) -> ScanT1WithToneResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         gains = sweep2array(
@@ -427,51 +436,52 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        with LivePlot2DwithLine(
-            "gain", "Time (us)", line_axis=1, num_lines=5
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(gains), len(lengths)),
-                on_update=lambda data: viewer.update(
-                    gains, lengths, t1_with_tone_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for _, step in sched.scan("gain", gains.tolist()):
-                    cfg = step.cfg
-                    modules = cfg.modules
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement", "gain", "Time (us)", line_axis=1, num_lines=5
+        )
+        signals_buffer = SignalBuffer(
+            (len(gains), len(lengths)),
+            on_update=lambda data: viewer.update(
+                gains, lengths, t1_with_tone_signal2real(data)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for _, step in sched.scan("gain", gains.tolist()):
+                cfg = step.cfg
+                modules = cfg.modules
 
-                    modules.test_pulse.set_param("gain", step.value)
-                    length_sweep = cfg.sweep.length
-                    length_param = sweep2param("length", length_sweep)
-                    modules.test_pulse.set_param("length", length_param)
+                modules.test_pulse.set_param("gain", step.value)
+                length_sweep = cfg.sweep.length
+                length_param = sweep2param("length", length_sweep)
+                modules.test_pulse.set_param("length", length_param)
 
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Pulse("pi_pulse", modules.pi_pulse),
-                            Pulse("test_pulse", modules.test_pulse),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("length", length_sweep)
-                        .build_and_acquire(
-                            **(acquire_kwargs or {}),
-                        )
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        Pulse("test_pulse", modules.test_pulse),
+                        Readout("readout", modules.readout),
                     )
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire()
+                )
 
         return ScanT1WithToneResult(
             values=gains,
             times=lengths,
             signals=signals_buffer.array,
-            cfg_snapshot=orig_cfg,
         )
 
-    @retrieve_result
     def analyze(
-        self, result: ScanT1WithToneResult | None = None
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
-        assert result is not None, "no result found"
+        self,
+        source: RunRecord[ScanT1WithToneCfg, ScanT1WithToneResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> ScanT1WithToneAnalysis:
+        result = source.result
+        del options
 
         gains, ts, signals = result.values, result.times, result.signals
 
@@ -504,10 +514,8 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
         t1s = t1s[valid_idxs]
         t1errs = t1errs[valid_idxs]
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        assert isinstance(fig, Figure)
-        assert isinstance(ax1, Axes)
-        assert isinstance(ax2, Axes)
+        fig, _ = plots.subplots("fit", nrows=2, ncols=1, sharex=True)
+        ax1, ax2 = fig.axes
 
         fig.suptitle("T1 while readout")
 
@@ -527,4 +535,4 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
         ax2.set_xlim(gains[0], gains[-1])
         ax2.grid()
 
-        return gains, t1s, t1errs, fig
+        return ScanT1WithToneAnalysis(gains=gains, t1s=t1s, t1errs=t1errs)

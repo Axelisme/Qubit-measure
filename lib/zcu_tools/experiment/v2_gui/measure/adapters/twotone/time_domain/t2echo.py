@@ -6,9 +6,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
+    T2EchoAnalyzeOptions,
     T2EchoCfg,
     T2EchoExp,
     T2EchoResult,
@@ -35,12 +36,12 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
+from zcu_tools.plotting.plots import Plots
 
 logger = logging.getLogger(__name__)
 
-T2EchoRunResult: TypeAlias = T2EchoResult
+T2EchoRunResult: TypeAlias = RunRecord[T2EchoCfg, T2EchoResult]
 
 
 @dataclass
@@ -57,7 +58,6 @@ class T2EchoAnalyzeParams:
 class T2EchoAnalyzeResult(AnalyzeResultBase):
     t2e: float
     t2e_err: float
-    figure: Figure
 
 
 class T2EchoAdapter(
@@ -151,32 +151,36 @@ class T2EchoAdapter(
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2EchoCfg:
-        # Strip the run-only detune_ratio knob before lowering to T2EchoCfg,
-        # which would reject the unknown key.
-        return super().build_exp_cfg(strip_detune_ratio(raw_cfg), req)
+        cfg = super().build_exp_cfg(strip_detune_ratio(raw_cfg), req)
+        cfg.detune = resolve_detune(detune_ratio_of(raw_cfg), cfg.sweep.length.step)
+        return cfg
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> T2EchoRunResult:
-        soc, soccfg = require_soc_handles(req)
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> T2EchoRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        # detune_ratio (fringes-per-step) → absolute applied detune (MHz) over the
-        # lowered length sweep step (SweepCfg guarantees step != 0 for expts > 1).
-        detune = resolve_detune(detune_ratio_of(raw_cfg), cfg.sweep.length.step)
-        # T2EchoExp.run returns (result, true_detune); the GUI run contract
-        # returns only the Result, so log the realized detune and drop it.
-        result, true_detune = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
-        logger.info("T2 Echo true detune: %.3f MHz", true_detune)
-        return result
+        result = self.exp_cls().run(cfg, context=context)
+        logger.info("T2Echo true detune: %s MHz", result.true_activate_detune)
+        return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> T2EchoAnalyzeResult:
         params = req.analyze_params
-        t2e, t2e_err, _, _, fig = T2EchoExp().analyze(
+        analysis = T2EchoExp().analyze(
             req.run_result,
-            fit_method=params.fit_method,
-            fit_phase=params.fit_phase,
+            T2EchoAnalyzeOptions(
+                fit_method=params.fit_method, fit_phase=params.fit_phase
+            ),
+            plots=plots,
         )
-        return T2EchoAnalyzeResult(t2e=t2e, t2e_err=t2e_err, figure=fig)
+        return T2EchoAnalyzeResult(
+            t2e=analysis.t2e,
+            t2e_err=analysis.t2e_err,
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[T2EchoRunResult, T2EchoAnalyzeResult]
