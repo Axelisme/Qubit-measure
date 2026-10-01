@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui.measure` — measure-gui adapters
 
-**Last updated:** 2026-10-01 — T1／GE records 與 canonical load
+**Last updated:** 2026-10-01 — T1／GE／OneTone FluxDep records 與 canonical load
 
 `experiment/v2_gui/measure/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/measure/` →

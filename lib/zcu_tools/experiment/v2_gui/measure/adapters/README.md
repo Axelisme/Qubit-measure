@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-01 — T1／GE RunRecord 與 loaded cfg
+**Last updated:** 2026-10-01 — T1／GE／OneTone FluxDep RunRecord 與前端分析
 
 # measure experiment adapters
 
