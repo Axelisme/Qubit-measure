@@ -15,7 +15,7 @@ canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換�
 呈現、保存政策或 Matplotlib thread safety。
 `plots.Plots` 在此集合上提供明確 `PlotHost`、typed 1D liveplot、單熱圖
 `liveplot_2d` 與含最近掃描線的 `liveplot_2d_with_line`。兩種 2D handle 共用
-`(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。
+`(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。單熱圖可指定 `clim=(min, max)`，固定色階跨 update 保留，未指定時沿資料自動縮放。
 `liveplot_1d` 的 `configure_axes` callback 在 host owner 初始化 artists 後、呈現前執行一次，供實驗設定原生 ticks／style。Callback 不得保留 active axes 供 worker 後續修改；設定失敗直接傳遞例外，不呈現未完成圖。
 一般圖在 `finish()` 時呈現，liveplot 立即呈現；update 先驗證與複製資料，
 再同步送到 host owner 修改 artists。不呈現 host 仍建圖、更新 artists 並支援

@@ -256,6 +256,24 @@ def test_live_name_conflict_does_not_present_another_figure() -> None:
 
 
 @pytest.mark.parametrize("uniform", [True, False])
+def test_heatmap_fixed_color_limits_survive_updates(uniform: bool) -> None:
+    plots = Plots(NonPresentingHost())
+    try:
+        viewer = plots.liveplot_2d(
+            "population", "x", "y", uniform=uniform, clim=(0.0, 1.0)
+        )
+        xs, ys = np.array([0.0, 1.0]), np.array([2.0, 3.0])
+        for value in (0.2, 0.8):
+            viewer.update(xs, ys, np.full((2, 2), value))
+            image = plots["population"].axes[0].images[0]
+            assert image.get_clim() == (0.0, 1.0)
+            np.testing.assert_allclose(np.asarray(image.get_array()), value)
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+@pytest.mark.parametrize("uniform", [True, False])
 def test_plain_heatmap_preserves_data_and_native_figure_across_lifecycle(
     uniform: bool,
 ) -> None:

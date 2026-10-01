@@ -276,6 +276,7 @@ class Plots(FigureCollection):
         *,
         title: str | None = None,
         uniform: bool = True,
+        clim: tuple[float, float] | None = None,
     ) -> HeatmapPlot:
         """Present a named heatmap without adding scan-line axes."""
         self._ensure_active()
@@ -283,10 +284,13 @@ class Plots(FigureCollection):
         def create() -> HeatmapPlot:
             self._ensure_active()
             figure, axes = self.subplots(name)
+            vmin, vmax = clim if clim is not None else (None, None)
             heatmap = (
-                Plot2DSegment(xlabel, ylabel, title)
+                Plot2DSegment(xlabel, ylabel, title, vmin=vmin, vmax=vmax)
                 if uniform
-                else PlotNonUniform2DSegment(xlabel, ylabel, title)
+                else PlotNonUniform2DSegment(
+                    xlabel, ylabel, title, vmin=vmin, vmax=vmax
+                )
             )
             heatmap.init_ax(axes)
             viewer = HeatmapPlot(self._host, figure, axes, heatmap, self._ensure_active)

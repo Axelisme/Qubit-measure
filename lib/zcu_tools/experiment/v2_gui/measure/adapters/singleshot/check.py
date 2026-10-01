@@ -4,9 +4,15 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.v2.singleshot import CheckCfg, CheckExp
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.singleshot.check import (
+    CheckAnalyzeOptions,
+    CheckCfg,
+    CheckExp,
+    CheckResult,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
@@ -16,20 +22,21 @@ from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import read_ge_centers
 
-CheckRunResult: TypeAlias = Any  # CheckResult (frozen domain dataclass)
+CheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
 
 @dataclass
-class CheckAnalyzeResult(FigureOnlyAnalyzeResult):
-    # The check is look-at-the-scatter: the domain analyze renders the IQ scatter
-    # with the |g>/|e> classification circles and the g/e/other percentages, and
-    # extracts no writeback-able scalar. ``figure`` is inherited.
+class CheckAnalyzeResult(AnalyzeResultBase):
+    # Classification scatter is published through Plots; no numeric writeback.
     pass
 
 
@@ -97,14 +104,23 @@ class CheckAdapter(
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> CheckRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = CheckExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[CheckRunResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[CheckRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> CheckAnalyzeResult:
         # The check classifies the scatter against the GE centres — read the trio
         # from md (fast-fail if the upstream 'singleshot/ge' writeback is absent).
         g_center, e_center, radius = read_ge_centers(req.md)
-        fig = CheckExp().analyze(g_center, e_center, radius, result=req.run_result)
-        return CheckAnalyzeResult(figure=fig)
+        CheckExp().analyze(
+            req.run_result, CheckAnalyzeOptions(g_center, e_center, radius), plots=plots
+        )
+        return CheckAnalyzeResult()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_sh_check_{time.strftime('%m%d')}"

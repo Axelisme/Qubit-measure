@@ -4,13 +4,19 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResult
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.singleshot.len_rabi import (
+    LenRabiAnalyzeOptions,
+    LenRabiExp,
+    LenRabiResult,
+)
 from zcu_tools.experiment.v2.singleshot.rabi_fit import (
     RabiJointFitResult,
     RabiPhysicalParams,
     fit_rabi_joint,
     rabi_excited_population,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 @pytest.mark.parametrize("initial_state", ["ground", "excited"])
@@ -38,10 +44,19 @@ def test_len_experiment_forwards_decay_to_joint_fit(
         shot_indices=np.array([0]),
         signals=np.array([[0.0j]]),
     )
-    with pytest.raises(RuntimeError, match="fit called"):
-        LenRabiExp().analyze(
-            result, decay=decay, fit_phase=fit_phase, initial_state=initial_state
-        )
+    plots = Plots(NonPresentingHost())
+    try:
+        with pytest.raises(RuntimeError, match="fit called"):
+            LenRabiExp().analyze(
+                RunRecord(cfg=None, result=result),
+                LenRabiAnalyzeOptions(
+                    decay=decay, fit_phase=fit_phase, initial_state=initial_state
+                ),
+                plots=plots,
+            )
+    finally:
+        plots.finish(present=False)
+        plots.release()
     assert called == [(decay, fit_phase, initial_state)]
 
 

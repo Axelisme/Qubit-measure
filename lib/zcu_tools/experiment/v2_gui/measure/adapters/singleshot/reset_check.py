@@ -4,9 +4,10 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.reset_check import (
+    ResetCheckAnalyzeOptions,
     ResetCheckCfg,
     ResetCheckExp,
     ResetCheckResult,
@@ -23,10 +24,13 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.cfg import EvalValue, ScalarSpec
 from zcu_tools.plotting.plots import Plots
+
+SsResetCheckRunResult = RunRecord[ResetCheckCfg, ResetCheckResult]
 
 
 @dataclass
@@ -36,12 +40,11 @@ class SsResetCheckAnalyzeResult(AnalyzeResultBase):
     reset_max_other_population: float
     worst_sample_gain: float
     analyzed_reset_points: int
-    figure: Figure
 
 
 class SsResetCheckAdapter(
     BaseAdapter[
-        ResetCheckCfg, ResetCheckResult, SsResetCheckAnalyzeResult, NoAnalyzeParams
+        ResetCheckCfg, SsResetCheckRunResult, SsResetCheckAnalyzeResult, NoAnalyzeParams
     ]
 ):
     exp_cls = ResetCheckExp
@@ -92,12 +95,22 @@ class SsResetCheckAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SsResetCheckRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = ResetCheckExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[ResetCheckResult, NoAnalyzeParams], *, plots: Plots
+        self,
+        req: AnalyzeRequest[SsResetCheckRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> SsResetCheckAnalyzeResult:
-        analysis, figure = ResetCheckExp().analyze(
+        analysis = ResetCheckExp().analyze(
             req.run_result,
-            confusion_matrix=req.md.get("confusion_matrix"),
+            ResetCheckAnalyzeOptions(confusion_matrix=req.md.get("confusion_matrix")),
             plots=plots,
         )
         return SsResetCheckAnalyzeResult(
@@ -106,7 +119,6 @@ class SsResetCheckAdapter(
             analysis.reset_max_other_population,
             analysis.worst_sample_gain,
             analysis.analyzed_reset_points,
-            figure,
         )
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import field_serializer
 
@@ -18,14 +18,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
@@ -45,7 +45,6 @@ class LenRabiResult:
     lengths: NDArray[np.float64]
     shot_indices: NDArray[np.int64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: LenRabiCfg | None = None
 
 
 class LenRabiSweepCfg(ConfigBase):
@@ -72,6 +71,14 @@ class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
         return str(value)
 
 
+@dataclass(frozen=True)
+class LenRabiAnalyzeOptions:
+    decay: bool = True
+    fit_phase: bool = False
+    initial_state: Literal["ground", "excited"] = "ground"
+    max_calls: int | None = None
+
+
 class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
     AXES_SPEC = AxesSpec(
         axes=(
@@ -90,20 +97,30 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         tag="singleshot/len_rabi",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: LenRabiCfg,
+        *,
+        context: RunContext,
     ) -> LenRabiResult:
+        soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         if cfg.rounds != 1:
-            warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
+            warnings.warn(
+                "rounds will be overwritten to 1 for singleshot measurement",
+                stacklevel=2,
+            )
             cfg.rounds = 1
         if cfg.reps != cfg.shots:
-            warnings.warn("reps will be overwritten by singleshot measurement shots")
+            warnings.warn(
+                "reps will be overwritten by singleshot measurement shots", stacklevel=2
+            )
             cfg.reps = cfg.shots
 
         modules = cfg.modules
@@ -117,94 +134,89 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         )
         expected_shape = (len(lengths), cfg.shots)
 
-        with LivePlot1D(
+        def configure_axes(ax: Axes) -> None:
+            ax.set_ylim(0.0, 1.0)
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
+
+        viewer = context.plots.liveplot_1d(
+            "measurement",
             "Length (us)",
             "Signal",
-            segment_kwargs=dict(
-                num_lines=3,
-                line_kwargs=[
-                    dict(label="Ground"),
-                    dict(label="Excited"),
-                    dict(label="Other"),
-                ],
-            ),
-        ) as viewer:
-            viewer.get_ax().set_ylim(0.0, 1.0)
+            num_lines=3,
+            configure_axes=configure_axes,
+        )
 
-            def update_view(raw_iq: NDArray[np.complex128]) -> None:
-                acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
-                populations = classify_rabi_iq(
-                    raw_iq, cfg.g_center, cfg.e_center, cfg.radius
-                )
-                populations[~acquired_rows] = np.nan
-                other = 1.0 - populations.sum(axis=1)
-                viewer.update(lengths, np.column_stack((populations, other)).T)
-
-            buffer = SignalBuffer(
-                expected_shape,
-                dtype=np.complex128,
-                on_update=update_view,
+        def update_view(raw_iq: NDArray[np.complex128]) -> None:
+            acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
+            populations = classify_rabi_iq(
+                raw_iq, cfg.g_center, cfg.e_center, cfg.radius
             )
-            with Schedule(cfg, buffer) as sched:
-                for length, step in sched.scan("length", lengths.tolist()):
-                    modules = step.cfg.modules
-                    modules.qub_pulse.set_param("length", length)
-                    program = (
-                        step.prog_builder(soc, soccfg)
-                        .add_reset("reset", modules.reset)
-                        .add_pulse("qubit_pulse", modules.qub_pulse)
-                        .add_readout("readout", modules.readout)
-                        .build()
-                    )
-                    try:
-                        program.acquire(soc, progress=True, cancel_flag=step.stop)
-                    except StoppedPartialAcquireError:
-                        step.set_stop()
-                        break
+            populations[~acquired_rows] = np.nan
+            other = 1.0 - populations.sum(axis=1)
+            viewer.update(lengths, np.column_stack((populations, other)).T)
 
-                    raw_iq = raw_shots_to_signal(program)
-                    expected_point_shape = (cfg.shots,)
-                    if raw_iq.shape != expected_point_shape:
-                        raise ValueError(
-                            "Len Rabi raw IQ shape mismatch: "
-                            f"expected {expected_point_shape}, got {raw_iq.shape}"
-                        )
-                    buffer[step].set(raw_iq)
-            signals = buffer.array
-            update_view(signals)
+        buffer = SignalBuffer(
+            expected_shape,
+            dtype=np.complex128,
+            on_update=update_view,
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            for length, step in sched.scan("length", lengths.tolist()):
+                modules = step.cfg.modules
+                modules.qub_pulse.set_param("length", length)
+                program = (
+                    step.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("qubit_pulse", modules.qub_pulse)
+                    .add_readout("readout", modules.readout)
+                    .build()
+                )
+                try:
+                    program.acquire(soc, progress=True, cancel_flag=step.stop)
+                except StoppedPartialAcquireError:
+                    step.set_stop()
+                    break
+
+                raw_iq = raw_shots_to_signal(program)
+                expected_point_shape = (cfg.shots,)
+                if raw_iq.shape != expected_point_shape:
+                    raise ValueError(
+                        "Len Rabi raw IQ shape mismatch: "
+                        f"expected {expected_point_shape}, got {raw_iq.shape}"
+                    )
+                buffer[step].set(raw_iq)
+        signals = buffer.array
+        update_view(signals)
 
         return LenRabiResult(
             lengths=lengths,
             shot_indices=np.arange(cfg.shots, dtype=np.int64),
             signals=signals,
-            cfg_snapshot=cfg,
         )
 
-    @retrieve_result
     def analyze(
         self,
-        result: LenRabiResult | None = None,
+        source: RunRecord[LenRabiCfg, LenRabiResult],
+        options: LenRabiAnalyzeOptions,
         *,
-        decay: bool = True,
-        fit_phase: bool = False,
-        initial_state: Literal["ground", "excited"] = "ground",
-        max_calls: int | None = None,
-    ) -> tuple[RabiJointFitResult, Figure]:
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> RabiJointFitResult:
+        result = source.result
 
         fit = fit_rabi_joint(
             result.lengths,
             result.signals,
-            decay=decay,
-            fit_phase=fit_phase,
-            max_calls=max_calls,
-            initial_state=initial_state,
+            decay=options.decay,
+            fit_phase=options.fit_phase,
+            max_calls=options.max_calls,
+            initial_state=options.initial_state,
         )
-        readout = (
-            result.cfg_snapshot.modules.readout
-            if result.cfg_snapshot is not None
-            else None
+        readout = source.cfg.modules.readout if source.cfg is not None else None
+        plot_rabi_joint(
+            result.lengths, result.signals, fit, readout, sweep="length", plots=plots
         )
-        return fit, plot_rabi_joint(
-            result.lengths, result.signals, fit, readout, sweep="length"
-        )
+        return fit

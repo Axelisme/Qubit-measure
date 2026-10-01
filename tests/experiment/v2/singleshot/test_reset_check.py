@@ -5,14 +5,15 @@ from pathlib import Path
 from threading import Event
 from typing import Any, Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.datafile import save_labber_data
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.singleshot.amp_rabi import (
+    AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiExp,
     AmpRabiModuleCfg,
@@ -20,6 +21,7 @@ from zcu_tools.experiment.v2.singleshot.amp_rabi import (
     AmpRabiSweepCfg,
 )
 from zcu_tools.experiment.v2.singleshot.reset_check import (
+    ResetCheckAnalyzeOptions,
     ResetCheckCfg,
     ResetCheckExp,
     ResetCheckModuleCfg,
@@ -136,6 +138,7 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
     tmp_path: Path,
     reset: bool,
     stop_after: int | None,
+    plots: Plots,
 ) -> None:
     module = "reset_check" if reset else "amp_rabi"
     monkeypatch.setattr(
@@ -160,8 +163,8 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
     cfg = _cfg(reset)
     before = cfg.model_dump()
     exp = ResetCheckExp() if reset else AmpRabiExp()
-    with schedule_stop_scope(StopSignal(event)):
-        result = exp.run(soc, soccfg, cfg)  # type: ignore[arg-type]
+    context = RunContext(soc, soccfg, plots, {}, StopSignal(event))
+    result = exp.run(cfg, context=context)  # type: ignore[arg-type]
     assert cfg.model_dump() == before
     assert len(programs) == (1 if reset or stop_after == 0 else 2)
     assert result.signals.shape == ((4, 3, 2) if reset else (4, 12))
@@ -188,25 +191,28 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
             )
         if completed == 1:
             assert np.isnan(result.signals[:, 6:]).all()
-    assert result.cfg_snapshot is not None and result.cfg_snapshot.rounds == 2
-    _assert_population_roundtrip(exp, result, tmp_path / "population.hdf5")
+    assert cfg.rounds == 2
+    _assert_population_roundtrip(exp, cfg, result, tmp_path / "population.hdf5")
 
 
 def _assert_population_roundtrip(
     exp: ResetCheckExp | AmpRabiExp,
+    cfg: ResetCheckCfg | AmpRabiCfg,
     result: ResetCheckResult | AmpRabiResult,
     path: Path,
 ) -> None:
     if isinstance(exp, ResetCheckExp):
         assert isinstance(result, ResetCheckResult)
-        exp.save(RunRecord(cfg=result.cfg_snapshot, result=result), path)
+        assert isinstance(cfg, ResetCheckCfg)
+        exp.save(RunRecord(cfg=cfg, result=result), path)
     else:
         assert isinstance(result, AmpRabiResult)
-        exp.save(RunRecord(cfg=result.cfg_snapshot, result=result), path)
+        assert isinstance(cfg, AmpRabiCfg)
+        exp.save(RunRecord(cfg=cfg, result=result), path)
     source = exp.load(path)
     loaded = source.result
     np.testing.assert_array_equal(loaded.signals, result.signals)
-    assert source.cfg == result.cfg_snapshot
+    assert source.cfg == cfg
     if isinstance(loaded, ResetCheckResult):
         np.testing.assert_array_equal(loaded.population_states, [0, 1])
     else:
@@ -215,7 +221,7 @@ def _assert_population_roundtrip(
 
 @pytest.mark.parametrize("reset", [False, True])
 def test_invalid_snapshot_calibration_fails_before_device_setup(
-    monkeypatch: pytest.MonkeyPatch, reset: bool
+    monkeypatch: pytest.MonkeyPatch, reset: bool, plots: Plots
 ) -> None:
     module = "reset_check" if reset else "amp_rabi"
     touched = []
@@ -227,7 +233,7 @@ def test_invalid_snapshot_calibration_fails_before_device_setup(
     cfg.radius = -1
     exp = ResetCheckExp() if reset else AmpRabiExp()
     with pytest.raises(ValueError, match="radius"):
-        exp.run(None, None, cfg)  # type: ignore[arg-type]
+        exp.run(cfg, context=RunContext(None, None, plots, {}, StopSignal()))  # type: ignore[arg-type]
     assert not touched
 
 
@@ -242,9 +248,12 @@ def test_reset_population_analysis_and_stage_styles(
     measured = true @ matrix if correct else true.copy()
     measured[-1] = np.nan
     result = ResetCheckResult(gains, np.arange(3), measured[..., :2])
-    analysis, figure = ResetCheckExp().analyze(
-        result, confusion_matrix=matrix if correct else None, plots=plots
+    analysis = ResetCheckExp().analyze(
+        RunRecord(cfg=None, result=result),
+        ResetCheckAnalyzeOptions(confusion_matrix=matrix if correct else None),
+        plots=plots,
     )
+    figure = plots["populations"]
     try:
         assert plots.finish(present=False)["populations"] is figure
         np.testing.assert_allclose(analysis.populations[:3], true[:3])
@@ -261,7 +270,7 @@ def test_reset_population_analysis_and_stage_styles(
         for line, values in zip(lines, expected, strict=True):
             np.testing.assert_allclose(np.asarray(line.get_ydata()), values)
     finally:
-        plt.close(figure)
+        plots.finish(present=False)
 
 
 def test_amp_rejects_population_only_file(tmp_path: Path) -> None:
@@ -274,16 +283,20 @@ def test_amp_rejects_population_only_file(tmp_path: Path) -> None:
         AmpRabiExp().load(Path(path))
 
 
-def test_amp_rejects_partial_raw_sweep() -> None:
+def test_amp_rejects_partial_raw_sweep(plots: Plots) -> None:
     signals = np.ones((5, 10), dtype=np.complex128)
     signals[0, 0] = np.nan
     result = AmpRabiResult(np.linspace(0, 1, 5), np.arange(10), signals)
     with pytest.raises(ValueError, match="finite raw IQ"):
-        AmpRabiExp().analyze(result)
+        AmpRabiExp().analyze(
+            RunRecord(cfg=None, result=result), AmpRabiAnalyzeOptions(), plots=plots
+        )
 
 
 @pytest.mark.parametrize("initial_state", ["ground", "excited"])
-def test_amp_raw_iq_rabi_fit(initial_state: Literal["ground", "excited"]) -> None:
+def test_amp_raw_iq_rabi_fit(
+    initial_state: Literal["ground", "excited"], plots: Plots
+) -> None:
     rng = np.random.default_rng(238)
     gains = np.linspace(-0.3, 1.2, 25)[::-1]
     p_e0 = 0.1 if initial_state == "ground" else 0.9
@@ -293,7 +306,12 @@ def test_amp_raw_iq_rabi_fit(initial_state: Literal["ground", "excited"]) -> Non
     # Entirely missing rounds can still be analyzed from completed shots.
     signals = np.column_stack((signals, np.full_like(signals, np.nan)))
     result = AmpRabiResult(gains, np.arange(2000), signals)
-    fit, figure = AmpRabiExp().analyze(result, initial_state=initial_state)
+    fit = AmpRabiExp().analyze(
+        RunRecord(cfg=None, result=result),
+        AmpRabiAnalyzeOptions(initial_state=initial_state),
+        plots=plots,
+    )
+    figure = plots["fit"]
     try:
         assert fit.joint_fit.backend.valid
         assert fit.joint_fit.phase == 0.0
@@ -310,4 +328,4 @@ def test_amp_raw_iq_rabi_fit(initial_state: Literal["ground", "excited"]) -> Non
         assert "gain" in figure.axes[0].get_xlabel()
         assert "rad/gain" in figure.axes[0].get_title()
     finally:
-        plt.close(figure)
+        plots.finish(present=False)

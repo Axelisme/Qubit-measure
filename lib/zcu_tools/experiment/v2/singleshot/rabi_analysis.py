@@ -3,7 +3,6 @@ from __future__ import annotations
 from numbers import Real
 from typing import Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -11,6 +10,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.experiment import config
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadoutCfg, ReadoutCfg
 
 from .rabi_fit import RabiJointFitResult
@@ -164,11 +164,12 @@ def plot_rabi_joint(
     readout: ReadoutCfg | None,
     *,
     sweep: Literal["length", "gain"],
-) -> Figure:
+    plots: Plots,
+) -> None:
     omega_unit = "rad/μs" if sweep == "length" else "rad/gain"
     width, height = config.figsize
-    fig = plt.figure(figsize=(width, height * 1.6), layout="constrained")
-    assert isinstance(fig, Figure)
+    fig = Figure(figsize=(width, height * 1.6), layout="constrained")
+    plots.adopt("fit", fig)
     grid = fig.add_gridspec(
         2,
         2,
@@ -231,4 +232,3 @@ def plot_rabi_joint(
         classified_distribution,
     )
     _plot_confusion_matrix(confusion_ax, fit)
-    return fig
