@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
@@ -12,7 +13,7 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import CfgObservation
 
-from ..adapter import WritebackItem
+from ..adapter import AnalysisMode, WritebackItem
 from .ports import (
     AnalysisPaneSnapshot,
     PathResourceSnapshot,
@@ -45,6 +46,14 @@ def _slug(name: str) -> str:
     # Collapse runs of '-' and trim, so 'twotone/rabi/amp_rabi' -> 'twotone-rabi-amp-rabi'.
     parts = [p for p in out.split("-") if p]
     return "-".join(parts) or "tab"
+
+
+@dataclass(frozen=True)
+class AnalysisPreparation:
+    """Analysis readiness after a committed result, independent of its success."""
+
+    has_params: bool
+    error: str | None = None
 
 
 class TabService:
@@ -223,22 +232,29 @@ class TabService:
     def get_tab_adapter_name(self, tab_id: str) -> str:
         return self._state.get_tab(tab_id).adapter_name
 
-    def initialize_tab_analyze_params(self, tab_id: str) -> object:
+    def prepare_result_analysis(self, tab_id: str) -> AnalysisPreparation:
+        """Prepare analysis without turning a committed result into a failure."""
         tab = self._state.get_tab(tab_id)
         if tab.run.result is None:
             raise RuntimeError("No run result available to build analyze params")
-        instance = tab.adapter.get_analyze_params(
-            tab.run.result, self._state.session_env
-        )
+        if tab.adapter.capabilities.analysis is AnalysisMode.NONE:
+            return AnalysisPreparation(has_params=False)
+        try:
+            instance = tab.adapter.get_analyze_params(
+                tab.run.result, self._state.session_env
+            )
+        except Exception as exc:
+            logger.exception("Analysis preparation failed for tab %s", tab_id)
+            return AnalysisPreparation(has_params=False, error=str(exc))
         self._state.update_tab_analyze_param_instance(tab_id, instance)
-        return instance
+        return AnalysisPreparation(has_params=True)
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._state.update_tab_analyze_param_instance(tab_id, instance)
 
     def initialize_tab_post_analyze_params(self, tab_id: str) -> object:
         """Build + store the post-analysis param instance once the primary analyze
-        result exists (mirrors ``initialize_tab_analyze_params``). Fast-fails if
+        result exists. Fast-fails if
         there is no primary analyze result to seed from."""
         tab = self._state.get_tab(tab_id)
         if tab.analysis.result is None:

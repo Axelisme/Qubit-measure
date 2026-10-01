@@ -601,8 +601,12 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     assert tab._save_center.is_load_enabled() is False
 
 
-def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_path):
+@pytest.mark.parametrize("analysis_error", [None, "analysis defaults unavailable"])
+def test_main_window_load_data_dialog_calls_controller(
+    qapp, monkeypatch, tmp_path, analysis_error
+):
     from qtpy.QtWidgets import QFileDialog
+    from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -617,7 +621,16 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
         soccfg=None,
         database_path=str(database_root / "2026" / "06" / "Data_0625"),
     )
-    window = MainWindow(ctrl)
+    ctrl.load_tab_result.return_value = LoadTabResultOutcome(
+        tab_id="tab-1",
+        data_path="/tmp/result.hdf5",
+        result_type="Result",
+        has_cfg_snapshot=False,
+        has_analyze_params=analysis_error is None,
+        analysis_error=analysis_error,
+    )
+    dialogs = RecordingDialogPresenter()
+    window = MainWindow(ctrl, dialog_presenter=dialogs)
     window._tab_widgets["tab-1"] = MagicMock()
     window.show_status_message = MagicMock()
 
@@ -638,6 +651,14 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
     ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
     window.show_status_message.assert_called_once()
     assert captured_dir["directory"] == str(database_root)
+    if analysis_error is not None:
+        assert [(call.kind, call.title) for call in dialogs.calls] == [
+            ("warning", "Analysis preparation failed"),
+        ]
+        assert "Data loaded successfully" in dialogs.consume_message_containing(
+            "warning", analysis_error
+        )
+    dialogs.assert_no_unexpected_messages()
 
 
 def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp):

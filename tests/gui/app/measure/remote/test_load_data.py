@@ -18,7 +18,8 @@ class _AnalyzeParams:
     threshold: float
 
 
-def test_tab_load_data_dispatch_returns_serializable_outcome() -> None:
+@pytest.mark.parametrize("analysis_error", [None, "analysis defaults unavailable"])
+def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> None:
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
     ctrl.load_tab_result.return_value = LoadTabResultOutcome(
@@ -26,11 +27,14 @@ def test_tab_load_data_dispatch_returns_serializable_outcome() -> None:
         data_path="/tmp/result.hdf5",
         result_type="Result",
         has_cfg_snapshot=True,
-        has_analyze_params=True,
+        has_analyze_params=analysis_error is None,
+        analysis_error=analysis_error,
     )
     ctrl.get_tab_snapshot.return_value = SimpleNamespace(
         interaction=SimpleNamespace(has_run_result=True),
-        analysis=SimpleNamespace(params=_AnalyzeParams(threshold=0.25)),
+        analysis=SimpleNamespace(
+            params=_AnalyzeParams(threshold=0.25) if analysis_error is None else None
+        ),
     )
     adapter = SimpleNamespace(run_analyze_control=ctrl)
 
@@ -44,11 +48,12 @@ def test_tab_load_data_dispatch_returns_serializable_outcome() -> None:
         "data_path": "/tmp/result.hdf5",
         "result_type": "Result",
         "has_cfg_snapshot": True,
-        "has_analyze_params": True,
+        "has_analyze_params": analysis_error is None,
         "source_kind": "loaded",
         "cfg_backfill": "not_applied",
+        "analysis_error": analysis_error,
         "has_run_result": True,
-        "analyze_params": {"threshold": 0.25},
+        "analyze_params": {"threshold": 0.25} if analysis_error is None else None,
     }
 
 

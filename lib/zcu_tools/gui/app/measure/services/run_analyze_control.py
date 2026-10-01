@@ -180,18 +180,18 @@ class RunAnalyzeControlFacet:
         self._access.require_available()
         permit = self._guard.acquire_load_permit(tab_id)
         outcome = self._load.load_result(permit, data_path)
-        tab = self._state.get_tab(tab_id)
-        has_analyze_params = False
-        if tab.adapter.capabilities.analysis is not AnalysisMode.NONE:
-            self._tab.initialize_tab_analyze_params(tab_id)
-            has_analyze_params = True
+        preparation = self._tab.prepare_result_analysis(tab_id)
         self._bus.emit(
             TabContentChangedPayload(
                 tab_id=tab_id,
                 fact=TabContentFact.LOADED_RESULT_COMMITTED,
             )
         )
-        return replace(outcome, has_analyze_params=has_analyze_params)
+        return replace(
+            outcome,
+            has_analyze_params=preparation.has_params,
+            analysis_error=preparation.error,
+        )
 
     def cancel_run(self) -> bool:
         return self._run.cancel_run()

@@ -528,6 +528,73 @@ def test_run_finished_calls_refresh_tab(cf):
     )
 
 
+@pytest.mark.parametrize("source", ["run", "cancelled", "load"])
+def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, source):
+    tab_id = cf.ctrl.new_tab("fake")
+    adapter = cf.state.get_tab(tab_id).adapter
+    monkeypatch.setattr(
+        adapter,
+        "capabilities",
+        dataclasses.replace(adapter.capabilities, load_data=True),
+    )
+
+    def fail_params(*_args):
+        raise ValueError("analysis defaults unavailable")
+
+    loaded = SimpleNamespace(cfg_snapshot=None)
+    monkeypatch.setattr(adapter, "get_analyze_params", fail_params)
+    monkeypatch.setattr(adapter, "load", lambda _request: loaded)
+    cf.state.update_tab_analyze_param_instance(tab_id, object())
+    facts = []
+    cf.bus.subscribe(TabContentChangedPayload, facts.append)
+    if source != "load":
+        terminal = []
+        cf.bus.subscribe(RunFinishedPayload, terminal.append)
+        entered, release = threading.Event(), threading.Event()
+
+        def partial_run(*_args):
+            entered.set()
+            if not release.wait(3):
+                raise RuntimeError("test did not release partial run")
+            return loaded
+
+        if source == "cancelled":
+            monkeypatch.setattr(adapter, "run", partial_run)
+        cf.ctrl.start_run(tab_id, cf.ctrl.cfg_resources.lookup(tab_id).observe().ref)
+        if source == "cancelled":
+            try:
+                assert _wait_for(entered.is_set)
+                cf.ctrl.cancel_run()
+            finally:
+                release.set()
+        assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+        assert terminal == [
+            RunFinishedPayload(
+                tab_id=tab_id,
+                outcome="cancelled" if source == "cancelled" else "finished",
+            )
+        ]
+        expected_fact = TabContentFact.RUN_RESULT_COMMITTED
+        cf.view.notify_diagnostic.assert_any_call(
+            "error",
+            "Analysis preparation failed",
+            "Run result retained. Analysis preparation failed: analysis defaults unavailable",
+        )
+    else:
+        outcome = cf.ctrl.load_tab_result(tab_id, "loaded.hdf5")
+        assert outcome.analysis_error == "analysis defaults unavailable"
+        assert outcome.has_analyze_params is False
+        expected_fact = TabContentFact.LOADED_RESULT_COMMITTED
+    snapshot = cf.ctrl.get_tab_snapshot(tab_id)
+    assert snapshot.run.result is not None
+    if source == "load":
+        assert snapshot.run.result is loaded
+    assert snapshot.analysis.params is None
+    assert snapshot.analysis.result is None
+    assert snapshot.post_analysis.result is None
+    assert facts == [TabContentChangedPayload(tab_id, expected_fact)]
+
+
 def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     """flux_dep / power_dep adapters declare ``analysis=AnalysisMode.NONE`` and have
     no analyze step; run-finished must not route them into analyze-params init

@@ -822,6 +822,12 @@ class MainWindow(QMainWindow):
         if outcome.cfg_backfill == "not_applied":
             message += "; Config was not backfilled"
         self.show_status_message(message)
+        if outcome.analysis_error is not None:
+            self._dialog_presenter.warning(
+                self,
+                "Analysis preparation failed",
+                f"Data loaded successfully. Analysis preparation failed: {outcome.analysis_error}",
+            )
 
     def post_analyze_tab(self, tab_id: str) -> None:
         logger.info("post_analyze_tab: tab_id=%r", tab_id)

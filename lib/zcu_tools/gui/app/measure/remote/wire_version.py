@@ -117,7 +117,7 @@ from __future__ import annotations
 # v74: tab.run_start requires the caller's explicit cfg ref.
 # v75: explicit cfg refs replace the per-connection cfg seen guard for Run.
 # v76: waveform saving returns only success/status; preview is a separate read.
-WIRE_VERSION = 76
+WIRE_VERSION = 77
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -170,4 +170,4 @@ WIRE_VERSION = 76
 # v104: one Setup dialog identity; project.apply and general project settings names.
 # v106: run callers submit their observed cfg identity and revision.
 # v107: Run admits a valid cfg ref across connections, retaining non-cfg guards.
-GUI_VERSION = 108
+GUI_VERSION = 109

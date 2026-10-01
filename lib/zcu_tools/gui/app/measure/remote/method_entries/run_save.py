@@ -51,7 +51,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "then has a run result and can be analyzed without a SoC connection. "
             "Compatible snapshot values backfill Config automatically, replacing "
             "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
-            "backfill failure does not undo the loaded result.",
+            "backfill failure does not undo the loaded result. analysis_error "
+            "reports analysis preparation failure without undoing the load; "
+            "has_analyze_params is false until preparation succeeds.",
             (
                 required_string("tab_id"),
                 required_string("data_path", "Canonical HDF5 result file to load"),

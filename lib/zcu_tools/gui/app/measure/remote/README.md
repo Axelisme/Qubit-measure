@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-01, explicit cfg ref admission
+**Last updated:** 2026-10-01, independent analysis preparation outcome
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,13 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 75`, `GUI_VERSION = 107`, and
-`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 75 uses explicit
+Current measure-gui values are `WIRE_VERSION = 77`, `GUI_VERSION = 109`, and
+`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 77 adds
+`analysis_error` to load outcomes; failed analysis preparation preserves the loaded
+result and the new tab from `tab.open_file`. GUI 109 publishes committed result facts
+independently of analysis preparation and reports its failure separately. WIRE 76
+separates waveform save from preview; GUI 108 treats asset persistence as save success.
+WIRE 75 uses explicit
 cfg refs across connections instead of a per-connection cfg seen guard. GUI 107
 retains tab, SoC, device and authentication guards. WIRE 74 requires
 `expected` on `tab.run_start`, using the common cfg_ref codec. GUI 106 runs only the
