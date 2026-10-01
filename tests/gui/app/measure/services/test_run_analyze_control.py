@@ -204,8 +204,11 @@ class RecordingTab:
         self._log.add("tab", "get_snapshot", tab_id)
         return self.snapshot
 
-    def initialize_tab_analyze_params(self, tab_id: str) -> None:
-        self._log.add("tab", "initialize_tab_analyze_params", tab_id)
+    def prepare_result_analysis(self, tab_id: str):
+        from zcu_tools.gui.app.measure.services.tab import AnalysisPreparation
+
+        self._log.add("tab", "prepare_result_analysis", tab_id)
+        return AnalysisPreparation(has_params=True)
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._log.add("tab", "update_tab_analyze_param_instance", tab_id, instance)
@@ -349,8 +352,7 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
         call(
             "load", "load_result", SimpleNamespace(tab_id="tab-1"), "/tmp/result.hdf5"
         ),
-        call("state", "get_tab", "tab-1"),
-        call("tab", "initialize_tab_analyze_params", "tab-1"),
+        call("tab", "prepare_result_analysis", "tab-1"),
         call("bus", "emit", "TabContentChangedPayload"),
     ]
     payload = bus.payloads[0]

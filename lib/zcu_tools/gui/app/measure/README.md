@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-01, independent waveform save and preview
+**Last updated:** 2026-10-01, result commit and analysis preparation
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -350,6 +350,16 @@ backfill rather than silently skipping that selector. Module/waveform references
 become custom values rather than guessed library keys.
 The Guard and LoadService both enforce the adapter's import-validated
 `capabilities.load_data` gate.
+
+Run and Load retain committed results even when adapter analysis-parameter
+preparation fails. `TabService.prepare_result_analysis` owns the capability check
+and returns typed readiness or an error after logging the failure. Both workflows
+publish their committed content fact once, with downstream panes cleared and
+successful params already installed. Run sends a separate diagnostic to attached
+views without changing its finished or cancelled outcome. Load returns
+`analysis_error` and `has_analyze_params=false`; Qt warns after confirming the load,
+and remote returns the same outcome. `tab.open_file` retains the new tab on this
+partial success. A genuine load or run failure keeps its existing failure contract.
 
 ### Pane-owned lifecycle
 

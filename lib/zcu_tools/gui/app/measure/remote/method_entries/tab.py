@@ -34,7 +34,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create a tab, load a result file without a SoC, and focus it. "
             "Read context.snapshot explicitly first. A load failure closes the new "
             "tab and restores prior focus. Returns the load outcome including "
-            "tab_id and cfg_backfill; not_applied retains the loaded result. "
+            "tab_id, cfg_backfill and analysis_error. Failed analysis preparation "
+            "retains the loaded result and the new tab. not_applied retains the result. "
             "Read tab.snapshot and tab.get_cfg before subsequent guarded writes.",
             (required_string("adapter_name"), required_string("data_path")),
         ),

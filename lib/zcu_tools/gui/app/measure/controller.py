@@ -33,7 +33,7 @@ from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from .adapter import AnalysisMode, SessionEnv
+from .adapter import SessionEnv
 from .events.completion import (
     AnalyzeFailedPayload,
     SaveArtifactsFinishedPayload,
@@ -419,21 +419,19 @@ class Controller(SessionControllerMixin):
             and self._state.get_tab(tab_id).run.result is None
         ):
             return
-        # State is already updated in RunService. Only adapters that do
-        # analysis (mode != NONE) are routed into analyze-params init; the NONE
-        # 2D sweeps (flux_dep / power_dep) have no analyze step, and their base
-        # ``get_analyze_params`` is a Fast-Fail guard — never call it for them.
-        if (
-            self._state.get_tab(tab_id).adapter.capabilities.analysis
-            is not AnalysisMode.NONE
-        ):
-            self._tab_svc.initialize_tab_analyze_params(tab_id)
+        preparation = self._tab_svc.prepare_result_analysis(tab_id)
         self._bus.emit(
             TabContentChangedPayload(
                 tab_id=tab_id,
                 fact=TabContentFact.RUN_RESULT_COMMITTED,
             )
         )
+        if preparation.error is not None:
+            self._notify(
+                "error",
+                "Analysis preparation failed",
+                f"Run result retained. Analysis preparation failed: {preparation.error}",
+            )
 
     def _on_analyze_finished(self, tab_id: str) -> None:
         # A fresh primary analyze result seeds the post-analysis params (mirrors

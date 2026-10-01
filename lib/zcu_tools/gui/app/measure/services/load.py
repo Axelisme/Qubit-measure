@@ -30,6 +30,7 @@ class LoadTabResultOutcome:
     has_analyze_params: bool
     source_kind: str = "loaded"
     cfg_backfill: Literal["applied", "not_applied"] = "not_applied"
+    analysis_error: str | None = None
 
 
 class LoadDataError(FailedPreconditionError):
