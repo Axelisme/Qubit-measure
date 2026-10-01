@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-01 — OneTone 與 Fake records
+**Last updated:** 2026-10-02 — FastFlux records
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -21,6 +21,15 @@
 `fake.FakeExp` 使用 explicit context 產生純 freqs／signals。Acquisition controls 在 typed FakeCfg，measurement 與 abs fit 圖歸本次 Plots。Analyze 接 None options、回傳 None，接受 cfg=None。Save／load 使用 Frequency／Hz 與 complex data 的 canonical record，不再於 load 偽造資料。
 
 一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用上述 explicit context 入口。T1WithTone 共用純 T1Result，但 acquisition／analysis／record bookkeeping 仍待遷移；ScanT1WithTone 使用另一 Result，也尚未遷移。
+
+## FastFlux records
+
+FastFlux 六個核心使用 `run(config, *, context) -> Result`，不保存跨次 cfg／result。
+同步分析接收 explicit `RunRecord`、options 與 `Plots`。T1 與三個 distortion 回傳
+具名數值欄位，MIST 的 `MistAnalyzeOptions` 保留 `ac_coeff`，其餘無可調選項時傳入
+`None`。三個 distortion 需要來源 cfg 來取得 pulse 時間，缺少時明確拒絕。共用
+NotebookAdapter 建立 records；核心保留既有 canonical axes、單位與分析公式。
+下面的舊 run 範本亦不適用 FastFlux。
 
 ## 目錄佈局
 

@@ -98,6 +98,62 @@ class LinePlot:
         self._host.call(lambda: self._host.refresh(self._figure))
 
 
+def _heatmap_data(
+    xs: NDArray[np.float64],
+    ys: NDArray[np.float64],
+    signals: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    if any(np.iscomplexobj(data) for data in (xs, ys, signals)):
+        raise ValueError("Heatmap updates require real-valued data")
+    x_data = np.array(xs, dtype=np.float64, copy=True)
+    y_data = np.array(ys, dtype=np.float64, copy=True)
+    signal_data = np.array(signals, dtype=np.float64, copy=True)
+    if x_data.ndim != 1 or y_data.ndim != 1 or not x_data.size or not y_data.size:
+        raise ValueError("Heatmap axes must be non-empty one-dimensional arrays")
+    if signal_data.shape != (x_data.size, y_data.size):
+        raise ValueError("Heatmap signals shape must match the x and y axes")
+
+    return x_data, y_data, signal_data
+
+
+class HeatmapPlot:
+    """Update one named heatmap through its presentation owner."""
+
+    def __init__(
+        self,
+        host: PlotHost,
+        figure: Figure,
+        axes: Axes,
+        heatmap: Plot2DSegment | PlotNonUniform2DSegment,
+        ensure_active: Callable[[], None],
+    ) -> None:
+        self._host = host
+        self._figure = figure
+        self._axes = axes
+        self._heatmap = heatmap
+        self._ensure_active = ensure_active
+
+    def update(
+        self,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        signals: NDArray[np.float64],
+        title: str | None = None,
+        *,
+        refresh: bool = True,
+    ) -> None:
+        self._ensure_active()
+        x_data, y_data, signal_data = _heatmap_data(xs, ys, signals)
+
+        def apply() -> None:
+            self._ensure_active()
+            self._heatmap.update(self._axes, x_data, y_data, signal_data, title)
+            if refresh:
+                self._host.refresh(self._figure)
+
+        self._host.call(apply)
+
+
 class HeatmapLinePlot:
     """Update a named 2D heatmap and its most recent scan lines on one owner."""
 
@@ -132,15 +188,7 @@ class HeatmapLinePlot:
     ) -> None:
         """Validate and copy producer data before dispatching artist mutation."""
         self._ensure_active()
-        if any(np.iscomplexobj(data) for data in (xs, ys, signals)):
-            raise ValueError("Heatmap updates require real-valued data")
-        x_data = np.array(xs, dtype=np.float64, copy=True)
-        y_data = np.array(ys, dtype=np.float64, copy=True)
-        signal_data = np.array(signals, dtype=np.float64, copy=True)
-        if x_data.ndim != 1 or y_data.ndim != 1 or not x_data.size or not y_data.size:
-            raise ValueError("Heatmap axes must be non-empty one-dimensional arrays")
-        if signal_data.shape != (x_data.size, y_data.size):
-            raise ValueError("Heatmap signals shape must match the x and y axes")
+        x_data, y_data, signal_data = _heatmap_data(xs, ys, signals)
 
         line_xs = x_data if self._line_axis == 0 else y_data
         # The final non-empty row/column is current; earlier lines retain scan order.
@@ -206,6 +254,34 @@ class Plots(FigureCollection):
             segment = Plot1DSegment(xlabel, ylabel, title=title, num_lines=num_lines)
             segment.init_ax(axes)
             viewer = LinePlot(self._host, figure, axes, segment, self._ensure_active)
+            self._host.present(figure)
+            self._live.append(figure)
+            return viewer
+
+        return self._host.call(create)
+
+    def liveplot_2d(
+        self,
+        name: str,
+        xlabel: str,
+        ylabel: str,
+        *,
+        title: str | None = None,
+        uniform: bool = True,
+    ) -> HeatmapPlot:
+        """Present a named heatmap without adding scan-line axes."""
+        self._ensure_active()
+
+        def create() -> HeatmapPlot:
+            self._ensure_active()
+            figure, axes = self.subplots(name)
+            heatmap = (
+                Plot2DSegment(xlabel, ylabel, title)
+                if uniform
+                else PlotNonUniform2DSegment(xlabel, ylabel, title)
+            )
+            heatmap.init_ax(axes)
+            viewer = HeatmapPlot(self._host, figure, axes, heatmap, self._ensure_active)
             self._host.present(figure)
             self._live.append(figure)
             return viewer

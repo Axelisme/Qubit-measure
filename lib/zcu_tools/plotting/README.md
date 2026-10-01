@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 繪圖能力家族
 
-**Last updated:** 2026-10-01 — 完成成果與 presentation handle 分離
+**Last updated:** 2026-10-02 — 單熱圖與掃描線圖共用 explicit owner
 
 本目錄收納具獨立定位或真實跨入口需求的共用繪圖能力。`liveplot/` 提供即時更新的 plotter、segment 與 frontend-neutral backend 契約，供 experiment runtime 與 GUI caller 使用；詳見 [liveplot/README.md](liveplot/README.md)。
 
@@ -13,9 +13,9 @@
 canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換全域 backend。
 一般圖可先繪製與保存，adapter 於操作完成後才接上呈現。此接口不處理 frontend
 呈現、保存政策或 Matplotlib thread safety。
-`plots.Plots` 在此集合上提供明確 `PlotHost`、typed 1D liveplot 與
-`liveplot_2d_with_line`。2D handle 接受 `(len(xs), len(ys))` 的實數資料，
-以熱圖及最近掃描線呈現；uniform 與 nonuniform 座標共用具名 Figure。
+`plots.Plots` 在此集合上提供明確 `PlotHost`、typed 1D liveplot、單熱圖
+`liveplot_2d` 與含最近掃描線的 `liveplot_2d_with_line`。兩種 2D handle 共用
+`(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。
 一般圖在 `finish()` 時呈現，liveplot 立即呈現；update 先驗證與複製資料，
 再同步送到 host owner 修改 artists。不呈現 host 仍建圖、更新 artists 並支援
 原生 savefig。匯入明確 plots 不初始化 pyplot 或 Notebook display；非呈現操作

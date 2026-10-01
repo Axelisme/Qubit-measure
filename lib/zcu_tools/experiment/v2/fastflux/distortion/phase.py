@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -16,14 +13,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
     ProgramV2Cfg,
@@ -45,7 +42,6 @@ class PhaseResult:
     lengths: NDArray[np.float64]
     phases: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: PhaseCfg | None = None
 
 
 def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -70,6 +66,12 @@ class PhaseCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: PhaseSweepCfg
 
 
+@dataclass(frozen=True)
+class PhaseAnalysis:
+    lengths_us: NDArray[np.float64]
+    phases_deg: NDArray[np.float64]
+
+
 class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
     # inner phases raw deg (IDENTITY); outer lengths memory-us -> disk-s via US_TO_S
     AXES_SPEC = AxesSpec(
@@ -83,17 +85,15 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         tag="fastflux/distortion/phase",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: PhaseCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> PhaseResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run(self, config: PhaseCfg, *, context: RunContext) -> PhaseResult:
+        cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         length_sweep = cfg.sweep.length
@@ -106,57 +106,55 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
-        with LivePlot2D("Time (us)", "Phase (deg)") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths), len(phases)),
-                on_update=lambda data: viewer.update(
-                    lengths, phases, phase_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                length_param = sweep2param("length", sched.cfg.sweep.length)
-                phase_param = sweep2param("phase", sched.cfg.sweep.phase)
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Join(
-                            Pulse("flux_pulse", modules.flux_pulse),
-                            [
-                                SoftDelay("wait_time", delay=length_param),
-                                Pulse("pi2_pulse1", modules.pi2_pulse),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg=modules.pi2_pulse.with_updates(
-                                        phase=phase_param
-                                    ),
-                                ),
-                            ],
-                            SoftDelay("readout_t", sched.cfg.readout_t),
-                        ),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length", sched.cfg.sweep.length)
-                    .declare_sweep("phase", sched.cfg.sweep.phase)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+        viewer = context.plots.liveplot_2d("measurement", "Time (us)", "Phase (deg)")
+        signals_buffer = SignalBuffer(
+            (len(lengths), len(phases)),
+            on_update=lambda data: viewer.update(
+                lengths, phases, phase_signal2real(data)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            length_param = sweep2param("length", sched.cfg.sweep.length)
+            phase_param = sweep2param("phase", sched.cfg.sweep.phase)
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Join(
+                        Pulse("flux_pulse", modules.flux_pulse),
+                        [
+                            SoftDelay("wait_time", delay=length_param),
+                            Pulse("pi2_pulse1", modules.pi2_pulse),
+                            Pulse(
+                                name="pi2_pulse2",
+                                cfg=modules.pi2_pulse.with_updates(phase=phase_param),
+                            ),
+                        ],
+                        SoftDelay("readout_t", sched.cfg.readout_t),
+                    ),
+                    Readout("readout", modules.readout),
                 )
-                signals = signals_buffer.array
+                .declare_sweep("length", sched.cfg.sweep.length)
+                .declare_sweep("phase", sched.cfg.sweep.phase)
+                .build_and_acquire()
+            )
 
-        return PhaseResult(lengths, phases, signals, cfg_snapshot=orig_cfg)
+        return PhaseResult(lengths, phases, signals_buffer.array)
 
-    @retrieve_result
     def analyze(
         self,
-        result: PhaseResult | None = None,
-    ) -> Figure:
-        assert result is not None, "No result found"
+        source: RunRecord[PhaseCfg, PhaseResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> PhaseAnalysis:
+        del options  # This analysis has no configurable options.
+        result = source.result
 
-        cfg = result.cfg_snapshot
+        cfg = source.cfg
         if cfg is None:
-            raise ValueError("cfg_snapshot is None")
+            raise ValueError("Analysis requires source.cfg")
         modules = cfg.modules
 
         flux_pulse = modules.flux_pulse
@@ -191,7 +189,8 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
             mean_topdetune
         )
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
+        fig, _ = plots.subplots("fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True)
+        ax1, ax2 = fig.axes
         ax1.imshow(
             real_signals.T,
             extent=(lengths[0], lengths[-1], phases[0], phases[-1]),
@@ -206,14 +205,13 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         ax2.set_ylabel("Phase (deg)")
         ax2.set_xlabel("Wait Time (us)")
 
-        plot_kwargs = dict(color="gray", alpha=0.3)
-        ax2.axvspan(start_t - pi2_len, start_t + pi2_len, **plot_kwargs)
+        ax2.axvspan(start_t - pi2_len, start_t + pi2_len, color="gray", alpha=0.3)
         ax1.axvline(start_t, color="black", linestyle="--")
-        ax2.axvspan(end_t - pi2_len, end_t + pi2_len, **plot_kwargs)
+        ax2.axvspan(end_t - pi2_len, end_t + pi2_len, color="gray", alpha=0.3)
         ax1.axvline(end_t, color="black", linestyle="--")
 
         ax2.legend()
 
         fig.tight_layout()
 
-        return fig
+        return PhaseAnalysis(lengths_us=lengths, phases_deg=init_phases)

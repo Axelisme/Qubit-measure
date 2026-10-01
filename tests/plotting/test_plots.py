@@ -200,6 +200,68 @@ def test_live_name_conflict_does_not_present_another_figure() -> None:
     plots.finish()
 
 
+@pytest.mark.parametrize("uniform", [True, False])
+def test_plain_heatmap_preserves_data_and_native_figure_across_lifecycle(
+    uniform: bool,
+) -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+    viewer = plots.liveplot_2d("scan", "Time", "Phase", uniform=uniform)
+    figure = plots["scan"]
+    assert host.presented == [figure]
+    (axes,) = figure.axes
+    xs, ys = np.array([0.0, 1.0]), np.array([10.0, 20.0])
+    data = np.array([[1.0, 2.0], [3.0, np.nan]])
+
+    def mutate_source() -> None:
+        xs[:] = 99
+        ys[:] = 99
+        data[:] = 99
+
+    host.before_call = mutate_source
+    viewer.update(xs, ys, data, "partial scan", refresh=False)
+    expected = np.array([[1.0, 3.0], [2.0, np.nan]])
+    np.testing.assert_allclose(
+        np.asarray(axes.images[0].get_array()), expected, equal_nan=True
+    )
+    extent = (-0.5, 1.5, 5.0, 25.0) if uniform else (0.0, 1.0, 10.0, 20.0)
+    assert axes.images[0].get_extent() == pytest.approx(extent)
+    assert axes.get_title() == "partial scan"
+    assert axes.get_xlabel() == "Time"
+    assert axes.get_ylabel() == "Phase"
+    assert host.refreshed == []
+
+    dispatched: list[bool] = []
+    host.before_call = lambda: dispatched.append(True)
+    for bad_xs, bad_data in (
+        (xs, np.ones((1, 3))),
+        (np.array([], dtype=float), data),
+        (xs, np.ones((2, 2), dtype=complex)),
+    ):
+        with pytest.raises(ValueError, match="real-valued|non-empty|shape"):
+            viewer.update(bad_xs, ys, bad_data)
+    assert dispatched == []
+    np.testing.assert_allclose(
+        np.asarray(axes.images[0].get_array()), expected, equal_nan=True
+    )
+    with pytest.raises(ValueError, match="already belongs"):
+        plots.liveplot_2d("scan", "x", "y")
+    assert host.presented == [figure]
+
+    host.before_call = None
+    viewer.update(np.array([0.0, 1.0]), np.array([10.0, 20.0]), expected.T)
+    assert host.refreshed == [(figure, False)]
+    assert plots.finish()["scan"] is figure
+    assert host.refreshed == [(figure, False), (figure, True)]
+    plots.release()
+    assert host.released == [figure]
+    with pytest.raises(RuntimeError, match="finished"):
+        viewer.update(xs, ys, data)
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_heatmap_line_plot_keeps_partial_scan_lines_and_native_figure() -> None:
     plots = Plots(NonPresentingHost())
     viewer = plots.liveplot_2d_with_line(
