@@ -30,6 +30,7 @@ jupyter:
 %load_ext autoreload
 import os
 import time
+from pathlib import Path
 from pprint import pprint
 
 import matplotlib.pyplot as plt
@@ -384,7 +385,9 @@ res_gain_exp.save(
 
 ## Flux dependence
 
-OneTone FluxDep 的 Notebook analyze 回傳互動控制物件。啟動不代表分析完成；有效選點後按 Done 才發布結果與 `pick` 圖，Cancel 保留上一筆成功分析。
+OneTone FluxDep core 只負責量測與資料保存。`NotebookAdapter` 回傳 RunRecord，獨立的 `FluxDepAnalyzer` 捕捉這筆來源並顯示選線工具。Start 不代表完成。有效選點後按 Done，本次 interaction 才發布 AnalysisRecord 與純具名 `pick` 圖。Cancel 或失敗不覆蓋工具的上一筆成功分析。
+
+後續 run 或 load 不改本次選線的 source。下一格讀 `flux_pick.record`，不把工具保留的舊成果當成本次 Done。`FluxDepPickerOptions` 只是初值，`flux_record.options` 保存實際終態。`flux_record.figures` 持有原生圖，`flux_pick.plots` 另管理呈現。確定 handle 非 None 後可呼叫 `release()` 釋放 canvas／toolbar，原 Figure 仍可 `savefig`。
 
 ```python
 cur_value = flux_yoko.set_current(-5e-3)
@@ -426,26 +429,35 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, ze.onetone.FluxDepCfg, reps=1000, rounds=1)
 
-from zcu_tools.notebook.experiments import FluxDepNotebookExp
+from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepExp
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.notebook.experiments import FluxDepAnalyzer, FluxDepPickerOptions
 
-res_flux_exp = FluxDepNotebookExp()
-_ = res_flux_exp.run(soc, soccfg, cfg)
+res_flux_exp = NotebookAdapter(FluxDepExp(), soc=soc, soccfg=soccfg)
+flux_run = res_flux_exp.run(cfg)
+flux_analyzer = FluxDepAnalyzer()
 ```
 
 ```python
-res_flux_exp.save(
-    filepath=reserve_labber_filepath(os.path.join(database_path, f"{res_name}_flux")),
+flux_filepath = res_flux_exp.save(
+    flux_run,
+    Path(database_path) / f"{res_name}_flux",
+    unique=True,
 )
 ```
 
+離線時可用 `NotebookAdapter(FluxDepExp()).load(flux_filepath)` 取得 RunRecord，再傳給獨立選線工具，不需要 soc／soccfg。有效資料的 cfg 可以是 None，選線仍可完成，預設 canonical saver 則拒絕缺 cfg 的來源。`save` 明確接收來源，`unique=True` 由 Adapter 選擇未占用路徑並回傳實際 Path，不建立鎖或完整 analysis session 檔案。
+
 ```python
-flux_pick = res_flux_exp.analyze()  # Select the two lines, then click Done.
+flux_pick = flux_analyzer.start(flux_run, FluxDepPickerOptions())
+# Select the two lines, then click Done before running the next cell.
 ```
 
 ```python
-flux_record = res_flux_exp.analysis
+flux_record = flux_pick.record
 if flux_record is None:
     raise RuntimeError("Select the two flux lines and click Done first")
+flux_fig = flux_record.figures["pick"]
 md.flx_half = flux_record.result.flux_half
 md.flx_int = flux_record.result.flux_int
 md.flx_period = flux_record.result.flux_period
@@ -2672,10 +2684,13 @@ md.q_f
 
 ## T1
 
-一般 T1 使用實驗專屬 Notebook 入口。它直接呈現 widget，不需切換全域 Matplotlib backend。`uniform` 屬於量測設定，隨結果保存。下面 With Tone 與 With Sweep Tone 是不同實驗，尚待後續遷移。
+一般 T1 使用 `NotebookAdapter(T1Exp())`，直接呈現 Notebook widget。Adapter 每次 run 配對 typed cfg 與純 Result，回傳 RunRecord。`uniform` 屬於量測設定，隨來源保存。同步 analyze 接收 typed options，回傳含 source、數值與純具名圖的 AnalysisRecord。下面 With Tone 與 With Sweep Tone 是不同實驗，尚待後續遷移。
+
+離線時可用 `NotebookAdapter(T1Exp()).load(t1_filepath)` 取得來源，再明確傳給 analyze。Load 與分析不需要硬體 handles。缺 cfg 的有效來源仍可分析，預設 canonical saver 則拒絕保存。`figures` 是純具名圖，`t1_exp.analysis_presentation` 另管理 widget。需要釋放顯示時，先確認 handle 非 None，再呼叫其 `release()`；保留的 Figure 仍可 `savefig`。
 
 ```python
-from zcu_tools.notebook.experiments import T1Exp
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1AnalyzeOptions, T1Exp
+from zcu_tools.notebook import NotebookAdapter
 
 exp_cfg = {
     "modules": {
@@ -2700,24 +2715,25 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T1Cfg, reps=1000, rounds=100)
 
-t1_exp = T1Exp()
-_ = t1_exp.run(soc, soccfg, cfg)
+t1_exp = NotebookAdapter(T1Exp(), soc=soc, soccfg=soccfg)
+t1_run = t1_exp.run(cfg)
 ```
 
 ```python
-analysis = t1_exp.analyze(dual_exp=False, skip=1)
+t1_record = t1_exp.analyze(T1AnalyzeOptions(dual_exp=False, skip=1), source=t1_run)
+analysis = t1_record.result
 md.t1, md.t1err = analysis.t1, analysis.t1_err
-fig = t1_exp.analysis_plots["fit"]
+fig = t1_record.figures["fit"]
 md.t1
 ```
 
 ```python
 filename = f"{qub_name}_t1_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
-t1_exp.save(
-    filepath=reserve_labber_filepath(
-        os.path.join(database_path, f"{filename}@{em.label}")
-    ),
+t1_filepath = t1_exp.save(
+    t1_record.source,
+    Path(database_path) / f"{filename}@{em.label}",
+    unique=True,
     comment=f"t1 = {md.t1:.3f}us",
 )
 ```
@@ -2949,10 +2965,18 @@ jpa_sgs.get_info()
 
 ## Ground state & Excited state
 
-GE 使用實驗專屬 Notebook 入口。Primary analysis 回傳 typed 結果與具名 `fit` 圖。Post analysis 使用同一筆 primary 的來源與 calibration，不重新 fit，圖集合與 primary 分開。
+GE 使用 `NotebookAdapter(GE_Exp())`。Primary analyze 回傳 AnalysisRecord，包含同一 RunRecord source、typed options、數值與純具名 `fit` 圖。獨立 `GEPostAnalyzer` 明確接收這筆 primary，沿用其來源與 calibration，不重新 fit。Post record 的純圖與 primary 分開。
+
+後續 Adapter run／load 成功只清目前分析引用，不改保留的 primary 或獨立 post 工具。保存時指定 `ge_primary.source`，不讀另一筆 current run。離線時可用 `NotebookAdapter(GE_Exp()).load(ge_filepath)` 取得來源；缺 cfg 的有效資料可 FIT／post，預設 canonical saver 則拒絕保存。`ge_post_record.figures` 持有原生圖，`ge_post_analyzer.analysis_plots` 另管理呈現，確認 handle 非 None 後可 `release()`，原圖仍可保存。
 
 ```python
-from zcu_tools.notebook.experiments import GEExp
+from zcu_tools.experiment.v2.singleshot.ge import (
+    GE_Exp,
+    GEAnalyzeOptions,
+    GEPostAnalyzeOptions,
+)
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.notebook.experiments import GEPostAnalyzer
 
 exp_cfg = {
     "modules": {
@@ -2984,30 +3008,36 @@ exp_cfg = {
 cfg = ml.make_cfg(exp_cfg, ze.singleshot.GE_Cfg, shots=100000)
 print("readout length: ", cfg.modules.readout.ro_cfg.ro_length)
 
-sh_ge_exp = GEExp()
-_ = sh_ge_exp.run(soc, soccfg, cfg)
+ge_core = GE_Exp()
+sh_ge_exp = NotebookAdapter(ge_core, soc=soc, soccfg=soccfg)
+ge_run = sh_ge_exp.run(cfg)
+ge_post_analyzer = GEPostAnalyzer(ge_core)
 ```
 
 ```python
-ge_analysis = sh_ge_exp.analyze(
-    initial_state="ground",
-    backend="center",
-    # length_ratio=cfg.modules.readout.ro_cfg.ro_length / md.t1_with_tone,
-    logscale=True,
-    align_t1=True,
+ge_primary = sh_ge_exp.analyze(
+    GEAnalyzeOptions(
+        initial_state="ground",
+        backend="center",
+        # length_ratio=cfg.modules.readout.ro_cfg.ro_length / md.t1_with_tone,
+        logscale=True,
+        align_t1=True,
+    ),
+    source=ge_run,
 )
+ge_analysis = ge_primary.result
 md.fid = ge_analysis.fidelity
-fig = sh_ge_exp.analysis_plots["fit"]
+fig = ge_primary.figures["fit"]
 print(f"Optimal fidelity after rotation = {md.fid:.1%}")
 ```
 
 ```python
 filename = f"{qub_name}_sh_ge_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
-sh_ge_exp.save(
-    filepath=reserve_labber_filepath(
-        os.path.join(database_path, f"{filename}@{em.label}")
-    ),
+ge_filepath = sh_ge_exp.save(
+    ge_primary.source,
+    Path(database_path) / f"{filename}@{em.label}",
+    unique=True,
     comment=str(ge_analysis),
 )
 ```
@@ -3033,10 +3063,14 @@ md.g_center, md.e_center, md.ge_s
 ```
 
 ```python
-ge_post = sh_ge_exp.post_analyze(consider_other=False)
+ge_post_record = ge_post_analyzer.analyze(
+    ge_primary,
+    GEPostAnalyzeOptions(consider_other=False),
+)
+ge_post = ge_post_record.result
 md.confusion_matrix = ge_post.confusion.matrix
 md.ge_radius = ge_post.confusion.radius
-post_fig = sh_ge_exp.post_analysis_plots["post"]
+post_fig = ge_post_record.figures["post"]
 md.ge_radius / md.ge_s
 ```
 
