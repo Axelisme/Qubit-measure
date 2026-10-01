@@ -1,12 +1,18 @@
 """Explicit, experiment-specific Notebook entry points."""
 
-from .flux_dep import FluxDepAnalysisRecord, FluxDepInteraction, FluxDepNotebookExp
+from .flux_dep import (
+    FluxDepAnalysisRecord,
+    FluxDepAnalyzer,
+    FluxDepInteraction,
+    FluxDepPickerOptions,
+)
 from .ge import GEPostAnalysisRecord, GEPostAnalyzer, GEPrimaryRecord
 
 __all__ = [
     "FluxDepAnalysisRecord",
+    "FluxDepAnalyzer",
     "FluxDepInteraction",
-    "FluxDepNotebookExp",
+    "FluxDepPickerOptions",
     "GEPostAnalysisRecord",
     "GEPostAnalyzer",
     "GEPrimaryRecord",

@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import ipywidgets as widgets
@@ -13,51 +12,50 @@ from matplotlib.figure import Figure
 
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import (
+    FluxPickAnalysis,
     FluxPickInputs,
     FluxPickState,
     analyze_flux_pick,
     fold_initial_lines,
 )
-from zcu_tools.experiment.context import QickContext
-from zcu_tools.experiment.v2.onetone.flux_dep import (
-    FluxDepAnalysis,
-    FluxDepAnalyzeOptions,
-    FluxDepCfg,
-    FluxDepResult,
-)
-from zcu_tools.experiment.v2.onetone.flux_dep import (
-    FluxDepExp as FluxDepCore,
-)
+from zcu_tools.experiment.records import AnalysisRecord, RunRecord
+from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepResult
 from zcu_tools.notebook.plotting import NotebookPlotHost
-from zcu_tools.plotting.plots import NonPresentingHost, PlotHost, Plots
+from zcu_tools.plotting.plots import PlotHost, Plots
 
 
 @dataclass(frozen=True)
-class FluxDepAnalysisRecord:
-    source: FluxDepResult
-    options: FluxDepAnalyzeOptions
-    result: FluxDepAnalysis
-    plots: Plots
+class FluxDepPickerOptions:
+    """Initial picker positions and display settings, not terminal options."""
+
+    flux_half: float | None = None
+    flux_int: float | None = None
+    conjugate: bool = False
+    magnitude_only: bool = False
+
+
+FluxDepAnalysisRecord = AnalysisRecord[
+    FluxDepCfg, FluxDepResult, FluxPickState, FluxPickAnalysis
+]
 
 
 class FluxDepInteraction:
-    """Preview a selection; only an explicit Done publishes its core analysis."""
+    """Preview an explicit source; publish only after Done finishes successfully."""
 
-    def __init__(  # noqa: PLR0913 - Notebook interaction inputs are explicit
+    def __init__(
         self,
-        source: FluxDepResult,
-        core: FluxDepCore,
+        source: RunRecord[FluxDepCfg, FluxDepResult],
+        options: FluxDepPickerOptions,
         host: PlotHost,
-        publish: Callable[[FluxDepAnalysisRecord], None],
-        *,
-        flux_half: float | None,
-        flux_int: float | None,
-        conjugate: bool,
-        magnitude_only: bool,
-        present: bool,
+        publish: Callable[[FluxDepAnalysisRecord, Plots], None],
     ) -> None:
-        inputs = FluxPickInputs(source.signals, source.values, source.freqs)
-        half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
+        data = source.result
+        inputs = FluxPickInputs(data.signals, data.values, data.freqs)
+        half, integer = fold_initial_lines(
+            inputs.dev_values, options.flux_half, options.flux_int
+        )
+        conjugate = options.conjugate
+        magnitude_only = options.magnitude_only
         seed = FluxPickState(
             flux_half=half,
             flux_int=integer,
@@ -66,12 +64,10 @@ class FluxDepInteraction:
         )
         self._source = source
         self._inputs = inputs
-        self._core = core
         self._host = host
         self._publish = publish
-        self._present = present
         self.is_finished = False
-        self.result: FluxDepAnalysis | None = None
+        self.record: FluxDepAnalysisRecord | None = None
         self.plots: Plots | None = None
         self.figure = Figure(figsize=(8, 5))
         FigureCanvasAgg(self.figure)
@@ -121,16 +117,15 @@ class FluxDepInteraction:
         self.cancel_button.on_click(lambda _button: self.cancel())
         self.conjugate_checkbox.observe(self._set_conjugate, names="value")
         self.magnitude_checkbox.observe(self._set_magnitude, names="value")
-        if present:
+        try:
+            ipython_display.display(self.widget)
+            host.present(self.figure)
+        except BaseException:
             try:
-                ipython_display.display(self.widget)
-                host.present(self.figure)
-            except BaseException:
-                try:
-                    host.release(self.figure)
-                finally:
-                    self._close_controls()
-                raise
+                host.release(self.figure)
+            finally:
+                self._close_controls()
+            raise
         self.figure.canvas.mpl_connect("button_press_event", self._on_press)
         self.figure.canvas.mpl_connect("motion_notify_event", self._on_move)
         self.figure.canvas.mpl_connect("button_release_event", self._on_release)
@@ -145,52 +140,13 @@ class FluxDepInteraction:
         self.picker.apply_positions(half, integer)
         self._refresh()
 
-    def done(self) -> FluxDepAnalysis:
-        if self.is_finished:
-            raise RuntimeError("Flux interaction has finished")
-        half, integer = self.picker.positions()
-        options = FluxDepAnalyzeOptions(
-            half,
-            integer,
-            conjugate=self.conjugate_checkbox.value,
-            magnitude_only=self.magnitude_checkbox.value,
-        )
-        analyze_flux_pick(
-            self._inputs,
-            FluxPickState(
-                flux_half=half,
-                flux_int=integer,
-                conjugate=options.conjugate,
-                magnitude_only=options.magnitude_only,
-            ),
-        )
-        plots = Plots(self._host)
-        try:
-            result = self._core.analyze(self._source, options, plots=plots)
-        except BaseException:
-            try:
-                plots.finish(present=False)
-            finally:
-                plots.release()
-            raise
-        try:
-            plots.finish()
-        except BaseException:
-            try:
-                plots.release()
-            finally:
-                self._retire_preview()
-            raise
-        try:
-            self._retire_preview()
-        except BaseException:
-            plots.release()
-            raise
-        record = FluxDepAnalysisRecord(self._source, options, result, plots)
-        self._publish(record)
-        self.result = result
-        self.plots = plots
-        return result
+    def done(self) -> FluxDepAnalysisRecord:
+        """Commit the captured source, terminal state and native pick figure.
+
+        Invalid separation leaves this interaction editable. Other failures retire
+        this operation without replacing a previous successful record or plots.
+        """
+        raise NotImplementedError("independent flux-pick Done is not implemented")
 
     def cancel(self) -> None:
         if self.is_finished:
@@ -279,101 +235,31 @@ class FluxDepInteraction:
             self.status.value = str(error)
 
 
-class FluxDepNotebookExp:
-    """Notebook convenience over stateless OneTone acquisition and analysis."""
+class FluxDepAnalyzer:
+    """Analyze explicit run records independently of acquisition and persistence.
 
-    def __init__(self, *, present: bool = True) -> None:
-        self._core = FluxDepCore()
-        self._host: PlotHost = NotebookPlotHost() if present else NonPresentingHost()
-        self._present = present
-        self.last_result: FluxDepResult | None = None
-        self.run_plots: Plots | None = None
-        self._analysis: FluxDepAnalysisRecord | None = None
+    Start captures one source. Later adapter run/load calls cannot replace it or
+    clear this tool's successful analysis. Native figures and their presentation
+    handles are published together only after all operation cleanup succeeds.
+    """
 
-    @property
-    def analysis(self) -> FluxDepAnalysisRecord | None:
-        return self._analysis
+    def __init__(self, host: PlotHost | None = None) -> None:
+        self._host = NotebookPlotHost() if host is None else host
+        self.analysis: FluxDepAnalysisRecord | None = None
+        self.analysis_plots: Plots | None = None
 
-    @property
-    def analysis_plots(self) -> Plots:
-        if self._analysis is None:
-            raise RuntimeError("No successful FluxDep analysis")
-        return self._analysis.plots
-
-    def run(self, soc: Any, soccfg: Any, cfg: FluxDepCfg) -> FluxDepResult:
-        plots = Plots(self._host)
-        try:
-            result = self._core.run(cfg, context=QickContext(soc, soccfg, plots))
-            plots.finish()
-        except BaseException:
-            try:
-                plots.finish(present=False)
-            finally:
-                plots.release()
-            raise
-        self.last_result = result
-        self.run_plots = plots
-        self._analysis = None
-        return result
-
-    def analyze(
+    def start(
         self,
-        result: FluxDepResult | None = None,
-        *,
-        flux_half: float | None = None,
-        flux_int: float | None = None,
-        conjugate: bool = False,
-        magnitude_only: bool = False,
+        source: RunRecord[FluxDepCfg, FluxDepResult],
+        options: FluxDepPickerOptions | None = None,
     ) -> FluxDepInteraction:
-        source = self.last_result if result is None else result
-        if source is None:
-            raise ValueError("No FluxDep result to analyze")
         return FluxDepInteraction(
             source,
-            self._core,
+            FluxDepPickerOptions() if options is None else options,
             self._host,
             self._publish,
-            flux_half=flux_half,
-            flux_int=flux_int,
-            conjugate=conjugate,
-            magnitude_only=magnitude_only,
-            present=self._present,
         )
 
-    def save(
-        self,
-        filepath: str | Path,
-        result: FluxDepResult | None = None,
-        comment: str | None = None,
-        tag: str | None = None,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
-    ) -> None:
-        selected = self.last_result if result is None else result
-        if selected is None:
-            raise ValueError("No FluxDep result to save")
-        self._core.save(
-            selected,
-            Path(filepath),
-            comment=comment,
-            tag=tag,
-            server_ip=server_ip,
-            port=port,
-        )
-
-    def load(
-        self,
-        filepath: str | Path,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
-    ) -> FluxDepResult:
-        result = self._core.load(Path(filepath), server_ip=server_ip, port=port)
-        self.last_result = result
-        self.run_plots = None
-        self._analysis = None
-        return result
-
-    def _publish(self, record: FluxDepAnalysisRecord) -> None:
-        self._analysis = record
+    def _publish(self, record: FluxDepAnalysisRecord, plots: Plots) -> None:
+        self.analysis = record
+        self.analysis_plots = plots
