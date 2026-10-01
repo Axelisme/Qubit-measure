@@ -174,15 +174,22 @@ class FluxDepInteraction:
             figures = plots.finish()
             record = FluxDepAnalysisRecord(self._source, state, result, figures)
             self._retire_preview()
-        except BaseException:
-            try:
-                plots.finish(present=False)
-            finally:
+        except BaseException as error:
+            cleanup_errors: list[BaseException] = []
+            for cleanup in (lambda: plots.finish(present=False), plots.release):
                 try:
-                    plots.release()
-                finally:
-                    if not self.is_finished:
-                        self._retire_preview()
+                    cleanup()
+                except BaseException as cleanup_error:  # noqa: BLE001 - continue operation cleanup
+                    cleanup_errors.append(cleanup_error)
+            if not self.is_finished:
+                try:
+                    self._retire_preview()
+                except BaseException as cleanup_error:  # noqa: BLE001 - retain the preview failure
+                    cleanup_errors.append(cleanup_error)
+            if cleanup_errors:
+                raise BaseExceptionGroup(
+                    "Flux analysis and cleanup failed", [error, *cleanup_errors]
+                ) from None
             raise
         self._publish(record, plots)
         self.record = record
