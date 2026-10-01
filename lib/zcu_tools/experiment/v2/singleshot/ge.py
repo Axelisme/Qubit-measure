@@ -186,7 +186,6 @@ class GE_Result:
     signals: NDArray[np.complex128]
     shot_indices: NDArray[np.int64]
     prepared_states: NDArray[np.int64]
-    cfg_snapshot: GE_Cfg | None = None
 
 
 @dataclass(frozen=True)
@@ -339,7 +338,6 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             signals=signals,
             shot_indices=np.arange(signals.shape[1], dtype=np.int64),
             prepared_states=_default_prepared_states(),
-            cfg_snapshot=cfg,
         )
 
     def analyze(
@@ -347,7 +345,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
     ) -> GEAnalysis:
         """Fit probe-off/on shots, recording a named fit figure in this operation."""
         # Acquisition order is always probe off/on; fit in physical g/e order.
-        signals = ge_signals_by_state(source.signals, options.initial_state)
+        signals = ge_signals_by_state(source.result.signals, options.initial_state)
         if options.backend not in ("pca", "center"):
             raise ValueError(f"Unknown backend: {options.backend}")
         fidelity, init_pops, fit = singleshot_ge_analysis(
@@ -374,7 +372,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
 
     def post_analyze(
         self,
-        result: GE_Result,
+        source: RunRecord[GE_Cfg, GE_Result],
         primary: GEAnalysis,
         options: GEPostAnalyzeOptions,
         *,
@@ -383,7 +381,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         """Classify shots with the adopted primary calibration; do not refit."""
         primary.validate_calibration()
         g_signals, e_signals = ge_signals_by_state(
-            result.signals, primary.initial_state
+            source.result.signals, primary.initial_state
         )
         signals = (g_signals, e_signals)
         confusion = self._calc_confusion_matrix(signals, primary, options)

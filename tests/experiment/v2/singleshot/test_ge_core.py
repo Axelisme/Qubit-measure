@@ -22,7 +22,7 @@ from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutC
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
-def ge_result() -> GE_Result:
+def ge_source() -> RunRecord[GE_Cfg, GE_Result]:
     rng = np.random.default_rng(83)
     excited = rng.random((2, 6000)) < np.array([0.1, 0.9])[:, None]
     signals = np.asarray(
@@ -58,11 +58,11 @@ def ge_result() -> GE_Result:
             ),
         ),
     )
-    return GE_Result(signals, np.arange(6000), np.array([0, 1]), cfg)
+    return RunRecord(cfg, GE_Result(signals, np.arange(6000), np.array([0, 1])))
 
 
 def test_explicit_source_can_fit_without_cfg() -> None:
-    source = RunRecord[GE_Cfg, GE_Result](cfg=None, result=ge_result())
+    source = RunRecord[GE_Cfg, GE_Result](cfg=None, result=ge_source().result)
     notebook = NotebookAdapter(GE_Exp(), host=NonPresentingHost())
 
     record = notebook.analyze(GEAnalyzeOptions(length_ratio=0.01), source=source)
@@ -81,20 +81,15 @@ def test_fit_and_post_use_the_same_prepared_states_and_separate_named_figures(
     initial_state: Literal["ground", "excited"],
     tmp_path: Path,
 ) -> None:
-    original = ge_result()
-    signals = (
-        original.signals if initial_state == "ground" else original.signals[::-1].copy()
-    )
-    result = GE_Result(
-        signals,
-        original.shot_indices,
-        original.prepared_states,
-        original.cfg_snapshot,
-    )
+    original = ge_source()
+    raw = original.result
+    signals = raw.signals if initial_state == "ground" else raw.signals[::-1].copy()
+    result = GE_Result(signals, raw.shot_indices, raw.prepared_states)
+    source = RunRecord(original.cfg, result)
     before = result.signals.copy()
     fit_plots = Plots(NonPresentingHost())
     analysis = GE_Exp().analyze(
-        result,
+        source,
         GEAnalyzeOptions(
             backend=backend, initial_state=initial_state, length_ratio=0.01
         ),
@@ -109,7 +104,7 @@ def test_fit_and_post_use_the_same_prepared_states_and_separate_named_figures(
     assert list(fit_plots) == ["fit"]
     post_plots = Plots(NonPresentingHost())
     post = GE_Exp().post_analyze(
-        result, analysis, GEPostAnalyzeOptions(), plots=post_plots
+        source, analysis, GEPostAnalyzeOptions(), plots=post_plots
     )
     post_plots.finish()
     np.testing.assert_allclose(post.confusion.matrix, np.eye(3), atol=0.06)
@@ -123,11 +118,11 @@ def test_fit_and_post_use_the_same_prepared_states_and_separate_named_figures(
 
 
 def test_invalid_state_and_calibration_fail_before_post_artifact() -> None:
-    result = ge_result()
+    source = ge_source()
     plots = Plots(NonPresentingHost())
     with pytest.raises(ValueError, match="Unknown initial state"):
         GE_Exp().analyze(
-            result,
+            source,
             GEAnalyzeOptions(initial_state=cast(Any, "other")),
             plots=plots,
         )
@@ -142,20 +137,20 @@ def test_invalid_state_and_calibration_fail_before_post_artifact() -> None:
         init_pops=np.array([[0.9, 0.1], [0.1, 0.9]]),
     )
     with pytest.raises(ValueError, match="Invalid GE calibration"):
-        GE_Exp().post_analyze(result, primary, GEPostAnalyzeOptions(), plots=plots)
+        GE_Exp().post_analyze(source, primary, GEPostAnalyzeOptions(), plots=plots)
     assert len(plots) == 0
 
 
-def test_canonical_round_trip_keeps_prepared_axes_and_cfg_snapshot(
+def test_canonical_round_trip_keeps_prepared_axes_and_cfg(
     tmp_path: Path,
 ) -> None:
-    result = ge_result()
-    source = tmp_path / "ge.hdf5"
+    source = ge_source()
+    path = tmp_path / "ge.hdf5"
     exp = GE_Exp()
-    exp.save(result, source)
-    loaded = exp.load(source)
-    np.testing.assert_array_equal(loaded.signals, result.signals)
-    np.testing.assert_array_equal(loaded.shot_indices, result.shot_indices)
-    np.testing.assert_array_equal(loaded.prepared_states, [0, 1])
-    assert isinstance(loaded.cfg_snapshot, GE_Cfg)
-    assert loaded.cfg_snapshot.shots == 6000
+    exp.save(source, path)
+    loaded = exp.load(path)
+    np.testing.assert_array_equal(loaded.result.signals, source.result.signals)
+    np.testing.assert_array_equal(loaded.result.shot_indices, source.result.shot_indices)
+    np.testing.assert_array_equal(loaded.result.prepared_states, [0, 1])
+    assert isinstance(loaded.cfg, GE_Cfg)
+    assert loaded.cfg.shots == 6000
