@@ -23,13 +23,15 @@ def make_source() -> RunRecord[FluxDepCfg, FluxDepResult]:
     return RunRecord(cfg=None, result=FluxDepResult(values, freqs, signals))
 
 
-def test_done_publishes_source_options_numeric_result_and_named_figure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+@pytest.fixture(autouse=True)
+def suppress_notebook_display(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "zcu_tools.notebook.experiments.flux_dep.ipython_display.display",
         lambda _widget: None,
     )
+
+
+def test_done_publishes_source_options_numeric_result_and_named_figure(tmp_path) -> None:
     analyzer = FluxDepAnalyzer(NonPresentingHost())
     source = make_source()
     original_signals = source.result.signals.copy()
@@ -67,3 +69,29 @@ def test_done_publishes_source_options_numeric_result_and_named_figure(
             control.cancel()
         if analyzer.analysis_plots is not None:
             analyzer.analysis_plots.release()
+
+
+def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> None:
+    analyzer = FluxDepAnalyzer(NonPresentingHost())
+    first = analyzer.start(make_source(), FluxDepPickerOptions(-0.2, 0.3))
+    old = first.done()
+    old_plots = analyzer.analysis_plots
+    assert old_plots is not None
+    next_control = analyzer.start(make_source(), FluxDepPickerOptions(0.0, 0.0))
+    try:
+        with pytest.raises(ValueError, match="separated"):
+            next_control.done()
+        assert not next_control.is_finished
+        assert analyzer.analysis is old
+        assert analyzer.analysis_plots is old_plots
+        next_control.set_positions(-0.1, 0.4)
+        next_control.cancel_button.click()
+        assert next_control.is_finished
+        assert analyzer.analysis is old
+        assert analyzer.analysis_plots is old_plots
+        with pytest.raises(RuntimeError, match="finished"):
+            next_control.done()
+    finally:
+        if not next_control.is_finished:
+            next_control.cancel()
+        old_plots.release()
