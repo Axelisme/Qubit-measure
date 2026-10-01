@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
@@ -17,14 +15,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     LoadValue,
     ProgramV2Cfg,
@@ -46,11 +44,10 @@ class ZigZagScanResult:
     times: NDArray[np.int64]
     values: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: ZigZagScanCfg | None = None
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real  # type: ignore
+    return rotate2real(signals).real
 
 
 class ZigZagScanModuleCfg(ConfigBase):
@@ -69,6 +66,17 @@ class ZigZagScanCfg(ProgramV2Cfg, ExpCfgModel):
     modules: ZigZagScanModuleCfg
     sweep: ZigZagScanSweepCfg
     n_times: int
+    repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse"
+
+
+@dataclass(frozen=True)
+class ZigZagScanAnalyzeOptions:
+    find_range: tuple[float | None, float | None] = (None, None)
+
+
+@dataclass(frozen=True)
+class ZigZagScanAnalysis:
+    min_value: float
 
 
 class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
@@ -89,18 +97,17 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         tag="twotone/ge/zigzag_scan",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: ZigZagScanCfg,
-        *,
-        repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> ZigZagScanResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run(self, cfg: ZigZagScanCfg, *, context: RunContext) -> ZigZagScanResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        repeat_on = cfg.repeat_on
+
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         times = np.arange(0, cfg.n_times + 1)
@@ -121,76 +128,75 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
 
         values = sweep2array(
             x_sweep,
-            x_key,  # type: ignore
+            x_key,
             {"soccfg": soccfg, "gen_ch": repeat_pulse.ch},
         )
 
-        with LivePlot2D("Times", x_info["name"]) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(times), len(values)),
-                on_update=lambda data: viewer.update(
-                    times.astype(np.float64),
-                    values,
-                    zigzag_signal2real(data),
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
+        viewer = context.plots.liveplot_2d("measurement", "Times", x_info["name"])
+        signals_buffer = SignalBuffer(
+            (len(times), len(values)),
+            on_update=lambda data: viewer.update(
+                times.astype(np.float64),
+                values,
+                zigzag_signal2real(data),
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
 
-                X90_pulse = deepcopy(modules.X90_pulse)
-                repeat_pulse = getattr(modules, repeat_on)
-                if repeat_pulse is None:
-                    raise ValueError(f"Repeat on pulse {repeat_on} not found")
+            X90_pulse = deepcopy(modules.X90_pulse)
+            repeat_pulse = getattr(modules, repeat_on)
+            if repeat_pulse is None:
+                raise ValueError(f"Repeat on pulse {repeat_on} not found")
 
-                x_sweep = getattr(sched.cfg.sweep, x_key)
-                assert x_sweep is not None
-                x_param = sweep2param(x_info["param_key"], x_sweep)
-                repeat_pulse.set_param(x_info["param_key"], x_param)
+            x_sweep = getattr(sched.cfg.sweep, x_key)
+            assert x_sweep is not None
+            x_param = sweep2param(x_info["param_key"], x_sweep)
+            repeat_pulse.set_param(x_info["param_key"], x_param)
 
-                # Convert to plain int list: LoadValue.values expects Sequence[int],
-                # and numpy 2.x scalar types (int_) are not considered int by pyright.
-                loop_n: list[int] = [
-                    int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
-                ]
+            # Convert to plain int list: LoadValue.values expects Sequence[int],
+            # and numpy 2.x scalar types (int_) are not considered int by pyright.
+            loop_n: list[int] = [
+                int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
+            ]
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        LoadValue(
-                            "load_repeat_count",
-                            values=loop_n,
-                            idx_reg="times",
-                            val_reg="repeat_count",
-                        ),
-                        Reset("reset", cfg=modules.reset),
-                        Pulse("X90_pulse", cfg=X90_pulse),
-                        Repeat(
-                            "zigzag_loop",
-                            n="repeat_count",
-                            # int() cast: numpy scalar types are not plain int to pyright.
-                            range_hint=(int(min(times)), int(max(times))),
-                        ).add_content(Pulse(f"loop_{repeat_on}", cfg=repeat_pulse)),
-                        Readout("readout", cfg=modules.readout),
-                    )
-                    .declare_sweep("times", len(times))
-                    .declare_sweep(x_key, x_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    LoadValue(
+                        "load_repeat_count",
+                        values=loop_n,
+                        idx_reg="times",
+                        val_reg="repeat_count",
+                    ),
+                    Reset("reset", cfg=modules.reset),
+                    Pulse("X90_pulse", cfg=X90_pulse),
+                    Repeat(
+                        "zigzag_loop",
+                        n="repeat_count",
+                        # int() cast: numpy scalar types are not plain int to pyright.
+                        range_hint=(int(min(times)), int(max(times))),
+                    ).add_content(Pulse(f"loop_{repeat_on}", cfg=repeat_pulse)),
+                    Readout("readout", cfg=modules.readout),
                 )
-                signals = signals_buffer.array
+                .declare_sweep("times", len(times))
+                .declare_sweep(x_key, x_sweep)
+                .build_and_acquire()
+            )
 
         return ZigZagScanResult(
-            times=times, values=values, signals=signals, cfg_snapshot=orig_cfg
+            times=times, values=values, signals=signals_buffer.array
         )
 
-    @retrieve_result
     def analyze(
         self,
-        result: ZigZagScanResult | None = None,
-        find_range: tuple[float | None, float | None] = (None, None),
-    ) -> tuple[float, Figure]:
-        assert result is not None, "no result found"
+        source: RunRecord[ZigZagScanCfg, ZigZagScanResult],
+        options: ZigZagScanAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> ZigZagScanAnalysis:
+        result = source.result
+        find_range = options.find_range
 
         times = result.times
         values = result.values
@@ -214,14 +220,15 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
             loss[values > find_range[1]] = np.nan
         min_value = values[np.nanargmin(loss)]
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        fig, _ = plots.subplots("fit", nrows=2, ncols=1, sharex=True)
+        ax1, ax2 = fig.axes
 
         dx = (values[1] - values[0]) * 0.5
         dy = (times[1] - times[0]) * 0.5
         ax1.imshow(
             zigzag_signal2real(signals),
             aspect="auto",
-            extent=[values[0] - dx, values[-1] + dx, times[0] - dy, times[-1] + dy],
+            extent=(values[0] - dx, values[-1] + dx, times[0] - dy, times[-1] + dy),
             origin="lower",
             interpolation="none",
         )
@@ -235,4 +242,4 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         ax2.set_xlabel("Sweep value (a.u.)")
         ax2.set_ylabel("Loss (a.u.)")
 
-        return min_value, fig
+        return ZigZagScanAnalysis(min_value=float(min_value))

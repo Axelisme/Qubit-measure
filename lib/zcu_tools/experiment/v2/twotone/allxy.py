@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib import rcParams
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 
@@ -18,13 +17,13 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,
@@ -42,7 +41,6 @@ from zcu_tools.utils.process import rotate2real
 class AllXY_Result:
     gate_idxs: NDArray[np.int64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: AllXYCfg | None = None
 
 
 # Standard AllXY sequence of 21 gate pairs
@@ -123,6 +121,27 @@ def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 # ------------------------------------------------------------------------------
 
 
+def _configure_allxy_axes(ax: Axes) -> None:
+    # Configure x-axis labels
+    name_map = {
+        "I": "$I$",
+        "X90": "$X_{90}$",
+        "Y90": "$Y_{90}$",
+        "X180": "$X_{180}$",
+        "Y180": "$Y_{180}$",
+    }
+    gate_labels = [
+        f"{name_map[gate1]}-{name_map[gate2]}" for gate1, gate2 in ALLXY_SEQUENCE
+    ]
+    ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
+    ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
+    ax.grid(True)
+    line = ax.lines[0]
+    line.set_marker(".")
+    line.set_linestyle(rcParams["lines.linestyle"])
+    line.set_markersize(5)
+
+
 class AllXYModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
     I_pulse: PulseCfg | None = None
@@ -135,6 +154,11 @@ class AllXYCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AllXYModuleCfg
 
 
+@dataclass(frozen=True)
+class AllXYAnalyzeOptions:
+    fit_ge: bool = False
+
+
 class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
     AXES_SPEC = AxesSpec(
         axes=(Axis("gate_idxs", "Gate Pair Index", "", IDENTITY, np.int64),),
@@ -144,104 +168,79 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         tag="twotone/ge/allxy",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: AllXYCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> AllXY_Result:
-        orig_cfg = deepcopy(cfg)
+    def run(self, cfg: AllXYCfg, *, context: RunContext) -> AllXY_Result:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
 
-        with LivePlot1D(
-            xlabel="Gate",
-            ylabel="Signal",
-            segment_kwargs=dict(
-                show_grid=True,
-                line_kwargs=[dict(marker=".", linestyle=None, markersize=5)],
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Gate", "Signal", configure_axes=_configure_allxy_axes
+        )
+        signals_buffer = SignalBuffer(
+            (len(ALLXY_SEQUENCE),),
+            on_update=lambda data: viewer.update(
+                np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
+                allxy_signal2real(data),
             ),
-        ) as viewer:
-            # Configure x-axis labels
-            name_map = {
-                "I": "$I$",
-                "X90": "$X_{90}$",
-                "Y90": "$Y_{90}$",
-                "X180": "$X_{180}$",
-                "Y180": "$Y_{180}$",
-            }
-            gate_labels = [
-                f"{name_map[gate1]}-{name_map[gate2]}"
-                for gate1, gate2 in ALLXY_SEQUENCE
-            ]
-            ax = viewer.get_ax()
-            ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
-            ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            I_pulse = modules.I_pulse
+            X180_pulse = modules.X180_pulse
+            X90_pulse = modules.X90_pulse
+            Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
+            Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
 
-            signals_buffer = SignalBuffer(
-                (len(ALLXY_SEQUENCE),),
-                on_update=lambda data: viewer.update(
-                    np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                    allxy_signal2real(data),
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                I_pulse = modules.I_pulse
-                X180_pulse = modules.X180_pulse
-                X90_pulse = modules.X90_pulse
-                Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
-                Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
+            if I_pulse is None:
+                I_pulse = X90_pulse.with_updates(gain=0.0)
 
-                if I_pulse is None:
-                    I_pulse = X90_pulse.with_updates(gain=0.0)
+            # Order must match GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
+            gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
 
-                # Order must match GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
-                gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
-
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        LoadValue(
-                            "load_gate1_idx",
-                            values=ALLXY_GATE1_IDX,
-                            idx_reg="allxy_idx",
-                            val_reg="gate_idx1",
-                        ),
-                        LoadValue(
-                            "load_gate2_idx",
-                            values=ALLXY_GATE2_IDX,
-                            idx_reg="allxy_idx",
-                            val_reg="gate_idx2",
-                        ),
-                        Reset("reset", cfg=modules.reset),
-                        ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
-                        ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
-                        Readout("readout", cfg=modules.readout),
-                    )
-                    .declare_sweep("allxy_idx", len(ALLXY_SEQUENCE))
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    LoadValue(
+                        "load_gate1_idx",
+                        values=ALLXY_GATE1_IDX,
+                        idx_reg="allxy_idx",
+                        val_reg="gate_idx1",
+                    ),
+                    LoadValue(
+                        "load_gate2_idx",
+                        values=ALLXY_GATE2_IDX,
+                        idx_reg="allxy_idx",
+                        val_reg="gate_idx2",
+                    ),
+                    Reset("reset", cfg=modules.reset),
+                    ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
+                    ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
+                    Readout("readout", cfg=modules.readout),
                 )
-                signals = signals_buffer.array
+                .declare_sweep("allxy_idx", len(ALLXY_SEQUENCE))
+                .build_and_acquire()
+            )
 
         return AllXY_Result(
             gate_idxs=np.arange(len(ALLXY_SEQUENCE), dtype=np.int64),
-            signals=signals,
-            cfg_snapshot=orig_cfg,
+            signals=signals_buffer.array,
         )
 
-    @retrieve_result
     def analyze(
-        self, result: AllXY_Result | None = None, fit_ge: bool = False
-    ) -> Figure:
-        assert result is not None, (
-            "No measurement data available. Run experiment first."
-        )
+        self,
+        source: RunRecord[AllXYCfg, AllXY_Result],
+        options: AllXYAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> None:
+        result = source.result
+        fit_ge = options.fit_ge
 
         signals = result.signals
 
@@ -303,13 +302,13 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         power_err = np.mean(
             [
                 np.abs(predict_state_with_error(seq, ep, 0.0) - perf_state)
-                for seq, perf_state in zip(sequence, perfect_states)
+                for seq, perf_state in zip(sequence, perfect_states, strict=False)
             ]
         )
         detune_err = np.mean(
             [
                 np.abs(predict_state_with_error(seq, 0.0, ed) - perf_state)
-                for seq, perf_state in zip(sequence, perfect_states)
+                for seq, perf_state in zip(sequence, perfect_states, strict=False)
             ]
         )
 
@@ -317,7 +316,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         # 3. Plotting
         # ------------------------------------------------------------------
 
-        fig, ax = plt.subplots(figsize=config.figsize)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
         ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
         ax.plot(
             predict_signals,
@@ -350,6 +349,4 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
 
         ax.set_title(f"power dep: {power_err:.1%}, detune dep: {detune_err:.1%}")
 
-        plt.tight_layout()
-
-        return fig
+        fig.tight_layout()

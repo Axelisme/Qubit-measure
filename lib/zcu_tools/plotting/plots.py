@@ -243,7 +243,13 @@ class Plots(FigureCollection):
         *,
         title: str | None = None,
         num_lines: int = 1,
+        configure_axes: Callable[[Axes], None] | None = None,
     ) -> LinePlot:
+        """Configure native artists once on the host owner before presenting.
+
+        The callback must not retain active axes for later worker-side mutation.
+        Configuration errors propagate without presenting the incomplete figure.
+        """
         self._ensure_active()
         if num_lines < 1:
             raise ValueError("Line count must be positive")
@@ -253,6 +259,8 @@ class Plots(FigureCollection):
             figure, axes = self.subplots(name)
             segment = Plot1DSegment(xlabel, ylabel, title=title, num_lines=num_lines)
             segment.init_ax(axes)
+            if configure_axes is not None:
+                configure_axes(axes)
             viewer = LinePlot(self._host, figure, axes, segment, self._ensure_active)
             self._host.present(figure)
             self._live.append(figure)

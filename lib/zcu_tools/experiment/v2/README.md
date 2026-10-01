@@ -49,6 +49,10 @@ FreqFlux 的 `fail_retry` 是 typed cfg 欄位；GUI 選線由 plugin 擁有。N
 
 `AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 分別發布 measurement_ground／measurement_excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，Notebook callers 尚待遷移。
 
+## Twotone sequence records
+
+AllXY／RB／ZigZag／ZigZagScan 使用 explicit RunContext、純 Result 與具名 measurement。AllXY 的 gate ticks／style 由 host owner 在呈現前初始化，analyze 接 AllXYAnalyzeOptions，只發布 fit 圖。RB analyze 接 None options，回傳 EPC／fidelity；ZigZagScan 接 find_range options，回傳 min_value。兩者 fit 圖另交 Plots。ZigZag 的 repeat_on 歸 typed cfg，沒有 analyze。Canonical 軸與 RB seed／recovery 演算法不變。
+
 ## 目錄佈局
 
 ```text

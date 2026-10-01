@@ -7,6 +7,7 @@ from typing import Any, TypeVar, cast
 
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from zcu_tools.plotting.figures import FigureCollection
@@ -64,6 +65,60 @@ def test_live_updates_and_native_save_work_without_presentation() -> None:
     assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
     with pytest.raises(RuntimeError, match="finished"):
         viewer.update(xs, ys)
+
+
+def test_live_axes_configuration_runs_on_owner_before_presenting() -> None:
+    class OwnerHost(RecordingHost):
+        in_call = False
+
+        def call(self, callback: Callable[[], _T]) -> _T:
+            self.in_call = True
+            try:
+                return callback()
+            finally:
+                self.in_call = False
+
+    host = OwnerHost()
+    plots = Plots(host)
+    configured: list[Axes] = []
+
+    def configure(axes: Axes) -> None:
+        assert host.in_call
+        assert host.presented == []
+        configured.append(axes)
+        axes.set_xticks([0.0, 1.0], ["I-I", "X-X"], rotation=30)
+        axes.lines[0].set_marker("x")
+        axes.lines[0].set_linestyle("None")
+
+    viewer = plots.liveplot_1d("gates", "Gate", "Signal", configure_axes=configure)
+    axes = plots["gates"].axes[0]
+    assert configured == [axes]
+    assert host.presented == [plots["gates"]]
+    viewer.update(np.array([0.0, 1.0]), np.array([0.2, 0.8]))
+    assert configured == [axes]
+    assert [tick.get_text() for tick in axes.get_xticklabels()] == ["I-I", "X-X"]
+    assert axes.lines[0].get_marker() == "x"
+    assert axes.lines[0].get_linestyle() == "None"
+    np.testing.assert_array_equal(axes.lines[0].get_ydata(), [0.2, 0.8])
+    plots.finish()
+    plots.release()
+
+
+def test_live_axes_configuration_failure_is_not_presented() -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+
+    def configure(axes: Axes) -> None:
+        axes.set_title("incomplete")
+        raise ValueError("invalid configuration")
+
+    with pytest.raises(ValueError, match="invalid configuration"):
+        plots.liveplot_1d("failed", "x", "y", configure_axes=configure)
+    assert host.presented == []
+    figures = plots.finish(present=False)
+    assert figures["failed"].axes[0].get_title() == "incomplete"
+    plots.release()
+    assert host.released == [figures["failed"]]
 
 
 def test_normal_figures_wait_for_finish_and_last_live_frame_refreshes() -> None:

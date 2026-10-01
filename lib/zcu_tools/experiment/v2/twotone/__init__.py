@@ -8,7 +8,7 @@ from .ac_stark import (
     AcStarkRamseyCfg,
     AcStarkRamseyExp,
 )
-from .allxy import AllXY_Exp, AllXYCfg
+from .allxy import AllXY_Exp, AllXYAnalyzeOptions, AllXYCfg
 from .ckp import CKP_Cfg, CKP_Exp, CKPAnalysis
 from .dispersive import (
     DispersiveAnalysis,
@@ -19,9 +19,14 @@ from .dispersive import (
 from .fluxdep import FreqFluxCfg, FreqFluxExp
 from .freq import FreqAnalysis, FreqAnalyzeOptions, FreqCfg, FreqExp
 from .power_dep import PowerCfg, PowerExp
-from .rb import RB_Exp, RBCfg
+from .rb import RB_Exp, RBAnalysis, RBCfg
 from .zigzag import ZigZagCfg, ZigZagExp
-from .zigzag_sweep import ZigZagScanCfg, ZigZagScanExp
+from .zigzag_sweep import (
+    ZigZagScanAnalysis,
+    ZigZagScanAnalyzeOptions,
+    ZigZagScanCfg,
+    ZigZagScanExp,
+)
 
 __all__ = [
     # modules
@@ -40,6 +45,7 @@ __all__ = [
     # allxy
     "AllXY_Exp",
     "AllXYCfg",
+    "AllXYAnalyzeOptions",
     # ckp
     "CKP_Exp",
     "CKP_Cfg",
@@ -63,9 +69,12 @@ __all__ = [
     # randomized benchmarking
     "RB_Exp",
     "RBCfg",
+    "RBAnalysis",
     # zigzag
     "ZigZagExp",
     "ZigZagCfg",
     "ZigZagScanExp",
     "ZigZagScanCfg",
+    "ZigZagScanAnalyzeOptions",
+    "ZigZagScanAnalysis",
 ]
