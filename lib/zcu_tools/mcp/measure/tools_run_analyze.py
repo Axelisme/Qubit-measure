@@ -8,6 +8,7 @@ from typing import Any
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.images import validated_png
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
@@ -38,7 +39,15 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
     started = ctx.send_gui_rpc(method, {"tab_id": tab, "updates": params})
     execution = ctx.session.executions.start(ctx.gui, tab, stage, started)
     if started["interactive"]:
-        tab_interact(ctx, {"tab": tab})
+        if execution.snapshot().status == "interactive":
+            try:
+                tab_interact(ctx, {"tab": tab})
+            except (GuiRpcError, ValueError, OSError) as exc:
+                # The start receipt already owns an execution. A lost handoff
+                # must not hide it or replace completion observed by its worker.
+                execution.observe_interaction(
+                    ToolReply({"figure": None, "delivery_error": str(exc)}, is_error=True)
+                )
         return execution.wait(0)
     return execution.wait(2.0)
 
