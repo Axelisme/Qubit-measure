@@ -77,14 +77,23 @@ A new tab created with tab.new carries an owner-thread existence receipt.
 Use tab_interact without payload to read the active plugin's committed state and
 commands; send one payload={command,args} to act. This method alone has no seen
 guard: GUI and agent commits use owner-loop order, and the later commit wins.
-Reads preserve focus; commands follow the Analysis pane. done settles the original
-analysis operation, and cancel(op) cancels it. preview_active describes local
-preview, not the committed state. Figure paths belong to this MCP session.
-Use status for the current GUI session and all live operations, wait(op) for a
-bounded outcome, and cancel(op) only when the domain operation supports it.
-wait(op) reports a failed operation as data; cancel(op) on a failed operation
-raises operation_failed instead of reporting success. The server drops its
-socket on exit but does not close the GUI. There are no
+Reads preserve focus; commands follow the Analysis pane. done returns the original
+analysis operation receipt, then joins its execution for result reads and image
+saving. preview_active describes local preview, not committed state. Figure paths
+belong to this MCP session; saved_images lists confirmed persistent image paths.
+Use status for the GUI session, live operations and this session's executions.
+status(execution) reads a local snapshot without reconnecting. wait(op) observes
+only the GUI operation; wait(execution) also waits for result reads, image saving
+and preview delivery. Both report failed outcomes as data, not query errors.
+Wait timeouts stop waiting, not the operation or its background continuation.
+For a registered analysis op or execution, cancel latches continuation intent even
+when the GUI operation is not cancellable. It starts no further result read or
+save, but retains the true outcome of any admitted save. gui_cancel describes the
+GUI request separately; terminal executions return not_needed without rewriting
+their outcome. Only unregistered cancel(op) retains the direct GUI hook behavior,
+including operation_failed for an already failed operation.
+The server disconnects and joins its workers before removing temporary PNGs on
+exit. It does not close the GUI or promise to stop hardware. There are no
 subscribed MCP events: read snapshots or wait on operation handles instead.
 Follow the run-measure-gui skill for hardware safety and measurement workflow.
 """
