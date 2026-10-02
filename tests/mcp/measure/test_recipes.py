@@ -472,8 +472,12 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         final = client.call("wait", {"execution": execution, "timeout": 2})
         assert not final.is_error  # Successful query, even when execution failed.
         assert final.data["status"] == ("cancelled" if save_succeeds else "failed")
-        assert final.data["raw_save"]["status"] == ("saved" if save_succeeds else "failed")
-        assert final.data["raw_save"]["path"] == ("/actual/raw.h5" if save_succeeds else None)
+        assert final.data["raw_save"]["status"] == (
+            "saved" if save_succeeds else "failed"
+        )
+        assert final.data["raw_save"]["path"] == (
+            "/actual/raw.h5" if save_succeeds else None
+        )
         if not save_succeeds:
             assert final.data["error"]["reason"] == "raw_save_failed"
         methods = [method for method, _ in client.transport.sent]

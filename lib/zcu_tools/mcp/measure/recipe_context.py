@@ -176,6 +176,8 @@ class RecipeContext:
             if self.progress.phase == "terminal":
                 return self._control_reply(GuiCancel("not_needed"))
             self._publish(cancel_requested=True, status="running")
+            if self.progress.phase == "raw_save":
+                return self._control_reply(GuiCancel("not_cancellable"))
         result = self._stop_run()
         return self._control_reply(result)
 
