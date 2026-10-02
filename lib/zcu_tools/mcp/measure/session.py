@@ -548,7 +548,7 @@ class MeasureMcpSession:
         except GuiTransportTimeoutError:
             # Preserve the ambiguous timeout classification; never replay.
             raise
-        except RuntimeError:
+        except (RuntimeError, OSError):
             # A disconnect may wake a pending RPC before its reply arrives.
             self._require_connection(generation)
             raise
