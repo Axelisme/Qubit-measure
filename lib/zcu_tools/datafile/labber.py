@@ -1163,18 +1163,9 @@ def _read_single_log(f, log):
     return z, axes, ts_rel
 
 
-def _read_uniform_multi_channel_log(
-    f: h5py.File, log: h5py.File | h5py.Group
-) -> tuple[
-    dict[str, tuple[str, np.ndarray]],
-    list[tuple[str, str, np.ndarray]],
-    np.ndarray | None,
-]:
-    """Read one scalar multi-channel log with strict Labber bookkeeping."""
-    if "Traces" in log:
-        raise ValueError("grouped v2 does not support vector or trace log channels")
-
-    source = log if "Log list" in log else f
+def _read_v2_log_channel_bookkeeping(
+    source: h5py.File | h5py.Group, channel_source: h5py.File | h5py.Group
+) -> tuple[list[str], h5py.Dataset, h5py.Group]:
     log_list = source.get("Log list")
     if not isinstance(log_list, h5py.Dataset):
         raise ValueError("grouped v2 log is missing Log list")
@@ -1184,7 +1175,6 @@ def _read_uniform_multi_channel_log(
     if len(set(channel_names)) != len(channel_names):
         raise ValueError("grouped v2 log channel labels must be unique")
 
-    channel_source = log if "Channels" in log else f
     channels_dataset = channel_source.get("Channels")
     if not isinstance(channels_dataset, h5py.Dataset):
         raise ValueError("grouped v2 log is missing Channels")
@@ -1211,6 +1201,25 @@ def _read_uniform_multi_channel_log(
     ]
     if set(configured_defaults) != set(channel_names):
         raise ValueError("grouped v2 Labber channel bookkeeping is inconsistent")
+    return channel_names, channels_dataset, instrument_config
+
+
+def _read_uniform_multi_channel_log(
+    f: h5py.File, log: h5py.File | h5py.Group
+) -> tuple[
+    dict[str, tuple[str, np.ndarray]],
+    list[tuple[str, str, np.ndarray]],
+    np.ndarray | None,
+]:
+    """Read one scalar multi-channel log with strict Labber bookkeeping."""
+    if "Traces" in log:
+        raise ValueError("grouped v2 does not support vector or trace log channels")
+
+    source = log if "Log list" in log else f
+    channel_source = log if "Channels" in log else f
+    channel_names, channels_dataset, instrument_config = (
+        _read_v2_log_channel_bookkeeping(source, channel_source)
+    )
 
     data_group = log.get("Data")
     if not isinstance(data_group, h5py.Group):
@@ -1266,29 +1275,22 @@ def _read_uniform_multi_channel_log(
     ):
         raise ValueError("grouped v2 step-channel bookkeeping is inconsistent")
 
+    # Decode inner-first axes, then verify every stored coordinate against them.
     units = _channel_units(f, log)
     axes: list[tuple[str, str, np.ndarray]] = []
-    for k in range(n_axes):
-        name = columns[k][0]
+    outer_strides = np.cumprod([1, *step_dims[1:-1]])
+    for k, name in enumerate(step_names):
         if k == 0:
             values = data[:, 0, 0]
         else:
-            stride = int(np.prod(step_dims[1:k])) if k > 1 else 1
-            indices = (np.arange(n_entry) // stride) % step_dims[k]
-            values = np.array(
-                [data[0, k, np.argmax(indices == j)] for j in range(step_dims[k])]
-            )
+            values = data[0, k, outer_strides[k - 1] * np.arange(step_dims[k])]
         axes.append((name, units.get(name, ""), np.asarray(values)))
 
     expected_steps = np.zeros((n_x, n_axes, n_entry), dtype=float)
     expected_steps[:, 0, :] = axes[0][2][:, None]
-    outer_shape = tuple(step_dims[1:][::-1])
-    if outer_shape:
-        multi = np.unravel_index(np.arange(n_entry), outer_shape)
-        n_outer = len(outer_shape)
-        for j in range(n_outer):
-            col = n_outer - j
-            expected_steps[:, col, :] = axes[col][2][multi[j]][None, :]
+    for col in range(n_axes - 1, 0, -1):
+        indices = (np.arange(n_entry) // outer_strides[col - 1]) % step_dims[col]
+        expected_steps[:, col, :] = axes[col][2][indices][None, :]
     if not np.array_equal(data[:, :n_axes, :], expected_steps, equal_nan=True):
         raise ValueError("grouped v2 step-coordinate columns do not match the grid")
 
@@ -1296,9 +1298,7 @@ def _read_uniform_multi_channel_log(
     for index, name in enumerate(channel_names):
         col = n_axes + 2 * index
         flat = (data[:, col, :] + 1j * data[:, col + 1, :]).T
-        values = flat.reshape(outer_shape + (n_x,))
-        if not outer_shape:
-            values = values.reshape(n_x)
+        values = flat.reshape(tuple(step_dims[::-1]))
         values_by_channel[name] = (units.get(name, ""), values)
 
     return values_by_channel, axes, _read_timestamps(data_group)

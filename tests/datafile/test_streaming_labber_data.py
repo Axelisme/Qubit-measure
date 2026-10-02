@@ -168,18 +168,20 @@ def test_streaming_grouped_close_marks_closed_when_underlying_close_fails(
     writer = open_streaming_grouped_labber_data(
         str(tmp_path / "broken_grouped"), [spec]
     )
-    original_file = writer._file
+    original_close = h5py.File.close
 
-    def fail_close() -> None:
+    def fail_close(file: h5py.File) -> None:
+        original_close(file)
         raise RuntimeError("close boom")
 
-    monkeypatch.setattr(original_file, "close", fail_close)
-    with pytest.raises(RuntimeError, match="close boom"):
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(h5py.File, "close", fail_close)
+            with pytest.raises(RuntimeError, match="close boom"):
+                writer.close()
+            writer.close()
+    finally:
         writer.close()
-
-    writer.close()
-    monkeypatch.undo()
-    original_file.close()
 
 
 def test_streaming_single_log_close_marks_closed_when_underlying_close_fails(
@@ -193,18 +195,20 @@ def test_streaming_single_log_close_marks_closed_when_underlying_close_fails(
         shape=(1,),
     )
     writer = open_streaming_labber_data(str(tmp_path / "broken_single"), spec)
-    original_file = writer._file
+    original_close = h5py.File.close
 
-    def fail_close() -> None:
+    def fail_close(file: h5py.File) -> None:
+        original_close(file)
         raise RuntimeError("close boom")
 
-    monkeypatch.setattr(original_file, "close", fail_close)
-    with pytest.raises(RuntimeError, match="close boom"):
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(h5py.File, "close", fail_close)
+            with pytest.raises(RuntimeError, match="close boom"):
+                writer.close()
+            writer.close()
+    finally:
         writer.close()
-
-    writer.close()
-    monkeypatch.undo()
-    original_file.close()
 
 
 def test_streaming_writer_validates_role_shape(tmp_path):
