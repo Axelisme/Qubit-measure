@@ -563,7 +563,10 @@ def test_rejected_done_keeps_registered_interaction_editable(
         "error": {"code": "invalid_params", "message": "selection required"},
     }
     rejected = _call_stdio(
-        monkeypatch, client, "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+        monkeypatch,
+        client,
+        "tab_interact",
+        {"tab": "t", "payload": {"command": "done"}},
     )
     assert rejected["isError"] is True
     assert "selection required" in rejected["content"][0]["text"]
@@ -643,12 +646,17 @@ def test_cancel_latches_intent_and_retains_original_terminal(
     if gui_cancel == "failed":
         assert "cannot send cancel" in data["gui_cancel"]["error"]["message"]
     repeated = _call_stdio(monkeypatch, client, "cancel", args)
-    assert json.loads(repeated["content"][0]["text"])["gui_cancel"] == data["gui_cancel"]
+    assert (
+        json.loads(repeated["content"][0]["text"])["gui_cancel"] == data["gui_cancel"]
+    )
     assert _methods(client).count("operation.cancel") == 1
     terminal.set()
     completed = _data(
         _call_stdio(
-            monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2}
+            monkeypatch,
+            client,
+            "wait",
+            {"execution": started["execution"], "timeout": 2},
         )
     )
     assert completed["status"] == ("failed" if outcome == "failed" else "cancelled")
@@ -657,7 +665,10 @@ def test_cancel_latches_intent_and_retains_original_terminal(
     assert completed["result"] is None
     assert completed["save_status"] == "not_started"
     assert set(_methods(client)) <= {
-        "tab.analyze", "tab.interact", "operation.await", "operation.cancel"
+        "tab.analyze",
+        "tab.interact",
+        "operation.await",
+        "operation.cancel",
     }
     frozen = client.call("status", {"execution": started["execution"]})
     final = _data(_call_stdio(monkeypatch, client, "cancel", args))
@@ -692,7 +703,9 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
-            return _result_reply("analysis", ["fit", "residual"] if remaining else ["fit"], {})
+            return _result_reply(
+                "analysis", ["fit", "residual"] if remaining else ["fit"], {}
+            )
         if method == "operation.cancel":
             return {"status": "finished"}
         raise AssertionError(method)
@@ -711,16 +724,23 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         if save_outcome == "rejected":
             return {
                 "ok": False,
-                "error": {"code": "precondition_failed", "message": "disk rejected export"},
+                "error": {
+                    "code": "precondition_failed",
+                    "message": "disk rejected export",
+                },
             }
         return {"ok": True, "result": {"image_path": "/actual/fit.png"}}
 
     client.transport.replies["tab.save_image"] = save
     with ThreadPoolExecutor(max_workers=1) as pool:
         try:
-            started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+            started = _data(
+                _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+            )
             assert saving.wait(2)
-            request = pool.submit(client.call, "cancel", {"execution": started["execution"]})
+            request = pool.submit(
+                client.call, "cancel", {"execution": started["execution"]}
+            )
             assert intent.wait(2)
             pending = client.call("status", {"execution": started["execution"]})
             assert pending["cancel_requested"] is True
@@ -731,17 +751,27 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         cancelled = request.result(timeout=3)
     assert cancelled.data["cancel_requested"] is True
     completed = _data(
-        _call_stdio(monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2})
+        _call_stdio(
+            monkeypatch,
+            client,
+            "wait",
+            {"execution": started["execution"], "timeout": 2},
+        )
     )
     assert completed["status"] == ("cancelled" if save_outcome == "saved" else "failed")
     assert completed["operation_outcome"]["status"] == "finished"
     assert completed["result"]["summary"] == {"frequency": 5.0}
     assert completed["saved_images"] == (
-        [{"figure_name": "fit", "image_path": "/actual/fit.png"}] if save_outcome == "saved" else []
+        [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+        if save_outcome == "saved"
+        else []
     )
     assert completed["save_status"] == (
-        ("incomplete" if remaining else "saved") if save_outcome == "saved"
-        else "unknown" if save_outcome == "lost" else "incomplete"
+        ("incomplete" if remaining else "saved")
+        if save_outcome == "saved"
+        else "unknown"
+        if save_outcome == "lost"
+        else "incomplete"
     )
     assert completed["unconfirmed_image"] == ("fit" if save_outcome == "lost" else None)
     if save_outcome != "saved":
@@ -773,7 +803,12 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {"operation_id": 71, "interactive": False, "params": {}, "invalidated_on_success": []}
+            return {
+                "operation_id": 71,
+                "interactive": False,
+                "params": {},
+                "invalidated_on_success": [],
+            }
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
@@ -789,9 +824,13 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     client = _client(tmp_path, clients, respond)
     with ThreadPoolExecutor(max_workers=2) as pool:
         try:
-            started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+            started = _data(
+                _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+            )
             assert save_ready.wait(2)
-            blocker = pool.submit(client.call, "rpc_call", {"method": "project.info", "params": {}})
+            blocker = pool.submit(
+                client.call, "rpc_call", {"method": "project.info", "params": {}}
+            )
             assert dispatch_save.wait(2)
             request = pool.submit(client.call, "cancel", {"op": started["op"]})
             assert intent.wait(2)
@@ -804,7 +843,12 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
         blocker.result(timeout=3)
         assert request.result(timeout=3).data["cancel_requested"] is True
     completed = _data(
-        _call_stdio(monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2})
+        _call_stdio(
+            monkeypatch,
+            client,
+            "wait",
+            {"execution": started["execution"], "timeout": 2},
+        )
     )
     assert completed["status"] == "cancelled"
     assert completed["saved_images"] == []

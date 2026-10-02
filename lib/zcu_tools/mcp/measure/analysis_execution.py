@@ -189,9 +189,7 @@ class AnalysisExecution:
             elif status in ("finished", "cancelled"):
                 result = GuiCancel("not_needed")
             else:
-                raise GuiRpcError(
-                    "invalid cancel reply", reason="incompatible_wire"
-                )
+                raise GuiRpcError("invalid cancel reply", reason="incompatible_wire")
         except Exception as exc:  # noqa: BLE001 - cancellation retains partial intent
             if isinstance(exc, GuiRpcError) and exc.reason == "not_cancellable":
                 result = GuiCancel("not_cancellable")

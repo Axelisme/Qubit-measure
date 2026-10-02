@@ -413,7 +413,11 @@ def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
         *[
             (tool, arguments, "exactly one")
             for tool in ("wait", "cancel")
-            for arguments in ({}, {"op": 1, "execution": "analysis-1"}, {"op": 1, "execution": None})
+            for arguments in (
+                {},
+                {"op": 1, "execution": "analysis-1"},
+                {"op": 1, "execution": None},
+            )
         ],
         *[
             (tool, {"execution": value}, "non-empty string")
