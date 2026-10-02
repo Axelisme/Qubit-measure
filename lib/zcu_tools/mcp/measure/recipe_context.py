@@ -179,6 +179,20 @@ class RecipeContext:
         result = self._stop_run()
         return self._control_reply(result)
 
+    def finish_early(self) -> ToolReply:
+        """Stop only Run, without revoking an already latched cancellation."""
+        with self._condition:
+            if self.progress.phase != "run":
+                return ToolReply(
+                    {
+                        "execution": self.progress.execution,
+                        "status": "not_applicable",
+                        "phase": self.progress.phase,
+                    }
+                )
+            self._publish(finish_early_requested=True)
+        return self._control_reply(self._stop_run())
+
     def _control_reply(self, result: GuiCancel) -> ToolReply:
         with self._condition:
             return ToolReply(
@@ -190,7 +204,10 @@ class RecipeContext:
     def _stop_run(self) -> GuiCancel:
         with self._condition:
             if (
-                not self.progress.cancel_requested
+                not (
+                    self.progress.cancel_requested
+                    or self.progress.finish_early_requested
+                )
                 or self.progress.phase != "run"
                 or self.progress.run_op is None
             ):
@@ -300,11 +317,17 @@ class RecipeContext:
             raise GuiRpcError(
                 str(outcome.get("error", "Run failed")), reason="run_failed"
             )
-        if outcome["status"] == "cancelled":
+        if outcome["status"] == "cancelled" and (
+            not self.progress.finish_early_requested or self.progress.cancel_requested
+        ):
             self._publish(status="cancelled", phase="terminal")
             return
         observed = self.rpc("tab.snapshot", {"tab_id": tab})["tabs"][0]
         self._publish(result_state=deepcopy(observed["result_state"]))
+        if not observed["result_state"]["available"]:
+            raise GuiRpcError(
+                "Run did not publish usable data", reason="run_result_unavailable"
+            )
         self._save_raw(tab, run_op)
         self._publish(phase="analysis")
         started = self.tools.gui.send_gui_rpc(

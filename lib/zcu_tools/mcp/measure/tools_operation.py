@@ -194,11 +194,20 @@ def cancel(
     return {"status": "cancelling"}
 
 
-def finish_early(
-    ctx: MeasureToolContext, arguments: dict[str, Any]
-) -> ToolReply:
+def finish_early(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
     """Stop only a recipe's Run, keeping usable partial results for its pipeline."""
-    raise NotImplementedError("Recipe finish_early control is not implemented")
+    if ("op" in arguments) == ("execution" in arguments):
+        raise ValueError("provide exactly one of op or execution")
+    if "execution" in arguments:
+        recipe = ctx.session.recipes.get(_execution_id(arguments))
+    else:
+        op = _operation_id(arguments)
+        recipe = ctx.session.recipes.for_op(op)
+        if recipe is None:
+            raise GuiRpcError(
+                f"No registered recipe for operation {op}", reason="unknown_operation"
+            )
+    return recipe.finish_early()
 
 
 def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:

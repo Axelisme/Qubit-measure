@@ -396,7 +396,8 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         if method == "operation.await" and params["operation_id"] == 71:
             return (
                 {"reason": "completed", "status": "cancelled"}
-                if release_run.is_set() else {"reason": "timeout"}
+                if release_run.is_set()
+                else {"reason": "timeout"}
             )
         if method == "operation.cancel":
             assert params == {"operation_id": 71}
