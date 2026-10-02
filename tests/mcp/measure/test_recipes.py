@@ -542,6 +542,73 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
 
 
 @pytest.mark.parametrize(
+    ("pending_method", "forbidden_method"),
+    [
+        ("tab.snapshot", "tab.save_data"),
+        ("operation.await", "tab.analyze"),
+        ("tab.get_figure", "tab.writeback_preview"),
+    ],
+)
+def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
+    tmp_path, monkeypatch, pending_method, forbidden_method
+):
+    gui = LookbackGui()
+    pending = Event()
+    release = Event()
+    control_replies = []
+
+    def respond(method, params):
+        at_boundary = method == pending_method and (
+            (method == "tab.snapshot" and gui.ran)
+            or (method == "operation.await" and params["operation_id"] == 82)
+            or method == "tab.get_figure"
+        )
+        if at_boundary:
+            pending.set()
+            assert release.wait(2)
+        if method == "operation.cancel":
+            return {"status": "finished"}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    controller = None
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert pending.wait(1)
+        execution = initial.data["execution"]
+        controller = Thread(
+            target=lambda: control_replies.append(
+                client.call("cancel", {"execution": execution})
+            )
+        )
+        controller.start()
+        for _ in range(100):
+            state = client.call("status", {"execution": execution})
+            if state["cancel_requested"]:
+                break
+            release.wait(0.01)
+        assert state["cancel_requested"]
+        assert forbidden_method not in [method for method, _ in client.transport.sent]
+        release.set()
+        controller.join(2)
+        assert not controller.is_alive()
+        assert control_replies[0].data["cancel_requested"]
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        assert terminal.data["status"] == "cancelled"
+        methods = [method for method, _ in client.transport.sent]
+        assert forbidden_method not in methods
+        assert methods.count("tab.run_start") == 1
+        if pending_method != "tab.snapshot":
+            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+    finally:
+        release.set()
+        if controller is not None:
+            controller.join(2)
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
     ("method_pending", "wire_op", "control"),
     [
         ("tab.run_start", 71, "cancel"),
