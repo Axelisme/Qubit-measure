@@ -147,8 +147,12 @@ class MeasureMcpSession:
             timeout_seconds: float | None = None,
             *,
             operation_handle: int | None = None,
+            before_send: Callable[[], None] | None = None,
         ) -> dict[str, Any]:
-            """Send once using this incarnation's live catalog and handle mapping."""
+            """Send once, admitting immediately before dispatch under the RPC lock.
+
+            before_send may reject by raising. It must not send RPCs or block.
+            """
             with self._session._rpc_lock:
                 return self._session._send_gui_rpc(
                     self._generation,
@@ -156,6 +160,7 @@ class MeasureMcpSession:
                     params,
                     timeout_seconds,
                     operation_handle=operation_handle,
+                    before_send=before_send,
                 )
 
         def expose_operation(self, gui_id: object) -> int:
@@ -469,6 +474,7 @@ class MeasureMcpSession:
         timeout_seconds: float | None = None,
         *,
         operation_handle: int | None = None,
+        before_send: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         self._require_connection(generation)
         if operation_handle is not None:

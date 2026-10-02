@@ -639,6 +639,53 @@ def make_serialization_client(
     return client, second
 
 
+def test_rpc_admission_rechecks_queued_intent_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = make_serialization_client(tmp_path, monkeypatch)
+    entered, release, attempted = Event(), Event(), Event()
+    preceding_replied, revoked = Event(), Event()
+    admissions: list[str] = []
+
+    def reply(params: dict[str, Any]) -> dict[str, Any]:
+        entered.set()
+        assert release.wait(3), "test did not release the preceding RPC"
+        preceding_replied.set()
+        return {"ok": True, "result": {"operation_id": 1}}
+
+    client.transport.replies["test.start"] = reply
+    binding = client.context.session.bind()
+
+    def admit() -> None:
+        assert preceding_replied.is_set(), "admission ran before acquiring the RPC lock"
+        admissions.append("checked")
+        if revoked.is_set():
+            raise ValueError("execution cancelled")
+
+    def queued_call() -> dict[str, Any]:
+        attempted.set()
+        return binding.send_gui_rpc("test.start", {}, before_send=admit)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(binding.send_gui_rpc, "test.start", {})
+        try:
+            assert entered.wait(3)
+            queued = pool.submit(queued_call)
+            assert attempted.wait(3)
+            revoked.set()
+        finally:
+            release.set()
+        assert first.result(timeout=3)["handle"] == 1
+        with pytest.raises(ValueError, match="execution cancelled"):
+            queued.result(timeout=3)
+    assert admissions == ["checked"]
+    assert [method for method, _ in client.transport.sent].count("test.start") == 1
+
+    revoked.clear()
+    assert binding.send_gui_rpc("test.start", {}, before_send=admit)["handle"] == 1
+    assert admissions == ["checked", "checked"]
+
+
 @pytest.mark.parametrize("action", ["rpc", "connect"])
 def test_rpc_and_connect_serialize_catalog_timeout_and_handle_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str
