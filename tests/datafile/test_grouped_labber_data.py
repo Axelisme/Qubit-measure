@@ -216,6 +216,43 @@ def test_grouped_v2_validates_complete_contract_before_file_creation(
     assert not path.with_suffix(".hdf5").exists()
 
 
+@pytest.mark.parametrize(
+    "case, match",
+    [
+        ("complete-role-first", "timestamps must be a flat array"),
+        ("compare-before-next-role", "must share one common grid"),
+        ("labels-after-all-roles", "data must be numeric"),
+    ],
+)
+def test_grouped_v2_reports_first_error_before_creating_file(tmp_path, case, match):
+    axes = [("X", "s", np.arange(3.0))]
+    base = LabberPayload(("Signal", "V", np.arange(3.0)), axes)
+    nonnumeric = LabberPayload(("Reference", "V", np.array(["a", "b", "c"])), axes)
+    cases = {
+        "complete-role-first": {
+            "signal": LabberPayload(base.data, axes, timestamps=np.array([0.0, 1.0])),
+            "reference": nonnumeric,
+        },
+        "compare-before-next-role": {
+            "signal": base,
+            "reference": LabberPayload(
+                ("Reference", "V", np.arange(3.0)), [("X", "s", np.arange(3.0) + 1)]
+            ),
+            "third": nonnumeric,
+        },
+        "labels-after-all-roles": {
+            "signal": LabberPayload(("X", "V", np.arange(3.0)), axes),
+            "reference": nonnumeric,
+        },
+    }
+    path = tmp_path / "invalid.hdf5"
+
+    with pytest.raises(ValueError, match=match):
+        save_grouped_labber_data(str(path), cases[case])
+
+    assert not path.exists()
+
+
 def test_grouped_v2_accepts_flat_numeric_list_values(tmp_path):
     path = save_grouped_labber_data(
         str(tmp_path / "flat_list"),
@@ -353,14 +390,16 @@ def test_grouped_loader_rejects_missing_bookkeeping(tmp_path, entry, match):
         load_grouped_labber_data(path)
 
 
-def test_grouped_roundtrip_preserves_3d_grid_and_common_timestamps(tmp_path):
+@pytest.mark.parametrize("shape", [(2, 3, 2), (2, 4, 3, 2), (2, 1, 3, 1, 2)])
+def test_grouped_roundtrip_preserves_grid_and_common_timestamps(tmp_path, shape):
     axes = [
-        ("Inner", "s", np.array([0.1, 0.2])),
-        ("Middle", "Hz", np.array([10.0, 20.0, 30.0])),
-        ("Outer", "V", np.array([0.0, np.nan])),
+        (f"Axis {index}", f"unit {index}", np.arange(length, dtype=float) + index * 10)
+        for index, length in enumerate(reversed(shape))
     ]
-    timestamps = np.array([1.0, 2.0, np.nan, 4.0, 5.0, 6.0])
-    values = np.arange(12.0).reshape(2, 3, 2)
+    axes[-1][2][-1] = np.nan
+    timestamps = np.arange(np.prod(shape[:-1]), dtype=float)
+    timestamps[2] = np.nan
+    values = np.arange(np.prod(shape), dtype=float).reshape(shape)
     roles = {
         "signal": LabberPayload(
             ("Signal", "a.u.", values + 1j * (values + 1)),
