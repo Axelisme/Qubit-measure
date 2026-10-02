@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 from matplotlib import rc_context
 from matplotlib.figure import Figure
@@ -412,6 +413,72 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
         assert call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"] == result_before
         fx.view.select_tab_pane.assert_not_called()
         assert call(sock, "operation.active")["result"]["operations"] == []
+
+
+def test_original_run_can_be_analyzed_and_saved_without_bypassing_seen_guards(
+    fx, monkeypatch, tmp_path
+):
+    original_run = FakeAdapter.run
+    release = threading.Event()
+
+    def known_run(self, request, schema, *, context):
+        record = original_run(self, request, schema, context=context)
+        return replace(record, result=replace(record.result, data=np.array([1.0, 3.0])))
+
+    def held_save(self, request):
+        if not release.wait(4):
+            raise TimeoutError("save release was not signalled")
+        Path(request.data_path).write_text(
+            ",".join(str(value) for value in request.run_result.result.data)
+        )
+
+    monkeypatch.setattr(FakeAdapter, "run", known_run)
+    monkeypatch.setattr(FakeAdapter, "save", held_save)
+    tab = fx.ctrl.new_tab("fake")
+    with open_client(fx.service.port) as sock:
+        try:
+            run = _completed_run(fx, sock, tab)
+            analyzed = call(
+                sock, "tab.analyze", {"tab_id": tab, "run_operation_id": run}
+            )["result"]["operation_id"]
+            assert call(
+                sock, "operation.await", {"operation_id": analyzed, "timeout": 2}
+            )["result"]["status"] == "finished"
+            assert call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"][
+                "summary"
+            ]["peak"] == 3.0
+
+            args = {"tab_id": tab, "run_operation_id": run,
+                    "data_path": str(tmp_path / "original")}
+            unseen = call(sock, "tab.save_data", args)
+            assert unseen["error"]["reason"] == "stale_version"
+            assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+            fx.ctrl.update_tab_data_path(tab, str(tmp_path / "gui-edit"))
+            stale = call(sock, "tab.save_data", args)
+            assert stale["error"]["reason"] == "stale_version"
+            assert list(tmp_path.iterdir()) == []
+            assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+            submitted = call(sock, "tab.save_data", args)["result"]
+            cancelled = call(
+                sock, "operation.cancel", {"operation_id": submitted["operation_id"]}
+            )
+            assert cancelled["error"]["reason"] == "not_cancellable"
+
+            # An owner publication after admission cannot replace the worker's input.
+            record = fx.ctrl.get_tab_snapshot(tab).run.result
+            fx.state.update_tab_result(
+                tab, replace(record, result=replace(record.result, data=np.array([99.0])))
+            )
+            release.set()
+            assert call(sock, "operation.await", {
+                "operation_id": submitted["operation_id"], "timeout": 2
+            })["result"]["status"] == "finished"
+            assert Path(submitted["data_path"]).read_text() == "1.0,3.0"
+            assert call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0][
+                "result_state"
+            ]["source_operation_id"] is None
+        finally:
+            release.set()
 
 
 @pytest.mark.parametrize("keep_partial", [True, False])
