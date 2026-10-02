@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-02 — explicit run cancellation
+**Last updated:** 2026-10-02 — explicit workflow figures
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -132,10 +132,14 @@ with Schedule(cfg, signals_buffer) as sched:
 
 `MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow。跨模組分工見 ADR-0062。
 base executor 擁有 common run lifecycle：建立 default outer result、combined liveplot
-layout、FFmpeg writer、`ResultTree` subscriptions、`Schedule` scope、measurement
-init/cleanup、per-measurement retry、stop/error partial handling、writer finish、
-figure close，以及 `last_cfg` / `last_result` / `last_run_outcome`。concrete executor
-只提供 cfg/env 建立與 outer-loop policy。
+layout、`ResultTree` subscriptions、`Schedule` scope、measurement init/cleanup、
+per-measurement retry、stop/error partial handling，以及 `last_cfg` / `last_result` /
+`last_run_outcome`。它用 caller 的 Plots 建立具名 `measurement` 合併圖；leaf 取得
+explicit Plots／figure name／axes，以 typed handles 更新資料與 markers。每次 result
+事件完成後刷新整圖，若啟用動畫則透過 owner-dispatched recorder 保存 frame。
+Executor 收尾 recorder，不 finish／release caller 的 Plots，也不 close 原生 Figure；
+presentation owner 停止 producer 後完成並釋放呈現。Concrete executor 只提供 cfg/env
+建立與 outer-loop policy。
 
 典型 executor 格式：
 

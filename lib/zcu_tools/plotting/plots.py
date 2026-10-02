@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Literal, Protocol, TypeVar, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, Protocol, TypeVar
+
+if TYPE_CHECKING:
+    from matplotlib.animation import AbstractMovieWriter
+    from matplotlib.collections import PathCollection
+    from matplotlib.lines import Line2D
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -185,6 +191,22 @@ class HeatmapPlot:
         self._axes = axes
         self._heatmap = heatmap
         self._ensure_active = ensure_active
+        self._marker: PathCollection | None = None
+
+    def mark_point(self, x: float, y: float) -> None:
+        """Set the red best-point overlay; NaN coordinates hide it."""
+        self._ensure_active()
+        point = np.array([[x, y]], dtype=np.float64)
+
+        def apply() -> None:
+            self._ensure_active()
+            if self._marker is None:
+                self._marker = self._axes.scatter(
+                    [], [], color="red", label="Best Point", zorder=3
+                )
+            self._marker.set_offsets(point)
+
+        self._host.call(apply)
 
     def update(
         self,
@@ -229,6 +251,22 @@ class HeatmapLinePlot:
         self._lines = lines
         self._line_axis = line_axis
         self._ensure_active = ensure_active
+        self._marker: Line2D | None = None
+
+    def mark_line(self, x: float) -> None:
+        """Set a red dashed reference on the scan-line axes; NaN hides it."""
+        self._ensure_active()
+        position = float(x)
+
+        def apply() -> None:
+            self._ensure_active()
+            if self._marker is None:
+                self._marker = self._line_axes.axvline(
+                    np.nan, color="red", linestyle="--"
+                )
+            self._marker.set_xdata([position])
+
+        self._host.call(apply)
 
     def update(
         self,
@@ -266,6 +304,38 @@ class HeatmapLinePlot:
         self._host.call(apply)
 
 
+class MovieRecording:
+    """Capture the live figure on its host owner; finish does not release it."""
+
+    def __init__(
+        self,
+        host: PlotHost,
+        writer: AbstractMovieWriter,
+        ensure_active: Callable[[], None],
+    ) -> None:
+        self._host = host
+        self._writer = writer
+        self._ensure_active = ensure_active
+        self._closed = False
+
+    def grab_frame(self) -> None:
+        def capture() -> None:
+            self._ensure_active()
+            if self._closed:
+                raise RuntimeError("Movie recording has finished")
+            self._writer.grab_frame()
+
+        self._host.call(capture)
+
+    def finish(self) -> None:
+        def close() -> None:
+            if not self._closed:
+                self._closed = True
+                self._writer.finish()
+
+        self._host.call(close)
+
+
 class Plots(FigureCollection):
     """One producer's plotting lifetime, shared by frontend adapters.
 
@@ -280,6 +350,8 @@ class Plots(FigureCollection):
         super().__init__()
         self._host = host
         self._live: list[Figure] = []
+        self._live_axes: set[Axes] = set()
+        self._recordings: dict[Figure, MovieRecording] = {}
         self._finished = False
         self._finished_figures: NamedFigures | None = None
         self._released: set[Figure] = set()
@@ -288,7 +360,71 @@ class Plots(FigureCollection):
         if self._finished:
             raise RuntimeError("Plot operation has finished")
 
-    def liveplot_1d(
+    def _resolve_axes(
+        self, name: str, axes: tuple[Axes, ...] | None, count: int
+    ) -> tuple[Figure, tuple[Axes, ...]]:
+        if axes is None:
+            figure, _ = self.subplots(name, ncols=count, squeeze=False)
+            resolved = tuple(figure.axes)
+        else:
+            figure = self[name]
+            resolved = axes
+        if len(resolved) != count or len(set(resolved)) != count:
+            raise ValueError("Live plot requires distinct axes of the expected count")
+        if any(ax.figure is not figure or ax not in figure.axes for ax in resolved):
+            raise ValueError("Live axes must belong to the named figure")
+        if any(ax in self._live_axes for ax in resolved):
+            raise ValueError("Axes already belong to a live plot")
+        self._live_axes.update(resolved)
+        return figure, resolved
+
+    def _present_live(self, figure: Figure) -> None:
+        if figure not in self._live:
+            self._host.present(figure)
+            self._live.append(figure)
+
+    def refresh(self, name: str) -> None:
+        """Refresh a complete live frame after a batch of typed updates."""
+        self._ensure_active()
+        figure = self[name]
+        if figure not in self._live:
+            raise ValueError("Figure is not live")
+
+        def refresh_frame() -> None:
+            self._ensure_active()
+            self._host.refresh(figure)
+
+        self._host.call(refresh_frame)
+
+    def record_animation(self, name: str, path: str | Path) -> MovieRecording:
+        """Record a live figure with FFmpeg, without changing its presentation.
+
+        The producer calls grab_frame after each complete update. Finish the
+        recorder when acquisition ends; Plots.finish also closes open recorders.
+        Writer errors propagate and do not declare the operation successful.
+        """
+        from matplotlib.animation import FFMpegWriter
+
+        self._ensure_active()
+        figure = self[name]
+        if figure not in self._live:
+            raise ValueError("Figure is not live")
+        if figure in self._recordings:
+            raise ValueError("Figure already has a movie recording")
+        if not FFMpegWriter.isAvailable():
+            raise RuntimeError("FFmpeg is required to record animations")
+
+        def start() -> MovieRecording:
+            self._ensure_active()
+            writer = FFMpegWriter(fps=30)
+            writer.setup(figure, str(path), dpi=200)
+            recording = MovieRecording(self._host, writer, self._ensure_active)
+            self._recordings[figure] = recording
+            return recording
+
+        return self._host.call(start)
+
+    def liveplot_1d(  # noqa: PLR0913 - explicit style and optional native axes
         self,
         name: str,
         xlabel: str,
@@ -297,6 +433,7 @@ class Plots(FigureCollection):
         title: str | None = None,
         num_lines: int = 1,
         configure_axes: Callable[[Axes], None] | None = None,
+        axes: Axes | None = None,
     ) -> LinePlot:
         """Configure native artists once on the host owner before presenting.
 
@@ -309,14 +446,15 @@ class Plots(FigureCollection):
 
         def create() -> LinePlot:
             self._ensure_active()
-            figure, axes = self.subplots(name)
+            figure, (ax,) = self._resolve_axes(
+                name, None if axes is None else (axes,), 1
+            )
             segment = Plot1DSegment(xlabel, ylabel, title=title, num_lines=num_lines)
-            segment.init_ax(axes)
+            segment.init_ax(ax)
             if configure_axes is not None:
-                configure_axes(axes)
-            viewer = LinePlot(self._host, figure, axes, segment, self._ensure_active)
-            self._host.present(figure)
-            self._live.append(figure)
+                configure_axes(ax)
+            viewer = LinePlot(self._host, figure, ax, segment, self._ensure_active)
+            self._present_live(figure)
             return viewer
 
         return self._host.call(create)
@@ -344,7 +482,7 @@ class Plots(FigureCollection):
 
         return self._host.call(create)
 
-    def liveplot_2d(
+    def liveplot_2d(  # noqa: PLR0913 - explicit heatmap choices and optional native axes
         self,
         name: str,
         xlabel: str,
@@ -353,13 +491,16 @@ class Plots(FigureCollection):
         title: str | None = None,
         uniform: bool = True,
         clim: tuple[float, float] | None = None,
+        axes: Axes | None = None,
     ) -> HeatmapPlot:
         """Present a named heatmap without adding scan-line axes."""
         self._ensure_active()
 
         def create() -> HeatmapPlot:
             self._ensure_active()
-            figure, axes = self.subplots(name)
+            figure, (ax,) = self._resolve_axes(
+                name, None if axes is None else (axes,), 1
+            )
             vmin, vmax = clim if clim is not None else (None, None)
             heatmap = (
                 Plot2DSegment(xlabel, ylabel, title, vmin=vmin, vmax=vmax)
@@ -368,10 +509,9 @@ class Plots(FigureCollection):
                     xlabel, ylabel, title, vmin=vmin, vmax=vmax
                 )
             )
-            heatmap.init_ax(axes)
-            viewer = HeatmapPlot(self._host, figure, axes, heatmap, self._ensure_active)
-            self._host.present(figure)
-            self._live.append(figure)
+            heatmap.init_ax(ax)
+            viewer = HeatmapPlot(self._host, figure, ax, heatmap, self._ensure_active)
+            self._present_live(figure)
             return viewer
 
         return self._host.call(create)
@@ -386,6 +526,7 @@ class Plots(FigureCollection):
         num_lines: int = 1,
         title: str | None = None,
         uniform: bool = True,
+        axes: tuple[Axes, Axes] | None = None,
     ) -> HeatmapLinePlot:
         """Present a named, owner-updated 2D heatmap with recent scan lines."""
         self._ensure_active()
@@ -396,8 +537,7 @@ class Plots(FigureCollection):
 
         def create() -> HeatmapLinePlot:
             self._ensure_active()
-            figure, axes = self.subplots(name, ncols=2)
-            heatmap_axes, line_axes = cast("tuple[Axes, Axes]", axes)
+            figure, (heatmap_axes, line_axes) = self._resolve_axes(name, axes, 2)
             heatmap = (
                 Plot2DSegment(xlabel, ylabel, title)
                 if uniform
@@ -429,8 +569,7 @@ class Plots(FigureCollection):
                 line_axis,
                 self._ensure_active,
             )
-            self._host.present(figure)
-            self._live.append(figure)
+            self._present_live(figure)
             return viewer
 
         return self._host.call(create)
@@ -443,6 +582,14 @@ class Plots(FigureCollection):
         self._finished_figures = figures
 
         def complete() -> None:
+            errors: list[Exception] = []
+            for recording in self._recordings.values():
+                try:
+                    recording.finish()
+                except Exception as error:  # noqa: BLE001 - finish all recordings
+                    errors.append(error)
+            if errors:
+                raise ExceptionGroup("Failed to finish movie recordings", errors)
             for figure in self._live:
                 self._host.refresh(figure, final=True)
             if present:

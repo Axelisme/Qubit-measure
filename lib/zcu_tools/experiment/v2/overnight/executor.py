@@ -67,6 +67,7 @@ class OvernightExecutor(
             outer_values=iters,
             run_loop=run_loop,
             stop=context.cancel_signal,
+            plots=context.plots,
         )
 
     def save(

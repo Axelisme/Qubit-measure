@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 (JPA AutoOptimize records)
+**Last updated:** 2026-10-02 (Explicit workflow figures)
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -270,7 +270,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。跨模組的 runtime／workflow 邊界見 ADR-0062。
 
-兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runtime/multi_executor.py`，見 `runtime/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、`ResultTree` per-measurement plot update、measurement init/cleanup、per-measurement retry、error/stop partial result、figure/writer `try/finally` cleanup 與 `last_cfg` / `last_result` / `last_run_outcome`。子類別各自只實作 `run()` 的 cfg/env 前置與 `Schedule` outer loop。
+兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runtime/multi_executor.py`，見 `runtime/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、`ResultTree` per-measurement plot update、measurement init/cleanup、per-measurement retry、error/stop partial result、recorder `try/finally` cleanup 與 `last_cfg` / `last_result` / `last_run_outcome`。子類別各自只實作 `run()` 的 cfg/env 前置與 `Schedule` outer loop。
 
 - `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 runner-owned `MeasurementBundle` / `MeasurementTask`，caller 以 explicit keyword deps 提供 `soc`、`soccfg`、`ml`、`predictor`；executor 在 run 內組 `FluxDepEnv`，用 root `Schedule.scan("flux", ...)` 掃 flux，並與 `FluxoniumPredictor` 協作，於每個 flux step 更新 typed `FluxDepInfoTracker`、設定 flux device，再交由 base executor 的 batch helper 執行 measurement。
 - `OvernightExecutor`（`overnight/executor.py`）：caller 以 explicit keyword deps 提供 `soc`、`soccfg`；executor 在 run 內組 `OvernightEnv`，用 root `Schedule.repeat("Iter", ...)` 在時間軸上重複 measurement batch，並以 `trigger_update(flush=True)` 強制送出 per-measurement liveplot event。
@@ -279,7 +279,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 必要欄位用 `require(name, task_name=...)` 從當步 `current` 取值；值為 `None` 時立即拋 `ValueError`，`flux_value`、`flux_idx`、`predict_freq` property 也經由 `require`。可選的 `best_ro_freq`、`best_ro_gain` property 則可回傳 `None`。`update`、`require`、`last_or` 遇到未知欄位名都拋 `AttributeError`。`last_or(name, fallback)` 只在該欄位的 `last` 為 `None` 時回傳明確提供的 fallback，否則回傳 `last`；caller 除將當次測量值當作平滑 fallback，也把 `0` 用作 `qubfreq_success_idx`／`lenrabi_success_idx` 尚無前次成功索引時的 fallback。
 
-兩者的 `retry_time` 是 per-measurement、per-flux/time-step 預算；`record_animation(mp4_path)` 需要 `ffmpeg`。
+兩者的 `retry_time` 是 per-measurement、per-flux/time-step 預算；`record_animation(mp4_path)` 需要 `ffmpeg`。合併圖位於 RunContext.plots 的 `measurement`，typed live handles 與 recorder 均由 host owner 操作，不依賴 ambient plotting backend。Executor 結束 recorder，但不 close Figure；caller 停止 producer 後 finish／release Plots，已保留的 NamedFigures 仍可保存。
 
 executor leaf contract 由 `runtime/task.py` 擁有：`Acquirer`、`TaskPlotter`、`TaskPersister`、`MeasurementBundle`、`ComposedMeasurementBundle` 與 direct-implementation `MeasurementTask`。app-local duplicated ABC 不保留；每個 leaf 取得 `ScheduleStep` 後建立 child-local buffer，再用該 step 的 `ProgramBuilder` 直接執行 QICK acquire。
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
@@ -20,7 +21,7 @@ from zcu_tools.experiment.v2.runtime import (
     ScheduleStep,
 )
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.plots import HeatmapLinePlot, Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -82,7 +83,7 @@ class MistResult(TypedDict, closed=True):
 
 
 class MistPlotDict(TypedDict, closed=True):
-    mist: LivePlot2DwithLine
+    mist: HeatmapLinePlot
 
 
 class MistTask(
@@ -180,20 +181,22 @@ class MistTask(
     def num_axes(self) -> dict[str, int]:
         return dict(mist=2)
 
-    def make_plotter(self, name, axs) -> MistPlotDict:
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> MistPlotDict:
         return MistPlotDict(
-            mist=LivePlot2DwithLine(
+            mist=plots.liveplot_2d_with_line(
+                figure_name,
                 "Flux device value",
                 "Readout Gain (a.u.)",
-                line_axis=1,
                 title=name,
-                existed_axes=[axs["mist"]],
+                axes=(axs["mist"][0], axs["mist"][1]),
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: MistPlotDict,
         event: ResultUpdateEvent[FluxDepEnv, MistResult],
         signals: MistResult,
     ) -> None:

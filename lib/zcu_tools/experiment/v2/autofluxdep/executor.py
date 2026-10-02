@@ -96,6 +96,7 @@ class FluxDepExecutor(
             outer_values=self.flux_values,
             run_loop=run_loop,
             stop=context.cancel_signal,
+            plots=context.plots,
         )
 
     def save(

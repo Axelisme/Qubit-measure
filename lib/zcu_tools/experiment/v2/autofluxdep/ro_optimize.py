@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from typing_extensions import (
@@ -23,7 +24,7 @@ from zcu_tools.experiment.v2.runtime import (
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.plotting.liveplot import LivePlot2D
+from zcu_tools.plotting.plots import HeatmapPlot, Plots
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -85,7 +86,7 @@ class RO_OptResult(TypedDict, closed=True):
 
 
 class RO_OptPlotDict(TypedDict, closed=True):
-    snr: LivePlot2D
+    snr: HeatmapPlot
 
 
 class RO_OptTask(
@@ -240,22 +241,22 @@ class RO_OptTask(
     def num_axes(self) -> dict[str, int]:
         return dict(snr=1)
 
-    def make_plotter(self, name, axs) -> RO_OptPlotDict:
-        self.best_point = axs["snr"][0].scatter(
-            [np.nan], [np.nan], color="red", label="Best Point", zorder=3
-        )
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> RO_OptPlotDict:
         return RO_OptPlotDict(
-            snr=LivePlot2D(
+            snr=plots.liveplot_2d(
+                figure_name,
                 "Frequency (MHz)",
                 "Gain (a.u.)",
-                existed_axes=[axs["snr"]],
-                segment_kwargs=dict(title=name),
+                axes=axs["snr"][0],
+                title=name,
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: RO_OptPlotDict,
         event: ResultUpdateEvent[FluxDepEnv, RO_OptResult],
         signals: RO_OptResult,
     ) -> None:
@@ -268,7 +269,7 @@ class RO_OptTask(
 
         best_ro_freq = np.nan if info.best_ro_freq is None else info.best_ro_freq
         best_ro_gain = np.nan if info.best_ro_gain is None else info.best_ro_gain
-        self.best_point.set_offsets([best_ro_freq, best_ro_gain])
+        plotters["snr"].mark_point(best_ro_freq, best_ro_gain)
         plotters["snr"].update(self.freqs, self.gains, real_signals, refresh=False)
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:

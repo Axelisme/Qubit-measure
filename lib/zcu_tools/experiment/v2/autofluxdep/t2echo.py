@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
@@ -22,7 +23,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -92,8 +93,8 @@ class T2EchoResult(TypedDict, closed=True):
 
 
 class T2EchoPlotDict(TypedDict, closed=True):
-    t2e: LivePlot1D
-    t2e_curve: LivePlot1D
+    t2e: LinePlot
+    t2e_curve: LinePlot
 
 
 class T2EchoTask(
@@ -244,27 +245,30 @@ class T2EchoTask(
     def num_axes(self) -> dict[str, int]:
         return dict(t2e=1, t2e_curve=1)
 
-    def make_plotter(self, name, axs) -> T2EchoPlotDict:
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T2EchoPlotDict:
         return T2EchoPlotDict(
-            t2e=LivePlot1D(
+            t2e=plots.liveplot_1d(
+                figure_name,
                 "Flux device value",
                 "T2 Echo (us)",
-                existed_axes=[axs["t2e"]],
-                segment_kwargs=dict(
-                    title=name + "(t2e)", line_kwargs=[dict(linestyle="None")]
-                ),
+                axes=axs["t2e"][0],
+                title=name + "(t2e)",
+                configure_axes=lambda ax: ax.lines[0].set_linestyle("None"),
             ),
-            t2e_curve=LivePlot1D(
+            t2e_curve=plots.liveplot_1d(
+                figure_name,
                 "Signal",
                 "Time (us)",
-                existed_axes=[axs["t2e_curve"]],
-                segment_kwargs=dict(title=name + "(t2e curve)"),
+                axes=axs["t2e_curve"][0],
+                title=name + "(t2e curve)",
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: T2EchoPlotDict,
         event: ResultUpdateEvent[FluxDepEnv, T2EchoResult],
         signals: T2EchoResult,
     ) -> None:

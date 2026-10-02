@@ -28,7 +28,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2D
+from zcu_tools.plotting.plots import HeatmapPlot, LinePlot, Plots
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
@@ -55,10 +55,10 @@ class T1Result(TypedDict, closed=True):
 
 
 class T1PlotDict(TypedDict, closed=True):
-    populations_go: LivePlot2D
-    populations_eo: LivePlot2D
-    current_g: LivePlot1D
-    current_e: LivePlot1D
+    populations_go: HeatmapPlot
+    populations_eo: HeatmapPlot
+    current_g: LinePlot
+    current_e: LinePlot
 
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
@@ -72,44 +72,47 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
     def num_axes(self) -> dict[str, int]:
         return dict(populations_go=1, populations_eo=1, current_g=1, current_e=1)
 
-    def make_plotter(self, name, axs) -> T1PlotDict:
-        def make_2d_plotter(ax, title):
-            return LivePlot2D(
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T1PlotDict:
+        def configure_current(ax: Axes) -> None:
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
+
+        def make_2d_plotter(ax: Axes, title: str) -> HeatmapPlot:
+            return plots.liveplot_2d(
+                figure_name,
                 "Iteration",
                 "Time (us)",
                 uniform=False,
-                existed_axes=[ax],
-                segment_kwargs=dict(
-                    title=title,
-                ),
+                axes=ax,
+                title=title,
             )
 
-        def make_1d_plotter(ax, title):
-            return LivePlot1D(
+        def make_1d_plotter(ax: Axes, title: str) -> LinePlot:
+            return plots.liveplot_1d(
+                figure_name,
                 "Time (us)",
                 "Population",
-                existed_axes=[ax],
-                segment_kwargs=dict(
-                    title=title,
-                    num_lines=3,
-                    line_kwargs=[
-                        dict(label="Ground"),
-                        dict(label="Excited"),
-                        dict(label="Other"),
-                    ],
-                ),
+                axes=ax,
+                title=title,
+                num_lines=3,
+                configure_axes=configure_current,
             )
 
         return T1PlotDict(
-            populations_go=make_2d_plotter(axs["populations_go"], f"{name} Ground"),
-            populations_eo=make_2d_plotter(axs["populations_eo"], f"{name} Other"),
-            current_g=make_1d_plotter(axs["current_g"], f"{name} Init Ground"),
-            current_e=make_1d_plotter(axs["current_e"], f"{name} Init Excited"),
+            populations_go=make_2d_plotter(axs["populations_go"][0], f"{name} Ground"),
+            populations_eo=make_2d_plotter(axs["populations_eo"][0], f"{name} Other"),
+            current_g=make_1d_plotter(axs["current_g"][0], f"{name} Init Ground"),
+            current_e=make_1d_plotter(axs["current_e"][0], f"{name} Init Excited"),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: T1PlotDict,
         event: ResultUpdateEvent[OvernightEnv, T1Result],
         results: T1Result,
     ) -> None:

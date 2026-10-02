@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
@@ -21,7 +22,7 @@ from zcu_tools.experiment.v2.runtime import (
     ScheduleStep,
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2DwithLine
+from zcu_tools.plotting.plots import HeatmapLinePlot, LinePlot, Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -91,8 +92,8 @@ class QubitFreqResult(TypedDict, closed=True):
 
 
 class FreqPlotDict(TypedDict, closed=True):
-    fit_freq: LivePlot1D
-    detune: LivePlot2DwithLine
+    fit_freq: LinePlot
+    detune: HeatmapLinePlot
 
 
 class QubitFreqTask(
@@ -277,35 +278,37 @@ class QubitFreqTask(
     def num_axes(self) -> dict[str, int]:
         return dict(fit_freq=1, detune=2)
 
-    def make_plotter(self, name, axs) -> FreqPlotDict:
-        self.freq_line = axs["detune"][1].axvline(np.nan, color="red", linestyle="--")
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> FreqPlotDict:
         return FreqPlotDict(
-            fit_freq=LivePlot1D(
+            fit_freq=plots.liveplot_1d(
+                figure_name,
                 "Flux device value",
                 "Frequency (MHz)",
-                existed_axes=[axs["fit_freq"]],
-                segment_kwargs=dict(title=name + "(fit_freq)"),
+                axes=axs["fit_freq"][0],
+                title=name + "(fit_freq)",
             ),
-            detune=LivePlot2DwithLine(
+            detune=plots.liveplot_2d_with_line(
+                figure_name,
                 "Flux device value",
                 "Detune (MHz)",
-                line_axis=1,
                 num_lines=3,
                 title=name + "(detune)",
-                existed_axes=[axs["detune"]],
+                axes=(axs["detune"][0], axs["detune"][1]),
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: FreqPlotDict,
         event: ResultUpdateEvent[FluxDepEnv, QubitFreqResult],
         signals: QubitFreqResult,
     ) -> None:
         flux_values = event.env.flux_values
 
         fit_detune = event.env.info.current.fit_detune
-        self.freq_line.set_xdata([np.nan if fit_detune is None else fit_detune])
+        plotters["detune"].mark_line(np.nan if fit_detune is None else fit_detune)
         plotters["fit_freq"].update(flux_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flux_values,

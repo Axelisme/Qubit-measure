@@ -534,3 +534,146 @@ def test_invalid_2d_factory_options_or_duplicate_name_never_present() -> None:
     assert host.presented == []
     assert plots["scan"] is existing
     plots.finish()
+
+
+def test_typed_plots_share_one_named_frame_and_preserve_it_after_release() -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+    figure, _ = plots.subplots("workflow", ncols=4)
+    axes = figure.axes
+    line = plots.liveplot_1d("workflow", "flux", "value", axes=axes[0])
+    heatmap = plots.liveplot_2d("workflow", "flux", "time", axes=axes[1])
+    scan = plots.liveplot_2d_with_line(
+        "workflow", "flux", "frequency", axes=(axes[2], axes[3])
+    )
+    xs = np.array([1.0, 2.0])
+    ys = np.array([3.0, 4.0, 5.0])
+    data = np.arange(6, dtype=float).reshape(2, 3)
+    line.update(xs, np.array([8.0, 9.0]), refresh=False)
+    heatmap.update(xs, ys, data, refresh=False)
+    scan.update(xs, ys, data, refresh=False)
+    assert list(plots) == ["workflow"]
+    assert host.presented == [figure]
+    assert host.refreshed == []
+    np.testing.assert_array_equal(axes[0].lines[0].get_ydata(), [8.0, 9.0])
+    np.testing.assert_array_equal(axes[1].images[0].get_array(), data.T)
+    np.testing.assert_array_equal(axes[2].images[0].get_array(), data.T)
+    np.testing.assert_array_equal(axes[3].lines[0].get_ydata(), data[-1])
+    heatmap.mark_point(1.0, 4.0)
+    scan.mark_line(3.5)
+    np.testing.assert_array_equal(axes[1].collections[0].get_offsets(), [[1.0, 4.0]])
+    np.testing.assert_array_equal(axes[3].lines[-1].get_xdata(), [3.5])
+    heatmap.mark_point(np.nan, np.nan)
+    scan.mark_line(np.nan)
+    assert len(axes[1].collections) == 1
+    assert len(axes[3].lines) == 2
+    assert np.isnan(axes[1].collections[0].get_offsets()).all()
+    assert np.isnan(axes[3].lines[-1].get_xdata()).all()
+    plots.refresh("workflow")
+    assert host.refreshed == [(figure, False)]
+    named = plots.finish()
+    plots.release()
+    assert host.refreshed == [(figure, False), (figure, True)]
+    assert host.released == [figure]
+    assert named["workflow"] is figure
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+    with pytest.raises(RuntimeError, match="finished"):
+        plots.refresh("workflow")
+
+
+def test_live_axes_reject_foreign_reused_and_removed_axes_before_mutation() -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+    figure, _ = plots.subplots("workflow", ncols=3)
+    other, other_ax = plots.subplots("other")
+    first, second, removed = figure.axes
+    figure.delaxes(removed)
+    with pytest.raises(ValueError, match="named figure"):
+        plots.liveplot_1d("workflow", "x", "y", axes=other_ax)
+    with pytest.raises(ValueError, match="named figure"):
+        plots.liveplot_2d("workflow", "x", "y", axes=removed)
+    with pytest.raises(ValueError, match="distinct"):
+        plots.liveplot_2d_with_line("workflow", "x", "y", axes=(first, first))
+    with pytest.raises(ValueError, match="named figure"):
+        plots.liveplot_2d_with_line("workflow", "x", "y", axes=(second, other_ax))
+    assert not first.lines and not second.images and not other.axes[0].lines
+    assert host.presented == []
+    plots.liveplot_1d("workflow", "x", "y", axes=first)
+    with pytest.raises(ValueError, match="already belong"):
+        plots.liveplot_2d("workflow", "x", "y", axes=first)
+    assert len(first.lines) == 1
+    assert not first.images
+    plots.finish()
+
+
+@pytest.mark.parametrize("close_explicitly", [False, True])
+def test_movie_captures_updated_frame_and_closes_on_owner(
+    monkeypatch: pytest.MonkeyPatch, close_explicitly: bool
+) -> None:
+    class OwnerHost(RecordingHost):
+        on_owner = False
+
+        def call(self, callback: Callable[[], _T]) -> _T:
+            previous = self.on_owner
+            self.on_owner = True
+            try:
+                return super().call(callback)
+            finally:
+                self.on_owner = previous
+
+    host = OwnerHost()
+    frames: list[bytes] = []
+    closed: list[bool] = []
+    attached: list[Figure] = []
+
+    class Writer:
+        def __init__(self, *, fps: int) -> None:
+            assert host.on_owner
+            self.figure: Figure | None = None
+
+        @classmethod
+        def isAvailable(cls) -> bool:
+            return True
+
+        def setup(self, figure: Figure, filename: str, dpi: int) -> None:
+            assert host.on_owner
+            self.figure = figure
+            attached.append(figure)
+
+        def grab_frame(self) -> None:
+            assert host.on_owner
+            assert self.figure is not None
+            output = BytesIO()
+            self.figure.savefig(output, format="png")
+            frames.append(output.getvalue())
+
+        def finish(self) -> None:
+            assert host.on_owner
+            closed.append(True)
+
+    monkeypatch.setattr("matplotlib.animation.FFMpegWriter", Writer)
+    plots = Plots(host)
+    viewer = plots.liveplot_1d("workflow", "x", "y")
+    recorder = plots.record_animation("workflow", "unused.mp4")
+    recorder.grab_frame()
+    viewer.update(np.array([1.0, 2.0]), np.array([4.0, 9.0]), refresh=False)
+    recorder.grab_frame()
+    assert len(frames) == 2 and frames[0] != frames[1]
+    assert attached == [plots["workflow"]]
+    with pytest.raises(ValueError, match="already has"):
+        plots.record_animation("workflow", "duplicate.mp4")
+    if close_explicitly:
+        recorder.finish()
+        with pytest.raises(RuntimeError, match="finished"):
+            recorder.grab_frame()
+    named = plots.finish()
+    recorder.finish()
+    assert closed == [True]
+    assert named["workflow"] is attached[0]
+    assert host.released == []
+    with pytest.raises(RuntimeError, match="finished"):
+        recorder.grab_frame()
+    plots.release()
+    assert host.released == attached

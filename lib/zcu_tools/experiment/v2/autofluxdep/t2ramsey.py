@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
@@ -22,7 +23,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -95,8 +96,8 @@ class T2RamseyResult(TypedDict, closed=True):
 
 
 class T2RamseyPlotDict(TypedDict, closed=True):
-    t2r: LivePlot1D
-    t2r_curve: LivePlot1D
+    t2r: LinePlot
+    t2r_curve: LinePlot
 
 
 class T2RamseyTask(
@@ -251,27 +252,30 @@ class T2RamseyTask(
     def num_axes(self) -> dict[str, int]:
         return dict(t2r=1, t2r_curve=1)
 
-    def make_plotter(self, name, axs) -> T2RamseyPlotDict:
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T2RamseyPlotDict:
         return T2RamseyPlotDict(
-            t2r=LivePlot1D(
+            t2r=plots.liveplot_1d(
+                figure_name,
                 "Flux device value",
                 "T2Ramsey (us)",
-                existed_axes=[axs["t2r"]],
-                segment_kwargs=dict(
-                    title=name + "(t2r)", line_kwargs=[dict(linestyle="None")]
-                ),
+                axes=axs["t2r"][0],
+                title=name + "(t2r)",
+                configure_axes=lambda ax: ax.lines[0].set_linestyle("None"),
             ),
-            t2r_curve=LivePlot1D(
+            t2r_curve=plots.liveplot_1d(
+                figure_name,
                 "Signal",
                 "Time (us)",
-                existed_axes=[axs["t2r_curve"]],
-                segment_kwargs=dict(title=name + "(t2r curve)"),
+                axes=axs["t2r_curve"][0],
+                title=name + "(t2r curve)",
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: T2RamseyPlotDict,
         event: ResultUpdateEvent[FluxDepEnv, T2RamseyResult],
         signals: T2RamseyResult,
     ) -> None:
