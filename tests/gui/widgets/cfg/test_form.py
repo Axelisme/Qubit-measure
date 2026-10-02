@@ -1632,7 +1632,6 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
 def test_module_reference_renders_header_and_editable_leaf(qapp, ctrl):
     from qtpy.QtCore import Qt
     from qtpy.QtWidgets import QComboBox, QLineEdit, QTreeWidget
-
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
@@ -1666,7 +1665,9 @@ def test_module_reference_renders_header_and_editable_leaf(qapp, ctrl):
 
     tree = w.findChild(QTreeWidget)
     assert tree is not None
-    leaves = tree.findItems("Gain", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive)
+    leaves = tree.findItems(
+        "Gain", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive
+    )
     assert len(leaves) == 1
     editor = tree.itemWidget(leaves[0], 1)
     assert editor is not None
@@ -1687,7 +1688,6 @@ def test_module_reference_renders_header_and_editable_leaf(qapp, ctrl):
 def test_waveform_reference_renders_header_and_editable_leaf(qapp, ctrl):
     from qtpy.QtCore import Qt
     from qtpy.QtWidgets import QComboBox, QLineEdit, QTreeWidget
-
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
@@ -1723,7 +1723,9 @@ def test_waveform_reference_renders_header_and_editable_leaf(qapp, ctrl):
 
     tree = w.findChild(QTreeWidget)
     assert tree is not None
-    leaves = tree.findItems("Sigma", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive)
+    leaves = tree.findItems(
+        "Sigma", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive
+    )
     assert len(leaves) == 1
     editor = tree.itemWidget(leaves[0], 1)
     assert editor is not None

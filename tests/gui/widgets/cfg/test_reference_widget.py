@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import QComboBox
-
 from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
