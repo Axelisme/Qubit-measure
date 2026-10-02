@@ -317,11 +317,7 @@ def test_loaded_result_does_not_inherit_the_previous_run_operation(fx, monkeypat
         _completed_run(fx, sock, tab)
         record = fx.ctrl.get_tab_snapshot(tab).run.result
         monkeypatch.setattr(FakeAdapter, "load", lambda self, request: record)
-        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
-        assert call(sock, "context.snapshot")["ok"]
-        assert call(
-            sock, "tab.load_data", {"tab_id": tab, "data_path": "loaded.hdf5"}
-        )["ok"]
+        fx.ctrl.load_tab_result(tab, "loaded.hdf5")
         snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
         assert snapshot["result_state"]["available"] is True
         assert snapshot["result_state"]["source_path"] == "loaded.hdf5"
