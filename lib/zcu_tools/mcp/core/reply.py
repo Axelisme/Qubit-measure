@@ -17,3 +17,4 @@ class ToolReply:
 
     data: dict[str, Any]
     images: tuple[PngImage, ...] = ()
+    is_error: bool = False

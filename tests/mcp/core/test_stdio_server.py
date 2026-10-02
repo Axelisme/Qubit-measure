@@ -166,6 +166,41 @@ def test_images_belong_to_one_reply_and_precede_hook_content(
         ]
 
 
+@pytest.mark.parametrize("is_error", [False, True])
+def test_partial_outcome_preserves_data_and_images_with_explicit_error_flag(
+    monkeypatch: pytest.MonkeyPatch, is_error: bool
+) -> None:
+    data = {
+        "status": "failed",
+        "saved_images": [{"figure_name": "fit", "image_path": "/saved/fit.png"}],
+        "error": {"phase": "image_save", "message": "second export failed"},
+    }
+    image = PngImage(b"confirmed preview bytes")
+    replies = _run(
+        monkeypatch,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "partial", "arguments": {}},
+            }
+        ],
+        {"partial": _tool(lambda _: ToolReply(data, (image,), is_error=is_error))},
+    )
+
+    result = replies[0]["result"]
+    assert result.get("isError", False) is is_error
+    assert json.loads(result["content"][0]["text"]) == data
+    assert result["content"][1:] == [
+        {
+            "type": "image",
+            "mimeType": "image/png",
+            "data": base64.b64encode(image.data).decode("ascii"),
+        }
+    ]
+
+
 def test_runtime_error_reports_reason_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
