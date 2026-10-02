@@ -80,7 +80,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "List context labels",
         ),
-        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "context.active",

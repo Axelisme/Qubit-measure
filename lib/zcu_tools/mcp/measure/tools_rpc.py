@@ -40,24 +40,21 @@ def rpc_describe(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
 
 def rpc_call(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     entry = _entry(ctx, arguments.get("method"))
-    if entry["exposure"] == "tool":
-        tools = ", ".join(entry["tool_names"])
-        raise GuiRpcError(f"use {tools} for {entry['method']}", reason="use_tool")
     params = arguments.get("params", {})
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    return ctx.session.send_gui_rpc(entry["method"], params, rpc_only=True)
+    return ctx.session.send_gui_rpc(entry["method"], params)
 
 
 RPC_TOOLS: dict[str, dict[str, Any]] = {
     "rpc_list": {
         "handler": rpc_list,
-        "description": "List low-frequency live GUI wire methods, optionally by domain. Tool-bound methods name their required tool.",
+        "description": "List public live GUI wire methods, optionally by domain. Tool names identify available higher-level helpers.",
         "inputSchema": {"type": "object", "properties": {"domain": {"type": "string"}}},
     },
     "rpc_describe": {
         "handler": rpc_describe,
-        "description": "Describe a live GUI method, its parameter schema, guard and tool routing.",
+        "description": "Describe a public live GUI method, its parameter schema and available tool helpers.",
         "inputSchema": {
             "type": "object",
             "properties": {"method": {"type": "string"}},
@@ -66,7 +63,7 @@ RPC_TOOLS: dict[str, dict[str, Any]] = {
     },
     "rpc_call": {
         "handler": rpc_call,
-        "description": "Call a low-frequency live GUI method. GUI validates params; mutations are not retried.",
+        "description": "Call a public live GUI method, including methods with tool helpers. GUI validates params; mutations are not retried.",
         "inputSchema": {
             "type": "object",
             "properties": {"method": {"type": "string"}, "params": {"type": "object"}},

@@ -213,11 +213,6 @@ def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
         "adapters": ["fake"]
     }
     with pytest.raises(RuntimeError) as error:
-        client.call(
-            "rpc_call", {"method": "adapter.guide", "params": {"adapter_name": "fake"}}
-        )
-    assert getattr(error.value, "reason", None) == "use_tool"
-    with pytest.raises(RuntimeError) as error:
         client.call("rpc_describe", {"method": "rpc.catalog"})
     assert getattr(error.value, "reason", None) == "unknown_method"
     assert all(

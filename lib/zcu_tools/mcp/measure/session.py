@@ -347,7 +347,6 @@ class MeasureMcpSession:
         params: dict[str, Any],
         timeout_seconds: float | None = None,
         *,
-        rpc_only: bool = False,
         operation_handle: int | None = None,
     ) -> dict[str, Any]:
         """One GUI send; transport failure never retries an ambiguous mutation."""
@@ -357,9 +356,6 @@ class MeasureMcpSession:
         entry = self._catalog.get(method)
         if entry is None:
             raise GuiRpcError(f"unknown GUI method {method!r}", reason="unknown_method")
-        if rpc_only and entry["exposure"] != "rpc":
-            tools = ", ".join(entry["tool_names"])
-            raise GuiRpcError(f"use {tools} for {method}", reason="use_tool")
         if timeout_seconds is None:
             timeout_seconds = entry["timeout_seconds"] + 1.0
         try:

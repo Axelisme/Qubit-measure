@@ -89,7 +89,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the resolved result_dir and database_path. Fast-fails with "
             "precondition_failed (no_project) when no project is applied yet.",
         ),
-        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "result_scope.list",

@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-01, independent analysis preparation outcome
+**Last updated:** 2026-10-02, guarded cfg reset
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -283,6 +283,11 @@ Stale errors include expected/actual; input errors can include path/edit_index.
 The adapter does not retry or publish a successful prefix. Plain strings are typed
 strings; __text, __expr, __complex and __ref carry the declared editing intents.
 Source publications advance revision and update all affected cfg before notification.
+
+`tab.reset_cfg` uses the same explicit cfg_ref contract. The tab resource obtains
+current adapter defaults and publishes one new revision, even for unchanged inputs.
+Reset can publish Invalid and returns the complete observation. It preserves results
+and saved files, adds no unsaved guard, and follows the Run pane only after success.
 
 `tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
 not require a second per-connection cfg observation. Tab, SoC, device and

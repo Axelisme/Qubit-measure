@@ -188,6 +188,25 @@ def h_tab_get_cfg(
     )
 
 
+def h_tab_reset_cfg(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    from ..cfg_observation import build_resource_observation, cfg_error_to_remote
+
+    tab_id = str(params["tab_id"])
+    try:
+        expected = decode_ref(params["expected"])
+        editor = adapter.cfg_lookup(tab_id)
+        actual = editor.observe().ref
+        if expected != actual:
+            raise CfgStaleError(expected, actual)
+        result = editor.reset(expected.revision)
+    except (CfgInputError, CfgPreconditionError) as exc:
+        raise cfg_error_to_remote(exc) from exc
+    follow_tab(adapter, tab_id, "run")
+    return build_resource_observation(result)
+
+
 def h_tab_edit_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:

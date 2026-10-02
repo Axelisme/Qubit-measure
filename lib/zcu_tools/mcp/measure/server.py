@@ -52,7 +52,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v95: finalized shared-state workflow guidance and interactive concurrency instructions.
 # v96: the project tool applies through the project.apply GUI method.
 # v98: tab_run requires and forwards the caller's explicit cfg ref once.
-MCP_VERSION = 98
+# v99: generic RPC accepts all public methods, including tool-backed commands.
+MCP_VERSION = 99
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
@@ -64,9 +65,9 @@ the live catalog. Incompatible wire versions fail before an action is forwarded.
 
 Use rpc_list(domain?) to find low-frequency methods, rpc_describe(method) for
 the GUI's live parameter schema and full description, and rpc_call(method,
-params) only for methods with exposure='rpc'. Methods bound to a specialized
-tool report use_tool instead. GUI handlers validate arguments and return stable
-error reasons. Mutations are never automatically retried after disconnect,
+params) for any listed method, including those with specialized tool helpers.
+Tool names are guidance, not a separate mode or permission. GUI handlers validate
+arguments and return stable error reasons. Mutations are never automatically retried after disconnect,
 timeout, stale_version or busy; read the current state before choosing to retry.
 For tab/context/SoC guard conflicts, explicitly read tab.snapshot(tab_id),
 context.snapshot, and soc.info(include_cfg=true), respectively. Summaries,
