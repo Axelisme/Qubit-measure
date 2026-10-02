@@ -53,7 +53,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v96: the project tool applies through the project.apply GUI method.
 # v98: tab_run requires and forwards the caller's explicit cfg ref once.
 # v99: generic RPC accepts all public methods, including tool-backed commands.
-MCP_VERSION = 99
+# v100: accept writes all current Primary and Post candidates with partial progress.
+MCP_VERSION = 100
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
