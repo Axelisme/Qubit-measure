@@ -5,12 +5,14 @@ import io
 import json
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.stdio_server import run_stdio_loop
+from zcu_tools.mcp.measure.session import GuiConnection
 
 from ._support import MeasureClient, RpcResponder, make_client
 
@@ -662,6 +664,154 @@ def test_cancel_latches_intent_and_retains_original_terminal(
     assert final["gui_cancel"]["status"] == "not_needed"
     assert client.call("status", {"execution": started["execution"]}) == frozen
     assert _methods(client).count("operation.cancel") == 1
+
+
+@pytest.mark.parametrize("remaining", [False, True])
+@pytest.mark.parametrize("save_outcome", ["saved", "rejected", "lost"])
+def test_cancel_during_admitted_save_retains_the_real_reply(
+    tmp_path, clients, monkeypatch, remaining, save_outcome
+):
+    saving, release, intent = Event(), Event(), Event()
+    read_internal = GuiConnection.read_internal
+
+    def read(connection, method, params, **kwargs):
+        if method == "operation.cancel":
+            intent.set()
+        return read_internal(connection, method, params, **kwargs)
+
+    monkeypatch.setattr(GuiConnection, "read_internal", read)
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {
+                "operation_id": 71,
+                "interactive": False,
+                "params": {},
+                "invalidated_on_success": [],
+            }
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.get_analyze_result":
+            return _result_reply("analysis", ["fit", "residual"] if remaining else ["fit"], {})
+        if method == "operation.cancel":
+            return {"status": "finished"}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+
+    def save(params):
+        assert params["figure_name"] == "fit"
+        saving.set()
+        assert release.wait(10), "test did not release admitted save"
+        if save_outcome == "lost":
+            client.transport.close()
+            assert client.transport.on_closed is not None
+            client.transport.on_closed(EOFError("save reply lost"))
+            return {"ok": True, "result": {"image_path": "/unconfirmed/fit.png"}}
+        if save_outcome == "rejected":
+            return {
+                "ok": False,
+                "error": {"code": "precondition_failed", "message": "disk rejected export"},
+            }
+        return {"ok": True, "result": {"image_path": "/actual/fit.png"}}
+
+    client.transport.replies["tab.save_image"] = save
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        try:
+            started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+            assert saving.wait(2)
+            request = pool.submit(client.call, "cancel", {"execution": started["execution"]})
+            assert intent.wait(2)
+            pending = client.call("status", {"execution": started["execution"]})
+            assert pending["cancel_requested"] is True
+            assert pending["status"] == "running"
+            assert pending["unconfirmed_image"] == "fit"
+        finally:
+            release.set()
+        cancelled = request.result(timeout=3)
+    assert cancelled.data["cancel_requested"] is True
+    completed = _data(
+        _call_stdio(monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2})
+    )
+    assert completed["status"] == ("cancelled" if save_outcome == "saved" else "failed")
+    assert completed["operation_outcome"]["status"] == "finished"
+    assert completed["result"]["summary"] == {"frequency": 5.0}
+    assert completed["saved_images"] == (
+        [{"figure_name": "fit", "image_path": "/actual/fit.png"}] if save_outcome == "saved" else []
+    )
+    assert completed["save_status"] == (
+        ("incomplete" if remaining else "saved") if save_outcome == "saved"
+        else "unknown" if save_outcome == "lost" else "incomplete"
+    )
+    assert completed["unconfirmed_image"] == ("fit" if save_outcome == "lost" else None)
+    if save_outcome != "saved":
+        assert completed["error"]["phase"] == "image_save"
+    assert _methods(client).count("tab.save_image") == 1
+    assert "tab.get_figure" not in _methods(client)
+
+
+def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkeypatch):
+    save_ready, blocker_entered, release_blocker = Event(), Event(), Event()
+    intent, dispatch_save = Event(), Event()
+    send_rpc = GuiConnection.send_gui_rpc
+    read_internal = GuiConnection.read_internal
+
+    def send(connection, method, params, *args, **kwargs):
+        if method == "tab.save_image":
+            save_ready.set()
+            assert blocker_entered.wait(10), "test did not occupy the RPC lock"
+            dispatch_save.set()
+        return send_rpc(connection, method, params, *args, **kwargs)
+
+    def read(connection, method, params, **kwargs):
+        if method == "operation.cancel":
+            intent.set()
+        return read_internal(connection, method, params, **kwargs)
+
+    monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
+    monkeypatch.setattr(GuiConnection, "read_internal", read)
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {"operation_id": 71, "interactive": False, "params": {}, "invalidated_on_success": []}
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.get_analyze_result":
+            return _result_reply("analysis", ["fit"], {})
+        if method == "project.info":
+            blocker_entered.set()
+            assert release_blocker.wait(10), "test did not release the RPC lock"
+            return {"project": "test"}
+        if method == "operation.cancel":
+            return {"status": "finished"}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        try:
+            started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+            assert save_ready.wait(2)
+            blocker = pool.submit(client.call, "rpc_call", {"method": "project.info", "params": {}})
+            assert dispatch_save.wait(2)
+            request = pool.submit(client.call, "cancel", {"op": started["op"]})
+            assert intent.wait(2)
+            pending = client.call("status", {"execution": started["execution"]})
+            assert pending["cancel_requested"] is True
+            assert pending["unconfirmed_image"] is None
+        finally:
+            blocker_entered.set()
+            release_blocker.set()
+        blocker.result(timeout=3)
+        assert request.result(timeout=3).data["cancel_requested"] is True
+    completed = _data(
+        _call_stdio(monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2})
+    )
+    assert completed["status"] == "cancelled"
+    assert completed["saved_images"] == []
+    assert completed["remaining_images"] == ["fit"]
+    assert completed["save_status"] == "not_started"
+    assert "tab.save_image" not in _methods(client)
+    assert "tab.get_figure" not in _methods(client)
 
 
 @pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])

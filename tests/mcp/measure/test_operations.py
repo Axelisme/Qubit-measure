@@ -410,12 +410,14 @@ def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
 @pytest.mark.parametrize(
     ("tool", "arguments", "message"),
     [
-        ("wait", {}, "exactly one"),
-        ("wait", {"op": 1, "execution": "analysis-1"}, "exactly one"),
-        ("wait", {"op": 1, "execution": None}, "exactly one"),
+        *[
+            (tool, arguments, "exactly one")
+            for tool in ("wait", "cancel")
+            for arguments in ({}, {"op": 1, "execution": "analysis-1"}, {"op": 1, "execution": None})
+        ],
         *[
             (tool, {"execution": value}, "non-empty string")
-            for tool in ("status", "wait")
+            for tool in ("status", "wait", "cancel")
             for value in ("", None, True, 1)
         ],
         *[
@@ -436,7 +438,7 @@ def test_execution_query_rejects_invalid_input_without_gui_access(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("tool", ["status", "wait"])
+@pytest.mark.parametrize("tool", ["status", "wait", "cancel"])
 def test_unknown_execution_is_a_query_failure_without_gui_access(
     tmp_path: Path, tool: str
 ) -> None:
