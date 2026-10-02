@@ -7,9 +7,11 @@ from numbers import Integral, Real
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
-from matplotlib.figure import Figure
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.freq import (
+    FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqResult,
@@ -36,8 +38,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import ScalarSpec
+from zcu_tools.plotting.plots import Plots
 
-OneToneFreqRunResult: TypeAlias = FreqResult
+OneToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 SamplingMode: TypeAlias = Literal["linear", "homophasal"]
 EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
 EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
@@ -75,7 +78,6 @@ class OneToneFreqAnalyzeResult(AnalyzeResultBase):
     freq: float
     fwhm: float
     params: dict[str, Any]
-    figure: Figure
     edelay: float | None = None
     edelay_source: EDelaySource = "global"
     edelay_persistable: bool = False
@@ -140,7 +142,7 @@ class OneToneFreqAdapter(
 
     @staticmethod
     def _readout_route(result: OneToneFreqRunResult) -> tuple[int, int] | None:
-        cfg = result.cfg_snapshot
+        cfg = result.cfg
         if cfg is None:
             return None
         try:
@@ -220,7 +222,7 @@ class OneToneFreqAdapter(
 
     @staticmethod
     def _has_nonuniform_fitting_grid(result: OneToneFreqRunResult) -> bool:
-        fitting_freqs = result.freqs[1:-1]
+        fitting_freqs = result.result.freqs[1:-1]
         if len(fitting_freqs) < 3:
             return False
         steps = np.abs(np.diff(fitting_freqs))
@@ -299,8 +301,18 @@ class OneToneFreqAdapter(
             cfg_raw.pop("homophasal", None)
         return super().build_exp_cfg(cfg_raw, req)
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> OneToneFreqRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FreqExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams]
+        self,
+        req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> OneToneFreqAnalyzeResult:
         params = req.analyze_params
         route = self._readout_route(req.run_result)
@@ -313,22 +325,24 @@ class OneToneFreqAdapter(
                     "max_edelay_search_radius must be positive and finite, got "
                     f"{params.max_edelay_search_radius!r}"
                 )
-        freq, fwhm, fit_params, figure = FreqExp().analyze(
+        answer = FreqExp().analyze(
             req.run_result,
-            model_type=params.model_type,
-            fit_bg_amp_slope=params.fit_bg_amp_slope,
-            fit_bg_phase_curvature=params.fit_bg_phase_curvature,
-            edelay_branch_seed=edelay_seed,
-            edelay_max_search_radius=max_search_radius,
+            FreqAnalyzeOptions(
+                model_type=params.model_type,
+                fit_bg_amp_slope=params.fit_bg_amp_slope,
+                fit_bg_phase_curvature=params.fit_bg_phase_curvature,
+                edelay_branch_seed=edelay_seed,
+                edelay_max_search_radius=max_search_radius,
+            ),
+            plots=plots,
         )
-        edelay = self._finite_real(fit_params.get("edelay"))
+        edelay = self._finite_real(answer.params.get("edelay"))
         if edelay is None:
             raise ValueError("one-tone fit result must contain a finite edelay")
         return OneToneFreqAnalyzeResult(
-            freq=freq,
-            fwhm=fwhm,
-            params=fit_params,
-            figure=figure,
+            freq=answer.freq,
+            fwhm=answer.fwhm,
+            params=answer.params,
             edelay=edelay,
             edelay_source=edelay_source,
             edelay_persistable=(
@@ -389,7 +403,7 @@ class OneToneFreqAdapter(
             )
         items.extend(
             pulse_readout_module_writeback_items(
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 target="readout_rf",
                 desc="Readout at fitted resonator frequency",
                 field_updates=(

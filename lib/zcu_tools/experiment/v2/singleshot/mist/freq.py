@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import field_serializer
 
@@ -17,14 +17,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -48,7 +48,6 @@ class FreqResult:
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
-    cfg_snapshot: FreqCfg | None = None
 
 
 class FreqModuleCfg(ConfigBase):
@@ -74,7 +73,14 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
         return str(value)
 
 
+@dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
+
+
 class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
+    Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(
@@ -92,15 +98,15 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
         tag="singleshot/mist/freq",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: FreqCfg,
-    ) -> FreqResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        soc, soccfg = context.soc, context.soccfg
+        cfg = deepcopy(cfg)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         freqs = sweep2array(
@@ -109,73 +115,94 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
-        with LivePlot1D(
+        def configure_axes(ax: Axes) -> None:
+            ax.set_ylim(0.0, 1.0)
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
+
+        viewer = context.plots.liveplot_1d(
+            "measurement",
             "Pulse freq",
             "Population",
-            segment_kwargs=dict(
-                num_lines=3,
-                line_kwargs=[
-                    dict(label="Ground"),
-                    dict(label="Excited"),
-                    dict(label="Other"),
-                ],
-            ),
-        ) as viewer:
-            viewer.get_ax().set_ylim(0.0, 1.0)
-
-            buffer = SignalBuffer(
-                (len(freqs), 2),
-                dtype=np.float64,
-                on_update=lambda data: viewer.update(freqs, calc_populations(data).T),
-            )
-            with Schedule(cfg, buffer) as sched:
-                run_cfg = sched.cfg
-                modules = run_cfg.modules
-                freq_sweep = run_cfg.sweep.freq
-                modules.probe_pulse.set_param("freq", sweep2param("freq", freq_sweep))
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("probe_pulse", modules.probe_pulse)
-                    .add_readout("readout", modules.readout)
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(
-                        raw2signal_fn=raw_population_signal,
-                        g_center=orig_cfg.g_center,
-                        e_center=orig_cfg.e_center,
-                        ge_radius=orig_cfg.radius,
-                    )
+            num_lines=3,
+            configure_axes=configure_axes,
+        )
+        buffer = SignalBuffer(
+            (len(freqs), 2),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(freqs, calc_populations(data).T),
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            run_cfg = sched.cfg
+            modules = run_cfg.modules
+            freq_sweep = run_cfg.sweep.freq
+            modules.probe_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add_reset("reset", modules.reset)
+                .add_pulse("init_pulse", modules.init_pulse)
+                .add_pulse("probe_pulse", modules.probe_pulse)
+                .add_readout("readout", modules.readout)
+                .declare_sweep("freq", freq_sweep)
+                .build_and_acquire(
+                    raw2signal_fn=raw_population_signal,
+                    g_center=cfg.g_center,
+                    e_center=cfg.e_center,
+                    ge_radius=cfg.radius,
                 )
-            signals = buffer.array
+            )
+        signals = buffer.array
 
-        return FreqResult(freqs=freqs, signals=signals, cfg_snapshot=orig_cfg)
+        return FreqResult(freqs=freqs, signals=signals)
 
-    @retrieve_result
     def analyze(
         self,
-        result: FreqResult | None = None,
+        source: RunRecord[FreqCfg, FreqResult],
+        options: FreqAnalyzeOptions,
         *,
-        confusion_matrix: NDArray[np.float64] | None = None,
-    ) -> Figure:
-        assert result is not None, "no result found"
-
+        plots: Plots,
+    ) -> None:
+        result = source.result
         freqs, populations = result.freqs, result.signals
 
         populations = calc_populations(populations)
 
-        populations = correct_populations(populations, confusion_matrix)
+        populations = correct_populations(populations, options.confusion_matrix)
 
-        fig, ax = plt.subplots(figsize=(6, 6))
+        _, ax = plots.subplots("fit", figsize=(6, 6))
 
-        plot_kwargs = dict(ls="-", marker="o", markersize=1)
-        ax.plot(freqs, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax.plot(freqs, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax.plot(freqs, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax.plot(
+            freqs,
+            populations[:, 0],
+            color="blue",
+            label="Ground",
+            ls="-",
+            marker="o",
+            markersize=1,
+        )
+        ax.plot(
+            freqs,
+            populations[:, 1],
+            color="red",
+            label="Excited",
+            ls="-",
+            marker="o",
+            markersize=1,
+        )
+        ax.plot(
+            freqs,
+            populations[:, 2],
+            color="green",
+            label="Other",
+            ls="-",
+            marker="o",
+            markersize=1,
+        )
         ax.set_xlabel("probe freq (MHz)", fontsize=14)
         ax.set_ylabel("Population", fontsize=14)
         ax.grid(True)
         ax.tick_params(axis="both", which="major", labelsize=12)
         ax.set_ylim(0, 1)
-
-        return fig

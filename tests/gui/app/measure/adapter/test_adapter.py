@@ -37,6 +37,7 @@ from zcu_tools.gui.cfg import (
     SweepValue,
     make_default_value,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict
 
 # ---------------------------------------------------------------------------
@@ -853,7 +854,7 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
             def make_filename_stem(self, ctx):
                 return "stem"
 
-            def analyze(self, req):
+            def analyze(self, req, *, plots: Plots):
                 return NoAnalysisResult()
 
 
@@ -869,7 +870,7 @@ def test_base_adapter_analyze_raises_by_default():
         predictor=None,
     )
     with pytest.raises(NotImplementedError, match="analyze"):
-        adapter.analyze(req)
+        adapter.analyze(req, plots=Plots(NonPresentingHost()))
 
 
 # ---------------------------------------------------------------------------
@@ -950,7 +951,7 @@ def test_analyze_params_cls_fallback_when_no_annotation():
         def get_analyze_params(self, result, ctx):
             return NoAnalyzeParams()
 
-        def analyze(self, req):
+        def analyze(self, req, *, plots: Plots):
             return NoAnalysisResult()
 
     # The overridden get_analyze_params has no type annotation → fallback

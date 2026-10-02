@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, make_cfg
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
 @dataclass
@@ -104,22 +104,22 @@ def make_snapshot(
     analysis_snap = AnalysisPaneSnapshot(
         params=DummyParams() if has_analyze_result else None,
         result=object() if has_analyze_result else None,
-        figure=figure_obj,
+        figures=ready_figures(figure_obj),
         writeback_items=tuple(analysis_writeback_items),
-        image_path=analysis_image_snap,
+        image_paths={"fit": analysis_image_snap} if figure_obj is not None else {},
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=DummyPostParams() if has_post_result else None,
         result=object() if has_post_result else None,
-        figure=post_figure_obj,
+        figures=ready_figures(post_figure_obj),
         writeback_items=tuple(post_writeback_items),
-        image_path=post_image_snap,
+        image_paths={"fit": post_image_snap} if post_figure_obj is not None else {},
     )
     save_snap = SavePaneSnapshot(data_path=data_path_snap)
     paths_snap = TabPathsSnapshot(
         data=data_path_snap,
-        analysis_image=analysis_image_snap,
-        post_analysis_image=post_image_snap,
+        analysis_images=analysis_snap.image_paths,
+        post_analysis_images=post_snap.image_paths,
     )
     snapshot = TabSnapshot(
         adapter_name="fake",
@@ -229,7 +229,7 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(
 
 
 def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
-    from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
+    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 
     ctrl = make_ctrl()
     snap_none = make_snapshot(
@@ -246,20 +246,22 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     # Prove absent Analysis/Post pages and controls/containers were never constructed, not only hidden
     assert not hasattr(tab_none, "analyze_form")
     assert not hasattr(tab_none, "writeback_widget")
-    assert not tab_none._save_center.has_artifact(ArtifactKind.ANALYSIS)
+    assert not tab_none._save_center.has_artifact(
+        ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    )
     assert not hasattr(tab_none, "_analysis_panel")
     assert not hasattr(tab_none, "_analysis_container")
     assert not hasattr(tab_none, "post_analyze_form")
     assert not hasattr(tab_none, "post_writeback_widget")
-    assert not tab_none._save_center.has_artifact(ArtifactKind.POST_ANALYSIS)
+    assert not tab_none._save_center.has_artifact(
+        ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
+    )
     assert not hasattr(tab_none, "_post_panel")
     assert not hasattr(tab_none, "_post_container")
     with pytest.raises(RuntimeError, match="does not support analysis"):
         tab_none.get_analysis_container()
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
         tab_none.get_post_container()
-    with pytest.raises(RuntimeError, match="does not support analysis"):
-        tab_none.get_image_path()
     # Mismatch must be rejected
     bad_snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
     with pytest.raises(RuntimeError, match="capability mismatch"):
@@ -277,7 +279,9 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     ]
     assert visible_analysis == ["Run", "Analysis", "Data", "Guide"]
     assert hasattr(tab_analysis, "analyze_form")
-    assert tab_analysis._save_center.has_artifact(ArtifactKind.ANALYSIS)
+    assert tab_analysis._save_center.has_artifact(
+        ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    )
     assert not hasattr(tab_analysis, "post_analyze_form")
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
         tab_analysis.get_post_container()
@@ -404,22 +408,23 @@ def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure
     tab.attach(snap, MagicMock())
     fig_a_old = Figure()
     fig_p_old = Figure()
-    tab.show_analysis_figure(fig_a_old)
-    tab.show_post_analysis_figure(fig_p_old)
+    old_analysis = ready_figures(fig_a_old)
+    tab.show_analysis_figures(old_analysis)
+    tab.show_post_analysis_figures(ready_figures(fig_p_old))
     assert tab.get_current_figure_for_pane("analysis") is fig_a_old
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p_old
     tab.prepare_analysis_container()
     assert tab.get_current_figure_for_pane("analysis") is None
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p_old
-    tab.show_analysis_figure(fig_a_old)
+    tab.show_analysis_figures(old_analysis)
     assert tab.get_current_figure_for_pane("analysis") is fig_a_old
     fig_a_new = Figure()
     tab._post_container.clear_dynamic_canvases()
-    tab.show_analysis_figure(fig_a_new)
+    tab.show_analysis_figures(ready_figures(fig_a_new))
     assert tab.get_current_figure_for_pane("analysis") is fig_a_new
     assert tab.get_current_figure_for_pane("post_analysis") is None
     fig_p_old2 = Figure()
-    tab.show_post_analysis_figure(fig_p_old2)
+    tab.show_post_analysis_figures(ready_figures(fig_p_old2))
     tab.prepare_post_container()
     assert tab.get_current_figure_for_pane("post_analysis") is None
     assert tab.get_current_figure_for_pane("analysis") is fig_a_new
@@ -478,8 +483,8 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
     # Seed figures
     fig_a = Figure()
     fig_p = Figure()
-    tab.show_analysis_figure(fig_a)
-    tab.show_post_analysis_figure(fig_p)
+    tab.show_analysis_figures(ready_figures(fig_a))
+    tab.show_post_analysis_figures(ready_figures(fig_p))
     # Clear post to simulate start, then emit failure fact which should restore both from State
     tab.prepare_post_container()
     assert tab.get_current_figure_for_pane("post_analysis") is None
@@ -493,53 +498,38 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
     tab.detach()
 
 
-def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
+def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
+    qapp, exp_tab_widget
+):
     ctrl = make_ctrl()
-    snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=True, load=True)
+    snap = make_snapshot(
+        "tab-1", analysis=AnalysisMode.FIT, post=True, load=True, has_post_result=True
+    )
     assert snap.capabilities is not None
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
 
-    # Run/Analysis/Post panels no longer own image path edits (S1) — they live in Data center
-    from qtpy.QtWidgets import QLineEdit
+    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 
-    assert not any(
-        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/image.png"
-        for c in tab._analysis_panel.findChildren(QLineEdit)
-    )
-    assert not any(
-        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/post_image.png"
-        for c in tab._post_panel.findChildren(QLineEdit)
-    )
-    assert not any(
-        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/data.hdf5"
-        for c in tab._run_panel.findChildren(QLineEdit)
-    )
-    assert any(
-        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/data.hdf5"
-        for c in tab._save_panel.findChildren(QLineEdit)
-    )
-    assert any(
-        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/image.png"
-        for c in tab._save_panel.findChildren(QLineEdit)
-    )
-    assert any(
-        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/post_image.png"
-        for c in tab._save_panel.findChildren(QLineEdit)
+    analysis_key = ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    post_key = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
+    assert all(
+        tab._save_center.has_artifact(key)
+        for key in (ArtifactKey(ArtifactKind.DATA), analysis_key, post_key)
     )
     tab.set_data_path("/tmp/data.hdf5")
-    tab.set_analysis_image_path("/tmp/a.png")
-    tab.set_post_image_path("/tmp/p.png")
+    tab.set_image_path(analysis_key, "/tmp/a.png")
+    tab.set_image_path(post_key, "/tmp/p.png")
     assert tab.get_data_path() == "/tmp/data.hdf5"
-    assert tab.get_image_path() == "/tmp/a.png"
-    assert tab.get_post_image_path() == "/tmp/p.png"
+    assert tab.get_image_path(analysis_key) == "/tmp/a.png"
+    assert tab.get_image_path(post_key) == "/tmp/p.png"
 
     tab.set_data_path("")
-    tab.set_analysis_image_path("")
-    tab.set_post_image_path("")
+    tab.set_image_path(analysis_key, "")
+    tab.set_image_path(post_key, "")
     assert tab.get_data_path() == ""
-    assert tab.get_image_path() == ""
-    assert tab.get_post_image_path() == ""
+    assert tab.get_image_path(analysis_key) == ""
+    assert tab.get_image_path(post_key) == ""
     tab._left_tabs.setCurrentWidget(tab._save_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     assert tab._right_stack.currentWidget() is tab._data_gallery
@@ -548,14 +538,14 @@ def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
     assert tab._right_stack.currentWidget() is tab._right_placeholder
     fig_a = Figure()
     fig_p = Figure()
-    tab.show_analysis_figure(fig_a)
-    tab.show_post_analysis_figure(fig_p)
+    tab.show_analysis_figures(ready_figures(fig_a))
+    tab.show_post_analysis_figures(ready_figures(fig_p))
     tab._left_tabs.setCurrentWidget(tab._analysis_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._analysis_stack
+    assert tab._right_stack.currentWidget() is tab._analysis_panel_right
     tab._left_tabs.setCurrentWidget(tab._post_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._post_stack
+    assert tab._right_stack.currentWidget() is tab._post_panel_right
     assert tab.get_current_figure_for_pane("analysis") is fig_a
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p
     tab.detach()

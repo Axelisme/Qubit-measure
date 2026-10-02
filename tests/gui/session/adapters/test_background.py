@@ -2,8 +2,7 @@
 
 Covers both substrates (dedicated QThread vs shared pool), the done/error
 delivery on the main thread, that a None result is delivered (not swallowed),
-and that work-thunk closures correctly install ambient scopes on the worker
-thread (figure routing via ``figure_ambient``, pbar via ``progress_ambient``).
+and that work-thunk closures install progress_ambient on the worker thread.
 
 BackgroundRunner is now scope-agnostic: it no longer accepts or reads an
 ``OffMainScopes`` argument. Scope entering is the caller's responsibility,
@@ -15,8 +14,6 @@ from __future__ import annotations
 import time
 
 import pytest
-from zcu_tools.gui.app.measure.services.scopes import figure_ambient
-from zcu_tools.gui.plotting.routing import get_current_container
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.scopes import progress_ambient
 
@@ -117,69 +114,6 @@ def test_pool_delivers_error(qapp):
     bg.submit(work, run_in_pool=True, on_done=lambda r: None, on_error=errs.append)
     _pump_until(qapp, lambda: errs)
     assert errs == [boom]
-
-
-def test_figure_ambient_routing_active_during_work(qapp):
-    # Work thunk closes over figure_ambient: the routing ContextVar is set on
-    # the worker thread for the duration of the thunk (ADR-0066).
-    # BackgroundRunner itself is unaware of the scope — only the thunk knows.
-    bg = _bg()
-    container = object()
-    seen: list[object] = []
-
-    def work() -> object:
-        with figure_ambient(container):  # type: ignore[arg-type]
-            seen.append(get_current_container())
-        return 1
-
-    bg.submit(
-        work,
-        run_in_pool=False,
-        on_done=lambda r: None,
-        on_error=lambda e: None,
-    )
-    _pump_until(qapp, lambda: seen)
-    assert seen == [container]
-
-
-def test_no_figure_ambient_leaves_routing_unset(qapp):
-    # When the work thunk does not install figure_ambient the routing ContextVar
-    # is absent on the worker thread (the default is None).
-    bg = _bg()
-    seen: list[object] = []
-
-    def work() -> object:
-        seen.append(get_current_container())
-        return 1
-
-    bg.submit(
-        work,
-        run_in_pool=True,
-        on_done=lambda r: None,
-        on_error=lambda e: None,
-    )
-    _pump_until(qapp, lambda: seen)
-    assert seen == [None]
-
-
-def test_figure_ambient_none_container_is_noop(qapp):
-    # figure_ambient(None) is a no-op: routing stays unset.
-    bg = _bg()
-    seen: list[object] = []
-
-    def work() -> object:
-        with figure_ambient(None):
-            seen.append(get_current_container())
-        return 1
-
-    bg.submit(
-        work,
-        run_in_pool=False,
-        on_done=lambda r: None,
-        on_error=lambda e: None,
-    )
-    _pump_until(qapp, lambda: seen)
-    assert seen == [None]
 
 
 def test_progress_ambient_installs_pbar_factory(qapp):

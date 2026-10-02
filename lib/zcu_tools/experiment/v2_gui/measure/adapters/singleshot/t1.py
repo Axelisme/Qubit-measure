@@ -4,9 +4,15 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.v2.singleshot.t1.t1 import T1Cfg, T1Exp, T1Result
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.singleshot.t1.t1 import (
+    T1AnalyzeOptions,
+    T1Cfg,
+    T1Exp,
+    T1Result,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     SweepDefault,
@@ -16,26 +22,23 @@ from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
     RunRequest,
     SessionEnv,
-    require_soc_handles,
 )
 from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.plotting.plots import Plots
 
-# Domain T1Exp.analyze returns only a Figure (T1 in suptitle, no numeric return).
-# This adapter is therefore figure-only with no writeback. If you need the T1
-# value written to the MetaDict, use 'singleshot/t1_tone' whose domain analyze
-# returns (t1, t1_b, fig).
-SsT1RunResult: TypeAlias = T1Result
+# Transition-rate analysis publishes figures without numeric writeback.
+SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
 @dataclass
-class SsT1AnalyzeResult(FigureOnlyAnalyzeResult):
-    # Dual-transition-rate fit result in suptitle only; no numeric writeback.
+class SsT1AnalyzeResult(AnalyzeResultBase):
     pass
 
 
@@ -123,34 +126,23 @@ class SsT1Adapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T1Cfg:
-        # Pop ``uniform`` before lowering — it is not part of T1Cfg.
-        cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("uniform", None)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def _uniform(self, raw_cfg: dict[str, object]) -> bool:
-        value = raw_cfg.get("uniform", False)
-        if not isinstance(value, bool):
-            raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
-        return value
-
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> SsT1RunResult:
-        # Uniform remains an explicit domain run option.
-        soc, soccfg = require_soc_handles(req)
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SsT1RunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        uniform = self._uniform(raw_cfg)
-        return T1Exp().run(soc, soccfg, cfg, uniform=uniform)
+        return RunRecord(cfg, T1Exp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[SsT1RunResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[SsT1RunResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsT1AnalyzeResult:
         # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
         # ``skip`` is not exposed as a user knob — users can re-run with a shorter
         # sweep instead.
         confusion = req.md.get("confusion_matrix")
-        fig = T1Exp().analyze(req.run_result, confusion_matrix=confusion)
-        return SsT1AnalyzeResult(figure=fig)
+        T1Exp().analyze(
+            req.run_result, T1AnalyzeOptions(confusion_matrix=confusion), plots=plots
+        )
+        return SsT1AnalyzeResult()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_ss_t1_{time.strftime('%m%d')}"

@@ -8,11 +8,10 @@ from zcu_tools.gui.app.measure.adapter import PostAnalyzeRequest, PostWritebackR
 from zcu_tools.gui.app.measure.events.tab import TabInteractionFact
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 
-from .scopes import figure_ambient
+from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
@@ -20,6 +19,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
     from zcu_tools.gui.session.types import SessionEnv
+    from zcu_tools.plotting.plots import Plots
 
     from ..state import RetiredPaneResources
     from .ports import AnalyzeStatePort, WritebackLifecyclePort
@@ -32,13 +32,14 @@ class _PostAnalyzeCapture:
     context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object
+    plots: Plots
 
 
 class PostAnalyzeService(_StagedAnalyzeService):
     """Second-layer analysis service — mirrors :class:`AnalyzeService`.
 
     Runs a tab's ``adapter.post_analyze`` off the main thread on top of the
-    primary analyze result, then records the result + figure into ``State`` on
+    primary analyze result, then records numeric results + named plots in ``State`` on
     the main thread (the State main-thread invariant). Like FIT analyze, it takes
     a handle only (no exclusion, ADR-0066): post-analysis is a pure CPU recompute
     that never conflicts with hardware. The handle lifecycle + failure path live in
@@ -69,7 +70,8 @@ class PostAnalyzeService(_StagedAnalyzeService):
         self,
         tab_id: str,
         post_analyze_params_instance: object,
-        figure_container: FigureContainer | None = None,
+        *,
+        plots: Plots,
     ) -> int:
         """Begin a post-analysis for ``tab_id``. Returns the operation token.
 
@@ -108,24 +110,31 @@ class PostAnalyzeService(_StagedAnalyzeService):
             context=ctx,
             adapter=adapter,
             params=post_analyze_params_instance,
+            plots=plots,
         )
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
-            # Post-analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0066).
-            with figure_ambient(figure_container):
-                return adapter.post_analyze(req)
+            return adapter.post_analyze(req, plots=plots)
 
         # The tab is marked analyzing for the duration so concurrent run/analyze is
         # gated out (is_tab_busy covers analyzing) — done by _submit_with_runner's
         # _begin tail (post-begin invariant from stage2c_spec.md).
-        return self._submit_with_runner(
-            tab_id,
-            work,
-            lambda record_tab_id, result: self._record(
-                record_tab_id, result, captured_inputs=captured_inputs
-            ),
-            "post-analyze failed to start",
-        )
+        try:
+            return self._submit_with_runner(
+                tab_id,
+                work,
+                lambda record_tab_id, result: self._record(
+                    record_tab_id, result, captured_inputs=captured_inputs
+                ),
+                lambda: discard_unpublished_plots(plots),
+                "post-analyze failed to start",
+            )
+        except Exception:
+            try:
+                discard_unpublished_plots(plots)
+            except Exception:
+                logger.exception("Unpublished post-analysis plot cleanup failed")
+            raise
 
     def _teardown_retired(self, retired: RetiredPaneResources | None) -> None:
         if retired is None:
@@ -135,6 +144,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 self._writeback.teardown_draft(draft)
             except Exception:
                 logger.exception("retired post-analysis draft teardown failed")
+        release_retired_plots(retired)
 
     def _record(
         self,
@@ -148,6 +158,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
         ctx = captured_inputs.context
         adapter = captured_inputs.adapter
         params = captured_inputs.params
+        plots = captured_inputs.plots
         writeback = self._writeback
         draft: Any | None = None
         try:
@@ -162,10 +173,11 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 )
             )
             draft = writeback.create_draft(proposal_items)
+            plots.finish()
             retired = self._state.update_tab_post_analyze(
                 tab_id,
                 post_result,
-                getattr(post_result, "figure", None),
+                plots,
                 post_analyze_params_instance=params,
                 source_operation_id=self._active_tokens[tab_id],
                 writeback_draft=draft,

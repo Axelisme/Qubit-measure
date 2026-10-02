@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import field_serializer
 
@@ -15,14 +15,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     Module,
@@ -85,7 +85,6 @@ class ResetCheckResult:
     population_states: NDArray[np.int64] = field(
         default_factory=lambda: np.array([0, 1], dtype=np.int64)
     )
-    cfg_snapshot: ResetCheckCfg | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +125,14 @@ def _population_line_kwargs() -> list[dict[str, str]]:
     ]
 
 
+@dataclass(frozen=True)
+class ResetCheckAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
+
+
 class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
+    Options: ClassVar[type[ResetCheckAnalyzeOptions]] = ResetCheckAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("population_states", "GE Population", "None", dtype=np.int64),
@@ -139,67 +145,77 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
         tag="singleshot/reset_check",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: ResetCheckCfg,
+        *,
+        context: RunContext,
     ) -> ResetCheckResult:
+        soc, soccfg = context.soc, context.soccfg
         g_center, e_center, radius = cfg.g_center, cfg.e_center, cfg.radius
         classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
         cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         gains = sweep2array(
             cfg.sweep.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": cfg.modules.rabi_pulse.ch},
         )
-        with LivePlot1D(
+
+        def configure_axes(ax: Axes) -> None:
+            ax.set_ylim(-0.02, 1.02)
+            for line, kwargs in zip(ax.lines, _population_line_kwargs(), strict=True):
+                line.set(**kwargs)
+            ax.legend()
+
+        viewer = context.plots.liveplot_1d(
+            "measurement",
             "Pulse gain (a.u.)",
             "Classified population",
-            segment_kwargs={"num_lines": 9, "line_kwargs": _population_line_kwargs()},
-        ) as viewer:
-            viewer.get_ax().set_ylim(-0.02, 1.02)
-            buffer = SignalBuffer(
-                (gains.size, 3, 2),
-                dtype=np.float64,
-                on_update=lambda data: viewer.update(
-                    gains, calc_populations(data).reshape(gains.size, 9).T
-                ),
-            )
-            with Schedule(cfg, buffer) as sched:
-                (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        *_reset_check_sequence(sched.cfg.modules, sched.cfg.sweep.gain)
-                    )
-                    .declare_sweep("gain", sched.cfg.sweep.gain)
-                    .declare_sweep("reset_sel", 3)
-                    .build_and_acquire(
-                        raw2signal_fn=raw_population_signal,
-                        g_center=g_center,
-                        e_center=e_center,
-                        ge_radius=radius,
-                    )
+            num_lines=9,
+            configure_axes=configure_axes,
+        )
+        buffer = SignalBuffer(
+            (gains.size, 3, 2),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(
+                gains, calc_populations(data).reshape(gains.size, 9).T
+            ),
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            (
+                sched.prog_builder(soc, soccfg)
+                .add(*_reset_check_sequence(sched.cfg.modules, sched.cfg.sweep.gain))
+                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .declare_sweep("reset_sel", 3)
+                .build_and_acquire(
+                    raw2signal_fn=raw_population_signal,
+                    g_center=g_center,
+                    e_center=e_center,
+                    ge_radius=radius,
                 )
-                sched.trigger_update(flush=True)
+            )
+            sched.trigger_update(flush=True)
         return ResetCheckResult(
             gains=gains,
             reset_states=np.arange(3, dtype=np.int64),
             signals=buffer.array,
-            cfg_snapshot=cfg,
         )
 
-    @retrieve_result
     def analyze(
         self,
-        result: ResetCheckResult | None = None,
+        source: RunRecord[ResetCheckCfg, ResetCheckResult],
+        options: ResetCheckAnalyzeOptions,
         *,
-        confusion_matrix: NDArray[np.float64] | None = None,
-    ) -> tuple[ResetCheckAnalysis, Figure]:
-        if result is None:
-            raise ValueError("No reset-check result found")
+        plots: Plots,
+    ) -> ResetCheckAnalysis:
+        result = source.result
+        confusion_matrix = options.confusion_matrix
         if (
             result.signals.shape != (result.gains.size, 3, 2)
             or not np.array_equal(result.reset_states, [0, 1, 2])
@@ -222,7 +238,7 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
             float(result.gains[worst]),
             int(valid.sum()),
         )
-        fig, ax = plt.subplots(figsize=(10, 6))
+        _, ax = plots.subplots("populations", figsize=(10, 6))
         order = np.argsort(result.gains)
         for values, kwargs in zip(
             populations[order].reshape(result.gains.size, 9).T,
@@ -247,4 +263,4 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
         )
         ax.legend(ncol=3, fontsize=8)
         ax.grid(True)
-        return analysis, fig
+        return analysis

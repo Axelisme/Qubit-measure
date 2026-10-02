@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
@@ -15,13 +17,14 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
+    RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
 
-PowerDepRunResult: TypeAlias = PowerResult
+PowerDepRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 
 class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
@@ -69,6 +72,13 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
             "the window."
         ),
     )
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> PowerDepRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = PowerExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

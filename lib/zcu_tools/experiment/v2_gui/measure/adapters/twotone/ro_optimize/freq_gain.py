@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import (
+    FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
     FreqGainResult,
@@ -28,6 +29,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -36,8 +38,9 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
-RoOptFreqGainRunResult: TypeAlias = FreqGainResult
+RoOptFreqGainRunResult: TypeAlias = RunRecord[FreqGainCfg, FreqGainResult]
 
 
 def _best_ro_freq_range(ctx: SessionEnv) -> SweepValue:
@@ -67,7 +70,6 @@ class RoOptFreqGainAnalyzeParams:
 class RoOptFreqGainAnalyzeResult(AnalyzeResultBase):
     best_freq: float
     best_gain: float
-    figure: Figure
 
 
 class RoOptFreqGainAdapter(
@@ -154,15 +156,31 @@ class RoOptFreqGainAdapter(
             .build()
         )
 
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> RoOptFreqGainRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, FreqGainExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeParams]
+        self,
+        req: AnalyzeRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> RoOptFreqGainAnalyzeResult:
         params = req.analyze_params
-        best_freq, best_gain, fig = FreqGainExp().analyze(
-            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        options = FreqGainAnalyzeOptions(
+            smooth=params.smooth,
+            smooth_method=params.smooth_method,
         )
+        result = FreqGainExp().analyze(req.run_result, options, plots=plots)
         return RoOptFreqGainAnalyzeResult(
-            best_freq=best_freq, best_gain=best_gain, figure=fig
+            best_freq=result.best_freq,
+            best_gain=result.best_gain,
         )
 
     def get_writeback_items(
@@ -184,7 +202,7 @@ class RoOptFreqGainAdapter(
         items.extend(
             readout_dpm_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 proposed={
                     "best_ro_freq": result.best_freq,
                     "best_ro_gain": result.best_gain,

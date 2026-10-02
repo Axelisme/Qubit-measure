@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Protocol
 
-from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
+from zcu_tools.device import BaseDevice, DeviceInfo
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.derivation import SmoothingService
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
@@ -24,6 +29,7 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
 from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore
 from zcu_tools.gui.app.autofluxdep.tools import Tools
 from zcu_tools.gui.session.scopes import progress_ambient
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.progress_bar import make_pbar
 
 logger = logging.getLogger(__name__)
@@ -75,6 +81,8 @@ class RunSession(RunObserver):
         ml: ModuleSource,
         soc: Any,
         soccfg: Any,
+        devices: Mapping[str, BaseDevice[Any]],
+        device_snapshot: Mapping[str, DeviceInfo],
         md: Any,
         notify: Notify | None,
         event_sink: RunEventSink,
@@ -92,6 +100,8 @@ class RunSession(RunObserver):
         self.ml = ml
         self.soc = soc
         self.soccfg = soccfg
+        self.devices = MappingProxyType(dict(devices))
+        self.device_snapshot = deepcopy(dict(device_snapshot))
         self.md = md
         self.notify = notify
         self._event_sink = event_sink
@@ -175,10 +185,14 @@ class RunSession(RunObserver):
             self._pause_event.clear()
         start_idx = self._next_flux_idx
 
-        with (
-            progress_ambient(progress_factory),
-            schedule_stop_scope(StopSignal(self._schedule_stop_event)),
-        ):
+        context = RunContext(
+            soc=self.soc,
+            soccfg=self.soccfg,
+            devices=self.devices,
+            plots=Plots(NonPresentingHost()),
+            cancel_signal=StopSignal(self._schedule_stop_event),
+        )
+        with progress_ambient(progress_factory):
             pbar = make_pbar(
                 total=len(self.flux_values),
                 desc=self._progress_label,
@@ -193,8 +207,8 @@ class RunSession(RunObserver):
                     providers=self.providers,
                     tools=self.tools,
                     ml=self.ml,
-                    soc=self.soc,
-                    soccfg=self.soccfg,
+                    context=context,
+                    device_snapshot=self.device_snapshot,
                     md=self.md,
                     flux_device=self.flux_device,
                     results=self.results,
@@ -207,7 +221,6 @@ class RunSession(RunObserver):
                     start_idx=start_idx,
                     info=self._info,
                     observer=self,
-                    should_stop=self._schedule_stop_event.is_set,
                     pause_requested=self._pause_event.is_set,
                 )
                 pbar.refresh()
@@ -227,6 +240,7 @@ class RunSession(RunObserver):
             finally:
                 self._progress_bar = None
                 pbar.close()
+                context.plots.finish()
 
     def mark_paused(self) -> None:
         self.store.mark_paused(self._next_flux_idx)

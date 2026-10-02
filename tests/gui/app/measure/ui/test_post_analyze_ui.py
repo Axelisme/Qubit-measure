@@ -15,13 +15,13 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -79,31 +79,27 @@ def _snapshot(
     analysis_pane = AnalysisPaneSnapshot(
         params=_AnalyzeParams() if has_analyze_result else None,
         result=object() if has_analyze_result else None,
-        figure=analysis_figure,
+        figures=ready_figures(analysis_figure),
         writeback_items=(),
-        image_path=PathResourceSnapshot(
-            override=None, path="/tmp/a.png" if has_analyze_result else None
-        ),
+        image_paths={"fit": PathResourceSnapshot(override=None, path="/tmp/a.png")}
+        if analysis_figure is not None
+        else {},
     )
     post_analysis_pane = PostAnalysisPaneSnapshot(
         params=post_params,
         result=object() if has_post_analyze_result else None,
-        figure=post_analysis_figure,
+        figures=ready_figures(post_analysis_figure),
         writeback_items=(),
-        image_path=PathResourceSnapshot(
-            override=None, path="/tmp/p.png" if has_post_analyze_result else None
-        ),
+        image_paths={"fit": PathResourceSnapshot(override=None, path="/tmp/p.png")}
+        if post_analysis_figure is not None
+        else {},
     )
     paths = TabPathsSnapshot(
         data=PathResourceSnapshot(
             override=None, path="/tmp/data.h5" if has_run_result else None
         ),
-        analysis_image=PathResourceSnapshot(
-            override=None, path="/tmp/a.png" if has_analyze_result else None
-        ),
-        post_analysis_image=PathResourceSnapshot(
-            override=None, path="/tmp/p.png" if has_post_analyze_result else None
-        ),
+        analysis_images=analysis_pane.image_paths,
+        post_analysis_images=post_analysis_pane.image_paths,
     )
     snapshot = TabSnapshot(
         adapter_name="ge",
@@ -243,8 +239,9 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
     assert tab.post_analyze_btn.isHidden() is False
     assert tab.post_analyze_btn.isEnabled() is False
     assert tab._post_gate_label.isHidden() is False
-    assert tab._save_center.has_artifact(ArtifactKind.POST_ANALYSIS)
-    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is False
+    post_key = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
+    assert tab._save_center.has_artifact(post_key) is False
+    assert tab._save_center.is_save_enabled(post_key) is False
 
     tab.update_interaction_state(
         _snapshot(
@@ -258,7 +255,7 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
     assert tab._post_analyze_section.isHidden() is True
     assert tab.post_analyze_btn.isEnabled() is True
     assert tab._post_gate_label.isHidden() is True
-    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is True
+    assert tab._save_center.is_save_enabled(post_key) is True
 
 
 def test_post_run_disabled_while_tab_busy(qapp):
@@ -366,7 +363,7 @@ def test_post_figure_refresh_clears_invalidated_presentation(qapp):
     )
     window._tab_widgets["tab-1"] = tab_w
     stale_figure = Figure()
-    window.show_post_analysis_image("tab-1", stale_figure)
+    tab_w.show_post_analysis_figures(ready_figures(stale_figure))
     assert tab_w.get_current_figure_for_pane("post_analysis") is stale_figure
 
     window.refresh_tab_post_figure("tab-1")
@@ -420,15 +417,16 @@ def test_take_figure_screenshot_captures_post_figure(qapp):
 
     post_fig = Figure()
     post_fig.add_subplot(111).plot([0, 1], [0, 1])
-    # Render the post figure through the real shared-container path.
-    window.show_post_analysis_image("tab-1", post_fig)
-    # Mock snapshot to return canonical post figure for pane-qualified screenshot
-    ctrl.get_tab_snapshot.return_value = _snapshot(
+    # Present the same canonical collection used by the pane snapshot.
+    snapshot = _snapshot(
         "tab-1",
         has_post_analyze_result=True,
         post_analysis_figure=post_fig,
         analysis_figure=Figure(),
     )
+    ctrl.get_tab_snapshot.return_value = snapshot
+    assert snapshot.post_analysis is not None
+    tab_w.show_post_analysis_figures(snapshot.post_analysis.figures)
 
     png = window.take_figure_screenshot_for_subtab("tab-1", "post_analysis")
 
@@ -452,7 +450,8 @@ def test_post_save_image_button_gated_on_post_result(qapp):
     tab.update_interaction_state(
         _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=False)
     )
-    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is False
+    post_key = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
+    assert tab._save_center.is_save_enabled(post_key) is False
 
     tab.update_interaction_state(
         _snapshot(
@@ -462,7 +461,7 @@ def test_post_save_image_button_gated_on_post_result(qapp):
             post_analysis_figure=Figure(),
         )
     )
-    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is True
+    assert tab._save_center.is_save_enabled(post_key) is True
 
 
 def test_post_save_image_button_disabled_without_active_context(qapp):
@@ -481,25 +480,10 @@ def test_post_save_image_button_disabled_without_active_context(qapp):
             has_active_context=False,
         )
     )
-    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is False
-
-
-def test_post_save_image_click_saves_post_figure(qapp):
-    """Clicking the post Save Image reads the post image path and dispatches
-    through the controller's ``save_post_image`` (which saves the post-analysis
-    pane's figure)."""
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-
-    ctrl = _mock_ctrl()
-    ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
-    tab_w = MagicMock()
-    tab_w.get_post_image_path.return_value = "/tmp/post.png"
-    window._tab_widgets["tab-1"] = tab_w
-
-    window.save_tab_post_analysis_image("tab-1")
-
-    ctrl.save_post_image.assert_called_once_with("tab-1", "/tmp/post.png")
+    assert (
+        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"))
+        is False
+    )
 
 
 def test_post_tab_uses_separate_qt_tab_index(qapp):

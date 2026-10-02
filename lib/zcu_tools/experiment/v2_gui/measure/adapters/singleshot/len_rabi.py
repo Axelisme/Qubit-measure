@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.len_rabi import (
+    LenRabiAnalyzeOptions,
     LenRabiCfg,
     LenRabiExp,
     LenRabiResult,
@@ -26,6 +27,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -34,13 +36,14 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._rabi import rabi_calibration_writeback
 
 # ``LenRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *length* and
 # preserves every raw IQ shot. Analysis derives populations from that canonical
 # raw result rather than persisting a second population representation.
-SsLenRabiRunResult: TypeAlias = LenRabiResult
+SsLenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
 
 
 @dataclass
@@ -58,7 +61,6 @@ class SsLenRabiAnalyzeResult(AnalyzeResultBase):
     # from the GUI summary. The operator reviews the population/fit Figure while
     # writeback projection reads the typed domain result directly.
     fit_result: RabiJointFitResult
-    figure: Figure
 
 
 class SsLenRabiAdapter(
@@ -150,16 +152,29 @@ class SsLenRabiAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SsLenRabiRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = LenRabiExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[SsLenRabiRunResult, SsLenRabiAnalyzeParams]
+        self,
+        req: AnalyzeRequest[SsLenRabiRunResult, SsLenRabiAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> SsLenRabiAnalyzeResult:
-        fit_result, figure = LenRabiExp().analyze(
+        fit_result = LenRabiExp().analyze(
             req.run_result,
-            decay=req.analyze_params.decay,
-            fit_phase=req.analyze_params.fit_phase,
-            initial_state=req.analyze_params.initial_state,
+            LenRabiAnalyzeOptions(
+                decay=req.analyze_params.decay,
+                fit_phase=req.analyze_params.fit_phase,
+                initial_state=req.analyze_params.initial_state,
+            ),
+            plots=plots,
         )
-        return SsLenRabiAnalyzeResult(fit_result=fit_result, figure=figure)
+        return SsLenRabiAnalyzeResult(fit_result=fit_result)
 
     def get_writeback_items(
         self, req: WritebackRequest[SsLenRabiRunResult, SsLenRabiAnalyzeResult]

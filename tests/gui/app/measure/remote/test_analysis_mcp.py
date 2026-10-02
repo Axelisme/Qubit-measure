@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from ._helpers import Fixture, call, mcp_client, open_client
@@ -19,28 +20,27 @@ class ScalarParams:
 @dataclass
 class ScalarResult:
     value: float
-    figure: Figure | None
 
     def to_summary_dict(self) -> dict[str, float]:
         return {"value": self.value}
 
 
 def _install_result(fx, tab: str, stage: str, value: float, operation: int) -> None:
-    result = ScalarResult(value, Figure())
+    result = ScalarResult(value)
+    plots = Plots(NonPresentingHost())
+    plots.adopt("fit", Figure())
+    plots.finish()
     if stage == "analysis":
         fx.state.update_tab_analyze(
-            tab, result, result.figure, source_operation_id=operation
+            tab, result, plots, source_operation_id=operation
         )
     else:
         adapter = fx.state.get_tab(tab).adapter
         adapter.capabilities = replace(adapter.capabilities, post_analysis=True)
         if fx.state.get_tab(tab).analysis.result is None:
-            primary = ScalarResult(1.0, Figure())
-            fx.state.update_tab_analyze(
-                tab, primary, primary.figure, source_operation_id=100
-            )
+            _install_result(fx, tab, "analysis", 1.0, 100)
         fx.state.update_tab_post_analyze(
-            tab, result, result.figure, source_operation_id=operation
+            tab, result, plots, source_operation_id=operation
         )
 
 
@@ -155,6 +155,7 @@ def test_operation_result_observation_unlocks_only_the_observed_image(
     save = {
         "tab_id": tab,
         "subtab_id": stage,
+        "figure_name": "fit",
         "operation_id": 101,
         "image_path": str(destination),
     }
@@ -219,6 +220,7 @@ def test_replaced_operation_cannot_read_or_save_another_result(
             {
                 "tab_id": tab,
                 "subtab_id": stage,
+                "figure_name": "fit",
                 "operation_id": 101,
                 "image_path": str(destination),
             },
@@ -248,12 +250,15 @@ def test_other_caller_save_path_change_invalidates_operation_observation(
                 {
                     **bound,
                     "subtab_id": stage,
+                    "figure_name": "fit",
                     "image_path": str(tmp_path / "other.png"),
                 },
             )["ok"]
             is True
         )
-        rejected = call(first, "tab.save_image", {**bound, "subtab_id": stage})
+        rejected = call(
+            first, "tab.save_image", {**bound, "subtab_id": stage, "figure_name": "fit"}
+        )
         assert rejected["error"]["reason"] == "stale_version"
 
 
@@ -272,7 +277,7 @@ def test_result_without_figure_does_not_report_a_saved_image(fx, tmp_path):
     tab = fx.ctrl.new_tab("fake")
     fx.state.update_tab_result(tab, object())
     fx.state.update_tab_analyze(
-        tab, ScalarResult(3.0, None), None, source_operation_id=101
+        tab, ScalarResult(3.0), None, source_operation_id=101
     )
     fx.service.render_view = None
     destination = tmp_path / "no-figure.png"
@@ -282,7 +287,12 @@ def test_result_without_figure_does_not_report_a_saved_image(fx, tmp_path):
         )["result"]
         assert observed["operation_state"]["analysis_state"]["has_figure"] is False
         assert observed["summary"] == {"value": 3.0}
-        params = {"tab_id": tab, "subtab_id": "analysis", "operation_id": 101}
+        params = {
+            "tab_id": tab,
+            "subtab_id": "analysis",
+            "figure_name": "fit",
+            "operation_id": 101,
+        }
         assert call(sock, "tab.get_figure", params)["ok"] is False
         rejected = call(
             sock, "tab.save_image", {**params, "image_path": str(destination)}

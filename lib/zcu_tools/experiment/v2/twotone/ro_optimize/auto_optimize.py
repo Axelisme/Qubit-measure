@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Optional, cast
+from pathlib import Path
+from typing import Any, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from skopt import Optimizer
@@ -15,7 +17,6 @@ from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     US_TO_S,
-    AbsExperiment,
     GroupedAxesSpec,
     GroupedLoadData,
     RoleAxisSpec,
@@ -23,12 +24,13 @@ from zcu_tools.experiment import (
     RoleZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, setup_devices
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.plotting.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
-from zcu_tools.plotting.liveplot.backend import close_figure
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -46,7 +48,13 @@ from zcu_tools.program.v2 import (
 class AutoOptResult:
     params: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: Optional["AutoOptCfg"] = None
+
+
+@dataclass(frozen=True)
+class AutoOptAnalysis:
+    best_freq: float
+    best_gain: float
+    best_length: float
 
 
 class ReadoutOptimizer:
@@ -115,6 +123,7 @@ class AutoOptCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AutoOptModuleCfg
     sweep: AutoOptSweepCfg
     skew_penalty: float = Field(default=0.0, ge=0.0)
+    num_points: int = Field(gt=0)
 
 
 RO_AUTO_READOUT_FREQ_ROLE = "readout_freq"
@@ -150,8 +159,8 @@ def save_auto_opt_grouped_result(
     )
 
 
-def load_auto_opt_grouped_result(filepath: str) -> AutoOptResult:
-    return RO_AUTO_GROUPED_AXES_SPEC.load_result(filepath)
+def load_auto_opt_grouped_result(source: Path) -> RunRecord[AutoOptCfg, AutoOptResult]:
+    return RO_AUTO_GROUPED_AXES_SPEC.load(source)
 
 
 def _validate_auto_opt_arrays(
@@ -192,7 +201,6 @@ def _build_auto_opt_result(data: GroupedLoadData[AutoOptCfg]) -> AutoOptResult:
     return AutoOptResult(
         params=params,
         signals=signals,
-        cfg_snapshot=data.cfg_snapshot,
     )
 
 
@@ -258,145 +266,123 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
+class AutoOptExp:
     def run(
         self,
-        soc,
-        soccfg,
         cfg: AutoOptCfg,
         *,
-        num_points: int,
+        context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> AutoOptResult:
-        orig_cfg = deepcopy(cfg)
         run_cfg = deepcopy(cfg)
-        setup_devices(run_cfg, progress=True)
-
-        freq_sweep = run_cfg.sweep.freq
-        gain_sweep = run_cfg.sweep.gain
-        len_sweep = run_cfg.sweep.length
-
-        optimizer = ReadoutOptimizer(freq_sweep, gain_sweep, len_sweep, num_points)
-
-        # (num_points, [freq, gain, length])
+        soc, soccfg = context.soc, context.soccfg
+        num_points = run_cfg.num_points
+        setup_devices(
+            run_cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
+        optimizer = ReadoutOptimizer(
+            run_cfg.sweep.freq,
+            run_cfg.sweep.gain,
+            run_cfg.sweep.length,
+            num_points,
+        )
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
-
-        # initialize figure and axes
-        figsize = (8, 5)
-        fig = plt.figure(figsize=figsize)
-        gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
-
-        fig.suptitle("Readout Auto Optimization")
-
-        ax_iter = fig.add_subplot(gs[:, 0])
-        ax_freq = fig.add_subplot(gs[0, 1])
-        ax_gain = fig.add_subplot(gs[1, 1])
-        ax_len = fig.add_subplot(gs[2, 1])
-
-        instant_plot(fig)  # show the figure immediately
         point_indices = np.arange(num_points, dtype=np.float64)
 
-        with MultiLivePlot(
-            fig,
-            plotters=dict(
-                iter_scatter=LivePlotScatter(
-                    "Iteration", "SNR (a.u.)", existed_axes=[[ax_iter]]
-                ),
-                freq_scatter=LivePlotScatter(
-                    "Frequency (MHz)", "SNR (a.u.)", existed_axes=[[ax_freq]]
-                ),
-                gain_scatter=LivePlotScatter(
-                    "Readout Gain (a.u.)", "SNR (a.u.)", existed_axes=[[ax_gain]]
-                ),
-                len_scatter=LivePlotScatter(
-                    "Readout Length (us)", "SNR (a.u.)", existed_axes=[[ax_len]]
-                ),
-            ),
-        ) as viewer:
-            current_index = 0
+        def configure_scatter(ax: Axes) -> None:
+            ax.lines[0].set_linestyle("None")
+            ax.lines[0].set_marker("o")
 
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                idx = current_index
-                snrs = np.abs(data)  # (num_points, )
-
-                cur_freq, cur_gain, cur_len = params[idx, :]
-
-                fig.suptitle(
-                    f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
-                )
-
-                viewer.get_plotter("iter_scatter").update(
-                    point_indices, snrs, refresh=False
-                )
-                viewer.get_plotter("freq_scatter").update(
-                    params[:, 0], snrs, refresh=False
-                )
-                viewer.get_plotter("gain_scatter").update(
-                    params[:, 1], snrs, refresh=False
-                )
-                viewer.get_plotter("len_scatter").update(
-                    params[:, 2], snrs, refresh=False
-                )
-                viewer.refresh()
-
-            signals_buffer = SignalBuffer(
-                (num_points,),
-                dtype=np.float64,
-                on_update=plot_fn,
+        viewers = [
+            context.plots.liveplot_1d(
+                name,
+                xlabel,
+                "SNR (a.u.)",
+                title="Readout Auto Optimization",
+                configure_axes=configure_scatter,
             )
-            with Schedule(run_cfg, signals_buffer) as sched:
-                for idx, (_, step) in enumerate(
-                    sched.scan("Iteration", range(num_points))
-                ):
-                    current_index = idx
+            for name, xlabel in (
+                ("measurement.iteration", "Iteration"),
+                ("measurement.freq", "Frequency (MHz)"),
+                ("measurement.gain", "Readout Gain (a.u.)"),
+                ("measurement.length", "Readout Length (us)"),
+            )
+        ]
+        current_index = 0
 
-                    last_snr = None
-                    if idx > 0:
-                        last_snr = np.abs(signals_buffer.array[idx - 1])
-                    cur_params = optimizer.next_params(idx, last_snr)
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            idx = current_index
+            snrs = np.abs(data)
+            cur_freq, cur_gain, cur_len = params[idx, :]
+            title = (
+                f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), "
+                f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
+            )
+            for viewer, xs in zip(
+                viewers,
+                (point_indices, params[:, 0], params[:, 1], params[:, 2]),
+                strict=True,
+            ):
+                viewer.update(xs, snrs, title=title)
 
-                    if cur_params is None:
-                        sched.set_stop()
-                        break
+        signals_buffer = SignalBuffer(
+            (num_points,),
+            dtype=np.float64,
+            on_update=plot_fn,
+        )
+        with Schedule(run_cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for idx, (_, step) in enumerate(sched.scan("Iteration", range(num_points))):
+                current_index = idx
 
-                    params[idx, :] = cur_params
-                    modules = step.cfg.modules
-                    modules.readout.set_param("freq", cur_params[0])
-                    modules.readout.set_param("gain", cur_params[1])
-                    modules.readout.set_param("length", cur_params[2])
-                    tracker = MomentTracker()
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", cfg=modules.reset),
-                            Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                            Readout("readout", cfg=modules.readout),
-                        )
-                        .declare_sweep("ge", 2)
-                        .build_and_acquire(
-                            raw2signal_fn=lambda _raw: snr_as_signal(
-                                [tracker],
-                                ge_axis=1,
-                                skew_penalty=sched.cfg.skew_penalty,
-                            ),
-                            trackers=[tracker],
-                            **(acquire_kwargs or {}),
-                        )
+                last_snr = None
+                if idx > 0:
+                    last_snr = np.abs(signals_buffer.array[idx - 1])
+                cur_params = optimizer.next_params(idx, last_snr)
+
+                if cur_params is None:
+                    sched.set_stop()
+                    break
+
+                params[idx, :] = cur_params
+                modules = step.cfg.modules
+                modules.readout.set_param("freq", cur_params[0])
+                modules.readout.set_param("gain", cur_params[1])
+                modules.readout.set_param("length", cur_params[2])
+                tracker = MomentTracker()
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", cfg=modules.reset),
+                        Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
+                        Readout("readout", cfg=modules.readout),
                     )
-                signals = signals_buffer.array
-        close_figure(fig)
+                    .declare_sweep("ge", 2)
+                    .build_and_acquire(
+                        raw2signal_fn=lambda _raw, tracker=tracker: snr_as_signal(
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=sched.cfg.skew_penalty,
+                        ),
+                        trackers=[tracker],
+                        **(acquire_kwargs or {}),
+                    )
+                )
+            signals = signals_buffer.array
 
-        # record the last result
-        self.last_result = AutoOptResult(params, signals, cfg_snapshot=orig_cfg)
-
-        return self.last_result
+        return AutoOptResult(params, signals)
 
     def analyze(
-        self, result: AutoOptResult | None = None
-    ) -> tuple[float, float, float, Figure]:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+        self,
+        source: RunRecord[AutoOptCfg, AutoOptResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> AutoOptAnalysis:
+        del options
+        result = source.result
 
         params, signals = result.params, result.signals
         snrs = np.abs(signals)
@@ -406,7 +392,8 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         best_params = params[max_id, :]
 
         figsize = (8, 5)
-        fig = plt.figure(figsize=figsize)
+        fig, ax = plots.subplots("fit", figsize=figsize)
+        ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 
         fig.suptitle("Readout Auto Optimization")
@@ -438,29 +425,19 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         plot_ax(ax_gain, 1, "Readout Gain (a.u.)")
         plot_ax(ax_len, 2, "Readout Length (us)")
 
-        return float(best_params[0]), float(best_params[1]), float(best_params[2]), fig
+        return AutoOptAnalysis(
+            float(best_params[0]), float(best_params[1]), float(best_params[2])
+        )
 
     def save(
         self,
-        filepath: str,
-        result: AutoOptResult | None = None,
+        source: RunRecord[AutoOptCfg, AutoOptResult],
+        destination: Path,
+        *,
         comment: str | None = None,
         tag: str = "twotone/ge/ro_optimize/auto",
     ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+        RO_AUTO_GROUPED_AXES_SPEC.save(source, destination, comment=comment, tag=tag)
 
-        if result.cfg_snapshot is None:
-            raise ValueError("Cannot save result without configuration snapshot")
-        RO_AUTO_GROUPED_AXES_SPEC.save_experiment_result(
-            filepath,
-            result,
-            comment=comment,
-            tag=tag,
-            make_comment_fn=make_comment,
-        )
-
-    def load(self, filepath: str) -> AutoOptResult:
-        self.last_result = load_auto_opt_grouped_result(filepath)
-        return self.last_result
+    def load(self, source: Path) -> RunRecord[AutoOptCfg, AutoOptResult]:
+        return load_auto_opt_grouped_result(source)

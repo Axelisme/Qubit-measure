@@ -294,14 +294,25 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 
     raw_cfg = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    from zcu_tools.experiment.context import RunContext
+    from zcu_tools.experiment.stop_signal import StopSignal
+    from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+    plots = Plots(NonPresentingHost())
     with use_pbar_factory(factory):
         run_result = adapter.run(
-            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}), raw_cfg
+            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
+            raw_cfg,
+            context=RunContext(
+                ctx.soc, ctx.soccfg, plots, devices={}, cancel_signal=StopSignal()
+            ),
         )
         QApplication.processEvents()
+    plots.finish()
+    plots.release()
 
-    assert len(run_result.freqs) == 5
-    assert len(run_result.signals) == 5
+    assert len(run_result.result.freqs) == 5
+    assert len(run_result.result.signals) == 5
     # Top-level experiment progress can leave bars behind; reset_all clears them.
     stack.reset_all()
     assert len(stack._active) == 0

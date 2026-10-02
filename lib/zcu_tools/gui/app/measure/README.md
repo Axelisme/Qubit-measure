@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-02, result-bound analysis inputs
+**Last updated:** 2026-10-03, operation-bound named plots
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -128,13 +128,17 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   presentation without selecting a subtab; Analysis remains an explicit user
   selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
-  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現各artifact的
-  status、saveability與草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
+  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現DATA與目前每張
+  具名圖的status、saveability與路徑草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
   `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
   Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
   都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
-  Save All由SaveControl/SaveService選擇可存項目，依analysis→post→data順序執行，
-  使用單一operation並Fast Fail，不回滾已完成的存檔。Qt按鈕不再編排各項存檔。
+  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。
+  同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
+  `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時
+  Save All 停用，明確單項匯出仍可再次保存。修改圖形目的地不取消已保存狀態。
+  SaveService 依 analysis逐圖→post逐圖→data 順序，以單一 operation 執行並 Fast Fail，
+  不回滾已完成的存檔；再次 Save All 省略成功項。Qt 按鈕不編排各項存檔。
   AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
   Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
   GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前
@@ -183,7 +187,7 @@ Shared layers:
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
-- `zcu_tools.gui.plotting`：matplotlib backend、figure routing、host/container/export
+- `zcu_tools.gui.plotting`：explicit figure host、container、export
   substrate。
 - `zcu_tools.mcp.measure`：agent-facing MCP policy layer and tool surface。
 
@@ -192,7 +196,7 @@ Shared layers:
 `MeasureGuiBehavior` is the process-runtime behavior for the shared
 `gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
 persistence caretaker, and the app-local `RemoteControlAdapter`
-without owning process policy such as logging, matplotlib backend selection,
+without owning process policy such as logging, rendering initialization,
 `QApplication`, control option construction, or exit-code handling. The
 standalone launcher is the process entrypoint; this module does not expose a
 second `run_app` path. After the window is shown, `after_show` opens the same
@@ -323,8 +327,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
    settings for a live device reject the permit without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
-4. The operation policy builds worker thunks with the needed ambient scopes:
-   plotting, progress, `Schedule` cancellation, and device setup cancellation.
+4. RunService captures borrowed drivers and creates a fresh RunContext with
+   operation plots and one StopSignal. The adapter passes this context to the core;
+   Schedule uses its StopSignal and device setup uses the same signal's event.
+   Only progress remains ambient. Driver lookup does not refresh accepted cfg.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /
@@ -337,13 +343,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
    the Writeback service remains stage-free.
 
-`tab.load_data` installs a canonical result into an existing adapter tab and clears
-stale analysis/writeback state. When the result carries a compatible execution
-snapshot, Load best-effort projects its concrete values into the current tab Config.
-It validates a complete detached candidate, publishes once on the same cfg resource,
-and reports `cfg_backfill=applied|not_applied` to Qt and remote. Successful backfill
-preserves cfg identity and advances its revision. Failed backfill keeps the previous
-cfg publication without undoing the loaded result. Fields without a reliable runtime inverse keep the current draft value;
+- `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。缺 cfg 時保留可用資料，不捏造設定。有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。Run/Load 先提交 primary result；analysis preparation 失敗不撤回它，只報 diagnostic。Named figures 和各 pane 的 presentation lifecycle 分開管理。
 dynamic selectors must match live options and the new complete draft must be valid
 before publication. A failed lookup or malformed option list rejects the entire
 backfill rather than silently skipping that selector. Module/waveform references
@@ -364,18 +364,23 @@ partial success. A genuine load or run failure keeps its existing failure contra
 ### Pane-owned lifecycle
 
 `Session` is the aggregate root and its fixed pane carriers are the resource owners:
-Run stores only the run result/source, Analysis and Post-Analysis each store params,
-result, canonical figure and an opaque writeback draft (with S2 baseline snapshot),
-and Save stores the data-path override. Analysis and Post-Analysis image-path
-overserides are independent resources; the read model projects data, analysis-image
-and post-analysis-image paths separately. Run live figures remain view-only and
+Run stores only the run result/source. Analysis and Post-Analysis each store params,
+result, a named `Plots` collection and an opaque writeback draft (with S2 baseline
+snapshot). Save stores the data-path override. Each image path override belongs to
+one `(stage, figure_name)` key; the read model projects DATA and current named
+images separately. Run live figures remain view-only and
 are not stored in State. Writeback baseline is a display-only draft-creation
 snapshot；同一opaque draft另擁有per-item applied state，只有成功write包含的items才標記applied，
 selection本身不改狀態，retarget或內容修改會重設；同kind items不得指向重複destination，
 避免batch覆寫卻誤標applied。狀態不跨draft/process持久化，也不提供
 concurrent-write detection或apply-conflict policy。
 
-Analysis/Post result services prepare proposals, figures and drafts before calling one
+Analysis/Post 逐圖記錄目前 result／Figure 產物是否曾成功保存，不追蹤
+artist、視圖或目的地的 dirty 變更。新圖從未保存開始；舊圖晚到的保存完成
+只更新提交時捕捉的record，不將同名新圖標成已保存。再次匯出失敗保留先前成功紀錄。DATA 仍追蹤原有
+result、path 與 comment 的保存 signature。
+
+Analysis/Post result services prepare proposals, named plots and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear
 down retired drafts only after commit and never roll back a committed pane when cleanup
 fails. A failed proposal/editor build leaves the previous canonical pane intact.
@@ -578,15 +583,11 @@ controlled fields.
   reports status, progress and feedback but no result payload. Figures and fit
   summaries are read through typed getters.
 
-Cancellation is operation-specific through the registered cancel hook. Run
-cancellation sets the operation `stop_event`; worker thunks expose it to
-Schedule-based experiments and executors through
-`schedule_stop_scope(StopSignal(stop_event))`, so `ProgramBuilder`,
-`Schedule.repeat/scan/batch`, and executor root schedules observe Stop without a
-global task runner context. The same run-local `stop_event` is explicitly bridged
-into `device_setup_cancel_scope(stop_event)`, so experiment-internal
-`setup_devices(...)` calls can stop long device ramps without making the runner
-module know about device policy. Run terminal policy treats the cancel hook as
+Cancellation is operation-specific through the registered cancel hook. Each run
+owns a fresh RunContext and StopSignal. Adapters pass that context to the core;
+Schedule and executor roots receive its cancel_signal explicitly. Device setup
+receives context.devices and cancel_signal.event, so ramps observe the same stop
+request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
 the source of user cancellation intent; `Schedule` may also set the same stop flag
 for internal failed/interrupted outcomes, and those are surfaced as failed
 operation outcomes instead of cancelled.
@@ -604,9 +605,10 @@ Progress is operation-scoped:
   progress view does not keep an operation pending.
 - Agent polling reads by operation id.
 
-Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib
-figures attach to the active `FigureContainer` through routing context; refresh,
-activate, and close resolve through the figure registry. Figure export uses fixed
+Adapter 在每次 run/analyze 操作中接收明確的 `Plots`。Qt host 綁定該 pane 的
+`FigureContainer`，普通 Figure 在完成後呈現，liveplot 的 artist 工作交給 owner thread。
+關閉視窗不會將plot host設為全域shutdown；Qt runtime在`aboutToQuit`處理該狀態。
+Figure export uses fixed
 logical sizes so outputs do not depend on window size: saved images use a 12×9 inch
 4:3 canvas at 150 DPI；Data Preview沿用同一logical canvas並以約53.33 DPI產生
 640×480 WYSIWYG raster；agent screenshots維持6.4×4.8 inch at 100 DPI。
@@ -687,8 +689,8 @@ analysis-result/writeback terminal path. Cancellation, setup failure and result
 failure retire the session and settle that same operation. Neither the service
 nor generic remote dispatch interprets flux-line keys.
 
-INTERACTIVE adapters expose `make_interactive_plugin(req)` and
-`make_interactive_frontend(plugin, session, env, request_finish, request_cancel)`.
+已遷移的INTERACTIVE adapters以明確的`plots=`建立plugin與frontend。
+未遷移adapter不使用舊簽名fallback。
 `RunAnalyzeControlFacet` starts the session before mounting; `MainWindow`
 mounts/unmounts the plugin-owned `InteractiveFrontend` in the Analysis pane.
 Failed finish validation keeps the widget editable; a valid finish unmounts it
@@ -697,8 +699,8 @@ The frontend owns artists, pointer selection, preview and timers. For measure fl
 picking, the first left click selects a line, pointer movement without a pressed
 button previews locally, and the second valid left click commits against the
 latest session snapshot. Release does not commit; external commits cancel preview.
-The Qt-free plugin can execute commands and finish without a widget, though
-that path does not promise a figure. `tab.interact` runs on the owner loop via the
+Qt-free plugin不依賴widget執行command，Done從已提交的session建立數值結果及
+具名圖。Frontend的preview不算結果圖。 `tab.interact` runs on the owner loop via the
 same `RunAnalyzeControlFacet` and session: reads project committed state and
 plugin-declared commands; writes validate each command's ParamSpec before its
 typed action. The View supplies an optional live PNG and `preview_active` as

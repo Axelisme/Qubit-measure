@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QObject, QTimer, Signal  # type: ignore[attr-defined]
@@ -74,11 +75,14 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from zcu_tools.gui.session.ui.predictor_dialog import (
         PredictorDialog,
         PredictorDialogState,
@@ -217,6 +221,7 @@ class MainWindow(QMainWindow):
         )
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
+        self._figure_plots = Plots(NonPresentingHost())
         self._dirty_plot_idx_by_name: dict[str, int] = {}
         self._row_update_perf = PerfStats("main.row_update", logger, slow_ms=30.0)
         self._progress_perf = PerfStats("main.progress_render", logger, slow_ms=20.0)
@@ -380,6 +385,7 @@ class MainWindow(QMainWindow):
         self._bridge.teardown()
         self._progress_unsub()
         self._list.teardown()
+        self._clear_plots()
         self._detail.teardown()
         self._capture_predictor_dialog_state()
         self._ctrl.persist_all()
@@ -716,12 +722,24 @@ class MainWindow(QMainWindow):
             self._reset_run_ui()
             self._dialog_presenter.warning(self, "Run failed to start", str(exc))
 
+    @property
+    def figures(self) -> Mapping[str, Figure]:
+        """Run-lived native figures, independent of the selected canvas."""
+        return self._figure_plots
+
     def _clear_plots(self) -> None:
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+
         self._detail.show_run_canvas(None)
+        self._figure_plots.finish(present=False)
+        self._figure_plots.release()
+        for figure in self._figure_plots.values():
+            FigureCanvasAgg(figure)
         for canvas, _ in self._plots.values():
             canvas.setParent(None)
             canvas.deleteLater()
         self._plots = {}
+        self._figure_plots = Plots(NonPresentingHost())
         self._dirty_plot_idx_by_name = {}
 
     def _build_plots(self) -> None:
@@ -747,11 +765,12 @@ class MainWindow(QMainWindow):
             if result is None:
                 continue  # a provider without a Result (none in the prototype)
             figure = Figure(figsize=(5, 4), tight_layout=True)
+            self._figure_plots.adopt(node.name, figure)
+            plotter = node.builder.make_plotter(self._figure_plots, node.name)
             # parent the canvas to the hidden park so it is never a top-level
             # window — only the selected one is re-parented into the run tab.
             canvas = FigureCanvasQTAgg(figure)
             canvas.setParent(self._canvas_park)
-            plotter = node.builder.make_plotter(figure)
             self._plots[node.name] = (canvas, plotter)
         # show the currently selected Node's fresh canvas
         self._on_select(self._list.selected_index)

@@ -163,4 +163,6 @@ class MyProgramV2(  # type: ignore[reportIncompatibleMethodOverride]
         rng_seed = cast(
             "Callable[[], int | np.random.SeedSequence | None]", next_seed
         )()
-        soc.set_sim_engine(SimEngine(self, sim, rng_seed=rng_seed))
+        soc.set_sim_engine(
+            SimEngine(self, sim, rng_seed=rng_seed, flux_source=soc.flux_source)
+        )

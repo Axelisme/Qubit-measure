@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 
 import pytest
+from zcu_tools.device import DeviceManager
+from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
 from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkCfg
 from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ac_stark import (
     SsAcStarkAdapter,
@@ -72,7 +74,7 @@ def test_prefill_matches_notebook_tone_roles_and_timing() -> None:
         EvalValue,
     )
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
-    cfg = ctx.ml.make_cfg(raw, AcStarkCfg)
+    cfg = make_cfg(raw, AcStarkCfg, CfgEnv(ctx.md, ctx.ml, DeviceManager()))
 
     assert cfg.modules.reset is None
     assert cfg.modules.init_pulse is None
@@ -124,7 +126,7 @@ def test_prefill_keeps_metadata_links_after_context_values_change() -> None:
     ctx.md.qub_1_4_ch = 5
     ctx.md.readout_f = 6220.0
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
-    cfg = ctx.ml.make_cfg(raw, AcStarkCfg)
+    cfg = make_cfg(raw, AcStarkCfg, CfgEnv(ctx.md, ctx.ml, DeviceManager()))
 
     assert cfg.modules.stark_pulse1.freq == 6220.0
     assert cfg.modules.stark_pulse2.freq == 4050.0
@@ -144,7 +146,7 @@ def test_configured_qubit_mixer_frequency_stays_linked_to_q_f() -> None:
     ) == EvalValue("q_f")
     ctx.md.q_f = 4050.0
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
-    cfg = ctx.ml.make_cfg(raw, AcStarkCfg)
+    cfg = make_cfg(raw, AcStarkCfg, CfgEnv(ctx.md, ctx.ml, DeviceManager()))
     assert cfg.modules.stark_pulse2.mixer_freq == 4050.0
 
 
@@ -173,7 +175,7 @@ def test_prefill_without_library_pi_amp_still_materializes() -> None:
     raw = schema_to_raw_dict(
         SsAcStarkAdapter.cfg_definition().instantiate(ctx), ctx.md, ctx.ml
     )
-    cfg = ctx.ml.make_cfg(raw, AcStarkCfg)
+    cfg = make_cfg(raw, AcStarkCfg, CfgEnv(ctx.md, ctx.ml, DeviceManager()))
 
     assert cfg.modules.stark_pulse2.waveform.length == 0.3
     assert cfg.modules.stark_pulse1.waveform.length == pytest.approx(
@@ -193,7 +195,7 @@ def test_prefill_uses_pi_len_when_pi_amp_is_missing() -> None:
     raw = schema_to_raw_dict(
         SsAcStarkAdapter.cfg_definition().instantiate(ctx), ctx.md, ctx.ml
     )
-    cfg = ctx.ml.make_cfg(raw, AcStarkCfg)
+    cfg = make_cfg(raw, AcStarkCfg, CfgEnv(ctx.md, ctx.ml, DeviceManager()))
 
     assert cfg.modules.stark_pulse2.waveform.length == 0.6
     assert cfg.modules.stark_pulse1.waveform.length == pytest.approx(

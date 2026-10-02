@@ -2,19 +2,33 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from zcu_tools.device import DeviceInfo, GlobalDeviceManager
+from zcu_tools.device import DeviceInfo, DeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import format_sweep1D, get_single_sweep_name
 from zcu_tools.program.v2 import ModuleCfgFactory
 from zcu_tools.utils import deepupdate
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 T_ExpCfg = TypeVar("T_ExpCfg", bound=ExpCfgModel)
+
+
+@dataclass(frozen=True)
+class CfgEnv:
+    """Borrowed resources for explicit Notebook configuration assembly.
+
+    Each make_cfg call reads current device information. This container neither
+    closes resources nor evaluates expressions in md.
+    """
+
+    md: MetaDict
+    ml: ModuleLibrary
+    device_manager: DeviceManager
 
 
 def assemble_experiment_cfg(
@@ -61,18 +75,15 @@ def assemble_experiment_cfg(
 def make_cfg(
     raw_cfg: Mapping[str, Any],
     cfg_model: type[T_ExpCfg],
+    env: CfgEnv,
     *,
-    ml: ModuleLibrary,
     overrides: Mapping[str, Any] | None = None,
-    device_snapshot: Mapping[str, DeviceInfo] | None = None,
 ) -> T_ExpCfg:
-    if device_snapshot is None:
-        device_snapshot = GlobalDeviceManager.get_all_info()
     return assemble_experiment_cfg(
         raw_cfg,
         cfg_model,
-        ml=ml,
-        device_snapshot=device_snapshot,
+        ml=env.ml,
+        device_snapshot=env.device_manager.get_all_info(),
         overrides=overrides,
     )
 

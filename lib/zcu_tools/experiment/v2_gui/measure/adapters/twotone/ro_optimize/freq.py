@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.ro_optimize.freq import (
+    FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqResult,
@@ -26,12 +27,14 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.plotting.plots import Plots
 
-RoOptFreqRunResult: TypeAlias = FreqResult
+RoOptFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 @dataclass
@@ -45,7 +48,6 @@ class RoOptFreqAnalyzeParams:
 @dataclass
 class RoOptFreqAnalyzeResult(AnalyzeResultBase):
     best_freq: float
-    figure: Figure
 
 
 class RoOptFreqAdapter(
@@ -120,14 +122,31 @@ class RoOptFreqAdapter(
             .build()
         )
 
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> RoOptFreqRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, FreqExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams]
+        self,
+        req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> RoOptFreqAnalyzeResult:
         params = req.analyze_params
-        best_freq, fig = FreqExp().analyze(
-            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        options = FreqAnalyzeOptions(
+            smooth=params.smooth,
+            smooth_method=params.smooth_method,
         )
-        return RoOptFreqAnalyzeResult(best_freq=best_freq, figure=fig)
+        result = FreqExp().analyze(req.run_result, options, plots=plots)
+        return RoOptFreqAnalyzeResult(
+            best_freq=result.best_freq,
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[RoOptFreqRunResult, RoOptFreqAnalyzeResult]
@@ -143,7 +162,7 @@ class RoOptFreqAdapter(
         items.extend(
             readout_dpm_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 proposed={"best_ro_freq": result.best_freq},
             )
         )

@@ -29,6 +29,8 @@ from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 _READOUT = {
     "type": "readout/pulse",
     "pulse_cfg": {
@@ -85,6 +87,8 @@ def _env(ml: ModuleLibrary, *, flux_idx: int = 0) -> RunEnv:
             },
         ),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
 
@@ -115,7 +119,15 @@ def test_qubit_freq_make_cfg_composes_prediction_correction():
     estimator = view.estimator("predict_freq_correction")
     assert estimator is not None
     estimator.observe(0.0, 7.5)
-    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=_ml(), feedback=view)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        ml=_ml(),
+        feedback=view,
+        context=make_run_context(),
+        device_snapshot={},
+    )
     snap = Snapshot(
         {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
@@ -150,6 +162,8 @@ def test_qubit_freq_make_cfg_uses_recovery_overlay_before_correction():
         ml=_ml(),
         tools=tools,
         feedback=view,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
@@ -168,7 +182,15 @@ def test_qubit_freq_prediction_correction_smoothly_reverts_to_base():
     estimator = view.estimator("predict_freq_correction")
     assert estimator is not None
     estimator.observe(0.0, 8.0)
-    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=_ml(), feedback=view)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        ml=_ml(),
+        feedback=view,
+        context=make_run_context(),
+        device_snapshot={},
+    )
     snap = Snapshot(
         {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
@@ -213,6 +235,8 @@ def test_qubit_freq_make_cfg_can_fix_drive_gain():
             },
         ),
         ml=_ml(),
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     cfg = QubitFreqBuilder().make_cfg(env, snap)
@@ -241,6 +265,8 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
         schema=_schema(builder, {"qub_ch": 3}),
         ml=None,
         result=result,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
@@ -266,7 +292,14 @@ def test_lenrabi_make_cfg_lowers_context():
         "rounds": 10,
         "relax_delay": 1.0,
     }
-    env = RunEnv(flux=0.0, flux_idx=0, schema=_schema(LenRabiBuilder(), params), ml=ml)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(LenRabiBuilder(), params),
+        ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
+    )
     knobs = env.schema.lower(ml)
     snap = Snapshot(
         {"qubit_freq": 5135.0, "t1": 10.0, "pi_length": 0.5, "pi_product": 0.3},
@@ -314,7 +347,15 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
     assert controller is not None
     proposal = controller.propose(0.6, math.log(4.0))
     assert proposal.value == pytest.approx(1.2)
-    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml, feedback=view)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        ml=ml,
+        feedback=view,
+        context=make_run_context(),
+        device_snapshot={},
+    )
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
     cfg = builder.make_cfg(env, snap)
@@ -343,7 +384,15 @@ def test_lenrabi_controller_proposal_smoothly_reverts_to_open_loop_gain():
     assert controller is not None
     controller.propose(0.3, math.log(4.0))
 
-    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml, feedback=view)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        ml=ml,
+        feedback=view,
+        context=make_run_context(),
+        device_snapshot={},
+    )
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
     cfgs = [builder.make_cfg(env, snap) for _ in range(10)]
 
@@ -381,6 +430,8 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
         flux_idx=0,
         schema=builder.make_default_schema(ctx),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     knobs = env.schema.lower(ml)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
@@ -416,6 +467,8 @@ def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
             },
         ),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     knobs = env.schema.lower(ml)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
@@ -452,6 +505,8 @@ def test_lenrabi_make_cfg_rejects_zero_feedback_history(
         flux_idx=0,
         schema=_schema(builder, {"qub_ch": 4, "qub_nqz": 2}),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"qubit_freq": 5135.0, history_key: 0.0},
@@ -472,6 +527,8 @@ def test_lenrabi_make_cfg_treats_zero_t1_history_as_missing() -> None:
         flux_idx=0,
         schema=_schema(builder, {"qub_ch": 4, "qub_nqz": 2}),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     knobs = env.schema.lower(ml)
     snap = Snapshot(
@@ -504,7 +561,15 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
     }
     schema = _schema(builder, params)
     result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 11))
-    env = RunEnv(flux=0.1, flux_idx=1, schema=schema, ml=None, result=result)
+    env = RunEnv(
+        flux=0.1,
+        flux_idx=1,
+        schema=schema,
+        ml=None,
+        result=result,
+        context=make_run_context(),
+        device_snapshot={},
+    )
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
     with pytest.raises(RuntimeError, match="ModuleLibrary"):
         builder.build_node(env).produce(snap)
@@ -555,6 +620,8 @@ def test_ro_optimize_make_cfg_lowers_context():
             },
         ),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     knobs = env.schema.lower(ml)
     cfg = RoOptimizeBuilder().make_cfg(env, snap)
@@ -613,6 +680,8 @@ def test_ro_optimize_first_point_uses_default_search_ranges():
             },
         ),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     cfg = RoOptimizeBuilder().make_cfg(env, snap)
@@ -653,6 +722,8 @@ def test_ro_optimize_make_cfg_can_fix_center_and_relax_delay():
             },
         ),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
     cfg = RoOptimizeBuilder().make_cfg(env, snap)
@@ -747,7 +818,15 @@ def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
     }
     schema = _schema(builder, params)
     result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 11))
-    env = RunEnv(flux=0.1, flux_idx=1, schema=schema, ml=None, result=result)
+    env = RunEnv(
+        flux=0.1,
+        flux_idx=1,
+        schema=schema,
+        ml=None,
+        result=result,
+        context=make_run_context(),
+        device_snapshot={},
+    )
     snap = Snapshot(
         {"best_ro_freq": 7444.6, "best_ro_gain": 0.5, "t1": 10.0},
         modules={"pi_pulse": _T1_PI_PULSE, "readout": _READOUT},
@@ -789,6 +868,8 @@ def test_t1_make_cfg_lowers_context():
         flux_idx=0,
         schema=_schema(T1Builder(), {"reps": 100, "rounds": 2}),
         ml=ModuleLibrary(),
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
@@ -867,6 +948,8 @@ def test_t1_make_cfg_can_fix_sweep_range_and_relax_delay():
             },
         ),
         ml=ModuleLibrary(),
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
@@ -923,8 +1006,8 @@ def _patch_t1_fast_produce(
     captured: dict[str, object] = {}
 
     class ScheduleProbe:
-        def __init__(self, cfg: object, signal_buffer: Any) -> None:
-            del cfg
+        def __init__(self, cfg: object, signal_buffer: Any, *, stop: object) -> None:
+            del cfg, stop
             self.signal_buffer = signal_buffer
             self.outcome = type(
                 "Outcome",
@@ -981,9 +1064,10 @@ def test_t1_nonuniform_produce_uses_delay_table(monkeypatch: pytest.MonkeyPatch)
         flux=0.0,
         flux_idx=0,
         schema=schema,
-        soccfg=_T1SocCfg(),
         ml=ModuleLibrary(),
         result=result,
+        context=make_run_context(soccfg=_T1SocCfg()),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
@@ -1034,9 +1118,10 @@ def test_t1_nonuniform_produce_auto_mode_honors_max_length(
         flux=0.0,
         flux_idx=0,
         schema=schema,
-        soccfg=_T1SocCfg(),
         ml=ModuleLibrary(),
         result=result,
+        context=make_run_context(soccfg=_T1SocCfg()),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
@@ -1080,9 +1165,10 @@ def test_t1_nonuniform_produce_rejects_collapsed_cycles(
         flux=0.0,
         flux_idx=0,
         schema=schema,
-        soccfg=_T1SocCfg(cycles_per_us=1.0),
         ml=ModuleLibrary(),
         result=result,
+        context=make_run_context(soccfg=_T1SocCfg(cycles_per_us=1.0)),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
@@ -1115,6 +1201,8 @@ def test_t1_produce_fast_fails_when_context_unconfigured():
         ),
         ml=None,
         result=result,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
@@ -1160,6 +1248,8 @@ def test_t2ramsey_make_cfg_lowers_context():
         flux_idx=0,
         schema=_schema(T2RamseyBuilder(), {"reps": 1000, "rounds": 10}),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0, "t2r": 8.0},
@@ -1206,6 +1296,8 @@ def test_t2ramsey_make_cfg_can_fix_sweep_range_and_relax_delay():
             },
         ),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0, "t2r": 8.0},
@@ -1235,6 +1327,8 @@ def test_t2ramsey_produce_fast_fails_when_context_unconfigured():
         schema=_schema(T2RamseyBuilder(), {"reps": 1000, "rounds": 2}),
         ml=None,
         result=result,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0, "t2r": 8.0},
@@ -1284,6 +1378,8 @@ def _t2echo_env(ml: ModuleLibrary) -> RunEnv:
         flux_idx=0,
         schema=_schema(T2EchoBuilder(), {"reps": 1000, "rounds": 10}),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
 
@@ -1347,6 +1443,8 @@ def test_t2echo_make_cfg_can_fix_sweep_range_and_relax_delay():
             },
         ),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 12.0, "t2e": 8.0},
@@ -1382,6 +1480,8 @@ def test_t2echo_produce_fast_fails_when_context_unconfigured():
         schema=_schema(T2EchoBuilder(), {"reps": 1000, "rounds": 1}),
         ml=None,
         result=result,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"t1": 10.0, "t2e": 8.0},
@@ -1439,6 +1539,8 @@ def _mist_env(ml: ModuleLibrary, **result_tools) -> RunEnv:
         ),
         ml=ml,
         **result_tools,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
 

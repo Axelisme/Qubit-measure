@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.rabi_check import (
+    RabiCheckCfg,
     RabiCheckExp,
     RabiCheckModuleCfg,
     RabiCheckResult,
     _rabi_check_sequence,
 )
 from zcu_tools.experiment.v2.twotone.reset.rabi_check_fit import fit_reset_rabi
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import (
     Branch,
     DirectReadoutCfg,
@@ -82,8 +84,11 @@ def test_analyze_fits_amplitudes_on_reference_iq_axis() -> None:
     # Large perpendicular branch offsets must not redefine the readout axis.
     signals = (values + 1j * np.array([0.0, 4.0, -3.0])[:, None]) * np.exp(0.7j)
     result = RabiCheckResult(gains=gains, signals=signals)
-    fit, figure = RabiCheckExp().analyze(result)
+    source = RunRecord[RabiCheckCfg, RabiCheckResult](cfg=None, result=result)
+    plots = Plots(NonPresentingHost())
     try:
+        fit = RabiCheckExp().analyze(source, None, plots=plots)
+        figure = plots["fit"]
         assert fit.frequency == pytest.approx(2.3, abs=1e-6)
         assert fit.before.amplitude == pytest.approx(0.8)
         assert fit.after.amplitude == pytest.approx(0.6)
@@ -107,7 +112,8 @@ def test_analyze_fits_amplitudes_on_reference_iq_axis() -> None:
             )
         np.testing.assert_array_equal(result.signals, signals)
     finally:
-        plt.close(figure)
+        plots.finish(present=False)
+        plots.release()
 
 
 def test_dephased_population_memory_retains_second_harmonic() -> None:

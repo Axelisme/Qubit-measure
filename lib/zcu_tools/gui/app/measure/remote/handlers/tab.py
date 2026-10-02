@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.measure.services.ports import TabPathsSnapshot
 from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
@@ -16,6 +17,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
+from ..artifact_keys import artifact_key_wire
 from ._common import follow_tab, render_view
 
 
@@ -122,7 +124,9 @@ def tab_operation_state(
         "save_paths": _save_paths_wire(snap.paths),
         "artifacts": [
             {
-                "kind": artifact.kind.value,
+                "key": artifact_key_wire(artifact.key),
+                "kind": artifact.key.kind.value,
+                "figure_name": artifact.key.figure_name,
                 "status": artifact.status.value,
                 "default_path": artifact.default_path,
                 "last_saved_path": artifact.last_saved_path,
@@ -141,13 +145,15 @@ def tab_operation_state(
         "analysis_state": {
             "revision": versions.get(f"tab:{tab_id}:analyze", 0),
             "available": snap.analysis.result is not None,
-            "has_figure": snap.analysis.figure is not None,
+            "has_figure": bool(snap.analysis.figures),
+            "figure_names": list(snap.analysis.figures or ()),
             "has_writeback_draft": snap.analysis.has_writeback_draft,
         },
         "post_analysis_state": {
             "revision": versions.get(f"tab:{tab_id}:post_analyze", 0),
             "available": snap.post_analysis.result is not None,
-            "has_figure": snap.post_analysis.figure is not None,
+            "has_figure": bool(snap.post_analysis.figures),
+            "figure_names": list(snap.post_analysis.figures or ()),
             "has_writeback_draft": snap.post_analysis.has_writeback_draft,
         },
     }
@@ -169,14 +175,17 @@ def h_tab_snapshot(
     return {"tabs": [tab_operation_state(adapter, tid) for tid in tab_ids]}
 
 
-def _save_paths_wire(paths) -> dict[str, str | None] | None:
+def _save_paths_wire(paths: TabPathsSnapshot | None) -> dict[str, object] | None:
     if paths is None:
         return None
-    # Three independent effective path resources (no single generic image_path).
     return {
         "data_path": paths.data.path,
-        "analysis_image_path": paths.analysis_image.path,
-        "post_analysis_image_path": paths.post_analysis_image.path,
+        "analysis_images": {
+            name: path.path for name, path in paths.analysis_images.items()
+        },
+        "post_analysis_images": {
+            name: path.path for name, path in paths.post_analysis_images.items()
+        },
     }
 
 

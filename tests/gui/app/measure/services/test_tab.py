@@ -4,13 +4,18 @@ from dataclasses import asdict
 from unittest.mock import MagicMock
 
 import pytest
+from matplotlib.figure import Figure
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     ContextReadiness,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKey,
+    ArtifactKind,
+    SaveStatus,
+)
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
@@ -20,6 +25,7 @@ from zcu_tools.gui.app.measure.state import (
     Session,
     State,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import cfg_resources
 
@@ -154,7 +160,10 @@ def _active_state() -> State:
 def test_snapshot_carries_post_analyze_fields() -> None:
     state = _active_state()
     post_params = object()
-    post_fig = object()
+    post_fig = Figure()
+    post_plots = Plots(NonPresentingHost())
+    post_plots.adopt("fit", post_fig)
+    post_plots.finish()
     state.add_tab(
         "tab",
         Session(
@@ -166,7 +175,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
             post_analysis=PostAnalysisPaneState(
                 result=MagicMock(),
                 params=post_params,
-                figure=post_fig,  # type: ignore[arg-type]
+                plots=post_plots,
             ),
         ),
     )
@@ -178,7 +187,9 @@ def test_snapshot_carries_post_analyze_fields() -> None:
 
     assert snapshot.post_analysis is not None
     assert snapshot.post_analysis.params is post_params
-    assert snapshot.post_analysis.figure is post_fig
+    assert snapshot.post_analysis.figures is not None
+    assert snapshot.post_analysis.figures is post_plots
+    assert snapshot.post_analysis.figures["fit"] is post_fig
     assert snapshot.interaction is not None
     assert snapshot.interaction.has_post_analyze_result is True
 
@@ -239,7 +250,7 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record() -> None:
             adapter=adapter,
             cfg=MagicMock(),
             save=SavePaneState(data_path_override="data.hdf5"),
-            analysis=AnalysisPaneState(image_path_override="analysis.png"),
+            analysis=AnalysisPaneState(image_path_overrides={"fit": "analysis.png"}),
         ),
     )
     state.update_tab_loaded_result("tab", object(), "existing.hdf5")
@@ -249,10 +260,8 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record() -> None:
     ).get_snapshot("tab")
 
     assert snapshot.run is not None and snapshot.run.source_path == "existing.hdf5"
-    assert [(a.kind, a.status) for a in snapshot.artifacts] == [
-        (ArtifactKind.DATA, SaveStatus.NOT_SAVED),
-        (ArtifactKind.ANALYSIS, SaveStatus.NO_RESULT),
-        (ArtifactKind.POST_ANALYSIS, SaveStatus.NO_RESULT),
+    assert [(a.key, a.status) for a in snapshot.artifacts] == [
+        (ArtifactKey(ArtifactKind.DATA), SaveStatus.NOT_SAVED),
     ]
     data = snapshot.artifacts[0]
     assert data.default_path == "data.hdf5"
@@ -278,9 +287,9 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift() -> None:
     service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
 
-    state.get_tab("tab").artifacts.started(ArtifactKind.DATA)
+    attempt = state.get_tab("tab").artifacts.started(ArtifactKey(ArtifactKind.DATA))
     state.update_tab_comment("tab", "edited during save")
-    state.get_tab("tab").artifacts.succeeded(ArtifactKind.DATA, "data_1.hdf5")
+    attempt.succeed("data_1.hdf5")
     data = service.get_snapshot("tab").artifacts[0]
     assert data.status is SaveStatus.UNSAVED_CHANGES
     assert data.default_path == "data.hdf5"
@@ -315,14 +324,12 @@ def test_artifact_failure_preserves_previous_success_but_does_not_mark_new_draft
     service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
     tracker = state.get_tab("tab").artifacts
-    tracker.started(ArtifactKind.DATA)
-    tracker.succeeded(ArtifactKind.DATA, "first_1.hdf5")
+    tracker.started(ArtifactKey(ArtifactKind.DATA)).succeed("first_1.hdf5")
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.SAVED
 
     state.update_tab_data_path_override("tab", "next.hdf5")
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.UNSAVED_CHANGES
-    tracker.started(ArtifactKind.DATA)
-    tracker.failed(ArtifactKind.DATA)
+    tracker.started(ArtifactKey(ArtifactKind.DATA)).fail()
     after_failure = service.get_snapshot("tab").artifacts[0]
     assert after_failure.status is SaveStatus.UNSAVED_CHANGES
     assert after_failure.last_saved_path == "first_1.hdf5"

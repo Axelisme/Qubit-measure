@@ -6,7 +6,7 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.device import FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.device import DeviceManager, FakeDeviceInfo
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, ContextReadiness
 from zcu_tools.gui.app.measure.services.guard import (
     AnalyzePermit,
@@ -199,7 +199,7 @@ def test_run_permit_detaches_observed_device_settings(monkeypatch) -> None:
         )
     )
     live_read = MagicMock(side_effect=AssertionError("Unexpected hardware read"))
-    monkeypatch.setattr(GlobalDeviceManager, "get_all_info", live_read)
+    monkeypatch.setattr(DeviceManager, "get_all_info", live_read)
 
     permit = GuardService(state).acquire_run_permit(
         tab_id, expected_revision=CfgRevision(0)

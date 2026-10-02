@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.rabi_check import (
     RabiCheckCfg,
     RabiCheckExp,
@@ -23,11 +23,15 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
+
+RabiCheckRunResult: TypeAlias = RunRecord[RabiCheckCfg, RabiCheckResult]
 
 
 @dataclass
@@ -45,11 +49,12 @@ class RabiCheckAnalyzeResult(AnalyzeResultBase):
     before_residual_rms: float
     reset_residual_rms: float
     after_residual_rms: float
-    figure: Figure
 
 
 class RabiCheckAdapter(
-    BaseAdapter[RabiCheckCfg, RabiCheckResult, RabiCheckAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[
+        RabiCheckCfg, RabiCheckRunResult, RabiCheckAnalyzeResult, NoAnalyzeParams
+    ]
 ):
     """Rabi-amplitude check for any reset type (single-tone / two-pulse / bath).
 
@@ -126,10 +131,17 @@ class RabiCheckAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> RabiCheckRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = RabiCheckExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[RabiCheckResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[RabiCheckRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> RabiCheckAnalyzeResult:
-        fit, figure = RabiCheckExp().analyze(req.run_result)
+        fit = RabiCheckExp().analyze(req.run_result, None, plots=plots)
         return RabiCheckAnalyzeResult(
             frequency_cycles_per_gain=fit.frequency,
             before_amplitude=fit.before.amplitude,
@@ -144,7 +156,6 @@ class RabiCheckAdapter(
             before_residual_rms=fit.before.residual_rms,
             reset_residual_rms=fit.reset.residual_rms,
             after_residual_rms=fit.after.residual_rms,
-            figure=figure,
         )
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

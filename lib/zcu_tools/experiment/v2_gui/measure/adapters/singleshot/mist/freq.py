@@ -4,9 +4,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.mist import FreqCfg, FreqDepExp, FreqResult
+from zcu_tools.experiment.v2.singleshot.mist.freq import FreqAnalyzeOptions
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
@@ -17,24 +19,24 @@ from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.plotting.plots import Plots
 
 from .._shared import readout_probe_freq, readout_probe_freq_range
 
-MistFreqRunResult: TypeAlias = FreqResult
+MistFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 @dataclass
-class MistFreqAnalyzeResult(FigureOnlyAnalyzeResult):
-    # MIST freq sweep is look-at-the-curve: the domain analyze renders the
-    # ground/excited/other population-vs-frequency traces and extracts no scalar,
-    # so there is no writeback. The single ``figure`` field is inherited.
+class MistFreqAnalyzeResult(AnalyzeResultBase):
     pass
 
 
@@ -127,15 +129,27 @@ class MistFreqAdapter(
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> MistFreqRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, FreqDepExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[MistFreqRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[MistFreqRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> MistFreqAnalyzeResult:
-        # ``confusion_matrix`` (the GE 3x3 matrix) is an analyze input read from
-        # md, not a user knob; absent → None, which skips the readout correction
-        # (the domain default).
-        confusion = req.md.get("confusion_matrix")
-        fig = FreqDepExp().analyze(req.run_result, confusion_matrix=confusion)
-        return MistFreqAnalyzeResult(figure=fig)
+        options = FreqAnalyzeOptions(
+            confusion_matrix=req.md.get("confusion_matrix"),
+        )
+        FreqDepExp().analyze(req.run_result, options, plots=plots)
+        return MistFreqAnalyzeResult()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_mist_freq_{time.strftime('%m%d')}"

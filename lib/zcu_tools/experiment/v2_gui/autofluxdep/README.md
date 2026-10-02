@@ -1,6 +1,6 @@
 # `experiment/v2_gui/autofluxdep/` — Autofluxdep GUI experiment integration
 
-**Last updated:** 2026-09-27 — experiment entry relocation
+**Last updated:** 2026-10-02 — explicit GUI plot factories
 
 本分支提供 autofluxdep GUI workflow 的 concrete measurement experiments。
 每個 `<name>.py` 擁有自己的 Builder／Node、cfg/schema、acquire／fit／Patch policy 與
@@ -8,6 +8,9 @@ Result／Plotter factory，檔尾輸出 `EXPERIMENT`。這些 Builder 實作
 [app 的 Builder／Node／RunEnv 契約](../../../gui/app/autofluxdep/README.md#workflow-與執行契約)；
 workflow 排程、run lifecycle、cfg snapshot 與 artifact 仍屬 app。
 這不是 `experiment/v2/autofluxdep/` 的 executor／MeasurementTask 介面。
+Plotter factory 接收 app 的 run-owned Plots 與 figure name，以 typed factories 建立原生
+subplot。主線程更新 Result 的 scalar／curve／heatmap 投影，再刷新 canvas；Plotter 不取得
+Qt widget 或保存權威，也不依賴 ambient liveplot backend。
 
 `catalog.py` 明確收集 qubit_freq、lenrabi、ro_optimize、t1、t2ramsey、t2echo 與 mist 的
 `EXPERIMENT`，供 GUI 建立 placement。catalog 順序只決定新增選單，不重排使用者保存的

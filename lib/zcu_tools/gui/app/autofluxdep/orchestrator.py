@@ -42,6 +42,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.derivation import SmoothingService
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode, RunEnv
@@ -326,7 +328,7 @@ class Orchestrator:
     ``RunEnv`` for cfg lowering, while declared module fallbacks are captured
     once into a private run-level source.
 
-    ``soc`` is the connected board curried into measurement Nodes. ``results``
+    ``context`` holds the explicit run capabilities curried into every Node. ``results``
     maps a provider's name → its pre-allocated sweep Result (built on the main
     thread at Run start); ``notify`` is the row-updated notification a Node's
     round_hook fires so the main thread redraws. Both are None/empty for a
@@ -338,10 +340,10 @@ class Orchestrator:
     """
 
     providers: list[PlacedNode]
+    context: RunContext
+    device_snapshot: Mapping[str, DeviceInfo]
     tools: Tools = field(default_factory=Tools)
     ml: ModuleSource | None = None
-    soc: Any = None
-    soccfg: Any = None
     md: Any = None
     # The name of the connected device the flux value is applied through (the
     # user's flux-source pick). Curried into each RunEnv so a real-acquire Node
@@ -372,10 +374,6 @@ class Orchestrator:
         self._module_fallbacks = (
             None if self.ml is None else _RunModuleFallbacks(self.ml, self.providers)
         )
-        # The run's cooperative cancel poll, set at the start of ``run`` so
-        # ``_make_env`` can curry it into each RunEnv for flux/provider-boundary
-        # cancellation. None until ``run`` is entered.
-        self._should_stop: Callable[[], bool] | None = None
         # The exception a Node's ``produce`` raised mid-sweep, if any. ``run``
         # catches it (a real acquire can Fast-Fail on an unconfigured Node), stops
         # the sweep, and exposes it here so the caller turns it into a terminal
@@ -406,8 +404,8 @@ class Orchestrator:
             flux_idx=idx,
             schema=provider.schema,
             node_name=provider.name,
-            soc=self.soc,
-            soccfg=self.soccfg,
+            context=self.context,
+            device_snapshot=self.device_snapshot,
             ml=self.ml,
             md=self.md,
             base_cfg=None if cfg_snapshot is None else cfg_snapshot.base_cfg,
@@ -422,7 +420,6 @@ class Orchestrator:
             flux_device=self.flux_device,
             result=result,
             round_hook=round_hook,
-            should_stop=self._should_stop,
         )
 
     def run(
@@ -432,7 +429,6 @@ class Orchestrator:
         start_idx: int = 0,
         info: InfoStore | None = None,
         observer: RunObserver | None = None,
-        should_stop: Callable[[], bool] | None = None,
         pause_requested: Callable[[], bool] | None = None,
     ) -> InfoStore:
         """Sweep flux × providers in order.
@@ -447,8 +443,8 @@ class Orchestrator:
         A caller resuming a run passes the preserved ``InfoStore`` from the prior
         segment so latest-available values, modules, and smoothed state survive.
 
-        ``should_stop`` is polled before each flux point (and before each
-        provider) for terminal cooperative cancellation; when it returns True
+        The context's cancel signal is polled before each flux point and provider
+        for terminal cooperative cancellation; when it is set
         the sweep stops and returns the InfoStore as-is. ``pause_requested`` is
         only honored at a flux boundary before ``begin_point()``.
         """
@@ -463,8 +459,7 @@ class Orchestrator:
             len(flux_values),
             start_idx,
         )
-        # Stash for ``_make_env`` to curry into each RunEnv.
-        self._should_stop = should_stop
+        should_stop = self.context.cancel_signal.is_set
         self.run_error = None
         run_info = info if info is not None else InfoStore()
         observer_provided = observer is not None
@@ -502,6 +497,7 @@ class Orchestrator:
                 profile_start = perf_now()
                 try:
                     patch = node.produce(snapshot)
+                    self.context.cancel_signal.raise_if_error()
                 except Exception as exc:  # a real acquire can Fast-Fail (e.g.
                     # unconfigured Node / no flux device). Record it as the run's
                     # terminal error and stop the sweep gracefully — never let it

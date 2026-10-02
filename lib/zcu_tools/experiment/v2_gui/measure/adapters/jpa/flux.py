@@ -9,10 +9,12 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
 from matplotlib.figure import Figure
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.jpa import FluxCfg, FluxExp
 from zcu_tools.experiment.v2.jpa.jpa_flux import FluxResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
@@ -34,8 +36,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import lower_jpa_flux_dev
+
+JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
 
 _JPA_FLUX_SWEEP_EXPTS = 101
 # Bring-up survey: ±5e-3 around the centre, taken from the notebook's JPA flux
@@ -71,7 +76,6 @@ def jpa_flux_sweep_seed(
 @dataclass
 class JpaFluxAnalyzeResult(AnalyzeResultBase):
     best_flux: float
-    figure: Figure
 
 
 def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
@@ -95,7 +99,7 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
 
 
 class JpaFluxAdapter(
-    BaseAdapter[FluxCfg, FluxResult, JpaFluxAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[FluxCfg, JpaFluxRunResult, JpaFluxAnalyzeResult, NoAnalyzeParams]
 ):
     exp_cls = FluxExp
     ExpCfg_cls: ClassVar[Any] = FluxCfg
@@ -174,15 +178,21 @@ class JpaFluxAdapter(
         # Pure preflight over the detached request snapshot.
         lower_jpa_flux_dev(raw_cfg, req.device_snapshot)
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> JpaFluxRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, FluxExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[FluxResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[JpaFluxRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> JpaFluxAnalyzeResult:
-        best_flux, fig = FluxExp().analyze(req.run_result)
-        _relabel_flux_figure(fig, best_flux)
-        return JpaFluxAnalyzeResult(best_flux=best_flux, figure=fig)
+        answer = FluxExp().analyze(req.run_result, None, plots=plots)
+        _relabel_flux_figure(plots["fit"], answer.best_flux)
+        return JpaFluxAnalyzeResult(best_flux=answer.best_flux)
 
     def get_writeback_items(
-        self, req: WritebackRequest[FluxResult, JpaFluxAnalyzeResult]
+        self, req: WritebackRequest[JpaFluxRunResult, JpaFluxAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
             MetaDictWriteback(

@@ -11,6 +11,7 @@ from pydantic import Field
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runtime import (
     MeasurementTask,
@@ -51,15 +52,13 @@ class FluxDepExecutor(
         dev_cfg: dict[str, DeviceInfo],
         predictor: FluxoniumPredictor,
         *,
-        soc: object,
-        soccfg: object,
+        context: RunContext,
         ml: ModuleLibrary,
         retry_time: int = 3,
     ) -> Mapping[str, Result]:
         cfg = FluxDepCfg(dev=dev_cfg)
         env = FluxDepEnv(
-            soc=soc,
-            soccfg=soccfg,
+            context=context,
             ml=ml,
             flux_values=self.flux_values,
             predictor=predictor,
@@ -67,7 +66,12 @@ class FluxDepExecutor(
         )
 
         set_flux_in_dev_cfg(cfg.dev, self.flux_values[0], label="flux_dev")
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
 
         def run_loop(sched: Schedule[FluxDepCfg, FluxDepEnv]) -> None:
             for i, (flux, flux_step) in enumerate(sched.scan("flux", self.flux_values)):
@@ -91,6 +95,8 @@ class FluxDepExecutor(
             env=env,
             outer_values=self.flux_values,
             run_loop=run_loop,
+            stop=context.cancel_signal,
+            plots=context.plots,
         )
 
     def save(

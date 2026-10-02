@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import (
@@ -26,7 +27,7 @@ from zcu_tools.experiment.v2.runtime import (
     ScheduleStep,
 )
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.plots import HeatmapLinePlot, Plots
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -69,7 +70,7 @@ class T1Result(TypedDict, closed=True):
 
 
 class T1PlotDict(TypedDict, closed=True):
-    t1: LivePlot2DwithLine
+    t1: HeatmapLinePlot
 
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
@@ -83,15 +84,17 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
     def num_axes(self) -> dict[str, int]:
         return dict(t1=2)
 
-    def make_plotter(self, name, axs) -> T1PlotDict:
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T1PlotDict:
         return T1PlotDict(
-            t1=LivePlot2DwithLine(
+            t1=plots.liveplot_2d_with_line(
+                figure_name,
                 "Iteration",
                 "Time (us)",
-                line_axis=1,
                 num_lines=5,
                 title=name,
-                existed_axes=[axs["t1"]],
+                axes=(axs["t1"][0], axs["t1"][1]),
             ),
         )
 
@@ -208,8 +211,6 @@ class T1Task(
     ) -> None:
         super().__init__(cfg, T1Cfg)
 
-        setup_devices(self.cfg, progress=True)
-
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
         self.acquire_kwargs = acquire_kwargs or {}
@@ -221,8 +222,14 @@ class T1Task(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop,
+        )
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": state.env.soccfg}
+            self.cfg.sweep.length, "time", {"soccfg": state.env.context.soccfg}
         )
         self.last_cfg = self.cfg
 
@@ -234,7 +241,7 @@ class T1Task(
         length_param = sweep2param("length", length_sweep)
 
         _ = (
-            signals_step.prog_builder(state.env.soc, state.env.soccfg)
+            signals_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.pi_pulse),
@@ -301,11 +308,17 @@ class T1WithToneTask(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop,
+        )
         self.lengths = sweep2array(
             self.cfg.sweep.length,
             "time",
             {
-                "soccfg": state.env.soccfg,
+                "soccfg": state.env.context.soccfg,
                 "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
@@ -320,7 +333,7 @@ class T1WithToneTask(
         modules.probe_pulse.set_param("length", length_param)
 
         _ = (
-            signals_step.prog_builder(state.env.soc, state.env.soccfg)
+            signals_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.pi_pulse),

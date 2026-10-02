@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import threading
 from collections.abc import Mapping
-from typing import Literal
+from typing import Any, Literal
 
-from zcu_tools.device import DeviceInfo, GlobalDeviceManager
+from zcu_tools.device import BaseDevice, DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.stop_signal import StopSignal
 
 # ==================== Helpers for device config ==================== #
 
@@ -60,17 +60,26 @@ def set_output_in_dev_cfg(
 
 def setup_devices(
     cfg: ExpCfgModel,
+    devices: Mapping[str, BaseDevice[Any]],
     *,
     progress: bool = False,
-    cancel_signal: threading.Event | None = None,
+    cancel_signal: StopSignal | None = None,
 ) -> None:
     """Apply device setup when the experiment config contains a dev section."""
 
     if cfg.dev is None:
         return
 
-    GlobalDeviceManager.setup_devices(
-        cfg.dev,
-        progress=progress,
-        cancel_signal=cancel_signal,
-    )
+    # Resolve the entire batch before touching any driver.
+    missing = cfg.dev.keys() - devices.keys()
+    if missing:
+        raise ValueError(f"Devices not found: {', '.join(sorted(missing))}")
+    snapshot = [(devices[name], info) for name, info in cfg.dev.items()]
+    for device, info in snapshot:
+        if cancel_signal is not None and cancel_signal.is_set():
+            return
+        device.setup(
+            info,
+            progress=progress,
+            stop_event=cancel_signal.event if cancel_signal is not None else None,
+        )

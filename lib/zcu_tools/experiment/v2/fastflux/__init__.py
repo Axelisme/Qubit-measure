@@ -1,6 +1,6 @@
 from . import distortion
-from .mist import MistCfg, MistExp
-from .t1 import T1Cfg, T1Exp
+from .mist import MistAnalyzeOptions, MistCfg, MistExp
+from .t1 import T1Analysis, T1Cfg, T1Exp
 from .twotone import TwotoneCfg, TwoToneExp
 
 __all__ = [
@@ -9,9 +9,11 @@ __all__ = [
     # mist
     "MistExp",
     "MistCfg",
+    "MistAnalyzeOptions",
     # t1
     "T1Exp",
     "T1Cfg",
+    "T1Analysis",
     # two tone
     "TwoToneExp",
     "TwotoneCfg",

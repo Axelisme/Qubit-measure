@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,9 +50,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
-from zcu_tools.gui.plotting import FigureContainer, routing_scope
+from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
@@ -117,6 +122,8 @@ class AnalyzePanelWidget(QWidget):
         self._filter_widget: SelectorWidget | None = None
 
         self._build_ui()
+        self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
+        self._diagnostics = Plots(self._plot_host)
         self._load_from_state()
         # Filter is the initially-current tab, but currentChanged does NOT fire
         # for the already-selected tab — so build its selector now, else it stayed
@@ -124,6 +131,16 @@ class AnalyzePanelWidget(QWidget):
         self._refresh_filter_tab()
 
     # --- construction ----------------------------------------------------
+
+    @property
+    def figures(self) -> Mapping[str, Figure]:
+        """Current diagnostic figures, independent of their Qt presentation."""
+        return NamedFigures(self._diagnostics)
+
+    def release_figures(self) -> None:
+        """Detach presentation while keeping retained figures saveable."""
+        self._diagnostics.finish(present=False)
+        self._diagnostics.release()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -260,7 +277,7 @@ class AnalyzePanelWidget(QWidget):
         self._status.setWordWrap(True)
         form.addRow(self._status)
 
-        # Right: the search's native diagnostic figure (routed via the backend).
+        # Right: the search's native diagnostic figure, explicitly presented.
         self._diag_stack = QStackedWidget()
         diag_placeholder = QLabel("Search to see the diagnostic plot.")
         diag_placeholder.setEnabled(False)
@@ -477,13 +494,10 @@ class AnalyzePanelWidget(QWidget):
         self._status.setText(f"EJ={EJ:.3f}  EC={EC:.3f}  EL={EL:.3f}")
         self._export_btn.setEnabled(True)
         try:
-            import matplotlib.pyplot as plt
-
-            plt.close("all")
-            self._diag_container.clear_dynamic_canvases()
-            with routing_scope(self._diag_container):
-                make_search_diagnostic_figure(result)
-                plt.show()
+            self.release_figures()
+            self._diagnostics = Plots(self._plot_host)
+            self._diagnostics.adopt("diagnostic", make_search_diagnostic_figure(result))
+            self._diagnostics.finish()
         except Exception as exc:
             logger.exception("Search diagnostic rendering failed")
             self._show_message(
@@ -591,7 +605,7 @@ class AnalyzePanelWidget(QWidget):
                 show_const_freq=self._show_const_freq.isChecked(),
                 plot_transitions=show_transitions,
             )
-        except Exception as exc:  # noqa: BLE001 — a show-config issue, not fatal
+        except Exception as exc:
             logger.exception("render_fit_figure failed")
             self._status.setText(f"Could not draw: {exc}")
             return

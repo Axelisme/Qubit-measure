@@ -93,7 +93,7 @@ def test_ro_optimize_acquire_finds_best_point():
         assert "opt_readout" in patch.modules()
 
 
-def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
+def test_ro_optimize_acquire_shares_cooperative_stop_with_schedule(monkeypatch):
     ctrl = build_core()
     sim_params = high_snr_simparams()
     connect_mock(ctrl, sim_params=sim_params)
@@ -101,6 +101,9 @@ def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
     pi_pulse = _pi_pulse(ml, sim_params)
 
     captured: dict[str, object] = {}
+    from zcu_tools.experiment.stop_signal import StopSignal
+
+    stop = StopSignal()
 
     class FakeProgram:
         def __init__(self, _soccfg, cfg, *, modules, sweep):
@@ -112,6 +115,7 @@ def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
             cancel_flag = kwargs["cancel_flag"]
             captured["cancel_flag_initial"] = cancel_flag.is_set()
             captured["trackers"] = kwargs.get("trackers")
+            stop.set()
             kwargs["round_hook"](1, object(), cancel_flag)
             captured["cancel_flag_after_round"] = cancel_flag.is_set()
             return object()
@@ -135,12 +139,6 @@ def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
     schema = node_schema(builder, {**_PARAMS, "rounds": 2})
     result = builder.make_init_result(schema, np.asarray([0.0]))
 
-    stop_polls = {"count": 0}
-
-    def should_stop() -> bool:
-        stop_polls["count"] += 1
-        return True
-
     env = make_acquire_env(
         ctrl,
         flux=0.0,
@@ -148,18 +146,18 @@ def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
         schema=schema,
         ml=ml,
         result=result,
-        should_stop=should_stop,
+        cancel_signal=stop,
     )
     snap = Snapshot(
         {"best_ro_freq": 6000.0, "best_ro_gain": 0.5, "t1": 10.0},
         modules={"pi_pulse": pi_pulse, "readout": _READOUT},
     )
 
-    builder.build_node(env).produce(snap)
+    patch = builder.build_node(env).produce(snap)
 
+    assert not patch.values()
     assert captured["cancel_flag_initial"] is False
-    assert captured["cancel_flag_after_round"] is False
-    assert stop_polls["count"] == 0
+    assert captured["cancel_flag_after_round"] is True
     trackers = captured["trackers"]
     assert isinstance(trackers, list)
     assert trackers

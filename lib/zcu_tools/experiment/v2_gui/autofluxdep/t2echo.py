@@ -38,6 +38,7 @@ import numpy as np
 
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
@@ -90,6 +91,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.cfg import SweepValue
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
@@ -185,10 +187,10 @@ class T2EchoNode(Node):
             ),
             update_interval=None,
         )
-        with Schedule(cfg, signal_buffer) as sched:
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
             builder = sched.prog_builder(
-                env.soc,
-                env.soccfg,
+                env.context.soc,
+                env.context.soccfg,
                 cfg=cfg,
                 program_cls=ModularProgramV2,
             )
@@ -413,9 +415,13 @@ class T2EchoBuilder(Builder):
         times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
 
-    def make_plotter(self, figure: Any) -> Decay1DPlotter:
+    def make_plotter(self, plots: Plots, figure_name: str) -> Decay1DPlotter:
         return Decay1DPlotter(
-            figure, title="t2echo", value_label="T2 Echo (us)", x_label="Time (us)"
+            plots,
+            figure_name,
+            title="t2echo",
+            value_label="T2 Echo (us)",
+            x_label="Time (us)",
         )
 
     def build_node(self, env: RunEnv) -> T2EchoNode:
@@ -523,7 +529,9 @@ class T2EchoBuilder(Builder):
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("detune_ratio", None)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
-        return ml.make_cfg(raw_cfg, T2EchoCfgTemplate)
+        return assemble_experiment_cfg(
+            raw_cfg, T2EchoCfgTemplate, ml=ml, device_snapshot=env.device_snapshot
+        )
 
 
 EXPERIMENT = T2EchoBuilder()

@@ -12,12 +12,11 @@ from typing import TYPE_CHECKING, Any, Protocol
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
+    from zcu_tools.plotting.plots import Plots
 
 from .types import AnalyzeRequest
 
@@ -30,7 +29,7 @@ class InteractivePluginProvider(Protocol):
     """
 
     def make_interactive_plugin(
-        self, request: AnalyzeRequest[Any, Any], /
+        self, request: AnalyzeRequest[Any, Any], /, *, plots: Plots
     ) -> PluginDefinition[Any, Any]: ...
 
     def make_interactive_frontend(
@@ -38,6 +37,8 @@ class InteractivePluginProvider(Protocol):
         plugin: PluginDefinition[Any, Any],
         session: Session[Any],
         env: InteractiveFrontendEnv,
-        request_finish: Callable[[Figure], bool],
+        request_finish: Callable[[], bool],
         request_cancel: Callable[[], bool],
+        *,
+        plots: Plots,
     ) -> InteractiveFrontend: ...

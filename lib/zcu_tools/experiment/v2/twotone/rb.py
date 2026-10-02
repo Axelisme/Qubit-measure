@@ -5,9 +5,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Literal, TypeAlias
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_decay
@@ -19,14 +17,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,
@@ -47,7 +45,6 @@ class RB_Result:
     sub_seeds: NDArray[np.int64]
     depths: NDArray[np.int64]
     signals2D: NDArray[np.complex128]
-    cfg_snapshot: RBCfg | None = None
 
 
 # ==============================================================================
@@ -328,6 +325,12 @@ class RBCfg(ProgramV2Cfg, ExpCfgModel):
     n_seeds: int
 
 
+@dataclass(frozen=True)
+class RBAnalysis:
+    epc: float
+    fidelity: float
+
+
 class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
     # depths/sub_seeds are integer sweeps on disk -> scale=IDENTITY (1.0).
     # axes inner-first [depths, sub_seeds] so native z == signals2D
@@ -343,18 +346,16 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         tag="twotone/ge/rb",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: RBCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> RB_Result:
-        orig_cfg = deepcopy(cfg)
+    def run(self, cfg: RBCfg, *, context: RunContext) -> RB_Result:
         run_cfg = deepcopy(cfg)
-        setup_devices(run_cfg, progress=True)
+        soc, soccfg = context.soc, context.soccfg
+
+        setup_devices(
+            run_cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
 
         depths = sweep2array(run_cfg.sweep.depth, allow_array=True).astype(np.int64)
 
@@ -367,170 +368,158 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
 
         prog_cache: dict[int, Any] = {}
 
-        with LivePlot1D("Depth", "Signal") as viewer:
+        viewer = context.plots.liveplot_1d("measurement", "Depth", "Signal")
 
-            def build_seq_seed(
-                entropy: int,
-            ) -> tuple[int, list[int], list[int], list[int], list[int]]:
-                child = np.random.SeedSequence(entropy)
-                rng = np.random.Generator(np.random.PCG64(child))
-                clifford_idxs = rng.integers(0, NUM_CLIFFORDS, size=max_depth)
+        def build_seq_seed(
+            entropy: int,
+        ) -> tuple[int, list[int], list[int], list[int], list[int]]:
+            child = np.random.SeedSequence(entropy)
+            rng = np.random.Generator(np.random.PCG64(child))
+            clifford_idxs = rng.integers(0, NUM_CLIFFORDS, size=max_depth)
 
-                # track the accumulated Clifford; the recovery at each depth is
-                # its full group inverse (acc = CAYLEY[next][acc]: next applied
-                # AFTER acc — see the CAYLEY order convention).
-                acc = 0
-                recovery_idx_by_pos: list[int] = [INVERSE_INDEX[acc]]
-                for ci in clifford_idxs:
-                    acc = CAYLEY[int(ci)][acc]
-                    recovery_idx_by_pos.append(INVERSE_INDEX[acc])
+            # track the accumulated Clifford; the recovery at each depth is
+            # its full group inverse (acc = CAYLEY[next][acc]: next applied
+            # AFTER acc — see the CAYLEY order convention).
+            acc = 0
+            recovery_idx_by_pos: list[int] = [INVERSE_INDEX[acc]]
+            for ci in clifford_idxs:
+                acc = CAYLEY[int(ci)][acc]
+                recovery_idx_by_pos.append(INVERSE_INDEX[acc])
 
-                (
-                    rand_gate_seq,
-                    prefix_len_by_depth,
-                    recovery_gate0_by_depth,
-                    recovery_gate1_by_depth,
-                ) = build_seed_program_tables(
-                    clifford_idxs.tolist(), recovery_idx_by_pos, depths
-                )
-                return (
-                    entropy,
-                    rand_gate_seq,
-                    prefix_len_by_depth,
-                    recovery_gate0_by_depth,
-                    recovery_gate1_by_depth,
-                )
-
-            signals_buffer = SignalBuffer(
-                (len(entropys), len(depths)),
-                on_update=lambda data: viewer.update(
-                    depths.astype(np.float64),
-                    rb_signal2real(data),
-                ),
+            (
+                rand_gate_seq,
+                prefix_len_by_depth,
+                recovery_gate0_by_depth,
+                recovery_gate1_by_depth,
+            ) = build_seed_program_tables(
+                clifford_idxs.tolist(), recovery_idx_by_pos, depths
             )
-            with Schedule(run_cfg, signals_buffer) as sched:
-                for _, step in sched.scan("seed", entropys.tolist()):
-                    (
-                        seed,
-                        rand_gate_seq,
-                        prefix_len_by_depth,
-                        recovery_gate0_by_depth,
-                        recovery_gate1_by_depth,
-                    ) = build_seq_seed(int(step.value))
-                    builder = step.prog_builder(soc, soccfg)
-                    if seed not in prog_cache:
-                        modules = step.cfg.modules
-                        max_rand_len = max(prefix_len_by_depth, default=0)
+            return (
+                entropy,
+                rand_gate_seq,
+                prefix_len_by_depth,
+                recovery_gate0_by_depth,
+                recovery_gate1_by_depth,
+            )
 
-                        Id_pulse = modules.I_pulse
-                        X90_pulse = modules.X90_pulse
-                        X180_pulse = modules.X180_pulse
-                        MX90_pulse = X90_pulse.with_updates(
-                            phase=X90_pulse.phase + 180.0
+        signals_buffer = SignalBuffer(
+            (len(entropys), len(depths)),
+            on_update=lambda data: viewer.update(
+                depths.astype(np.float64),
+                rb_signal2real(data),
+            ),
+        )
+        with Schedule(run_cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for _, step in sched.scan("seed", entropys.tolist()):
+                (
+                    seed,
+                    rand_gate_seq,
+                    prefix_len_by_depth,
+                    recovery_gate0_by_depth,
+                    recovery_gate1_by_depth,
+                ) = build_seq_seed(int(step.value))
+                builder = step.prog_builder(soc, soccfg)
+                if seed not in prog_cache:
+                    modules = step.cfg.modules
+                    max_rand_len = max(prefix_len_by_depth, default=0)
+
+                    Id_pulse = modules.I_pulse
+                    X90_pulse = modules.X90_pulse
+                    X180_pulse = modules.X180_pulse
+                    MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
+                    Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
+                    Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
+                    MY90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase - 90.0)
+
+                    if Id_pulse is None:
+                        Id_pulse = X90_pulse.with_updates(gain=0.0)
+
+                    gate_pulses = [
+                        Id_pulse,
+                        X90_pulse,
+                        X180_pulse,
+                        MX90_pulse,
+                        Y90_pulse,
+                        Y180_pulse,
+                        MY90_pulse,
+                    ]
+
+                    prog_cache[seed] = (
+                        builder.add(
+                            LoadValue(
+                                "load_rand_len",
+                                values=prefix_len_by_depth,
+                                idx_reg="depth_idx",
+                                val_reg="rand_len",
+                            ),
+                            LoadValue(
+                                "load_recovery_gate_0",
+                                values=recovery_gate0_by_depth,
+                                idx_reg="depth_idx",
+                                val_reg="recovery_gate_0",
+                            ),
+                            LoadValue(
+                                "load_recovery_gate_1",
+                                values=recovery_gate1_by_depth,
+                                idx_reg="depth_idx",
+                                val_reg="recovery_gate_1",
+                            ),
+                            Reset("reset", cfg=modules.reset),
+                            Repeat(
+                                "rand_gate_idx",
+                                "rand_len",
+                                range_hint=(0, max_rand_len),
+                            ).add_content(
+                                [
+                                    LoadValue(
+                                        "load_rand_gate",
+                                        values=rand_gate_seq,
+                                        idx_reg="rand_gate_idx",
+                                        val_reg="gate_idx",
+                                    ),
+                                    ComputedPulse(
+                                        "basic_gate",
+                                        val_reg="gate_idx",
+                                        pulses=gate_pulses,
+                                    ),
+                                ]
+                            ),
+                            # Both recovery slots must share the full
+                            # gate_pulses so their total_length (max over
+                            # candidates) is depth-independent.
+                            ComputedPulse(
+                                "recovery_gate_0",
+                                val_reg="recovery_gate_0",
+                                pulses=gate_pulses,
+                            ),
+                            ComputedPulse(
+                                "recovery_gate_1",
+                                val_reg="recovery_gate_1",
+                                pulses=gate_pulses,
+                            ),
+                            Readout("readout", cfg=modules.readout),
                         )
-                        Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
-                        Y180_pulse = X180_pulse.with_updates(
-                            phase=X180_pulse.phase + 90.0
-                        )
-                        MY90_pulse = X90_pulse.with_updates(
-                            phase=X90_pulse.phase - 90.0
-                        )
-
-                        if Id_pulse is None:
-                            Id_pulse = X90_pulse.with_updates(gain=0.0)
-
-                        gate_pulses = [
-                            Id_pulse,
-                            X90_pulse,
-                            X180_pulse,
-                            MX90_pulse,
-                            Y90_pulse,
-                            Y180_pulse,
-                            MY90_pulse,
-                        ]
-
-                        prog_cache[seed] = (
-                            builder.add(
-                                LoadValue(
-                                    "load_rand_len",
-                                    values=prefix_len_by_depth,
-                                    idx_reg="depth_idx",
-                                    val_reg="rand_len",
-                                ),
-                                LoadValue(
-                                    "load_recovery_gate_0",
-                                    values=recovery_gate0_by_depth,
-                                    idx_reg="depth_idx",
-                                    val_reg="recovery_gate_0",
-                                ),
-                                LoadValue(
-                                    "load_recovery_gate_1",
-                                    values=recovery_gate1_by_depth,
-                                    idx_reg="depth_idx",
-                                    val_reg="recovery_gate_1",
-                                ),
-                                Reset("reset", cfg=modules.reset),
-                                Repeat(
-                                    "rand_gate_idx",
-                                    "rand_len",
-                                    range_hint=(0, max_rand_len),
-                                ).add_content(
-                                    [
-                                        LoadValue(
-                                            "load_rand_gate",
-                                            values=rand_gate_seq,
-                                            idx_reg="rand_gate_idx",
-                                            val_reg="gate_idx",
-                                        ),
-                                        ComputedPulse(
-                                            "basic_gate",
-                                            val_reg="gate_idx",
-                                            pulses=gate_pulses,
-                                        ),
-                                    ]
-                                ),
-                                # Both recovery slots must share the full
-                                # gate_pulses so their total_length (max over
-                                # candidates) is depth-independent.
-                                ComputedPulse(
-                                    "recovery_gate_0",
-                                    val_reg="recovery_gate_0",
-                                    pulses=gate_pulses,
-                                ),
-                                ComputedPulse(
-                                    "recovery_gate_1",
-                                    val_reg="recovery_gate_1",
-                                    pulses=gate_pulses,
-                                ),
-                                Readout("readout", cfg=modules.readout),
-                            )
-                            .declare_sweep("depth_idx", len(depths))
-                            .build()
-                        )
-
-                    _ = builder.run_program(
-                        prog_cache[seed],
-                        **(acquire_kwargs or {}),
+                        .declare_sweep("depth_idx", len(depths))
+                        .build()
                     )
-                signals2D = signals_buffer.array  # (n_seeds, n_depths)
 
-        self.last_result = RB_Result(
+                _ = builder.run_program(prog_cache[seed])
+
+        return RB_Result(
             sub_seeds=entropys,
             depths=depths,
-            signals2D=signals2D,
-            cfg_snapshot=orig_cfg,
+            signals2D=signals_buffer.array,
         )
 
-        return self.last_result
-
-    @retrieve_result
     def analyze(
         self,
-        result: RB_Result | None = None,
-    ) -> tuple[float, float, Figure]:
-        assert result is not None, (
-            "No measurement data available. Run experiment first."
-        )
+        source: RunRecord[RBCfg, RB_Result],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> RBAnalysis:
+        result = source.result
+        del options
 
         depths = result.depths
         signals2D = result.signals2D
@@ -538,9 +527,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         real_signals_avg = rb_signal2real(signals2D)
         depths_f = depths.astype(np.float64)
 
-        decay_time, decay_err, fit_signals, (pOpt, pCov) = fit_decay(
-            depths_f, real_signals_avg
-        )
+        decay_time, decay_err, fit_signals, _ = fit_decay(depths_f, real_signals_avg)
 
         p = np.exp(-1.0 / decay_time)
         p_err = p / (decay_time**2) * decay_err
@@ -549,8 +536,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         fidelity = 1.0 - epc
         fidelity_err = epc_err
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         for si in range(signals2D.shape[0]):
             per_seed = rotate2real(signals2D[si]).real
@@ -584,4 +570,4 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
 
         fig.tight_layout()
 
-        return epc, fidelity, fig
+        return RBAnalysis(epc=float(epc), fidelity=float(fidelity))

@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.amp_rabi import (
+    AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiExp,
     AmpRabiFit,
@@ -26,13 +27,17 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import EvalValue, ScalarSpec
+from zcu_tools.plotting.plots import Plots
 
 from ._rabi import rabi_calibration_writeback
+
+SsAmpRabiRunResult = RunRecord[AmpRabiCfg, AmpRabiResult]
 
 
 @dataclass
@@ -51,12 +56,11 @@ class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
     frequency: float
     amplitude: float
     fit_result: AmpRabiFit
-    figure: Figure
 
 
 class SsAmpRabiAdapter(
     BaseAdapter[
-        AmpRabiCfg, AmpRabiResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
+        AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
     ]
 ):
     exp_cls = AmpRabiExp
@@ -111,11 +115,23 @@ class SsAmpRabiAdapter(
             .build()
         )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SsAmpRabiRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = AmpRabiExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[AmpRabiResult, SsAmpRabiAnalyzeParams]
+        self,
+        req: AnalyzeRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> SsAmpRabiAnalyzeResult:
-        fit, figure = AmpRabiExp().analyze(
-            req.run_result, initial_state=req.analyze_params.initial_state
+        fit = AmpRabiExp().analyze(
+            req.run_result,
+            AmpRabiAnalyzeOptions(initial_state=req.analyze_params.initial_state),
+            plots=plots,
         )
         return SsAmpRabiAnalyzeResult(
             fit.pi_gain,
@@ -125,11 +141,10 @@ class SsAmpRabiAdapter(
             fit.frequency,
             fit.amplitude,
             fit,
-            figure,
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[AmpRabiResult, SsAmpRabiAnalyzeResult]
+        self, req: WritebackRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return rabi_calibration_writeback(req.analyze_result.fit_result.joint_fit)
 

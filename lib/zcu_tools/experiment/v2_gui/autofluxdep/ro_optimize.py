@@ -43,6 +43,7 @@ from numpy.typing import NDArray
 from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal
@@ -93,6 +94,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.gui.cfg import CenteredSweepValue
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -370,10 +372,10 @@ class RoOptimizeNode(Node):
             on_update=on_update,
             update_interval=None,
         )
-        with Schedule(cfg, signal_buffer) as sched:
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
             builder = sched.prog_builder(
-                env.soc,
-                env.soccfg,
+                env.context.soc,
+                env.context.soccfg,
                 cfg=cfg,
                 program_cls=ModularProgramV2,
             )
@@ -701,8 +703,8 @@ class RoOptimizeBuilder(Builder):
         gains = np.linspace(gain_range[0], gain_range[1], gain_expts)
         return Sweep2DResult.allocate(flux, freqs, gains)
 
-    def make_plotter(self, figure: Any) -> Landscape2DPlotter:
-        return Landscape2DPlotter(figure, title="ro_optimize")
+    def make_plotter(self, plots: Plots, figure_name: str) -> Landscape2DPlotter:
+        return Landscape2DPlotter(plots, figure_name, title="ro_optimize")
 
     def build_node(self, env: RunEnv) -> RoOptimizeNode:
         return RoOptimizeNode(env, self)
@@ -820,7 +822,9 @@ class RoOptimizeBuilder(Builder):
         ranges = pop_sweep_ranges(raw_cfg, ("freq", "gain"), node_name=self.name)
         raw_cfg["freq_range"] = ranges["freq"]
         raw_cfg["gain_range"] = ranges["gain"]
-        return ml.make_cfg(raw_cfg, RoOptimizeCfgTemplate)
+        return assemble_experiment_cfg(
+            raw_cfg, RoOptimizeCfgTemplate, ml=ml, device_snapshot=env.device_snapshot
+        )
 
 
 EXPERIMENT = RoOptimizeBuilder()

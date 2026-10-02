@@ -15,6 +15,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
@@ -54,6 +55,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -144,10 +146,10 @@ class MistNode(Node):
             on_update=on_update,
             update_interval=None,
         )
-        with Schedule(cfg, signal_buffer) as sched:
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
             builder = sched.prog_builder(
-                env.soc,
-                env.soccfg,
+                env.context.soc,
+                env.context.soccfg,
                 cfg=cfg,
                 program_cls=ModularProgramV2,
             )
@@ -271,9 +273,9 @@ class MistBuilder(Builder):
         gains = sweepcfg_to_axis(knobs["gain_sweep"])
         return Sweep1DResult.allocate(flux, gains, x_label="gain")
 
-    def make_plotter(self, figure: Any) -> ColormapLinePlotter:
+    def make_plotter(self, plots: Plots, figure_name: str) -> ColormapLinePlotter:
         return ColormapLinePlotter(
-            figure, title="mist", y_label="Readout Gain (a.u.)", num_lines=1
+            plots, figure_name, title="mist", y_label="Readout Gain (a.u.)", num_lines=1
         )
 
     def build_node(self, env: RunEnv) -> MistNode:
@@ -324,7 +326,9 @@ class MistBuilder(Builder):
         patches.update(readout_module_patches(readout))
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
-        return ml.make_cfg(raw_cfg, MistCfgTemplate)
+        return assemble_experiment_cfg(
+            raw_cfg, MistCfgTemplate, ml=ml, device_snapshot=env.device_snapshot
+        )
 
 
 EXPERIMENT = MistBuilder()

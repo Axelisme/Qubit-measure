@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` — named experiment work contexts
 
-**Last updated:** 2026-09-30 — MetaDict mutation ownership
+**Last updated:** 2026-10-02 — explicit CfgEnv
 
 Context 是綁定特定參數資源的具名實驗工作 scope；同一 context 預期具有相同的環境與實驗語意。儀器值只是命名便利，名稱可以是任意合法字串。Context 不會自動監控實驗環境。
 
@@ -63,7 +63,6 @@ modules:
 | `register_waveform(**wav_kwargs)` | 新增/覆蓋波形設定並寫回 |
 | `register_module(**mod_kwargs)` | 新增/覆蓋模組設定並寫回 |
 | `update_module(name, override_cfg)` | 部分更新既有模組設定 |
-| `make_cfg(exp_cfg, cfg_model, **kwargs)` | thin wrapper；轉呼 `zcu_tools.experiment.cfg_assembler.make_cfg(..., ml=self, ...)` |
 
 **Experiment cfg materialization 邊界**：
 
@@ -73,9 +72,9 @@ modules:
 
 1. `assemble_experiment_cfg(raw_cfg, cfg_model, *, ml, device_snapshot, overrides=None)` 是 stateless materializer。
 2. `raw_cfg` 已是 concrete dict；GUI 的 `CfgSchema` / `EvalValue` / md lowering 在 adapter 層完成，不進 assembler。
-3. caller 在每次 run / notebook call 當下傳入 current `ml` 與 `device_snapshot`。核心不持有 active context，也不直接讀 `GlobalDeviceManager`。
-4. `make_cfg(raw_cfg, cfg_model, *, ml, overrides=None, device_snapshot=None)` 是薄 wrapper；若未傳 `device_snapshot`，在呼叫當下讀 `GlobalDeviceManager.get_all_info()`，再轉呼 `assemble_experiment_cfg`。
-5. `ModuleLibrary.make_cfg(...)` 是 forwarding wrapper，避免形成第二套 materialization implementation；新呼叫點優先使用 `zcu_tools.experiment.cfg_assembler.make_cfg(...)`。
+3. GUI caller 傳入固定的 ml 與 device snapshot；assembler 不讀硬體。
+4. Notebook 使用 `make_cfg(raw_cfg, cfg_model, CfgEnv(md, ml, device_manager))`。每次呼叫取得指定 manager 的當次裝置資訊，不執行 setup；讀取失敗直接傳播。
+5. ModuleLibrary 只管理 module／waveform store，不再提供缺少 device owner 的 make_cfg 轉接。
 
 **Cfg 解析 API**（統一走 Factory wrapper）：
 

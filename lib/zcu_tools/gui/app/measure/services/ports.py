@@ -8,7 +8,7 @@ only what the consumer uses; an existing implementer need not inherit the port.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -28,7 +28,7 @@ class SaveDataSubmission:
 
 @dataclass(frozen=True, slots=True)
 class SaveDestination:
-    kind: ArtifactKind
+    key: ArtifactKey
     path: str
 
 
@@ -77,14 +77,12 @@ class CfgEditResult:
 
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from zcu_tools.gui.app.measure.adapter import (
         AdapterCapabilities,
         WritebackItem,
     )
     from zcu_tools.gui.app.measure.artifact_tracker import (
-        ArtifactKind,
+        ArtifactKey,
         ArtifactSnapshot,
     )
     from zcu_tools.gui.app.measure.state import (
@@ -95,6 +93,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
     from zcu_tools.gui.session.types import SessionEnv
+    from zcu_tools.plotting.figures import FigureCollection
+    from zcu_tools.plotting.plots import Plots
 
     from .persistence_types import AppPersistedState
 
@@ -117,9 +117,9 @@ class RunPaneSnapshot:
 class AnalysisPaneSnapshot:
     params: object | None
     result: object | None
-    figure: Figure | None
+    figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_path: PathResourceSnapshot
+    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -129,9 +129,9 @@ class AnalysisPaneSnapshot:
 class PostAnalysisPaneSnapshot:
     params: object | None
     result: object | None
-    figure: Figure | None
+    figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_path: PathResourceSnapshot
+    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -145,11 +145,11 @@ class SavePaneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class TabPathsSnapshot:
-    """The three path resources projected independently by a tab snapshot."""
+    """Data and each named image path, projected independently by a tab."""
 
     data: PathResourceSnapshot
-    analysis_image: PathResourceSnapshot
-    post_analysis_image: PathResourceSnapshot
+    analysis_images: Mapping[str, PathResourceSnapshot]
+    post_analysis_images: Mapping[str, PathResourceSnapshot]
 
 
 @dataclass(frozen=True)
@@ -343,7 +343,7 @@ class TabAnalyzeWritePort(Protocol):
         self,
         tab_id: str,
         analyze_result: object,
-        figure: Figure | None,
+        plots: Plots | None,
         writeback_draft: object | None = None,
         analyze_params_instance: object = ...,
         *,
@@ -353,7 +353,7 @@ class TabAnalyzeWritePort(Protocol):
         self,
         tab_id: str,
         post_analyze_result: object,
-        figure: Figure | None,
+        plots: Plots | None,
         *,
         post_analyze_params_instance: object = ...,
         writeback_draft: object | None = None,

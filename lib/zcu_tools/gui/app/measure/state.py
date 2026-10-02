@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -34,13 +33,19 @@ from zcu_tools.gui.version_table import (
 
 from .adapter import (
     AnalysisMode,
-    AnalyzeResultWithFigure,
     ExpAdapterProtocol,
     SavePaths,
     T_AnalyzeParams,
     T_Cfg,
 )
-from .artifact_tracker import ArtifactKind, ArtifactSnapshot, ArtifactTracker
+from .artifact_paths import named_image_path
+from .artifact_tracker import (
+    ArtifactKey,
+    ArtifactKind,
+    ArtifactObservation,
+    ArtifactSnapshot,
+    ArtifactTracker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +54,11 @@ logger = logging.getLogger(__name__)
 # bump↔drop contract live on SessionState; tab keys are bumped by State below.
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
+    from zcu_tools.plotting.plots import Plots
 
 
 T_Result = TypeVar("T_Result")
-T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
+T_AnalyzeResult = TypeVar("T_AnalyzeResult")
 
 
 # ``Session`` is the aggregate root, but its result-bearing resources are owned by
@@ -70,9 +75,9 @@ class RunPaneState(Generic[T_Result]):
 class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     params: T_AnalyzeParams | None = None
     result: T_AnalyzeResult | None = None
-    figure: Figure | None = None
+    plots: Plots | None = None
     writeback_draft: object | None = None
-    image_path_override: str | None = None
+    image_path_overrides: dict[str, str] = field(default_factory=dict)
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
 
@@ -81,9 +86,9 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
 class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     params: T_AnalyzeParams | None = None
     result: T_AnalyzeResult | None = None
-    figure: Figure | None = None
+    plots: Plots | None = None
     writeback_draft: object | None = None
-    image_path_override: str | None = None
+    image_path_overrides: dict[str, str] = field(default_factory=dict)
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
 
@@ -106,7 +111,7 @@ class RetiredRunResource:
 class RetiredAnalysisResource:
     params: object | None = None
     result: object | None = None
-    figure: Figure | None = None
+    plots: Plots | None = None
     writeback_draft: object | None = None
 
 
@@ -136,6 +141,15 @@ class RetiredPaneResources:
             if candidate is not None and all(candidate is not old for old in drafts):
                 drafts.append(candidate)
         return tuple(drafts)
+
+    @property
+    def plots(self) -> tuple[Plots, ...]:
+        """Detached presentation owners, de-duplicated by identity."""
+        plots: list[Plots] = []
+        for candidate in (self.analysis.plots, self.post_analysis.plots):
+            if candidate is not None and all(candidate is not old for old in plots):
+                plots.append(candidate)
+        return tuple(plots)
 
 
 _UNSET: object = object()
@@ -179,12 +193,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         return self.post_analysis.result is not None
 
     def has_figure(self) -> bool:
-        return self.analysis.figure is not None
-
-    @staticmethod
-    def _with_suffix(path: str, suffix: str) -> str:
-        root, extension = os.path.splitext(path)
-        return f"{root}{suffix}{extension}"
+        return self.analysis.plots is not None and bool(self.analysis.plots)
 
     def _adapter_save_paths(self, ctx: SessionEnv) -> SavePaths | None:
         if not ctx.database_path or not ctx.result_dir or not ctx.active_label:
@@ -197,23 +206,32 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         paths = self._adapter_save_paths(ctx)
         return None if paths is None else paths.data_path
 
-    def effective_analysis_image_path(self, ctx: SessionEnv) -> str | None:
-        if self.analysis.image_path_override is not None:
-            return self.analysis.image_path_override
-        paths = self._adapter_save_paths(ctx)
-        return (
-            None if paths is None else self._with_suffix(paths.image_path, "_analysis")
-        )
+    def image_pane(
+        self, key: ArtifactKey
+    ) -> AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any]:
+        if key.kind is ArtifactKind.ANALYSIS:
+            return self.analysis
+        if key.kind is ArtifactKind.POST_ANALYSIS:
+            return self.post_analysis
+        raise ValueError("Data artifacts have no image pane")
 
-    def effective_post_analysis_image_path(self, ctx: SessionEnv) -> str | None:
-        if self.post_analysis.image_path_override is not None:
-            return self.post_analysis.image_path_override
+    def effective_image_path(self, ctx: SessionEnv, key: ArtifactKey) -> str | None:
+        pane = self.image_pane(key)
+        name = key.figure_name
+        if name is None or pane.plots is None or name not in pane.plots:
+            raise KeyError(f"No current image artifact {key!r}")
+        override = pane.image_path_overrides.get(name)
+        if override is not None:
+            return override
         paths = self._adapter_save_paths(ctx)
-        return (
-            None
-            if paths is None
-            else self._with_suffix(paths.image_path, "_post_analysis")
-        )
+        if paths is None:
+            return None
+        try:
+            name.encode("utf-8")
+        except UnicodeEncodeError:
+            # Keep the artifact visible; save preflight rejects this name before I/O.
+            return None
+        return named_image_path(paths.image_path, key)
 
 
 @dataclass(frozen=True)
@@ -343,7 +361,7 @@ class State(SessionState):
         return RetiredAnalysisResource(
             params=pane.params,
             result=pane.result,
-            figure=pane.figure,
+            plots=pane.plots,
             writeback_draft=pane.writeback_draft,
         )
 
@@ -359,13 +377,15 @@ class State(SessionState):
     def _empty_analysis_like(
         pane: AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any],
     ) -> AnalysisPaneState[Any, Any]:
-        return AnalysisPaneState(image_path_override=pane.image_path_override)
+        return AnalysisPaneState(image_path_overrides=dict(pane.image_path_overrides))
 
     @staticmethod
     def _empty_post_analysis_like(
         pane: PostAnalysisPaneState[Any, Any] | AnalysisPaneState[Any, Any],
     ) -> PostAnalysisPaneState[Any, Any]:
-        return PostAnalysisPaneState(image_path_override=pane.image_path_override)
+        return PostAnalysisPaneState(
+            image_path_overrides=dict(pane.image_path_overrides)
+        )
 
     def _replace_run_pane(
         self,
@@ -456,8 +476,12 @@ class State(SessionState):
             analysis=State._retired_analysis(tab.analysis),
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        if pane.image_path_override is None:
-            pane.image_path_override = tab.analysis.image_path_override
+        if not pane.image_path_overrides and pane.plots is not None:
+            pane.image_path_overrides = {
+                name: path
+                for name, path in tab.analysis.image_path_overrides.items()
+                if name in pane.plots
+            }
         tab.analysis = pane
         tab.post_analysis = self._empty_post_analysis_like(tab.post_analysis)
         self.version.bump(f"tab:{tab_id}:analyze")
@@ -469,10 +493,10 @@ class State(SessionState):
         tab_id: str,
         *,
         result: object,
-        figure: Figure | None,
+        plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
-        image_path_override: str | None = None,
+        image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit an Analysis carrier in one State transition."""
         retired = self.swap_analysis_pane(
@@ -480,9 +504,11 @@ class State(SessionState):
             AnalysisPaneState(
                 params=params,
                 result=result,
-                figure=figure,
+                plots=plots,
                 writeback_draft=writeback_draft,
-                image_path_override=image_path_override,
+                image_path_overrides=(
+                    {} if image_path_overrides is None else dict(image_path_overrides)
+                ),
             ),
         )
         return retired
@@ -491,7 +517,7 @@ class State(SessionState):
         self,
         tab_id: str,
         analyze_result: object,
-        figure: Figure | None,
+        plots: Plots | None,
         writeback_draft: object | None = None,
         analyze_params_instance: object = _UNSET,
         *,
@@ -505,9 +531,9 @@ class State(SessionState):
             else analyze_params_instance
         )
         logger.debug(
-            "update_tab_analyze: tab_id=%r figure=%s",
+            "update_tab_analyze: tab_id=%r plots=%s",
             tab_id,
-            "yes" if figure is not None else "none",
+            "yes" if plots is not None else "none",
         )
         return self.swap_analysis_pane(
             tab_id,
@@ -515,7 +541,7 @@ class State(SessionState):
                 result=analyze_result,
                 source_operation_id=source_operation_id,
                 result_params=deepcopy(params),
-                figure=figure,
+                plots=plots,
                 params=params,
                 writeback_draft=writeback_draft,
             ),
@@ -548,8 +574,12 @@ class State(SessionState):
         retired = RetiredPaneResources(
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        if pane.image_path_override is None:
-            pane.image_path_override = tab.post_analysis.image_path_override
+        if not pane.image_path_overrides and pane.plots is not None:
+            pane.image_path_overrides = {
+                name: path
+                for name, path in tab.post_analysis.image_path_overrides.items()
+                if name in pane.plots
+            }
         tab.post_analysis = pane
         self.version.bump(f"tab:{tab_id}:post_analyze")
         return retired
@@ -559,10 +589,10 @@ class State(SessionState):
         tab_id: str,
         *,
         result: object,
-        figure: Figure | None,
+        plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
-        image_path_override: str | None = None,
+        image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit a Post carrier in one State transition."""
         retired = self.swap_post_analysis_pane(
@@ -570,9 +600,11 @@ class State(SessionState):
             PostAnalysisPaneState(
                 params=params,
                 result=result,
-                figure=figure,
+                plots=plots,
                 writeback_draft=writeback_draft,
-                image_path_override=image_path_override,
+                image_path_overrides=(
+                    {} if image_path_overrides is None else dict(image_path_overrides)
+                ),
             ),
         )
         return retired
@@ -581,7 +613,7 @@ class State(SessionState):
         self,
         tab_id: str,
         post_analyze_result: object,
-        figure: Figure | None,
+        plots: Plots | None,
         *,
         post_analyze_params_instance: object = _UNSET,
         writeback_draft: object | None = None,
@@ -596,9 +628,9 @@ class State(SessionState):
             else post_analyze_params_instance
         )
         logger.debug(
-            "update_tab_post_analyze: tab_id=%r figure=%s",
+            "update_tab_post_analyze: tab_id=%r plots=%s",
             tab_id,
-            "yes" if figure is not None else "none",
+            "yes" if plots is not None else "none",
         )
         return self.swap_post_analysis_pane(
             tab_id,
@@ -606,7 +638,7 @@ class State(SessionState):
                 result=post_analyze_result,
                 source_operation_id=source_operation_id,
                 result_params=deepcopy(params),
-                figure=figure,
+                plots=plots,
                 params=params,
                 writeback_draft=writeback_draft,
             ),
@@ -631,36 +663,37 @@ class State(SessionState):
         """
         self._assert_owner()
         tab = self.get_tab(tab_id)
-        tracker = tab.artifacts
-        snapshots = [
-            tracker.observe(
-                ArtifactKind.DATA,
+        observations = [
+            ArtifactObservation(
+                key=ArtifactKey(ArtifactKind.DATA),
                 result=tab.run.result,
-                has_figure=False,
+                figure=None,
                 path=tab.effective_data_path(self.session_env),
                 comment=tab.save.comment,
             )
         ]
         capabilities = tab.adapter.capabilities
-        if capabilities.analysis is not AnalysisMode.NONE:
-            snapshots.append(
-                tracker.observe(
-                    ArtifactKind.ANALYSIS,
-                    result=tab.analysis.result,
-                    has_figure=tab.analysis.figure is not None,
-                    path=tab.effective_analysis_image_path(self.session_env),
+        for kind, pane, available in (
+            (
+                ArtifactKind.ANALYSIS,
+                tab.analysis,
+                capabilities.analysis is not AnalysisMode.NONE,
+            ),
+            (ArtifactKind.POST_ANALYSIS, tab.post_analysis, capabilities.post_analysis),
+        ):
+            if not available or pane.plots is None or pane.result is None:
+                continue
+            for name, figure in pane.plots.items():
+                key = ArtifactKey(kind, name)
+                observations.append(
+                    ArtifactObservation(
+                        key=key,
+                        result=pane.result,
+                        figure=figure,
+                        path=tab.effective_image_path(self.session_env, key),
+                    )
                 )
-            )
-        if capabilities.post_analysis:
-            snapshots.append(
-                tracker.observe(
-                    ArtifactKind.POST_ANALYSIS,
-                    result=tab.post_analysis.result,
-                    has_figure=tab.post_analysis.figure is not None,
-                    path=tab.effective_post_analysis_image_path(self.session_env),
-                )
-            )
-        return tuple(snapshots)
+        return tab.artifacts.project(observations)
 
     def update_tab_comment(self, tab_id: str, comment: str) -> None:
         """Publish the Data comment draft shared by GUI and remote saves."""
@@ -686,19 +719,24 @@ class State(SessionState):
         self.tabs[tab_id].save.data_path_override = data_path
         self._bump_path_versions(tab_id, "data")
 
-    def update_tab_analysis_image_path_override(
-        self, tab_id: str, image_path: str | None
+    def update_tab_image_path_override(
+        self, tab_id: str, key: ArtifactKey, image_path: str | None
     ) -> None:
         self._assert_owner()
-        self.tabs[tab_id].analysis.image_path_override = image_path
-        self._bump_path_versions(tab_id, "analysis_image")
-
-    def update_tab_post_analysis_image_path_override(
-        self, tab_id: str, image_path: str | None
-    ) -> None:
-        self._assert_owner()
-        self.tabs[tab_id].post_analysis.image_path_override = image_path
-        self._bump_path_versions(tab_id, "post_analysis_image")
+        pane = self.tabs[tab_id].image_pane(key)
+        name = key.figure_name
+        if name is None or pane.plots is None or name not in pane.plots:
+            raise KeyError(f"No current image artifact {key!r}")
+        if image_path is None:
+            pane.image_path_overrides.pop(name, None)
+        else:
+            pane.image_path_overrides[name] = image_path
+        stage = (
+            "analysis_image"
+            if key.kind is ArtifactKind.ANALYSIS
+            else "post_analysis_image"
+        )
+        self._bump_path_versions(tab_id, stage)
 
     def set_tab_running(self, tab_id: str, running: bool) -> None:
         self._assert_owner()

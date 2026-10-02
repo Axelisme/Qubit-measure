@@ -23,6 +23,10 @@ spectrum that has selected points.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .analyze_panel import AnalyzePanelWidget
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
@@ -134,7 +138,7 @@ class MainWindow(QMainWindow):
         # first use and only shown/hidden after, so its tabs / form / paths /
         # figures survive switching away and back (it is not a _current_editor
         # that _clear_editor would destroy).
-        self._analyze_panel: QWidget | None = None
+        self._analyze_panel: AnalyzePanelWidget | None = None
 
         # A draggable splitter lets the user resize the spectrum list vs editor.
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -370,7 +374,7 @@ class MainWindow(QMainWindow):
                     transpose_axes=req.transpose_axes,
                 )
                 self._ctrl.set_active_spectrum(name)  # jump straight into line picking
-            except Exception as exc:  # noqa: BLE001 — surface load errors, don't crash the shell
+            except Exception as exc:
                 logger.exception("load_spectrum failed")
                 self._show_io_error("Load", req.filepath, exc)
 
@@ -396,7 +400,7 @@ class MainWindow(QMainWindow):
             return
         try:
             names = self._ctrl.load_processed_spectrums(filepath)
-        except Exception as exc:  # noqa: BLE001 — surface load errors, don't crash the shell
+        except Exception as exc:
             logger.exception("load_processed_spectrums failed")
             self._show_io_error("Restore", filepath, exc)
             return
@@ -462,7 +466,7 @@ class MainWindow(QMainWindow):
             try:
                 resolved = self._ctrl.export_spectrums(filepath=path, mode="w")
                 self._show_info("Exported", f"Wrote {resolved}")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.exception("export failed")
                 self._show_io_error("Export", path, exc)
 
@@ -492,7 +496,7 @@ class MainWindow(QMainWindow):
 
     # --- close path --------------------------------------------------------
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Quiesce all background workers before the C++ widget tree is torn down.
 
         ``_current_editor`` (FindPointsWidget) is handled by ``_clear_editor`` when
@@ -507,5 +511,6 @@ class MainWindow(QMainWindow):
         ):
             self._current_editor.quiesce()  # type: ignore[union-attr]
         if self._analyze_panel is not None:
-            self._analyze_panel.quiesce()  # type: ignore[union-attr]
+            self._analyze_panel.quiesce()
+            self._analyze_panel.release_figures()
         super().closeEvent(a0)

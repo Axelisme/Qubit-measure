@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.bath.phase import (
     PhaseCfg,
     PhaseExp,
@@ -24,6 +24,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -31,17 +32,17 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import bath_reset_writeback_items
 
-BathPhaseRunResult: TypeAlias = PhaseResult
+BathPhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
 
 
 @dataclass
 class BathPhaseAnalyzeResult(AnalyzeResultBase):
     max_phase: float
     min_phase: float
-    figure: Figure
 
 
 class BathPhaseAdapter(
@@ -82,7 +83,7 @@ class BathPhaseAdapter(
             "'bathreset_min_phase'. Also proposes two ModuleLibrary modules: "
             "'reset_bath' (the calibrated tested reset with pi/2 phase set to "
             "the max/ground phase) and 'reset_bath_e' (pi/2 phase set to the "
-            "min/excited phase) — both skipped when no cfg_snapshot is "
+            "min/excited phase) — both skipped when no source cfg is "
             "available (e.g. loaded from file) (D2(a))."
         ),
         recommended=(
@@ -124,12 +125,22 @@ class BathPhaseAdapter(
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> BathPhaseRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = PhaseExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[BathPhaseRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[BathPhaseRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> BathPhaseAnalyzeResult:
-        max_phase, min_phase, fig = PhaseExp().analyze(req.run_result)
+        analysis = PhaseExp().analyze(req.run_result, None, plots=plots)
         return BathPhaseAnalyzeResult(
-            max_phase=max_phase, min_phase=min_phase, figure=fig
+            max_phase=analysis.max_phase, min_phase=analysis.min_phase
         )
 
     def get_writeback_items(
@@ -154,7 +165,7 @@ class BathPhaseAdapter(
         # is the calibrated tested_reset with cavity freq/gain and its pi/2 phase
         # overwritten from md (max-phase → ground, min-phase → excited). Emitted
         # only when the matching md keys are present.
-        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
+        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg))
 
         return items
 

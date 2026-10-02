@@ -63,12 +63,9 @@ _SHARED_MODULES = [
     # Read-only value lookup is pure session logic; concrete source binders live
     # in services and are intentionally not part of this import-clean list.
     "zcu_tools.gui.session.value_lookup",
-    # The plotting package + its backend-select module must stay import-clean so
-    # an entry script can configure the matplotlib backend before any pyplot
-    # import. The heavy plotting submodules (backend/host/container) DO pull in
-    # qtpy/matplotlib by design and are intentionally NOT listed here.
+    # Plotting exports load lazily; host/container load Qt and Matplotlib only
+    # when callers request them.
     "zcu_tools.gui.plotting",
-    "zcu_tools.gui.plotting.setup",
 ]
 
 

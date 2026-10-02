@@ -16,17 +16,15 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseReadout,
@@ -43,7 +41,6 @@ class OneToneFluxResult:
     fluxes: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: OneToneFluxCfg | None = None
 
 
 class OneToneFluxModuleCfg(ConfigBase):
@@ -79,9 +76,9 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
         tag="jpa/flux_onetone",
     )
 
-    @record_result
-    def run(self, soc, soccfg, cfg: OneToneFluxCfg) -> OneToneFluxResult:
-        orig_cfg = deepcopy(cfg)
+    def run(self, cfg: OneToneFluxCfg, *, context: RunContext) -> OneToneFluxResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
         jpa_flux_sweep = cfg.sweep.jpa_flux
 
@@ -93,44 +90,43 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
             allow_array=True,
         )
 
-        with LivePlot2DwithLine(
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement",
             "JPA Flux value (a.u.)",
             "Readout frequency (MHz)",
             line_axis=1,
             num_lines=5,
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(jpa_fluxs), len(freqs)),
-                on_update=lambda data: viewer.update(jpa_fluxs, freqs, np.abs(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
-                    set_flux_in_dev_cfg(
-                        step.cfg.dev,
-                        jpa_flux,
-                        label="jpa_flux_dev",
-                    )
-                    setup_devices(step.cfg, progress=False)
-                    modules = step.cfg.modules
-                    modules.readout.set_param(
-                        "freq", sweep2param("freq", step.cfg.sweep.freq)
-                    )
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            PulseReadout("readout", modules.readout),
-                        )
-                        .declare_sweep("freq", step.cfg.sweep.freq)
-                        .build_and_acquire()
-                    )
-                signals = signals_buffer.array
-
-        return OneToneFluxResult(
-            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
+        signals_buffer = SignalBuffer(
+            (len(jpa_fluxs), len(freqs)),
+            on_update=lambda data: viewer.update(jpa_fluxs, freqs, np.abs(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
+                set_flux_in_dev_cfg(
+                    step.cfg.dev,
+                    jpa_flux,
+                    label="jpa_flux_dev",
+                )
+                setup_devices(
+                    step.cfg,
+                    context.devices,
+                    progress=False,
+                    cancel_signal=context.cancel_signal,
+                )
+                modules = step.cfg.modules
+                modules.readout.set_param(
+                    "freq", sweep2param("freq", step.cfg.sweep.freq)
+                )
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        PulseReadout("readout", modules.readout),
+                    )
+                    .declare_sweep("freq", step.cfg.sweep.freq)
+                    .build_and_acquire()
+                )
+            signals = signals_buffer.array
 
-    @retrieve_result
-    def analyze(self, result: OneToneFluxResult | None = None) -> None:
-        assert result is not None, "no result found"
-        raise NotImplementedError("analysis not implemented yet")
+        return OneToneFluxResult(fluxes=jpa_fluxs, freqs=freqs, signals=signals)

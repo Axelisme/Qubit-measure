@@ -8,11 +8,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFormLayout,
     QGroupBox,
     QLabel,
+    QPushButton,
     QWidget,
 )
 from zcu_tools.gui.result_scope import ResultScope, ResultScopeManager
 from zcu_tools.gui.session.services.connection import (
-    ConnectMockRequest,
     ConnectRemoteRequest,
 )
 from zcu_tools.gui.session.services.project_settings import (
@@ -278,11 +278,13 @@ def test_setup_dialog_connect_mock_dispatches_request(qapp):
     dialog = SetupDialog(ctrl)
 
     dialog._mock_check.setChecked(True)
-    dialog._on_connect_clicked()
+    next(
+        button
+        for button in dialog.findChildren(QPushButton)
+        if button.text() == "Connect"
+    ).click()
 
-    ctrl.start_connect.assert_called_once()
-    (req,) = ctrl.start_connect.call_args.args
-    assert isinstance(req, ConnectMockRequest)
+    ctrl.start_simulated_environment.assert_called_once_with()
 
 
 def test_setup_dialog_connect_remote_dispatches_request(qapp):

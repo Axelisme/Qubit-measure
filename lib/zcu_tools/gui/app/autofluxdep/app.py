@@ -20,7 +20,6 @@ from zcu_tools.gui.runtime import (
     GuiAssembly,
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
-    PlotPolicy,
 )
 
 if TYPE_CHECKING:
@@ -62,7 +61,6 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
     spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
         app_name="autofluxdep",
         app_slug="autofluxdep",
-        plot_policy=PlotPolicy.AGG_ONLY,
         default_control_port=8768,
         logging_extra_namespaces=(
             "zcu_tools.program.v2",

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
@@ -23,7 +24,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.plots import HeatmapLinePlot, Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -118,7 +119,7 @@ class LenRabiResult(TypedDict, closed=True):
 
 
 class LenRabiPlotDict(TypedDict, closed=True):
-    rabi_curve: LivePlot2DwithLine
+    rabi_curve: HeatmapLinePlot
 
 
 class LenRabiTask(
@@ -170,13 +171,18 @@ class LenRabiTask(
         signals_buffer = raw_step.buffer(self.num_expts)
         cfg = raw_step.cfg
         modules = cfg.modules
-        setup_devices(cfg, progress=False)
+        setup_devices(
+            cfg,
+            progress=False,
+            cancel_signal=state.stop,
+            devices=state.env.context.devices,
+        )
 
         len_sweep = cfg.sweep.length
         modules.rabi_pulse.set_param("length", sweep2param("length", len_sweep))
 
         _ = (
-            raw_step.prog_builder(state.env.soc, state.env.soccfg)
+            raw_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add_reset("reset", modules.reset)
             .add_pulse("rabi_pulse", modules.rabi_pulse)
             .add_readout("readout", modules.readout)
@@ -194,7 +200,9 @@ class LenRabiTask(
         real_signals = lenrabi_signal2real(raw_signals)
 
         self.lengths = sweep2array(
-            len_sweep, "time", {"soccfg": state.env.soccfg, "gen_ch": rabi_pulse.ch}
+            len_sweep,
+            "time",
+            {"soccfg": state.env.context.soccfg, "gen_ch": rabi_pulse.ch},
         )
 
         (pi_len, _, pi2_len, _, rabi_freq, _, mean_err, fit_signals) = auto_fit_lenrabi(
@@ -269,29 +277,30 @@ class LenRabiTask(
     def num_axes(self) -> dict[str, int]:
         return dict(rabi_curve=2)
 
-    def make_plotter(self, name, axs) -> LenRabiPlotDict:
-        self.pi_line = axs["rabi_curve"][1].axvline(np.nan, color="red", linestyle="--")
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> LenRabiPlotDict:
         return LenRabiPlotDict(
-            rabi_curve=LivePlot2DwithLine(
+            rabi_curve=plots.liveplot_2d_with_line(
+                figure_name,
                 "Flux device value",
                 "Signal",
-                line_axis=1,
                 num_lines=3,
                 title=name + "(rabi_curve)",
-                existed_axes=[axs["rabi_curve"]],
+                axes=(axs["rabi_curve"][0], axs["rabi_curve"][1]),
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: LenRabiPlotDict,
         event: ResultUpdateEvent[FluxDepEnv, LenRabiResult],
         signals: LenRabiResult,
     ) -> None:
         flux_values = event.env.flux_values
 
         pi_length = event.env.info.current.pi_length
-        self.pi_line.set_xdata([np.nan if pi_length is None else pi_length])
+        plotters["rabi_curve"].mark_line(np.nan if pi_length is None else pi_length)
         plotters["rabi_curve"].update(
             flux_values,
             self.lengths,

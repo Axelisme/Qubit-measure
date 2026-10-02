@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import field_serializer
 
@@ -15,14 +15,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
@@ -43,7 +43,6 @@ class AmpRabiResult:
     gains: NDArray[np.float64]
     shot_indices: NDArray[np.int64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: AmpRabiCfg | None = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +103,15 @@ def _gain_calibration(fit: RabiJointFitResult) -> AmpRabiFit:
     )
 
 
+@dataclass(frozen=True)
+class AmpRabiAnalyzeOptions:
+    initial_state: Literal["ground", "excited"] = "ground"
+    max_calls: int | None = None
+
+
 class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
+    Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
@@ -116,30 +123,34 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         tag="singleshot/amp_rabi",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: AmpRabiCfg,
+        *,
+        context: RunContext,
     ) -> AmpRabiResult:
+        soc, soccfg = context.soc, context.soccfg
         g_center, e_center, radius = cfg.g_center, cfg.e_center, cfg.radius
         classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
-        snapshot = deepcopy(cfg)
-        setup_devices(snapshot, progress=True)
-        cfg = deepcopy(snapshot)
+        cfg = deepcopy(cfg)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         rounds, cfg.rounds = cfg.rounds, 1
         gains = sweep2array(
             cfg.sweep.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
         )
-        with LivePlot1D(
-            "Pulse gain (a.u.)",
-            "Classified population",
-            segment_kwargs={
-                "num_lines": 3,
-                "line_kwargs": [
+
+        def configure_axes(ax: Axes) -> None:
+            ax.set_ylim(-0.02, 1.02)
+            for line, kwargs in zip(
+                ax.lines,
+                [
                     {"label": label, "color": color}
                     for label, color in (
                         ("Ground", "blue"),
@@ -147,70 +158,76 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
                         ("Other", "green"),
                     )
                 ],
-            },
-        ) as viewer:
-            viewer.get_ax().set_ylim(-0.02, 1.02)
+                strict=True,
+            ):
+                line.set(**kwargs)
+            ax.legend()
 
-            def update_view(raw: NDArray[np.complex128]) -> None:
-                shots = _flatten_round_shots(raw)
-                complete = np.all(np.isfinite(shots), axis=0)
-                populations = np.full((gains.size, 2), np.nan)
-                if np.any(complete):
-                    populations = classify_rabi_iq(
-                        shots[:, complete], g_center, e_center, radius
-                    )
-                viewer.update(
-                    gains, np.column_stack((populations, 1 - populations.sum(axis=1))).T
+        viewer = context.plots.liveplot_1d(
+            "measurement",
+            "Pulse gain (a.u.)",
+            "Classified population",
+            num_lines=3,
+            configure_axes=configure_axes,
+        )
+
+        def update_view(raw: NDArray[np.complex128]) -> None:
+            shots = _flatten_round_shots(raw)
+            complete = np.all(np.isfinite(shots), axis=0)
+            populations = np.full((gains.size, 2), np.nan)
+            if np.any(complete):
+                populations = classify_rabi_iq(
+                    shots[:, complete], g_center, e_center, radius
                 )
-
-            buffer = SignalBuffer(
-                (rounds, gains.size, cfg.reps),
-                dtype=np.complex128,
-                on_update=update_view,
+            viewer.update(
+                gains, np.column_stack((populations, 1 - populations.sum(axis=1))).T
             )
-            with Schedule(cfg, buffer) as sched:
-                modules = sched.cfg.modules
-                modules.qub_pulse.set_param(
-                    "gain", sweep2param("gain", sched.cfg.sweep.gain)
-                )
-                program = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
-                    .declare_sweep("gain", sched.cfg.sweep.gain)
-                    .build()
-                )
-                for _, step in sched.repeat("round", rounds):
-                    try:
-                        program.acquire(soc, progress=False, cancel_flag=step.stop)
-                    except StoppedPartialAcquireError:
-                        step.set_stop()
-                        break
-                    raw = raw_shots_to_signal(program)
-                    if raw.shape != (cfg.reps, gains.size):
-                        raise ValueError(
-                            f"Amp Rabi raw IQ shape mismatch: expected {(cfg.reps, gains.size)}, got {raw.shape}"
-                        )
-                    buffer[step].set(raw.T)
-            update_view(buffer.array)
+
+        buffer = SignalBuffer(
+            (rounds, gains.size, cfg.reps),
+            dtype=np.complex128,
+            on_update=update_view,
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            modules.qub_pulse.set_param(
+                "gain", sweep2param("gain", sched.cfg.sweep.gain)
+            )
+            program = (
+                sched.prog_builder(soc, soccfg)
+                .add_reset("reset", modules.reset)
+                .add_pulse("qubit_pulse", modules.qub_pulse)
+                .add_readout("readout", modules.readout)
+                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .build()
+            )
+            for _, step in sched.repeat("round", rounds):
+                try:
+                    program.acquire(soc, progress=False, cancel_flag=step.stop)
+                except StoppedPartialAcquireError:
+                    step.set_stop()
+                    break
+                raw = raw_shots_to_signal(program)
+                if raw.shape != (cfg.reps, gains.size):
+                    raise ValueError(
+                        f"Amp Rabi raw IQ shape mismatch: expected {(cfg.reps, gains.size)}, got {raw.shape}"
+                    )
+                buffer[step].set(raw.T)
+        update_view(buffer.array)
         return AmpRabiResult(
             gains,
             np.arange(rounds * cfg.reps, dtype=np.int64),
             _flatten_round_shots(buffer.array),
-            snapshot,
         )
 
-    @retrieve_result
     def analyze(
         self,
-        result: AmpRabiResult | None = None,
+        source: RunRecord[AmpRabiCfg, AmpRabiResult],
+        options: AmpRabiAnalyzeOptions,
         *,
-        initial_state: Literal["ground", "excited"] = "ground",
-        max_calls: int | None = None,
-    ) -> tuple[AmpRabiFit, Figure]:
-        if result is None:
-            raise ValueError("No amp Rabi result found")
+        plots: Plots,
+    ) -> AmpRabiFit:
+        result = source.result
         if result.signals.shape != (
             result.gains.size,
             result.shot_indices.size,
@@ -226,14 +243,9 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             signals,
             decay=False,
             fit_phase=False,
-            initial_state=initial_state,
-            max_calls=max_calls,
+            initial_state=options.initial_state,
+            max_calls=options.max_calls,
         )
-        readout = (
-            result.cfg_snapshot.modules.readout
-            if result.cfg_snapshot is not None
-            else None
-        )
-        return _gain_calibration(joint), plot_rabi_joint(
-            gains, signals, joint, readout, sweep="gain"
-        )
+        readout = source.cfg.modules.readout if source.cfg is not None else None
+        plot_rabi_joint(gains, signals, joint, readout, sweep="gain", plots=plots)
+        return _gain_calibration(joint)

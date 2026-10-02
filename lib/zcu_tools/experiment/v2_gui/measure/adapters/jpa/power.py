@@ -9,10 +9,12 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
 from matplotlib.figure import Figure
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.jpa import PowerCfg, PowerExp
 from zcu_tools.experiment.v2.jpa.jpa_power import PowerResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
@@ -34,8 +36,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import lower_jpa_rf_power_dev
+
+JpaPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 _JPA_POWER_SWEEP_EXPTS = 101
 # Conservative low-power survey: the low-power portion (-20..-5 dBm) of the
@@ -70,7 +75,6 @@ def jpa_power_sweep_seed(
 @dataclass
 class JpaPowerAnalyzeResult(AnalyzeResultBase):
     best_power: float
-    figure: Figure
 
 
 def _relabel_power_figure(fig: Figure) -> None:
@@ -87,7 +91,7 @@ def _relabel_power_figure(fig: Figure) -> None:
 
 
 class JpaPowerAdapter(
-    BaseAdapter[PowerCfg, PowerResult, JpaPowerAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[PowerCfg, JpaPowerRunResult, JpaPowerAnalyzeResult, NoAnalyzeParams]
 ):
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
@@ -166,15 +170,21 @@ class JpaPowerAdapter(
         # Pure preflight over the detached request snapshot.
         lower_jpa_rf_power_dev(raw_cfg, req.device_snapshot)
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> JpaPowerRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, PowerExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[PowerResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[JpaPowerRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> JpaPowerAnalyzeResult:
-        best_power, fig = PowerExp().analyze(req.run_result)
-        _relabel_power_figure(fig)
-        return JpaPowerAnalyzeResult(best_power=best_power, figure=fig)
+        answer = PowerExp().analyze(req.run_result, None, plots=plots)
+        _relabel_power_figure(plots["fit"])
+        return JpaPowerAnalyzeResult(best_power=answer.best_power)
 
     def get_writeback_items(
-        self, req: WritebackRequest[PowerResult, JpaPowerAnalyzeResult]
+        self, req: WritebackRequest[JpaPowerRunResult, JpaPowerAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
             MetaDictWriteback(

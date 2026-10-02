@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import (
     MeasurementTask,
     MultiMeasurementExecutor,
@@ -48,12 +49,11 @@ class OvernightExecutor(
     def run(
         self,
         *,
-        soc: object,
-        soccfg: object,
+        context: RunContext,
         fail_retry: int = 3,
     ) -> Mapping[str, Result]:
         iters = np.arange(self.num_times)
-        env = OvernightEnv(soc=soc, soccfg=soccfg, iters=iters)
+        env = OvernightEnv(context=context, iters=iters)
         cfg = OvernightCfg()
 
         def run_loop(sched: Schedule[OvernightCfg, OvernightEnv]) -> None:
@@ -66,6 +66,8 @@ class OvernightExecutor(
             env=env,
             outer_values=iters,
             run_loop=run_loop,
+            stop=context.cancel_signal,
+            plots=context.plots,
         )
 
     def save(

@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
     Session,
     TabInteractionState,
 )
@@ -14,6 +19,7 @@ from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import CfgObservation
 
 from ..adapter import AnalysisMode, WritebackItem
+from .plot_lifecycle import release_retired_plots
 from .ports import (
     AnalysisPaneSnapshot,
     PathResourceSnapshot,
@@ -97,14 +103,25 @@ class TabService:
             override=tab.save.data_path_override,
             path=tab.effective_data_path(ctx),
         )
-        analysis_image_path = PathResourceSnapshot(
-            override=tab.analysis.image_path_override,
-            path=tab.effective_analysis_image_path(ctx),
-        )
-        post_image_path = PathResourceSnapshot(
-            override=tab.post_analysis.image_path_override,
-            path=tab.effective_post_analysis_image_path(ctx),
-        )
+
+        def image_paths(
+            kind: ArtifactKind,
+            pane: AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any],
+        ) -> Mapping[str, PathResourceSnapshot]:
+            if pane.plots is None or pane.result is None:
+                return MappingProxyType({})
+            return MappingProxyType(
+                {
+                    name: PathResourceSnapshot(
+                        override=pane.image_path_overrides.get(name),
+                        path=tab.effective_image_path(ctx, ArtifactKey(kind, name)),
+                    )
+                    for name in pane.plots
+                }
+            )
+
+        analysis_image_paths = image_paths(ArtifactKind.ANALYSIS, tab.analysis)
+        post_image_paths = image_paths(ArtifactKind.POST_ANALYSIS, tab.post_analysis)
 
         # Pane-owned writeback items via opaque drafts.
         def _items_for_pane(pane) -> tuple[WritebackItem, ...]:
@@ -128,9 +145,9 @@ class TabService:
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,
                 result=tab.analysis.result,
-                figure=tab.analysis.figure,
+                figures=tab.analysis.plots,
                 writeback_items=analysis_items,
-                image_path=analysis_image_path,
+                image_paths=analysis_image_paths,
                 has_writeback_draft=tab.analysis.writeback_draft is not None,
                 source_operation_id=tab.analysis.source_operation_id,
                 result_params=tab.analysis.result_params,
@@ -138,9 +155,9 @@ class TabService:
             post_analysis=PostAnalysisPaneSnapshot(
                 params=tab.post_analysis.params,
                 result=tab.post_analysis.result,
-                figure=tab.post_analysis.figure,
+                figures=tab.post_analysis.plots,
                 writeback_items=post_items,
-                image_path=post_image_path,
+                image_paths=post_image_paths,
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
                 source_operation_id=tab.post_analysis.source_operation_id,
                 result_params=tab.post_analysis.result_params,
@@ -148,8 +165,8 @@ class TabService:
             save=SavePaneSnapshot(data_path=data_path, comment=tab.save.comment),
             paths=TabPathsSnapshot(
                 data=data_path,
-                analysis_image=analysis_image_path,
-                post_analysis_image=post_image_path,
+                analysis_images=analysis_image_paths,
+                post_analysis_images=post_image_paths,
             ),
             artifacts=self._state.get_artifact_snapshots(tab_id),
         )
@@ -229,6 +246,7 @@ class TabService:
                 self._writeback.teardown_draft(draft)
             except Exception:
                 logger.exception("closed-tab draft teardown failed")
+        release_retired_plots(retired)
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).analysis.result
@@ -282,25 +300,15 @@ class TabService:
     def get_tab_data_path(self, tab_id: str) -> str | None:
         return self._state.get_tab(tab_id).effective_data_path(self._state.session_env)
 
-    def get_tab_analysis_image_path(self, tab_id: str) -> str | None:
-        return self._state.get_tab(tab_id).effective_analysis_image_path(
-            self._state.session_env
-        )
-
-    def get_tab_post_analysis_image_path(self, tab_id: str) -> str | None:
-        return self._state.get_tab(tab_id).effective_post_analysis_image_path(
-            self._state.session_env
+    def get_tab_image_path(self, tab_id: str, key: ArtifactKey) -> str | None:
+        return self._state.get_tab(tab_id).effective_image_path(
+            self._state.session_env, key
         )
 
     def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:
         self._state.update_tab_data_path_override(tab_id, data_path)
 
-    def update_tab_analysis_image_path_override(
-        self, tab_id: str, image_path: str | None
+    def update_tab_image_path_override(
+        self, tab_id: str, key: ArtifactKey, image_path: str | None
     ) -> None:
-        self._state.update_tab_analysis_image_path_override(tab_id, image_path)
-
-    def update_tab_post_analysis_image_path_override(
-        self, tab_id: str, image_path: str | None
-    ) -> None:
-        self._state.update_tab_post_analysis_image_path_override(tab_id, image_path)
+        self._state.update_tab_image_path_override(tab_id, key, image_path)

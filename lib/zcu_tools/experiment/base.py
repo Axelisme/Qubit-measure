@@ -1,146 +1,25 @@
-"""Experiment interface (Protocol) + base implementation (ADR-0063).
+"""Stateless persistence for record-based experiments."""
 
-``AbsExperiment`` provides the common, signature-identical persistence pair
-(``save``/``load``) driven by a per-experiment ``AXES_SPEC`` (native labber_io
-axes-list, load = exact inverse of save). ``run``/``analyze`` stay
-per-experiment. Two decorators DRY the ``last_result`` bookkeeping:
-
-- ``@record_result`` (run/load): cache the returned Result on ``last_result``.
-- ``@retrieve_result`` (analyze/save): resolve a ``result=None`` argument from
-  ``last_result``.
-"""
-
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
-from functools import wraps
-from inspect import signature
-from typing import (
-    Any,
-    ClassVar,
-    Concatenate,
-    Generic,
-    ParamSpec,
-    Protocol,
-    TypeVar,
-    runtime_checkable,
-)
+from pathlib import Path
+from typing import Any, ClassVar, Generic, TypeVar
 
 import numpy as np
 
 from zcu_tools.experiment.axes_spec import AxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-
-__all__ = [
-    "AbsExperiment",
-    "PersistableExperiment",
-    "ExperimentProtocol",
-    "record_result",
-    "retrieve_result",
-]
+from zcu_tools.experiment.records import RunRecord
 
 T_Result = TypeVar("T_Result")
 T_Config = TypeVar("T_Config", bound=ExpCfgModel)
-T_Config_contra = TypeVar("T_Config_contra", bound=ExpCfgModel, contravariant=True)
-P = ParamSpec("P")
-R = TypeVar("R")
 
 
-def record_result(
-    fn: Callable[Concatenate[Any, P], R],
-) -> Callable[Concatenate[Any, P], R]:
-    """Cache the method's returned Result on ``self.last_result`` (run/load).
+class PersistableExperiment(Generic[T_Result, T_Config]):
+    """Stateless canonical save/load via ``AXES_SPEC``.
 
-    Preserves the wrapped method's exact signature via ``ParamSpec``.
+    Callers choose the RunRecord and destination explicitly. Loading returns a
+    new RunRecord without changing this instance. Callers also own path reservation;
+    an existing destination is rejected rather than overwritten.
     """
-
-    @wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> R:
-        result = fn(self, *args, **kwargs)
-        self.last_result = result
-        return result
-
-    return wrapper
-
-
-def retrieve_result(
-    fn: Callable[Concatenate[Any, P], R],
-) -> Callable[Concatenate[Any, P], R]:
-    """Fall the ``result`` argument back to ``self.last_result`` when omitted/None
-    (analyze/save). The wrapped method still asserts non-None.
-
-    ``result`` is located by name via the bound signature, so it works wherever
-    it sits in the parameter list (1st in analyze, 2nd in save).
-    """
-    sig = signature(fn)
-
-    @wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> R:
-        bound = sig.bind(self, *args, **kwargs)
-        bound.apply_defaults()
-        if bound.arguments.get("result") is None:
-            bound.arguments["result"] = self.last_result
-        return fn(*bound.args, **bound.kwargs)
-
-    return wrapper
-
-
-@runtime_checkable
-class ExperimentProtocol(Protocol[T_Result, T_Config_contra]):
-    """Structural contract every experiment satisfies.
-
-    Open by design — experiments may add methods (e.g. ``calc_confusion_matrix``).
-    ``run``/``analyze`` keyword surfaces are per-experiment and intentionally not
-    pinned; ``save``/``load`` are provided by ``AbsExperiment``.
-
-    ``T_Config_contra`` is contravariant: it appears only in input (``cfg``)
-    position, so an experiment over a wider cfg satisfies a protocol over a
-    narrower one.
-    """
-
-    last_result: T_Result | None
-
-    def run(
-        self,
-        soc: Any,
-        soccfg: Any,
-        cfg: T_Config_contra,
-        /,
-        *args: Any,
-        **kwargs: Any,
-    ) -> T_Result: ...
-
-    def analyze(
-        self, result: T_Result | None = ..., /, *args: Any, **kwargs: Any
-    ) -> Any: ...
-
-    def save(
-        self,
-        filepath: str,
-        result: T_Result | None = ...,
-        comment: str | None = ...,
-        tag: str | None = ...,
-        **kwargs: Any,
-    ) -> None: ...
-
-    def load(self, filepath: str, **kwargs: Any) -> T_Result: ...
-
-
-class AbsExperiment(Generic[T_Result, T_Config]):
-    """Minimal base: just the ``last_result`` cache.
-
-    Native persistence (``save``/``load`` via ``AXES_SPEC``) is OPT-IN — inherit
-    ``PersistableExperiment`` instead to gain it. Un-migrated experiments keep
-    their own incompatible ``save``/``load`` signatures off this minimal base.
-    """
-
-    def __init__(self) -> None:
-        self.last_result: T_Result | None = None
-
-
-class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
-    """Opt-in base: native-labber save/load via ``AXES_SPEC``."""
 
     #: per-experiment persistence declaration; required for save()/load().
     AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = None
@@ -204,29 +83,23 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
                 f"expected {expected_shape}"
             )
 
-    @retrieve_result
     def save(
         self,
-        filepath: str,
-        result: T_Result | None = None,
+        source: RunRecord[T_Config, T_Result],
+        destination: Path,
+        *,
         comment: str | None = None,
         tag: str | None = None,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
     ) -> None:
-        from zcu_tools.datafile import (
-            save_labber_data,
-            upload_to_server,
-        )
+        from zcu_tools.datafile import save_labber_data
         from zcu_tools.experiment.utils import make_comment
 
-        assert result is not None, "no result found"
         spec = self._spec()
+        result = source.result
 
-        cfg = getattr(result, "cfg_snapshot")
+        cfg = source.cfg
         if cfg is None:
-            raise ValueError("cfg_snapshot is None")
+            raise ValueError("RunRecord.cfg is None; cannot save without configuration")
         comment = make_comment(cfg, comment)
 
         axes = [
@@ -235,29 +108,17 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
         ]
         z = (spec.z.label, spec.z.unit, np.asarray(getattr(result, spec.z.field_name)))
 
-        saved_path = save_labber_data(
-            filepath, z=z, axes=axes, comment=comment, tags=tag or spec.tag
+        save_labber_data(
+            str(destination), z=z, axes=axes, comment=comment, tags=tag or spec.tag
         )
-        if server_ip is not None:
-            upload_to_server(saved_path, server_ip, port)
-            os.remove(saved_path)
 
-    @record_result
-    def load(
-        self,
-        filepath: str,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
-    ) -> T_Result:
-        from zcu_tools.datafile import download_from_server, load_labber_data
+    def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
+        from zcu_tools.datafile import load_labber_data
         from zcu_tools.experiment.utils import parse_comment
 
         spec = self._spec()
 
-        if server_ip is not None and not os.path.exists(filepath):
-            download_from_server(filepath, server_ip, port)
-
+        filepath = str(source)
         ld = load_labber_data(filepath)
         self._validate_canonical_labber_data(ld, spec)
 
@@ -274,8 +135,7 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
             for i, ax in enumerate(spec.axes)
         }
         kwargs[spec.z.field_name] = self._cast_loaded_z(ld.z, spec)
-        kwargs["cfg_snapshot"] = cfg_snapshot
-        return spec.result_type(**kwargs)
+        return RunRecord(cfg=cfg_snapshot, result=spec.result_type(**kwargs))
 
     def _cast_loaded_z(
         self,

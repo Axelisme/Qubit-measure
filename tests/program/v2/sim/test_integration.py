@@ -55,50 +55,71 @@ import matplotlib
 # never display them (the autouse _close_matplotlib_figures fixture cleans up).
 matplotlib.use("Agg")
 
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
+from threading import Event
+from typing import Any
+
 import numpy as np
 import pytest
+from zcu_tools.device.base import BaseDevice
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.lookback import (
+    LookbackAnalyzeOptions,
     LookbackCfg,
     LookbackExp,
     LookbackModuleCfg,
 )
-from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Exp, GEModuleCfg
+from zcu_tools.experiment.v2.singleshot.ge import (
+    GE_Cfg,
+    GE_Exp,
+    GEAnalyzeOptions,
+    GEModuleCfg,
+)
 from zcu_tools.experiment.v2.singleshot.t1 import t1 as singleshot_t1
 from zcu_tools.experiment.v2.singleshot.t1 import t1_with_tone as singleshot_t1_tone
 from zcu_tools.experiment.v2.singleshot.t1 import (
     t1_with_tone_sweep as singleshot_t1_tone_sweep,
 )
 from zcu_tools.experiment.v2.twotone.freq import (
+    FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqModuleCfg,
     FreqSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
+    AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiExp,
     AmpRabiModuleCfg,
     AmpRabiSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
+    LenRabiAnalyzeOptions,
     LenRabiCfg,
     LenRabiExp,
     LenRabiModuleCfg,
     LenRabiSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+    T1AnalyzeOptions,
     T1Cfg,
     T1Exp,
     T1ModuleCfg,
     T1SweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
+    T2EchoAnalyzeOptions,
     T2EchoCfg,
     T2EchoExp,
     T2EchoModuleCfg,
     T2EchoSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
+    T2RamseyAnalyzeOptions,
     T2RamseyCfg,
     T2RamseyExp,
     T2RamseyModuleCfg,
@@ -107,6 +128,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
 from zcu_tools.experiment.v2.utils import sweep2array, t1_delay_axis
 from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -207,6 +229,16 @@ def _sim_dephasing(*, T2: float, T2_star: float) -> SimParams:
 @pytest.mark.filterwarnings(
     "ignore:fit_func failed; returning init_p fallback with infinite covariance:RuntimeWarning"
 )
+@contextmanager
+def _simulation_context(soc: Any, soccfg: Any) -> Generator[RunContext]:
+    plots = Plots(NonPresentingHost())
+    try:
+        yield RunContext(soc, soccfg, plots, {}, StopSignal())
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
 def test_freq_recovers_f_qubit() -> None:
     """twotone freq fit recovers the injected absolute f_qubit.
 
@@ -246,8 +278,14 @@ def test_freq_recovers_f_qubit() -> None:
     )
 
     exp = FreqExp()
-    result = exp.run(soc, soccfg, cfg)
-    fit_freq, _freq_err, _fwhm, _fwhm_err, _fig = exp.analyze(result, model_type="lor")
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result),
+            FreqAnalyzeOptions(model_type="lor"),
+            plots=context.plots,
+        )
+    fit_freq = analysis.freq
 
     # f_qubit < f_dds so the analyzer axis is un-folded: the recovered peak must
     # land on the true injected f_qubit to within a few sweep steps (step = 5 MHz).
@@ -295,8 +333,12 @@ def test_amp_rabi_recovers_pi_gain() -> None:
     )
 
     exp = AmpRabiExp()
-    result = exp.run(soc, soccfg, cfg)
-    pi_gain, _pi_gain_err, _pi2_gain, _pi2_gain_err, _fig = exp.analyze(result)
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result), AmpRabiAnalyzeOptions(), plots=context.plots
+        )
+    pi_gain = analysis.pi_amp
 
     # Recovered pi gain == pi_gain_len / length.
     assert pi_gain == pytest.approx(expected_pi_gain, rel=0.05)
@@ -344,11 +386,14 @@ def test_len_rabi_recovers_gain_scaling() -> None:
             relax_delay=_RESET_RELAX_DELAY,
         )
         exp = LenRabiExp()
-        result = exp.run(soc, soccfg, cfg)
-        pi_len, _pi_len_err, _pi2_len, _pi2_len_err, rabi_freq, _rabi_f_err, _fig = (
-            exp.analyze(result, decay=False, fit_phase=True)
-        )
-        return pi_len, rabi_freq
+        with _simulation_context(soc, soccfg) as context:
+            result = exp.run(cfg, context=context)
+            analysis = exp.analyze(
+                RunRecord(cfg, result),
+                LenRabiAnalyzeOptions(decay=False, fit_phase=True),
+                plots=context.plots,
+            )
+        return analysis.pi_len, analysis.rabi_f
 
     pi_len_lo, freq_lo = _run(0.4)
     pi_len_hi, freq_hi = _run(0.8)
@@ -396,8 +441,25 @@ def test_t1_recovers_t1(uniform: bool) -> None:
     cfg = _t1_cfg(length_sweep)
 
     exp = T1Exp()
-    result = exp.run(soc, soccfg, cfg, uniform=uniform)
-    t1, _t1err, _fig = exp.analyze(result)
+    cfg.uniform = uniform
+    original_cfg = cfg.model_copy(deep=True)
+    run_plots = Plots(NonPresentingHost())
+    result = exp.run(
+        cfg,
+        context=RunContext(
+            soc, soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
+    run_plots.finish()
+    fit_plots = Plots(NonPresentingHost())
+    source = RunRecord(cfg=cfg, result=result)
+    analysis = exp.analyze(source, T1AnalyzeOptions(), plots=fit_plots)
+    fit_plots.finish()
+    t1 = analysis.t1
+    assert cfg == original_cfg
+    np.testing.assert_array_equal(
+        run_plots["measurement"].axes[0].lines[0].get_xdata(), result.times
+    )
 
     if uniform:
         expected_times = sweep2array(length_sweep, "time", {"soccfg": soccfg})
@@ -420,12 +482,74 @@ def test_t1_recovers_t1(uniform: bool) -> None:
     assert t1 == pytest.approx(_SIM.T1, rel=0.05)
 
 
+def test_t1_interrupted_acquire_returns_partial_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _t1_cfg(SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29))
+    plots = Plots(NonPresentingHost())
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2.runtime.schedule.ModularProgramV2.acquire", interrupt
+    )
+    result = T1Exp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
+    plots.finish()
+    assert result.signals.shape == result.times.shape == (30,)
+    assert np.all(np.isnan(result.signals))
+    plots.release()
+
+
+def test_t1_setup_failure_leaves_caller_config_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _t1_cfg(SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29))
+    original = cfg.model_copy(deep=True)
+    plots = Plots(NonPresentingHost())
+
+    def fail_setup(
+        config: T1Cfg,
+        devices: Mapping[str, BaseDevice[Any]],
+        *,
+        progress: bool,
+        cancel_signal: Event,
+    ) -> None:
+        config.reps = 999
+        raise RuntimeError("setup failed")
+
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2.twotone.time_domain.t1.setup_devices", fail_setup
+    )
+    with pytest.raises(RuntimeError, match="setup failed"):
+        T1Exp().run(
+            cfg,
+            context=RunContext(
+                soc, soccfg, plots, devices={}, cancel_signal=StopSignal()
+            ),
+        )
+    plots.finish(present=False)
+    assert cfg == original
+    plots.release()
+
+
 def test_t1_nonuniform_preserves_direct_delay_list() -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     direct_times = [0.0, 0.7, 4.3, 17.2, 80.0]
     cfg = _t1_cfg(direct_times)
 
-    result = T1Exp().run(soc, soccfg, cfg, uniform=False)
+    cfg.uniform = False
+    plots = Plots(NonPresentingHost())
+    result = T1Exp().run(
+        cfg,
+        context=RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal()),
+    )
+    plots.finish()
 
     expected_times = _quantized_times(soccfg, direct_times)
     np.testing.assert_array_equal(result.times, expected_times)
@@ -521,12 +645,30 @@ def _singleshot_t1_tone_sweep_cfg(
     )
 
 
-def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
+@pytest.fixture
+def singleshot_context():
+    sessions = []
+
+    def make(soc, soccfg):
+        plots = Plots(NonPresentingHost())
+        sessions.append(plots)
+        return RunContext(soc, soccfg, plots, {}, StopSignal())
+
+    yield make
+    for plots in sessions:
+        plots.finish(present=False)
+        plots.release()
+
+
+def test_singleshot_t1_nonuniform_uses_shared_delay_axis(singleshot_context) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
     cfg = _singleshot_t1_cfg(length_sweep)
 
-    result = singleshot_t1.T1Exp().run(soc, soccfg, cfg, uniform=False)
+    result = singleshot_t1.T1Exp().run(
+        cfg.model_copy(update={"uniform": False}),
+        context=singleshot_context(soc, soccfg),
+    )
 
     ideal_times = t1_delay_axis(
         start=length_sweep.start,
@@ -539,15 +681,11 @@ def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
     np.testing.assert_array_equal(result.lengths, expected_times)
     assert len(result.lengths) == length_sweep.expts
     assert result.signals.shape == (length_sweep.expts, 2, 2)
-    assert result.cfg_snapshot is not None
-    assert (
-        result.cfg_snapshot.g_center,
-        result.cfg_snapshot.e_center,
-        result.cfg_snapshot.radius,
-    ) == (cfg.g_center, cfg.e_center, cfg.radius)
 
 
-def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
+def test_singleshot_t1_nonuniform_rejects_quantized_collisions(
+    singleshot_context,
+) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     cfg = _singleshot_t1_cfg([0.0, 0.0001, 1.0])
 
@@ -555,22 +693,31 @@ def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
         ValueError,
         match="delay sweep collapsed after cycle quantization",
     ):
-        singleshot_t1.T1Exp().run(soc, soccfg, cfg, uniform=False)
+        singleshot_t1.T1Exp().run(
+            cfg.model_copy(update={"uniform": False}),
+            context=singleshot_context(soc, soccfg),
+        )
 
 
 @pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
-def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> None:
+def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(
+    variant: str, singleshot_context
+) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
 
     if variant == "tone":
         cfg = _singleshot_t1_tone_cfg(length_sweep)
-        result = singleshot_t1_tone.T1WithToneExp().run(soc, soccfg, cfg, uniform=False)
+        result = singleshot_t1_tone.T1WithToneExp().run(
+            cfg.model_copy(update={"uniform": False}),
+            context=singleshot_context(soc, soccfg),
+        )
         expected_signal_shape = (length_sweep.expts, 2, 2)
     else:
         cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
         result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-            soc, soccfg, cfg, uniform=False
+            cfg.model_copy(update={"uniform": False}),
+            context=singleshot_context(soc, soccfg),
         )
         expected_signal_shape = (2, 2, length_sweep.expts, 2)
 
@@ -594,6 +741,7 @@ def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> N
 
 def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
     monkeypatch: pytest.MonkeyPatch,
+    singleshot_context,
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
@@ -609,19 +757,25 @@ def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
 
     monkeypatch.setattr(soc, "next_sim_acquire_seed", counted_next_seed)
 
-    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(soc, soccfg, cfg, uniform=False)
+    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+        cfg.model_copy(update={"uniform": False}),
+        context=singleshot_context(soc, soccfg),
+    )
 
     assert cfg.sweep.gain is not None
     assert acquire_count == cfg.sweep.gain.expts
 
 
-def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires() -> None:
+def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires(
+    singleshot_context,
+) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     length_sweep = SweepCfg(start=0.1, stop=0.6, expts=6, step=0.1)
     cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
 
     result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-        soc, soccfg, cfg, uniform=True
+        cfg.model_copy(update={"uniform": True}),
+        context=singleshot_context(soc, soccfg),
     )
 
     assert result.signals.shape == (2, 2, length_sweep.expts, 2)
@@ -629,7 +783,7 @@ def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires() -> None:
 
 @pytest.mark.parametrize("uniform", [False, True])
 def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
-    uniform: bool, monkeypatch: pytest.MonkeyPatch
+    uniform: bool, monkeypatch: pytest.MonkeyPatch, singleshot_context
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     cfg = _singleshot_t1_tone_sweep_cfg(
@@ -644,13 +798,15 @@ def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
 
     with pytest.raises(ValueError, match="strictly positive"):
         singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-            soc, soccfg, cfg, uniform=uniform
+            cfg.model_copy(update={"uniform": uniform}),
+            context=singleshot_context(soc, soccfg),
         )
 
 
 @pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
 def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
     variant: str,
+    singleshot_context,
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
     direct_times = [0.008, 0.009, 1.0]
@@ -661,11 +817,15 @@ def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
     ):
         if variant == "tone":
             singleshot_t1_tone.T1WithToneExp().run(
-                soc, soccfg, _singleshot_t1_tone_cfg(direct_times), uniform=False
+                _singleshot_t1_tone_cfg(direct_times),
+                context=singleshot_context(soc, soccfg),
             )
         else:
             singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-                soc, soccfg, _singleshot_t1_tone_sweep_cfg(direct_times), uniform=False
+                _singleshot_t1_tone_sweep_cfg(direct_times).model_copy(
+                    update={"uniform": False}
+                ),
+                context=singleshot_context(soc, soccfg),
             )
 
 
@@ -707,10 +867,14 @@ def _run_ramsey(sim: SimParams, detune: float = 2.0) -> tuple[float, float, floa
     )
     exp = T2RamseyExp()
     # true_detune is the detune after length rounding; the fringe fit recovers it.
-    result = exp.run(soc, soccfg, cfg, detune=detune)
-    true_detune = result.true_activate_detune
-    t2r, _t2rerr, fit_detune, _detune_err, _fig = exp.analyze(result)
-    return t2r, fit_detune, true_detune
+    cfg.detune = detune
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result), T2RamseyAnalyzeOptions(), plots=context.plots
+        )
+    assert result.true_activate_detune is not None
+    return analysis.t2r, analysis.detune, result.true_activate_detune
 
 
 def _run_echo(sim: SimParams) -> float:
@@ -754,9 +918,15 @@ def _run_echo(sim: SimParams) -> float:
     exp = T2EchoExp()
     # Echo runs on resonance (detune=0); the pi pulse refocuses the static detune
     # regardless, so the engine's ensemble average leaves only the homogeneous T2.
-    result, _true_detune = exp.run(soc, soccfg, cfg, detune=0.0)
-    t2e, _t2eerr, _detune, _detune_err, _fig = exp.analyze(result, fit_method="decay")
-    return t2e
+    cfg.detune = 0.0
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result),
+            T2EchoAnalyzeOptions(fit_method="decay"),
+            plots=context.plots,
+        )
+    return analysis.t2e
 
 
 def test_t2ramsey_recovers_t2_star_and_detuning() -> None:
@@ -869,12 +1039,27 @@ def test_lookback_recovers_timefly_as_trig_offset() -> None:
     )
 
     exp = LookbackExp()
-    result = exp.run(soc, soccfg, cfg)
-    offset, _fig = exp.analyze(result, plot_fit=True)
+    run_plots = Plots(NonPresentingHost())
+    result = exp.run(
+        cfg,
+        context=RunContext(
+            soc, soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
+    run_plots.finish()
+    fit_plots = Plots(NonPresentingHost())
+    answer = exp.analyze(
+        RunRecord(cfg=cfg, result=result),
+        LookbackAnalyzeOptions(plot_fit=True),
+        plots=fit_plots,
+    )
+    fit_plots.finish()
+    run_plots.release()
+    fit_plots.release()
 
     # The rising edge sits at program-time == timeFly; analyze returns the last
     # sub-threshold time before the magnitude peak, i.e. just before timeFly.
-    assert offset == pytest.approx(_SIM.timeFly, abs=0.1)
+    assert answer.predict_offset == pytest.approx(_SIM.timeFly, abs=0.1)
 
 
 # --------------------------------------------------------------- singleshot GE
@@ -903,7 +1088,7 @@ def _run_ge(
     """Run GE_Exp end to end on a low-snr sim soc; return the recovered analysis.
 
     Returns ``(fidelity, populations, g_center, e_center)`` from
-    ``GE_Exp.analyze(backend='pca')``.  ``snr`` is lowered (the DEFAULT snr=300
+    ``GE_Exp.analyze(..., GEAnalyzeOptions(backend='pca'))``.  ``snr`` is lowered (the DEFAULT snr=300
     fully separates the blobs so the fidelity is trivially ~1); a small snr makes
     the |g>/|e> blobs overlap so the discrimination fidelity is meaningful.
     """
@@ -930,9 +1115,20 @@ def _run_ge(
         ),
     )
     exp = GE_Exp()
-    result = exp.run(soc, soccfg, cfg)
-    fid, pops, fit, _fig = exp.analyze(result, backend="pca")
-    return fid, pops, fit["g_center"], fit["e_center"]
+    run_plots = Plots(NonPresentingHost())
+    result = exp.run(
+        cfg,
+        context=RunContext(
+            soc, soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
+    )
+    run_plots.finish()
+    fit_plots = Plots(NonPresentingHost())
+    fit = exp.analyze(
+        RunRecord(cfg, result), GEAnalyzeOptions(backend="pca"), plots=fit_plots
+    )
+    fit_plots.finish()
+    return fit.fidelity, fit.init_pops, fit.g_center, fit.e_center
 
 
 class _RecordingProgressBar(BaseProgressBar):

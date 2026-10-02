@@ -34,9 +34,9 @@ class DeviceStatus(Enum):
     """Lifecycle status of a device entry held in State.
 
     ``MEMORY_ONLY`` is a remembered-but-not-live entry (no driver in
-    GlobalDeviceManager). All other values are *live* statuses: the device has
+    DeviceManager). All other values are *live* statuses: the device has
     a driver registered and is either idle (``CONNECTED``) or in a transient
-    operation. The cross-object invariant is: a device is in GlobalDeviceManager
+    operation. The cross-object invariant is: a device is in DeviceManager
     iff its State status is a live status.
     """
 
@@ -52,7 +52,7 @@ class DeviceState:
     """Serializable device state — the SSOT for one device.
 
     State owns this; DeviceService holds only the live driver (in
-    GlobalDeviceManager), the worker threads and the progress model. ``info`` is
+    DeviceManager), the worker threads and the progress model. ``info`` is
     a ``BaseDeviceInfo`` value snapshot (not a live driver) and so lives here.
     ``remember`` is the persistent flag that drives the settings persistence
     projection — it is no longer a transient connect-request attribute.
@@ -82,7 +82,7 @@ class DeviceState:
 
     def is_live(self) -> bool:
         """A driver is registered (connected or in a transient operation) — the
-        cross-object invariant's 'in GlobalDeviceManager' side."""
+        cross-object invariant's 'in DeviceManager' side."""
         return self.status is not DeviceStatus.MEMORY_ONLY
 
 

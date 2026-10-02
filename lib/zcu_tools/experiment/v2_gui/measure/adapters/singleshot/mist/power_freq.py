@@ -4,13 +4,15 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.mist import (
     FreqPowerCfg,
     FreqPowerExp,
     FreqPowerResult,
 )
+from zcu_tools.experiment.v2.singleshot.mist.power_freq import FreqPowerAnalyzeOptions
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
@@ -21,7 +23,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.cfg import (
@@ -29,17 +33,15 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from .._shared import readout_probe_freq, readout_probe_freq_range
 
-MistPowerFreqRunResult: TypeAlias = FreqPowerResult
+MistPowerFreqRunResult: TypeAlias = RunRecord[FreqPowerCfg, FreqPowerResult]
 
 
 @dataclass
-class MistPowerFreqAnalyzeResult(FigureOnlyAnalyzeResult):
-    # MIST 2D landscape is look-at-the-image: the domain analyze renders the
-    # ground/excited/other population maps over (gain, freq) and extracts no
-    # scalar, so there is no writeback. ``figure`` is inherited.
+class MistPowerFreqAnalyzeResult(AnalyzeResultBase):
     pass
 
 
@@ -68,8 +70,8 @@ class MistPowerFreqAdapter(
             "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
             "defaults with 'singleshot/ge' writeback. The run classifies each "
             "shot using these values; missing or invalid cfg calibration fails "
-            "before hardware. Optionally reads 'confusion_matrix' (readout correction), "
-            "'ac_stark_coeff' and 'log_scale' at analyze time; 't1' to set the "
+            "before hardware. Optionally reads 'confusion_matrix' for readout "
+            "correction at analyze time, and 't1' to set the "
             "relax delay; 'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the "
             "probe drive and frequency sweep."
         ),
@@ -143,22 +145,27 @@ class MistPowerFreqAdapter(
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> MistPowerFreqRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, FreqPowerExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[MistPowerFreqRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[MistPowerFreqRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> MistPowerFreqAnalyzeResult:
-        # ``ac_coeff`` (= md 'ac_stark_coeff'), ``log_scale`` and
-        # ``confusion_matrix`` are analyze inputs read from md, not user knobs;
-        # absent → domain defaults (linear axes, no readout correction).
-        ac_coeff = req.md.get("ac_stark_coeff")
-        log_scale = bool(req.md.get("log_scale", False))
-        confusion = req.md.get("confusion_matrix")
-        fig = FreqPowerExp().analyze(
-            req.run_result,
-            ac_coeff=ac_coeff,
-            log_scale=log_scale,
-            confusion_matrix=confusion,
+        options = FreqPowerAnalyzeOptions(
+            confusion_matrix=req.md.get("confusion_matrix"),
         )
-        return MistPowerFreqAnalyzeResult(figure=fig)
+        FreqPowerExp().analyze(req.run_result, options, plots=plots)
+        return MistPowerFreqAnalyzeResult()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_mist_power_freq_{time.strftime('%m%d')}"

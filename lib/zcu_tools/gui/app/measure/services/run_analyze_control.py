@@ -16,11 +16,11 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.cfg.resource import CfgRef, CfgStaleError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
+from .plot_lifecycle import discard_unpublished_plots
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.plotting import FigureContainer
     from zcu_tools.gui.session.ports import OwnerScheduler
+    from zcu_tools.plotting.plots import Plots
 
     from .analyze import ActiveInteractive, AnalyzeService
     from .guard import AnalyzePermit, GuardService
@@ -58,7 +59,6 @@ class RunAnalyzeRenderHost(Protocol):
         self, tab_id: str, *, restore_result: bool = False
     ) -> None: ...
 
-    def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None: ...
     def discard_interactive_preview(self, tab_id: str) -> None: ...
 
 
@@ -95,7 +95,7 @@ class RunAnalyzeControlPort(Protocol):
         subtab_id: Literal["analysis", "post_analysis"],
         operation_id: int,
     ) -> None: ...
-    def finish_interactive(self, tab_id: str, figure: Figure | None = None) -> bool: ...
+    def finish_interactive(self, tab_id: str) -> bool: ...
 
     def start_post_analyze(
         self, tab_id: str, post_analyze_params_instance: object
@@ -181,12 +181,13 @@ class RunAnalyzeControlFacet:
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
-        return self._run.start_run(permit, live_container)
+        return self._run.start_run(permit, plots=self._new_plots(live_container))
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         self._access.require_available()
         permit = self._guard.acquire_load_permit(tab_id)
         outcome = self._load.load_result(permit, data_path)
+        self._run.release_view_plots(tab_id)
         preparation = self._tab.prepare_result_analysis(tab_id)
         self._bus.emit(
             TabContentChangedPayload(
@@ -206,7 +207,7 @@ class RunAnalyzeControlFacet:
     def cancel_analyze(self, tab_id: str) -> bool:
         host = self._render_host()
         if host is not None:
-            host.unmount_interactive_analysis(tab_id)
+            host.unmount_interactive_analysis(tab_id, restore_result=True)
         return self._analyze.cancel_interactive(tab_id)
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
@@ -226,7 +227,7 @@ class RunAnalyzeControlFacet:
     ) -> None:
         self._state.require_analysis_operation(tab_id, subtab_id, operation_id)
 
-    def finish_interactive(self, tab_id: str, figure: Figure | None = None) -> bool:
+    def finish_interactive(self, tab_id: str) -> bool:
         active = self._analyze.get_interactive(tab_id)
         if active is None:
             raise FailedPreconditionError(
@@ -235,15 +236,11 @@ class RunAnalyzeControlFacet:
         host = self._render_host()
         if host is not None:
             host.discard_interactive_preview(tab_id)
-            presentation = host.interactive_presentation(tab_id)
-            if presentation is not None:
-                figure = presentation[0]
-            # A validation failure must keep the frontend mounted and editable.
-            # On success, remove it before finish_plugin emits synchronous content
-            # events that attach the same Figure canvas to the result pane.
+            # Only unmount after validation; failure leaves the frontend editable.
+            # The plugin creates committed figures separately from this preview.
             active.plugin.can_finish(active.session.snapshot())
             host.unmount_interactive_analysis(tab_id)
-        terminal = self._analyze.finish_plugin(tab_id, figure)
+        terminal = self._analyze.finish_plugin(tab_id)
         if terminal and host is not None:
             host.unmount_interactive_analysis(tab_id, restore_result=True)
         return terminal
@@ -262,7 +259,7 @@ class RunAnalyzeControlFacet:
             host.make_analysis_container(tab_id) if host is not None else None
         )
         return self._analyze.start_analyze(
-            permit, analyze_params_instance, figure_container
+            permit, analyze_params_instance, plots=self._new_plots(figure_container)
         )
 
     def _start_interactive_analyze(
@@ -282,33 +279,44 @@ class RunAnalyzeControlFacet:
             raise FailedPreconditionError(
                 "interactive analysis requires an attached render host"
             )
-        plugin = tab.adapter.make_interactive_plugin(req)
-        if self._run_background is not None:
-            plugin.bind_background(self._run_background)
-        self._tab.update_tab_analyze_param_instance(tab_id, analyze_params_instance)
-        token = self._analyze.start_plugin(permit, plugin, self._owner_scheduler)
-        active = self._analyze.get_interactive(tab_id)
-        if active is None:
-            self._analyze.cancel_interactive(tab_id)
-            raise RuntimeError("interactive operation has no service-owned session")
-
-        def finish(figure: Figure) -> bool:
-            return self.finish_interactive(tab_id, figure)
-
+        plots = self._new_plots(None)
         try:
+            plugin = tab.adapter.make_interactive_plugin(req, plots=plots)
+            if self._run_background is not None:
+                plugin.bind_background(self._run_background)
+            token = self._analyze.start_plugin(
+                permit,
+                plugin,
+                self._owner_scheduler,
+                analyze_params_instance=analyze_params_instance,
+                plots=plots,
+            )
+        except Exception:
+            try:
+                discard_unpublished_plots(plots)
+            except Exception:
+                logger.exception(
+                    "interactive setup plot cleanup failed: tab_id=%r", tab_id
+                )
+            raise
+        try:
+            active = self._analyze.get_interactive(tab_id)
+            if active is None:
+                raise RuntimeError("interactive operation has no service-owned session")
             host.mount_interactive_analysis(
                 tab_id,
                 lambda env: tab.adapter.make_interactive_frontend(
                     plugin,
                     active.session,
                     env,
-                    finish,
+                    lambda: self.finish_interactive(tab_id),
                     lambda: self.cancel_analyze(tab_id),
+                    plots=active.plots,
                 ),
             )
         except Exception:
             try:
-                host.unmount_interactive_analysis(tab_id)
+                host.unmount_interactive_analysis(tab_id, restore_result=True)
             except Exception:
                 logger.exception(
                     "failed to unmount interactive analysis after setup failure: tab_id=%r",
@@ -331,8 +339,21 @@ class RunAnalyzeControlFacet:
             host.make_post_analysis_container(tab_id) if host is not None else None
         )
         return self._post_analyze.start_post_analyze(
-            tab_id, post_analyze_params_instance, figure_container
+            tab_id,
+            post_analyze_params_instance,
+            plots=self._new_plots(figure_container),
         )
+
+    def _new_plots(self, container: FigureContainer | None) -> Plots:
+        from zcu_tools.gui.plotting.explicit import QtPlotHost
+        from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+        host = (
+            NonPresentingHost()
+            if container is None
+            else QtPlotHost(container, self._owner_scheduler)
+        )
+        return Plots(host)
 
     def _ensure_tab_idle(self, tab_id: str) -> None:
         self._access.require_available()

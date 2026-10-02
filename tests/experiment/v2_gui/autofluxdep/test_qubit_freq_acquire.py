@@ -19,14 +19,17 @@ from typing import Any
 
 import numpy as np
 import pytest
+from zcu_tools.device.fake import FakeDevice
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.cfg import CenteredSweepValue
-from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+from zcu_tools.gui.session.services.simulated_environment import FAKE_FLUX_DEVICE_NAME
+from zcu_tools.program.v2.mocksoc import MockQickSoc
 
 from tests.gui.app.autofluxdep._helpers import (
     connect_mock,
     high_snr_simparams,
+    make_run_context,
     mock_flux_predictor,
     run_controller_to_completion,
 )
@@ -188,8 +191,7 @@ def test_qubit_freq_acquire_fit_varies_with_flux():
 
 def test_plotter_update_runs_after_a_real_produce():
     # build qubit_freq's Result + Plotter, fill a row via a real acquire produce,
-    # then redraw — the LivePlot-backed update path must not raise (existed_axes +
-    # host draw). Uses the same flux-aware mock context as the fit test above.
+    # then redraw the named Figure through typed factories on the main thread.
     from matplotlib.figure import Figure
     from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
@@ -216,14 +218,23 @@ def test_plotter_update_runs_after_a_real_produce():
     schema = builder.make_default_schema().with_overrides(params)
     result = builder.make_init_result(schema, flux)
     figure = Figure()
-    plotter = builder.make_plotter(figure)
+    from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+    plots = Plots(NonPresentingHost())
+    plots.adopt("qubit_freq", figure)
+    plotter = builder.make_plotter(plots, "qubit_freq")
     ctx = ctrl.state.session_env
+    source = FakeDevice(fast_mode=True)
+    assert isinstance(ctx.soc, MockQickSoc)
+    ctx.soc.set_flux_source(source.get_value)
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
         schema=schema,
-        soc=ctx.soc,
-        soccfg=ctx.soccfg,
+        context=make_run_context(
+            soc=ctx.soc, soccfg=ctx.soccfg, devices={FAKE_FLUX_DEVICE_NAME: source}
+        ),
+        device_snapshot={FAKE_FLUX_DEVICE_NAME: source.get_info()},
         ml=ctx.ml,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         result=result,
@@ -270,13 +281,18 @@ def test_good_fit_observes_prediction_residual_by_default():
     )
     before = predictor.predict_freq(0.0)
     ctx = ctrl.state.session_env
+    source = FakeDevice(fast_mode=True)
+    assert isinstance(ctx.soc, MockQickSoc)
+    ctx.soc.set_flux_source(source.get_value)
     feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
         schema=schema,
-        soc=ctx.soc,
-        soccfg=ctx.soccfg,
+        context=make_run_context(
+            soc=ctx.soc, soccfg=ctx.soccfg, devices={FAKE_FLUX_DEVICE_NAME: source}
+        ),
+        device_snapshot={FAKE_FLUX_DEVICE_NAME: source.get_info()},
         ml=ctx.ml,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         result=result,
@@ -370,8 +386,10 @@ def _mocked_qubit_freq_produce_env(
         flux=0.0,
         flux_idx=0,
         schema=schema,
-        soc=ctrl.state.session_env.soc,
-        soccfg=ctrl.state.session_env.soccfg,
+        context=make_run_context(
+            soc=ctrl.state.session_env.soc, soccfg=ctrl.state.session_env.soccfg
+        ),
+        device_snapshot={},
         ml=ctrl.state.session_env.ml,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         result=result,

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import ClassVar, Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_qubit_freq
@@ -17,14 +15,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -40,7 +38,6 @@ from zcu_tools.utils.process import minus_background
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: FreqCfg | None = None
 
 
 def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -63,7 +60,23 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FreqSweepCfg
 
 
+@dataclass(frozen=True)
+class FreqAnalyzeOptions:
+    model_type: Literal["lor", "sinc"] = "lor"
+    plot_fit: bool = True
+
+
+@dataclass(frozen=True)
+class FreqAnalysis:
+    freq: float
+    freq_err: float
+    fwhm: float
+    fwhm_err: float
+
+
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+    Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
+
     # freq stores MHz on disk -> scale=IDENTITY (1.0)
     AXES_SPEC = AxesSpec(
         axes=(Axis("freqs", "Frequency", "MHz"),),
@@ -73,17 +86,20 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         tag="twotone/freq",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
         cfg: FreqCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> FreqResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         # predicted sweep points before FPGA coercion
@@ -91,45 +107,43 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg.sweep.freq, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
         )
 
-        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs),),
-                on_update=lambda data: viewer.update(freqs, qubfreq_signal2real(data)),
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Frequency (MHz)", "Amplitude"
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs),),
+            on_update=lambda data: viewer.update(freqs, qubfreq_signal2real(data)),
+        )
+
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
+
+            freq_sweep = cfg.sweep.freq
+            modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add_reset("reset", modules.reset)
+                .add_pulse("qub_pulse", modules.qub_pulse)
+                .add_readout("readout", modules.readout)
+                .declare_sweep("freq", freq_sweep)
+                .build_and_acquire()
             )
 
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
+        return FreqResult(
+            freqs=freqs,
+            signals=signals_buffer.array,
+        )
 
-                freq_sweep = cfg.sweep.freq
-                modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
-
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("qub_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-
-            return FreqResult(
-                freqs=freqs,
-                signals=signals_buffer.array,
-                cfg_snapshot=orig_cfg,
-            )
-
-    @retrieve_result
     def analyze(
         self,
-        result: FreqResult | None = None,
+        source: RunRecord[FreqCfg, FreqResult],
+        options: FreqAnalyzeOptions,
         *,
-        model_type: Literal["lor", "sinc"] = "lor",
-        plot_fit: bool = True,
-    ) -> tuple[float, float, float, float, Figure]:
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> FreqAnalysis:
+        result = source.result
 
         freqs = result.freqs
         signals = result.signals
@@ -144,14 +158,13 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         # fit_qubit_freq computes both fit uncertainties; surface them so the GUI
         # summary carries freq_err / fwhm_err (the figure title already shows them).
         freq, freq_err, fwhm, fwhm_err, y_fit, _ = fit_qubit_freq(
-            freqs, real_signals, model_type
+            freqs, real_signals, options.model_type
         )
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
-        if plot_fit:
+        if options.plot_fit:
             ax.plot(freqs, y_fit, label=f"fit, FWHM={fwhm:.1g} MHz")
             label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
             ax.axvline(freq, color="r", ls="--", label=label)
@@ -162,4 +175,4 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        return freq, freq_err, fwhm, fwhm_err, fig
+        return FreqAnalysis(freq, freq_err, fwhm, fwhm_err)

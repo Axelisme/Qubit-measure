@@ -132,6 +132,7 @@ class _StagedAnalyzeService:
         tab_id: str,
         work: Callable[[Any], Any],
         record: Callable[[str, Any], None],
+        on_failure: Callable[[], None],
         start_fail_message: str,
     ) -> int:
         """Submit ``work`` via OperationRunner (FIT/post analyze path).
@@ -180,6 +181,12 @@ class _StagedAnalyzeService:
         def _fail(error: Exception, settle: SettleFn) -> None:
             """The single failure terminal path: clear analyzing, settle failed, emit."""
             logger.warning("staged-analyze failed: tab_id=%r error=%r", tab_id, error)
+            try:
+                on_failure()
+            except Exception:
+                logger.exception(
+                    "Unpublished analysis plot cleanup failed: tab_id=%r", tab_id
+                )
             self._active_tokens.pop(tab_id, None)
             self._state.set_tab_analyzing(tab_id, False)
             # settle before facts — State visible to awaiter on wake.

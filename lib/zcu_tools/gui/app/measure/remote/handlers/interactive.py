@@ -108,12 +108,15 @@ def h_tab_interact(
             # The facet discards the local preview before finishing from state.
             control.finish_interactive(tab_id)
             result = control.get_tab_analyze_result(tab_id)
-            candidate = getattr(result, "figure", None)
-            figure = (
-                candidate
-                if result is not prior_result and isinstance(candidate, Figure)
-                else None
-            )
+            figures = None
+            if result is not prior_result:
+                pane = control.get_tab_snapshot(tab_id).analysis
+                if pane is None:
+                    raise RuntimeError("Finished interactive analysis has no pane")
+                figures = pane.figures
+            # A newly committed pane starts with its first registered figure.
+            # The disposable interactive preview is never an output artifact.
+            figure = next(iter(figures.values()), None) if figures else None
             return {
                 **_project(plugin, state, figure, preview_active=False),
                 "operation_id": operation_id,

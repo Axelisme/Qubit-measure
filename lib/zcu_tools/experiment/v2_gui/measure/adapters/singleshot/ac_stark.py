@@ -6,9 +6,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
-from zcu_tools.experiment.v2.singleshot import AcStarkCfg, AcStarkExp
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.singleshot.ac_stark import (
+    AcStarkAnalyzeOptions,
+    AcStarkCfg,
+    AcStarkExp,
+    AcStarkResult,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -24,6 +29,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -34,15 +40,16 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
 from ._shared import read_chi_kappa, readout_probe_freq
 
-# Domain AcStarkExp.analyze returns (ac_coeff, fig). The fitted AC-Stark
+# Domain analysis returns a numeric coefficient and publishes its named fit. The AC-Stark
 # coefficient is written back to the MetaDict (key ``ac_stark_coeff``, matching
 # single_qubit.md:3329) — it is the photon-number-per-gain² calibration the
 # downstream MIST experiments read as ``ac_coeff``.
-SsAcStarkRunResult: TypeAlias = Any  # AcStarkResult (frozen domain dataclass)
+SsAcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
 
 _RF_WIDTH_FALLBACK_MHZ = 5.0
 
@@ -138,7 +145,6 @@ def _freq_sweep_default(ctx: SessionEnv) -> SweepValue:
 @dataclass
 class SsAcStarkAnalyzeResult(AnalyzeResultBase):
     ac_stark_coeff: float
-    figure: Figure
 
 
 class SsAcStarkAdapter(
@@ -289,8 +295,15 @@ class SsAcStarkAdapter(
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SsAcStarkRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = AcStarkExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[SsAcStarkRunResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[SsAcStarkRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsAcStarkAnalyzeResult:
         # ``chi`` / ``kappa`` (= md 'rf_w', the resonator linewidth) are required
         # fit inputs read from md — fast-fail if either is missing. The domain
@@ -300,14 +313,14 @@ class SsAcStarkAdapter(
         chi, kappa = read_chi_kappa(req.md)
         confusion = req.md.get("confusion_matrix")
         cutoff = req.md.get("cutoff")
-        ac_coeff, fig = AcStarkExp().analyze(
-            chi,
+        analysis = AcStarkExp().analyze(
             req.run_result,
-            kappa=kappa,
-            confusion_matrix=confusion,
-            cutoff=cutoff,
+            AcStarkAnalyzeOptions(
+                chi=chi, kappa=kappa, confusion_matrix=confusion, cutoff=cutoff
+            ),
+            plots=plots,
         )
-        return SsAcStarkAnalyzeResult(ac_stark_coeff=ac_coeff, figure=fig)
+        return SsAcStarkAnalyzeResult(ac_stark_coeff=analysis.ac_stark_coeff)
 
     def get_writeback_items(
         self,

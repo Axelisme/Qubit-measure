@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-01, resource form local input
+**Last updated:** 2026-10-02, explicit rendering initialization
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -126,7 +126,7 @@ app-local ports與module shape policy；autofluxdep不經measure lowering/conver
 ## Process Runtime (`runtime.py`)
 
 `gui.runtime` owns process-level startup mechanics for launchable GUI apps:
-logging, matplotlib plot policy, `QApplication` creation, shared plot-host
+logging, `QApplication` creation, rendering initialization, shared plot-host
 lifecycle, remote-control option construction, adapter start/stop, and integer
 exit-code handling. Apps expose a fixed `GuiRuntimeBehavior.spec` class variable
 for static process contract and implement `assemble(control)` for app-local
@@ -145,8 +145,9 @@ classes and launcher-provided factories.
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
 declares shared logging/control/project flags and converts parser output into
 `GuiLaunchOptions` / `ProjectInfo`. It deliberately avoids importing Qt or
-matplotlib or app modules at module import time, so scripts can import it before
-runtime applies plot policy.
+matplotlib or app modules at module import time. Runtime initializes the explicit
+plot host, shutdown callback and mathtext support after QApplication exists;
+it does not select a process-wide Matplotlib backend.
 
 ## Project / Result Scope
 

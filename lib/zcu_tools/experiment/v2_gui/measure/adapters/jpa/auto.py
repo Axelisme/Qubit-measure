@@ -14,6 +14,8 @@ from typing import Any, ClassVar
 from matplotlib.figure import Figure
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.jpa import AutoOptimizeExp, JPAOptCfg
 from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import JPAOptimizeResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
@@ -32,8 +34,8 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import (
     lower_jpa_flux_dev,
@@ -44,24 +46,10 @@ from .flux import jpa_flux_sweep_seed
 from .freq import jpa_freq_sweep_seed
 from .power import jpa_power_sweep_seed
 
-# The core optimizer needs at least 4 evaluated points to produce valid
-# samples; the adapter refuses smaller budgets before any hardware work.
-_JPA_AUTO_MIN_NUM_POINTS = 4
+JpaAutoRunResult = RunRecord[JPAOptCfg, JPAOptimizeResult]
+
 # Bring-up iteration budget (contract: GUI default may use 1001).
 _JPA_AUTO_NUM_POINTS_DEFAULT = 1001
-
-
-def _num_points(raw_cfg: Mapping[str, object]) -> int:
-    """The run-only iteration budget, fast-failing on illegal values."""
-    value = raw_cfg.get("num_points")
-    if not isinstance(value, int):
-        raise ValueError("num_points must be an integer")
-    if value < _JPA_AUTO_MIN_NUM_POINTS:
-        raise ValueError(
-            "JPA auto-optimize requires num_points >= "
-            f"{_JPA_AUTO_MIN_NUM_POINTS}, got {value}"
-        )
-    return value
 
 
 def _lower_jpa_auto_devs(
@@ -110,11 +98,10 @@ class JpaAutoAnalyzeResult(AnalyzeResultBase):
     best_flux: float
     best_freq: float
     best_power: float
-    figure: Figure
 
 
 class JpaAutoOptimizeAdapter(
-    BaseAdapter[JPAOptCfg, JPAOptimizeResult, JpaAutoAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[JPAOptCfg, JpaAutoRunResult, JpaAutoAnalyzeResult, NoAnalyzeParams]
 ):
     exp_cls = AutoOptimizeExp
     ExpCfg_cls: ClassVar[Any] = JPAOptCfg
@@ -239,38 +226,32 @@ class JpaAutoOptimizeAdapter(
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> JPAOptCfg:
         cfg_raw = dict(raw_cfg)
-        # num_points is a run argument only — it never enters the Experiment cfg.
-        cfg_raw.pop("num_points", None)
         cfg_raw["dev"] = _lower_jpa_auto_devs(cfg_raw, req.device_snapshot)
         return super().build_exp_cfg(cfg_raw, req)
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         # Pure preflight over the detached request snapshot.
-        _num_points(raw_cfg)
-        _lower_jpa_auto_devs(raw_cfg, req.device_snapshot)
+        self.build_exp_cfg(raw_cfg, req)
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> JPAOptimizeResult:
-        soc, soccfg = require_soc_handles(req)
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> JpaAutoRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        num_points = _num_points(raw_cfg)
-        return AutoOptimizeExp().run(soc, soccfg, cfg, num_points=num_points)
+        return RunRecord(cfg, AutoOptimizeExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[JPAOptimizeResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[JpaAutoRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> JpaAutoAnalyzeResult:
-        best_flux, best_freq, best_power, fig = AutoOptimizeExp().analyze(
-            req.run_result
-        )
-        _relabel_auto_figure(fig)
+        analysis = AutoOptimizeExp().analyze(req.run_result, None, plots=plots)
+        _relabel_auto_figure(plots["fit"])
         return JpaAutoAnalyzeResult(
-            best_flux=best_flux,
-            best_freq=best_freq,
-            best_power=best_power,
-            figure=fig,
+            best_flux=analysis.best_flux,
+            best_freq=analysis.best_freq,
+            best_power=analysis.best_power,
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[JPAOptimizeResult, JpaAutoAnalyzeResult]
+        self, req: WritebackRequest[JpaAutoRunResult, JpaAutoAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [

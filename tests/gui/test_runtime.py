@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from zcu_tools.gui import runtime
+from zcu_tools.gui import plotting, runtime
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 from zcu_tools.gui.runtime import (
     GuiAssembly,
     GuiLaunchOptions,
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
-    PlotPolicy,
     build_control_options,
     run_gui_runtime,
 )
@@ -21,7 +21,6 @@ def test_build_control_options_disabled() -> None:
     spec = GuiRuntimeSpec(
         app_name="fluxdep",
         app_slug="fluxdep",
-        plot_policy=PlotPolicy.EMBEDDED_BACKEND,
         default_control_port=8766,
     )
     options = GuiLaunchOptions(log_root=Path("."), no_control=True)
@@ -33,7 +32,6 @@ def test_build_control_options_omitted_port_uses_default_with_fallback() -> None
     spec = GuiRuntimeSpec(
         app_name="fluxdep",
         app_slug="fluxdep",
-        plot_policy=PlotPolicy.EMBEDDED_BACKEND,
         default_control_port=8766,
     )
     options = GuiLaunchOptions(log_root=Path("."), control_token="token")
@@ -51,7 +49,6 @@ def test_build_control_options_explicit_port_is_pinned() -> None:
     spec = GuiRuntimeSpec(
         app_name="dispersive",
         app_slug="dispersive",
-        plot_policy=PlotPolicy.EMBEDDED_BACKEND,
         default_control_port=8767,
     )
     options = GuiLaunchOptions(log_root=Path("."), control_port=9000)
@@ -67,9 +64,9 @@ def test_build_control_options_explicit_port_is_pinned() -> None:
 class _Signal:
     def __init__(self, events: list[str]) -> None:
         self._events = events
-        self.callbacks: list[object] = []
+        self.callbacks: list[Callable[[], None]] = []
 
-    def connect(self, callback: object) -> None:
+    def connect(self, callback: Callable[[], None]) -> None:
         self._events.append("connect")
         self.callbacks.append(callback)
 
@@ -112,7 +109,6 @@ class _Behavior(GuiRuntimeBehavior):
     spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
         app_name="fake",
         app_slug="fake",
-        plot_policy=PlotPolicy.NONE,
         default_control_port=9999,
     )
 
@@ -141,15 +137,28 @@ class _Behavior(GuiRuntimeBehavior):
         self._events.append("after")
 
 
-def test_run_gui_runtime_orders_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def rendering_events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     events: list[str] = []
+    monkeypatch.setattr(plotting, "ensure_host", lambda: events.append("host"))
+    monkeypatch.setattr(
+        plotting, "install_mathtext_lock", lambda: events.append("mathtext-lock")
+    )
+    monkeypatch.setattr(
+        plotting, "prewarm_mathtext", lambda: events.append("mathtext-prewarm")
+    )
+    monkeypatch.setattr(
+        plotting, "set_shutting_down", lambda value: events.append(f"shutdown:{value}")
+    )
+    return events
+
+
+def test_run_gui_runtime_orders_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, rendering_events: list[str]
+) -> None:
+    events = rendering_events
     app = _App(events, code=17)
     monkeypatch.setattr(runtime, "_get_or_create_qapplication", lambda: app)
-    monkeypatch.setattr(
-        runtime,
-        "_configure_post_qt_plot_policy",
-        lambda policy, app: events.append(f"post:{policy.value}"),
-    )
 
     code = run_gui_runtime(
         _Behavior(events),
@@ -158,7 +167,10 @@ def test_run_gui_runtime_orders_lifecycle(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert code == 17
     assert events == [
-        "post:none",
+        "host",
+        "connect",
+        "mathtext-lock",
+        "mathtext-prewarm",
         "assemble",
         "before",
         "show",
@@ -167,19 +179,19 @@ def test_run_gui_runtime_orders_lifecycle(monkeypatch: pytest.MonkeyPatch) -> No
         "after",
         "exec",
     ]
+    for callback in app.aboutToQuit.callbacks:
+        callback()
+    assert events[-2:] == ["shutdown:True", "stop"]
 
 
 def test_run_gui_runtime_reports_control_start_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    rendering_events: list[str],
 ) -> None:
-    events: list[str] = []
+    events = rendering_events
     app = _App(events, code=17)
     monkeypatch.setattr(runtime, "_get_or_create_qapplication", lambda: app)
-    monkeypatch.setattr(
-        runtime,
-        "_configure_post_qt_plot_policy",
-        lambda _policy, _app: events.append("post"),
-    )
 
     code = run_gui_runtime(
         _Behavior(events, fail_start=True),
@@ -187,17 +199,25 @@ def test_run_gui_runtime_reports_control_start_failure(
     )
 
     assert code == 1
-    assert events == ["post", "assemble", "before", "show", "start"]
+    assert events == [
+        "host",
+        "connect",
+        "mathtext-lock",
+        "mathtext-prewarm",
+        "assemble",
+        "before",
+        "show",
+        "start",
+    ]
     assert "cannot open control socket" in capsys.readouterr().err
 
 
 def test_run_gui_runtime_rejects_control_adapter_when_control_disabled(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, rendering_events: list[str]
 ) -> None:
-    events: list[str] = []
+    events = rendering_events
     app = _App(events)
     monkeypatch.setattr(runtime, "_get_or_create_qapplication", lambda: app)
-    monkeypatch.setattr(runtime, "_configure_post_qt_plot_policy", lambda *_: None)
 
     class BadBehavior(_Behavior):
         def assemble(self, control: ControlOptions | None) -> GuiAssembly:

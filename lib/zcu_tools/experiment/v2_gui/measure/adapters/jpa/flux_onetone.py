@@ -8,8 +8,10 @@ operator guide. The core experiment lives in
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.jpa import OneToneFluxCfg, OneToneFluxExp
 from zcu_tools.experiment.v2.jpa.jpa_flux_onetone import OneToneFluxResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
@@ -31,6 +33,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from ._shared import lower_jpa_flux_dev
 from .flux import jpa_flux_sweep_seed
 
+JpaFluxOneToneRunResult: TypeAlias = RunRecord[OneToneFluxCfg, OneToneFluxResult]
+
 # Bring-up survey: ~101 readout-frequency points around the resonator; the
 # flux sweep reuses the shared JPA flux survey seed (101 points). These are
 # inspectable starting bounds, NOT safety certification — the operator must
@@ -38,7 +42,7 @@ from .flux import jpa_flux_sweep_seed
 _JPA_FLUX_ONETONE_FREQ_EXPTS = 101
 
 
-class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, OneToneFluxResult]):
+class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]):
     exp_cls = OneToneFluxExp
     ExpCfg_cls: ClassVar[Any] = OneToneFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
@@ -137,6 +141,12 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, OneToneFluxResult]):
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         # Pure preflight over the detached request snapshot.
         lower_jpa_flux_dev(raw_cfg, req.device_snapshot)
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> JpaFluxOneToneRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, OneToneFluxExp().run(cfg, context=context))
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_jpa_flux_onetone_{time.strftime('%m%d')}"

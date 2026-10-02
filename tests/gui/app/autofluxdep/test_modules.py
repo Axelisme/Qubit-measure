@@ -16,6 +16,8 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
     resolve_provider_snapshot,
 )
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 from ._helpers import make_builder, place
 
 
@@ -122,7 +124,9 @@ def test_produced_module_flows_to_downstream_node():
     ml = _FakeML({"readout": "preset"})
 
     # producer first → consumer sees THIS point's tuned
-    Orchestrator([producer, consumer], ml=ml).run([0.0, 1.0])
+    Orchestrator(
+        [producer, consumer], ml=ml, context=make_run_context(), device_snapshot={}
+    ).run([0.0, 1.0])
 
     # point0: ro reads ml preset → tuned(preset); consumer sees tuned(preset)
     # point1: ro's module_point empty at ro time, module_prev has tuned(preset)

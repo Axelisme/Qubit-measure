@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
     NoAnalyzeParams,
     PostAnalyzeResultBase,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 class _MinimalNoAnalysisAdapter(
@@ -42,7 +43,7 @@ class _FitNoParamsAdapter(_MinimalNoAnalysisAdapter):
         analysis=AnalysisMode.FIT
     )
 
-    def analyze(self, req: Any) -> NoAnalysisResult:
+    def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
         del req
         return NoAnalysisResult()
 
@@ -72,7 +73,7 @@ def test_fit_forbids_interactive_plugin() -> None:
     with pytest.raises(TypeError, match="analysis=FIT.*make_interactive_plugin"):
 
         class _BadAdapter(_FitNoParamsAdapter):
-            def make_interactive_plugin(self, req: Any) -> Any:
+            def make_interactive_plugin(self, req: Any, *, plots: Plots) -> Any:
                 return object()
 
 
@@ -95,7 +96,7 @@ def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
                 del ctx
                 return "bad"
 
-            def analyze(self, req: Any) -> NoAnalysisResult:
+            def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
                 del req
                 return NoAnalysisResult()
 
@@ -117,7 +118,7 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
             del ctx
             return "ok"
 
-        def analyze(self, req: Any) -> NoAnalysisResult:
+        def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
             del req
             return NoAnalysisResult()
 
@@ -150,7 +151,7 @@ def test_interactive_forbids_analyze() -> None:
                 analysis=AnalysisMode.INTERACTIVE
             )
 
-            def make_interactive_plugin(self, req: Any) -> Any:
+            def make_interactive_plugin(self, req: Any, *, plots: Plots) -> Any:
                 return object()
 
             def make_interactive_frontend(
@@ -160,10 +161,12 @@ def test_interactive_forbids_analyze() -> None:
                 env: Any,
                 request_finish: Any,
                 request_cancel: Any,
+                *,
+                plots: Plots,
             ) -> Any:
                 return object()
 
-            def analyze(self, req: Any) -> NoAnalysisResult:
+            def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
                 del req
                 return NoAnalysisResult()
 
@@ -172,7 +175,7 @@ def test_none_forbids_analyze() -> None:
     with pytest.raises(TypeError, match="analysis=NONE.*analyze"):
 
         class _BadAdapter(_MinimalNoAnalysisAdapter):
-            def analyze(self, req: Any) -> NoAnalysisResult:
+            def analyze(self, req: Any, *, plots: Plots) -> NoAnalysisResult:
                 del req
                 return NoAnalysisResult()
 
@@ -181,7 +184,7 @@ def test_none_forbids_interactive_plugin() -> None:
     with pytest.raises(TypeError, match="analysis=NONE.*make_interactive_plugin"):
 
         class _BadAdapter(_MinimalNoAnalysisAdapter):
-            def make_interactive_plugin(self, req: Any) -> Any:
+            def make_interactive_plugin(self, req: Any, *, plots: Plots) -> Any:
                 return object()
 
 
@@ -195,7 +198,7 @@ def test_interactive_requires_frontend() -> None:
                 analysis=AnalysisMode.INTERACTIVE
             )
 
-            def make_interactive_plugin(self, req: Any) -> Any:
+            def make_interactive_plugin(self, req: Any, *, plots: Plots) -> Any:
                 return object()
 
 
@@ -227,7 +230,7 @@ def test_post_analysis_requires_get_post_analyze_params() -> None:
                 post_analysis=True,
             )
 
-            def post_analyze(self, req: Any) -> PostAnalyzeResultBase:
+            def post_analyze(self, req: Any, *, plots: Plots) -> PostAnalyzeResultBase:
                 del req
                 return PostAnalyzeResultBase()
 
@@ -263,7 +266,7 @@ def test_post_analysis_false_forbids_post_analyze() -> None:
     with pytest.raises(TypeError, match="post_analysis=False.*post_analyze"):
 
         class _BadAdapter(_FitNoParamsAdapter):
-            def post_analyze(self, req: Any) -> PostAnalyzeResultBase:
+            def post_analyze(self, req: Any, *, plots: Plots) -> PostAnalyzeResultBase:
                 del req
                 return PostAnalyzeResultBase()
 
@@ -273,7 +276,10 @@ def test_intermediate_base_implementation_counts_as_implemented() -> None:
         pass
 
     assert _ChildAdapter.capabilities.analysis is AnalysisMode.FIT
-    assert _ChildAdapter().analyze(object()).figure is None
+    assert isinstance(
+        _ChildAdapter().analyze(object(), plots=Plots(NonPresentingHost())),
+        NoAnalysisResult,
+    )
 
 
 def test_intermediate_base_forbidden_implementation_is_detected() -> None:

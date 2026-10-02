@@ -28,6 +28,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontendEnv,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.plotting.plots import Plots
 
 from .flux_pick_plugin import FluxPickPlugin
 
@@ -40,8 +41,9 @@ class FluxPickFrontend(InteractiveFrontend):
         plugin: FluxPickPlugin,
         session: Session[FluxPickState],
         env: InteractiveFrontendEnv,
-        request_finish: Callable[[Figure], bool],
+        request_finish: Callable[[], bool],
         request_cancel: Callable[[], bool],
+        *,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -204,7 +206,7 @@ class FluxPickFrontend(InteractiveFrontend):
             return
         self.cancel_preview()
         try:
-            terminal = self._request_finish(self._figure)
+            terminal = self._request_finish()
         except FailedPreconditionError as exc:
             self._info.setText(str(exc))
             return
@@ -254,11 +256,15 @@ def make_flux_pick_frontend(
     plugin: PluginDefinition[Any, Any],
     session: Session[Any],
     env: InteractiveFrontendEnv,
-    request_finish: Callable[[Figure], bool],
+    request_finish: Callable[[], bool],
     request_cancel: Callable[[], bool],
+    *,
+    plots: Plots,
 ) -> InteractiveFrontend:
     if not isinstance(plugin, FluxPickPlugin):
         raise TypeError("flux-pick adapter requires a FluxPickPlugin")
+    # The preview is disposable; the plugin writes final figures into these plots.
+    del plots
     return FluxPickFrontend(
         plugin,
         cast(Session[FluxPickState], session),

@@ -188,7 +188,10 @@ class SetupDialog(QDialog):
 
         right_layout.addWidget(conn_group)
 
-        self._mock_check = QCheckBox("Use MockSoc (offline, no hardware)")
+        self._mock_check = QCheckBox("Use Simulate Env")
+        self._mock_check.setToolTip(
+            "Disconnect real devices and set up a simulated environment with a FakeDevice and MockSoc."
+        )
         self._mock_check.stateChanged.connect(self._on_mock_toggled)
         right_layout.addWidget(self._mock_check)
 
@@ -569,19 +572,9 @@ class SetupDialog(QDialog):
         self._port_spin.setEnabled(not use_mock)
 
     def _on_connect_clicked(self) -> None:
-        from zcu_tools.gui.session.services.connection import (
-            ConnectMockRequest,
-            ConnectRemoteRequest,
-        )
+        from zcu_tools.gui.session.services.connection import ConnectRemoteRequest
 
         use_mock = self._mock_check.isChecked()
-        req = (
-            ConnectMockRequest()
-            if use_mock
-            else ConnectRemoteRequest(
-                ip=self._ip_edit.text().strip(), port=self._port_spin.value()
-            )
-        )
 
         self._ctrl.bind_connection_outcome(
             self._on_connect_finished,
@@ -596,8 +589,21 @@ class SetupDialog(QDialog):
                 )
             )
         self._connect_btn.setEnabled(False)
-        self._set_conn_status("Connecting…", error=False)
-        self._ctrl.start_connect(req)
+        self._set_conn_status(
+            "Preparing simulated environment…" if use_mock else "Connecting…",
+            error=False,
+        )
+        try:
+            if use_mock:
+                self._ctrl.start_simulated_environment()
+            else:
+                self._ctrl.start_connect(
+                    ConnectRemoteRequest(
+                        ip=self._ip_edit.text().strip(), port=self._port_spin.value()
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 — restore the button on entry rejection
+            self._on_connect_failed(str(exc))
 
     def _on_connect_finished(self) -> None:
         self._connect_btn.setEnabled(True)

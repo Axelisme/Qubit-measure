@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-08-17 — semantic per-point evolution caching
+**Last updated:** 2026-10-02 — explicit flux source
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -119,24 +119,16 @@ physics compute. `SimEngine` still accepts an engine-local `cancel_flag` for
 direct/internal callers, but `MyProgramV2.acquire` does not feed acquire-level
 flags into it.
 
-**FLUX-AWARE-MOCK — operating flux from a live device.** By default the operating
-flux is pinned at reduced flux = 1.0 (R-3).  `SimParams.flux_device` opts into
-reading it live: when set, `engine._operating_signal` resolves the named device
-from `GlobalDeviceManager` (a deliberate cross-layer reach from `program/v2/sim`
-into `device/`; no import cycle since `device/` never imports the sim package — the
-import is lazy inside the function), requires it to be a `FakeDevice`, and maps its
-current `value` through `value_to_flux` to the reduced operating flux.  This mirrors
-the real rig's software flux sweep: the runner does **software-per-acquire** (set
-the device value, then run one acquire), so the flux is constant within an acquire
-(the cache invariant above holds) and a fresh `SimEngine` is built every acquire
-(base `_attach_sim_engine`), so the device read is effectively "read the live flux
-just before each acquisition" with no stale cross-acquire value.  The binding lives
-on the soc's *internal* SimParams copy (copy-on-input in `MockQickSoc.__init__`):
-`set_flux_device` mutates that copy via `with_updates`, never the caller's instance
-— critical because the GUI mock-connect passes the shared `DEFAULT_SIMPARAM`
-singleton.  Resolution is fail-fast (missing device / non-FakeDevice raises) but the
-*binding* is permitted before the device is registered.  Grep `FLUX-AWARE-MOCK` for
-every coupling point.
+**Live operating flux.** The environment owner resolves and validates a FakeDevice
+before passing its value reader to `MockQickSoc.set_flux_source`. Each acquire
+borrows that reader when constructing SimEngine. The engine reads once for that
+acquire and retains the operating point across its rounds. A later acquire reads
+the current value again. Reader failures propagate rather than falling back.
+
+With no reader, the operating point is reduced flux 1.0. Passing `None` explicitly
+unbinds a source. White-noise mocks reject binding because they have no SimEngine.
+SimParams contains data only; neither MockSoc nor SimEngine looks up a registry.
+Each soc keeps its own copied parameters and source binding.
 
 ## Module map
 

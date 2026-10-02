@@ -9,28 +9,32 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.jpa import CheckCfg, CheckExp
 from zcu_tools.experiment.v2.jpa.jpa_check import CheckResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
     res_freq_range,
-    run_figure_only_analyze,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
     RunRequest,
     SessionEnv,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import lower_jpa_rf_output_dev
+
+JpaCheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
 # Bring-up survey: ~101 readout-frequency points around the resonator. These
 # are inspectable starting bounds, NOT safety certification — the operator must
@@ -39,15 +43,12 @@ _JPA_CHECK_FREQ_EXPTS = 101
 
 
 @dataclass
-class JpaCheckAnalyzeResult(FigureOnlyAnalyzeResult):
-    # The check is look-at-the-comparison: the domain analyze renders the
-    # pump-off vs pump-on resonator traces and extracts no writeback-able
-    # scalar. ``figure`` is inherited.
+class JpaCheckAnalyzeResult(AnalyzeResultBase):
     pass
 
 
 class JpaCheckAdapter(
-    BaseAdapter[CheckCfg, CheckResult, JpaCheckAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[CheckCfg, JpaCheckRunResult, JpaCheckAnalyzeResult, NoAnalyzeParams]
 ):
     exp_cls = CheckExp
     ExpCfg_cls: ClassVar[Any] = CheckCfg
@@ -128,10 +129,17 @@ class JpaCheckAdapter(
         # Pure preflight over the detached request snapshot.
         lower_jpa_rf_output_dev(raw_cfg, req.device_snapshot)
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> JpaCheckRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, CheckExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[CheckResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[JpaCheckRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> JpaCheckAnalyzeResult:
-        return run_figure_only_analyze(CheckExp, JpaCheckAnalyzeResult, req)
+        CheckExp().analyze(req.run_result, None, plots=plots)
+        return JpaCheckAnalyzeResult()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_jpa_check_{time.strftime('%m%d')}"

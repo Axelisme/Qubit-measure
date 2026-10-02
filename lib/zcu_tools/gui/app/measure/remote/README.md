@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-02, operation-bound result inputs
+**Last updated:** 2026-10-03, operation-bound named image saving
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 77`, `GUI_VERSION = 109`, and
-`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 77 adds
+Current measure-gui values are `WIRE_VERSION = 78`, `GUI_VERSION = 110`, and
+`MCP_VERSION = 101` (defined in `zcu_tools.mcp.measure.server`). WIRE 78 combines
+operation-bound result inputs and figure reads with named image saving. GUI 110
+commits provenance and captured inputs with named plots; a replaced operation
+cannot change image paths or export. MCP 101 includes public RPC access, whole-draft
+acceptance, PNG delivery and fail-closed session binding. WIRE 77 adds
 `analysis_error` to load outcomes; failed analysis preparation preserves the loaded
 result and the new tab from `tab.open_file`. GUI 109 publishes committed result facts
 independently of analysis preparation and reports its failure separately. WIRE 76
@@ -258,7 +262,7 @@ The wire surface is grouped by ownership:
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
   `PredictorControlPort`.
-- `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save (data via `tab_id` only; image via `(tab_id, subtab_id)` with `analysis|post_analysis`) and figures via `(tab_id, subtab_id)` (`run` reads live FigureContainer, `analysis`/`post_analysis` read canonical State figures). `tab.snapshot.save_paths` projects independent `data_path`、`analysis_image_path`與`post_analysis_image_path`; explicit save destinations update the shared GUI drafts. `tab.save_artifacts` submits one application-owned operation for data/analysis/post keys, returns reserved destinations plus an operation id, and guards the observed result, analysis and path resources. Reserved paths are not completion evidence; terminal success and artifact snapshots establish saved results.
+- `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_image`要求`tab_id`、`subtab_id=analysis|post_analysis`與`figure_name`；`tab.save_artifacts`接受`data`、`analysis:<name>`及`post:<name>`完整key，不接受無名稱的analysis/post舊格式。`tab.snapshot`逐圖列出`figure_names`、`analysis_images`／`post_analysis_images`路徑與artifact status；explicit destinations修改相同key的GUI草稿。Run screenshot讀live FigureContainer；analysis/post screenshot讀目前選中的具名圖。`tab.save_artifacts`回傳保留路徑與operation id，保留不代表成功，完成後以terminal及artifact snapshot判讀。
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
 - `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time).

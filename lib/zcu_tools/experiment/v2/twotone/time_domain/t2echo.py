@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import ClassVar, Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
@@ -18,13 +16,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -44,7 +43,7 @@ from zcu_tools.utils.process import rotate2real
 class T2EchoResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: T2EchoCfg | None = None
+    true_activate_detune: float | None = None
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -65,9 +64,26 @@ class T2EchoSweepCfg(ConfigBase):
 class T2EchoCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T2EchoModuleCfg
     sweep: T2EchoSweepCfg
+    detune: float = 0.0
+
+
+@dataclass(frozen=True)
+class T2EchoAnalyzeOptions:
+    fit_method: Literal["fringe", "decay"] = "decay"
+    fit_phase: bool = False
+
+
+@dataclass(frozen=True)
+class T2EchoAnalysis:
+    t2e: float
+    t2e_err: float
+    detune: float
+    detune_err: float
 
 
 class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
+    Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
+
     # times stores us in memory, s on disk -> scale=US_TO_S
     AXES_SPEC = AxesSpec(
         axes=(Axis("times", "Time", "s", scale=US_TO_S),),
@@ -77,18 +93,17 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         tag="twotone/ge/t2echo",
     )
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: T2EchoCfg,
-        *,
-        detune: float = 0.0,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[T2EchoResult, float]:
-        orig_cfg = deepcopy(cfg)
+    def run(self, cfg: T2EchoCfg, *, context: RunContext) -> T2EchoResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        detune = cfg.detune
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
 
         lengths = sweep2array(
             cfg.sweep.length, "time", {"soccfg": soccfg, "scaler": 0.5}
@@ -111,62 +126,61 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         else:
             true_detune = 0.0
 
-        with LivePlot1D(
+        viewer = context.plots.liveplot_1d(
+            "measurement",
             "Time (us)",
             "Amplitude",
-            segment_kwargs={"title": f"T2 Echo (detune={true_detune:.3f}MHz)"},
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
+            title=f"T2 Echo (detune={true_detune:.3f}MHz)",
+        )
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
 
-                length_sweep = cfg.sweep.length
-                length_param = sweep2param("length", length_sweep)
-                detune_param = 360 * detune * length_param
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+            detune_param = 360 * detune * length_param
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("pi2_pulse1", modules.pi2_pulse),
-                        Delay("t2e_delay1", delay=0.5 * length_param),
-                        Pulse("pi_pulse", modules.pi_pulse),
-                        Delay("t2e_delay2", delay=0.5 * length_param),
-                        Pulse(
-                            name="pi2_pulse2",
-                            cfg=modules.pi2_pulse.with_updates(
-                                phase=modules.pi2_pulse.phase + detune_param
-                            ),
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("pi2_pulse1", modules.pi2_pulse),
+                    Delay("t2e_delay1", delay=0.5 * length_param),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Delay("t2e_delay2", delay=0.5 * length_param),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg=modules.pi2_pulse.with_updates(
+                            phase=modules.pi2_pulse.phase + detune_param
                         ),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+                    ),
+                    Readout("readout", modules.readout),
                 )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire()
+            )
 
-        # record result
-        self.last_result = T2EchoResult(
-            times=lengths, signals=signals_buffer.array, cfg_snapshot=orig_cfg
+        return T2EchoResult(
+            times=lengths,
+            signals=signals_buffer.array,
+            true_activate_detune=true_detune,
         )
 
-        return self.last_result, true_detune
-
-    @retrieve_result
     def analyze(
         self,
-        result: T2EchoResult | None = None,
+        source: RunRecord[T2EchoCfg, T2EchoResult],
+        options: T2EchoAnalyzeOptions,
         *,
-        fit_method: Literal["fringe", "decay"] = "decay",
-        fit_phase: bool = False,
-    ) -> tuple[float, float, float, float, Figure]:
+        plots: Plots,
+    ) -> T2EchoAnalysis:
         """fit_phase frees the fringe phase; decay-only fits ignore this option."""
-        assert result is not None, "no result found"
+        result = source.result
+        fit_method = options.fit_method
+        fit_phase = options.fit_phase
 
         xs, signals = result.times, result.signals
 
@@ -187,8 +201,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
         else:
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
@@ -212,4 +225,9 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
 
         fig.tight_layout()
 
-        return t2e, t2eerr, detune, detune_err, fig
+        return T2EchoAnalysis(
+            t2e=float(t2e),
+            t2e_err=float(t2eerr),
+            detune=float(detune),
+            detune_err=float(detune_err),
+        )

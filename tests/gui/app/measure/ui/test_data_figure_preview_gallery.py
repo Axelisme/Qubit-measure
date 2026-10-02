@@ -25,15 +25,15 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
-from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
 @dataclass
@@ -153,24 +153,24 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
     analysis_snap = AnalysisPaneSnapshot(
         params=DummyParams() if analysis is not AnalysisMode.NONE else None,
         result=object() if analysis is not AnalysisMode.NONE else None,
-        figure=None,
+        figures=None,
         writeback_items=(),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=DummyPostParams() if post else None,
         result=object() if post else None,
-        figure=None,
+        figures=None,
         writeback_items=(),
-        image_path=PathResourceSnapshot(override=None, path=None),
+        image_paths={},
     )
     save_snap = SavePaneSnapshot(
         data_path=PathResourceSnapshot(override=None, path="/tmp/d.h5")
     )
     paths_snap = TabPathsSnapshot(
         data=PathResourceSnapshot(override=None, path="/tmp/d.h5"),
-        analysis_image=PathResourceSnapshot(override=None, path=None),
-        post_analysis_image=PathResourceSnapshot(override=None, path=None),
+        analysis_images={},
+        post_analysis_images={},
     )
     snapshot = TabSnapshot(
         adapter_name="fake",
@@ -432,11 +432,11 @@ def test_exp_data_routing_a4(qapp, exp_tab_widget):
     # Analysis
     tab._left_tabs.setCurrentIndex(idx("Analysis"))
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._analysis_stack
+    assert tab._right_stack.currentWidget() is tab._analysis_panel_right
     # Post
     tab._left_tabs.setCurrentIndex(idx("Post-Analysis"))
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._post_stack
+    assert tab._right_stack.currentWidget() is tab._post_panel_right
     # Data -> gallery
     tab._left_tabs.setCurrentIndex(idx("Data"))
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
@@ -478,12 +478,12 @@ def test_exp_data_activation_refreshes_and_lifecycle_sync(qapp, exp_tab_widget):
     assert tab.get_run_container() is run_c
     assert tab._data_gallery.card_state("run") == "available"
 
-    tab.show_analysis_figure(fig_a)
+    tab.show_analysis_figures(ready_figures(fig_a))
     assert tab.get_current_figure_for_pane("analysis") is fig_a
     assert tab.get_analysis_container() is ana_c
     assert tab._data_gallery.card_state("analysis") == "available"
 
-    tab.show_post_analysis_figure(fig_p)
+    tab.show_post_analysis_figures(ready_figures(fig_p))
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p
     assert tab.get_post_container() is post_c
     assert tab._data_gallery.card_state("post_analysis") == "available"
@@ -504,8 +504,8 @@ def test_exp_data_activation_refreshes_and_lifecycle_sync(qapp, exp_tab_widget):
     # clear_post_figure only affects post
     fig_a2 = Figure()
     fig_p2 = Figure()
-    tab.show_analysis_figure(fig_a2)
-    tab.show_post_analysis_figure(fig_p2)
+    tab.show_analysis_figures(ready_figures(fig_a2))
+    tab.show_post_analysis_figures(ready_figures(fig_p2))
     assert tab._data_gallery.card_state("post_analysis") == "available"
     tab.clear_post_figure()
     assert tab._data_gallery.card_state("post_analysis") == "empty"
@@ -567,9 +567,8 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(
     tab._left_tabs.setCurrentIndex(data_idx)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     assert tab._right_stack.currentWidget() is tab._data_gallery
-    # Ensure left save controls still present
-    assert tab._save_center is not None
-    assert tab._save_center.has_artifact(tab._save_center.artifact_kinds[0])
+    # Ensure the data save action remains available from this pane.
+    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
     tab.detach()
 
 
@@ -598,17 +597,16 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     # Show figures while Data visible
     tab.show_run_figure(fig_run)
-    tab.show_analysis_figure(fig_a)
-    tab.show_post_analysis_figure(fig_p)
+    tab.show_analysis_figures(ready_figures(fig_a))
+    tab.show_post_analysis_figures(ready_figures(fig_p))
     # Analysis should be unavailable, others available
     assert tab._data_gallery.card_state("run") == "available"
     assert tab._data_gallery.card_state("analysis") == "unavailable"
     assert tab._data_gallery.card_state("post_analysis") == "available"
     # Save center should still be usable after single-card failure (A3)
-    assert tab._save_center.has_artifact(ArtifactKind.DATA)
+    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
     assert tab._save_center.is_save_all_enabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
-    assert tab._save_center.has_artifact(tab._save_center.artifact_kinds[0])
+    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
     tab.detach()
 
 

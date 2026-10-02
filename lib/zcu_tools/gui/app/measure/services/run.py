@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.device import device_setup_cancel_scope
-from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
+from zcu_tools.device.base import BaseDevice
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
+    TabClosedPayload,
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     NO_RESULT,
@@ -26,27 +29,39 @@ from zcu_tools.gui.session.scopes import progress_ambient
 
 from .guard import RunPermit
 from .operation_gate import OperationKind
-from .scopes import figure_ambient
+from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import ExclusionGate
+    from zcu_tools.plotting.plots import Plots
 
     from ..state import RetiredPaneResources
     from .ports import RunStatePort, WritebackLifecyclePort
 
 
+@dataclass(frozen=True, slots=True)
+class _RunOperation:
+    """Inputs captured for one terminal callback, separate from the next run."""
+
+    tab_id: str
+    plots: Plots
+    stop_event: threading.Event
+    stop_signal: StopSignal
+    cancel_requested: threading.Event
+
+
 class RunService:
     """Encapsulates execution of an experiment adapter via BackgroundRunner
-    (OffMain-thread strategy with figure/progress/cancel scopes — ADR-0066).
+    (OffMain-thread strategy with explicit RunContext and ambient progress — ADR-0066).
 
     Uses OperationRunner (ADR-0066) for the lifecycle mechanism; domain
-    policy (cancel-partial interpretation, State writes, facts) is inline here.
+    policy (cancel-partial interpretation, State writes, facts) stays here.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - explicit operation owners and borrowed driver source
         self,
         state: RunStatePort,
         runner: OperationRunner,
@@ -55,8 +70,10 @@ class RunService:
         writeback: WritebackLifecyclePort,
         *,
         gate: ExclusionGate,
+        devices: Callable[[], Mapping[str, BaseDevice[Any]]],
     ) -> None:
         self._state = state
+        self._devices = devices
         self._runner = runner
         self._gate = gate
         self._bus = bus
@@ -68,6 +85,20 @@ class RunService:
         # active_token is set by begin() and cleared on the terminal path so the
         # controller can cancel_run() and await the outcome (ADR-0066).
         self._active_token: int | None = None
+        # Run plots are view-only, never part of the canonical pane or Save All.
+        self._view_plots: dict[str, Plots] = {}
+        self._bus.subscribe(TabClosedPayload, self._on_tab_closed)
+
+    def _on_tab_closed(self, payload: TabClosedPayload) -> None:
+        self.release_view_plots(payload.tab_id)
+
+    def release_view_plots(self, tab_id: str) -> None:
+        previous = self._view_plots.pop(tab_id, None)
+        if previous is not None:
+            try:
+                previous.release()
+            except Exception:
+                logger.exception("Retired run view release failed: tab_id=%r", tab_id)
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:
         for draft in retired.writeback_drafts:
@@ -75,6 +106,87 @@ class RunService:
                 self._writeback.teardown_draft(draft)
             except Exception:
                 logger.exception("retired run draft teardown failed")
+        release_retired_plots(retired)
+
+    def _discard_plots(self, op: _RunOperation, context: str) -> None:
+        try:
+            discard_unpublished_plots(op.plots)
+        except Exception:
+            logger.exception(
+                "%s run plot cleanup failed: tab_id=%r", context, op.tab_id
+            )
+
+    def _on_run_terminal(
+        self, op: _RunOperation, bg: BgResult, settle: SettleFn
+    ) -> None:
+        # Schedule failures set the stop flag too, but are not cancellations.
+        if bg.ok:
+            if op.cancel_requested.is_set() or op.stop_event.is_set():
+                self._run_cancelled(op, bg.result, settle)
+            else:
+                self._run_finished(op, bg.result, settle)
+            return
+        if op.cancel_requested.is_set() and op.stop_signal.error is None:
+            self._run_cancelled(op, NO_RESULT, settle)
+        else:
+            error = bg.error or RuntimeError("Run worker failed without an error")
+            self._run_failed(op, error, settle)
+
+    def _publish_run_result(
+        self, op: _RunOperation, result: Any, settle: SettleFn
+    ) -> bool:
+        try:
+            op.plots.finish()
+            retired = self._state.update_tab_result(op.tab_id, result)
+        except Exception as error:  # noqa: BLE001 - settle host/State failures on the owner loop
+            self._run_failed(op, error, settle)
+            return False
+        self._view_plots[op.tab_id] = op.plots
+        self._teardown_retired(retired)
+        return True
+
+    def _clear_running(self, tab_id: str) -> None:
+        self._state.set_tab_running(tab_id, False)
+        self._active_token = None
+
+    def _run_finished(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
+        logger.info(
+            "_on_run_finished: tab_id=%r result_type=%s",
+            op.tab_id,
+            type(result).__name__,
+        )
+        if not self._publish_run_result(op, result, settle):
+            return
+        self._clear_running(op.tab_id)
+        # State is observable before settle (ADR-0066).
+        settle(OperationOutcome("finished"))
+        self._bus.emit(RunFinishedPayload(tab_id=op.tab_id, outcome="finished"))
+
+    def _run_cancelled(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
+        logger.info("_on_run_cancelled: tab_id=%r", op.tab_id)
+        # A cancelled run may still carry a partial result.
+        if result is NO_RESULT:
+            self._discard_plots(op, "Cancelled")
+        elif not self._publish_run_result(op, result, settle):
+            return
+        self._clear_running(op.tab_id)
+        settle(OperationOutcome("cancelled"))
+        self._bus.emit(RunFinishedPayload(tab_id=op.tab_id, outcome="cancelled"))
+
+    def _run_failed(
+        self, op: _RunOperation, error: Exception, settle: SettleFn
+    ) -> None:
+        logger.warning("_on_run_failed: tab_id=%r error=%r", op.tab_id, error)
+        self._discard_plots(op, "Failed")
+        self._clear_running(op.tab_id)
+        settle(OperationOutcome("failed", str(error)))
+        self._bus.emit(
+            RunFinishedPayload(
+                tab_id=op.tab_id,
+                outcome="failed",
+                error_message=str(error),
+            )
+        )
 
     def _prepare_tab_for_run(self, tab_id: str) -> None:
         # Reject conflicts before reserving State or clearing results. Runner
@@ -93,7 +205,8 @@ class RunService:
     def start_run(
         self,
         permit: RunPermit,
-        live_container: FigureContainer | None = None,
+        *,
+        plots: Plots,
     ) -> int:
         # Static preconditions (context readiness, committed-cfg validity, soc
         # capability) are proven by the RunPermit. Dynamic resource availability
@@ -103,6 +216,7 @@ class RunService:
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         logger.info("start_run: tab_id=%r", tab_id)
+        self.release_view_plots(tab_id)
 
         # PRE-OPEN: Starting a run invalidates the previous run/analyze/writeback
         # result. State performs one owner-thread swap and returns every detached
@@ -118,80 +232,28 @@ class RunService:
         adapter = permit.adapter
         request = permit.request
         raw_cfg = permit.accepted_cfg.values
+        context = RunContext(
+            soc=request.soc,
+            soccfg=request.soccfg,
+            plots=plots,
+            devices=self._devices(),
+            cancel_signal=stop_signal,
+        )
 
         def request_cancel() -> None:
             cancel_requested.set()
             stop_event.set()
 
         def work(factory: Any) -> Any:
-            # Run is the OffMain-thread strategy with all three scopes (ADR-0066):
-            # figure routing+liveplot (figure_ambient, app layer), progress
-            # (progress_ambient, session layer), and cancel (Schedule StopSignal
-            # plus device setup cancel scope).
-            with figure_ambient(live_container), progress_ambient(factory):
-                with schedule_stop_scope(stop_signal):
-                    with device_setup_cancel_scope(stop_event):
-                        result = adapter.run(request, raw_cfg)
-                        stop_signal.raise_if_error()
-                        return result
+            # Progress alone is ambient; execution dependencies are run-owned.
+            with progress_ambient(factory):
+                result = adapter.run(request, raw_cfg, context=context)
+                stop_signal.raise_if_error()
+                return result
 
-        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
-            # Interpret bg outcome: we own stop_event, so we decide cancelled vs
-            # finished/failed (ADR-0066). Mirrors the old _on_bg_done/_on_bg_error
-            # → _on_run_finished/_on_run_cancelled/_on_run_failed logic exactly.
-            if bg.ok:
-                if cancel_requested.is_set() or stop_event.is_set():
-                    _on_run_cancelled(bg.result, settle)
-                else:
-                    _on_run_finished(bg.result, settle)
-            else:
-                assert bg.error is not None
-                if cancel_requested.is_set() and stop_signal.error is None:
-                    _on_run_cancelled(NO_RESULT, settle)
-                else:
-                    _on_run_failed(bg.error, settle)
-
-        def _on_run_finished(result: Any, settle: SettleFn) -> None:
-            logger.info(
-                "_on_run_finished: tab_id=%r result_type=%s",
-                tab_id,
-                type(result).__name__,
-            )
-            retired = self._state.update_tab_result(tab_id, result)
-            self._teardown_retired(retired)
-            self._state.set_tab_running(tab_id, False)
-            self._active_token = None
-            # State is observable before settle (ADR-0066 / stage2c invariant 1).
-            settle(OperationOutcome("finished"))
-            self._bus.emit(RunFinishedPayload(tab_id=tab_id, outcome="finished"))
-
-        def _on_run_cancelled(result: Any, settle: SettleFn) -> None:
-            logger.info("_on_run_cancelled: tab_id=%r", tab_id)
-            # A cancelled run may still carry a partial result (the worker returned
-            # before the stop_event tripped a hard interrupt); keep it if present.
-            if result is not NO_RESULT:
-                retired = self._state.update_tab_result(tab_id, result)
-                self._teardown_retired(retired)
-            self._state.set_tab_running(tab_id, False)
-            self._active_token = None
-            # STATE is observable before settle.
-            settle(OperationOutcome("cancelled"))
-            self._bus.emit(RunFinishedPayload(tab_id=tab_id, outcome="cancelled"))
-
-        def _on_run_failed(error: Exception, settle: SettleFn) -> None:
-            logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
-            self._state.set_tab_running(tab_id, False)
-            self._active_token = None
-            # STATE is observable before settle.
-            settle(OperationOutcome("failed", str(error)))
-            self._bus.emit(
-                RunFinishedPayload(
-                    tab_id=tab_id,
-                    outcome="failed",
-                    error_message=str(error),
-                )
-            )
-
+        operation = _RunOperation(
+            tab_id, plots, stop_event, stop_signal, cancel_requested
+        )
         spec = OperationSpec(
             exclusion=ExclusionRequest(
                 kind=OperationKind.RUN,
@@ -203,7 +265,7 @@ class RunService:
             cancel_hook=request_cancel,
             work=work,
             run_in_pool=False,
-            on_terminal=on_terminal,
+            on_terminal=lambda bg, settle: self._on_run_terminal(operation, bg, settle),
         )
 
         # begin() is atomic: ensure_can_start → create → register → factory → submit.
@@ -211,6 +273,7 @@ class RunService:
         try:
             token = self._runner.begin(spec)
         except Exception:
+            self._discard_plots(operation, "Rejected")
             self._state.set_tab_running(tab_id, False)
             self._bus.emit(
                 TabInteractionChangedPayload(

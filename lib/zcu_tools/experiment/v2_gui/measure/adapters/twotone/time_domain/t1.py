@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Exp, T1Result
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+    T1Analysis,
+    T1AnalyzeOptions,
+    T1Cfg,
+    T1Exp,
+    T1Result,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -18,29 +24,42 @@ from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 
-T1RunResult: TypeAlias = T1Result
+if TYPE_CHECKING:
+    from zcu_tools.plotting.plots import Plots
+
+T1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
 @dataclass
 class T1AnalyzeParams:
     dual_exp: Annotated[bool, ParamMeta(label="Dual exponential")] = False
+    skip: Annotated[int, ParamMeta(label="Skip leading points")] = 0
 
 
-@dataclass
-class T1AnalyzeResult(AnalyzeResultBase):
-    t1: float
-    t1_err: float
-    figure: Figure
+@dataclass(frozen=True)
+class T1AnalyzeResult:
+    """GUI summary over the unchanged, typed core analysis."""
+
+    analysis: T1Analysis
+
+    @property
+    def t1(self) -> float:
+        return self.analysis.t1
+
+    @property
+    def t1_err(self) -> float:
+        return self.analysis.t1_err
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return asdict(self.analysis)
 
 
 class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
@@ -116,31 +135,25 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T1Cfg:
-        cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("uniform", None)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def _uniform(self, raw_cfg: dict[str, object]) -> bool:
-        value = raw_cfg.get("uniform", True)
-        if not isinstance(value, bool):
-            raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
-        return value
-
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> T1RunResult:
-        soc, soccfg = require_soc_handles(req)
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> T1RunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        return T1Exp().run(soc, soccfg, cfg, uniform=self._uniform(raw_cfg))
+        result = T1Exp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[T1RunResult, T1AnalyzeParams]
+        self, req: AnalyzeRequest[T1RunResult, T1AnalyzeParams], *, plots: Plots
     ) -> T1AnalyzeResult:
         params = req.analyze_params
-        t1, t1_err, fig = T1Exp().analyze(
+        if params.skip < 0:
+            raise ValueError("Skip leading points must be nonnegative")
+        analysis = T1Exp().analyze(
             req.run_result,
-            dual_exp=params.dual_exp,
+            T1AnalyzeOptions(dual_exp=params.dual_exp, skip=params.skip),
+            plots=plots,
         )
-        return T1AnalyzeResult(t1=t1, t1_err=t1_err, figure=fig)
+        return T1AnalyzeResult(analysis)
 
     def get_writeback_items(
         self, req: WritebackRequest[T1RunResult, T1AnalyzeResult]

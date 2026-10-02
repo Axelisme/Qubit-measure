@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 class _FakeAdapter(BaseAdapter[Any, Any, Any, Any]):
@@ -47,7 +48,7 @@ def test_default_capability_has_no_post_analysis() -> None:
 
 def test_base_post_analyze_raises() -> None:
     with pytest.raises(NotImplementedError, match="post-analysis"):
-        _FakeAdapter().post_analyze(MagicMock())
+        _FakeAdapter().post_analyze(MagicMock(), plots=Plots(NonPresentingHost()))
 
 
 def test_base_get_post_analyze_params_raises() -> None:

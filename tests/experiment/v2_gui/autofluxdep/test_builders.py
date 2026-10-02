@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 # --- catalog exposes all measurement types ---
 
@@ -54,7 +55,9 @@ def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
 
     builder = create_placement(type_name).builder
     figure = Figure()
-    plotter = builder.make_plotter(figure)
+    plots = Plots(NonPresentingHost())
+    plots.adopt(type_name, figure)
+    plotter = builder.make_plotter(plots, type_name)
     assert plotter is not None
     assert len(figure.axes) == n_axes
 
@@ -80,7 +83,9 @@ def test_ro_optimize_plotter_marks_latest_best_point():
     result.best_gain[1] = 0.5
 
     figure = Figure()
-    plotter = Landscape2DPlotter(figure)
+    plots = Plots(NonPresentingHost())
+    plots.adopt("landscape", figure)
+    plotter = Landscape2DPlotter(plots, "landscape")
     plotter.update(result, 2)
 
     marker = figure.axes[0].collections[-1]
@@ -110,10 +115,47 @@ def test_qubit_freq_plotter_title_shows_current_snr():
     result.snr[1] = 12.34
 
     figure = Figure()
-    plotter = QubitFreqPlotter(figure)
+    plots = Plots(NonPresentingHost())
+    plots.adopt("frequency", figure)
+    plotter = QubitFreqPlotter(plots, "frequency")
     plotter.update(result, 1)
 
     assert "snr = 12.3" in figure.axes[1].get_title()
+
+
+def test_decay_plotter_updates_named_scalar_and_current_curve():
+    from io import BytesIO
+
+    from matplotlib.figure import Figure
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.plotters import Decay1DPlotter
+    from zcu_tools.experiment.v2_gui.autofluxdep._support.result import Sweep1DResult
+
+    plots = Plots(NonPresentingHost())
+    figure = Figure()
+    plots.adopt("decay", figure)
+    plotter = Decay1DPlotter(plots, "decay", "decay", "Lifetime", "Delay")
+    result = Sweep1DResult.allocate(
+        np.array([0.0, 0.1]), np.array([0.0, 0.5, 1.0]), x_label="Delay"
+    )
+    result.fit_value[:] = [4.0, 5.0]
+    result.signal[:] = [[1.0, 0.5, 0.2], [2.0, 1.0, 0.4]]
+    result.fit_curve[:] = [[1.1, 0.6, 0.3], [2.1, 1.1, 0.5]]
+    plotter.update(result, 1)
+
+    np.testing.assert_allclose(
+        np.asarray(figure.axes[0].lines[0].get_ydata()), [4.0, 5.0]
+    )
+    np.testing.assert_allclose(
+        np.asarray(figure.axes[1].lines[0].get_ydata()), result.signal[1]
+    )
+    np.testing.assert_allclose(
+        np.asarray(figure.axes[1].lines[1].get_ydata()), result.fit_curve[1]
+    )
+    retained = plots.finish()
+    plots.release()
+    saved = BytesIO()
+    retained["decay"].savefig(saved, format="png")
+    assert saved.getvalue().startswith(b"\x89PNG")
 
 
 def test_sweep1d_plotter_title_shows_current_snr():
@@ -134,11 +176,21 @@ def test_sweep1d_plotter_title_shows_current_snr():
     result.snr[1] = 23.45
 
     figure = Figure()
+    plots = Plots(NonPresentingHost())
+    plots.adopt("scan", figure)
     plotter = ColormapLinePlotter(
-        figure,
+        plots,
+        "scan",
         title="lenrabi",
         y_label="Pulse length (us)",
+        marker_of=lambda current: float(current.fit_value[1]),
     )
+    result.fit_value[1] = 0.5
     plotter.update(result, 1)
 
     assert "snr = 23.4" in figure.axes[0].get_title()
+    marker = figure.axes[1].lines[-1]
+    np.testing.assert_allclose(np.asarray(marker.get_xdata()), [0.5])
+    result.fit_value[1] = np.nan
+    plotter.update(result, 1)
+    assert np.isnan(marker.get_xdata()).all()

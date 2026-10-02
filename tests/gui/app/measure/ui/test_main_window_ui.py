@@ -10,13 +10,17 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtGui import QKeyEvent
-from qtpy.QtWidgets import QApplication, QLineEdit, QWidget
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QStackedWidget, QWidget
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     MetaDictWriteback,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKey,
+    ArtifactKind,
+    SaveStatus,
+)
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
@@ -41,13 +45,17 @@ from zcu_tools.gui.cfg.resource import (
     CfgResource,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.plotting.explicit import QtPlotHost
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
 def _mock_ctrl() -> MagicMock:
@@ -79,7 +87,7 @@ _DEFAULT_PARAMS = object()
 
 class _RecordingTabActions:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str] | tuple[str, str, ArtifactKey]] = []
 
     def refresh_interaction(self, tab_id: str) -> None:
         self.calls.append(("refresh_interaction", tab_id))
@@ -105,11 +113,8 @@ class _RecordingTabActions:
     def save_data(self, tab_id: str) -> None:
         self.calls.append(("save_data", tab_id))
 
-    def save_image(self, tab_id: str) -> None:
-        self.calls.append(("save_image", tab_id))
-
-    def save_post_image(self, tab_id: str) -> None:
-        self.calls.append(("save_post_image", tab_id))
+    def save_image(self, tab_id: str, key: ArtifactKey) -> None:
+        self.calls.append(("save_image", tab_id, key))
 
     def save_all(self, tab_id: str) -> None:
         self.calls.append(("save_all", tab_id))
@@ -196,22 +201,22 @@ def _snapshot(
     analysis_snap = AnalysisPaneSnapshot(
         params=resolved_analyze_params,
         result=object() if has_analyze_result else None,
-        figure=figure_obj,
+        figures=ready_figures(figure_obj),
         writeback_items=tuple(writeback_items),
-        image_path=analysis_image_snap,
+        image_paths={"fit": analysis_image_snap} if figure_obj is not None else {},
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=post_analyze_params,
         result=object() if has_post_analyze_result else None,
-        figure=post_figure_obj,
+        figures=ready_figures(post_figure_obj),
         writeback_items=(),
-        image_path=post_image_snap,
+        image_paths={"fit": post_image_snap} if post_figure_obj is not None else {},
     )
     save_snap = SavePaneSnapshot(data_path=data_path_snap)
     paths_snap = TabPathsSnapshot(
         data=data_path_snap,
-        analysis_image=analysis_image_snap,
-        post_analysis_image=post_image_snap,
+        analysis_images=analysis_snap.image_paths,
+        post_analysis_images=post_snap.image_paths,
     )
 
     snapshot = TabSnapshot(
@@ -355,7 +360,8 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     assert tab._save_center.is_load_enabled() is False
     assert tab.writeback_widget.isEnabled() is False
     assert (
-        tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
+        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
+        is False
     )  # disabled because is_analyzing
 
 
@@ -385,7 +391,7 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 
     assert tab.run_btn.isEnabled() is False
     assert tab.analyze_btn.isEnabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
+    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
 
 
 def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
@@ -412,8 +418,11 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
         )
     )
 
-    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is False
-    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
+    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is False
+    assert (
+        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
+        is False
+    )
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.toolTip() == "Tab is busy"
 
@@ -508,8 +517,11 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     assert tab._save_center.is_load_enabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.writeback_widget.isEnabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is False
-    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
+    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is False
+    assert (
+        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
+        is False
+    )
 
 
 def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
@@ -543,8 +555,8 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
     # No Load Data capability means no control is constructed.
     assert not tab._save_center.is_load_visible()
     # ... but Save stays reachable and usable (run result + active context).
-    assert tab._save_center.has_artifact(ArtifactKind.DATA)
-    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
+    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
+    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
 
 
 def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
@@ -564,7 +576,7 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
     assert tab._left_tabs.tabText(1) == "Analysis"
     assert tab._analyze_section.isHidden() is False
     assert tab.analyze_btn.isHidden() is False
-    assert tab._save_center.has_artifact(ArtifactKind.DATA)
+    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
 
 
 def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
@@ -696,52 +708,6 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
     assert "Inspect…" in texts
     assert "Agent…" not in texts
     assert "Arb Waveforms…" not in texts
-
-
-def test_main_window_tab_actions_forward_to_private_handlers(qapp, monkeypatch):
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-
-    ctrl = _apply_window_defaults(MagicMock())
-    ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
-    handlers = {
-        "refresh_tab_interaction": MagicMock(),
-        "run_or_stop_tab": MagicMock(),
-        "load_tab_data_dialog": MagicMock(),
-        "analyze_tab": MagicMock(),
-        "post_analyze_tab": MagicMock(),
-        "apply_tab_writeback": MagicMock(),
-        "save_tab_data": MagicMock(),
-        "save_tab_analysis_image": MagicMock(),
-        "save_tab_post_analysis_image": MagicMock(),
-    }
-    for name, handler in handlers.items():
-        monkeypatch.setattr(window, name, handler)
-
-    # Pane-qualified writeback: analysis -> pane="analysis", post -> pane="post_analysis"
-    window._tab_actions.refresh_interaction("tab-1")
-    handlers["refresh_tab_interaction"].assert_called_once_with("tab-1")
-    window._tab_actions.run_or_stop("tab-1")
-    handlers["run_or_stop_tab"].assert_called_once_with("tab-1")
-    window._tab_actions.load_data("tab-1")
-    handlers["load_tab_data_dialog"].assert_called_once_with("tab-1")
-    window._tab_actions.analyze("tab-1")
-    handlers["analyze_tab"].assert_called_once_with("tab-1")
-    window._tab_actions.post_analyze("tab-1")
-    handlers["post_analyze_tab"].assert_called_once_with("tab-1")
-    window._tab_actions.apply_writeback("tab-1")
-    handlers["apply_tab_writeback"].assert_called_once_with("tab-1", pane="analysis")
-    handlers["apply_tab_writeback"].reset_mock()
-    window._tab_actions.apply_post_writeback("tab-1")
-    handlers["apply_tab_writeback"].assert_called_once_with(
-        "tab-1", pane="post_analysis"
-    )
-    window._tab_actions.save_data("tab-1")
-    handlers["save_tab_data"].assert_called_once_with("tab-1")
-    window._tab_actions.save_image("tab-1")
-    handlers["save_tab_analysis_image"].assert_called_once_with("tab-1")
-    window._tab_actions.save_post_image("tab-1")
-    handlers["save_tab_post_analysis_image"].assert_called_once_with("tab-1")
 
 
 def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
@@ -999,7 +965,9 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
     tab.update_writeback_items.assert_not_called()
-    tab.show_analysis_figure.assert_called_once_with(figure)
+    snapshot = ctrl.get_tab_snapshot.return_value
+    assert snapshot.analysis is not None
+    tab.show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
 
 
 def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_start(
@@ -1035,7 +1003,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
     )
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
-    tab.show_analysis_figure.assert_not_called()
+    tab.show_analysis_figures.assert_not_called()
 
 
 def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
@@ -1070,7 +1038,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     )
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
-    tab.show_analysis_figure.assert_not_called()
+    tab.show_analysis_figures.assert_not_called()
 
 
 def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
@@ -1105,12 +1073,12 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
         TabInteractionChangedPayload("tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED)
     )
 
-    assert tab.show_analysis_figure.call_args_list == [
-        ((primary,),),
-    ]
-    assert tab.show_post_analysis_figure.call_args_list == [
-        ((post,),),
-    ]
+    snapshot = ctrl.get_tab_snapshot.return_value
+    assert snapshot.analysis is not None and snapshot.post_analysis is not None
+    tab.show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
+    tab.show_post_analysis_figures.assert_called_once_with(
+        snapshot.post_analysis.figures
+    )
 
 
 @pytest.mark.parametrize(
@@ -1154,8 +1122,9 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, 
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     window._tab_widgets["tab-1"] = tab
-    tab.show_analysis_figure(primary)
-    tab.show_post_analysis_figure(post)
+    assert snapshot.analysis is not None and snapshot.post_analysis is not None
+    tab.show_analysis_figures(snapshot.analysis.figures)
+    tab.show_post_analysis_figures(snapshot.post_analysis.figures)
 
     # Simulate operation start clearing only its pane; here clear both figures to emulate stale state
     tab._analysis_container.clear_dynamic_canvases()
@@ -1206,7 +1175,7 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(qapp):
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     window._tab_widgets["tab-1"] = tab
-    tab.show_analysis_figure(Figure())
+    tab.show_analysis_figures(ready_figures(Figure()))
     assert tab.get_current_figure_for_pane("analysis") is not None
 
     bus.emit(TabContentChangedPayload("tab-1", TabContentFact.LOADED_RESULT_COMMITTED))
@@ -1467,9 +1436,15 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     assert tab._save_center.is_load_enabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.post_analyze_btn.isEnabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
-    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is True
-    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is True
+    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
+    assert (
+        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
+        is True
+    )
+    assert (
+        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"))
+        is True
+    )
 
     actions.calls.clear()
     tab.run_btn.click()
@@ -1478,9 +1453,9 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     tab.post_analyze_btn.click()
     tab.writeback_widget.apply_requested.emit()
     tab.post_writeback_widget.apply_requested.emit()
-    tab._save_center.save_button(ArtifactKind.DATA).click()
-    tab._save_center.save_button(ArtifactKind.ANALYSIS).click()
-    tab._save_center.save_button(ArtifactKind.POST_ANALYSIS).click()
+    tab._save_center.save_button(ArtifactKey(ArtifactKind.DATA)).click()
+    tab._save_center.save_button(ArtifactKey(ArtifactKind.ANALYSIS, "fit")).click()
+    tab._save_center.save_button(ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")).click()
 
     assert actions.calls == [
         ("run_or_stop", "tab-1"),
@@ -1490,8 +1465,8 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
         ("apply_writeback", "tab-1"),
         ("apply_post_writeback", "tab-1"),
         ("save_data", "tab-1"),
-        ("save_image", "tab-1"),
-        ("save_post_image", "tab-1"),
+        ("save_image", "tab-1", ArtifactKey(ArtifactKind.ANALYSIS, "fit")),
+        ("save_image", "tab-1", ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")),
     ]
 
 
@@ -1750,7 +1725,7 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
         lambda fig, container: canvas,
     )
 
-    tab.show_analysis_figure(Figure())
+    tab.show_analysis_figures(ready_figures(Figure()))
 
     canvas.draw.assert_called_once_with()
 
@@ -1773,8 +1748,8 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
 
     fig_a1 = Figure()
     fig_p1 = Figure()
-    tab.show_analysis_figure(fig_a1)
-    tab.show_post_analysis_figure(fig_p1)
+    tab.show_analysis_figures(ready_figures(fig_a1))
+    tab.show_post_analysis_figures(ready_figures(fig_p1))
 
     # Each pane has its own stack with placeholder + 1 canvas
     assert tab._analysis_stack.count() == 2
@@ -1784,7 +1759,7 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
 
     # Re-showing analysis does not affect post
     fig_a2 = Figure()
-    tab.show_analysis_figure(fig_a2)
+    tab.show_analysis_figures(ready_figures(fig_a2))
     assert tab.get_current_figure_for_pane("analysis") is fig_a2
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p1
     assert tab._post_stack.count() == 2
@@ -2078,6 +2053,33 @@ def test_app_close_idle_with_no_unsaved_tabs_shuts_down_without_prompt(qapp):
     assert len(dialogs.calls) == 0
     QCoreApplication.processEvents()
     _shutdown_callback(ctrl)
+
+
+def test_closing_window_leaves_plot_host_available_until_app_quits(qapp):
+    window, _ctrl = _setup_window_with_tabs(
+        RecordingDialogPresenter(), active_operations=0
+    )
+    window.close()
+    QCoreApplication.processEvents()
+
+    stack = QStackedWidget()
+    placeholder = QLabel("empty")
+    stack.addWidget(placeholder)
+    container = FigureContainer(stack, placeholder)
+    owner = QtOwnerScheduler()
+    try:
+        plots = Plots(QtPlotHost(container, owner))
+        plots.subplots("fresh")
+        plots.finish()
+        assert stack.count() == 2
+        plots.release()
+        assert stack.count() == 1
+    finally:
+        container.clear_dynamic_canvases()
+        owner.deleteLater()
+        stack.deleteLater()
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def test_app_close_with_unsaved_tabs_prompts_and_declining_cancels(qapp):

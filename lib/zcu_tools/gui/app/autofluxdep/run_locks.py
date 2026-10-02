@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
+    from zcu_tools.program.v2.sim import SimParams
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -94,6 +95,12 @@ class GuardedSetupControl:
     def start_connect(self, req: ConnectRequest) -> int:
         self._guard("setup")
         return self._inner.start_connect(req)
+
+    def start_simulated_environment(
+        self, *, sim_params: SimParams | None = None
+    ) -> int:
+        self._guard("setup")
+        return self._inner.start_simulated_environment(sim_params=sim_params)
 
     def bind_connection_outcome(
         self,

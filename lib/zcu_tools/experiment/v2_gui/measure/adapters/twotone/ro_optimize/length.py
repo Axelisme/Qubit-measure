@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.ro_optimize.length import (
+    LengthAnalyzeOptions,
     LengthCfg,
     LengthExp,
     LengthResult,
@@ -25,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -32,8 +34,9 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
-RoOptLengthRunResult: TypeAlias = LengthResult
+RoOptLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 
 @dataclass
@@ -42,7 +45,7 @@ class RoOptLengthAnalyzeParams:
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
     ] = "wavelet"
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
-    # GUI-facing name for LengthExp.analyze(t0=...): this is a duration
+    # GUI-facing name for LengthAnalyzeOptions.t0: this is a duration
     # normalization overhead, not a penalty strength. Small positive values
     # produce stronger short-readout bias than large positive values.
     duration_t0: Annotated[float | None, ParamMeta(label="Duration t0 (us)")] = None
@@ -51,7 +54,6 @@ class RoOptLengthAnalyzeParams:
 @dataclass
 class RoOptLengthAnalyzeResult(AnalyzeResultBase):
     best_length: float
-    figure: Figure
 
 
 class RoOptLengthAdapter(
@@ -123,17 +125,32 @@ class RoOptLengthAdapter(
             .build()
         )
 
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> RoOptLengthRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, LengthExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams]
+        self,
+        req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> RoOptLengthAnalyzeResult:
         params = req.analyze_params
-        best_length, fig = LengthExp().analyze(
-            req.run_result,
+        options = LengthAnalyzeOptions(
             t0=params.duration_t0,
             smooth=params.smooth,
             smooth_method=params.smooth_method,
         )
-        return RoOptLengthAnalyzeResult(best_length=best_length, figure=fig)
+        result = LengthExp().analyze(req.run_result, options, plots=plots)
+        return RoOptLengthAnalyzeResult(
+            best_length=result.best_length,
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[RoOptLengthRunResult, RoOptLengthAnalyzeResult]
@@ -149,7 +166,7 @@ class RoOptLengthAdapter(
         items.extend(
             readout_dpm_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 proposed={"best_ro_length": result.best_length},
             )
         )
