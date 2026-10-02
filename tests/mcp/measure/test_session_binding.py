@@ -380,14 +380,16 @@ def test_assembled_multistep_tools_do_not_cross_connections(
         else:
             assert result["completed"] == []
             assert result["not_started"] == ["primary"]
-    elif tool == "tab_analyze" and not replies["tab.analyze"]["interactive"]:
+    elif tool == "tab_analyze":
         result = client.call(tool, arguments)
-        assert (
-            result.is_error,
-            result.data["status"],
-            result.data["error"]["reason"],
-            result.data["op"],
-        ) == (True, "failed", "connection_lost", 1)
+        assert result.is_error is True
+        assert result.data["op"] == 1
+        if result.data["status"] == "interactive":
+            assert "connection" in result.data["interaction"]["delivery_error"].lower()
+        else:
+            assert (result.data["status"], result.data["error"]["reason"]) == (
+                "failed", "connection_lost"
+            )
     else:
         with pytest.raises(GuiRpcError) as error:
             client.call(tool, arguments)
@@ -436,6 +438,70 @@ def test_received_operation_reply_survives_eof(
     assert not second.sent
     client.context.session.connect_to_gui(port=9912, launch="never", clean=False)
     assert client.context.session.bind().expose_operation(7) == 2
+
+
+@pytest.mark.parametrize("change", ["eof", "reconnect"])
+@pytest.mark.parametrize("cut_after", ["tab.get_analyze_result", "tab.save_image"])
+def test_background_analysis_retains_received_facts_without_cross_generation_replay(
+    tmp_path, monkeypatch, change, cut_after
+):
+    client, second = make_restartable_client(tmp_path, monkeypatch)
+    session = client.context.session
+    replies = {
+        "tab.analyze": {"operation_id": 71, "interactive": False, "params": {}, "invalidated_on_success": []},
+        "operation.await": {"reason": "completed", "status": "finished"},
+        "tab.get_analyze_result": {
+            "summary": {"peak": 5},
+            "params": {},
+            "operation_state": {"analysis_state": {"figure_names": ["fit", "residual"]}},
+        },
+        "tab.save_image": {"image_path": "/actual/fit.png"},
+    }
+    client.transport.replies.update({key: {"ok": True, "result": value} for key, value in replies.items()})
+    second.replies["tab.analyze"] = {"ok": True, "result": replies["tab.analyze"]}
+    real_send = GuiConnection.send_gui_rpc
+    changed = Event()
+
+    def send(connection, method, params, *args, **kwargs):
+        reply = real_send(connection, method, params, *args, **kwargs)
+        if method == cut_after and not changed.is_set():
+            changed.set()
+            if change == "eof":
+                client.context.bridge.disconnect()
+            else:
+                session.connect_to_gui(port=9912, launch="never", clean=False)
+        return reply
+
+    monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
+    try:
+        reply = client.call("tab_analyze", {"tab": "t"})
+        assert changed.is_set()
+        assert reply.is_error is True
+        result = reply.data
+        assert result["status"] == "failed"
+        assert result["error"]["reason"] == "connection_lost"
+        assert result["op"] == 1
+        assert result["result"]["summary"] == {"peak": 5}
+        assert result["saved_images"] == (
+            [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+            if cut_after == "tab.save_image" else []
+        )
+        assert result["remaining_images"] == (
+            ["residual"] if cut_after == "tab.save_image" else ["fit", "residual"]
+        )
+        assert result["unconfirmed_image"] is None
+        before = list(second.sent)
+        assert client.call("status", {"execution": result["execution"]}) == result
+        assert client.call("cancel", {"execution": result["execution"]}).data["gui_cancel"]["status"] == "not_needed"
+        assert second.sent == before
+        if change == "eof":
+            session.connect_to_gui(port=9912, launch="never", clean=False)
+        new_op = client.call("rpc_call", {"method": "tab.analyze", "params": {"tab_id": "t", "updates": {}}})
+        assert new_op["handle"] == 2
+        assert client.call("status", {"execution": result["execution"]})["op"] == 1
+        assert not any(method in {"tab.save_image", "tab.get_analyze_result", "tab.get_figure", "operation.cancel"} for method, _ in second.sent)
+    finally:
+        session.close()
 
 
 def test_binding_survives_noop_connect_but_not_a_new_connection(
