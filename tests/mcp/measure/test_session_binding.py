@@ -321,7 +321,7 @@ def test_assembled_multistep_tools_do_not_cross_connections(
     assert sum(method == cut_after for method, _ in client.transport.sent) == 1
 
 
-@pytest.mark.parametrize("method", ["tab.run", "tab.analyze"])
+@pytest.mark.parametrize("method", ["tab.run_start", "tab.analyze"])
 def test_received_operation_reply_survives_eof(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
