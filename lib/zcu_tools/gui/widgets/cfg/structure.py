@@ -11,7 +11,7 @@ import logging
 from typing import cast, final
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QBrush, QColor, QPainter, QPen  # type: ignore[attr-defined]
+from qtpy.QtGui import QColor, QPainter, QPen  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractItemView,
     QHeaderView,
@@ -25,15 +25,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceSpec, is_custom_reference_key
-from zcu_tools.gui.cfg.binding import (
-    CenteredSweepField,
-    CfgField,
-    ReferenceField,
-    ScalarField,
-    SectionField,
-    SweepField,
-)
+from zcu_tools.gui.cfg import is_custom_reference_key
+from zcu_tools.gui.cfg.binding import CfgField, ReferenceField, SectionField
 
 from .presentation import (
     apply_tree_item_decoration,
@@ -433,11 +426,6 @@ class TreeCfgWidget(QWidget):
 
     def _level_color(self, depth: int) -> QColor:
         return QColor(TREE_DEPTH_COLORS[depth % len(TREE_DEPTH_COLORS)])
-
-    def _set_depth_background(self, item: QTreeWidgetItem, depth: int) -> None:
-        # A1: rows no longer use depth background colors; guide lines are colored instead.
-        # Kept for compatibility but intentionally no-op.
-        return
 
     def _default_expanded_for_reference(self, field: ReferenceField) -> bool:
         if field.spec.optional and not field.is_enabled:
@@ -858,7 +846,6 @@ class TreeCfgWidget(QWidget):
             return
         # Reference
         if isinstance(child_field, ReferenceField):
-            spec = child_field.spec  # type: ignore[attr-defined]
             label = decorated_label(child_field, key, child_path, self._context)
             item = QTreeWidgetItem(parent_item, (label, ""))  # type: ignore[arg-type]
             item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
