@@ -247,104 +247,21 @@ class TreeCfgWidget(QWidget):
         ref_field = self._find_reference_field(path) if sec_field is None else None
         if sec_field is None and ref_field is None:
             return False
-        # Reference-elided subtree: rebuild only descendants of the reference item,
-        # preserving the reference header, ancestors and unrelated branches.
+        self._clear_descendants(item, path)
+        target_depth = self._item_depth.get(id(item), 0)
         if ref_field is not None:
-            # Collect descendants under the reference (excludes the reference itself)
-            descendant_item_paths = [
-                p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
-            ]
-            descendant_leaf_paths = [
-                p
-                for p in list(self._leaf_path_to_widget.keys())
-                if p.startswith(path + ".")
-            ]
-            # Teardown descendant leaf widgets.
-            for leaf_path in descendant_leaf_paths:
-                widget = self._leaf_path_to_widget.pop(leaf_path, None)
-                if widget is not None:
-                    try:
-                        widget.teardown()
-                    except Exception:
-                        pass
-                    try:
-                        self._leaf_widgets.remove(widget)
-                    except ValueError:
-                        pass
-                    try:
-                        cast(QWidget, widget).setParent(None)
-                    except Exception:
-                        pass
-                    try:
-                        cast(QWidget, widget).deleteLater()
-                    except Exception:
-                        pass
-            # Teardown descendant reference headers and disconnect.
-            descendant_ref_paths = [
-                p
-                for p in descendant_item_paths
-                if self._find_reference_field(p) is not None
-            ]
-            for ref_path in descendant_ref_paths:
-                ref_item = self._path_to_item.get(ref_path)
-                if ref_item is not None:
-                    header = self._tree.itemWidget(ref_item, 1)
-                    if header is not None:
-                        try:
-                            cast(FieldWidgetProtocol, header).teardown()
-                        except Exception:
-                            pass
-                        try:
-                            header.setParent(None)
-                        except Exception:
-                            pass
-                        try:
-                            header.deleteLater()
-                        except Exception:
-                            pass
-                        try:
-                            self._ref_headers.remove(cast(FieldWidgetProtocol, header))
-                        except ValueError:
-                            pass
-                rf = self._find_reference_field(ref_path)
-                if rf is not None:
-                    for f, cb in list(self._ref_connections):
-                        if f is rf:
-                            try:
-                                f.on_change.disconnect(cb)  # type: ignore[attr-defined]
-                            except Exception:
-                                pass
-                    for f, cb in list(self._ref_enabled_connections):
-                        if f is rf:
-                            try:
-                                f.on_enabled_changed.disconnect(cb)  # type: ignore[attr-defined]
-                            except Exception:
-                                pass
-                    self._ref_connections = [
-                        (f, cb) for (f, cb) in self._ref_connections if f is not rf
-                    ]
-                    self._ref_enabled_connections = [
-                        (f, cb)
-                        for (f, cb) in self._ref_enabled_connections
-                        if f is not rf
-                    ]
-                    self._ref_prev_state.pop(ref_path, None)
-                self._path_to_item.pop(ref_path, None)
-                if ref_item is not None:
-                    self._item_depth.pop(id(ref_item), None)
-            # Remove remaining descendant section/group items.
-            for item_path in descendant_item_paths:
-                if item_path in descendant_ref_paths:
-                    continue
-                it = self._path_to_item.pop(item_path, None)
-                if it is not None:
-                    self._item_depth.pop(id(it), None)
-                self._ref_prev_state.pop(item_path, None)
-            while item.childCount():
-                item.takeChild(0)
-            target_depth = self._item_depth.get(id(item), 0)
             self._populate_reference_subtree(item, ref_field, path, target_depth)
-            return True
+        else:
+            assert sec_field is not None
+            self._add_section_children(item, sec_field, path, target_depth + 1)
+        return True
+
+    def _clear_descendants(self, item: QTreeWidgetItem, path: str) -> None:
+        """Release descendant editors and callbacks without removing the owner row.
+
+        Both section and reference refresh keep the owner's item, depth and
+        reference header. Decoration cache invalidation belongs to CfgFormWidget.
+        """
         # Collect descendant item paths (sections/references/groups) under target.
         descendant_item_paths = [
             p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
@@ -382,7 +299,6 @@ class TreeCfgWidget(QWidget):
             for p in descendant_item_paths
             if self._find_reference_field(p) is not None
         ]
-        # Also include direct descendant refs that may not be in _path_to_item? They are.
         for ref_path in descendant_ref_paths:
             # Find header widget for this ref item (column 1 widget).
             ref_item = self._path_to_item.get(ref_path)
@@ -431,7 +347,8 @@ class TreeCfgWidget(QWidget):
                 self._ref_prev_state.pop(ref_path, None)
             # Remove from maps
             self._path_to_item.pop(ref_path, None)
-            self._item_depth.pop(id(ref_item), None) if ref_item is not None else None
+            if ref_item is not None:
+                self._item_depth.pop(id(ref_item), None)
         # Remove remaining descendant section/group items (non-reference sections and groups).
         for item_path in descendant_item_paths:
             if item_path in descendant_ref_paths:
@@ -443,12 +360,6 @@ class TreeCfgWidget(QWidget):
         # Remove all child QTreeWidgetItems from target item (clears UI).
         while item.childCount():
             item.takeChild(0)
-        # Drop decorations under target will be handled by CfgFormWidget caller;
-        # here we just rebuild the subtree.
-        target_depth = self._item_depth.get(id(item), 0)
-        assert sec_field is not None
-        self._add_section_children(item, sec_field, path, target_depth + 1)
-        return True
 
     def _find_section_field(self, path: str) -> SectionField | None:
         if path == self._path or path == "":
