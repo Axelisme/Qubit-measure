@@ -1,5 +1,6 @@
 """Bind explicitly registered Python recipes to the measure MCP tool table."""
 
+import logging
 from functools import partial
 from typing import Any
 
@@ -9,6 +10,8 @@ from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.recipe_context import RecipeContext, RecipeError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
+logger = logging.getLogger(__name__)
+
 
 def run_recipe(
     tools: MeasureToolContext, definition: RecipeDefinition, arguments: dict[str, Any]
@@ -17,6 +20,7 @@ def run_recipe(
     try:
         definition.run(context, arguments)
     except Exception as error:
+        logger.exception("Recipe %s failed", definition.name)
         context.progress.error = RecipeError(
             context.progress.phase,
             str(getattr(error, "reason", None) or "recipe_failed"),

@@ -1,7 +1,8 @@
 """Explicit, editable recipe registration; no discovery or hot reload."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
