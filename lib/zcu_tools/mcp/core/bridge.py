@@ -365,7 +365,8 @@ class McpBridge:
 
         Attaching wires the bridge's routing callbacks into the transport; the
         bridge keeps the pending map / RID condition. Replacing or detaching
-        fails the previous transport's pending RPCs and closes it.
+        fails the previous transport's pending RPCs but does not close that
+        externally managed wire. Use disconnect() for owned connection teardown.
         """
         with self._rid_cond:
             previous = self._transport
@@ -380,9 +381,6 @@ class McpBridge:
                     self._deliver_event,
                     lambda failure: self._on_socket_closed(transport, failure),
                 )
-        # close may join the reader, whose final callback needs the condition.
-        if previous is not None:
-            previous.close()
 
     def _deliver_event(self, msg: dict[str, Any]) -> None:
         # Preserve the drop-if-None semantics: read-only apps wire no on_event.
@@ -593,6 +591,7 @@ class McpBridge:
                 return "Not connected."
             was_open = transport.is_open
             self._retire_transport(transport)
+        # close may join the reader, whose final callback needs the condition.
         transport.close()
         return "Disconnected from GUI." if was_open else "Not connected."
 

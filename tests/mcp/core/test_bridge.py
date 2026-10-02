@@ -421,7 +421,6 @@ def test_transport_replacement_settles_old_rpc_and_ignores_retired_callbacks(
             bridge.set_transport(new)
             with pytest.raises(RuntimeError, match="[Dd]isconnect"):
                 old_rpc.result(timeout=1)
-            assert old.closed
             new_rpc = pool.submit(bridge.send_rpc_raw, "new", {}, 5)
             new_request = new.requests.get(timeout=1)
             old.unexpected_close()
@@ -432,6 +431,7 @@ def test_transport_replacement_settles_old_rpc_and_ignores_retired_callbacks(
             assert bridge.is_connected
         finally:
             old.reply(old_request)
+            old.close()
             if new_request is not None:
                 new.reply(new_request)
             bridge.disconnect()
@@ -459,6 +459,7 @@ def test_retired_send_failure_does_not_disconnect_replacement(tmp_path: Path) ->
             assert new_rpc.result(timeout=1)["result"] == "new"
         finally:
             old.release_send.set()
+            old.close()
             if new_request is not None:
                 new.reply(new_request)
             bridge.disconnect()
