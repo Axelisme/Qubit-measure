@@ -135,8 +135,25 @@ class AnalysisExecution:
             )
             snapshot = deepcopy(self._snapshot)
             return ToolReply(
-                asdict(snapshot), self._images, is_error=snapshot.status == "failed"
+                asdict(snapshot),
+                self._images,
+                is_error=snapshot.status == "failed"
+                or (snapshot.status == "interactive" and bool(
+                    snapshot.interaction and snapshot.interaction.get("delivery_error")
+                )),
             )
+
+    def observe_interaction(self, reply: ToolReply) -> None:
+        """Keep the latest handoff without replacing an observed completion."""
+        with self._condition:
+            if self._snapshot.phase != "operation":
+                return
+            self._images = reply.images
+            self._snapshot = replace(
+                self._snapshot, interaction=deepcopy(reply.data),
+                figure=reply.data.get("figure"),
+            )
+            self._condition.notify_all()
 
     def start(self) -> None:
         """Called under the registry lock, so close cannot miss an admitted worker."""
@@ -257,7 +274,7 @@ class AnalysisExecution:
                 if status == "cancelled":
                     self._publish(status="cancelled", phase="terminal")
                     return False
-                self._publish(invalidated=deepcopy(self._invalidated))
+                self._publish(status="running", invalidated=deepcopy(self._invalidated))
                 return True
             if reason not in ("timeout", "user_feedback"):
                 raise GuiRpcError(
@@ -361,6 +378,7 @@ class AnalysisExecutions:
                     stage=stage,
                     op=op,
                     params=deepcopy(started["params"]),
+                    status="interactive" if started.get("interactive") else "running",
                 ),
                 connection,
                 self._session,
@@ -372,6 +390,11 @@ class AnalysisExecutions:
             self._by_id[execution.snapshot().execution] = execution
             execution.start()
             return execution
+
+    def for_op(self, op: int) -> AnalysisExecution | None:
+        """Find an existing completion owner without creating a new job."""
+        with self._lock:
+            return self._by_op.get(op)
 
     def get(self, execution: str) -> AnalysisExecution:
         """Resolve a session-local execution without binding or reconnecting."""

@@ -36,20 +36,10 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
     method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
     ctx = ctx.bound()
     started = ctx.send_gui_rpc(method, {"tab_id": tab, "updates": params})
-    op = started["handle"]
-    if started["interactive"]:
-        interaction = tab_interact(ctx, {"tab": tab})
-        return ToolReply(
-            {
-                **interaction.data,
-                "status": "interactive",
-                "tab": tab,
-                "op": op,
-                "params": started["params"],
-            },
-            interaction.images,
-        )
     execution = ctx.session.executions.start(ctx.gui, tab, stage, started)
+    if started["interactive"]:
+        tab_interact(ctx, {"tab": tab})
+        return execution.wait(0)
     return execution.wait(2.0)
 
 
@@ -64,15 +54,28 @@ def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         params["payload"] = payload
+    ctx = ctx.bound()
     reply = dict(ctx.send_gui_rpc("tab.interact", params))
+    execution = ctx.session.executions.for_op(reply["handle"])
     figure = reply["figure"]
     images: tuple[PngImage, ...] = ()
-    if figure is not None:
-        image = validated_png(base64.b64decode(figure["png_b64"], validate=True))
-        path = ctx.session.write_png(image.data)
-        reply["figure"] = str(path)
-        images = (image,)
-    return ToolReply(reply, images)
+    delivery_error = False
+    try:
+        if figure is not None:
+            image = validated_png(base64.b64decode(figure["png_b64"], validate=True))
+            path = ctx.session.write_png(image.data)
+            reply["figure"] = str(path)
+            images = (image,)
+    except (ValueError, OSError) as exc:
+        if execution is None:
+            raise
+        reply["figure"] = None
+        reply["delivery_error"] = str(exc)
+        delivery_error = True
+    if execution is not None:
+        reply["execution"] = execution.snapshot().execution
+        execution.observe_interaction(ToolReply(reply, images, is_error=delivery_error))
+    return ToolReply(reply, images, is_error=delivery_error)
 
 
 def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:

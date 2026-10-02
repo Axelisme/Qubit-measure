@@ -132,6 +132,7 @@ def test_interact_forwards_once_and_materializes_session_image(
             expected["payload"] = payload
         assert params == expected
         return {
+            "operation_id": 71,
             "plugin": "generic-test",
             "state": state,
             "info": {"label": "picker"},
@@ -161,10 +162,10 @@ def test_interact_headless_and_wire_failure_do_not_retry(
     tmp_path, clients, monkeypatch
 ):
     client = _client(
-        tmp_path, clients, lambda method, params: {"state": {}, "figure": None}
+        tmp_path, clients, lambda method, params: {"operation_id": 71, "state": {}, "figure": None}
     )
     reply = _call_stdio(monkeypatch, client, "tab_interact", {"tab": "t"})
-    assert _data(reply) == {"state": {}, "figure": None}
+    assert _data(reply) == {"handle": 1, "state": {}, "figure": None}
     _assert_figure(reply, present=False)
     client.transport.sent.clear()
     client.transport.replies["tab.interact"] = {
@@ -412,19 +413,25 @@ def test_malformed_interactive_image_is_a_tool_error_not_a_success(
 ):
     def respond(method, params):
         if method == "tab.analyze":
-            return {"operation_id": 71, "interactive": True, "params": {}}
+            return {"operation_id": 71, "interactive": True, "params": {}, "invalidated_on_success": []}
+        if method == "operation.await":
+            return {"reason": "user_feedback", "status": "running"}
         assert method == "tab.interact"
-        return {"figure": {"png_b64": "not valid base64!"}, "state": {}}
+        return {"operation_id": 71, "figure": {"png_b64": "not valid base64!"}, "state": {}}
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(monkeypatch, client, tool, {"tab": "t"})
     assert reply["isError"] is True
     assert len(reply["content"]) == 1
     assert "base64" in reply["content"][0]["text"]
+    if tool == "tab_analyze":
+        partial = json.loads(reply["content"][0]["text"])
+        assert partial["status"] == "interactive"
+        assert partial["execution"]
     expected = (
         ["tab.analyze", "tab.interact"] if tool == "tab_analyze" else ["tab.interact"]
     )
-    assert _methods(client) == expected
+    assert [m for m in _methods(client) if m != "operation.await"] == expected
 
 
 @pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])
@@ -434,9 +441,11 @@ def test_invalid_interactive_png_is_a_tool_error_without_retry(
 ):
     def respond(method, params):
         if method == "tab.analyze":
-            return {"operation_id": 71, "interactive": True, "params": {}}
+            return {"operation_id": 71, "interactive": True, "params": {}, "invalidated_on_success": []}
+        if method == "operation.await":
+            return {"reason": "user_feedback", "status": "running"}
         assert method == "tab.interact"
-        return {"figure": {"png_b64": base64.b64encode(png).decode()}, "state": {}}
+        return {"operation_id": 71, "figure": {"png_b64": base64.b64encode(png).decode()}, "state": {}}
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(monkeypatch, client, tool, {"tab": "t"})
@@ -444,10 +453,14 @@ def test_invalid_interactive_png_is_a_tool_error_without_retry(
     assert len(reply["content"]) == 1
     assert reply["content"][0]["type"] == "text"
     assert "Invalid PNG image" in reply["content"][0]["text"]
+    if tool == "tab_analyze":
+        partial = json.loads(reply["content"][0]["text"])
+        assert partial["status"] == "interactive"
+        assert partial["execution"]
     expected = (
         ["tab.analyze", "tab.interact"] if tool == "tab_analyze" else ["tab.interact"]
     )
-    assert _methods(client) == expected
+    assert [m for m in _methods(client) if m != "operation.await"] == expected
 
 
 @pytest.mark.parametrize(
