@@ -182,6 +182,12 @@ class AnalyzeService(_StagedAnalyzeService):
         """Read the active plugin and session; never return a retired binding."""
         return self._interactive_instances.get(tab_id)
 
+    def get_interactive_operation(self, tab_id: str) -> int | None:
+        """Return the token for this tab's active interactive binding."""
+        if tab_id not in self._interactive_instances:
+            return None
+        return self._active_tokens[tab_id]
+
     def finish_plugin(self, tab_id: str, figure: Figure | None = None) -> bool:
         """Finish from the committed snapshot; validation errors leave it editable."""
         active = self._interactive_instances.get(tab_id)
@@ -368,6 +374,7 @@ class AnalyzeService(_StagedAnalyzeService):
                 getattr(analyze_result, "figure", None),
                 writeback_draft=draft,
                 analyze_params_instance=analyze_params,
+                source_operation_id=self._active_tokens[tab_id],
             )
         except BaseException:
             if draft is not None:

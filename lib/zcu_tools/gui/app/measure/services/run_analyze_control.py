@@ -88,6 +88,13 @@ class RunAnalyzeControlPort(Protocol):
     def get_tab_analyze_result(self, tab_id: str) -> object | None: ...
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int: ...
     def get_interactive(self, tab_id: str) -> ActiveInteractive | None: ...
+    def get_interactive_operation(self, tab_id: str) -> int | None: ...
+    def require_analysis_operation(
+        self,
+        tab_id: str,
+        subtab_id: Literal["analysis", "post_analysis"],
+        operation_id: int,
+    ) -> None: ...
     def finish_interactive(self, tab_id: str, figure: Figure | None = None) -> bool: ...
 
     def start_post_analyze(
@@ -207,6 +214,17 @@ class RunAnalyzeControlFacet:
 
     def get_interactive(self, tab_id: str) -> ActiveInteractive | None:
         return self._analyze.get_interactive(tab_id)
+
+    def get_interactive_operation(self, tab_id: str) -> int | None:
+        return self._analyze.get_interactive_operation(tab_id)
+
+    def require_analysis_operation(
+        self,
+        tab_id: str,
+        subtab_id: Literal["analysis", "post_analysis"],
+        operation_id: int,
+    ) -> None:
+        self._state.require_analysis_operation(tab_id, subtab_id, operation_id)
 
     def finish_interactive(self, tab_id: str, figure: Figure | None = None) -> bool:
         active = self._analyze.get_interactive(tab_id)

@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-02, guarded cfg reset
+**Last updated:** 2026-10-02, operation-bound result observations
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -215,6 +215,12 @@ GUI owns observation and write tracking:
 - `tab.snapshot(tab_id)` reveals existence, result/analysis/post revisions,
   availability and effective paths. It does not serialize raw result arrays or
   claim cfg/writeback contents. The all-tabs index reveals no per-tab state.
+- Analysis result getters with an explicit `operation_id` verify the pane's
+  provenance and return its summary plus complete `operation_state`. Successful
+  bound reads establish the same observations as a single-tab snapshot. Ordinary
+  summary queries and figure previews establish none. Bound figure reads and
+  image saves reject replaced results with `result_superseded`; image saves also
+  retain the existing seen guards. No failed read or stale write triggers a retry.
 - `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot` reveals
   the active label and complete serializable md/ml contents. Encoding failure
   does not establish a baseline. These replies may be large or sensitive.

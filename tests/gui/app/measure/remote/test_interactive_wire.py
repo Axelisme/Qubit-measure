@@ -162,6 +162,7 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         assert initial["ok"] is True
         result = initial["result"]
         assert result["plugin"] == "flux_pick"
+        assert result["operation_id"] == token
         assert result["figure"] is None
         assert result["preview_active"] is False
         names = [item["name"] for item in result["commands"]]
@@ -194,6 +195,8 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         committed = _interact(sock, tab_id)["result"]["state"]
         done = _interact(sock, tab_id, {"command": "done"})
         assert done["result"]["state"] == committed
+        assert done["result"]["operation_id"] == token
+        assert fx.ctrl.get_tab_snapshot(tab_id).analysis.source_operation_id == token
         assert done["result"]["figure"] is None
         assert fx.ctrl.get_tab_analyze_result(tab_id).flx_half == pytest.approx(
             committed["flux_half"]
@@ -457,6 +460,8 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         running = call("status", {})["running"]
         assert len(running) == 1
         op = running[0]["op"]
+        assert read["handle"] == op
+        assert changed["handle"] == op
         if terminal == "done":
             result = call(
                 "tab_interact", {"tab": tab_id, "payload": {"command": "done"}}

@@ -94,6 +94,9 @@ def h_tab_interact(
         raise FailedPreconditionError(
             f"tab {tab_id!r} has no active interactive analysis"
         )
+    operation_id = control.get_interactive_operation(tab_id)
+    if operation_id is None:
+        raise RuntimeError("active interactive analysis has no operation token")
     plugin, session = active.plugin, active.session
     decoded = _decode_payload(params.get("payload"), plugin)
     if decoded is not None:
@@ -111,7 +114,10 @@ def h_tab_interact(
                 if result is not prior_result and isinstance(candidate, Figure)
                 else None
             )
-            return _project(plugin, state, figure, preview_active=False)
+            return {
+                **_project(plugin, state, figure, preview_active=False),
+                "operation_id": operation_id,
+            }
         plugin.execute_command(session, name, args)
     state = plugin.project_state(session.snapshot())
     presentation = (
@@ -120,4 +126,7 @@ def h_tab_interact(
         else None
     )
     figure, preview_active = presentation if presentation is not None else (None, False)
-    return _project(plugin, state, figure, preview_active=preview_active)
+    return {
+        **_project(plugin, state, figure, preview_active=preview_active),
+        "operation_id": operation_id,
+    }

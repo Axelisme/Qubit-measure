@@ -13,6 +13,7 @@ from zcu_tools.gui.app.measure.adapter.analyze_params import (
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ._common import follow_tab
+from .tab import tab_operation_state
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -38,6 +39,9 @@ def h_tab_get_analyze_result(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    operation_id = cast(int | None, params.get("operation_id"))
+    if operation_id is not None:
+        control.require_analysis_operation(tab_id, "analysis", operation_id)
     result = control.get_tab_analyze_result(tab_id)
     if result is None:
         return {"summary": None}
@@ -47,7 +51,13 @@ def h_tab_get_analyze_result(
             ErrorCode.INTERNAL,
             "analyze result does not implement to_summary_dict()",
         )
-    return {"summary": to_summary()}
+    reply = {"summary": to_summary()}
+    if operation_id is not None:
+        reply.update(
+            operation_id=operation_id,
+            operation_state=tab_operation_state(adapter, tab_id),
+        )
+    return reply
 
 
 def h_tab_get_analyze_params(
@@ -139,6 +149,9 @@ def h_tab_get_post_analyze_result(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    operation_id = cast(int | None, params.get("operation_id"))
+    if operation_id is not None:
+        control.require_analysis_operation(tab_id, "post_analysis", operation_id)
     result = control.get_post_analyze_result(tab_id)
     if result is None:
         return {"summary": None}
@@ -148,7 +161,13 @@ def h_tab_get_post_analyze_result(
             ErrorCode.INTERNAL,
             "post-analysis result does not implement to_summary_dict()",
         )
-    return {"summary": to_summary()}
+    reply = {"summary": to_summary()}
+    if operation_id is not None:
+        reply.update(
+            operation_id=operation_id,
+            operation_state=tab_operation_state(adapter, tab_id),
+        )
+    return reply
 
 
 def h_tab_get_post_analyze_params(

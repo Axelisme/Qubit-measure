@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-01, result commit and analysis preparation
+**Last updated:** 2026-10-02, operation-bound analysis results
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -381,6 +381,11 @@ down retired drafts only after commit and never roll back a committed pane when 
 fails. A failed proposal/editor build leaves the previous canonical pane intact.
 Primary analysis replacement invalidates Post-Analysis, Post replacement leaves
 Analysis untouched, and a successful run/load clears both downstream panes.
+Each successful analysis swap records its source operation token in the pane.
+The read model exposes that provenance, and result reads and image exports can
+require it. Replacement clears or changes it with the result. Failed or cancelled
+analysis retains the previous pane and its provenance. Tokens are session-local;
+this metadata is neither a result history nor persisted recovery state.
 
 State and `TabSnapshot` expose only the explicit Run, Analysis, Post-Analysis, Save
 and path carriers; there are no flat tab result/writeback/path projections. Callers

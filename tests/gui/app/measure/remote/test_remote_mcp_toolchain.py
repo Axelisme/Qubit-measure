@@ -1077,7 +1077,7 @@ def test_save_image_delegates_to_save_control(fx):
         assert resp["ok"] is True
         assert resp["result"]["image_path"] == "/tmp/image.png"
         fx.service.save_control.save_image.assert_called_once_with(
-            tab_id, "/tmp/image.png"
+            tab_id, "/tmp/image.png", operation_id=None
         )
         fx.ctrl.save_image.assert_not_called()
         resp2 = call(
@@ -1092,7 +1092,7 @@ def test_save_image_delegates_to_save_control(fx):
         assert resp2["ok"] is True
         assert resp2["result"]["image_path"] == "/tmp/post.png"
         fx.service.save_control.save_post_image.assert_called_once_with(
-            tab_id, "/tmp/post.png"
+            tab_id, "/tmp/post.png", operation_id=None
         )
     finally:
         sock.close()

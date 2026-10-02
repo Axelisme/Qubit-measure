@@ -4,9 +4,10 @@ import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 from zcu_tools.gui.cfg.resource import CfgResource
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
     DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,
 )
@@ -71,6 +72,7 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     figure: Figure | None = None
     writeback_draft: object | None = None
     image_path_override: str | None = None
+    source_operation_id: int | None = None
 
 
 @dataclass
@@ -80,6 +82,7 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     figure: Figure | None = None
     writeback_draft: object | None = None
     image_path_override: str | None = None
+    source_operation_id: int | None = None
 
 
 @dataclass
@@ -278,6 +281,22 @@ class State(SessionState):
     def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]:
         return self.tabs[tab_id]
 
+    def require_analysis_operation(
+        self,
+        tab_id: str,
+        subtab_id: Literal["analysis", "post_analysis"],
+        operation_id: int,
+    ) -> None:
+        """Reject a result replaced since the caller's analysis operation."""
+        self._assert_owner()
+        tab = self.tabs[tab_id]
+        pane = tab.analysis if subtab_id == "analysis" else tab.post_analysis
+        if pane.result is None or pane.source_operation_id != operation_id:
+            raise FailedPreconditionError(
+                f"{subtab_id} no longer contains operation {operation_id}'s result",
+                reason_code="result_superseded",
+            )
+
     def has_tab(self, tab_id: str) -> bool:
         """Existence query — callers ask the aggregate, not the raw dict."""
         return tab_id in self.tabs
@@ -472,6 +491,8 @@ class State(SessionState):
         figure: Figure | None,
         writeback_draft: object | None = None,
         analyze_params_instance: object = _UNSET,
+        *,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources:
         self._assert_owner()
         tab = self.tabs[tab_id]
@@ -485,12 +506,15 @@ class State(SessionState):
             tab_id,
             "yes" if figure is not None else "none",
         )
-        return self.replace_analysis_pane(
+        return self.swap_analysis_pane(
             tab_id,
-            result=analyze_result,
-            figure=figure,
-            params=params,
-            writeback_draft=writeback_draft,
+            AnalysisPaneState(
+                result=analyze_result,
+                source_operation_id=source_operation_id,
+                figure=figure,
+                params=params,
+                writeback_draft=writeback_draft,
+            ),
         )
 
     @staticmethod
@@ -557,6 +581,7 @@ class State(SessionState):
         *,
         post_analyze_params_instance: object = _UNSET,
         writeback_draft: object | None = None,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources:
         """Record a Post result while retaining the independent Analysis pane."""
         self._assert_owner()
@@ -571,14 +596,16 @@ class State(SessionState):
             tab_id,
             "yes" if figure is not None else "none",
         )
-        retired = self.replace_post_analysis_pane(
+        return self.swap_post_analysis_pane(
             tab_id,
-            result=post_analyze_result,
-            figure=figure,
-            params=params,
-            writeback_draft=writeback_draft,
+            PostAnalysisPaneState(
+                result=post_analyze_result,
+                source_operation_id=source_operation_id,
+                figure=figure,
+                params=params,
+                writeback_draft=writeback_draft,
+            ),
         )
-        return retired
 
     def update_tab_post_analyze_param_instance(
         self, tab_id: str, instance: object

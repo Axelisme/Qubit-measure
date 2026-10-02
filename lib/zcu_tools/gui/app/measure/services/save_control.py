@@ -47,9 +47,21 @@ class SaveControlPort(Protocol):
         comment: str | None = None,
     ) -> SaveArtifactsSubmission: ...
 
-    def save_image(self, tab_id: str, image_path: str | None = None) -> str: ...
+    def save_image(
+        self,
+        tab_id: str,
+        image_path: str | None = None,
+        *,
+        operation_id: int | None = None,
+    ) -> str: ...
 
-    def save_post_image(self, tab_id: str, image_path: str | None = None) -> str: ...
+    def save_post_image(
+        self,
+        tab_id: str,
+        image_path: str | None = None,
+        *,
+        operation_id: int | None = None,
+    ) -> str: ...
 
 
 class SaveControlFacet:
@@ -150,7 +162,15 @@ class SaveControlFacet:
             permit, tuple(destinations), self._state.get_tab(tab_id).save.comment
         )
 
-    def save_image(self, tab_id: str, image_path: str | None = None) -> str:
+    def save_image(
+        self,
+        tab_id: str,
+        image_path: str | None = None,
+        *,
+        operation_id: int | None = None,
+    ) -> str:
+        if operation_id is not None:
+            self._state.require_analysis_operation(tab_id, "analysis", operation_id)
         if image_path is not None and not image_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty image path")
         permit = self._guard.acquire_save_permit(tab_id)
@@ -172,7 +192,17 @@ class SaveControlFacet:
         self._notify_info(f"Image saved to {resolved}")
         return resolved
 
-    def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
+    def save_post_image(
+        self,
+        tab_id: str,
+        image_path: str | None = None,
+        *,
+        operation_id: int | None = None,
+    ) -> str:
+        if operation_id is not None:
+            self._state.require_analysis_operation(
+                tab_id, "post_analysis", operation_id
+            )
         if image_path is not None and not image_path.strip():
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has an empty post image path"

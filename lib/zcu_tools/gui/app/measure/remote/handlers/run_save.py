@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
 from zcu_tools.gui.cfg.edit_codec import decode_ref
@@ -164,8 +164,13 @@ def h_tab_save_image(
         )
     image_path = params["image_path"]
     path_str = str(image_path) if image_path is not None else None
+    operation_id = cast(int | None, params.get("operation_id"))
     if subtab_id == "analysis":
-        written = adapter.save_control.save_image(tab_id, path_str)
+        written = adapter.save_control.save_image(
+            tab_id, path_str, operation_id=operation_id
+        )
     else:
-        written = adapter.save_control.save_post_image(tab_id, path_str)
+        written = adapter.save_control.save_post_image(
+            tab_id, path_str, operation_id=operation_id
+        )
     return {"image_path": written}

@@ -220,6 +220,7 @@ def test_on_post_analyze_finished_updates_state(qapp):
 
     tab = state.get_tab("tab1")
     assert tab.post_analysis.result is post_result
+    assert tab.post_analysis.source_operation_id == token
     assert tab.post_analysis.figure is post_result.figure
     assert tab.is_analyzing is False
     assert finished == [("tab1", post_result)]
@@ -233,6 +234,8 @@ def test_on_post_analyze_finished_updates_state(qapp):
 
 def test_on_post_analyze_failed_resets_state(qapp):
     state = _make_state()
+    previous = MagicMock(figure=None)
+    state.update_tab_post_analyze("tab1", previous, None, source_operation_id=900)
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
@@ -248,6 +251,8 @@ def test_on_post_analyze_failed_resets_state(qapp):
     bg.last_on_error(error)
 
     assert state.get_tab("tab1").is_analyzing is False
+    assert state.get_tab("tab1").post_analysis.result is previous
+    assert state.get_tab("tab1").post_analysis.source_operation_id == 900
     assert len(failed) == 1
     outcome = svc._handles.poll(token)
     assert outcome is not None and outcome.status == "failed"

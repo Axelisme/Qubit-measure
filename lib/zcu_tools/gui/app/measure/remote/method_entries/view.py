@@ -6,6 +6,7 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
+    optional_integer,
     optional_string,
     required_string,
 )
@@ -95,10 +96,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "FigureContainer (view-only, not canonical); analysis/post read their "
             "canonical figures from State. Requires (tab_id, subtab_id) with closed "
             "values run|analysis|post_analysis. The PNG is rendered at a fixed "
-            "small geometry (token-light), independent of the GUI window size.",
+            "small geometry (token-light), independent of the GUI window size. "
+            "Optional operation_id applies only to analysis panes and rejects replaced results.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: run|analysis|post_analysis"),
+                optional_integer(
+                    "operation_id", "Require this analysis operation's current result"
+                ),
                 optional_string(
                     "out_path", "Write PNG here instead of returning base64"
                 ),

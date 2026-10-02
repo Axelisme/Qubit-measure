@@ -230,6 +230,7 @@ def test_on_analyze_finished_updates_state(qapp):
     bg.last_on_done(fake_result)
 
     assert state.get_tab("tab1").analysis.result is fake_result
+    assert state.get_tab("tab1").analysis.source_operation_id == token
     assert state.get_tab("tab1").is_analyzing is False
     assert len(finished_signals) == 1
     assert finished_signals[0] == ("tab1", fake_result)
@@ -357,7 +358,7 @@ def test_result_build_failure_settles_failed_without_reopening_input(qapp):
 def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     state = _make_state()
     previous = MagicMock(figure=MagicMock())
-    state.update_tab_analyze("tab1", previous, previous.figure)
+    state.update_tab_analyze("tab1", previous, previous.figure, source_operation_id=900)
     handles = OperationHandles()
     bus = EventBus()
     svc, _ = _make_service(state, bus, handles=handles)
@@ -382,6 +383,7 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
     assert state.get_tab("tab1").analysis.result is previous
+    assert state.get_tab("tab1").analysis.source_operation_id == 900
     assert state.get_tab("tab1").analysis.figure is previous.figure
     assert not state.get_tab("tab1").is_analyzing
     assert svc.get_interactive("tab1") is None
@@ -502,6 +504,29 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):
     # Interaction event fired; no failure signal.
     assert received == [TabInteractionFact.PRIMARY_ANALYZE_CANCELLED]
     assert failed == []
+
+
+def test_cancelled_interaction_retains_previous_pane_operation_sources(qapp):
+    state = _make_state()
+    primary = MagicMock(figure=None)
+    post = MagicMock(figure=None)
+    state.update_tab_analyze("tab1", primary, None, source_operation_id=900)
+    state.update_tab_post_analyze("tab1", post, None, source_operation_id=901)
+    handles = OperationHandles()
+    svc, _ = _make_service(state, EventBus(), handles=handles)
+    plugin = PluginDefinition(
+        "pick", 2, (), lambda _state: None, lambda _value: MagicMock(figure=None)
+    )
+    token = svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+    )
+    assert svc.get_interactive_operation("tab1") == token
+    assert svc.cancel_interactive("tab1") is True
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "cancelled"
+    assert state.get_tab("tab1").analysis.source_operation_id == 900
+    assert state.get_tab("tab1").post_analysis.source_operation_id == 901
+    assert svc.get_interactive_operation("tab1") is None
 
 
 def test_cancel_interactive_no_inflight_is_graceful_noop(qapp):

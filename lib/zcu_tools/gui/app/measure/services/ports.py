@@ -121,6 +121,7 @@ class AnalysisPaneSnapshot:
     writeback_items: tuple[WritebackItem, ...]
     image_path: PathResourceSnapshot
     has_writeback_draft: bool = False
+    source_operation_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +132,7 @@ class PostAnalysisPaneSnapshot:
     writeback_items: tuple[WritebackItem, ...]
     image_path: PathResourceSnapshot
     has_writeback_draft: bool = False
+    source_operation_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,6 +344,8 @@ class TabAnalyzeWritePort(Protocol):
         figure: Figure | None,
         writeback_draft: object | None = None,
         analyze_params_instance: object = ...,
+        *,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources: ...
     def update_tab_post_analyze(
         self,
@@ -351,6 +355,7 @@ class TabAnalyzeWritePort(Protocol):
         *,
         post_analyze_params_instance: object = ...,
         writeback_draft: object | None = None,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources: ...
 
 

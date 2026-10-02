@@ -90,7 +90,9 @@ def h_tab_list_all(
     }
 
 
-def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, object]:
+def tab_operation_state(
+    adapter: RemoteControlAdapter, tab_id: str
+) -> dict[str, object]:
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     # Render snapshot always fills the live fields (persist/restore form is the
@@ -164,7 +166,7 @@ def h_tab_snapshot(
         if not adapter.tab_control.has_tab(tab_id):
             raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
         tab_ids = [tab_id]
-    return {"tabs": [_tab_snapshot_wire(adapter, tid) for tid in tab_ids]}
+    return {"tabs": [tab_operation_state(adapter, tid) for tid in tab_ids]}
 
 
 def _save_paths_wire(paths) -> dict[str, str | None] | None:
