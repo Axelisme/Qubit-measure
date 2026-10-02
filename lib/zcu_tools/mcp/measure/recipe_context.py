@@ -118,12 +118,21 @@ class RecipeContext:
         arguments: dict[str, Any],
     ) -> None:
         """Start under the registry lock so close cannot miss this worker."""
-        self._thread = Thread(
+        thread = Thread(
             target=self._run,
             args=(run, deepcopy(arguments)),
             name=self.progress.execution,
         )
-        self._thread.start()
+        try:
+            thread.start()
+        except RuntimeError as error:
+            self._publish(
+                error=RecipeError("preparing", "worker_start_failed", str(error)),
+                status="failed",
+                phase="terminal",
+            )
+        else:
+            self._thread = thread
 
     def _run(
         self,
