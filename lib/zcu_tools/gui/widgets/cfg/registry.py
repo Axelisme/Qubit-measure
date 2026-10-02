@@ -16,7 +16,6 @@ from zcu_tools.gui.cfg.binding import (
     LiteralField,
     ReferenceField,
     ScalarField,
-    SectionField,
     SweepField,
 )
 

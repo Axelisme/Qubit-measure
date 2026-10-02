@@ -182,8 +182,6 @@ class TreeCfgWidget(QWidget):
             lambda item: self._remember_expanded(item, False)
         )
 
-        field.on_validity_changed.connect(self._on_validity_changed)
-
         self._rebuild_tree()
 
     @property
@@ -191,10 +189,6 @@ class TreeCfgWidget(QWidget):
         return self._field
 
     def teardown(self) -> None:
-        try:
-            self._field.on_validity_changed.disconnect(self._on_validity_changed)
-        except Exception:
-            pass
         self._disconnect_refs()
         for header in self._ref_headers:
             try:
@@ -381,11 +375,6 @@ class TreeCfgWidget(QWidget):
             else:
                 return None
         return cur if isinstance(cur, SectionField) else None
-
-    def _on_validity_changed(self, valid: bool) -> None:
-        del valid
-        # Visual invalid marking handled via draft validity propagation at CfgFormWidget
-        # level; tree does not need additional styling.
 
     def _remember_expanded(self, item: QTreeWidgetItem, expanded: bool) -> None:
         path = item.data(0, Qt.ItemDataRole.UserRole)
