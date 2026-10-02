@@ -235,6 +235,45 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         assert _interact(sock, tab_id)["error"]["code"] == "precondition_failed"
 
 
+def test_socket_done_receipt_skips_png_and_settles_original_operation(
+    fx, monkeypatch
+) -> None:
+    tab_id, token, _plugin = _start(fx)
+
+    def unavailable_renderer(_figure):
+        raise RuntimeError("PNG renderer unavailable")
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.remote.handlers.interactive.render_figure_png",
+        unavailable_renderer,
+    )
+    with open_client(fx.service.port) as sock:
+        initial = _interact(sock, tab_id, include_figure=False)["result"]
+        rejected = _interact(
+            sock,
+            tab_id,
+            {"command": "done", "args": {"unexpected": 1}},
+            include_figure=False,
+        )
+        assert rejected["error"]["code"] == "invalid_params"
+        assert _interact(sock, tab_id, include_figure=False)["result"] == initial
+
+        done = _interact(
+            sock, tab_id, {"command": "done"}, include_figure=False
+        )
+        assert done["ok"] is True
+        result = done["result"]
+        assert result == {**initial, "figure": None, "preview_active": False}
+        assert result["operation_id"] == token
+        settled = _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})
+        assert settled["result"]["status"] == "finished"
+        summary = _rpc(
+            sock, "tab.get_analyze_result", {"tab_id": tab_id, "operation_id": token}
+        )
+        assert summary["ok"] is True
+        assert _interact(sock, tab_id)["error"]["code"] == "precondition_failed"
+
+
 def test_commands_after_gui_and_context_changes_need_no_seen_baseline(fx) -> None:
     tab_id, token, plugin = _start(fx)
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)

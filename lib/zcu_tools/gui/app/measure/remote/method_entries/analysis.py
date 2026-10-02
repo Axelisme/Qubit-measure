@@ -101,10 +101,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the existing analysis operation. The GUI-local preview never becomes "
             "the returned state; figure may show it and preview_active reports it. "
             "Returns the original analysis operation_id, including after done. "
-            "Wait on that operation for the actual terminal outcome.",
+            "Wait on that operation for the actual terminal outcome. "
+            "Set include_figure=false for a receipt without PNG rendering.",
             (
                 required_string("tab_id"),
                 ParamSpec("payload", JsonType.OBJECT, required=False),
+                ParamSpec(
+                    "include_figure", JsonType.BOOLEAN, required=False, default=True
+                ),
             ),
         ),
         agent=AgentMethodPolicy(
