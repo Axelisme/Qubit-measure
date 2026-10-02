@@ -1204,9 +1204,23 @@ def _read_v2_log_channel_bookkeeping(
     return channel_names, channels_dataset, instrument_config
 
 
-def _read_v2_scalar_data_columns(
-    log: h5py.File | h5py.Group, channel_names: list[str]
-) -> tuple[h5py.Group, np.ndarray, list[tuple[str, str]]]:
+def _read_uniform_multi_channel_log(
+    f: h5py.File, log: h5py.File | h5py.Group
+) -> tuple[
+    dict[str, tuple[str, np.ndarray]],
+    list[tuple[str, str, np.ndarray]],
+    np.ndarray | None,
+]:
+    """Read one scalar multi-channel log with strict Labber bookkeeping."""
+    if "Traces" in log:
+        raise ValueError("grouped v2 does not support vector or trace log channels")
+
+    source = log if "Log list" in log else f
+    channel_source = log if "Channels" in log else f
+    channel_names, channels_dataset, instrument_config = (
+        _read_v2_log_channel_bookkeeping(source, channel_source)
+    )
+
     data_group = log.get("Data")
     if not isinstance(data_group, h5py.Group):
         raise ValueError("grouped v2 log is missing Data group")
@@ -1217,7 +1231,7 @@ def _read_v2_scalar_data_columns(
     ):
         raise ValueError("grouped v2 Data group is incomplete")
     data = np.asarray(data_dataset[()])
-    _n_x, n_col, _n_entry = data.shape
+    n_x, n_col, n_entry = data.shape
     columns = [
         (_decode(name) or "", _decode(info) or "")
         for name, info in channel_names_dataset[()]
@@ -1233,15 +1247,10 @@ def _read_v2_scalar_data_columns(
     if any(info for _name, info in columns[:n_axes]):
         raise ValueError("grouped v2 step-channel columns have invalid bookkeeping")
 
-    return data_group, data, columns
-
-
-def _validate_v2_step_bookkeeping(
-    source: h5py.File | h5py.Group,
-    channels_dataset: h5py.Dataset,
-    instrument_config: h5py.Group,
-    step_names: list[str],
-) -> None:
+    step_dims = _read_strict_v2_step_dimensions(
+        log, data_group, n_x=n_x, n_entry=n_entry, n_axes=n_axes
+    )
+    step_names = [name for name, _info in columns[:n_axes]]
     configured_steps = [
         _decode(row["name"]) or ""
         for row in channels_dataset[()]
@@ -1266,81 +1275,30 @@ def _validate_v2_step_bookkeeping(
     ):
         raise ValueError("grouped v2 step-channel bookkeeping is inconsistent")
 
-
-def _decode_v2_common_grid(
-    data: np.ndarray,
-    columns: list[tuple[str, str]],
-    step_dims: list[int],
-    units: dict[str, str],
-) -> list[tuple[str, str, np.ndarray]]:
-    n_x, _n_col, n_entry = data.shape
-    n_axes = len(step_dims)
+    # Decode inner-first axes, then verify every stored coordinate against them.
+    units = _channel_units(f, log)
     axes: list[tuple[str, str, np.ndarray]] = []
-    for k in range(n_axes):
-        name = columns[k][0]
+    outer_strides = np.cumprod([1, *step_dims[1:-1]])
+    for k, name in enumerate(step_names):
         if k == 0:
             values = data[:, 0, 0]
         else:
-            stride = int(np.prod(step_dims[1:k])) if k > 1 else 1
-            indices = (np.arange(n_entry) // stride) % step_dims[k]
-            values = np.array(
-                [data[0, k, np.argmax(indices == j)] for j in range(step_dims[k])]
-            )
+            values = data[0, k, outer_strides[k - 1] * np.arange(step_dims[k])]
         axes.append((name, units.get(name, ""), np.asarray(values)))
 
     expected_steps = np.zeros((n_x, n_axes, n_entry), dtype=float)
     expected_steps[:, 0, :] = axes[0][2][:, None]
-    outer_shape = tuple(step_dims[1:][::-1])
-    if outer_shape:
-        multi = np.unravel_index(np.arange(n_entry), outer_shape)
-        n_outer = len(outer_shape)
-        for j in range(n_outer):
-            col = n_outer - j
-            expected_steps[:, col, :] = axes[col][2][multi[j]][None, :]
+    for col in range(n_axes - 1, 0, -1):
+        indices = (np.arange(n_entry) // outer_strides[col - 1]) % step_dims[col]
+        expected_steps[:, col, :] = axes[col][2][indices][None, :]
     if not np.array_equal(data[:, :n_axes, :], expected_steps, equal_nan=True):
         raise ValueError("grouped v2 step-coordinate columns do not match the grid")
-    return axes
-
-
-def _read_uniform_multi_channel_log(
-    f: h5py.File, log: h5py.File | h5py.Group
-) -> tuple[
-    dict[str, tuple[str, np.ndarray]],
-    list[tuple[str, str, np.ndarray]],
-    np.ndarray | None,
-]:
-    """Read one scalar multi-channel log with strict Labber bookkeeping."""
-    if "Traces" in log:
-        raise ValueError("grouped v2 does not support vector or trace log channels")
-
-    source = log if "Log list" in log else f
-    channel_source = log if "Channels" in log else f
-    channel_names, channels_dataset, instrument_config = (
-        _read_v2_log_channel_bookkeeping(source, channel_source)
-    )
-    data_group, data, columns = _read_v2_scalar_data_columns(log, channel_names)
-    n_x, n_col, n_entry = data.shape
-    n_axes = n_col - 2 * len(channel_names)
-    step_dims = _read_strict_v2_step_dimensions(
-        log, data_group, n_x=n_x, n_entry=n_entry, n_axes=n_axes
-    )
-    _validate_v2_step_bookkeeping(
-        source,
-        channels_dataset,
-        instrument_config,
-        [name for name, _info in columns[:n_axes]],
-    )
-    units = _channel_units(f, log)
-    axes = _decode_v2_common_grid(data, columns, step_dims, units)
-    outer_shape = tuple(step_dims[1:][::-1])
 
     values_by_channel: dict[str, tuple[str, np.ndarray]] = {}
     for index, name in enumerate(channel_names):
         col = n_axes + 2 * index
         flat = (data[:, col, :] + 1j * data[:, col + 1, :]).T
-        values = flat.reshape(outer_shape + (n_x,))
-        if not outer_shape:
-            values = values.reshape(n_x)
+        values = flat.reshape(tuple(step_dims[::-1]))
         values_by_channel[name] = (units.get(name, ""), values)
 
     return values_by_channel, axes, _read_timestamps(data_group)
