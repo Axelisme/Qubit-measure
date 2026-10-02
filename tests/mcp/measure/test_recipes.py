@@ -245,6 +245,52 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     assert not caller.is_alive()
 
 
+def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path):
+    gui = LookbackGui()
+    done = Event()
+    writeback_read = Event()
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {**gui(method, params), "interactive": True}
+        if method == "operation.await" and params["operation_id"] == 93:
+            if not done.is_set():
+                return {"reason": "user_feedback"}
+        if method == "tab.interact":
+            assert params["tab_id"] == "t"
+            if params.get("payload", {}).get("command") == "done":
+                done.set()
+            return {"operation_id": 93, "figure": None, "prompt": "Confirm offset"}
+        if method == "tab.writeback_preview":
+            writeback_read.set()
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    try:
+        handoff = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert handoff.data["status"] == "interactive"
+        assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert handoff.data["analysis"]["op"] == handoff.data["op"]
+        execution = handoff.data["execution"]
+        read = client.call("tab_interact", {"tab": "t"})
+        assert read.data["prompt"] == "Confirm offset"
+        finished_analysis = client.call(
+            "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+        )
+        assert finished_analysis.data["status"] == "finished"
+        assert writeback_read.wait(2), "Recipe must resume after interactive analysis"
+        finished = client.call("wait", {"execution": execution, "timeout": 2})
+        assert finished.data["status"] == "finished", finished.data
+        assert finished.data["analysis"]["execution"] == read.data["execution"]
+        assert finished.data["writeback"]["has_draft"]
+        assert finished.images[0].data == _PNG
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == methods.count("tab.analyze") == 1
+    finally:
+        done.set()
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
