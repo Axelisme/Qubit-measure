@@ -44,6 +44,7 @@ def ml_roles(
 def ml_create(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create from a role's md-backed defaults and return the stored cfg."""
     role_id = arguments["role_id"]
+    ctx = ctx.bound()
     roles = ml_roles(ctx, {})
     role = next((entry for entry in roles if entry["role_id"] == role_id), None)
     if role is None:
@@ -82,6 +83,7 @@ def _entry_kind(index: dict[str, Any], name: str, requested: Any) -> str:
 def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delegate sequential library commits to the shared GUI application."""
     name = arguments["name"]
+    ctx = ctx.bound()
     index = ml_get(ctx, {})
     kind = _entry_kind(index, name, arguments.get("kind"))
     destination = arguments.get("save_as", name)
@@ -115,6 +117,7 @@ def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
 def ml_rename(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Rename only the library entry; leave linked reference names unchanged."""
     name = arguments["name"]
+    ctx = ctx.bound()
     kind = _entry_kind(ml_get(ctx, {}), name, arguments.get("kind"))
     result = ctx.send_gui_rpc(
         f"context.ml_rename_{kind}", {"old": name, "new": arguments["new_name"]}
@@ -129,6 +132,7 @@ def ml_rename(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, A
 def ml_delete(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Delete only the library entry; preserve modified inline reference values."""
     name = arguments["name"]
+    ctx = ctx.bound()
     kind = _entry_kind(ml_get(ctx, {}), name, arguments.get("kind"))
     result = ctx.send_gui_rpc(f"context.ml_del_{kind}", {"name": name})
     return {

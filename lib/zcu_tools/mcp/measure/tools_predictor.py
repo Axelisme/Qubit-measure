@@ -71,6 +71,9 @@ def predictor_load(
 def predict(ctx: MeasureToolContext, arguments: dict[str, Any]) -> list[dict[str, Any]]:
     value = arguments["value"]
     transitions = arguments.get("transitions", [[0, 1]])
+    if not transitions:
+        return []
+    ctx = ctx.bound()
     return [
         {
             "transition": transition,

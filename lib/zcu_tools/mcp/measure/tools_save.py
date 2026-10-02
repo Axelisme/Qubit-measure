@@ -16,6 +16,7 @@ def tab_save(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
     for name in ("artifacts", "paths", "comment"):
         if name in arguments:
             params[name] = arguments[name]
+    ctx = ctx.bound()
     submission = ctx.send_gui_rpc("tab.save_artifacts", params)
     op = submission["handle"]
     outcome = wait(ctx, {"op": op, "timeout": 2})

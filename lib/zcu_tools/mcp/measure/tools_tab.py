@@ -40,6 +40,7 @@ def experiments(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str,
     prefix = arguments.get("prefix", "")
     if not isinstance(prefix, str):
         raise ValueError("prefix must be a string")
+    ctx = ctx.bound()
     names = ctx.gui.read_internal("adapter.list", {})["adapters"]
     result = []
     for name in names:
@@ -76,6 +77,7 @@ def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
             "experiment": experiment,
             "cfg_backfill": loaded["cfg_backfill"],
         }
+    ctx = ctx.bound()
     previous_focus = ctx.gui.read_internal("tab.list_all", {})["active_tab_id"]
     created = ctx.send_gui_rpc("tab.new", {"adapter_name": experiment})
     tab = created["tab_id"]
@@ -125,6 +127,8 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
         not isinstance(item, str) or item not in valid for item in include
     ):
         raise ValueError(f"include must be a list of {sorted(valid)}")
+    if include:
+        ctx = ctx.bound()
     result: dict[str, Any] = {}
     snap = None
     if "summary" in include or "artifacts" in include:

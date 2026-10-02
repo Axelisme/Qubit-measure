@@ -36,6 +36,7 @@ def project(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
 def contexts(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """List context labels and the current selection."""
     del arguments
+    ctx = ctx.bound()
     labels = ctx.gui.read_internal("context.labels", {})["labels"]
     active = ctx.gui.read_internal("context.active", {})["label"]
     return {"active": active, "labels": labels}
@@ -67,6 +68,8 @@ def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     if "keys" not in arguments:
         result = ctx.gui.read_internal("context.md_get", {"summaries": True})
         return {"values": result["values"]}
+    if arguments["keys"]:
+        ctx = ctx.bound()
     return {
         "values": {
             key: ctx.gui.read_internal("context.md_get_attr", {"key": key})["value"]
@@ -77,6 +80,7 @@ def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
 
 def soc_info(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read the GUI's connection and hardware projection."""
+    ctx = ctx.bound()
     connected = bool(ctx.gui.read_internal("state.has_soc", {})["value"])
     if not connected:
         return {
@@ -94,10 +98,9 @@ def soc_info(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
 
 def soc_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Synchronously connect the GUI to a remote board and read its info."""
-    ctx.send_gui_rpc(
-        "soc.connect",
-        {"kind": "remote", "ip": arguments["address"], "port": arguments["port"]},
-    )
+    params = {"kind": "remote", "ip": arguments["address"], "port": arguments["port"]}
+    ctx = ctx.bound()
+    ctx.send_gui_rpc("soc.connect", params)
     return soc_info(ctx, {"include_cfg": False})
 
 
@@ -106,6 +109,7 @@ def md_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     applied: dict[str, dict[str, Any]] = {}
     for key, value in arguments["values"].items():
         try:
+            ctx = ctx.bound()
             reply = ctx.send_gui_rpc(
                 "context.md_set_attr", {"key": key, "value": value, "receipt": True}
             )

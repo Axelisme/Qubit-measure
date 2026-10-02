@@ -54,6 +54,7 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
     method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
+    ctx = ctx.bound()
     started = ctx.send_gui_rpc(method, {"tab_id": tab, "updates": params})
     op = started["handle"]
     if started["interactive"]:

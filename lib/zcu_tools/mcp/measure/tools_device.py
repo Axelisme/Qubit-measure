@@ -27,6 +27,7 @@ def devices(
             for item in ctx.gui.read_internal("device.list", {})["devices"]
         ]
 
+    ctx = ctx.bound()
     snapshot = ctx.gui.read_internal("device.snapshot", {"name": name})["snapshot"]
     status = snapshot["status"]
     connected = status in ("connected", "setting_up")
@@ -87,6 +88,7 @@ def device_connect(
     has_address = "address" in arguments
     if has_type != has_address:
         raise ValueError("provide both type and address, or name only to reconnect")
+    ctx = ctx.bound()
     if has_type:
         started = ctx.send_gui_rpc(
             "device.connect",
@@ -110,6 +112,7 @@ def device_disconnect(
 ) -> dict[str, Any]:
     name = arguments["name"]
     forget = arguments.get("forget", False)
+    ctx = ctx.bound()
     started = ctx.send_gui_rpc(
         "device.disconnect", {"name": name, "remember": not forget}
     )
@@ -120,6 +123,7 @@ def device_disconnect(
 def device_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     name = arguments["name"]
     values = arguments["values"]
+    ctx = ctx.bound()
     fields = _live_fields(ctx, name)
     by_name = {field["name"]: field for field in fields}
     legal = sorted(key for key, field in by_name.items() if field["settable"])

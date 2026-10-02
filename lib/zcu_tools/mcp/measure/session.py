@@ -511,7 +511,8 @@ class MeasureMcpSession:
             )
         pattern = entry["operation_key"]
         if pattern is not None and "operation_id" in result:
-            self._require_connection(generation)
+            # A delivered reply stays known even if its socket has just closed.
+            self._require_generation(generation)
             result = dict(result)
             handle = self._expose_operation(result.pop("operation_id"))
             key = pattern.format(

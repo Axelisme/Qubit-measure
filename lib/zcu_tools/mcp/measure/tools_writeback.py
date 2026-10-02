@@ -60,6 +60,7 @@ def accept(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     stage = "primary"
     write_attempted = False
     try:
+        ctx = ctx.bound()
         # These queries and previews do not reveal resources or unlock GUI guards.
         for stage, subtab, method in (
             ("primary", "analysis", "tab.get_analyze_result"),
