@@ -364,15 +364,25 @@ class McpBridge:
         """Swap the wire transport (the seam for tests + connect()).
 
         Attaching wires the bridge's routing callbacks into the transport; the
-        bridge keeps the pending map / RID condition. Passing None detaches.
+        bridge keeps the pending map / RID condition. Replacing or detaching
+        fails the previous transport's pending RPCs and closes it.
         """
-        self._transport = transport
-        if transport is not None:
-            transport.attach(
-                self._deliver_reply,
-                self._deliver_event,
-                lambda failure: self._on_socket_closed(transport, failure),
-            )
+        with self._rid_cond:
+            previous = self._transport
+            if previous is transport:
+                return
+            if previous is not None:
+                self._retire_transport(previous)
+            self._transport = transport
+            if transport is not None:
+                transport.attach(
+                    self._deliver_reply,
+                    self._deliver_event,
+                    lambda failure: self._on_socket_closed(transport, failure),
+                )
+        # close may join the reader, whose final callback needs the condition.
+        if previous is not None:
+            previous.close()
 
     def _deliver_event(self, msg: dict[str, Any]) -> None:
         # Preserve the drop-if-None semantics: read-only apps wire no on_event.
@@ -382,21 +392,32 @@ class McpBridge:
     def _on_socket_closed(
         self, transport: Transport, failure: Exception | None
     ) -> None:
-        # Ignore late callbacks from a retired socket after a reconnect.
+        self._retire_transport(
+            transport, failure or ConnectionError("GUI socket closed unexpectedly.")
+        )
+
+    def _retire_transport(
+        self, transport: Transport, failure: Exception | None = None
+    ) -> bool:
+        """Atomically end admission and settle waiters, but do not join the reader."""
         with self._rid_cond:
             if self._transport is not transport:
-                return
+                return False
+            self._transport = None
+            failure = failure or RuntimeError(
+                "Disconnected from GUI. Pending RPC outcomes are unknown."
+            )
             for holder in self._pending.values():
-                holder["error"] = failure or ConnectionError(
-                    "GUI socket closed unexpectedly."
-                )
+                holder["error"] = failure
                 holder["done"] = True
             self._pending.clear()
             self._rid_cond.notify_all()
+            return True
 
     @property
     def is_connected(self) -> bool:
-        return self._transport is not None and self._transport.is_open
+        with self._rid_cond:
+            return self._transport is not None and self._transport.is_open
 
     # ------------------------------------------------------------------
     # pid file
@@ -436,14 +457,13 @@ class McpBridge:
             holder["done"] = True
             self._rid_cond.notify_all()
 
-    def _close_timed_out_transport(self, transport: Transport) -> None:
-        """Drop a socket whose reply stream is no longer trustworthy."""
-
-        try:
+    def _close_failed_transport(self, transport: Transport, failure: Exception) -> None:
+        """Wake peers before closing a stream whose outcomes are uncertain."""
+        if self._retire_transport(
+            transport,
+            ConnectionError(f"GUI disconnected after transport failure: {failure}"),
+        ):
             transport.close()
-        finally:
-            if self._transport is transport:
-                self._transport = None
 
     def send_rpc_raw(
         self, method: str, params: dict[str, Any], timeout_seconds: float
@@ -452,15 +472,17 @@ class McpBridge:
 
         Returns the raw wire response dict (``{ok, result}`` or ``{ok:False,
         error}``). App layers wrap this to raise on ``ok:False`` and add policy.
+        Disconnection interrupts the wait, not the remote operation. An admitted
+        request may have been sent; the bridge never replays it.
         """
-        transport = self._transport
-        if transport is None or not transport.is_open:
-            raise RuntimeError(
-                f"GUI not connected. Call {self.config.tool_prefix}connect first."
-            )
-        rid = self._next_rid()
         holder: dict[str, Any] = {"done": False}
         with self._rid_cond:
+            transport = self._transport
+            if transport is None or not transport.is_open:
+                raise RuntimeError(
+                    f"GUI not connected. Call {self.config.tool_prefix}connect first."
+                )
+            rid = self._next_rid()
             self._pending[rid] = holder
         try:
             transport.send_line({"id": rid, "method": method, "params": params})
@@ -469,10 +491,10 @@ class McpBridge:
             with self._rid_cond:
                 self._pending.pop(rid, None)
             raise
-        except Exception:
+        except Exception as exc:
             with self._rid_cond:
                 self._pending.pop(rid, None)
-            self._close_timed_out_transport(transport)
+            self._close_failed_transport(transport, exc)
             raise
 
         deadline = time.monotonic() + timeout_seconds
@@ -486,8 +508,9 @@ class McpBridge:
                     break
                 self._rid_cond.wait(timeout=remaining)
         if timed_out:
-            self._close_timed_out_transport(transport)
-            raise GuiTransportTimeoutError(method, timeout_seconds)
+            failure = GuiTransportTimeoutError(method, timeout_seconds)
+            self._close_failed_transport(transport, failure)
+            raise failure
         if "error" in holder and "message" not in holder:
             raise holder["error"]
         return holder["message"]
@@ -563,11 +586,13 @@ class McpBridge:
         )
 
     def disconnect(self) -> str:
-        transport = self._transport
-        if transport is None:
-            return "Not connected."
-        was_open = transport.is_open
-        self._transport = None
+        """Detach and wake pending RPCs without cancelling remote operations."""
+        with self._rid_cond:
+            transport = self._transport
+            if transport is None:
+                return "Not connected."
+            was_open = transport.is_open
+            self._retire_transport(transport)
         transport.close()
         return "Disconnected from GUI." if was_open else "Not connected."
 
