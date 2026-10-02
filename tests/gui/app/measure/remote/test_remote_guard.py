@@ -140,6 +140,7 @@ def test_socket_snapshot_exposes_result_replacement_and_restores_guard(fx) -> No
             "revision": 0,
             "available": False,
             "source_path": None,
+            "source_operation_id": None,
         }
         assert initial["analysis_state"]["available"] is False
         assert initial["post_analysis_state"]["available"] is False
@@ -153,6 +154,7 @@ def test_socket_snapshot_exposes_result_replacement_and_restores_guard(fx) -> No
             "revision": 1,
             "available": True,
             "source_path": "loaded.h5",
+            "source_operation_id": None,
         }
         assert rpc("tab.load_data", args)["error"].get("reason") != "stale_version"
         fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
