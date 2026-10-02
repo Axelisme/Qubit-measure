@@ -20,6 +20,14 @@ _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
     "+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
+_AMBIGUOUS_SAVE_ERRORS = {
+    "handler_timeout": {"code": "timeout", "message": "GUI handler timed out"},
+    "encoding_failed": {
+        "code": "internal",
+        "reason": "response_encoding_failed",
+        "message": "request may have executed",
+    },
+}
 _INVALID_PNGS = [
     pytest.param(b"hello", id="non-png"),
     pytest.param(b"hello" + _PNG[-12:], id="non-png-with-iend"),
@@ -678,7 +686,9 @@ def test_cancel_latches_intent_and_retains_original_terminal(
 
 
 @pytest.mark.parametrize("remaining", [False, True])
-@pytest.mark.parametrize("save_outcome", ["saved", "rejected", "lost"])
+@pytest.mark.parametrize(
+    "save_outcome", ["saved", "rejected", "lost", *_AMBIGUOUS_SAVE_ERRORS]
+)
 def test_cancel_during_admitted_save_retains_the_real_reply(
     tmp_path, clients, monkeypatch, remaining, save_outcome
 ):
@@ -704,7 +714,7 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
             return _result_reply(
-                "analysis", ["fit", "residual"] if remaining else ["fit"], {}
+                "analysis", ["prefix", "fit", "residual"] if remaining else ["prefix", "fit"], {}
             )
         if method == "operation.cancel":
             return {"status": "finished"}
@@ -713,6 +723,8 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
     client = _client(tmp_path, clients, respond)
 
     def save(params):
+        if params["figure_name"] == "prefix":
+            return {"ok": True, "result": {"image_path": "/actual/prefix.png"}}
         assert params["figure_name"] == "fit"
         saving.set()
         assert release.wait(10), "test did not release admitted save"
@@ -721,6 +733,8 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             assert client.transport.on_closed is not None
             client.transport.on_closed(EOFError("save reply lost"))
             return {"ok": True, "result": {"image_path": "/unconfirmed/fit.png"}}
+        if save_outcome in _AMBIGUOUS_SAVE_ERRORS:
+            return {"ok": False, "error": _AMBIGUOUS_SAVE_ERRORS[save_outcome]}
         if save_outcome == "rejected":
             return {
                 "ok": False,
@@ -761,22 +775,27 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
     assert completed["status"] == ("cancelled" if save_outcome == "saved" else "failed")
     assert completed["operation_outcome"]["status"] == "finished"
     assert completed["result"]["summary"] == {"frequency": 5.0}
-    assert completed["saved_images"] == (
-        [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
-        if save_outcome == "saved"
-        else []
-    )
+    confirmed = ["prefix", "fit"] if save_outcome == "saved" else ["prefix"]
+    assert completed["saved_images"] == [
+        {"figure_name": name, "image_path": f"/actual/{name}.png"} for name in confirmed
+    ]
+    unknown = save_outcome == "lost" or save_outcome in _AMBIGUOUS_SAVE_ERRORS
     assert completed["save_status"] == (
         ("incomplete" if remaining else "saved")
         if save_outcome == "saved"
         else "unknown"
-        if save_outcome == "lost"
+        if unknown
         else "incomplete"
     )
-    assert completed["unconfirmed_image"] == ("fit" if save_outcome == "lost" else None)
+    assert completed["unconfirmed_image"] == ("fit" if unknown else None)
+    assert completed["remaining_images"] == (
+        ([] if save_outcome == "saved" else ["fit"]) + (["residual"] if remaining else [])
+    )
     if save_outcome != "saved":
         assert completed["error"]["phase"] == "image_save"
-    assert _methods(client).count("tab.save_image") == 1
+    if save_outcome in _AMBIGUOUS_SAVE_ERRORS:
+        _assert_ambiguous_save_error(completed, save_outcome)
+    assert _methods(client).count("tab.save_image") == 2
     assert "tab.get_figure" not in _methods(client)
 
 
@@ -1296,6 +1315,13 @@ def test_execution_query_observes_background_completion_without_reconnect(
         release.set()
 
 
+def _assert_ambiguous_save_error(data: dict[str, Any], failure: str) -> None:
+    envelope = _AMBIGUOUS_SAVE_ERRORS[failure]
+    assert data["error"]["code"] == envelope["code"]
+    assert data["error"]["reason"] == envelope.get("reason", "gui_handler_timeout")
+    assert envelope["message"] in data["error"]["message"]
+
+
 def _inject_analysis_rejection(
     client: MeasureClient,
     failure: str,
@@ -1311,9 +1337,14 @@ def _inject_analysis_rejection(
     }
     if failure == "result_rejected":
         client.transport.replies["tab.get_analyze_result"] = rejection
-    elif failure == "save_rejected":
+    elif failure == "save_rejected" or failure in _AMBIGUOUS_SAVE_ERRORS:
+        save_error = (
+            {"ok": False, "error": _AMBIGUOUS_SAVE_ERRORS[failure]}
+            if failure in _AMBIGUOUS_SAVE_ERRORS
+            else rejection
+        )
         client.transport.replies["tab.save_image"] = lambda params: (
-            rejection
+            save_error
             if params["figure_name"] == "residual"
             else {"ok": True, "result": {"image_path": "/actual/fit.png"}}
         )
@@ -1333,6 +1364,8 @@ def _inject_analysis_rejection(
         ("result_rejected", "result_read", "not_started", [], None),
         ("save_rejected", "image_save", "incomplete", ["fit"], None),
         ("save_lost", "image_save", "unknown", ["fit"], "residual"),
+        ("handler_timeout", "image_save", "unknown", ["fit"], "residual"),
+        ("encoding_failed", "image_save", "unknown", ["fit"], "residual"),
         ("save_bad_path", "image_save", "unknown", ["fit"], "residual"),
         ("after_result_eof", "image_save", "incomplete", [], None),
         ("after_save_eof", "figure_read", "saved", ["fit", "residual"], None),
@@ -1391,6 +1424,8 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
         {"figure_name": name, "image_path": f"/actual/{name}.png"} for name in confirmed
     ]
     assert data["unconfirmed_image"] == unconfirmed
+    if failure in _AMBIGUOUS_SAVE_ERRORS:
+        _assert_ambiguous_save_error(data, failure)
     if failure == "result_rejected":
         assert data["result"] is None
         assert data["remaining_images"] is None
