@@ -106,8 +106,7 @@ def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
     images: tuple[PngImage, ...] = ()
     if figure is not None:
         image = _png_image(base64.b64decode(figure["png_b64"], validate=True))
-        path = ctx.session.new_png_path()
-        path.write_bytes(image.data)
+        path = ctx.session.write_png(image.data)
         reply["figure"] = str(path)
         images = (image,)
     return ToolReply(reply, images)

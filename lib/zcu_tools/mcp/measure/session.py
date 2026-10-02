@@ -203,6 +203,15 @@ class MeasureMcpSession:
                 )
             return Path(self._png_directory.name) / f"{uuid.uuid4().hex}.png"
 
+    def write_png(self, png: bytes) -> Path:
+        """Write one validated image under session ownership; reject after close."""
+        path = self.new_png_path()
+        path.write_bytes(png)
+        return path
+
+    def close(self) -> None:
+        """Permanently stop admission, disconnect, drain work, then remove PNGs."""
+
     def cleanup_pngs(self) -> None:
         with self._rpc_lock:
             if self._png_directory is not None:

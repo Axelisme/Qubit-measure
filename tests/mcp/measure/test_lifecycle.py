@@ -4,6 +4,7 @@ import json
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -14,11 +15,70 @@ from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     build_agent_catalog,
 )
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
 
 # Real loopback disconnects are observed by the bridge's reader thread.
 pytestmark = pytest.mark.uses_wall_clock
+
+
+def test_session_close_retires_pngs_and_refuses_future_work(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    session = client.context.session
+    session.bind()
+    image = session.write_png(b"validated-image")
+    try:
+        assert image.read_bytes() == b"validated-image"
+        session.close()
+        session.close()
+        assert not image.exists()
+        assert not image.parent.exists()
+        assert not client.transport.is_open
+        for action in (
+            lambda: session.write_png(b"later-image"),
+            session.new_png_path,
+            session.bind,
+            lambda: session.connect_to_gui(port=None, launch="never", clean=False),
+        ):
+            with pytest.raises(GuiRpcError) as error:
+                action()
+            assert error.value.reason == "session_closed"
+        assert not image.parent.exists()
+    finally:
+        client.context.bridge.disconnect()
+        session.cleanup_pngs()
+
+
+def test_session_close_wakes_an_inflight_rpc_without_waiting_for_rpc_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_client(tmp_path)
+    session = client.context.session
+    binding = session.bind()
+    sent = threading.Event()
+    client.transport.sent.clear()
+
+    def send(payload: dict[str, Any]) -> None:
+        client.transport.sent.append((payload["method"], payload["params"]))
+        sent.set()
+
+    monkeypatch.setattr(client.transport, "send_line", send)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = pool.submit(
+            binding.send_gui_rpc, "context.labels", {}, timeout_seconds=10.0
+        )
+        try:
+            assert sent.wait(1)
+            closing = pool.submit(session.close)
+            closing.result(timeout=1)
+            with pytest.raises(GuiRpcError) as error:
+                pending.result(timeout=1)
+            assert error.value.reason == "session_closed"
+            assert not client.transport.is_open
+        finally:
+            client.context.bridge.disconnect()
+    assert client.transport.sent == [("context.labels", {})]
 
 
 class LoopbackGui:

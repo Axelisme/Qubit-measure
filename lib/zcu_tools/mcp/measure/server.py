@@ -131,20 +131,15 @@ def main() -> None:
         resolve_connect_port=resolve_connect_port,
     )
 
-    def cleanup() -> None:
-        try:
-            bridge.disconnect()
-        finally:
-            session.cleanup_pngs()
-
-    run_stdio_loop(
-        _CONFIG,
-        build_measure_tools(context),
-        hooks=StdioLoopHooks(
-            on_start=_setup_logging, on_cleanup=cleanup, on_error=logger.exception
-        ),
-        server_version="1.1.0",
-    )
+    try:
+        run_stdio_loop(
+            _CONFIG,
+            build_measure_tools(context),
+            hooks=StdioLoopHooks(on_start=_setup_logging, on_error=logger.exception),
+            server_version="1.1.0",
+        )
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":
