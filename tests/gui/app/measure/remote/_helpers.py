@@ -13,10 +13,12 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+from PIL import Image
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.measure.registry import register_all
@@ -41,6 +43,7 @@ from zcu_tools.gui.remote.errors import remote_error_from_expected
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
@@ -78,6 +81,13 @@ def observe_run_inputs(
         invoke("device.snapshot", {"name": device["name"]})
 
 
+def make_png() -> bytes:
+    """A complete decodable PNG for an in-process render collaborator."""
+    buffer = BytesIO()
+    Image.new("RGBA", (1, 1)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
@@ -108,15 +118,10 @@ def make_view() -> MagicMock:
             "open_dialogs": [],
         }
     )
-    # Static PNG bytes (1x1 transparent PNG).
-    _PNG = (
-        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00"
-        b"\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cb"
-        b"\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
-    view.take_figure_screenshot_for_subtab = MagicMock(return_value=_PNG)
-    view.take_dialog_screenshot = MagicMock(return_value=_PNG)
-    view.take_window_screenshot = MagicMock(return_value=_PNG)
+    png = make_png()
+    view.take_figure_screenshot_for_subtab = MagicMock(return_value=png)
+    view.take_dialog_screenshot = MagicMock(return_value=png)
+    view.take_window_screenshot = MagicMock(return_value=png)
     return view
 
 
@@ -399,7 +404,9 @@ def call_mcp_with_qt(
             QCoreApplication.processEvents()
             time.sleep(0.005)
         assert worker.done(), "MCP tool did not receive a GUI reply"
-        return worker.result()
+        reply = worker.result()
+        # These GUI contracts inspect structured data; stdio image delivery has its own owner.
+        return reply.data if isinstance(reply, ToolReply) else reply
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 

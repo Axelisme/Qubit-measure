@@ -167,6 +167,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 post_result,
                 getattr(post_result, "figure", None),
                 post_analyze_params_instance=params,
+                source_operation_id=self._active_tokens[tab_id],
                 writeback_draft=draft,
             )
         except BaseException:

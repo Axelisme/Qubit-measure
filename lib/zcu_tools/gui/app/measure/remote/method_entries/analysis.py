@@ -7,6 +7,7 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     default_object,
+    optional_integer,
     required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
@@ -31,7 +32,24 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab.get_analyze_result",
         "analysis:h_tab_get_analyze_result",
         MethodSpec(
-            5.0, "Read tab analyze result scalar summary", (required_string("tab_id"),)
+            5.0,
+            "Read the current scalar summary without refreshing observations. Optional "
+            "operation_id requires that operation's result and also returns complete "
+            "operation_state, establishing the same observations as tab.snapshot.",
+            (required_string("tab_id"), optional_integer("operation_id")),
+        ),
+        agent=AgentMethodPolicy(
+            reveals=(
+                "tab:{tab_id}",
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:analyze",
+                "tab:{tab_id}:post_analyze",
+                "tab:{tab_id}:path:data",
+                "tab:{tab_id}:path:analysis_image",
+                "tab:{tab_id}:path:post_analysis_image",
+            ),
+            reveals_when_nonempty=("operation_id",),
+            operation_key="analyze:{tab_id}",
         ),
     ),
     method_entry(
@@ -81,21 +99,42 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Omit payload to discover committed state and commands; use "
             "{command, args} for one validated action, or command=done to settle "
             "the existing analysis operation. The GUI-local preview never becomes "
-            "the returned state; figure may show it and preview_active reports it.",
+            "the returned state; figure may show it and preview_active reports it. "
+            "Returns the original analysis operation_id, including after done. "
+            "Wait on that operation for the actual terminal outcome.",
             (
                 required_string("tab_id"),
                 ParamSpec("payload", JsonType.OBJECT, required=False),
             ),
         ),
-        agent=AgentMethodPolicy(exposure="tool", tool_names=("tab_interact",)),
+        agent=AgentMethodPolicy(
+            exposure="tool",
+            tool_names=("tab_interact",),
+            operation_key="analyze:{tab_id}",
+        ),
     ),
     method_entry(
         "tab.get_post_analyze_result",
         "analysis:h_tab_get_post_analyze_result",
         MethodSpec(
             5.0,
-            "Read tab post-analysis result scalar summary",
-            (required_string("tab_id"),),
+            "Read the current post-analysis scalar summary without refreshing observations. "
+            "Optional operation_id requires that operation's result and also returns complete "
+            "operation_state, establishing the same observations as tab.snapshot.",
+            (required_string("tab_id"), optional_integer("operation_id")),
+        ),
+        agent=AgentMethodPolicy(
+            reveals=(
+                "tab:{tab_id}",
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:analyze",
+                "tab:{tab_id}:post_analyze",
+                "tab:{tab_id}:path:data",
+                "tab:{tab_id}:path:analysis_image",
+                "tab:{tab_id}:path:post_analysis_image",
+            ),
+            reveals_when_nonempty=("operation_id",),
+            operation_key="post_analyze:{tab_id}",
         ),
     ),
     method_entry(

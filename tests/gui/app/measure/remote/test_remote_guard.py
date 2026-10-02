@@ -35,8 +35,8 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from ._helpers import call as _raw_call
+from ._helpers import make_png, observe_run_inputs
 from ._helpers import mcp_client as _mcp_client
-from ._helpers import observe_run_inputs
 from ._remote_core_support import (
     RemoteCoreFixture as _Fixture,
 )
@@ -464,8 +464,8 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
     fx, tmp_path: Path
 ) -> None:
     _prepare_guarded_context(fx)
-    # The headless View supplies preview bytes; artifact export below is real.
-    fx.view.take_figure_screenshot_for_subtab.return_value = b"preview"
+    # The fixture View supplies a valid PNG; artifact export below is real.
+    fx.view.take_figure_screenshot_for_subtab.return_value = make_png()
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})

@@ -6,6 +6,7 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
+    optional_integer,
     optional_string,
     required_object,
     required_string,
@@ -162,11 +163,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Save a pane's canonical image file (analysis|post_analysis only; run "
             "has no canonical image). Requires (tab_id, subtab_id) with closed "
             "values analysis|post_analysis. Explicit image_path updates the GUI "
-            "draft before saving; omission keeps the draft, and an empty path is rejected.",
+            "draft before saving; omission keeps the draft, and an empty path is rejected. "
+            "Optional operation_id rejects a replaced result before changing paths or exporting.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: analysis|post_analysis"),
                 optional_string("image_path", "Override image path"),
+                optional_integer(
+                    "operation_id", "Require this analysis operation's current result"
+                ),
             ),
         ),
         agent=AgentMethodPolicy(
