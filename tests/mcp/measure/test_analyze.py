@@ -524,6 +524,142 @@ def test_done_joins_original_completion_without_duplicate_saves(
     }
 
 
+@pytest.mark.parametrize("bad_image", [False, True])
+def test_rejected_done_keeps_registered_interaction_editable(
+    tmp_path, clients, monkeypatch, bad_image
+):
+    value = 1
+
+    def respond(method, params):
+        nonlocal value
+        if method == "tab.analyze":
+            return {
+                "operation_id": 71,
+                "interactive": True,
+                "params": {},
+                "invalidated_on_success": [],
+            }
+        if method == "operation.await":
+            return {"reason": "user_feedback", "status": "running"}
+        if method == "tab.interact":
+            if "payload" in params:
+                assert params["payload"] == {"command": "set", "value": 2}
+                value = 2
+            return {
+                "operation_id": 71,
+                "state": {"value": value},
+                "commands": [{"name": "set"}, {"name": "done"}],
+                "figure": {"png_b64": "invalid"} if value == 2 and bad_image else None,
+            }
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+    execution = started["execution"]
+    client.transport.replies["tab.interact"] = {
+        "ok": False,
+        "error": {"code": "invalid_params", "message": "selection required"},
+    }
+    rejected = _call_stdio(
+        monkeypatch, client, "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+    )
+    assert rejected["isError"] is True
+    assert "selection required" in rejected["content"][0]["text"]
+    snapshot = client.call("status", {"execution": execution})
+    assert snapshot["status"] == "interactive"
+    assert snapshot["error"] is None
+    assert snapshot["interaction"]["state"] == {"value": 1}
+    del client.transport.replies["tab.interact"]
+    updated = _call_stdio(
+        monkeypatch,
+        client,
+        "tab_interact",
+        {"tab": "t", "payload": {"command": "set", "value": 2}},
+    )
+    assert bool(updated.get("isError")) is bad_image
+    data = json.loads(updated["content"][0]["text"])
+    assert data["execution"] == execution
+    snapshot = client.call("status", {"execution": execution})
+    assert snapshot["status"] == "interactive"
+    assert snapshot["interaction"]["state"] == {"value": 2}
+    assert bool(snapshot["interaction"].get("delivery_error")) is bad_image
+    assert snapshot["save_status"] == "not_started"
+    assert set(_methods(client)) == {"tab.analyze", "tab.interact", "operation.await"}
+    assert _methods(client).count("tab.interact") == 3
+
+
+@pytest.mark.parametrize("selector", ["op", "execution"])
+@pytest.mark.parametrize("outcome", ["finished", "cancelled", "failed"])
+@pytest.mark.parametrize("gui_cancel", ["cancelling", "not_cancellable", "failed"])
+def test_cancel_latches_intent_and_retains_original_terminal(
+    tmp_path, clients, monkeypatch, selector, outcome, gui_cancel
+):
+    terminal = Event()
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {
+                "operation_id": 71,
+                "interactive": True,
+                "params": {},
+                "invalidated_on_success": [],
+            }
+        if method == "tab.interact":
+            return {"operation_id": 71, "state": {}, "figure": None}
+        if method == "operation.await":
+            assert params["operation_id"] == 71
+            return (
+                {"reason": "completed", "status": outcome, "error": "real failure"}
+                if terminal.is_set()
+                else {"reason": "user_feedback", "status": "running"}
+            )
+        if method == "operation.cancel":
+            assert params["operation_id"] == 71
+            return {"status": gui_cancel}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+    if gui_cancel == "failed":
+        client.transport.replies["operation.cancel"] = {
+            "ok": False,
+            "error": {"code": "precondition_failed", "message": "cannot send cancel"},
+        }
+    args = {selector: started[selector]}
+    cancelled = _call_stdio(monkeypatch, client, "cancel", args)
+    assert bool(cancelled.get("isError")) is (gui_cancel == "failed")
+    data = json.loads(cancelled["content"][0]["text"])
+    assert data["execution"] == started["execution"]
+    assert data["cancel_requested"] is True
+    assert data["gui_cancel"]["status"] == (
+        "requested" if gui_cancel == "cancelling" else gui_cancel
+    )
+    if gui_cancel == "failed":
+        assert "cannot send cancel" in data["gui_cancel"]["error"]["message"]
+    repeated = _call_stdio(monkeypatch, client, "cancel", args)
+    assert json.loads(repeated["content"][0]["text"])["gui_cancel"] == data["gui_cancel"]
+    assert _methods(client).count("operation.cancel") == 1
+    terminal.set()
+    completed = _data(
+        _call_stdio(
+            monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2}
+        )
+    )
+    assert completed["status"] == ("failed" if outcome == "failed" else "cancelled")
+    assert completed["operation_outcome"]["status"] == outcome
+    assert completed["cancel_requested"] is True
+    assert completed["result"] is None
+    assert completed["save_status"] == "not_started"
+    assert set(_methods(client)) <= {
+        "tab.analyze", "tab.interact", "operation.await", "operation.cancel"
+    }
+    frozen = client.call("status", {"execution": started["execution"]})
+    final = _data(_call_stdio(monkeypatch, client, "cancel", args))
+    assert final["gui_cancel"]["status"] == "not_needed"
+    assert client.call("status", {"execution": started["execution"]}) == frozen
+    assert _methods(client).count("operation.cancel") == 1
+
+
 @pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])
 def test_malformed_interactive_image_is_a_tool_error_not_a_success(
     tmp_path, clients, monkeypatch, tool

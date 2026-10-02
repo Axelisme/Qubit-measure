@@ -150,9 +150,18 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def cancel(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Ask the GUI's domain owner to stop, then await a bounded terminal."""
+def cancel(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any] | ToolReply:
+    """Cancel one registered execution or an unregistered GUI operation."""
+    if ("op" in arguments) == ("execution" in arguments):
+        raise ValueError("provide exactly one of op or execution")
+    if "execution" in arguments:
+        return ctx.session.executions.get(_execution_id(arguments)).cancel()
     op = _operation_id(arguments)
+    execution = ctx.session.executions.for_op(op)
+    if execution is not None:
+        return execution.cancel()
     ctx = ctx.bound()
     response = ctx.gui.read_internal("operation.cancel", {}, operation_handle=op)
     if response["status"] != "cancelling":
@@ -205,11 +214,17 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "cancel": {
             "handler": partial(cancel, ctx),
-            "description": "Cancel a known operation when it has a cancel hook.",
+            "description": "Request cancellation of one operation or execution.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"op": {"type": "integer"}},
-                "required": ["op"],
+                "properties": {
+                    "op": {"type": "integer"},
+                    "execution": {"type": "string", "minLength": 1},
+                },
+                "oneOf": [
+                    {"required": ["op"], "not": {"required": ["execution"]}},
+                    {"required": ["execution"], "not": {"required": ["op"]}},
+                ],
             },
         },
     }

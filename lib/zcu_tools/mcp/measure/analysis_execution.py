@@ -147,6 +147,10 @@ class AnalysisExecution:
                 ),
             )
 
+    def cancel(self) -> ToolReply:
+        """Latch continuation cancellation, then request stop on the original binding."""
+        raise NotImplementedError("execution cancellation is not implemented")
+
     def observe_interaction(self, reply: ToolReply, *, done: bool = False) -> None:
         """Keep the latest handoff without replacing an observed completion."""
         with self._condition:
