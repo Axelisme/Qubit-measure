@@ -65,6 +65,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.cfg import SweepValue
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
@@ -364,9 +365,13 @@ class T2RamseyBuilder(Builder):
         times = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
 
-    def make_plotter(self, figure: Any) -> Decay1DPlotter:
+    def make_plotter(self, plots: Plots, figure_name: str) -> Decay1DPlotter:
         return Decay1DPlotter(
-            figure, title="t2ramsey", value_label="T2Ramsey (us)", x_label="Time (us)"
+            plots,
+            figure_name,
+            title="t2ramsey",
+            value_label="T2Ramsey (us)",
+            x_label="Time (us)",
         )
 
     def build_node(self, env: RunEnv) -> T2RamseyNode:

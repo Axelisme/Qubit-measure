@@ -1,6 +1,6 @@
 # `gui/app/autofluxdep/` — Autofluxdep app
 
-**Last updated:** 2026-10-02 — explicit segment context
+**Last updated:** 2026-10-02 — run-owned named figures
 
 這個 app 擁有 autofluxdep GUI shell、workflow 編排、run lifecycle、artifact 與 UI；
 [concrete experiment、catalog 與共用量測 mechanics](../../../experiment/v2_gui/autofluxdep/README.md)
@@ -20,7 +20,10 @@ Orchestrator 按使用者 placement 次序執行，不做拓撲排序；它解�
 `controller.py` 組合 shared session services，提供 setup、context、device、predictor 與 progress
 control facets，並處理 workflow 編輯、run 操作與關閉。`app.py` 建立 core、runtime behavior 與
 主視窗。`state.py` 持有 workflow、flux values、run results 和 ProjectInfo。
-`ui/` 呈現 node list、cfg form、run progress 與結果圖；plot 更新在主線程完成。
+`ui/` 呈現 node list、cfg form、run progress 與結果圖；plot 建立與更新都在主線程完成。
+每次 run 的 Plots 以 node instance name 持有原生 Figure，Builder 接受該 collection 與名稱，
+透過 typed factories 建立 subplot。`MainWindow.figures` 提供具名圖的 Mapping；canvas
+只負責呈現。Restart／清理／關閉釋放 Qt canvas，不清空已被 caller 保留的 Figure。
 `services/remote/` 是 read-only RPC view，不執行 workflow mutation。
 
 ## Run lifecycle 與持久化
@@ -37,8 +40,9 @@ setup 及 provider boundary 共用這個停止來源。Orchestrator 在 Node 返
 error channel，不讓 partial data 掩蓋失敗。Pause 保留 workflow state，Continue 不沿用
 上一 segment 的 token 或錯誤。Run setup 同時固定 State 已觀測的 device snapshot，
 Builder 透過 assemble_experiment_cfg 使用它，不在 worker 組裝 cfg 時讀取裝置。Snapshot
-與借用的 driver mapping 分開保存。Context 的 plots 目前是 non-presenting；既有 workflow
-Result／Plotter 仍負責顯示，具名 figure 遷移由後續 workflow 票完成。
+與借用的 driver mapping 分開保存。Context 的 plots 是 segment-local non-presenting
+collection；UI 的 Result／Plotter 與具名 Figure collection 則存活整個 run，Pause／Continue
+沿用同一批 UI 圖。這兩個 owner 不互相接管圖，也不影響 artifact schema。
 
 `services/run_store.py` 和相關 export／report services 擁有 Run Result Artifact。
 Metadata root 保存 manifest、journal 和 report；data root 保存 committed node rows 與 exports。

@@ -115,6 +115,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import (
     Need,
 )
 from zcu_tools.gui.cfg import SweepValue
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
@@ -455,9 +456,9 @@ class T1Builder(Builder):
         )
         return Sweep1DResult.allocate(flux, times, x_label="relax time (us)")
 
-    def make_plotter(self, figure: Any) -> Decay1DPlotter:
+    def make_plotter(self, plots: Plots, figure_name: str) -> Decay1DPlotter:
         return Decay1DPlotter(
-            figure, title="t1", value_label="T1 (us)", x_label="Time (us)"
+            plots, figure_name, title="t1", value_label="T1 (us)", x_label="Time (us)"
         )
 
     def build_node(self, env: RunEnv) -> T1Node:

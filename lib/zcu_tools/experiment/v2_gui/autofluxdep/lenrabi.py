@@ -89,6 +89,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep, Need
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -573,9 +574,10 @@ class LenRabiBuilder(Builder):
         lengths = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, lengths, x_label="pulse length (us)")
 
-    def make_plotter(self, figure: Any) -> ColormapLinePlotter:
+    def make_plotter(self, plots: Plots, figure_name: str) -> ColormapLinePlotter:
         return ColormapLinePlotter(
-            figure,
+            plots,
+            figure_name,
             title="lenrabi",
             y_label="Pulse length (us)",
             num_lines=3,

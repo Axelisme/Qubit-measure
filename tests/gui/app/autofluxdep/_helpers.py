@@ -542,10 +542,10 @@ def make_builder(
                 return None
             return result_factory(schema, flux)
 
-        def make_plotter(self, figure: Any) -> Any:
+        def make_plotter(self, plots: Plots, figure_name: str) -> Any:
             if plotter_factory is None:
                 return None
-            return plotter_factory(figure)
+            return plotter_factory(plots[figure_name])
 
     b = _AdHocBuilder()
     b.name = name

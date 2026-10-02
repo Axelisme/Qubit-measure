@@ -55,6 +55,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -272,9 +273,9 @@ class MistBuilder(Builder):
         gains = sweepcfg_to_axis(knobs["gain_sweep"])
         return Sweep1DResult.allocate(flux, gains, x_label="gain")
 
-    def make_plotter(self, figure: Any) -> ColormapLinePlotter:
+    def make_plotter(self, plots: Plots, figure_name: str) -> ColormapLinePlotter:
         return ColormapLinePlotter(
-            figure, title="mist", y_label="Readout Gain (a.u.)", num_lines=1
+            plots, figure_name, title="mist", y_label="Readout Gain (a.u.)", num_lines=1
         )
 
     def build_node(self, env: RunEnv) -> MistNode:

@@ -44,6 +44,7 @@ from zcu_tools.gui.app.autofluxdep.cfg.override_plan import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.plotting.plots import Plots
 
 # round_hook(whole_trace): called each acquire round with the running-averaged
 # trace; the Node fills its Result row + the env notifies the main thread.
@@ -235,9 +236,9 @@ class Builder(ABC):
         del schema, flux, md  # base is a no-op; measurement Builders override
         return None
 
-    def make_plotter(self, figure: Any) -> Any:
-        """Build the sweep-lived Plotter bound to ``figure``. None = no plot."""
-        del figure  # base is a no-op; measurement Builders override
+    def make_plotter(self, plots: Plots, figure_name: str) -> Any:
+        """Build a main-thread Plotter for the run-owned named Figure."""
+        del plots, figure_name  # base is a no-op; measurement Builders override
         return None
 
     # --- per-flux-point factory (curries the environment in) ---

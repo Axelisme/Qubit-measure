@@ -68,6 +68,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.tools import Predictor
 from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -370,43 +371,38 @@ class QubitFreqNode(Node):
 class QubitFreqPlotter:
     """qubit_freq's two-panel liveplot, aligned with the runner module.
 
-    Built once at Run start with a bare matplotlib ``Figure``; reuses
-    ``zcu_tools.plotting.liveplot`` (LivePlot1D / LivePlot2DwithLine) embedded into the
-    Figure's axes via ``existed_axes`` (the liveplot fig is None then — the host
-    refreshes; see ``zcu_tools.plotting.liveplot.segments.base``). ``update(result, idx)``
-    on the main thread after each row notification feeds:
+    Built once for a run-owned named Figure. Typed factories update its panels;
+    ``update(result, idx)`` runs on the main thread after each row notification:
 
-    - ``fit_freq`` (LivePlot1D): flux value → fitted absolute qubit frequency.
-    - ``detune`` (LivePlot2DwithLine): the flux × detune signal colormap plus the
+    - ``fit_freq`` (LinePlot): flux value → fitted absolute qubit frequency.
+    - ``detune`` (HeatmapLinePlot): the flux × detune signal colormap plus the
       latest few flux rows as 1-D traces; a red dashed line marks the current
       fit_detune (matching the runner's ``freq_line``).
     """
 
-    def __init__(self, figure: Any) -> None:
-        from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2DwithLine
-
+    def __init__(self, plots: Plots, figure_name: str) -> None:
+        figure = plots[figure_name]
         self._fig = figure
         ax_fit = figure.add_subplot(2, 1, 1)
         ax_2d = figure.add_subplot(2, 2, 3)
         ax_line = figure.add_subplot(2, 2, 4)
         self._detune_title = "qubit_freq (detune)"
-        self._freq_line = ax_line.axvline(np.nan, color="red", linestyle="--")
-        self._fit = LivePlot1D(
+        self._fit = plots.liveplot_1d(
+            figure_name,
             "Flux device value",
             "Frequency (MHz)",
-            existed_axes=[[ax_fit]],
-            segment_kwargs=dict(title="qubit_freq (fit_freq)"),
+            axes=ax_fit,
+            title="qubit_freq (fit_freq)",
         )
-        self._detune = LivePlot2DwithLine(
+        self._detune = plots.liveplot_2d_with_line(
+            figure_name,
             "Flux device value",
             "Detune (MHz)",
             line_axis=1,
             num_lines=3,
             title=self._detune_title,
-            existed_axes=[[ax_2d, ax_line]],
+            axes=(ax_2d, ax_line),
         )
-        self._fit.__enter__()
-        self._detune.__enter__()
 
     def update(self, result: QubitFreqResult, idx: int) -> None:
         self._fit.update(result.flux, result.fit_freq, refresh=False)
@@ -420,7 +416,7 @@ class QubitFreqPlotter:
         # mark the current fit as a detune offset (freq - predict_freq)
         offset = result.fit_freq - result.predict_freq
         valid = offset[~np.isnan(offset)]
-        self._freq_line.set_xdata([valid[-1] if valid.size else np.nan])
+        self._detune.mark_line(float(valid[-1]) if valid.size else np.nan)
         self._fig.canvas.draw_idle()
 
 
@@ -555,8 +551,8 @@ class QubitFreqBuilder(Builder):
         detune = sweepcfg_to_axis(knobs["detune_sweep"])
         return QubitFreqResult.allocate(flux, detune)
 
-    def make_plotter(self, figure: Any) -> QubitFreqPlotter:
-        return QubitFreqPlotter(figure)
+    def make_plotter(self, plots: Plots, figure_name: str) -> QubitFreqPlotter:
+        return QubitFreqPlotter(plots, figure_name)
 
     def build_node(self, env: RunEnv) -> QubitFreqNode:
         return QubitFreqNode(env, self)

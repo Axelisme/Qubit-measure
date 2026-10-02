@@ -94,6 +94,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.gui.cfg import CenteredSweepValue
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -702,8 +703,8 @@ class RoOptimizeBuilder(Builder):
         gains = np.linspace(gain_range[0], gain_range[1], gain_expts)
         return Sweep2DResult.allocate(flux, freqs, gains)
 
-    def make_plotter(self, figure: Any) -> Landscape2DPlotter:
-        return Landscape2DPlotter(figure, title="ro_optimize")
+    def make_plotter(self, plots: Plots, figure_name: str) -> Landscape2DPlotter:
+        return Landscape2DPlotter(plots, figure_name, title="ro_optimize")
 
     def build_node(self, env: RunEnv) -> RoOptimizeNode:
         return RoOptimizeNode(env, self)
