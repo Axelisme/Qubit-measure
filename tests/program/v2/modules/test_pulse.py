@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -17,7 +18,7 @@ def _make_cfg(length=0.2, pre=0.0, post=0.0):
 
 
 def test_pulsecfg_validates_nqz():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="nqz"):
         PulseCfg(
             waveform=ConstWaveformCfg(length=0.1),
             ch=0,
@@ -45,7 +46,7 @@ def test_pulsecfg_set_param_length_delegates_to_waveform():
 
 def test_pulsecfg_set_param_unknown_rejected():
     cfg = _make_cfg()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unknown parameter: ch"):
         cfg.set_param("ch", 1)
 
 

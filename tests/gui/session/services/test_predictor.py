@@ -12,6 +12,7 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.services.predictor import (
     CalibrateFluxBiasRequest,
+    LoadPredictorRequest,
     PredictCurveRequest,
     PredictFreqRequest,
     PredictMatrixCurveRequest,
@@ -60,12 +61,9 @@ def test_predictor_load_clear_does_not_bump_context_version():
 
 def test_load_predictor_wraps_io_errors(tmp_path):
     svc = _make_svc()
-    with pytest.raises(PredictorLoadError):
-        from zcu_tools.gui.session.services.predictor import LoadPredictorRequest
-
-        svc.load_predictor(
-            LoadPredictorRequest(path=str(tmp_path / "missing.json"), flux_bias=0.0)
-        )
+    request = LoadPredictorRequest(path=str(tmp_path / "missing.json"), flux_bias=0.0)
+    with pytest.raises(PredictorLoadError, match="missing.json"):
+        svc.load_predictor(request)
 
 
 def test_predict_freq_without_predictor_raises():

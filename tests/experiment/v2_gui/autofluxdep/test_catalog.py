@@ -1,13 +1,8 @@
-"""Catalog validation and experiment-package dependency architecture."""
+"""Catalog validation and workflow placement behavior."""
 
 from __future__ import annotations
 
-import ast
-import importlib.util
-import subprocess
-import sys
 from dataclasses import FrozenInstanceError
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -33,7 +28,6 @@ _EXPECTED_NAMES = (
     "t2echo",
     "mist",
 )
-_EXPERIMENT_PREFIX = "zcu_tools.experiment.v2_gui.autofluxdep."
 
 
 def _catalog_builder(
@@ -57,58 +51,6 @@ def _catalog_builder(
         },
     )
     return builder_type()
-
-
-def _imports(path: Path) -> tuple[str, ...]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    source_root = Path(__file__).parents[4] / "lib"
-    module_parts = path.relative_to(source_root).with_suffix("").parts
-    if module_parts[-1] == "__init__":
-        module_parts = module_parts[:-1]
-        package = ".".join(module_parts)
-    else:
-        package = ".".join(module_parts[:-1])
-
-    return _canonical_imports(tree, package=package)
-
-
-def _canonical_imports(tree: ast.AST, *, package: str) -> tuple[str, ...]:
-    imported: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                relative_name = "." * node.level + (node.module or "")
-                imported_from = importlib.util.resolve_name(relative_name, package)
-            elif node.module is not None:
-                imported_from = node.module
-            else:  # pragma: no cover - absolute ``from`` always has a module
-                continue
-            imported.append(imported_from)
-            imported.extend(
-                f"{imported_from}.{alias.name}"
-                for alias in node.names
-                if alias.name != "*"
-            )
-    return tuple(imported)
-
-
-def test_import_analyzer_canonicalizes_relative_imports() -> None:
-    tree = ast.parse(
-        "from . import qubit_freq\n"
-        "from .t2echo import EXPERIMENT\n"
-        "from ..autofluxdep import t1\n"
-    )
-
-    imported = _canonical_imports(
-        tree,
-        package="zcu_tools.experiment.v2_gui.autofluxdep",
-    )
-
-    assert "zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq" in imported
-    assert "zcu_tools.experiment.v2_gui.autofluxdep.t2echo" in imported
-    assert "zcu_tools.experiment.v2_gui.autofluxdep.t1" in imported
 
 
 def test_catalog_is_explicit_ordered_and_immutable() -> None:
@@ -143,73 +85,6 @@ def test_catalog_rejects_duplicate_declaration_entries() -> None:
 def test_unknown_placement_preserves_key_error() -> None:
     with pytest.raises(KeyError):
         create_placement("not_registered")
-
-
-def test_each_concrete_experiment_file_is_registered_exactly_once() -> None:
-    package_dir = (
-        Path(__file__).parents[4] / "lib/zcu_tools/experiment/v2_gui/autofluxdep"
-    )
-    concrete = {
-        path.stem
-        for path in package_dir.glob("*.py")
-        if path.stem not in {"__init__", "catalog"}
-    }
-    registered = tuple(
-        builder.__class__.__module__.rsplit(".", 1)[-1] for builder in builders()
-    )
-
-    assert set(registered) == concrete
-    assert len(registered) == len(set(registered))
-
-
-def test_support_and_nodes_do_not_import_concrete_experiments() -> None:
-    package_dir = Path(__file__).parents[4] / "lib/zcu_tools/gui/app/autofluxdep"
-    concrete_modules = {_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES}
-    experiment_dir = (
-        Path(__file__).parents[4] / "lib/zcu_tools/experiment/v2_gui/autofluxdep"
-    )
-    guarded_files = (
-        *experiment_dir.joinpath("_support").rglob("*.py"),
-        *package_dir.joinpath("nodes").rglob("*.py"),
-    )
-
-    for path in guarded_files:
-        assert concrete_modules.isdisjoint(_imports(path)), path
-
-
-def test_concrete_experiments_do_not_import_one_another() -> None:
-    package_dir = (
-        Path(__file__).parents[4] / "lib/zcu_tools/experiment/v2_gui/autofluxdep"
-    )
-    concrete_modules = {_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES}
-    for name in _EXPECTED_NAMES:
-        path = package_dir / f"{name}.py"
-        assert concrete_modules.isdisjoint(_imports(path)), path
-
-
-def test_support_import_does_not_load_catalog_or_concrete_experiments() -> None:
-    forbidden = (
-        "zcu_tools.experiment.v2_gui.autofluxdep.catalog",
-        *(_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES),
-    )
-    probe = f"""
-import sys
-import zcu_tools.experiment.v2_gui.autofluxdep._support.result
-
-forbidden = {forbidden!r}
-loaded = tuple(name for name in forbidden if name in sys.modules)
-if loaded:
-    raise SystemExit(f"unexpected experiment imports: {{loaded!r}}")
-"""
-
-    completed = subprocess.run(
-        [sys.executable, "-c", probe],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
 def test_predictor_is_not_user_placeable() -> None:

@@ -79,7 +79,7 @@ class TestNoneResetCfg:
 
     def test_set_param_always_raises(self):
         cfg = NoneResetCfg()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="NoneReset does not support set_param"):
             cfg.set_param("anything", 1.0)
 
 
@@ -133,7 +133,7 @@ class TestPulseResetCfg:
 
     def test_set_param_unknown_raises(self):
         cfg = PulseResetCfg(pulse_cfg=_make_pulse_cfg())
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown parameter: ro_ch"):
             cfg.set_param("ro_ch", 0)
 
 
@@ -221,7 +221,7 @@ class TestTwoPulseResetCfg:
         cfg = TwoPulseResetCfg(
             pulse1_cfg=_make_pulse_cfg(), pulse2_cfg=_make_pulse_cfg(ch=2)
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown parameter: unknown"):
             cfg.set_param("unknown", 0)
 
 
@@ -340,7 +340,7 @@ class TestBathResetCfg:
             qubit_tone_cfg=_make_pulse_cfg(ch=2),
             pi2_cfg=_make_pi2_cfg(),
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown parameter: unknown"):
             cfg.set_param("unknown", 0)
 
 

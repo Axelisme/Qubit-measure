@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 from zcu_tools.program.v2.modules import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -51,11 +52,11 @@ class TestModuleCfgFactoryFromRaw:
         assert isinstance(cfg, NoneResetCfg)
 
     def test_unknown_type_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="union_tag_invalid"):
             ModuleCfgFactory.from_raw({"type": "no_such_module"})
 
     def test_missing_discriminator_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="union_tag_not_found"):
             ModuleCfgFactory.from_raw({"ch": 1})
 
     def test_ml_context_propagated_for_string_ref(self):
@@ -107,9 +108,9 @@ class TestWaveformCfgFactoryFromRaw:
         assert isinstance(cfg.raise_waveform, GaussWaveformCfg)
 
     def test_unknown_style_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="union_tag_invalid"):
             WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})
 
     def test_missing_discriminator_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="union_tag_not_found"):
             WaveformCfgFactory.from_raw({"length": 1.0})

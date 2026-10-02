@@ -415,7 +415,7 @@ def test_axis_length_mismatch_raises(tmp_path):
     freq_wrong = np.linspace(4e9, 5e9, 8)  # 8 != 10
     power = np.linspace(-30.0, 0.0, 5)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="axis 'Freq' length 8 != z dim 10"):
         save_labber_data(
             str(tmp_path / "bad_len"),
             z=("S21", "", z2d),

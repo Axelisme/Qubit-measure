@@ -120,7 +120,9 @@ def test_uniform_axis_preserves_existing_single_point_behavior() -> None:
 def test_nonuniform_axis_rejects_invalid_domain(
     start: float, stop: float, expts: int, model_t1: float
 ) -> None:
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(
+        ValueError, match="invalid non-uniform T1 sampling domain"
+    ) as exc_info:
         t1_delay_axis(
             start=start,
             stop=stop,
@@ -187,7 +189,9 @@ def test_generated_axis_collision_is_not_silently_deduplicated() -> None:
 def test_direct_delay_quantization_rejects_collisions_or_reordering(
     delays: list[float],
 ) -> None:
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(
+        ValueError, match="delay sweep collapsed after cycle quantization"
+    ) as exc_info:
         materialize_nonuniform_t1_delays(delays, soccfg=_CycleConfig())
 
     message = str(exc_info.value)

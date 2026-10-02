@@ -28,9 +28,9 @@ def test_parse_pairs_empty():
 
 
 def test_parse_pairs_malformed_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="transition pair must be 'i,j'"):
         parse_pairs("(0,1,2)")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="transition pair must be integers"):
         parse_pairs("(a,b)")
 
 

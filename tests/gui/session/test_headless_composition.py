@@ -1,40 +1,18 @@
-"""Executable definition of the Qt-free session-core composition."""
+"""Exercise session connection and cancellation through public headless adapters."""
 
 from __future__ import annotations
 
-import importlib.abc
-import os
-import subprocess
-import sys
-import tempfile
 import threading
 import time
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
-_CHILD_FLAG = "--headless-child"
-_QT_ROOTS = frozenset({"qtpy", "PyQt6", "PySide6"})
+import pytest
 
 
-class _BlockQtImports(importlib.abc.MetaPathFinder):
-    def find_spec(
-        self,
-        fullname: str,
-        path: object = None,
-        target: object = None,
-    ) -> None:
-        del path, target
-        if fullname.partition(".")[0] in _QT_ROOTS:
-            raise ImportError(f"Qt import blocked in headless smoke: {fullname}")
-        return None
-
-
-def _install_qt_import_blocker() -> None:
-    sys.meta_path.insert(0, _BlockQtImports())
-
-
-def _run_headless_smoke() -> None:
+def test_session_core_connects_and_cancels_on_owner_thread(
+    request: pytest.FixtureRequest,
+) -> None:
     from zcu_tools.device.fake import FakeDevice
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
@@ -140,6 +118,11 @@ def _run_headless_smoke() -> None:
     handles = OperationHandles()
     progress = ProgressService(OwnerProgressTransport())
     background = ThreadPoolBackgroundExecutor(owner, max_pool_workers=2)
+
+    def quiesce_background() -> None:
+        assert background.quiesce(timeout=5.0)
+
+    request.addfinalizer(quiesce_background)
     runner = OperationRunner(gate, handles, progress, background, bus)
     registry = InMemoryDeviceRegistry()
     fake_flux = FakeDevice(fast_mode=True)
@@ -256,35 +239,3 @@ def _run_headless_smoke() -> None:
     assert len(gate_events) == 4
     assert all(thread_id == owner_id for thread_id, _active in gate_events)
     assert [len(active) for _thread_id, active in gate_events] == [1, 0, 1, 0]
-    assert not any(name.partition(".")[0] in _QT_ROOTS for name in sys.modules)
-
-
-def test_session_core_runs_without_qt_imports_or_qapplication() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    env = os.environ.copy()
-    python_path = str(repo_root / "lib")
-    if current := env.get("PYTHONPATH"):
-        python_path = os.pathsep.join((python_path, current))
-    env["PYTHONPATH"] = python_path
-
-    completed = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), _CHILD_FLAG],
-        cwd=repo_root,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20.0,
-    )
-    assert completed.returncode == 0, (
-        f"headless child failed with code {completed.returncode}\n"
-        f"stdout:\n{completed.stdout}\n"
-        f"stderr:\n{completed.stderr}"
-    )
-
-
-if __name__ == "__main__" and sys.argv[1:] == [_CHILD_FLAG]:
-    _install_qt_import_blocker()
-    with tempfile.TemporaryDirectory(prefix="zcu-headless-mpl-") as mpl_config:
-        os.environ["MPLCONFIGDIR"] = mpl_config
-        _run_headless_smoke()

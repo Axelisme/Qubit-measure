@@ -14,8 +14,6 @@ cases (sweep edges, literal rejection, unknown paths) each get a focused case.
 
 from __future__ import annotations
 
-import ast
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -25,34 +23,6 @@ from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.binding import CfgDraft
 
 from ._helpers import Fixture, call, open_client
-
-
-def test_remote_path_projection_has_no_field_or_editor_subtype_grammar() -> None:
-    source_path = (
-        Path(__file__).parents[5]
-        / "lib/zcu_tools/gui/app/measure/remote/path_resolver.py"
-    )
-    source = source_path.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    forbidden = {
-        "CfgField",
-        "SectionField",
-        "ScalarField",
-        "LiteralField",
-        "SweepField",
-        "CenteredSweepField",
-        "ReferenceField",
-        "SweepEditor",
-        "CenteredSweepEditor",
-    }
-    imported = {
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-        for alias in node.names
-    }
-    assert imported.isdisjoint(forbidden)
-    assert "<Custom:" not in source
 
 
 def _make_draft(

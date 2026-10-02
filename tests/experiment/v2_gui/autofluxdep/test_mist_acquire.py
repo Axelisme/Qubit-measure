@@ -1,17 +1,13 @@
-"""RB-2: mist end-to-end real acquire against the flux-aware MockSoc.
+"""Exercise MIST acquisition through the flux-aware MockSoc.
 
-MIST sweeps the disturbance-pulse gain and reads the state-disturbance magnitude
-directly (no fit). MIST is a known SimEngine gap (the simulator does not yet model
-the punch-out / high-gain disturbance regime), so this test asserts the real
-acquire path runs and fills a finite row IF the SimEngine supports the program;
-if the engine fast-fails on the mist program, the test skips with the exact error
-(unified real acquire -- the Node carries no mock-detection branch).
+The simulator verifies that the acquisition path fills a finite disturbance row.
+It does not validate the physical high-gain punch-out model. Acquisition errors
+remain test failures rather than being classified as simulator limitations.
 """
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from zcu_tools.experiment.v2_gui.autofluxdep.mist import MistBuilder
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -50,7 +46,7 @@ def _pi_pulse(ml, freq: float):
     }
 
 
-def test_mist_acquire_runs_or_skips_on_simengine_gap():
+def test_mist_acquire_reports_success_and_finite_signal():
     ctrl = build_core()
     connect_mock(ctrl)
     ml = ctrl.state.session_env.ml
@@ -64,8 +60,8 @@ def test_mist_acquire_runs_or_skips_on_simengine_gap():
     # the mist_freq knob sets the disturbance drive; set it on resonance so the
     # mist pulse actually drives the qubit under the SimEngine (before building
     # the schema the env lowers).
-    _PARAMS["mist_freq"] = f01
-    schema = node_schema(builder, _PARAMS)
+    params = {**_PARAMS, "mist_freq": f01}
+    schema = node_schema(builder, params)
     result = builder.make_init_result(schema, np.asarray([flux]))
     env = make_acquire_env(
         ctrl, flux=flux, flux_idx=0, schema=schema, ml=ml, result=result
@@ -75,11 +71,7 @@ def test_mist_acquire_runs_or_skips_on_simengine_gap():
         modules={"pi_pulse": _pi_pulse(ml, f01), "opt_readout": ACQUIRE_READOUT},
     )
 
-    try:
-        patch = builder.build_node(env).produce(snap)
-    except Exception as exc:  # SimEngine MIST support pending
-        pytest.skip(f"SimEngine MIST support pending: {type(exc).__name__}: {exc}")
-        raise AssertionError("pytest.skip should not return")
+    patch = builder.build_node(env).produce(snap)
 
     # the real acquire ran: success reported + the disturbance row is finite
     assert patch.values().get("success") == 1.0

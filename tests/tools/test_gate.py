@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import sys
+import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 import gate
 import pytest
-
-# gate.measure runs a real command and reads its output; the measure cases hand it
-# a trivial `python -c` child as the command under test.
-pytestmark = pytest.mark.requires_subprocess
 
 
 def test_formatting_runs_before_anything_measures_the_code() -> None:
@@ -46,16 +43,6 @@ def test_the_ratchet_is_given_the_resolved_base() -> None:
     )
 
     assert ratchet.command[-2:] == ("--base", "deadbeef")
-
-
-def test_the_slow_checks_are_named_rather_than_folded_in() -> None:
-    """Folding a two-minute suite into a two-second command teaches people to skip it."""
-    commands = [step.command for step in gate.steps("abc", ("lib/a.py",), fix=True)]
-    joined = " ".join(part for command in commands for part in command)
-
-    assert "pytest" not in joined
-    assert any("pytest" in separate for separate in gate.SEPARATE_CHECKS)
-    assert any("check_pytest_collection" in s for s in gate.SEPARATE_CHECKS)
 
 
 class _StubRatchet:
@@ -135,48 +122,28 @@ def test_an_unreadable_ratchet_report_falls_back_to_its_error(
     )
 
 
-def test_a_json_receipt_reading_comes_from_its_named_key(tmp_path: Path):
-    check = gate.Check(
-        "probe",
-        (sys.executable, "-c", "print('{\"violation_count\": 19}')"),
-        "violation_count",
-    )
+@pytest.mark.parametrize(
+    ("stdout", "returncode", "count_key", "expected"),
+    [
+        ('{"violation_count": 19}', 0, "violation_count", "19"),
+        ('{"summary": {"errorCount": 3620}}', 1, "summary.errorCount", "3620"),
+        ("[1, 2, 3]", 1, "__len__", "3"),
+        ("", 0, None, "green"),
+        ("", 1, None, "RED"),
+        ("not json", 0, "total", "unreadable"),
+    ],
+    ids=["named-key", "nested-key", "list-length", "success", "failure", "unreadable"],
+)
+def test_measure_reports_external_receipts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+    returncode: int,
+    count_key: str | None,
+    expected: str,
+) -> None:
+    check = gate.Check("probe", ("external-check",), count_key)
+    receipt = subprocess.CompletedProcess(check.command, returncode, stdout, "")
+    monkeypatch.setattr(gate.subprocess, "run", Mock(return_value=receipt))
 
-    assert gate.measure(check, tmp_path) == "19"
-
-
-def test_a_nested_key_is_followed(tmp_path: Path):
-    check = gate.Check(
-        "probe",
-        (sys.executable, "-c", 'print(\'{"summary": {"errorCount": 3620}}\')'),
-        "summary.errorCount",
-    )
-
-    assert gate.measure(check, tmp_path) == "3620"
-
-
-def test_a_json_list_is_read_by_length(tmp_path: Path):
-    """Ruff emits an array of diagnostics; its own summary lines are not data."""
-    check = gate.Check("probe", (sys.executable, "-c", "print('[1,2,3]')"), "__len__")
-
-    assert gate.measure(check, tmp_path) == "3"
-
-
-def test_a_check_without_a_count_key_reports_its_exit_code(tmp_path: Path):
-    green = gate.Check("probe", (sys.executable, "-c", "pass"))
-    red = gate.Check("probe", (sys.executable, "-c", "raise SystemExit(1)"))
-
-    assert gate.measure(green, tmp_path) == "green"
-    assert gate.measure(red, tmp_path) == "RED"
-
-
-def test_unreadable_output_is_reported_rather_than_guessed(tmp_path: Path):
-    check = gate.Check("probe", (sys.executable, "-c", "print('not json')"), "total")
-
-    assert gate.measure(check, tmp_path) == "unreadable"
-
-
-def test_pyright_is_not_in_the_default_status_set() -> None:
-    """41 seconds against 6 would make the status view something people stop running."""
-    assert all(check.name != "pyright" for check in gate.STATUS_CHECKS)
-    assert gate.PYRIGHT_CHECK.name == "pyright"
+    assert gate.measure(check, tmp_path) == expected

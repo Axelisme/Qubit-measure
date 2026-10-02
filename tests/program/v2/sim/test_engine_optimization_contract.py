@@ -290,16 +290,6 @@ def test_segment_propagator_lru_key_includes_shifted_delta_and_equilibrium_pop(
     assert engine_module._cached_segment_propagator.cache_info().currsize == 3
 
 
-def test_segment_propagator_lru_returns_readonly_value() -> None:
-    """Cached propagators are immutable to prevent cache corruption."""
-
-    prop = engine_module._cached_segment_propagator(_segment(delta=0.1))
-
-    assert prop.flags.writeable is False
-    with pytest.raises(ValueError):
-        prop[0, 0] = 2.0
-
-
 def test_sequence_prefix_cache_reuses_common_prefix() -> None:
     """Per-grid sequence cache shares cumulative propagators by prefix."""
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import partial
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -471,16 +472,18 @@ def test_direct_reference_failed_rebuild_preserves_state_callbacks_and_events(
     field.on_enabled_changed.connect(enabled_changed)
     field.on_validity_changed.connect(validity_changed)
 
+    if operation == "set_chosen_key":
+        update_reference = partial(field.set_chosen_key, "<Custom:Bad>")
+    else:
+        update_reference = partial(
+            field.set_value,
+            ReferenceValue(
+                "<Custom:Bad>", CfgSectionValue({"mode": DirectValue("bad")})
+            ),
+        )
+
     with pytest.raises(RuntimeError, match="unknown option source 'missing'"):
-        if operation == "set_chosen_key":
-            field.set_chosen_key("<Custom:Bad>")
-        else:
-            field.set_value(
-                ReferenceValue(
-                    "<Custom:Bad>",
-                    CfgSectionValue({"mode": DirectValue("bad")}),
-                )
-            )
+        update_reference()
 
     assert field.get_chosen_key() == "<Custom:Good>"
     assert field._binding_state is LibraryBindingState.CUSTOM

@@ -87,7 +87,7 @@ def test_plot_eff_t1_with_sample_keeps_sample_ylim_with_large_component() -> Non
 
 def test_plot_eff_t1_with_sample_rejects_component_shape_mismatch() -> None:
     with pytest.raises(ValueError, match="component_t1s\\['bad'\\]"):
-        fig, _ = plot_eff_t1_with_sample(
+        plot_eff_t1_with_sample(
             np.array([-1.0, 0.0, 1.0], dtype=np.float64),
             np.array([8.0, 10.0, 9.0], dtype=np.float64),
             np.array([0.5, 0.6, 0.5], dtype=np.float64),
@@ -97,12 +97,11 @@ def test_plot_eff_t1_with_sample_rejects_component_shape_mismatch() -> None:
             t_fluxs=np.array([0.0, 0.5, 1.0], dtype=np.float64),
             component_t1s={"bad": np.array([20.0, 21.0], dtype=np.float64)},
         )
-        plt.close(fig)
 
 
 def test_plot_eff_t1_with_sample_rejects_band_shape_mismatch() -> None:
     with pytest.raises(ValueError, match="component_bands\\['bad'\\]"):
-        fig, _ = plot_eff_t1_with_sample(
+        plot_eff_t1_with_sample(
             np.array([-1.0, 0.0, 1.0], dtype=np.float64),
             np.array([8.0, 10.0, 9.0], dtype=np.float64),
             np.array([0.5, 0.6, 0.5], dtype=np.float64),
@@ -117,4 +116,3 @@ def test_plot_eff_t1_with_sample_rejects_band_shape_mismatch() -> None:
                 )
             },
         )
-        plt.close(fig)

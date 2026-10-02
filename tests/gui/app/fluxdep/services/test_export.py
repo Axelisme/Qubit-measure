@@ -14,10 +14,10 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
 
 
-def test_export_empty_raises():
+def test_export_empty_raises(tmp_path):
     st = FluxDepState()
-    with pytest.raises(ValueError):
-        ExportService(st).export_spectrums(filepath="/tmp/should_not_write.hdf5")
+    with pytest.raises(ValueError, match="no spectra to export"):
+        ExportService(st).export_spectrums(filepath=str(tmp_path / "empty.hdf5"))
 
 
 def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-02 — explicit device cancellation test owner
+**Last updated:** 2026-10-03，test trust cleanup
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -183,7 +183,7 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 
 `tests/experiment/cfg_editing/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
 runtime parity、nested allowed sets、deep-fresh mutable containers、main/autoflux僅兩個policy差異、
-strict root-only Mapping/typed inspection、missing/non-string/unknown與fresh-process import purity；materializer tests另鎖spec/value完整對齊、scalar
+strict root-only Mapping/typed inspection、missing/non-string/unknown。materializer tests 另鎖 spec/value 完整對齊、scalar
 missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與
 Bath ghost rejection。`tests/gui/cfg/test_materialization.py`只測domain-free Spec walk與policy ports；main
 全7+6及autoflux legal-but-unmaterializable subset由各app cfg tests鎖定。app binding/lowering tests鎖
@@ -193,13 +193,11 @@ value→shape順序，以及既有26-entry metadata/value golden。
 `tests/gui/cfg/binding/test_targets.py`鎖定list/resolve acceptance equality、canonical grammar、
 legacy zero-mutation replacement、schema collision與production registry coverage。remote cfg tests
 鎖定 target wire parity；service/writeback tests 鎖定 shape-only listing 與 batch net diff。
-現有 AST import purity 案例屬於待整理的靜態檢查，新增 import 變動直接審閱。
+Import ownership、來源依賴與靜態宣告直接審閱，不以 AST 或獨立程序的匯入結果作測試。
 
 measure adapter facade 不 forward `zcu_tools.gui.cfg.__all__` names；generic cfg imports
 應指向 shared owner，autofluxdep app-local barrel 另有自己的 owner。
-現有 `tests/gui/cfg/test_measure_import_contract.py` 與
-`tests/gui/app/autofluxdep/test_cfg_import_contract.py` 含靜態 import 檢查；新增或修改
-import 規則時直接 review 相關檔案，對外行為則由接縫測試驗證。
+Import 規則由直接 review 相關檔案確認，對外行為由接縫測試驗證。
 
 `tests/gui/cfg/test_schema_assembler.py`擁有domain-free paired Spec/Value construction contract：
 path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
@@ -280,7 +278,7 @@ interaction.
 `CfgSchemaAssembler`前後的spec/value/logical-path/persisted observable parity；autoflux domain
 仍擁有logical projection與generation policy。
 
-`tests/gui/app/autofluxdep/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_cfg_import_contract.py` 的現有靜態檢查不作為新增測試模式。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
+`tests/gui/app/autofluxdep/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。Import ownership 以直接審閱確認。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
 
 `tests/gui/app/autofluxdep/test_labber_browser_export.py` 覆蓋 Labber Browser sidecar contract、fixed-axis sidecar live streaming row writes 與 terminal qubit_freq sidecar export。
 

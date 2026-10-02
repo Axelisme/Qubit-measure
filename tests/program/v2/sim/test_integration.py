@@ -49,6 +49,8 @@ average alone.
 
 from __future__ import annotations
 
+from functools import partial
+
 import matplotlib
 
 # Headless backend: these tests build figures via the experiments' analyze() but
@@ -811,22 +813,18 @@ def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
     soc, soccfg = make_mock_soc(sim=_SIM)
     direct_times = [0.008, 0.009, 1.0]
 
-    with pytest.raises(
-        ValueError,
-        match="delay sweep collapsed after cycle quantization",
-    ):
-        if variant == "tone":
-            singleshot_t1_tone.T1WithToneExp().run(
-                _singleshot_t1_tone_cfg(direct_times),
-                context=singleshot_context(soc, soccfg),
-            )
-        else:
-            singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
-                _singleshot_t1_tone_sweep_cfg(direct_times).model_copy(
-                    update={"uniform": False}
-                ),
-                context=singleshot_context(soc, soccfg),
-            )
+    if variant == "tone":
+        cfg = _singleshot_t1_tone_cfg(direct_times)
+        run = partial(singleshot_t1_tone.T1WithToneExp().run, cfg)
+    else:
+        cfg = _singleshot_t1_tone_sweep_cfg(direct_times).model_copy(
+            update={"uniform": False}
+        )
+        run = partial(singleshot_t1_tone_sweep.T1WithToneSweepExp().run, cfg)
+    context = singleshot_context(soc, soccfg)
+
+    with pytest.raises(ValueError, match="collapsed after cycle quantization"):
+        run(context=context)
 
 
 # --------------------------------------------------------------- T2 Ramsey / echo runners

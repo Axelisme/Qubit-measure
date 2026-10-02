@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules import (
     WaveformCfgFactory,  # ensures leaf subclass registration
@@ -32,7 +33,9 @@ def test_const_waveform_length_set_param():
 
 def test_cosine_waveform_rejects_qickparam_length():
     cfg = CosineWaveformCfg(length=1.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="Cosine waveform length must be a float value"
+    ):
         cfg.set_param("length", QickParam(start=1.0, spans={"a": 0.1}))
 
 
@@ -69,7 +72,9 @@ def test_gauss_waveform_only_length_preserves_sigma():
 
 def test_drag_waveform_rejects_qickparam():
     cfg = DragWaveformCfg(length=1.0, sigma=0.2, delta=0.1, alpha=0.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="Drag waveform length must not be a QickParam"
+    ):
         cfg.set_param("length", QickParam(start=1.0, spans={"a": 0.1}))
 
 
@@ -109,12 +114,12 @@ def test_drag_waveform_rejects_unknown_param():
 
 def test_arb_waveform_set_param_rejected():
     cfg = ArbWaveformCfg(data="dummy")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Arb waveform length is asset-derived"):
         cfg.set_param("length", 2.0)
 
 
 def test_arb_waveform_cfg_rejects_legacy_length_field():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError, match="length"):
         ArbWaveformCfg.model_validate({"style": "arb", "length": 1.0, "data": "dummy"})
 
 
@@ -169,7 +174,7 @@ def test_waveform_adapter_dispatches_by_style():
 
 
 def test_waveform_adapter_rejects_unknown_style():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="union_tag_invalid"):
         WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})
 
 

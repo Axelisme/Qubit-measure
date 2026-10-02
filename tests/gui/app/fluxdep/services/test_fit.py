@@ -121,7 +121,9 @@ def test_selected_pointcloud_stale_mask_raises():
     # selection set, then a point added → mask length now disagrees
     st.set_selection(np.array([True, False, True, False]))
     st.put_spectrum(_aligned_entry_with_points("s2", [0.4], [5.2]))
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="selection mask length 4 != joint point cloud"
+    ):
         FitService(st).selected_pointcloud()
 
 

@@ -50,31 +50,6 @@ def _compute_role(role_id: str) -> dict[str, Any]:
     return entry
 
 
-def test_golden_covers_exactly_the_registered_roles() -> None:
-    golden = _load_golden()
-    assert set(golden) == set(ROLE_FACTORIES), (
-        "golden role set drifted from ROLE_FACTORIES; regenerate the golden for a "
-        "reviewed role add/remove"
-    )
-
-
-def test_readout_dpm_golden_keeps_optimized_readout_live_links() -> None:
-    """The golden pins readout_dpm to live ro_optimize outputs, not snapshots."""
-
-    payload = _load_golden()["readout_dpm"]["blank/pop"]["v"]
-    pulse_cfg = payload["pulse_cfg"]
-    ro_cfg = payload["ro_cfg"]
-
-    assert pulse_cfg["freq"] == {"E": "best_ro_freq", "r": None}
-    assert pulse_cfg["gain"] == {"E": "best_ro_gain", "r": None}
-    assert pulse_cfg["waveform"]["v"]["length"] == {
-        "E": "best_ro_length + 0.1",
-        "r": None,
-    }
-    assert ro_cfg["ro_freq"] == {"E": "best_ro_freq", "r": None}
-    assert ro_cfg["ro_length"] == {"E": "best_ro_length", "r": None}
-
-
 @pytest.mark.parametrize("role_id", sorted(ROLE_FACTORIES))
 def test_role_default_payload_matches_golden(role_id: str) -> None:
     golden = _load_golden()

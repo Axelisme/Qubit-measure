@@ -419,8 +419,6 @@ def test_grouped_role_value_cannot_be_labber_data(tmp_path):
         axes=[Axis("Frequency", "Hz", np.arange(3, dtype=float))],
     )
 
+    invalid_roles = cast(Mapping[str | DatasetRole, LabberPayload], {"signal": data})
     with pytest.raises(TypeError, match="LabberPayload"):
-        invalid_roles = cast(
-            Mapping[str | DatasetRole, LabberPayload], {"signal": data}
-        )
         save_grouped_labber_data(str(tmp_path / "bad_value"), invalid_roles)

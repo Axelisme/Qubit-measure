@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from functools import partial
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
@@ -703,16 +704,18 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
     data_path = str(tmp_path / "data" / "measurement")
     image_path = str(tmp_path / "images" / "plot.png")
 
+    if entrypoint == "start_save_data":
+        save = partial(svc.start_save_data, permit, data_path)
+    else:
+        kind = (
+            ArtifactKind.ANALYSIS
+            if entrypoint == "analysis"
+            else ArtifactKind.POST_ANALYSIS
+        )
+        save = partial(svc.save_image_sync, permit, _key(kind), image_path)
+
     with pytest.raises(FailedPreconditionError, match="busy"):
-        if entrypoint == "start_save_data":
-            svc.start_save_data(permit, data_path)
-        else:
-            kind = (
-                ArtifactKind.ANALYSIS
-                if entrypoint == "analysis"
-                else ArtifactKind.POST_ANALYSIS
-            )
-            svc.save_image_sync(permit, _key(kind), image_path)
+        save()
 
     bg.submit.assert_not_called()
     figure.savefig.assert_not_called()

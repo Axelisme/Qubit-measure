@@ -88,7 +88,7 @@ def test_run_cfg_snapshot_defensively_copies_nested_run_truth() -> None:
         snapshot.knobs["acquire"]["retry"] = 3
     with pytest.raises(ValueError, match="read-only"):
         snapshot_samples[0] = 5.0
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cannot set WRITEABLE flag to True"):
         snapshot_samples.setflags(write=True)
 
     wire_base = cast(dict[str, Any], snapshot.to_wire()["base_cfg"])
