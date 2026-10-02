@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02, public RPC and cfg reset
+**Last updated:** 2026-10-02, accept all pane candidates
 
 # `zcu_tools/mcp/measure/`
 
@@ -59,6 +59,10 @@ Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，M
 `tab_interact` 原樣轉送一次 active plugin command，不解讀實驗專屬命令。省略 payload 時回 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 先驗證 session 與命令，再跟隨 Analysis pane 並執行；done 結束原 analysis operation，取消沿用 cancel(op)。此介面採 best-effort，不加 seen guard，後提交者為準；沒有來源鎖、隱藏預讀或重試。GUI 傳回的 PNG 在 MCP 邊界解碼到 session-owned 暫存檔，工具回絕對路徑而非 inline 圖片。
 
 ## Writeback
+
+`accept(tab)` 接受目前 Primary 與存在的 Post 全部候選，不受 GUI 勾選影響，也不更改勾選。它先讀兩個結果摘要，再依 Primary、Post 順序 preview 並寫入各 pane 的完整 IDs；跨 pane 的同名 ID 不合併。無結果、無草稿或空候選的 pane 記為 skipped。摘要與 preview 不更新觀測游標，寫入仍需通過原 GUI guard。
+
+`accept` 首錯即停，不重試或 rollback。completed 只列 GUI 已確認成功的 pane 與其 written 結果；failed_stage 指出失敗 pane，其餘尚未處理的 pane 列在 not_started。摘要或 preview 失敗不開始該 pane 的 mutation；寫入失敗可能已有部分副作用，回覆會明示這點。若任一摘要查詢失敗，尚未開始任何 pane 寫入。
 
 `writeback` 的 preview 直接投影 GUI 共享草稿與目前 context，不在 MCP materialize cfg。寫入只送一次 `tab.writeback_write`；GUI 依序修改指定草稿，首錯保留已改前綴且不開始 context apply。全部成功後一次 apply 指定 IDs，不改 GUI 勾選；結果以含 id、kind、target、before、after 的列表保留跨 kind 同名目的地。MCP 不隱藏預讀、不重試。GUI 在改草稿前透過明確 view 命令切到目標 analysis/post pane；preview 與非同步完成不切頁。
 
