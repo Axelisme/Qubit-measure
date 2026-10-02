@@ -46,7 +46,9 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
                 # The start receipt already owns an execution. A lost handoff
                 # must not hide it or replace completion observed by its worker.
                 execution.observe_interaction(
-                    ToolReply({"figure": None, "delivery_error": str(exc)}, is_error=True)
+                    ToolReply(
+                        {"figure": None, "delivery_error": str(exc)}, is_error=True
+                    )
                 )
         return execution.wait(0)
     return execution.wait(2.0)

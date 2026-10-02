@@ -448,18 +448,28 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
     client, second = make_restartable_client(tmp_path, monkeypatch)
     session = client.context.session
     replies = {
-        "tab.analyze": {"operation_id": 71, "interactive": False, "params": {}, "invalidated_on_success": []},
+        "tab.analyze": {
+            "operation_id": 71,
+            "interactive": False,
+            "params": {},
+            "invalidated_on_success": [],
+        },
         "operation.await": {"reason": "completed", "status": "finished"},
         "tab.get_analyze_result": {
             "summary": {"peak": 5},
             "params": {},
-            "operation_state": {"analysis_state": {"figure_names": ["fit", "residual"]}},
+            "operation_state": {
+                "analysis_state": {"figure_names": ["fit", "residual"]}
+            },
         },
         "tab.save_image": {"image_path": "/actual/fit.png"},
     }
-    client.transport.replies.update({key: {"ok": True, "result": value} for key, value in replies.items()})
+    client.transport.replies.update(
+        {key: {"ok": True, "result": value} for key, value in replies.items()}
+    )
     second.replies["tab.analyze"] = {"ok": True, "result": replies["tab.analyze"]}
     real_send = GuiConnection.send_gui_rpc
+
     def send(connection, method, params, *args, **kwargs):
         reply = real_send(connection, method, params, *args, **kwargs)
         if method == cut_after:
@@ -479,20 +489,38 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
         assert result["result"]["summary"] == {"peak": 5}
         assert result["saved_images"] == (
             [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
-            if cut_after == "tab.save_image" else []
+            if cut_after == "tab.save_image"
+            else []
         )
         assert result["remaining_images"] == (
             ["residual"] if cut_after == "tab.save_image" else ["fit", "residual"]
         )
         assert result["unconfirmed_image"] is None
         assert client.call("status", {"execution": result["execution"]}) == result
-        assert client.call("cancel", {"execution": result["execution"]}).data["gui_cancel"]["status"] == "not_needed"
+        assert (
+            client.call("cancel", {"execution": result["execution"]}).data[
+                "gui_cancel"
+            ]["status"]
+            == "not_needed"
+        )
         if change == "eof":
             session.connect_to_gui(port=9912, launch="never", clean=False)
-        new_op = client.call("rpc_call", {"method": "tab.analyze", "params": {"tab_id": "t", "updates": {}}})
+        new_op = client.call(
+            "rpc_call",
+            {"method": "tab.analyze", "params": {"tab_id": "t", "updates": {}}},
+        )
         assert new_op["handle"] == 2
         assert client.call("status", {"execution": result["execution"]})["op"] == 1
-        assert not any(method in {"tab.save_image", "tab.get_analyze_result", "tab.get_figure", "operation.cancel"} for method, _ in second.sent)
+        assert not any(
+            method
+            in {
+                "tab.save_image",
+                "tab.get_analyze_result",
+                "tab.get_figure",
+                "operation.cancel",
+            }
+            for method, _ in second.sent
+        )
     finally:
         session.close()
 

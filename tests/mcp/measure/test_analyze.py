@@ -858,7 +858,9 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     assert "tab.get_figure" not in _methods(client)
 
 
-def _hold_wire_reply(client: MeasureClient, monkeypatch: pytest.MonkeyPatch, method: str) -> Event:
+def _hold_wire_reply(
+    client: MeasureClient, monkeypatch: pytest.MonkeyPatch, method: str
+) -> Event:
     """Model a GUI request that was dispatched but has not replied."""
     sent = Event()
     send_line = client.transport.send_line
@@ -889,14 +891,21 @@ def test_close_drains_pending_save_and_cancel_before_png_cleanup(
     monkeypatch.setattr(GuiConnection, "read_internal", read)
 
     client = _client(tmp_path, clients)
-    client.transport.replies.update({
-        method: {"ok": True, "result": result}
-        for method, result in {
-            "tab.analyze": {"operation_id": 71, "interactive": False, "params": {}, "invalidated_on_success": []},
-            "operation.await": {"reason": "completed", "status": "finished"},
-            "tab.get_analyze_result": _result_reply("analysis", ["fit"], {}),
-        }.items()
-    })
+    client.transport.replies.update(
+        {
+            method: {"ok": True, "result": result}
+            for method, result in {
+                "tab.analyze": {
+                    "operation_id": 71,
+                    "interactive": False,
+                    "params": {},
+                    "invalidated_on_success": [],
+                },
+                "operation.await": {"reason": "completed", "status": "finished"},
+                "tab.get_analyze_result": _result_reply("analysis", ["fit"], {}),
+            }.items()
+        }
+    )
     session = client.context.session
     image = session.write_png(_PNG)
     saving = _hold_wire_reply(client, monkeypatch, "tab.save_image")
@@ -911,10 +920,14 @@ def test_close_drains_pending_save_and_cancel_before_png_cleanup(
     request = None
     with ThreadPoolExecutor(max_workers=2) as pool:
         try:
-            started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+            started = _data(
+                _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+            )
             assert saving.wait(2)
             if cancel_first:
-                request = pool.submit(client.call, "cancel", {"execution": started["execution"]})
+                request = pool.submit(
+                    client.call, "cancel", {"execution": started["execution"]}
+                )
                 assert intent.wait(2)
             with monkeypatch.context() as patch:
                 patch.setattr(session, "cleanup_pngs", cleanup)
@@ -948,7 +961,12 @@ def test_close_after_start_receipt_retains_operation_without_new_work(
 
     def respond(method, params):
         assert method == "tab.analyze"
-        return {"operation_id": 71, "interactive": interactive, "params": {}, "invalidated_on_success": []}
+        return {
+            "operation_id": 71,
+            "interactive": interactive,
+            "params": {},
+            "invalidated_on_success": [],
+        }
 
     client = _client(tmp_path, clients, respond)
 
@@ -988,7 +1006,12 @@ def test_worker_start_failure_keeps_the_admitted_operation_receipt(
 
     def respond(method, params):
         assert method == "tab.analyze"
-        return {"operation_id": 71, "interactive": interactive, "params": {}, "invalidated_on_success": []}
+        return {
+            "operation_id": 71,
+            "interactive": interactive,
+            "params": {},
+            "invalidated_on_success": [],
+        }
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
@@ -1016,7 +1039,12 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {"operation_id": 71, "interactive": True, "params": {}, "invalidated_on_success": []}
+            return {
+                "operation_id": 71,
+                "interactive": True,
+                "params": {},
+                "invalidated_on_success": [],
+            }
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
@@ -1031,15 +1059,25 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
     client = _client(tmp_path, clients, respond)
     client.transport.replies["tab.interact"] = {
         "ok": False,
-        "error": {"code": "precondition_failed", "message": "interactive session already completed"},
+        "error": {
+            "code": "precondition_failed",
+            "message": "interactive session already completed",
+        },
     }
     started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
     assert started["op"] == 1
     completed = _data(
-        _call_stdio(monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2})
+        _call_stdio(
+            monkeypatch,
+            client,
+            "wait",
+            {"execution": started["execution"], "timeout": 2},
+        )
     )
     assert completed["status"] == "finished"
-    assert completed["saved_images"] == [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+    assert completed["saved_images"] == [
+        {"figure_name": "fit", "image_path": "/actual/fit.png"}
+    ]
     assert _methods(client).count("tab.analyze") == 1
     assert _methods(client).count("tab.save_image") == 1
 
