@@ -61,6 +61,25 @@ def fx(qapp):
     fixture.stop()
 
 
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_writeback_preview_accepts_matching_analysis_operation(fx, stage):
+    tab = fx.ctrl.new_tab("fake")
+    fx.state.update_tab_result(tab, object())
+    _install_result(fx, tab, stage, 3.0, 101)
+    with open_client(fx.service.port) as sock:
+        result = call(
+            sock,
+            "tab.writeback_preview",
+            {
+                "tab_id": tab,
+                "subtab_id": stage,
+                "operation_id": 101,
+            },
+        )
+        assert result["ok"] is True, result
+        assert result["result"]["has_draft"] is False
+
+
 def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
     tab = fx.ctrl.new_tab("fake")
     run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
@@ -211,6 +230,7 @@ def test_replaced_operation_cannot_read_or_save_another_result(
         for method, params in (
             (_result_method(stage), {"tab_id": tab}),
             ("tab.get_figure", {"tab_id": tab, "subtab_id": stage}),
+            ("tab.writeback_preview", {"tab_id": tab, "subtab_id": stage}),
         ):
             rejected = call(sock, method, {**params, "operation_id": 101})
             assert rejected["error"]["reason"] == "result_superseded"
