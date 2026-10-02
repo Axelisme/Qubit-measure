@@ -290,6 +290,19 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         sock.close()
 
 
+def test_run_snapshot_identifies_the_operation_that_published_its_result(fx):
+    tab = fx.ctrl.new_tab("fake")
+    with open_client(fx.service.port) as sock:
+        run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
+        terminal = call(
+            sock, "operation.await", {"operation_id": run, "timeout": 2}
+        )["result"]
+        assert terminal["status"] == "finished"
+        snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
+        assert snapshot["result_state"]["available"] is True
+        assert snapshot["result_state"]["source_operation_id"] == run
+
+
 def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
     fx, monkeypatch: pytest.MonkeyPatch
 ) -> None:

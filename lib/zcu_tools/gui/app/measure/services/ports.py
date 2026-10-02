@@ -111,6 +111,7 @@ class PathResourceSnapshot:
 class RunPaneSnapshot:
     result: object | None
     source_path: str | None
+    source_operation_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -69,6 +69,7 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult")
 class RunPaneState(Generic[T_Result]):
     result: T_Result | None = None
     source_path: str | None = None
+    source_operation_id: int | None = None
 
 
 @dataclass

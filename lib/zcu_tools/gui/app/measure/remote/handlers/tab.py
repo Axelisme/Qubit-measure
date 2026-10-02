@@ -141,6 +141,7 @@ def tab_operation_state(
             "revision": versions.get(f"tab:{tab_id}:result", 0),
             "available": snap.run.result is not None,
             "source_path": snap.run.source_path,
+            "source_operation_id": snap.run.source_operation_id,
         },
         "analysis_state": {
             "revision": versions.get(f"tab:{tab_id}:analyze", 0),
