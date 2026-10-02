@@ -121,7 +121,7 @@ class RecipeContext:
     ) -> None:
         try:
             run(self, arguments)
-        except Exception as error:  # noqa: BLE001 - worker boundary retains partial progress
+        except Exception as error:  # Worker boundary retains partial progress.
             logger.exception("Recipe %s failed", self.progress.recipe)
             self._publish(
                 error=RecipeError(
