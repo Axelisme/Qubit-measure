@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 from zcu_tools.datafile import load_labber_data, save_labber_data
+from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
@@ -112,8 +113,11 @@ def test_notebook_b_does_not_replace_explicit_a_or_its_native_figures(
 ) -> None:
     core = FakeExp()
     adapter = NotebookAdapter(
-        core, devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
-    )
+        device_manager=DeviceManager(),
+        soc=object(),
+        soccfg=object(),
+        host=NonPresentingHost(),
+    )(core)
     a = adapter.run(make_cfg())
     b_cfg = make_cfg()
     b_cfg.sweep = SweepCfg(start=5.4, stop=5.8, expts=9, step=0.05)
@@ -133,7 +137,7 @@ def test_notebook_b_does_not_replace_explicit_a_or_its_native_figures(
     answer.figures["fit"].savefig(tmp_path / "native.png")
     assert (tmp_path / "native.png").stat().st_size > 0
 
-    saved = adapter.save(a, tmp_path / "a.hdf5")
+    saved = adapter.save(tmp_path / "a.hdf5", source=a)
     disk = load_labber_data(str(saved))
     assert disk.axes[0].unit == "Hz"
     np.testing.assert_array_equal(disk.axes[0].values, a.result.freqs * 1e6)
@@ -141,7 +145,7 @@ def test_notebook_b_does_not_replace_explicit_a_or_its_native_figures(
     loaded = adapter.load(saved)
     assert loaded.cfg == a.cfg
     np.testing.assert_array_equal(loaded.result.signals, a.result.signals)
-    adapter.load(adapter.save(b, tmp_path / "b.hdf5"))
+    adapter.load(adapter.save(tmp_path / "b.hdf5", source=b))
     after_b = adapter.analyze(None, source=loaded)
     assert after_b.source is loaded
     np.testing.assert_array_equal(
@@ -161,14 +165,14 @@ def test_nullable_cfg_analysis_succeeds_but_canonical_save_rejects(
     source = RunRecord[FakeCfg, FakeResult](
         cfg=None, result=FakeResult(np.array([5.0, 5.1]), np.array([3 + 4j, -5j]))
     )
-    adapter = NotebookAdapter(FakeExp(), host=NonPresentingHost())
+    adapter = NotebookAdapter(host=NonPresentingHost())(FakeExp())
     answer = adapter.analyze(None, source=source)
     assert answer.source is source and answer.result is None
     np.testing.assert_array_equal(
         answer.figures["fit"].axes[0].lines[0].get_ydata(), [5, 5]
     )
     with pytest.raises(ValueError, match="RunRecord.cfg is None"):
-        adapter.save(source, tmp_path / "unknown-cfg.hdf5")
+        adapter.save(tmp_path / "unknown-cfg.hdf5", source=source)
 
 
 def test_load_keeps_valid_data_when_acquisition_cfg_is_invalid(tmp_path: Path) -> None:
@@ -180,7 +184,7 @@ def test_load_keeps_valid_data_when_acquisition_cfg_is_invalid(tmp_path: Path) -
         axes=[("Frequency", "Hz", np.array([5e6, 5.1e6]))],
         comment=json.dumps({"cfg": {"rounds": 0}}),
     )
-    adapter = NotebookAdapter(FakeExp(), host=NonPresentingHost())
+    adapter = NotebookAdapter(host=NonPresentingHost())(FakeExp())
     with pytest.warns(UserWarning, match="Failed to validate loaded cfg"):
         source = adapter.load(path)
     assert source.cfg is None and adapter.last_run is source
@@ -190,15 +194,18 @@ def test_load_keeps_valid_data_when_acquisition_cfg_is_invalid(tmp_path: Path) -
         answer.figures["fit"].axes[0].lines[0].get_ydata(), [5, 5]
     )
     with pytest.raises(ValueError, match="RunRecord.cfg is None"):
-        adapter.save(source, tmp_path / "cannot-save.hdf5")
+        adapter.save(tmp_path / "cannot-save.hdf5", source=source)
 
 
 def test_failed_run_retains_previous_source_and_analysis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = NotebookAdapter(
-        FakeExp(), devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
-    )
+        device_manager=DeviceManager(),
+        soc=object(),
+        soccfg=object(),
+        host=NonPresentingHost(),
+    )(FakeExp())
     source = adapter.run(make_cfg())
     answer = adapter.analyze(None, source=source)
     monkeypatch.setattr(
@@ -211,8 +218,11 @@ def test_failed_run_retains_previous_source_and_analysis(
 
 def test_bad_analysis_or_noncanonical_load_retains_success(tmp_path: Path) -> None:
     adapter = NotebookAdapter(
-        FakeExp(), devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
-    )
+        device_manager=DeviceManager(),
+        soc=object(),
+        soccfg=object(),
+        host=NonPresentingHost(),
+    )(FakeExp())
     source = adapter.run(make_cfg())
     answer = adapter.analyze(None, source=source)
     bad = RunRecord[FakeCfg, FakeResult](

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 (完成 caller 遷移與 CPMG typed analysis)
+**Last updated:** 2026-10-02
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -20,7 +20,7 @@
 
 `fake.FakeExp` 使用 explicit context 產生純 freqs／signals。Acquisition controls 在 typed FakeCfg，measurement 與 abs fit 圖歸本次 Plots。Analyze 接 None options、回傳 None，接受 cfg=None。Save／load 使用 Frequency／Hz 與 complex data 的 canonical record，不再於 load 偽造資料。
 
-一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
+一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 先建立 `nb_adapter = zcu_tools.notebook.NotebookAdapter(...)`，再呼叫 `nb_adapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
 
 T2Echo／T2Ramsey 的 detune 放入 typed cfg，run 回傳純 Result，analyze 使用 explicit source 與 typed options，向 Plots 發布 fit 圖。硬體 rounding 後的 true_activate_detune 是 run-only metadata；canonical axes／complex data 不包含它，load 後值為 None，不推測實際 detune。兩者分析均允許 cfg=None。
 
@@ -174,7 +174,7 @@ matrix的估計流程。
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
 2. 從 `context.plots.liveplot_1d("measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
 3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
-4. Schedule 接 `stop=context.cancel_signal`，將外部取消傳給 acquire。Device setup 接 `cancel_signal=context.cancel_signal.event`；直接 acquire 的路徑也必須傳入 cancel flag。
+4. Schedule 接 `stop=context.cancel_signal`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.cancel_signal`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
 
 Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result 規則見 [runtime README](runtime/README.md)。
@@ -207,7 +207,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 只有兩類「副本外操作」是有意保留的：
 
-- **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.cancel_signal.event)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
+- **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.cancel_signal)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
 - **singleshot 強制 reps/rounds**：singleshot 家族（`ge` / `check` / ...）的 `run()` 開頭以 `cfg = deepcopy(cfg)` 重綁本地副本後才改 `cfg.rounds = 1` / `cfg.reps = cfg.shots`，並在覆寫前 `warnings.warn(...)`。重綁後的 mutation 作用在本地副本，非副本外。
 
 ---

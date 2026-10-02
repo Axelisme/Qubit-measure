@@ -326,7 +326,7 @@ class AutoOptimizeExp:
                 setup_devices(
                     step.cfg,
                     context.devices,
-                    cancel_signal=context.cancel_signal.event,
+                    cancel_signal=context.cancel_signal,
                     progress=False,
                 )
                 modules = step.cfg.modules

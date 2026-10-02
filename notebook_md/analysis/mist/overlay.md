@@ -14,6 +14,8 @@ from zcu_tools.experiment.v2.twotone.ac_stark import AcStarkAnalyzeOptions
 from zcu_tools.simulate import mA2flx, flx2mA
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.notebook.analysis.mist.branch.overlay import calc_overlay, plot_overlay
+
+nb_adapter = NotebookAdapter()
 ```
 
 ```python
@@ -87,10 +89,10 @@ period = selection.result.flux_period
 filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
 )
-exp = NotebookAdapter(ze.twotone.dispersive.DispersiveExp())
+exp = nb_adapter(ze.twotone.dispersive.DispersiveExp())
 dispersive_run = exp.load(Path(filepath))
 fpts, signals = dispersive_run.result.freqs, dispersive_run.result.signals
-dispersive_analysis = exp.analyze(DispersiveAnalyzeOptions(), source=dispersive_run)
+dispersive_analysis = exp.analyze(DispersiveAnalyzeOptions())
 chi, kappa = dispersive_analysis.result.chi, dispersive_analysis.result.avg_fwhm
 fig = dispersive_analysis.figures["fit"]
 ```
@@ -100,11 +102,11 @@ filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
 )
 
-exp = NotebookAdapter(ze.twotone.ac_stark.AcStarkExp())
+exp = nb_adapter(ze.twotone.ac_stark.AcStarkExp())
 ac_stark_run = exp.load(Path(filepath))
 pdrs, fpts, signals = ac_stark_run.result.gains, ac_stark_run.result.freqs, ac_stark_run.result.signals
 ac_stark_analysis = exp.analyze(
-    AcStarkAnalyzeOptions(chi=chi, kappa=kappa, cutoff=0.04), source=ac_stark_run
+    AcStarkAnalyzeOptions(chi=chi, kappa=kappa, cutoff=0.04)
 )
 ac_coeff = ac_stark_analysis.result.ac_coeff
 fig = ac_stark_analysis.figures["fit"]

@@ -109,7 +109,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         if cfg.rounds != 1:
             warnings.warn(

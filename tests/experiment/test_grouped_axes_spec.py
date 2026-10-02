@@ -128,7 +128,7 @@ class _GroupedCore:
 
 
 def test_notebook_grouped_persistence_roundtrip(tmp_path: Path) -> None:
-    adapter = NotebookAdapter(_GroupedCore(), host=NonPresentingHost())
+    adapter = NotebookAdapter(host=NonPresentingHost())(_GroupedCore())
     source = RunRecord(
         cfg=_GroupedCfg(name="notebook"),
         result=_GroupedResult(
@@ -137,7 +137,7 @@ def test_notebook_grouped_persistence_roundtrip(tmp_path: Path) -> None:
         ),
     )
 
-    written = adapter.save(source, tmp_path / "grouped.hdf5", comment="note")
+    written = adapter.save(tmp_path / "grouped.hdf5", source=source, comment="note")
     loaded = adapter.load(written)
 
     assert written == tmp_path / "grouped.hdf5"

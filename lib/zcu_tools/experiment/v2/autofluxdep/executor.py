@@ -70,7 +70,7 @@ class FluxDepExecutor(
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         def run_loop(sched: Schedule[FluxDepCfg, FluxDepEnv]) -> None:

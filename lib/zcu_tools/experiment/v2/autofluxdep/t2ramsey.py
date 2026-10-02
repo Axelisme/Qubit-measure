@@ -163,7 +163,7 @@ class T2RamseyTask(
         setup_devices(
             cfg,
             progress=False,
-            cancel_signal=state.stop.event,
+            cancel_signal=state.stop,
             devices=state.env.context.devices,
         )
 

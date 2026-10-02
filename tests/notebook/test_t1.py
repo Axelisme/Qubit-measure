@@ -56,9 +56,9 @@ def make_source(cfg: T1Cfg | None, t1: float) -> RunRecord[T1Cfg, T1Result]:
 def test_canonical_load_and_explicit_analysis_keep_source_and_native_figure(
     t1_cfg: T1Cfg, tmp_path: Path
 ) -> None:
-    adapter = NotebookAdapter(T1Exp(), host=NonPresentingHost())
+    adapter = NotebookAdapter(host=NonPresentingHost())(T1Exp())
     original = make_source(t1_cfg, 20.0)
-    path_a = adapter.save(original, tmp_path / "a.hdf5")
+    path_a = adapter.save(tmp_path / "a.hdf5", source=original)
     source_a = adapter.load(path_a)
     assert source_a.cfg == t1_cfg
     np.testing.assert_allclose(
@@ -69,7 +69,7 @@ def test_canonical_load_and_explicit_analysis_keep_source_and_native_figure(
     assert initial.result.t1 == pytest.approx(20.0)
 
     cfg_b = t1_cfg.model_copy(update={"reps": 3})
-    path_b = adapter.save(make_source(cfg_b, 12.0), tmp_path / "b.hdf5")
+    path_b = adapter.save(tmp_path / "b.hdf5", source=make_source(cfg_b, 12.0))
     source_b = adapter.load(path_b)
     assert source_b.cfg == cfg_b
     assert adapter.last_run is source_b
@@ -86,7 +86,7 @@ def test_canonical_load_and_explicit_analysis_keep_source_and_native_figure(
     assert latest.source is source_b
     assert latest.result.t1 == pytest.approx(12.0)
 
-    saved_a = adapter.save(source_a, tmp_path / "saved-a.hdf5")
+    saved_a = adapter.save(tmp_path / "saved-a.hdf5", source=source_a)
     reloaded_a = adapter.load(saved_a)
     assert reloaded_a.cfg == t1_cfg
     np.testing.assert_array_equal(reloaded_a.result.signals, original.result.signals)
@@ -98,9 +98,9 @@ def test_canonical_load_and_explicit_analysis_keep_source_and_native_figure(
 def test_loaded_data_without_valid_cfg_remains_analyzable_but_not_saveable(
     t1_cfg: T1Cfg, tmp_path: Path, cfg_state: str
 ) -> None:
-    adapter = NotebookAdapter(T1Exp(), host=NonPresentingHost())
+    adapter = NotebookAdapter(host=NonPresentingHost())(T1Exp())
     original = make_source(t1_cfg, 20.0)
-    valid_path = adapter.save(original, tmp_path / "valid.hdf5")
+    valid_path = adapter.save(tmp_path / "valid.hdf5", source=original)
     adapter.load(valid_path)
     previous = adapter.analyze(T1AnalyzeOptions())
 
@@ -126,7 +126,7 @@ def test_loaded_data_without_valid_cfg_remains_analyzable_but_not_saveable(
 
     destination = tmp_path / "rejected.hdf5"
     with pytest.raises(ValueError, match=r"RunRecord\.cfg is None"):
-        adapter.save(loaded, destination)
+        adapter.save(destination, source=loaded)
     assert not destination.exists()
     assert adapter.last_run is loaded
     assert adapter.analysis is analysis

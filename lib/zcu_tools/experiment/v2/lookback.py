@@ -86,7 +86,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
             run_cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         viewer = context.plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
         with Schedule(run_cfg, stop=context.cancel_signal) as sched:

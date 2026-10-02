@@ -281,7 +281,7 @@ class AutoOptExp:
             run_cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         optimizer = ReadoutOptimizer(
             run_cfg.sweep.freq,

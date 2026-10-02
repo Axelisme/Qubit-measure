@@ -193,7 +193,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         viewer = context.plots.liveplot_1d(
@@ -240,7 +240,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         viewer = context.plots.liveplot_1d(

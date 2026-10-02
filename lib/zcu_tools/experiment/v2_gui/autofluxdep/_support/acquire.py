@@ -164,7 +164,7 @@ def setup_flux_point(cfg: ExpCfgModel, env: RunEnv, exp_name: str) -> None:
         cfg,
         env.context.devices,
         progress=False,
-        cancel_signal=env.context.cancel_signal.event,
+        cancel_signal=env.context.cancel_signal,
     )
 
 

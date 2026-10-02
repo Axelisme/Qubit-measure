@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from zcu_tools.device import FakeDeviceInfo
+from zcu_tools.device import DeviceManager, FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
@@ -186,8 +186,11 @@ def test_notebook_b_keeps_explicit_a_native_plot_and_last_success_on_failure(
     tmp_path: Path,
 ) -> None:
     adapter = NotebookAdapter(
-        FakeExp(), devices={}, soc=object(), soccfg=object(), host=NonPresentingHost()
-    )
+        device_manager=DeviceManager(),
+        soc=object(),
+        soccfg=object(),
+        host=NonPresentingHost(),
+    )(FakeExp())
     a = adapter.run(make_cfg(0.05))
     b = adapter.run(make_cfg(0.2))
     answer = adapter.analyze(FakeAnalyzeOptions(threshold=0.0), source=a)
@@ -202,7 +205,7 @@ def test_notebook_b_keeps_explicit_a_native_plot_and_last_success_on_failure(
     answer.figures["fit"].axes[0].set_title("User annotation")
     answer.figures["fit"].savefig(tmp_path / "native.png")
     assert (tmp_path / "native.png").stat().st_size > 0
-    adapter.save(a, tmp_path / "no-file.hdf5")
+    adapter.save(tmp_path / "no-file.hdf5", source=a)
     assert not (tmp_path / "no-file.hdf5").exists()
     bad = FakeRunResult(cfg=None, result=FakeResult(np.empty(0)))
     with pytest.raises(ValueError, match="zero-size array"):

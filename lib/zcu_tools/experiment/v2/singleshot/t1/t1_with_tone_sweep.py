@@ -225,7 +225,7 @@ class T1WithToneSweepExp(
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
@@ -312,7 +312,7 @@ class T1WithToneSweepExp(
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(

@@ -298,7 +298,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         # Validate and setup configuration

@@ -90,7 +90,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         signals_buffer = SignalBuffer((cfg.shots,))

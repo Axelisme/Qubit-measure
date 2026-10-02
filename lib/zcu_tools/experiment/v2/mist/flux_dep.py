@@ -139,7 +139,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                     step.cfg,
                     context.devices,
                     progress=False,
-                    cancel_signal=context.cancel_signal.event,
+                    cancel_signal=context.cancel_signal,
                 )
                 modules = step.cfg.modules
                 modules.probe_pulse.set_param(

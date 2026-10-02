@@ -531,7 +531,7 @@ def test_cancel_run_stops_experiment_setup_devices_before_first_device():
             exp_cfg,
             context.devices,
             progress=False,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         return object()
 
@@ -560,7 +560,7 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
 
     def run_setup(*_args: Any, context: RunContext) -> object:
         contexts.append(context)
-        setup_devices(cfg, context.devices, cancel_signal=context.cancel_signal.event)
+        setup_devices(cfg, context.devices, cancel_signal=context.cancel_signal)
         if len(contexts) == 1:
             context.cancel_signal.set_error("failed", "first run failed", None)
         return object()

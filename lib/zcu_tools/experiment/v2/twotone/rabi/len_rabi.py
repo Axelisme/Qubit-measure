@@ -100,7 +100,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 
@@ -153,7 +153,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 

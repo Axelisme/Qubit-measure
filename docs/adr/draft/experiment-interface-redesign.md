@@ -12,7 +12,7 @@
 
 ### 核心與前端
 
-核心保留無跨次可變狀態的實驗 class。共用 NotebookAdapter 接收 experiment instance，綁定可重用 hardware handles 與 plot host。同步實驗不再各寫扁平參數 wrapper，caller 直接提供 typed config／options。GUI adapter 直接使用核心，兩前端不互相包裝。
+核心保留無跨次可變狀態的實驗 class。NotebookAdapter 先綁定 soc、soccfg、DeviceManager 與 plot host 引用，再由 `nb_adapter(core)` 建立各自保存 records 的 NotebookExperiment。Caller 建立 experiment instance，不要求零參數 constructor。同步實驗不各寫扁平參數 wrapper，caller 直接提供 typed config／options。GUI adapter 直接使用核心，兩前端不互相包裝。
 
 RunRecord 泛型組合 cfg 與實驗專屬 Result。Result 只表達資料，不攜帶 cfg_snapshot。AnalysisRecord 組合 explicit source RunRecord、實際 options、typed Analysis 與純具名 figures；cfg 與 result 從 source 取得，不另外保存一份可混用的來源。
 
@@ -31,15 +31,15 @@ analyze(source: RunRecord, options, *, plots) -> Analysis
 
 RunContext 提供單次 run 的 soc、soccfg、具名 devices、plots 與 cancel_signal，不保留 QickContext alias。Caller 在 run 前固定名稱到 BaseDevice 的綁定，核心只借用 driver。核心仍決定每個 sweep point 何時 setup；setup helper 在整批 setup 前驗證所有必要名稱，不查全域 manager。Connect、disconnect、registry 與 ResourceManager 生命週期留在前端 owner。Hardware handles 不進 cfg 或 records。
 
-每次 run 建立新的 context、Plots 與 StopSignal，硬體 handles 可以重用，停止與錯誤狀態不能沿用。Executor、子實驗與 Schedule 共用這個 StopSignal，device setup 使用其 Event。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。既有 retry、partial result、raise_if_error 與 GUI operation 分類保持不變，不引入另一個 outcome 或 runner。Progress bar 暫留環境注入。
+每次 run 建立新的 context、Plots 與 StopSignal，硬體 handles 可以重用，停止與錯誤狀態不能沿用。Executor、子實驗、Schedule 與 experiment setup helper 共用這個 StopSignal。只有 helper 呼叫低層 driver 的 stop_event 介面時才取出 Event，device 模組不反向依賴 experiment。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。既有 retry、partial result、raise_if_error 與 GUI operation 分類保持不變，不引入另一個 outcome 或 runner。Progress bar 暫留環境注入。
 
-Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒絕，不自行查找或建立資源。單次 buffer、tracker 與 cache 歸 run。NotebookAdapter 每次 run 由 caller 提供的硬體與 driver mapping 建立 context；GUI 的 RunService 與 workflow RunSession 各自在 operation 邊界建立 context。
+Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒絕，不自行查找或建立資源。單次 buffer、tracker 與 cache 歸 run。NotebookExperiment 每次 run 從已綁定的 manager 取得一次 driver mapping，再建立 context；同次 run 不重查 registry。建構入口不讀裝置資訊，load／analyze／save 也不查裝置。同一 manager 更新 registry 後，下次 run 使用新綁定；重新賦值 caller 變數不重綁既有入口。GUI 的 RunService 與 workflow RunSession 仍各自在 operation 邊界建立 context。
 
 影響 acquisition 的實驗選項全部進 typed config，包括 T1 uniform。核心擁有設定驗證及環境無關預設；GUI 擁有編輯表示、標籤、expression 與 md／module library seed。核心分析不讀 live GUI 狀態。Hardware handles 不進 cfg 或 record。
 
 共用包裝層隔離 caller cfg／options 與 core 工作輸入，成功後保留該次來源與選項。Record 的欄位關聯固定，不深拷貝大型 Result，不凍結 Figure artists。Record-owned cfg／options 可被使用者刻意修改，不提供 deep-freeze、讀取時複製或完整不可變歷史保證。
 
-同步核心 options 與 Analysis 是實驗專屬 typed 資料，options 欄位擁有預設值，不另設 Notebook defaults 或動態簽名。Analysis 不含 Figure 或 writeback。Notebook 同步入口回傳 AnalysisRecord，互動工具也保留成功成果的來源、實際 options 與純圖。Notebook 不新增 writeback。
+同步核心 options 與 Analysis 是實驗專屬 typed 資料，options 欄位擁有預設值，不另設 Notebook defaults 或動態簽名。Analysis 不含 Figure 或 writeback。Notebook 同步入口回傳 AnalysisRecord，互動工具也保留成功成果的來源、實際 options 與純圖。Notebook 的 analyze(options, *, source=None) 與 save(destination, *, source=None) 預設最近成功 run／load 的 last_run，無來源就拒絕。分析歷史 source 不改 last_run 或 save 的預設來源。Core 與獨立互動工具仍要求明確來源。Notebook 不新增 writeback。
 
 GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選項、隨機 seed、時間或其他重現資訊。Framework 保存來源、插件輸出與圖，不追查插件的隱式依賴，也不保證完整 options 或可重現性。`params` 保持表單輸入，不在 Done 時替換成終態 options；不新增通用 committed-options owner。GUI 與 remote 讀同一份已提交輸出。
 
@@ -99,7 +99,7 @@ DeviceManager 的 registry、lock 與 close claims 屬於 instance，不提供�
 
 Notebook 使用 `CfgEnv(md, ml, device_manager)` 集中借用資源。顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時取得當次 device snapshot，再組裝 typed cfg。讀取失敗直接報錯，不退回舊 snapshot，不執行 setup。md 目前只作資源引用，raw cfg 中的 `md.foo` 在建立 dict 時取值，不新增 expression 或延遲求值。
 
-CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 md、ml 或 registry 管理權。底層 `assemble_experiment_cfg` 仍接顯式 snapshot，不讀硬體。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
+CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 md、ml 或 registry 管理權。底層 `assemble_experiment_cfg` 仍接顯式 snapshot，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新資訊時由使用者再次 make_cfg；driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
 
 GUI 的 Use Simulate Env 入口由獨立 coordinator 編排，不由一般 soc_changed 通知偷偷註冊 FakeDevice。通過既有互斥檢查後，先經 owner disconnect 已連線的真實 devices，FakeDevice 保留。全部成功才確認或建立 FakeDevice、註冊、將其即時數值 reader 綁定 MockSoc，再交給 SoC owner。既有有效 mock source 不重設；matching predictor 的配套亦由 coordinator 組裝。
 
@@ -171,14 +171,14 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 ## 已實作的公開入口與驗證邊界
 
 - [Experiment](../../../lib/zcu_tools/experiment/README.md) 說明 RunRecord／AnalysisRecord、nullable cfg、RunContext 與 default／grouped persistence。核心不再保存前一次結果。
-- [Notebook](../../../lib/zcu_tools/notebook/README.md) 說明 NotebookAdapter、GEPostAnalyzer 與 FluxDepAnalyzer。同步分析使用 explicit source；互動工具的 Done／Cancel 與晚到成果保留各自來源。
+- [Notebook](../../../lib/zcu_tools/notebook/README.md) 說明 NotebookAdapter、GEPostAnalyzer 與 FluxDepAnalyzer。同步分析可省略 source，獨立互動工具仍接明確來源；Done／Cancel 與晚到成果保留各自來源。
 - [GUI plotting](../../../lib/zcu_tools/gui/plotting/README.md) 說明原生 Figure 與 Qt presentation 的不同生命週期。Plots.finish 完成最後刷新，Plots.release 只釋放呈現。NamedFigures 保留完成後的原生圖。
 - Measure 的 ArtifactKey 以 stage 與圖名識別成果。ArtifactTracker 記錄每張圖是否曾成功保存，SaveService 捕捉本次保存來源與目的地。Save All 選尚未保存的成果，個別失敗不撤銷先前成功項。
 - [Session](../../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
 
-三個參考實驗已有各自的軟體接受紀錄，其餘核心與 callers 已完成遷移。全 task 的 Standards／Spec 審查指出的 Notebook 失敗提交、grouped persistence 接線及 typed analysis 缺口已修正。修正後的兩軸審查沒有新增 findings，報告本身不等於正式接受或 landing 授權。
+三個參考實驗已有各自的軟體接受紀錄，其餘核心與 callers 已完成遷移。全 task 的 Standards／Spec 審查指出的 Notebook 失敗提交、grouped persistence 接線及 typed analysis 缺口已修正。R04 修正後的兩軸審查沒有新增 findings，報告本身不等於正式接受或 landing 授權。
 
-2026-10-02 的修正候選通過集中行為測試，結果為 7435 passed、7 skipped。7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
+2026-10-02 的 R04 修正候選通過集中行為測試，結果為 7435 passed、7 skipped。這是 Notebook 環境柯里化與 StopSignal helper 修訂前的結果，不代替後續候選驗證。7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
 
 本次未操作硬體，也未重跑所有 Notebook cells 或 FFmpeg。既有 VSCode 60-frame 人工觀察只覆蓋當時的探針與版本。Standalone [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於新的 Plots host。
 

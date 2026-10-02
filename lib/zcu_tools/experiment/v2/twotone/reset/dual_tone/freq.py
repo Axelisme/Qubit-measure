@@ -112,7 +112,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 
@@ -169,7 +169,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 

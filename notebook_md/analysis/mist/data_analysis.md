@@ -41,6 +41,8 @@ from zcu_tools.experiment.v2.singleshot.mist.power import PowerAnalyzeOptions
 from zcu_tools.experiment.v2.mist.flux_dep import mist_signal2real
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.simulate import mA2flx, flx2mA
+
+nb_adapter = NotebookAdapter()
 ```
 
 ```python
@@ -76,9 +78,9 @@ if "sample_f" in allows:
 filepath = (
     r"../../../Database/Q12_2D[5]/Q1/Q1_dispersive_shift_gain0.050@-2.600mA_3.hdf5"
 )
-exp = NotebookAdapter(ze.twotone.dispersive.DispersiveExp())
+exp = nb_adapter(ze.twotone.dispersive.DispersiveExp())
 dispersive_run = exp.load(Path(filepath))
-dispersive_analysis = exp.analyze(DispersiveAnalyzeOptions(), source=dispersive_run)
+dispersive_analysis = exp.analyze(DispersiveAnalyzeOptions())
 chi, kappa = dispersive_analysis.result.chi, dispersive_analysis.result.avg_fwhm
 fig = dispersive_analysis.figures["fit"]
 fig.savefig(image_dir / "dispersive_shift.png")
@@ -90,9 +92,9 @@ Load one canonical CKP file containing the `Initial State` axis. Replace the exa
 
 ```python
 filepath = result_dir / "data" / "ckp.hdf5"
-exp = NotebookAdapter(ze.twotone.ckp.CKP_Exp())
+exp = nb_adapter(ze.twotone.ckp.CKP_Exp())
 ckp_run = exp.load(filepath)
-ckp_analysis = exp.analyze(None, source=ckp_run)
+ckp_analysis = exp.analyze(None)
 chi, kappa, readout_f = ckp_analysis.result.chi, ckp_analysis.result.kappa, ckp_analysis.result.res_freq
 fig = ckp_analysis.figures["fit"]
 fig.savefig(image_dir / "dispersive_shift.png")
@@ -105,10 +107,10 @@ filepath = (
     r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ac_stark@1.800mA_1.hdf5"
 )
 
-exp = NotebookAdapter(ze.twotone.ac_stark.AcStarkExp())
+exp = nb_adapter(ze.twotone.ac_stark.AcStarkExp())
 ac_stark_run = exp.load(Path(filepath))
 ac_stark_analysis = exp.analyze(
-    AcStarkAnalyzeOptions(chi=chi, kappa=kappa, cutoff=0.1), source=ac_stark_run
+    AcStarkAnalyzeOptions(chi=chi, kappa=kappa, cutoff=0.1)
 )
 ac_coeff = ac_stark_analysis.result.ac_coeff
 fig = ac_stark_analysis.figures["fit"]
@@ -126,10 +128,10 @@ filepath = (
     # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-0.650mA_2.hdf5"
 )
 
-exp = NotebookAdapter(ze.singleshot.mist.PowerExp())
+exp = nb_adapter(ze.singleshot.mist.PowerExp())
 power_run = exp.load(Path(filepath))
 power_analysis = exp.analyze(
-    PowerAnalyzeOptions(ac_coeff=ac_coeff, log_scale=True), source=power_run
+    PowerAnalyzeOptions(ac_coeff=ac_coeff, log_scale=True)
 )
 fig = power_analysis.figures["fit"]
 fig.savefig(image_dir / (filepath.split("/")[-1].split("@")[0] + ".png"))

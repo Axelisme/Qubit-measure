@@ -245,7 +245,7 @@ def test_notebook_adapter_uses_default_widget_host_and_retains_success(
         cfg=None,
         result=T1Result(times, np.exp(-times / 20.0).astype(np.complex128)),
     )
-    adapter = NotebookAdapter(T1Exp())
+    adapter = NotebookAdapter()(T1Exp())
     try:
         successful = adapter.analyze(T1AnalyzeOptions(), source=source)
         figure = successful.figures["fit"]

@@ -112,7 +112,7 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
                     step.cfg,
                     context.devices,
                     progress=False,
-                    cancel_signal=context.cancel_signal.event,
+                    cancel_signal=context.cancel_signal,
                 )
                 modules = step.cfg.modules
                 modules.readout.set_param(

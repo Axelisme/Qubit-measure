@@ -63,7 +63,7 @@ def ge_source() -> RunRecord[GE_Cfg, GE_Result]:
 
 def test_explicit_source_can_fit_without_cfg() -> None:
     source = RunRecord[GE_Cfg, GE_Result](cfg=None, result=ge_source().result)
-    notebook = NotebookAdapter(GE_Exp(), host=NonPresentingHost())
+    notebook = NotebookAdapter(host=NonPresentingHost())(GE_Exp())
 
     record = notebook.analyze(GEAnalyzeOptions(length_ratio=0.01), source=source)
 

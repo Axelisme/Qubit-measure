@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import threading
 from collections.abc import Mapping
 from typing import Any, Literal
 
 from zcu_tools.device import BaseDevice, DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.stop_signal import StopSignal
 
 # ==================== Helpers for device config ==================== #
 
@@ -63,7 +63,7 @@ def setup_devices(
     devices: Mapping[str, BaseDevice[Any]],
     *,
     progress: bool = False,
-    cancel_signal: threading.Event | None = None,
+    cancel_signal: StopSignal | None = None,
 ) -> None:
     """Apply device setup when the experiment config contains a dev section."""
 
@@ -78,4 +78,8 @@ def setup_devices(
     for device, info in snapshot:
         if cancel_signal is not None and cancel_signal.is_set():
             return
-        device.setup(info, progress=progress, stop_event=cancel_signal)
+        device.setup(
+            info,
+            progress=progress,
+            stop_event=cancel_signal.event if cancel_signal is not None else None,
+        )

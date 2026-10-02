@@ -156,7 +156,7 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         gains = sweep2array(
             cfg.sweep.gain,

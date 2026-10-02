@@ -152,7 +152,7 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 

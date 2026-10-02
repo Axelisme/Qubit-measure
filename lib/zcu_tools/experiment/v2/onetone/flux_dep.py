@@ -109,7 +109,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         viewer = context.plots.liveplot_2d_with_line(
@@ -136,7 +136,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                     cfg,
                     context.devices,
                     progress=False,
-                    cancel_signal=context.cancel_signal.event,
+                    cancel_signal=context.cancel_signal,
                 )
                 modules = cfg.modules
 

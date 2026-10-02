@@ -171,7 +171,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         length_sweep = cfg.sweep.length
@@ -233,7 +233,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         delay_table = materialize_nonuniform_t1_delays(

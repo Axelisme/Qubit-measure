@@ -46,6 +46,7 @@ from zcu_tools.device.fake import FakeDevice
 device_manager = DeviceManager()
 fake_device = FakeDevice()
 device_manager.register_device("fake_device", fake_device)
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
 
 fake_device.set_value(1.0)
 ```
@@ -75,10 +76,10 @@ exp_cfg = {
 cfg = make_cfg(exp_cfg, ze.twotone.AllXYCfg, env, overrides={"reps": 100, "rounds": 10})
 print(cfg)
 
-allxy_exp = NotebookAdapter(ze.twotone.AllXY_Exp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
+allxy_exp = nb_adapter(ze.twotone.AllXY_Exp())
 with open("allxy-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
-        allxy_run = allxy_exp.run(cfg)
+        _ = allxy_exp.run(cfg)
 ```
 
 ```python
@@ -108,10 +109,10 @@ cfg = make_cfg(
 )
 print(cfg)
 
-cpmg_exp = NotebookAdapter(ze.twotone.time_domain.CPMG_Exp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
+cpmg_exp = nb_adapter(ze.twotone.time_domain.CPMG_Exp())
 with open("cpmg-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
-        cpmg_run = cpmg_exp.run(cfg)
+        _ = cpmg_exp.run(cfg)
 ```
 
 ```python
@@ -137,8 +138,8 @@ exp_cfg = {
 cfg = make_cfg(exp_cfg, ze.twotone.RBCfg, env, overrides={"reps": 100, "rounds": 1})
 print(cfg)
 
-rb_exp = NotebookAdapter(ze.twotone.RB_Exp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
+rb_exp = nb_adapter(ze.twotone.RB_Exp())
 with open("rb-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
-        rb_run = rb_exp.run(cfg)
+        _ = rb_exp.run(cfg)
 ```

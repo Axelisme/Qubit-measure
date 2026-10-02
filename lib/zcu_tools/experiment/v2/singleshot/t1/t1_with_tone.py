@@ -182,7 +182,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 
@@ -252,7 +252,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 

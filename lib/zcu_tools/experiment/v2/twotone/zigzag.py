@@ -75,7 +75,7 @@ class ZigZagExp(PersistableExperiment[ZigZagResult, ZigZagCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         times = np.arange(0, cfg.n_times + 1)

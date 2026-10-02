@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from zcu_tools.datafile import format_ext, reserve_labber_filepath
-from zcu_tools.device.base import BaseDevice
+from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.interfaces import RecordExperiment, SynchronousExperiment
@@ -24,13 +23,44 @@ OptionsT = TypeVar("OptionsT")
 AnalysisT = TypeVar("AnalysisT")
 
 
-class NotebookAdapter(Generic[CoreT]):
-    """Bind handles and presentation while retaining only successful records.
+class NotebookAdapter:
+    """Bind an environment once, then wrap independent experiment instances.
+
+    Construction only retains references. Each run takes one current driver
+    mapping from the bound manager; it does not refresh cfg or reconnect devices.
+    Reassigning a caller's variables does not rebind this environment.
+    """
+
+    def __init__(
+        self,
+        *,
+        soc: Any = None,
+        soccfg: Any = None,
+        device_manager: DeviceManager | None = None,
+        host: PlotHost | None = None,
+    ) -> None:
+        self._soc = soc
+        self._soccfg = soccfg
+        self._device_manager = device_manager
+        self._host = NotebookPlotHost() if host is None else host
+
+    def __call__(self, experiment: CoreT) -> NotebookExperiment[CoreT]:
+        return NotebookExperiment(
+            experiment,
+            soc=self._soc,
+            soccfg=self._soccfg,
+            device_manager=self._device_manager,
+            host=self._host,
+        )
+
+
+class NotebookExperiment(Generic[CoreT]):
+    """Retain successful records for one experiment in a bound environment.
 
     Analyze is statically available only for SynchronousExperiment instances.
-    Load and analysis work without hardware. Run requires handles and devices before
-    starting an operation. Each operation owns fresh plots; retaining a prior
-    record or presentation handle does not let later operations close its figures.
+    Load and analysis work without hardware. Run requires handles and a manager
+    before starting an operation. Run and analyze own fresh plots; retaining a
+    prior record does not let later operations close its figures.
     """
 
     def __init__(
@@ -39,13 +69,13 @@ class NotebookAdapter(Generic[CoreT]):
         *,
         soc: Any = None,
         soccfg: Any = None,
-        devices: Mapping[str, BaseDevice[Any]] | None = None,
+        device_manager: DeviceManager | None = None,
         host: PlotHost | None = None,
     ) -> None:
         self._core = experiment
         self._soc = soc
         self._soccfg = soccfg
-        self._devices = devices
+        self._device_manager = device_manager
         self._host = NotebookPlotHost() if host is None else host
         self._last_run: RunRecord[Any, Any] | None = None
         self._analysis: AnalysisRecord[Any, Any, Any, Any] | None = None
@@ -54,35 +84,36 @@ class NotebookAdapter(Generic[CoreT]):
 
     @property
     def last_run(
-        self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
     ) -> RunRecord[CfgT, ResultT] | None:
         return self._last_run
 
     @property
     def analysis(
-        self: NotebookAdapter[
+        self: NotebookExperiment[
             SynchronousExperiment[CfgT, ResultT, OptionsT, AnalysisT]
         ],
     ) -> AnalysisRecord[CfgT, ResultT, OptionsT, AnalysisT] | None:
         return self._analysis
 
     def run(
-        self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
         cfg: CfgT,
     ) -> RunRecord[CfgT, ResultT]:
         if self._soc is None or self._soccfg is None:
             raise ValueError("Run requires both soc and soccfg handles")
-        if self._devices is None:
+        if self._device_manager is None:
             raise ValueError(
-                "Run requires an explicit devices mapping; use {} for no devices"
+                "Run requires an explicit device manager; use DeviceManager() for no devices"
             )
+        devices = self._device_manager.get_all_devices()
         retained_cfg = deepcopy(cfg)
         plots = Plots(self._host)
         context = RunContext(
             soc=self._soc,
             soccfg=self._soccfg,
             plots=plots,
-            devices=self._devices,
+            devices=devices,
             cancel_signal=StopSignal(),
         )
         try:
@@ -100,7 +131,7 @@ class NotebookAdapter(Generic[CoreT]):
         return record
 
     def analyze(
-        self: NotebookAdapter[
+        self: NotebookExperiment[
             SynchronousExperiment[CfgT, ResultT, OptionsT, AnalysisT]
         ],
         options: OptionsT,
@@ -134,7 +165,7 @@ class NotebookAdapter(Generic[CoreT]):
         return record
 
     def load(
-        self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
         source: Path,
     ) -> RunRecord[CfgT, ResultT]:
         record = self._core.load(source)
@@ -145,21 +176,24 @@ class NotebookAdapter(Generic[CoreT]):
         return record
 
     def save(
-        self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
-        source: RunRecord[CfgT, ResultT],
-        destination: Path,
+        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
+        destination: str | Path,
         *,
+        source: RunRecord[CfgT, ResultT] | None = None,
         unique: bool = False,
         comment: str | None = None,
         tag: str | None = None,
     ) -> Path:
+        selected = self.last_run if source is None else source
+        if selected is None:
+            raise ValueError("No run record to save")
         path = Path(
             reserve_labber_filepath(str(destination))
             if unique
             else format_ext(str(destination))
         )
         self._core.save(
-            source,
+            selected,
             path,
             comment=comment,
             tag=tag,

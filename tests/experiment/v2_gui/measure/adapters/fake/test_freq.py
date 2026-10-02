@@ -290,14 +290,14 @@ def test_missing_cfg_save_rejects_but_disabled_persistence_is_noop(
 
 
 def test_notebook_reuse_keeps_explicit_source_and_native_figure(tmp_path: Path) -> None:
-    adapter = NotebookAdapter(
-        FakeFreqExp("hm", HangerSimParams(freq=6200.0)), host=NonPresentingHost()
+    adapter = NotebookAdapter(host=NonPresentingHost())(
+        FakeFreqExp("hm", HangerSimParams(freq=6200.0))
     )
     a = RunRecord(cfg=make_cfg(), result=make_freq_result(freq=6000.0))
     b = adapter.load(
         adapter.save(
-            RunRecord(cfg=make_cfg(), result=make_freq_result(freq=6020.0)),
             tmp_path / "b.hdf5",
+            source=RunRecord(cfg=make_cfg(), result=make_freq_result(freq=6020.0)),
         )
     )
     analysis = adapter.analyze(FreqAnalyzeOptions(edelay=0.021), source=a)
@@ -315,6 +315,6 @@ def test_notebook_reuse_keeps_explicit_source_and_native_figure(tmp_path: Path) 
         adapter.analyze(FreqAnalyzeOptions(model_type="invalid"), source=b)  # type: ignore[arg-type]
     assert adapter.analysis is analysis
     assert adapter.last_run is b
-    loaded = adapter.load(adapter.save(a, tmp_path / "a.hdf5"))
+    loaded = adapter.load(adapter.save(tmp_path / "a.hdf5", source=a))
     assert loaded.cfg == a.cfg
     np.testing.assert_array_equal(loaded.result.signals, a.result.signals)

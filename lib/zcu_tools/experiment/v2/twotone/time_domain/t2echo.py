@@ -100,7 +100,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         lengths = sweep2array(

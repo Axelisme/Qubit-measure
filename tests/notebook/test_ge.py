@@ -66,7 +66,7 @@ def make_source() -> RunRecord[GE_Cfg, GE_Result]:
 
 def test_post_uses_adopted_fit_source_and_keeps_prior_figures(tmp_path: Path) -> None:
     core, host = GE_Exp(), NonPresentingHost()
-    adapter = NotebookAdapter(core, host=host)
+    adapter = NotebookAdapter(host=host)(core)
     tool = GEPostAnalyzer(core, host=host)
     source = make_source()
     primary = adapter.analyze(
@@ -82,7 +82,7 @@ def test_post_uses_adopted_fit_source_and_keeps_prior_figures(tmp_path: Path) ->
         other.result.shot_indices,
         other.result.prepared_states,
     )
-    path_b = adapter.save(RunRecord(other.cfg, shifted), tmp_path / "b.hdf5")
+    path_b = adapter.save(tmp_path / "b.hdf5", source=RunRecord(other.cfg, shifted))
     current = adapter.load(path_b)
     assert adapter.last_run is current
     assert adapter.analysis is None
@@ -110,15 +110,17 @@ def test_canonical_save_load_replaces_latest_and_preserves_retained_figures(
     tmp_path: Path,
 ) -> None:
     core, host = GE_Exp(), NonPresentingHost()
-    adapter = NotebookAdapter(core, host=host)
+    adapter = NotebookAdapter(host=host)(core)
     tool = GEPostAnalyzer(core, host=host)
-    path = adapter.save(make_source(), tmp_path / "source.hdf5")
+    path = adapter.save(tmp_path / "source.hdf5", source=make_source())
     loaded = adapter.load(path)
     assert adapter.last_run is loaded
     old_fit = adapter.analyze(GEAnalyzeOptions(length_ratio=0.01))
     old_post = tool.analyze(old_fit, GEPostAnalyzeOptions())
 
-    destination = adapter.save(loaded, tmp_path / "saved.hdf5", comment="GE notebook")
+    destination = adapter.save(
+        tmp_path / "saved.hdf5", source=loaded, comment="GE notebook"
+    )
     replaced = adapter.load(destination)
     assert adapter.last_run is replaced
     assert adapter.analysis is None
@@ -141,9 +143,9 @@ def test_loaded_data_without_valid_cfg_supports_fit_and_post_but_not_save(
     tmp_path: Path, cfg_state: str
 ) -> None:
     core, host = GE_Exp(), NonPresentingHost()
-    adapter = NotebookAdapter(core, host=host)
+    adapter = NotebookAdapter(host=host)(core)
     original = make_source()
-    valid_path = adapter.save(original, tmp_path / "valid.hdf5")
+    valid_path = adapter.save(tmp_path / "valid.hdf5", source=original)
     payload = LabberData.load(str(valid_path))
     metadata = json.loads(payload.comment)
     if cfg_state == "missing":
@@ -166,7 +168,7 @@ def test_loaded_data_without_valid_cfg_supports_fit_and_post_but_not_save(
 
     destination = tmp_path / "rejected.hdf5"
     with pytest.raises(ValueError, match=r"RunRecord\.cfg is None"):
-        adapter.save(loaded, destination)
+        adapter.save(destination, source=loaded)
     assert not destination.exists()
     assert adapter.last_run is loaded
     assert adapter.analysis is primary

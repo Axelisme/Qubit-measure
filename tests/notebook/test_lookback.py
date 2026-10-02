@@ -32,17 +32,17 @@ def make_source(
 def test_old_source_retains_cfg_numbers_and_native_figure_after_load_b(
     tmp_path: Path,
 ) -> None:
-    adapter = NotebookAdapter(LookbackExp(), host=NonPresentingHost())
+    adapter = NotebookAdapter(host=NonPresentingHost())(LookbackExp())
     original = make_source(make_lookback_cfg(reps=7, trig_offset=0.25))
-    path_a = adapter.save(original, tmp_path / "a.hdf5")
+    path_a = adapter.save(tmp_path / "a.hdf5", source=original)
     source_a = adapter.load(path_a)
     initial = adapter.analyze(LookbackAnalyzeOptions(), source=source_a)
     presentation_a = adapter.analysis_presentation
     assert initial.result.predict_offset == pytest.approx(0.4)
 
     path_b = adapter.save(
-        make_source(make_lookback_cfg(reps=3, trig_offset=1.5), shift=5.0),
         tmp_path / "b.hdf5",
+        source=make_source(make_lookback_cfg(reps=3, trig_offset=1.5), shift=5.0),
     )
     source_b = adapter.load(path_b)
     assert adapter.last_run is source_b and adapter.analysis is None
@@ -57,7 +57,7 @@ def test_old_source_retains_cfg_numbers_and_native_figure_after_load_b(
     initial.figures["fit"].savefig(tmp_path / "old.png")
     assert (tmp_path / "old.png").stat().st_size > 0
 
-    reloaded = adapter.load(adapter.save(source_a, tmp_path / "saved-a.hdf5"))
+    reloaded = adapter.load(adapter.save(tmp_path / "saved-a.hdf5", source=source_a))
     assert reloaded.cfg == source_a.cfg
     np.testing.assert_array_equal(reloaded.result.signals, original.result.signals)
     assert reloaded.result.signals.dtype == np.complex128
@@ -65,7 +65,7 @@ def test_old_source_retains_cfg_numbers_and_native_figure_after_load_b(
 
 
 def test_analysis_failure_preserves_the_successful_record() -> None:
-    adapter = NotebookAdapter(LookbackExp(), host=NonPresentingHost())
+    adapter = NotebookAdapter(host=NonPresentingHost())(LookbackExp())
     successful = adapter.analyze(LookbackAnalyzeOptions(), source=make_source(None))
     invalid = RunRecord[LookbackCfg, LookbackResult](
         cfg=None, result=LookbackResult(np.array([]), np.array([], dtype=np.complex128))

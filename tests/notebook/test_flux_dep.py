@@ -52,7 +52,7 @@ def test_canonical_load_keeps_pending_pick_source_and_retains_old_figure(
     core.save(source_b, path_b)
     assert_canonical_payload(LabberData.load(str(path_a)), source_a.result)
 
-    adapter = NotebookAdapter(core)
+    adapter = NotebookAdapter()(core)
     loaded_a = adapter.load(path_a)
     assert loaded_a.cfg is not None
     assert loaded_a.cfg.model_dump() == cfg_a.model_dump()
@@ -79,7 +79,7 @@ def test_canonical_load_keeps_pending_pick_source_and_retains_old_figure(
     assert completed.options.flux_int == pytest.approx(0.4)
     assert completed.result.flux_period == pytest.approx(1.0)
     assert adapter.last_run is loaded_b
-    saved = adapter.save(loaded_a, tmp_path / "saved-a.hdf5", unique=False)
+    saved = adapter.save(tmp_path / "saved-a.hdf5", source=loaded_a, unique=False)
     round_trip = core.load(saved)
     assert adapter.last_run is loaded_b
     assert round_trip.cfg is not None
@@ -113,7 +113,7 @@ def test_loaded_data_without_valid_cfg_can_be_picked_but_not_saved(
     data.comment = json.dumps(metadata)
     altered = tmp_path / "without-valid-cfg.hdf5"
     data.save(str(altered))
-    adapter = NotebookAdapter(core)
+    adapter = NotebookAdapter()(core)
     expected_warning = (
         pytest.warns(UserWarning) if cfg_kind == "invalid" else nullcontext()
     )
@@ -130,7 +130,7 @@ def test_loaded_data_without_valid_cfg_can_be_picked_but_not_saved(
     assert completed.result.flux_int == pytest.approx(0.3)
     assert completed.result.flux_period == pytest.approx(1.0)
     with pytest.raises(ValueError, match="RunRecord.cfg is None"):
-        adapter.save(loaded, tmp_path / "rejected.hdf5", unique=False)
+        adapter.save(tmp_path / "rejected.hdf5", source=loaded, unique=False)
     assert not (tmp_path / "rejected.hdf5").exists()
     assert tool.analysis is completed
     plots = tool.analysis_plots

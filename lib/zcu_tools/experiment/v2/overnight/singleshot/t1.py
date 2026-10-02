@@ -289,7 +289,7 @@ class T1Task(
             self.cfg,
             state.env.context.devices,
             progress=True,
-            cancel_signal=state.stop.event,
+            cancel_signal=state.stop,
         )
         self.lengths = sweep2array(
             self.cfg.sweep.length, "time", {"soccfg": state.env.context.soccfg}
@@ -389,7 +389,7 @@ class T1WithToneTask(
             self.cfg,
             state.env.context.devices,
             progress=True,
-            cancel_signal=state.stop.event,
+            cancel_signal=state.stop,
         )
         self.lengths = sweep2array(
             self.cfg.sweep.length, "time", {"soccfg": state.env.context.soccfg}

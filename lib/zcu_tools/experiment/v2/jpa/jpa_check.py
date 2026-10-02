@@ -90,7 +90,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 
@@ -119,7 +119,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                     step.cfg,
                     context.devices,
                     progress=False,
-                    cancel_signal=context.cancel_signal.event,
+                    cancel_signal=context.cancel_signal,
                 )
                 modules = step.cfg.modules
                 modules.readout.set_param(

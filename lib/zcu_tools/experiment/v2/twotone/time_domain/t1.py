@@ -108,7 +108,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         delay_table = materialize_nonuniform_t1_delays(
@@ -155,7 +155,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
@@ -283,7 +283,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 
@@ -420,7 +420,7 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         modules = cfg.modules
 

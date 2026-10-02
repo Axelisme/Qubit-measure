@@ -354,7 +354,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
             run_cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
 
         depths = sweep2array(run_cfg.sweep.depth, allow_array=True).astype(np.int64)

@@ -115,7 +115,7 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
                     cfg,
                     context.devices,
                     progress=False,
-                    cancel_signal=context.cancel_signal.event,
+                    cancel_signal=context.cancel_signal,
                 )
                 modules = cfg.modules
 

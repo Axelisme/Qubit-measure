@@ -135,7 +135,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             cfg,
             context.devices,
             progress=True,
-            cancel_signal=context.cancel_signal.event,
+            cancel_signal=context.cancel_signal,
         )
         rounds, cfg.rounds = cfg.rounds, 1
         gains = sweep2array(
