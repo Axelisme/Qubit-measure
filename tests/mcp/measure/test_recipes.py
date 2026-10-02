@@ -674,6 +674,39 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         client.context.session.close()
 
 
+def test_recipe_cancel_during_preparation_wins_over_a_missing_parameter_handoff(
+    tmp_path, monkeypatch
+):
+    gui = LookbackGui()
+    pending = Event()
+    release = Event()
+
+    def respond(method, params):
+        if method == "tab.edit_cfg":
+            pending.set()
+            assert release.wait(2)
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {})
+        assert pending.wait(1)
+        execution = initial.data["execution"]
+        cancelled = client.call("cancel", {"execution": execution})
+        assert cancelled.data["cancel_requested"]
+        release.set()
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        assert terminal.data["status"] == "cancelled"
+        assert terminal.data["cancel_requested"]
+        assert terminal.data["tab"] == "t"
+        assert terminal.data["missing"] == []
+        assert not gui.ran
+    finally:
+        release.set()
+        client.context.session.close()
+
+
 def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safely(
     tmp_path, monkeypatch
 ):
