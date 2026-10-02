@@ -165,9 +165,14 @@ def cancel(
     if ("op" in arguments) == ("execution" in arguments):
         raise ValueError("provide exactly one of op or execution")
     if "execution" in arguments:
-        return ctx.session.executions.get(_execution_id(arguments)).cancel()
+        key = _execution_id(arguments)
+        return (
+            ctx.session.recipes.get(key)
+            if key.startswith("recipe-")
+            else ctx.session.executions.get(key)
+        ).cancel()
     op = _operation_id(arguments)
-    execution = ctx.session.executions.for_op(op)
+    execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
     if execution is not None:
         return execution.cancel()
     ctx = ctx.bound()

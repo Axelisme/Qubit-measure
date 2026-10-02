@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
+from zcu_tools.mcp.measure.analysis_execution import CancelError, GuiCancel
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 if TYPE_CHECKING:
@@ -72,6 +73,10 @@ class RecipeSnapshot:
     error: RecipeError | None = None
 
 
+class _ContinuationCancelled(Exception):
+    pass
+
+
 class RecipeContext:
     """One recipe's binding and progress; helpers never reconnect or retry."""
 
@@ -82,6 +87,7 @@ class RecipeContext:
         self._closed = closed
         self._condition = Condition()
         self._thread: Thread | None = None
+        self._run_cancel: GuiCancel | None = None
 
     def snapshot(self) -> dict[str, Any]:
         with self._condition:
@@ -121,6 +127,8 @@ class RecipeContext:
     ) -> None:
         try:
             run(self, arguments)
+        except _ContinuationCancelled:
+            self._publish(status="cancelled", phase="terminal")
         except Exception as error:  # Worker boundary retains partial progress.
             logger.exception("Recipe %s failed", self.progress.recipe)
             self._publish(
@@ -147,8 +155,73 @@ class RecipeContext:
             self.progress = replace(self.progress, **changes)
             self._condition.notify_all()
 
+    def _admit(self, phase: RecipePhase) -> None:
+        with self._condition:
+            if self._closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+            if self.progress.cancel_requested:
+                raise _ContinuationCancelled
+            self._publish(phase=phase)
+            if phase == "raw_save":
+                self._publish(raw_save=RawSave("saving"))
+
     def rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        return self.tools.send_gui_rpc(method, params)
+        return self.tools.gui.send_gui_rpc(
+            method, params, before_send=lambda: self._admit(self.progress.phase)
+        )
+
+    def cancel(self) -> ToolReply:
+        """Latch intent before requesting the original Run's cooperative stop."""
+        with self._condition:
+            if self.progress.phase == "terminal":
+                return self._control_reply(GuiCancel("not_needed"))
+            self._publish(cancel_requested=True, status="running")
+        result = self._stop_run()
+        return self._control_reply(result)
+
+    def _control_reply(self, result: GuiCancel) -> ToolReply:
+        with self._condition:
+            return ToolReply(
+                {**asdict(self.progress), "gui_cancel": asdict(result)},
+                self.images,
+                is_error=result.status == "failed",
+            )
+
+    def _stop_run(self) -> GuiCancel:
+        with self._condition:
+            if (
+                not self.progress.cancel_requested
+                or self.progress.phase != "run"
+                or self.progress.run_op is None
+            ):
+                return GuiCancel("not_needed")
+            if self._run_cancel is not None:
+                return self._run_cancel
+            op = self.progress.run_op
+            # Claim the one stop attempt before waiting for the shared RPC lock.
+            self._run_cancel = GuiCancel("requested")
+        try:
+            reply = self.tools.gui.read_internal(
+                "operation.cancel", {}, operation_handle=op
+            )
+            if reply["status"] == "cancelling":
+                result = GuiCancel("requested")
+            elif reply["status"] in ("finished", "cancelled"):
+                result = GuiCancel("not_needed")
+            else:
+                raise GuiRpcError("Invalid cancel reply", reason="incompatible_wire")
+        except Exception as error:  # noqa: BLE001 - retain latched intent on control failure
+            result = GuiCancel(
+                "failed",
+                CancelError(
+                    str(getattr(error, "reason", None) or "cancel_failed"),
+                    str(error),
+                    getattr(error, "code", None),
+                ),
+            )
+        with self._condition:
+            self._run_cancel = result
+        return result
 
     def prepare_tab(self, experiment: str, reuse_tab_id: str | None) -> dict[str, Any]:
         if reuse_tab_id is None:
@@ -220,6 +293,7 @@ class RecipeContext:
         )
         run_op = started["handle"]
         self._publish(run_op=run_op, op=run_op)
+        self._stop_run()
         outcome = self._await_operation(run_op)
         self._publish(run_outcome=outcome)
         if outcome["status"] == "failed":
@@ -237,6 +311,7 @@ class RecipeContext:
             "tab.analyze",
             {"tab_id": tab, "updates": {}},
             run_operation_handle=run_op,
+            before_send=lambda: self._admit("analysis"),
         )
         self._publish(op=started["handle"])
         execution = self.tools.session.executions.start(
@@ -278,6 +353,7 @@ class RecipeContext:
             "tab.writeback_preview",
             {"tab_id": tab, "subtab_id": "analysis"},
             operation_handle=started["handle"],
+            before_send=lambda: self._admit("writeback_read"),
         )
         self._publish(writeback=writeback, status="finished", phase="terminal")
 
@@ -309,6 +385,7 @@ class RecipeContext:
                 "tab.save_data",
                 {"tab_id": tab},
                 run_operation_handle=run_op,
+                before_send=lambda: self._admit("raw_save"),
             )
             path = started["data_path"]
             self._publish(
@@ -328,6 +405,8 @@ class RecipeContext:
                     reason="raw_save_failed",
                 )
             self._publish(raw_save=RawSave("saved", path, path, outcome))
+        except _ContinuationCancelled:
+            raise
         except Exception as error:
             if self.progress.raw_save.status != "failed":
                 reason = getattr(error, "reason", None)
@@ -382,6 +461,15 @@ class RecipeExecutions:
                 f"unknown execution: {execution!r}", reason="unknown_execution"
             )
         return found
+
+    def for_op(self, op: int) -> RecipeContext | None:
+        with self._lock:
+            executions = list(self._executions.values())
+        for execution in executions:
+            snapshot = execution.snapshot()
+            if op in (snapshot["run_op"], snapshot["op"]):
+                return execution
+        return None
 
     def snapshots(self) -> list[dict[str, Any]]:
         with self._lock:
