@@ -1629,7 +1629,10 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
     assert literal_edits[0].isEnabled() is False
 
 
-def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl):
+def test_module_reference_renders_header_and_editable_leaf(qapp, ctrl):
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QComboBox, QLineEdit, QTreeWidget
+
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
@@ -1656,31 +1659,35 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
     ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
 
-    # Sole tree: ReferenceWidget is header-only inside QTreeWidget (no sub_container),
-    # so its internal expand/sub_container layout is not the form's collapsible section.
-    # Verify tree structure instead.
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+    combo = ref_widget.findChild(QComboBox)
+    assert combo is not None
+    assert combo.currentText() == "Pulse Shape"
+    assert combo.currentData() == "<Custom:Pulse Shape>"
 
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Check that reference header exists and sigma leaf is rendered
-    found_sigma = False
-    stack = [root._tree.invisibleRootItem()]
-    while stack:
-        cur = stack.pop()
-        if cur is None:
-            continue
-        for i in range(cur.childCount()):
-            child = cur.child(i)
-            if child is None:
-                continue
-            if "Sigma" in child.text(0) or "Gain" in child.text(0):
-                found_sigma = True
-            stack.append(child)
-    assert found_sigma or True  # at least tree rendered
+    tree = w.findChild(QTreeWidget)
+    assert tree is not None
+    leaves = tree.findItems("Gain", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive)
+    assert len(leaves) == 1
+    editor = tree.itemWidget(leaves[0], 1)
+    assert editor is not None
+    line = editor.findChild(QLineEdit)
+    assert line is not None
+    assert line.text() == "0.25"
+    line.setText("0.75")
+
+    reference = w.read_values().fields["pulse"]
+    assert isinstance(reference, ReferenceValue)
+    assert reference.chosen_key == "<Custom:Pulse Shape>"
+    gain = reference.value.fields["gain"]
+    assert isinstance(gain, DirectValue)
+    assert gain.value == 0.75
+    w.detach()
 
 
-def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
+def test_waveform_reference_renders_header_and_editable_leaf(qapp, ctrl):
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QComboBox, QLineEdit, QTreeWidget
+
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
@@ -1709,11 +1716,29 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
 
     ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
+    combo = ref_widget.findChild(QComboBox)
+    assert combo is not None
+    assert combo.currentText() == "Gaussian"
+    assert combo.currentData() == "<Custom:Gaussian>"
 
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+    tree = w.findChild(QTreeWidget)
+    assert tree is not None
+    leaves = tree.findItems("Sigma", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive)
+    assert len(leaves) == 1
+    editor = tree.itemWidget(leaves[0], 1)
+    assert editor is not None
+    line = editor.findChild(QLineEdit)
+    assert line is not None
+    assert line.text() == "0.5"
+    line.setText("0.125")
 
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
+    reference = w.read_values().fields["waveform"]
+    assert isinstance(reference, ReferenceValue)
+    assert reference.chosen_key == "<Custom:Gaussian>"
+    sigma = reference.value.fields["sigma"]
+    assert isinstance(sigma, DirectValue)
+    assert sigma.value == 0.125
+    w.detach()
 
 
 def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):

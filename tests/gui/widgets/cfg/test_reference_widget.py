@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
+
+from qtpy.QtWidgets import QComboBox
 
 from zcu_tools.gui.cfg import (
     CfgSectionSpec,
@@ -69,40 +71,69 @@ def _make_widget(field: ReferenceField) -> ReferenceWidget:
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
     registry = default_cfg_renderers()
-    return cast(
-        ReferenceWidget,
-        registry.render(field, FieldRenderContext(registry=registry)),
-    )
+    widget = registry.render(field, FieldRenderContext(registry=registry))
+    assert isinstance(widget, ReferenceWidget)
+    return widget
 
 
 def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):
     catalog = _Catalog()
     field = _make_field(catalog)
     widget = _make_widget(field)
-    count_before = widget._combo.count()
+    try:
+        combo = widget.findChild(QComboBox)
+        assert combo is not None
+        assert combo.currentData() == f"<Custom:{_INNER_LABEL}>"
 
-    catalog.entries["my_module"] = ResolvedReference(_INNER_LABEL, _inner_value())
-    field.refresh_references("module")
+        catalog.entries["my_module"] = ResolvedReference(_INNER_LABEL, _inner_value())
+        field.refresh_references("module")
 
-    assert widget._combo.count() > count_before
-    assert "Lib: my_module" in [
-        widget._combo.itemText(index) for index in range(widget._combo.count())
-    ]
-    widget.teardown()
+        assert [
+            (combo.itemText(index), combo.itemData(index))
+            for index in range(combo.count())
+            if combo.itemData(index) is not None
+        ] == [
+            (_INNER_LABEL, f"<Custom:{_INNER_LABEL}>"),
+            ("Lib: my_module", "my_module"),
+        ]
+        assert combo.currentData() == f"<Custom:{_INNER_LABEL}>"
+    finally:
+        widget.teardown()
 
 
-def test_module_ref_widget_teardown_disconnects_field_callbacks(qapp):
-    field = _make_field(_Catalog())
-    widget = _make_widget(field)
-    widget.teardown()
+def test_module_ref_widget_teardown_stops_catalog_display_updates(qapp):
+    catalog = _Catalog()
+    field = _make_field(catalog)
+    detached = _make_widget(field)
+    attached = _make_widget(field)
+    detached.teardown()
+    try:
+        detached_combo = detached.findChild(QComboBox)
+        attached_combo = attached.findChild(QComboBox)
+        assert detached_combo is not None
+        assert attached_combo is not None
+        assert detached_combo.count() == attached_combo.count() == 1
 
-    assert widget._on_model_changed not in field.on_change._callbacks
+        catalog.entries["my_module"] = ResolvedReference(_INNER_LABEL, _inner_value())
+        field.refresh_references("module")
+
+        assert field.available_keys() == ("my_module",)
+        assert attached_combo.findData("my_module") >= 0
+        assert detached_combo.count() == 1
+        assert detached_combo.currentText() == _INNER_LABEL
+        assert detached_combo.currentData() == f"<Custom:{_INNER_LABEL}>"
+    finally:
+        attached.teardown()
 
 
 def test_module_ref_widget_initial_combo_without_catalog_keys(qapp):
     widget = _make_widget(_make_field(_Catalog()))
 
-    assert [
-        widget._combo.itemText(index) for index in range(widget._combo.count())
-    ] == [_INNER_LABEL]
-    widget.teardown()
+    try:
+        combo = widget.findChild(QComboBox)
+        assert combo is not None
+        assert combo.count() == 1
+        assert combo.currentText() == _INNER_LABEL
+        assert combo.currentData() == f"<Custom:{_INNER_LABEL}>"
+    finally:
+        widget.teardown()
