@@ -941,6 +941,132 @@ def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
         client.context.session.close()
 
 
+@pytest.mark.parametrize("partial_data", [False, True])
+def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
+    tmp_path, partial_data
+):
+    gui = LookbackGui()
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == 71:
+            gui.ran = partial_data
+            return {"reason": "completed", "status": "cancelled"}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    try:
+        reply = client.call("lookback", {"frequency_mhz": 6000.0})
+        assert reply.data["status"] == "cancelled"
+        assert not reply.data["cancel_requested"]
+        assert not reply.data["finish_early_requested"]
+        assert reply.data["run_outcome"]["status"] == "cancelled"
+        assert reply.data["raw_save"]["status"] == "not_started"
+        methods = [method for method, _ in client.transport.sent]
+        assert "tab.save_data" not in methods
+        assert "tab.analyze" not in methods
+        assert "operation.cancel" not in methods
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    ("argument", "module"),
+    [
+        ("readout_ref", "readout"),
+        ("use_reset", "reset"),
+        ("init_pulse_ref", "init_pulse"),
+    ],
+)
+def test_explicit_invalid_library_reference_is_not_disabled_or_replaced(
+    tmp_path, argument, module
+):
+    gui = LookbackGui()
+    gui.md["r_f"] = 6500.0
+    gui.publication["tree"]["children"]["modules"]["children"][module].update(
+        valid=False, error="missing library entry"
+    )
+    client = make_client(tmp_path, gui)
+    try:
+        reply = client.call("lookback", {argument: "missing"})
+        assert reply.is_error
+        assert reply.data["status"] == "failed"
+        assert reply.data["error"]["reason"] == "invalid_cfg"
+        assert reply.data["tab"] == "t"
+        edits = [
+            params
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+        ]
+        assert len(edits) == 1
+        assert {"path": ["modules", module], "value": {"__ref": "missing"}} in edits[0][
+            "edits"
+        ]
+        assert "tab.run_start" not in [method for method, _ in client.transport.sent]
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    ("pending_method", "wire_op", "phase", "raw_status"),
+    [
+        ("operation.await", 71, "run", "not_started"),
+        ("tab.save_data", None, "raw_save", "unknown"),
+        ("operation.await", 82, "raw_save", "unknown"),
+        ("operation.await", 93, "analysis", "saved"),
+    ],
+)
+def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
+    tmp_path, monkeypatch, pending_method, wire_op, phase, raw_status
+):
+    client = make_client(tmp_path, LookbackGui(), port_is_open=lambda port: True)
+    send_line = client.transport.send_line
+    pending = Event()
+    reconnects = []
+
+    def send(payload):
+        if payload["method"] == pending_method and (
+            wire_op is None or payload["params"]["operation_id"] == wire_op
+        ):
+            client.transport.sent.append((payload["method"], payload["params"]))
+            pending.set()
+            return
+        send_line(payload)
+
+    def unexpected_connect(*args, **kwargs):
+        reconnects.append((args, kwargs))
+        raise AssertionError("Recipe must not reconnect")
+
+    monkeypatch.setattr(client.transport, "send_line", send)
+    monkeypatch.setattr(client.context.bridge, "connect", unexpected_connect)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6000.0})
+        assert pending.wait(1)
+        client.transport.close()
+        assert client.transport.on_closed is not None
+        client.transport.on_closed(None)
+        execution = initial.data["execution"]
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        assert terminal.data["status"] == "failed"
+        assert terminal.data["error"]["reason"] == "connection_lost"
+        assert terminal.data["error"]["phase"] == phase
+        assert terminal.data["raw_save"]["status"] == raw_status
+        if wire_op == 82:
+            assert terminal.data["raw_save"]["reserved_path"] == "/actual/raw.h5"
+            assert terminal.data["raw_save"]["path"] is None
+        if raw_status == "saved":
+            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        state = client.call("status", {"execution": execution})
+        assert state["error"] == terminal.data["error"]
+        assert not reconnects
+        assert client.transport.sent[-1][0] == pending_method
+        assert [method for method, _ in client.transport.sent].count(
+            "tab.run_start"
+        ) == 1
+    finally:
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("failure", ["wrong_experiment", "busy", "missing", "stale"])
 def test_lookback_reuse_errors_do_not_create_replacement_or_retry(tmp_path, failure):
     gui = LookbackGui()
@@ -982,6 +1108,9 @@ def test_lookback_reuse_errors_do_not_create_replacement_or_retry(tmp_path, fail
         ("raw_start", "raw_save", "failed"),
         ("raw_finish", "raw_save", "failed"),
         ("analysis", "analysis", "saved"),
+        ("superseded_raw", "raw_save", "failed"),
+        ("superseded_analysis", "analysis", "saved"),
+        ("superseded_writeback", "writeback_read", "saved"),
         ("image", "analysis", "saved"),
         ("writeback", "writeback_read", "saved"),
     ],
@@ -1004,6 +1133,9 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
     client = make_client(tmp_path, respond)
     failed_method = {
         "raw_start": "tab.save_data",
+        "superseded_raw": "tab.save_data",
+        "superseded_analysis": "tab.analyze",
+        "superseded_writeback": "tab.writeback_preview",
         "image": "tab.save_image",
         "writeback": "tab.writeback_preview",
     }.get(failure)
@@ -1012,7 +1144,9 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
             "ok": False,
             "error": {
                 "code": "precondition_failed",
-                "reason": "injected",
+                "reason": "result_superseded"
+                if failure.startswith("superseded")
+                else "injected",
                 "message": "injected failure",
             },
         }
@@ -1022,6 +1156,8 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
         assert data["status"] == "failed", data
         assert reply.is_error
         assert data["error"]["phase"] == phase
+        if failure.startswith("superseded"):
+            assert data["error"]["reason"] == "result_superseded"
         assert data["raw_save"]["status"] == raw_status
         assert data["tab"] == "t"
         assert data["run_op"] is not None
