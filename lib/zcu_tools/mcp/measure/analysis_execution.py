@@ -340,6 +340,7 @@ class AnalysisExecutions:
         self._lock = Lock()
         self._next_id = 1
         self._by_op: dict[int, AnalysisExecution] = {}
+        self._by_id: dict[str, AnalysisExecution] = {}
 
     def start(
         self,
@@ -368,16 +369,25 @@ class AnalysisExecutions:
             )
             self._next_id += 1
             self._by_op[op] = execution
+            self._by_id[execution.snapshot().execution] = execution
             execution.start()
             return execution
 
     def get(self, execution: str) -> AnalysisExecution:
         """Resolve a session-local execution without binding or reconnecting."""
-        raise NotImplementedError("execution lookup is not implemented")
+        with self._lock:
+            found = self._by_id.get(execution)
+        if found is None:
+            raise GuiRpcError(
+                f"unknown execution: {execution!r}", reason="unknown_execution"
+            )
+        return found
 
     def snapshots(self) -> list[ExecutionSnapshot]:
         """Return detached snapshots of every execution in this session."""
-        raise NotImplementedError("execution listing is not implemented")
+        with self._lock:
+            executions = list(self._by_id.values())
+        return [execution.snapshot() for execution in executions]
 
     def stop_admission(self) -> None:
         """Permanently reject new workers and wake existing ones."""

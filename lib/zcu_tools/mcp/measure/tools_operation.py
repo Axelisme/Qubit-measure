@@ -85,12 +85,7 @@ def _execution_id(arguments: dict[str, Any]) -> str:
     return execution
 
 
-def wait(
-    ctx: MeasureToolContext, arguments: dict[str, Any]
-) -> dict[str, Any] | ToolReply:
-    """Wait on exactly one operation or execution; timeout does not cancel it."""
-    if ("op" in arguments) == ("execution" in arguments):
-        raise ValueError("provide exactly one of op or execution")
+def _wait_timeout(arguments: dict[str, Any]) -> float:
     timeout = arguments.get("timeout", 60)
     if (
         isinstance(timeout, bool)
@@ -99,16 +94,33 @@ def wait(
         or not 0 <= timeout <= 300
     ):
         raise ValueError("timeout must be between 0 and 300 seconds")
-    start = time.monotonic()
+    return float(timeout)
+
+
+def _wait_tool(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any] | ToolReply:
+    """Wait on exactly one operation or execution; timeout does not cancel it."""
+    if ("op" in arguments) == ("execution" in arguments):
+        raise ValueError("provide exactly one of op or execution")
     if "execution" in arguments:
+        timeout = _wait_timeout(arguments)
+        start = time.monotonic()
         execution = ctx.session.executions.get(_execution_id(arguments))
-        reply = execution.wait(float(timeout))
+        reply = execution.wait(timeout)
         return ToolReply(
             {**reply.data, "elapsed_s": max(0.0, time.monotonic() - start)},
             reply.images,
         )
+    return wait(ctx, arguments)
+
+
+def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Wait on a GUI operation, not its downstream analysis completion."""
     op = _operation_id(arguments)
+    timeout = _wait_timeout(arguments)
     ctx = ctx.bound()
+    start = time.monotonic()
     reply = ctx.send_gui_rpc(
         "operation.await",
         {"timeout": timeout},
@@ -171,7 +183,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
             },
         },
         "wait": {
-            "handler": partial(wait, ctx),
+            "handler": partial(_wait_tool, ctx),
             "description": "Wait for one operation or execution; timeout does not cancel.",
             "inputSchema": {
                 "type": "object",
