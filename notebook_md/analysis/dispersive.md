@@ -89,7 +89,8 @@ from zcu_tools.experiment.v2.onetone import FluxDepExp
 
 onetone_path = r"../../Database/Q12_2D[5]/Q1/R1_flux_1.hdf5"
 
-spectrum = FluxDepExp().load(Path(onetone_path))
+onetone_run = FluxDepExp().load(Path(onetone_path))
+spectrum = onetone_run.result
 sp_dev_values = spectrum.values
 sp_freqs = spectrum.freqs * 1e-3  # MHz to GHz
 sp_signals = spectrum.signals

@@ -26,6 +26,11 @@ from pydantic import TypeAdapter
 
 %autoreload 2
 import zcu_tools.experiment.v2.autofluxdep as zefd
+from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.notebook.plotting import NotebookPlotHost
+from zcu_tools.plotting.plots import Plots
 import zcu_tools.program.v2 as zp
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.resources.context import ContextManager
@@ -70,7 +75,7 @@ soc.get_sample_rates()
 # Connect Instruments
 
 ```python
-from zcu_tools.device import GlobalDeviceManager, DeviceInfo
+from zcu_tools.device import DeviceManager, DeviceInfo
 from zcu_tools.device.yoko import YOKOGS200
 
 dev_info_path = os.path.join(em.flux_dir, "device_info.json")
@@ -82,11 +87,12 @@ with open(dev_info_path, "r") as f:
     }
 pprint(dev_info)
 
-resource_manager = reconnect_devices(dev_info)
+device_manager = DeviceManager()
+resource_manager = reconnect_devices(dev_info, device_manager)
 
-flux_yoko = cast(YOKOGS200, GlobalDeviceManager.get_device("flux_yoko"))
+flux_yoko = cast(YOKOGS200, device_manager.get_device("flux_yoko"))
 
-GlobalDeviceManager.setup_devices(dev_info, progress=True)
+device_manager.setup_devices(dev_info, progress=True)
 ```
 
 # Initial Tools
@@ -133,11 +139,11 @@ executor = (
             qubit_freq=zefd.QubitFreqTask(
                 detune_sweep=make_sweep(-20, 50, step=0.5),
                 cfg_maker=lambda ctx, ml: (
-                    (info := ctx.env["info"])
-                    and (pred_qf := info["predict_freq"])
-                    and (prev_factor := info.last.get("qfw_factor", md.qf_w / 0.05))
-                    and (opt_readout := info.last.get("opt_readout", readout_cfg))
-                    and ml.make_cfg(
+                    (info := ctx.env.info)
+                    and (pred_qf := info.predict_freq)
+                    and (prev_factor := info.last_or("qfw_factor", md.qf_w / 0.05))
+                    and (opt_readout := info.last_or("opt_readout", readout_cfg))
+                    and make_cfg(
                         {
                             "modules": {
                                 "qub_pulse": {
@@ -160,6 +166,7 @@ executor = (
                             "rounds": 100,
                         },
                         zefd.QubitFreqCfgTemplate,
+                        CfgEnv(md=md, ml=ml, device_manager=device_manager),
                     )
                 ),
                 earlystop_snr=50,
@@ -167,13 +174,13 @@ executor = (
             # lenrabi=zefd.LenRabiTask(
             #     num_expts=101,
             #     cfg_maker=lambda ctx, ml: (
-            #         (info := ctx.env["info"])
-            #         and (cur_qf := info.get("qubit_freq"))
-            #         and (prev_t1 := info.last.get("smooth_t1", md.t1))
-            #         and (prev_pi_len := info.last.get("pi_length", pi_len))
-            #         and (prev_pi_pd := info.last.get("smooth_pi_product", pi_product))
-            #         and (opt_readout := info.last.get("opt_readout", readout_cfg))
-            #         and ml.make_cfg(
+            #         (info := ctx.env.info)
+            #         and (cur_qf := info.require("qubit_freq"))
+            #         and (prev_t1 := info.last_or("smooth_t1", md.t1))
+            #         and (prev_pi_len := info.last_or("pi_length", pi_len))
+            #         and (prev_pi_pd := info.last_or("smooth_pi_product", pi_product))
+            #         and (opt_readout := info.last_or("opt_readout", readout_cfg))
+            #         and make_cfg(
             #             {
             #                 "modules": {
             #                     "rabi_pulse": pi_pulse.with_updates(
@@ -190,6 +197,7 @@ executor = (
             #                 "sweep_range": (0.05, max(5 * prev_pi_len, 0.5)),
             #             },
             #             zefd.LenRabiCfgTemplate,
+            #             CfgEnv(md=md, ml=ml, device_manager=device_manager),
             #         )
             #     ),
             #     earlystop_snr=30,
@@ -198,12 +206,12 @@ executor = (
             #     freq_expts=10,
             #     gain_expts=10,
             #     cfg_maker=lambda ctx, ml: (
-            #         (info := ctx.env["info"])
-            #         and (prev_t1 := info.last.get("smooth_t1", md.t1))
-            #         and (prev_best_freq := info.last.get("best_ro_freq", readout_freq))
-            #         and (prev_best_gain := info.last.get("best_ro_gain", readout_gain))
-            #         and (cur_pi_pulse := info.get("pi_pulse"))
-            #         and ml.make_cfg(
+            #         (info := ctx.env.info)
+            #         and (prev_t1 := info.last_or("smooth_t1", md.t1))
+            #         and (prev_best_freq := info.last_or("best_ro_freq", readout_freq))
+            #         and (prev_best_gain := info.last_or("best_ro_gain", readout_gain))
+            #         and (cur_pi_pulse := info.require("pi_pulse"))
+            #         and make_cfg(
             #             {
             #                 "modules": {
             #                     "pi_pulse": cur_pi_pulse,
@@ -222,17 +230,18 @@ executor = (
             #                 ),
             #             },
             #             zefd.RO_OptCfgTemplate,
+            #             CfgEnv(md=md, ml=ml, device_manager=device_manager),
             #         )
             #     ),
             # ),
             # t1=zefd.T1Task(
             #     num_expts=101,
             #     cfg_maker=lambda ctx, ml: (
-            #         (info := ctx.env["info"])
-            #         and (prev_t1 := info.last.get("smooth_t1", md.t1))
-            #         and (cur_pi_pulse := info.get("pi_pulse"))
-            #         and (opt_readout := info.last.get("opt_readout", readout_cfg))
-            #         and ml.make_cfg(
+            #         (info := ctx.env.info)
+            #         and (prev_t1 := info.last_or("smooth_t1", md.t1))
+            #         and (cur_pi_pulse := info.require("pi_pulse"))
+            #         and (opt_readout := info.last_or("opt_readout", readout_cfg))
+            #         and make_cfg(
             #             {
             #                 "modules": {
             #                     "pi_pulse": cur_pi_pulse,
@@ -244,6 +253,7 @@ executor = (
             #                 "sweep_range": (0.5, max(1.0, 5 * prev_t1)),
             #             },
             #             zefd.T1CfgTemplate,
+            #             CfgEnv(md=md, ml=ml, device_manager=device_manager),
             #         )
             #     ),
             #     earlystop_snr=20,
@@ -252,12 +262,12 @@ executor = (
             #     num_expts=121,
             #     detune_ratio=0.05,
             #     cfg_maker=lambda ctx, ml: (
-            #         (info := ctx.env["info"])
-            #         and (cur_t1 := info.get("smooth_t1", md.t1))
-            #         and (prev_t2r := info.last.get("smooth_t2r", md.t2r))
-            #         and (cur_pi2_pulse := info.get("pi2_pulse"))
-            #         and (opt_readout := info.last.get("opt_readout", readout_cfg))
-            #         and ml.make_cfg(
+            #         (info := ctx.env.info)
+            #         and (cur_t1 := (info.current.smooth_t1 if info.current.smooth_t1 is not None else md.t1))
+            #         and (prev_t2r := info.last_or("smooth_t2r", md.t2r))
+            #         and (cur_pi2_pulse := info.require("pi2_pulse"))
+            #         and (opt_readout := info.last_or("opt_readout", readout_cfg))
+            #         and make_cfg(
             #             {
             #                 "modules": {
             #                     "pi2_pulse": cur_pi2_pulse,
@@ -269,6 +279,7 @@ executor = (
             #                 "sweep_range": (0, 2.5 * prev_t2r),
             #             },
             #             zefd.T2RamseyCfgTemplate,
+            #             CfgEnv(md=md, ml=ml, device_manager=device_manager),
             #         )
             #     ),
             #     earlystop_snr=20,
@@ -277,13 +288,13 @@ executor = (
             #     num_expts=121,
             #     detune_ratio=0.05,
             #     cfg_maker=lambda ctx, ml: (
-            #         (info := ctx.env["info"])
-            #         and (cur_t1 := info.get("smooth_t1", md.t1))
-            #         and (prev_t2e := info.last.get("smooth_t2e", md.t2e))
-            #         and (cur_pi_pulse := info.get("pi_pulse"))
-            #         and (cur_pi2_pulse := info.get("pi2_pulse"))
-            #         and (opt_readout := info.last.get("opt_readout", readout_cfg))
-            #         and ml.make_cfg(
+            #         (info := ctx.env.info)
+            #         and (cur_t1 := (info.current.smooth_t1 if info.current.smooth_t1 is not None else md.t1))
+            #         and (prev_t2e := info.last_or("smooth_t2e", md.t2e))
+            #         and (cur_pi_pulse := info.require("pi_pulse"))
+            #         and (cur_pi2_pulse := info.require("pi2_pulse"))
+            #         and (opt_readout := info.last_or("opt_readout", readout_cfg))
+            #         and make_cfg(
             #             {
             #                 "modules": {
             #                     "pi_pulse": cur_pi_pulse,
@@ -296,6 +307,7 @@ executor = (
             #                 "sweep_range": (0, 2.5 * prev_t2e),
             #             },
             #             zefd.T2EchoCfgTemplate,
+            #             CfgEnv(md=md, ml=ml, device_manager=device_manager),
             #         )
             #     ),
             #     earlystop_snr=20,
@@ -304,13 +316,24 @@ executor = (
     )
     .record_animation(os.path.join(em.flux_dir, f"{filename}.mp4"))
 )
-_ = executor.run(
-    dev_cfg={"flux_yoko": flux_yoko.get_info().with_updates(label="flux_dev")},
-    predictor=preditor.clone(),
-    env_dict={"soccfg": soccfg, "soc": soc, "ml": ml.clone()},
-    retry_time=0,
+run_plots = Plots(NotebookPlotHost())
+run_context = RunContext(
+    soc=soc, soccfg=soccfg, plots=run_plots,
+    devices=device_manager.get_all_devices(), cancel_signal=StopSignal(),
 )
+try:
+    run_results = executor.run(
+        dev_cfg={"flux_yoko": flux_yoko.get_info().with_updates(label="flux_dev")},
+        predictor=preditor.clone(),
+        context=run_context,
+        ml=ml.clone(),
+        retry_time=0,
+    )
+finally:
+    run_figures = run_plots.finish()
 ```
+
+Keep `run_figures` to inspect or save the native Matplotlib figures. Call `run_plots.release()` when the widget presentation is no longer needed. Releasing it does not destroy the retained figures.
 
 ```python
 filepath = Path(database_path, f"{filename}@{em.label}")
@@ -319,7 +342,7 @@ snapshot_dir = filepath.parent / f"{filepath.name}_snapshot"
 snapshot_dir.mkdir(parents=True, exist_ok=True)
 
 (snapshot_dir / "measure_code.py").write_text(measure_code)
-dump_device_info(str(snapshot_dir / "device_info.json"))
+dump_device_info(snapshot_dir / "device_info.json", device_manager)
 ml.clone(dst_path=snapshot_dir / "module_cfg.yaml")
 md.clone(dst_path=snapshot_dir / "meta_info.json")
 

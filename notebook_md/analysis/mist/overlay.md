@@ -1,7 +1,6 @@
 ```python
 %load_ext autoreload
 import numpy as np
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
@@ -9,7 +8,9 @@ from typing import List, cast
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
-from zcu_tools.datafile import load_data
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.experiment.v2.twotone.dispersive import DispersiveAnalyzeOptions
+from zcu_tools.experiment.v2.twotone.ac_stark import AcStarkAnalyzeOptions
 from zcu_tools.simulate import mA2flx, flx2mA
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.notebook.analysis.mist.branch.overlay import calc_overlay, plot_overlay
@@ -63,17 +64,17 @@ sim_flxs = np.linspace(-0.05, 0.55, 200)
 %matplotlib widget
 filepath = r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\R4_flux_1.hdf5"
 
-from zcu_tools.notebook.experiments import FluxDepNotebookExp
+from zcu_tools.notebook.experiments import FluxDepAnalyzer
 
-exp = FluxDepNotebookExp()
-spectrum = exp.load(filepath)
+flux_run = ze.onetone.FluxDepExp().load(Path(filepath))
+spectrum = flux_run.result
 flxs, fpts, signals = spectrum.values, spectrum.freqs, spectrum.signals
-
-actline = exp.analyze()  # Select the two lines, then click Done.
+flux_analyzer = FluxDepAnalyzer()
+actline = flux_analyzer.start(flux_run)  # Select the two lines, then click Done.
 ```
 
 ```python
-selection = exp.analysis
+selection = flux_analyzer.analysis
 if selection is None:
     raise RuntimeError("Select the two flux lines and click Done first")
 mA_c, mA_e = selection.result.flux_half, selection.result.flux_int
@@ -86,15 +87,12 @@ period = selection.result.flux_period
 filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
 )
-# signals, fpts, _ = load_data(filepath)
-# fpts /= 1e6
-
-exp = ze.twotone.dispersive.DispersiveExp()
-fpts, signals = exp.load(filepath)
-
-chi, kappa, fig = exp.analyze()
-plt.show(fig)
-plt.close(fig)
+exp = NotebookAdapter(ze.twotone.dispersive.DispersiveExp())
+dispersive_run = exp.load(Path(filepath))
+fpts, signals = dispersive_run.result.freqs, dispersive_run.result.signals
+dispersive_analysis = exp.analyze(DispersiveAnalyzeOptions(), source=dispersive_run)
+chi, kappa = dispersive_analysis.result.chi, dispersive_analysis.result.avg_fwhm
+fig = dispersive_analysis.figures["fit"]
 ```
 
 ```python
@@ -102,13 +100,14 @@ filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
 )
 
-exp = ze.twotone.ac_stark.AcStarkExp()
-pdrs, fpts, signals = exp.load(filepath)
-
-ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.04)
-
-plt.show(fig)
-plt.close(fig)
+exp = NotebookAdapter(ze.twotone.ac_stark.AcStarkExp())
+ac_stark_run = exp.load(Path(filepath))
+pdrs, fpts, signals = ac_stark_run.result.gains, ac_stark_run.result.freqs, ac_stark_run.result.signals
+ac_stark_analysis = exp.analyze(
+    AcStarkAnalyzeOptions(chi=chi, kappa=kappa, cutoff=0.04), source=ac_stark_run
+)
+ac_coeff = ac_stark_analysis.result.ac_coeff
+fig = ac_stark_analysis.figures["fit"]
 ```
 
 ```python
@@ -124,8 +123,8 @@ ac_coeff = 1e3
 fig = go.Figure()
 
 for filepath in filepaths:
-    signals, As, pdrs = load_data(filepath, return_cfg=False)
-    assert pdrs is not None
+    mist_run = ze.mist.flux_dep.FluxDepExp().load(Path(filepath))
+    signals, As, pdrs = mist_run.result.signals, mist_run.result.values, mist_run.result.gains
 
     flxs = mA2flx(As, mA_c, period)
     photons = ac_coeff * pdrs**2
@@ -196,8 +195,8 @@ fig.update_layout(height=600, margin=dict(t=10, b=20, l=20))
 from zcu_tools.experiment.v2.mist.flux_dep import mist_signal2real
 
 for filepath in filepaths:
-    signals, As, pdrs = load_data(filepath, return_cfg=False)
-    assert pdrs is not None
+    mist_run = ze.mist.flux_dep.FluxDepExp().load(Path(filepath))
+    signals, As, pdrs = mist_run.result.signals, mist_run.result.values, mist_run.result.gains
 
     flxs = mA2flx(As, mA_c, period)
     photons = ac_coeff * pdrs**2

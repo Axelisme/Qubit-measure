@@ -5,6 +5,8 @@ import os
 %autoreload 2
 from zcu_tools.notebook.utils import gc_collect
 import zcu_tools.experiment.v2 as ze
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
 from zcu_tools.resources.context import ModuleLibrary, MetaDict, ContextManager
 from zcu_tools.datafile import create_datafolder
 import zcu_tools.program.v2.base as zp2b
@@ -38,17 +40,19 @@ soccfg = QickConfig(soc.get_cfg())
 ```
 
 ```python
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice
 
+device_manager = DeviceManager()
 fake_device = FakeDevice()
-GlobalDeviceManager.register_device("fake_device", fake_device)
+device_manager.register_device("fake_device", fake_device)
 
 fake_device.set_value(1.0)
 ```
 
 ```python
 ml, md = em.use_flux(label="20260411", readonly=True)
+env = CfgEnv(md=md, ml=ml, device_manager=device_manager)
 ml, md
 ```
 
@@ -68,13 +72,13 @@ exp_cfg = {
     },
     "relax_delay": 10.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.AllXYCfg, reps=100, rounds=10)
+cfg = make_cfg(exp_cfg, ze.twotone.AllXYCfg, env, overrides={"reps": 100, "rounds": 10})
 print(cfg)
 
-allxy_exp = ze.twotone.AllXY_Exp()
+allxy_exp = NotebookAdapter(ze.twotone.AllXY_Exp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
 with open("allxy-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
-        _ = allxy_exp.run(soc, soccfg, cfg)
+        allxy_run = allxy_exp.run(cfg)
 ```
 
 ```python
@@ -98,17 +102,16 @@ exp_cfg = {
     # "relax_delay": 30.0,  # us
     "relax_delay": 0.05 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.CPMG_Cfg, reps=100, rounds=10)
+cfg = make_cfg(
+    exp_cfg, ze.twotone.time_domain.CPMG_Cfg, env,
+    overrides={"reps": 100, "rounds": 10, "detune_ratio": 0.1, "earlystop_snr": 10.0},
+)
 print(cfg)
 
-detune_ratio = 0.1
-
-cpmg_exp = ze.twotone.time_domain.CPMG_Exp()
+cpmg_exp = NotebookAdapter(ze.twotone.time_domain.CPMG_Exp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
 with open("cpmg-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
-        _ = cpmg_exp.run(
-            soc, soccfg, cfg, detune_ratio=detune_ratio, earlystop_snr=10.0
-        )
+        cpmg_run = cpmg_exp.run(cfg)
 ```
 
 ```python
@@ -131,11 +134,11 @@ exp_cfg = {
     "n_seeds": 5,
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.RBCfg, reps=100, rounds=1)
+cfg = make_cfg(exp_cfg, ze.twotone.RBCfg, env, overrides={"reps": 100, "rounds": 1})
 print(cfg)
 
-rb_exp = ze.twotone.RB_Exp()
+rb_exp = NotebookAdapter(ze.twotone.RB_Exp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
 with open("rb-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
-        _ = rb_exp.run(soc, soccfg, cfg)
+        rb_run = rb_exp.run(cfg)
 ```
