@@ -11,7 +11,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 def _tab_snapshot(ctx: MeasureToolContext, tab: str) -> dict[str, Any]:
-    tabs = ctx.session.read_internal("tab.snapshot", {"tab_id": tab})["tabs"]
+    tabs = ctx.gui.read_internal("tab.snapshot", {"tab_id": tab})["tabs"]
     if len(tabs) != 1 or tabs[0].get("tab_id") != tab:
         raise GuiRpcError(f"unknown tab {tab!r}", reason="unknown_tab")
     return tabs[0]
@@ -40,12 +40,12 @@ def experiments(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str,
     prefix = arguments.get("prefix", "")
     if not isinstance(prefix, str):
         raise ValueError("prefix must be a string")
-    names = ctx.session.read_internal("adapter.list", {})["adapters"]
+    names = ctx.gui.read_internal("adapter.list", {})["adapters"]
     result = []
     for name in names:
         if not name.startswith(prefix):
             continue
-        current = ctx.session.read_internal("adapter.guide", {"adapter_name": name})[
+        current = ctx.gui.read_internal("adapter.guide", {"adapter_name": name})[
             "guide"
         ]
         behavior = current["behavior"].strip()
@@ -58,7 +58,7 @@ def experiments(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str,
 
 def guide(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Return the named live GUI adapter's guide."""
-    return ctx.session.read_internal(
+    return ctx.gui.read_internal(
         "adapter.guide", {"adapter_name": arguments["experiment"]}
     )["guide"]
 
@@ -76,7 +76,7 @@ def tab_open(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
             "experiment": experiment,
             "cfg_backfill": loaded["cfg_backfill"],
         }
-    previous_focus = ctx.session.read_internal("tab.list_all", {})["active_tab_id"]
+    previous_focus = ctx.gui.read_internal("tab.list_all", {})["active_tab_id"]
     created = ctx.send_gui_rpc("tab.new", {"adapter_name": experiment})
     tab = created["tab_id"]
     try:
@@ -146,10 +146,10 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
             "source_file": snap.get("result_source_path"),
         }
     if "cfg" in include:
-        result["cfg"] = ctx.session.read_internal("tab.get_cfg", {"tab_id": tab})
+        result["cfg"] = ctx.gui.read_internal("tab.get_cfg", {"tab_id": tab})
     if "analyze_params" in include:
-        primary = ctx.session.read_internal("tab.get_analyze_params", {"tab_id": tab})
-        post = ctx.session.read_internal("tab.get_post_analyze_params", {"tab_id": tab})
+        primary = ctx.gui.read_internal("tab.get_analyze_params", {"tab_id": tab})
+        post = ctx.gui.read_internal("tab.get_post_analyze_params", {"tab_id": tab})
         result["analyze_params"] = {
             "primary": {
                 "definitions": primary["definitions"],
@@ -165,7 +165,7 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
         ("post", "tab.get_post_analyze_result", "post_analysis"),
     ):
         if key in include:
-            summary = ctx.session.read_internal(method, {"tab_id": tab})["summary"]
+            summary = ctx.gui.read_internal(method, {"tab_id": tab})["summary"]
             result[key] = (
                 {"reason": "no_result"}
                 if summary is None
@@ -190,6 +190,7 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
 
 def tab_live(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read live run progress/figure without changing the focused tab."""
+    ctx = ctx.bound()
     tab = arguments["tab"]
     snap = _tab_snapshot(ctx, tab)
     has_result = bool(snap["interaction"]["has_run_result"])
@@ -200,11 +201,11 @@ def tab_live(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
     eta: float | None = None
     elapsed: float | None = None
     if running:
-        operations = ctx.session.read_internal("operation.active", {})["operations"]
+        operations = ctx.gui.read_internal("operation.active", {})["operations"]
         for operation in operations:
             if operation.get("tab") == tab and operation.get("kind") == "run":
-                handle = ctx.session.expose_operation(operation["op"])
-                update = ctx.session.read_internal(
+                handle = ctx.gui.expose_operation(operation["op"])
+                update = ctx.gui.read_internal(
                     "operation.progress", {}, operation_handle=handle
                 )
                 bars = update["bars"]

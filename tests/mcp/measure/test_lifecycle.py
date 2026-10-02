@@ -585,7 +585,14 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
     client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
     first = client.transport
-    first.replies["rpc.catalog"] = {"ok": True, "result": {"methods": CATALOG}}
+    first.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {
+            "methods": CATALOG
+            + [{**CATALOG[0], "method": "test.start", "operation_key": "tab:old"}]
+        },
+    }
+    first.replies["test.start"] = {"ok": True, "result": {"operation_id": 43}}
     other = type(first)(overview_rpc)
     other.replies["rpc.catalog"] = {
         "ok": True,
@@ -605,7 +612,8 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
 
     monkeypatch.setattr(client.context.bridge, "connect", connect)
     client.call("connect", {"port": 9911})
-    client.context.session.operation_handles["tab:old"] = 43
+    handle = client.call("rpc_call", {"method": "test.start"})["handle"]
+    assert client.context.session.operation_handles == {"tab:old": handle}
     client.call("connect", {"port": 9912})
     assert ports == [9911, 9912]
     assert not client.context.session.operation_handles

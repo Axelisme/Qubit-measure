@@ -24,10 +24,10 @@ def devices(
                 "type": item["type_name"],
                 "connected": item["status"] in ("connected", "setting_up"),
             }
-            for item in ctx.session.read_internal("device.list", {})["devices"]
+            for item in ctx.gui.read_internal("device.list", {})["devices"]
         ]
 
-    snapshot = ctx.session.read_internal("device.snapshot", {"name": name})["snapshot"]
+    snapshot = ctx.gui.read_internal("device.snapshot", {"name": name})["snapshot"]
     status = snapshot["status"]
     connected = status in ("connected", "setting_up")
     return {
@@ -47,7 +47,7 @@ def devices(
 
 
 def _live_fields(ctx: MeasureToolContext, name: str) -> list[dict[str, Any]]:
-    return ctx.session.read_internal("device.setup_spec", {"name": name})["fields"]
+    return ctx.gui.read_internal("device.setup_spec", {"name": name})["fields"]
 
 
 def _check_terminal(op: int, outcome: dict[str, Any]) -> bool:

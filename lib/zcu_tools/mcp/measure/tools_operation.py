@@ -14,7 +14,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read current GUI orientation and every live GUI-owned operation."""
     del arguments
-    session = ctx.session
+    session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
     has_soc = bool(session.read_internal("state.has_soc", {})["value"])
@@ -84,6 +84,7 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
         or not 0 <= timeout <= 300
     ):
         raise ValueError("timeout must be between 0 and 300 seconds")
+    ctx = ctx.bound()
     start = time.monotonic()
     reply = ctx.send_gui_rpc(
         "operation.await",
@@ -104,7 +105,7 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     result["status"] = "running"
     if "feedback" in reply:
         result["feedback"] = reply["feedback"]
-    progress = ctx.session.read_internal("operation.progress", {}, operation_handle=op)
+    progress = ctx.gui.read_internal("operation.progress", {}, operation_handle=op)
     if progress["active"]:
         bars = progress["bars"]
         result["progress"] = bars
@@ -117,7 +118,8 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
 def cancel(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Ask the GUI's domain owner to stop, then await a bounded terminal."""
     op = _operation_id(arguments)
-    response = ctx.session.read_internal("operation.cancel", {}, operation_handle=op)
+    ctx = ctx.bound()
+    response = ctx.gui.read_internal("operation.cancel", {}, operation_handle=op)
     if response["status"] != "cancelling":
         return {"status": response["status"]}
     outcome = wait(ctx, {"op": op, "timeout": 0.25})

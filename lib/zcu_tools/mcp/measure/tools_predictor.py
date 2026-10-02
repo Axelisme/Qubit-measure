@@ -27,7 +27,7 @@ def predictor_info(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
     del arguments
-    info = ctx.session.read_internal("predictor.info", {})
+    info = ctx.gui.read_internal("predictor.info", {})
     if not info["loaded"]:
         return {"loaded": False}
     return {

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02, analysis image delivery
+**Last updated:** 2026-10-02, connection-bound calls
 
 # `zcu_tools/mcp/measure/`
 
@@ -9,6 +9,7 @@
 - `assembly.py` 建立固定手寫工具表。01／02 提供 `connect`、`status`、`wait`、`cancel` 與三個 `rpc_*`；05 增加 `experiments`、`guide`、`tab_open`、`tab_get`、`tab_live`、`screenshot`；04 的 predictor 工具經 GUI 同一 `PredictorService` 讀、載、預測與單點 bias 校正；device 四工具沿 GUI `DeviceService` 驗證欄位與讀取現況，使用 02 的 opaque operation handle 等待、取消或逾時後恢復，不另存一份操作結果。其餘 domain tools 依各自 ticket 接入；`rpc_call` 可呼叫 catalog 中所有公開 method，包括標為 `tool` 的 method。Tool names 只提示可用的高層工具，不形成另一種 mode 或權限。`project.info` 提供已套用 project 的身份與實際目錄；`context.labels` 提供全部 labels。`tab_get` 的 artifacts 直接投影 GUI State 快照，含 status、default_path、last_saved_path 與 is_saveable。MCP 只轉換 artifact key 與 data/image kind，不自行推導 dirty 或掃描磁碟。cfg完整投影包含型別、選項、鎖定與cached值。
 - `tab_save` 送出一次 GUI-owned batch operation，不在 MCP 迴圈存各 artifact。GUI 在啟動存檔前切到目標 tab 的 Data pane；讀取及非同步完成不切頁。明確 paths/comment 更新共同草稿，省略則沿用。短等完成才回 saved 實際路徑；未完成回 op，失敗保留 operation 診斷。長存檔和部分成功從 `tab_get` 的 last_saved_path 查，不另存 operation payload。Agent 須先明確讀 summary/artifacts，工具不預讀或重送 stale mutation。
 - `session.py` 擁有單一 MCP session 的 catalog、bridge 與 opaque integer operation handles。明確重連或非預期 EOF 後清 catalog/舊 handle 對應；下一個 GUI incarnation 可重用 wire operation ID，但不重用此 MCP session 曾向 agent 外露的 handle。GUI-origin operation 由 `status` 收錄，與 agent-started operation 使用同一映射；wait/cancel/progress 在每次 wire 操作前確認連線，再把 opaque handle 解析成該 GUI 世代的 ID。送出前若斷線即失敗，不用舊 ID 向重啟後的 GUI 重送。這不是第二個 operation outcome store。
+- `session.bind()` 回傳固定 GUI generation 的 `GuiConnection`。RPC、catalog 與 handle 對應由同一把鎖保護；`status`、`wait`、`cancel`、`tab_live` 和 `rpc_call` 的多步流程保持同一 binding。No-op connect 不失效，真正重連或斷線後的下一步明示 `connection_lost`，不自動接到新 GUI。已收到的同代回覆仍是已知結果，不因隨後 socket 關閉而變成未知。Catalog 與 handle 對外提供快照，不暴露內部可寫 alias。這只同步 session 呼叫，不提供並行 stdio 或背景 worker 的關閉保證。
 - GUI owner bump 資源版本，remote adapter 保存每連線的 seen。完整讀取成功才記錄宣告的資源；部分讀取、失敗、逾時與回覆編碼失敗不建立觀察。未看過的 key 即使版本 0 仍拒絕。自寫只推進先前 seen 等於寫入前版本的資源；未看過的連帶 cfg 變更不加入 seen。MCP 不保存版本、不送 expected_versions、不解析寫入收據。stale、斷線或 timeout 都不自動重送。
 - `tab_get` summary/artifacts 與 `tab_live` 保留完整 `operation_state`，含 result/analysis revisions、availability 及有效 paths。cfg-only 讀取不暗中讀 snapshot；原始 result 陣列不是操作狀態的必要內容。
 - `tab_open(from_file)` 只送一次 GUI `tab.open_file`，不隱藏預讀。Agent 必須先讀 context。GUI 負責建立、載入、失敗清理與聚焦；成功另回 cfg_backfill，not_applied 保留結果。新 tab 只建立存在 baseline，後续寫入仍需明確讀取對應資源。

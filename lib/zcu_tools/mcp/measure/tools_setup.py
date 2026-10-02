@@ -23,7 +23,7 @@ def project(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
         }
         result = ctx.send_gui_rpc("project.apply", params)
     else:
-        result = ctx.session.read_internal("project.info", {})
+        result = ctx.gui.read_internal("project.info", {})
     return {
         "chip": result["chip_name"],
         "qubit": result["qub_name"],
@@ -36,8 +36,8 @@ def project(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
 def contexts(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """List context labels and the current selection."""
     del arguments
-    labels = ctx.session.read_internal("context.labels", {})["labels"]
-    active = ctx.session.read_internal("context.active", {})["label"]
+    labels = ctx.gui.read_internal("context.labels", {})["labels"]
+    active = ctx.gui.read_internal("context.active", {})["label"]
     return {"active": active, "labels": labels}
 
 
@@ -65,11 +65,11 @@ def context_create(
 def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read selected values or the GUI's safe index of MetaDict values."""
     if "keys" not in arguments:
-        result = ctx.session.read_internal("context.md_get", {"summaries": True})
+        result = ctx.gui.read_internal("context.md_get", {"summaries": True})
         return {"values": result["values"]}
     return {
         "values": {
-            key: ctx.session.read_internal("context.md_get_attr", {"key": key})["value"]
+            key: ctx.gui.read_internal("context.md_get_attr", {"key": key})["value"]
             for key in arguments["keys"]
         }
     }
@@ -77,7 +77,7 @@ def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
 
 def soc_info(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read the GUI's connection and hardware projection."""
-    connected = bool(ctx.session.read_internal("state.has_soc", {})["value"])
+    connected = bool(ctx.gui.read_internal("state.has_soc", {})["value"])
     if not connected:
         return {
             "connected": False,
@@ -86,7 +86,7 @@ def soc_info(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
             "description": None,
             "is_mock": False,
         }
-    info = ctx.session.read_internal(
+    info = ctx.gui.read_internal(
         "soc.info", {"include_cfg": arguments.get("include_cfg", False)}
     )
     return {"connected": True, **info}

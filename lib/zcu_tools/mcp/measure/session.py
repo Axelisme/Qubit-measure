@@ -5,8 +5,12 @@ from __future__ import annotations
 import math
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
+from types import MappingProxyType
 from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.bridge import (
@@ -106,6 +110,59 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
 class MeasureMcpSession:
     """One MCP session; bridge transport remains independent of method policy."""
 
+    @dataclass(frozen=True)
+    class GuiConnection:
+        """A captured GUI incarnation; calls serialize and never reconnect.
+
+        Obtain this capability with session.bind(), then share it across the steps
+        of one operation. A changed or disconnected GUI expires the capability.
+        """
+
+        _session: MeasureMcpSession
+        _generation: int
+
+        @property
+        def catalog(self) -> Mapping[str, CatalogEntry]:
+            with self._session._rpc_lock:
+                self._session._require_connection(self._generation)
+                return self._session.catalog
+
+        def read_internal(
+            self,
+            method: str,
+            params: dict[str, Any],
+            *,
+            operation_handle: int | None = None,
+        ) -> dict[str, Any]:
+            """Read orientation or control on this GUI only."""
+            with self._session._rpc_lock:
+                return self._session._read_internal(
+                    self._generation, method, params, operation_handle=operation_handle
+                )
+
+        def send_gui_rpc(
+            self,
+            method: str,
+            params: dict[str, Any],
+            timeout_seconds: float | None = None,
+            *,
+            operation_handle: int | None = None,
+        ) -> dict[str, Any]:
+            """Send once using this incarnation's live catalog and handle mapping."""
+            with self._session._rpc_lock:
+                return self._session._send_gui_rpc(
+                    self._generation,
+                    method,
+                    params,
+                    timeout_seconds,
+                    operation_handle=operation_handle,
+                )
+
+        def expose_operation(self, gui_id: object) -> int:
+            with self._session._rpc_lock:
+                self._session._require_connection(self._generation)
+                return self._session._expose_operation(gui_id)
+
     def __init__(
         self,
         config: MCPBridgeConfig,
@@ -115,6 +172,8 @@ class MeasureMcpSession:
         port_is_open: PortIsOpenFn,
     ) -> None:
         self._config = config
+        self._rpc_lock = RLock()
+        self._generation = 0
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
         self._port_is_open = port_is_open
@@ -132,14 +191,18 @@ class MeasureMcpSession:
 
     def new_png_path(self) -> Path:
         """Reserve a fresh session-owned path; the GUI writes the image."""
-        if self._png_directory is None:
-            self._png_directory = tempfile.TemporaryDirectory(prefix="measure-mcp-png-")
-        return Path(self._png_directory.name) / f"{uuid.uuid4().hex}.png"
+        with self._rpc_lock:
+            if self._png_directory is None:
+                self._png_directory = tempfile.TemporaryDirectory(
+                    prefix="measure-mcp-png-"
+                )
+            return Path(self._png_directory.name) / f"{uuid.uuid4().hex}.png"
 
     def cleanup_pngs(self) -> None:
-        if self._png_directory is not None:
-            self._png_directory.cleanup()
-            self._png_directory = None
+        with self._rpc_lock:
+            if self._png_directory is not None:
+                self._png_directory.cleanup()
+                self._png_directory = None
 
     @property
     def bridge(self) -> McpBridge:
@@ -149,19 +212,42 @@ class MeasureMcpSession:
 
     @property
     def catalog(self) -> Mapping[str, CatalogEntry]:
-        """Validated live GUI entries, refreshed for each new connection."""
-        return self._catalog
+        """A detached snapshot; nested schema and tool lists are not live aliases."""
+        with self._rpc_lock:
+            return MappingProxyType(deepcopy(self._catalog))
 
     @property
-    def operation_handles(self) -> MutableMapping[str, int]:
-        return self._operation_handles
+    def operation_handles(self) -> Mapping[str, int]:
+        with self._rpc_lock:
+            return MappingProxyType(dict(self._operation_handles))
 
     def attach_bridge(self, bridge: McpBridge) -> None:
-        if self._bridge is not None and self._bridge is not bridge:
-            raise RuntimeError("MeasureMcpSession bridge is already attached")
-        self._bridge = bridge
+        with self._rpc_lock:
+            if self._bridge is not None and self._bridge is not bridge:
+                raise RuntimeError("MeasureMcpSession bridge is already attached")
+            self._bridge = bridge
+
+    def bind(self) -> GuiConnection:
+        """Ensure once and capture the current GUI for a multi-step operation."""
+        with self._rpc_lock:
+            self.ensure_connected()
+            return GuiConnection(self, self._generation)
+
+    def _require_generation(self, generation: int) -> None:
+        if generation != self._generation:
+            raise GuiRpcError(
+                "GUI connection changed; binding expired", reason="connection_lost"
+            )
+
+    def _require_connection(self, generation: int) -> None:
+        self._require_generation(generation)
+        if not self._catalog or not self.bridge.is_connected:
+            raise GuiRpcError(
+                "GUI is not connected; binding expired", reason="connection_lost"
+            )
 
     def _clear_connection(self) -> None:
+        self._generation += 1
         self._catalog = {}
         self._operation_handles.clear()
         self._gui_operations.clear()
@@ -224,6 +310,15 @@ class MeasureMcpSession:
             raise
 
     def connect_to_gui(
+        self, *, port: int | None, launch: str, clean: bool, token: str | None = None
+    ) -> dict[str, Any]:
+        """Serialize attach and handshake with all calls on the current GUI."""
+        with self._rpc_lock:
+            return self._connect_to_gui(
+                port=port, launch=launch, clean=clean, token=token
+            )
+
+    def _connect_to_gui(
         self, *, port: int | None, launch: str, clean: bool, token: str | None = None
     ) -> dict[str, Any]:
         """Attach or launch once; incompatible GUI contracts fail before mutations.
@@ -296,6 +391,10 @@ class MeasureMcpSession:
 
     def ensure_connected(self) -> None:
         """A lazy attach always reloads the catalog after GUI restart."""
+        with self._rpc_lock:
+            self._ensure_connected()
+
+    def _ensure_connected(self) -> None:
         if self.bridge.is_connected and self._catalog:
             return
         if self.bridge.is_connected:
@@ -318,15 +417,23 @@ class MeasureMcpSession:
         *,
         operation_handle: int | None = None,
     ) -> dict[str, Any]:
-        """Read a known GUI orientation method without exporting it to rpc_call.
+        """A single orientation/control call, lazily attaching when needed."""
+        return self.bind().read_internal(
+            method, params, operation_handle=operation_handle
+        )
 
-        The caller names shipped GUI methods, including operation control. No MCP
-        method or guard registry is maintained for these GUI-owned calls.
-        """
-        self.ensure_connected()
+    def _read_internal(
+        self,
+        generation: int,
+        method: str,
+        params: dict[str, Any],
+        *,
+        operation_handle: int | None = None,
+    ) -> dict[str, Any]:
+        self._require_connection(generation)
         if operation_handle is not None:
             params = self._params_for_operation(params, operation_handle)
-        reply = self.bridge.send_rpc_raw(method, params, 6.0)
+        reply = self._bound_rpc(generation, method, params, 6.0)
         if not reply.get("ok"):
             error = reply.get("error", {})
             raise GuiRpcError(
@@ -349,8 +456,21 @@ class MeasureMcpSession:
         *,
         operation_handle: int | None = None,
     ) -> dict[str, Any]:
-        """One GUI send; transport failure never retries an ambiguous mutation."""
-        self.ensure_connected()
+        """A single catalog call; never retry an ambiguous mutation."""
+        return self.bind().send_gui_rpc(
+            method, params, timeout_seconds, operation_handle=operation_handle
+        )
+
+    def _send_gui_rpc(
+        self,
+        generation: int,
+        method: str,
+        params: dict[str, Any],
+        timeout_seconds: float | None = None,
+        *,
+        operation_handle: int | None = None,
+    ) -> dict[str, Any]:
+        self._require_connection(generation)
         if operation_handle is not None:
             params = self._params_for_operation(params, operation_handle)
         entry = self._catalog.get(method)
@@ -359,7 +479,7 @@ class MeasureMcpSession:
         if timeout_seconds is None:
             timeout_seconds = entry["timeout_seconds"] + 1.0
         try:
-            resp = self.bridge.send_rpc_raw(method, params, timeout_seconds)
+            resp = self._bound_rpc(generation, method, params, timeout_seconds)
         except GuiTransportTimeoutError as exc:
             raise GuiRpcError(
                 f"GUI Transport Timeout: {exc}. Reconnect on the next call; review before retrying.",
@@ -391,8 +511,9 @@ class MeasureMcpSession:
             )
         pattern = entry["operation_key"]
         if pattern is not None and "operation_id" in result:
+            self._require_connection(generation)
             result = dict(result)
-            handle = self.expose_operation(result.pop("operation_id"))
+            handle = self._expose_operation(result.pop("operation_id"))
             key = pattern.format(
                 tab_id=params.get("tab_id", ""), name=params.get("name", "")
             )
@@ -401,6 +522,10 @@ class MeasureMcpSession:
         return result
 
     def expose_operation(self, gui_id: object) -> int:
+        """Expose a GUI ID after ensuring the current connection."""
+        return self.bind().expose_operation(gui_id)
+
+    def _expose_operation(self, gui_id: object) -> int:
         """Issue one stable integer handle for a GUI operation in this connection."""
         if isinstance(gui_id, bool) or not isinstance(gui_id, int) or gui_id <= 0:
             raise GuiRpcError("invalid GUI operation id", reason="incompatible_wire")
@@ -410,6 +535,27 @@ class MeasureMcpSession:
             self._next_operation_handle += 1
             self._gui_operations[gui_id] = handle
         return handle
+
+    def _bound_rpc(
+        self,
+        generation: int,
+        method: str,
+        params: dict[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        try:
+            reply = self.bridge.send_rpc_raw(method, params, timeout_seconds)
+        except GuiTransportTimeoutError:
+            # Preserve the ambiguous timeout classification; never replay.
+            raise
+        except RuntimeError:
+            # A disconnect may wake a pending RPC before its reply arrives.
+            self._require_connection(generation)
+            raise
+        # A received reply remains known even if this socket subsequently closes.
+        # A replacement GUI, however, must never supply this call's result.
+        self._require_generation(generation)
+        return reply
 
     def _params_for_operation(
         self, params: dict[str, Any], handle: int
@@ -423,12 +569,18 @@ class MeasureMcpSession:
         raise GuiRpcError("unknown or expired operation", reason="unknown_op")
 
     def operation_handle_for_key(self, key: str) -> int | None:
-        return self._operation_handles.get(key)
+        with self._rpc_lock:
+            return self._operation_handles.get(key)
 
     def debug_operations(self) -> dict[str, dict[str, dict[str, int]]]:
-        return {
-            "handles": {
-                key: {"operation_id": op_id}
-                for key, op_id in self._operation_handles.items()
+        with self._rpc_lock:
+            return {
+                "handles": {
+                    key: {"operation_id": op_id}
+                    for key, op_id in self._operation_handles.items()
+                }
             }
-        }
+
+
+# The capability is nested with its owner so session state stays private.
+GuiConnection = MeasureMcpSession.GuiConnection

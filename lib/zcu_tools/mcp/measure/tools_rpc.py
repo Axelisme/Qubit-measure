@@ -10,14 +10,14 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 def _entry(ctx: MeasureToolContext, name: object) -> CatalogEntry:
-    ctx.session.ensure_connected()
-    if not isinstance(name, str) or name not in ctx.session.catalog:
+    catalog = ctx.gui.catalog
+    if not isinstance(name, str) or name not in catalog:
         raise GuiRpcError(f"unknown GUI method {name!r}", reason="unknown_method")
-    return ctx.session.catalog[name]
+    return catalog[name]
 
 
 def rpc_list(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    ctx.session.ensure_connected()
+    catalog = ctx.gui.catalog
     domain = arguments.get("domain")
     if domain is not None and not isinstance(domain, str):
         raise ValueError("domain must be a string")
@@ -28,7 +28,7 @@ def rpc_list(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
                 "description": entry["description"].split(".", 1)[0],
                 "tool_names": entry["tool_names"],
             }
-            for entry in ctx.session.catalog.values()
+            for entry in catalog.values()
             if domain is None or entry["method"].split(".", 1)[0] == domain
         ]
     }
@@ -39,11 +39,12 @@ def rpc_describe(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
 
 
 def rpc_call(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    ctx = ctx.bound()
     entry = _entry(ctx, arguments.get("method"))
     params = arguments.get("params", {})
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    return ctx.session.send_gui_rpc(entry["method"], params)
+    return ctx.gui.send_gui_rpc(entry["method"], params)
 
 
 RPC_TOOLS: dict[str, dict[str, Any]] = {
