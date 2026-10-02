@@ -15,8 +15,12 @@ from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcp
 
 AnalysisStage = Literal["primary", "post"]
 ExecutionStatus = Literal["running", "interactive", "finished", "failed", "cancelled"]
-ExecutionPhase = Literal["operation", "result_read", "image_save", "figure_read", "terminal"]
-SaveStatus = Literal["not_started", "not_available", "saving", "saved", "incomplete", "unknown"]
+ExecutionPhase = Literal[
+    "operation", "result_read", "image_save", "figure_read", "terminal"
+]
+SaveStatus = Literal[
+    "not_started", "not_available", "saving", "saved", "incomplete", "unknown"
+]
 
 
 @dataclass(frozen=True)
@@ -67,7 +71,11 @@ def _analysis_result(
 ) -> tuple[AnalysisResult, list[str]]:
     state = reply.get("operation_state")
     params = reply.get("params")
-    if "summary" not in reply or not isinstance(params, dict) or not isinstance(state, dict):
+    if (
+        "summary" not in reply
+        or not isinstance(params, dict)
+        or not isinstance(state, dict)
+    ):
         raise GuiRpcError("invalid analysis result reply", reason="incompatible_wire")
     pane = state.get("analysis_state" if stage == "primary" else "post_analysis_state")
     names = pane.get("figure_names") if isinstance(pane, dict) else None
@@ -77,7 +85,9 @@ def _analysis_result(
         or len(names) != len(set(names))
     ):
         raise GuiRpcError("invalid analysis figure names", reason="incompatible_wire")
-    return AnalysisResult(deepcopy(reply["summary"]), deepcopy(params), deepcopy(state)), list(names)
+    return AnalysisResult(
+        deepcopy(reply["summary"]), deepcopy(params), deepcopy(state)
+    ), list(names)
 
 
 class AnalysisExecution:
@@ -108,11 +118,16 @@ class AnalysisExecution:
         """Wait locally for completion or an interactive handoff, never cancel."""
         with self._condition:
             self._condition.wait_for(
-                lambda: self._snapshot.status in ("interactive", "finished", "failed", "cancelled"),
+                lambda: (
+                    self._snapshot.status
+                    in ("interactive", "finished", "failed", "cancelled")
+                ),
                 timeout=timeout,
             )
             snapshot = deepcopy(self._snapshot)
-            return ToolReply(asdict(snapshot), self._images, is_error=snapshot.status == "failed")
+            return ToolReply(
+                asdict(snapshot), self._images, is_error=snapshot.status == "failed"
+            )
 
     def start(self) -> None:
         """Called under the registry lock, so close cannot miss an admitted worker."""
@@ -145,16 +160,27 @@ class AnalysisExecution:
             if self._closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
             self._snapshot = replace(
-                self._snapshot, phase=phase, unconfirmed_image=image,
-                save_status="saving" if image is not None else self._snapshot.save_status,
+                self._snapshot,
+                phase=phase,
+                unconfirmed_image=image,
+                save_status="saving"
+                if image is not None
+                else self._snapshot.save_status,
             )
 
     def _rpc(
-        self, phase: ExecutionPhase, method: str, params: dict[str, Any],
-        *, image: str | None = None, timeout: float | None = None,
+        self,
+        phase: ExecutionPhase,
+        method: str,
+        params: dict[str, Any],
+        *,
+        image: str | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         return self._connection.send_gui_rpc(
-            method, params, timeout_seconds=timeout,
+            method,
+            params,
+            timeout_seconds=timeout,
             operation_handle=self._snapshot.op,
             before_send=lambda: self._admit(phase, image),
         )
@@ -172,9 +198,14 @@ class AnalysisExecution:
                 if known_rejection:
                     unconfirmed = None
             self._snapshot = replace(
-                snapshot, status="failed", phase="terminal",
-                save_status=save_status, unconfirmed_image=unconfirmed,
-                error=ExecutionError(snapshot.phase, reason or "execution_failed", str(exc), code),
+                snapshot,
+                status="failed",
+                phase="terminal",
+                save_status=save_status,
+                unconfirmed_image=unconfirmed,
+                error=ExecutionError(
+                    snapshot.phase, reason or "execution_failed", str(exc), code
+                ),
             )
             self._condition.notify_all()
 
@@ -184,68 +215,102 @@ class AnalysisExecution:
             if not self._await_operation():
                 return
             self._complete_analysis()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker boundary must publish every failure
             self._fail(exc)
 
     def _await_operation(self) -> bool:
         while True:
             began = time.monotonic()
-            reply = self._rpc("operation", "operation.await", {"timeout": 0.25}, timeout=2.25)
+            reply = self._rpc(
+                "operation", "operation.await", {"timeout": 0.25}, timeout=2.25
+            )
             reason = reply.get("reason")
             if reason == "completed":
                 status = reply.get("status")
                 if status not in ("finished", "failed", "cancelled"):
-                    raise GuiRpcError("invalid operation outcome", reason="incompatible_wire")
+                    raise GuiRpcError(
+                        "invalid operation outcome", reason="incompatible_wire"
+                    )
                 self._publish(operation_outcome=deepcopy(reply))
                 if status == "failed":
-                    raise GuiRpcError(str(reply.get("error", "analysis failed")), reason="analysis_failed")
+                    raise GuiRpcError(
+                        str(reply.get("error", "analysis failed")),
+                        reason="analysis_failed",
+                    )
                 if status == "cancelled":
                     self._publish(status="cancelled", phase="terminal")
                     return False
                 self._publish(invalidated=deepcopy(self._invalidated))
                 return True
             if reason not in ("timeout", "user_feedback"):
-                raise GuiRpcError("invalid operation await reply", reason="incompatible_wire")
+                raise GuiRpcError(
+                    "invalid operation await reply", reason="incompatible_wire"
+                )
             # A GUI can answer immediately with user feedback. Pace observation
             # without holding the RPC lock, and let close wake the worker.
             with self._condition:
-                self._condition.wait_for(self._closed.is_set, max(0.0, 0.25 - (time.monotonic() - began)))
+                self._condition.wait_for(
+                    self._closed.is_set, max(0.0, 0.25 - (time.monotonic() - began))
+                )
 
     def _complete_analysis(self) -> None:
         snapshot = self.snapshot()
         pane = "analysis" if snapshot.stage == "primary" else "post_analysis"
-        method = "tab.get_analyze_result" if snapshot.stage == "primary" else "tab.get_post_analyze_result"
+        method = (
+            "tab.get_analyze_result"
+            if snapshot.stage == "primary"
+            else "tab.get_post_analyze_result"
+        )
         reply = self._rpc("result_read", method, {"tab_id": snapshot.tab})
         result, names = _analysis_result(reply, snapshot.stage)
-        self._publish(result=result, params=deepcopy(result.params), remaining_images=names)
+        self._publish(
+            result=result, params=deepcopy(result.params), remaining_images=names
+        )
         if not names:
-            self._publish(save_status="not_available", status="finished", phase="terminal")
+            self._publish(
+                save_status="not_available", status="finished", phase="terminal"
+            )
             return
         saved: list[SavedImage] = []
         for index, name in enumerate(names):
             reply = self._rpc(
-                "image_save", "tab.save_image",
-                {"tab_id": snapshot.tab, "subtab_id": pane, "figure_name": name, "image_path": None},
+                "image_save",
+                "tab.save_image",
+                {
+                    "tab_id": snapshot.tab,
+                    "subtab_id": pane,
+                    "figure_name": name,
+                    "image_path": None,
+                },
                 image=name,
             )
             path = reply.get("image_path")
             if not isinstance(path, str) or not path:
-                raise GuiRpcError("invalid saved image path", reason="incompatible_wire")
+                raise GuiRpcError(
+                    "invalid saved image path", reason="incompatible_wire"
+                )
             saved.append(SavedImage(name, path))
             self._publish(
-                saved_images=list(saved), remaining_images=names[index + 1:],
+                saved_images=list(saved),
+                remaining_images=names[index + 1 :],
                 unconfirmed_image=None,
             )
         self._publish(save_status="saved")
-        reply = self._rpc("figure_read", "tab.get_figure", {"tab_id": snapshot.tab, "subtab_id": pane})
+        reply = self._rpc(
+            "figure_read", "tab.get_figure", {"tab_id": snapshot.tab, "subtab_id": pane}
+        )
         encoded = reply.get("png_b64")
         if not isinstance(encoded, str):
-            raise GuiRpcError("invalid analysis preview reply", reason="incompatible_wire")
+            raise GuiRpcError(
+                "invalid analysis preview reply", reason="incompatible_wire"
+            )
         image = validated_png(base64.b64decode(encoded, validate=True))
         path = self._session.write_png(image.data)
         with self._condition:
             self._images = (image,)
-            self._snapshot = replace(self._snapshot, figure=str(path), status="finished", phase="terminal")
+            self._snapshot = replace(
+                self._snapshot, figure=str(path), status="finished", phase="terminal"
+            )
             self._condition.notify_all()
 
 
@@ -273,10 +338,15 @@ class AnalysisExecutions:
                 return self._by_op[op]
             execution = AnalysisExecution(
                 ExecutionSnapshot(
-                    execution=f"analysis-{self._next_id}", tab=tab, stage=stage,
-                    op=op, params=deepcopy(started["params"]),
+                    execution=f"analysis-{self._next_id}",
+                    tab=tab,
+                    stage=stage,
+                    op=op,
+                    params=deepcopy(started["params"]),
                 ),
-                connection, self._session, self._closed,
+                connection,
+                self._session,
+                self._closed,
                 deepcopy(started["invalidated_on_success"]),
             )
             self._next_id += 1

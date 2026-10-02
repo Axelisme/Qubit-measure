@@ -207,14 +207,18 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
             }
         if name == "tab.save_image":
             assert params == {
-                "tab_id": "t", "subtab_id": pane,
-                "figure_name": params["figure_name"], "image_path": None,
+                "tab_id": "t",
+                "subtab_id": pane,
+                "figure_name": params["figure_name"],
+                "image_path": None,
                 "operation_id": 71,
             }
             return {"image_path": f"/actual/{params['figure_name']}.png"}
         if name == "tab.get_figure":
             assert params == {
-                "tab_id": "t", "subtab_id": pane, "operation_id": 71,
+                "tab_id": "t",
+                "subtab_id": pane,
+                "operation_id": 71,
             }
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(name)
@@ -242,14 +246,18 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         [
             {"figure_name": "fit", "image_path": "/actual/fit.png"},
             {"figure_name": "residual", "image_path": "/actual/residual.png"},
-        ] if has_figure else []
+        ]
+        if has_figure
+        else []
     )
     assert result["remaining_images"] == []
     assert result["unconfirmed_image"] is None
     assert result["error"] is None
     _assert_figure(reply, present=has_figure)
     assert _methods(client) == [
-        method, "operation.await", result_method,
+        method,
+        "operation.await",
+        result_method,
         *(["tab.save_image", "tab.save_image", "tab.get_figure"] if has_figure else []),
     ]
 
@@ -395,16 +403,23 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
     def respond(name, params):
         if name == method:
             return {
-                "operation_id": 71, "interactive": False, "params": {},
+                "operation_id": 71,
+                "interactive": False,
+                "params": {},
                 "invalidated_on_success": [],
             }
         if name == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
             return {
-                "summary": {"frequency": 5.0}, "params": {},
+                "summary": {"frequency": 5.0},
+                "params": {},
                 "operation_state": {
-                    ("analysis_state" if stage == "primary" else "post_analysis_state"): {
+                    (
+                        "analysis_state"
+                        if stage == "primary"
+                        else "post_analysis_state"
+                    ): {
                         "figure_names": ["fit"],
                     }
                 },
@@ -426,8 +441,14 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
     assert "Invalid PNG image" in data["error"]["message"]
     assert data["error"]["phase"] == "figure_read"
     assert data["result"]["summary"] == {"frequency": 5.0}
-    assert data["saved_images"] == [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+    assert data["saved_images"] == [
+        {"figure_name": "fit", "image_path": "/actual/fit.png"}
+    ]
     assert data["save_status"] == "saved"
     assert _methods(client) == [
-        method, "operation.await", result_method, "tab.save_image", "tab.get_figure",
+        method,
+        "operation.await",
+        result_method,
+        "tab.save_image",
+        "tab.get_figure",
     ]

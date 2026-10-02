@@ -122,7 +122,14 @@ def test_status_received_discovery_reply_survives_eof(
         pytest.param(
             "tab_analyze",
             {"tab": "t"},
-            {"tab.analyze": {"operation_id": 7, "interactive": False, "params": {}, "invalidated_on_success": []}},
+            {
+                "tab.analyze": {
+                    "operation_id": 7,
+                    "interactive": False,
+                    "params": {},
+                    "invalidated_on_success": [],
+                }
+            },
             "tab.analyze",
             id="analysis-wait",
         ),
@@ -368,10 +375,12 @@ def test_assembled_multistep_tools_do_not_cross_connections(
             assert result["not_started"] == ["primary"]
     elif tool == "tab_analyze" and not replies["tab.analyze"]["interactive"]:
         result = client.call(tool, arguments)
-        assert result.is_error
-        assert result.data["status"] == "failed"
-        assert result.data["error"]["reason"] == "connection_lost"
-        assert result.data["op"] == 1
+        assert (
+            result.is_error,
+            result.data["status"],
+            result.data["error"]["reason"],
+            result.data["op"],
+        ) == (True, "failed", "connection_lost", 1)
         client.context.session.close()
     else:
         with pytest.raises(GuiRpcError) as error:
