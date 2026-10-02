@@ -1,6 +1,6 @@
-"""Typed node-knob CfgSchema: structure, defaults, equivalence, seam.
+"""Typed node-knob CfgSchema: structure, defaults, and equivalence.
 
-Three families of test:
+Two families of test:
 
 1. **Structure** — each node's ``make_default_schema`` declares exactly the user
    knobs (the typed node settings), and *no* derived/upstream field (predict_freq,
@@ -8,8 +8,6 @@ Three families of test:
 2. **Defaults** — default schemas lower through the same schema/helper paths as
    production. Tests assert invariants and derive expected values from production
    schemas/helpers instead of duplicating default tables.
-3. **Seam invariant** — only ``cfg/form.py`` may import
-   ``zcu_tools.gui.app.measure`` from inside the autofluxdep package.
 """
 
 from __future__ import annotations
@@ -2655,6 +2653,3 @@ def test_real_builders_restrict_generated_readout_to_pulse_shape():
         readout = modules.fields["readout"]
         assert isinstance(readout, ReferenceSpec), builder.name
         assert [spec.label for spec in readout.allowed] == ["Pulse Readout"]
-
-
-# --- 3. seam invariant: autoflux production has no measure-app imports ----------
