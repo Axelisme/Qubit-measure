@@ -321,7 +321,10 @@ def _call_tool(
             "id": rid,
             "result": {"isError": True, "content": content},
         }
-    return {"jsonrpc": "2.0", "id": rid, "result": {"content": content}}
+    result: dict[str, Any] = {"content": content}
+    if isinstance(res, ToolReply) and res.is_error:
+        result["isError"] = True
+    return {"jsonrpc": "2.0", "id": rid, "result": result}
 
 
 def _tool_error_text(name: str | None, exc: Exception) -> str:
