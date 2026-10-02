@@ -1,14 +1,14 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-01 — native terminal flux-pick builder
+**Last updated:** 2026-10-02 — native search diagnostic figures
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
-pyplot-managed Matplotlib `Figure`. It draws the observed and predicted frequencies,
+native Matplotlib `Figure` with an Agg canvas. It draws the observed and predicted frequencies,
 plus per-parameter distance scatter (including lower bounds for pruned entries).
-It does not call `plt.show()` or accept/save the result. Notebook and GUI adapters
-choose when to show, retain, or close the figure. GUI routing must already be active
-when it creates the figure; pyplot registers it with Gcf until the caller closes it.
+It does not register with pyplot, present, or accept/save the result. Notebook and
+GUI adapters choose when to show and retain it. GUI adopts the named figure into
+its explicit Plots owner; Notebook publishes the ordinary figure with display.
 
 `pick.make_flux_pick_figure(inputs, state)` returns a separate native Figure with
 an Agg canvas for an accepted device-axis selection. It reuses `TwoLinePicker`

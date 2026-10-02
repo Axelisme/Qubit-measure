@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from io import BytesIO
+
 import numpy as np
 import pytest
-from matplotlib.figure import Figure
 from qtpy.QtCore import QThread  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
@@ -54,7 +55,6 @@ def search_input(tmp_path, spectrum_hdf5):
 
 @pytest.fixture
 def completed_search(qapp, search_input, monkeypatch, failure):
-    import matplotlib.pyplot as plt
     from zcu_tools.gui.app.fluxdep.services import fit
     from zcu_tools.gui.app.fluxdep.ui import analyze_panel
 
@@ -63,6 +63,8 @@ def completed_search(qapp, search_input, monkeypatch, failure):
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
     calls: list[str] = []
     warnings: list[tuple[str, str]] = []
+    make_figure = analyze_panel.make_search_diagnostic_figure
+    present_figure = analyze_panel.QtPlotHost.present
 
     def search(*args):
         calls.append("search")
@@ -76,20 +78,22 @@ def completed_search(qapp, search_input, monkeypatch, failure):
         assert QThread.currentThread() == qapp.thread()
         assert actual is result
         assert ctrl.state.fit.params == result.params
-        assert [p.has_result for p in facts if p.has_result] == [True]
+        assert sum(p.has_result for p in facts) == calls.count("search")
         if failure == "builder":
             raise RuntimeError("diagnostic builder failed")
-        return Figure()
+        return make_figure(actual)
 
-    def show():
-        calls.append("show")
+    def present(host, figure):
+        calls.append("present")
+        assert QThread.currentThread() == qapp.thread()
         assert ctrl.state.fit.params == result.params
-        if failure == "show":
-            raise RuntimeError("diagnostic show failed")
+        if failure == "present":
+            raise RuntimeError("diagnostic present failed")
+        present_figure(host, figure)
 
     monkeypatch.setattr(fit, "search_database", search)
     monkeypatch.setattr(analyze_panel, "make_search_diagnostic_figure", build)
-    monkeypatch.setattr(plt, "show", show)
+    monkeypatch.setattr(analyze_panel.QtPlotHost, "present", present)
     monkeypatch.setattr(
         analyze_panel,
         "calculate_energy_vs_flux",
@@ -111,10 +115,11 @@ def completed_search(qapp, search_input, monkeypatch, failure):
         yield panel, ctrl, result, facts, calls, warnings, buttons
     finally:
         panel.quiesce()
+        panel.release_figures()
         panel.deleteLater()
 
 
-@pytest.mark.parametrize("failure", [None, "builder", "show", "search"])
+@pytest.mark.parametrize("failure", [None, "builder", "present", "search"])
 def test_search_button_commits_before_rendering(completed_search, failure):
     panel, ctrl, result, facts, calls, warnings, buttons = completed_search
     assert buttons["Search database"].isEnabled()
@@ -132,7 +137,7 @@ def test_search_button_commits_before_rendering(completed_search, failure):
         assert calls == (
             ["search", "builder"]
             if failure == "builder"
-            else ["search", "builder", "show"]
+            else ["search", "builder", "present"]
         )
         if failure:
             assert len(warnings) == 1
@@ -141,3 +146,44 @@ def test_search_button_commits_before_rendering(completed_search, failure):
             assert f"diagnostic {failure} failed" in warnings[0][1]
         else:
             assert warnings == []
+
+
+@pytest.mark.parametrize("failure", [None])
+def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
+    completed_search, monkeypatch
+):
+    import matplotlib.pyplot as plt
+    from zcu_tools.gui.app.fluxdep.services import fit
+
+    panel, ctrl, _result, _facts, _calls, _warnings, buttons = completed_search
+    retained = panel.figures
+    first = retained["diagnostic"]
+    before = BytesIO()
+    first.savefig(before, format="png")
+    unrelated = plt.figure()
+    try:
+        buttons["Search database"].click()
+        panel.quiesce()
+        second = panel.figures["diagnostic"]
+        assert second is not first
+        assert retained["diagnostic"] is first
+        assert plt.fignum_exists(unrelated.number)
+        after = BytesIO()
+        first.savefig(after, format="png")
+        assert before.getvalue() == after.getvalue()
+
+        def fail_search(*args):
+            raise RuntimeError("numeric search failed")
+
+        monkeypatch.setattr(fit, "search_database", fail_search)
+        buttons["Search database"].click()
+        panel.quiesce()
+        assert panel.figures["diagnostic"] is second
+        assert ctrl.state.fit.params is None
+        assert not buttons["Export params.json"].isEnabled()
+        panel.release_figures()
+        saved = BytesIO()
+        second.savefig(saved, format="png")
+        assert saved.getvalue().startswith(b"\x89PNG")
+    finally:
+        plt.close(unrelated)

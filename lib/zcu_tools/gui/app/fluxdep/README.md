@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-01. Search completion and diagnostic rendering
+**Last updated:** 2026-10-02. Explicit search figures and presentation lifetime
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -91,7 +91,7 @@ LoadService 用底層 `load_data`(datafile) + `format_rawdata`(analysis.spectrum
 所有 State 寫入只在 Qt 主執行緒（沿用 measure 的不變式）。worker（互動 widget 的
 背景計算）不直接寫 State，只 emit Qt signal → 主執行緒 slot 寫。
 
-### 兩種繪圖機制：互動 widget 自建 canvas / v2 診斷圖走 plot_host backend
+### 兩種繪圖機制：互動 widget 自建 canvas / v2 診斷圖使用 explicit host
 **互動 widget（定線/選點/結果預覽）自持 canvas**：widget 自持 `Figure` +
 `FigureCanvasQTAgg`，主執行緒 `mpl_connect` 接滑鼠 + 即時 redraw（圖上互動，與
 measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(base) 提供 canvas +
@@ -99,8 +99,8 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
 
 **v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：
 [search kernel](../../../analysis/fluxdep/README.md) 只算數值；
-[診斷圖 builder](../../../plotting/fluxdep/README.md) 使用 `plt.figure()`。Qt 在主執行緒記錄搜尋結果後，才呼叫 builder 與 `plt.show()`。診斷圖失敗另報 warning，結果與 export 仍可用。
-沿用 pyplot 路由內嵌。共用套件:
+[診斷圖 builder](../../../plotting/fluxdep/README.md) 回傳原生 Agg Figure。Qt 在主執行緒記錄搜尋結果後，才建圖、adopt `diagnostic` 並透過 Plots／QtPlotHost 呈現。Panel 持有明確的 owner scheduler 與 presentation 使用期；替換和關窗 release，舊原生圖仍可保存。診斷圖失敗另報 warning，結果與 export 仍可用。Notebook caller 以 IPython display 發布普通圖。
+Process runtime 的舊 backend 初始化仍待整體退場，search 不再使用其 routing。共用套件:
 - `plotting/backend.py`（client）：`module://zcu_tools.gui.plotting.backend`，攔 `plt.figure()` →
   attach 到當前 `FigureContainer`；`plt.show()` → activate（**未 attach 則 raise**，Fast-Fail 統一）；
   `GuiFigureCanvas.draw_idle` 吃跨線程。
@@ -114,7 +114,7 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   `scripts/run_fluxdep_gui.py`。
 - **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
   worker 經 `compute_search(pbar_factory=...)` 安裝進度通知。主執行緒的成功 callback 先記錄結果，
-  再於 `routing_scope(diag_container)` 內繪製診斷圖。
+  再透過該 panel 的 explicit host 呈現診斷圖。
 
 ### 編輯區階段驅動
 MainWindow 編輯區依 active 譜的 pipeline 階段 swap widget：未定線→LinePicker；
