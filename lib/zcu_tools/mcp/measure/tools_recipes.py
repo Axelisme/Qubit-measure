@@ -1,6 +1,7 @@
 """Bind explicitly registered Python recipes to the measure MCP tool table."""
 
 import logging
+import time
 from functools import partial
 from typing import Any
 
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 def run_recipe(
     tools: MeasureToolContext, definition: RecipeDefinition, arguments: dict[str, Any]
 ) -> ToolReply:
+    started = time.monotonic()
     context = RecipeContext(tools, definition.name)
     try:
         definition.run(context, arguments)
@@ -29,7 +31,11 @@ def run_recipe(
         )
         context.progress.status = "failed"
         context.progress.phase = "terminal"
-    return ToolReply(context.snapshot(), is_error=context.progress.status == "failed")
+    return ToolReply(
+        {**context.snapshot(), "elapsed_s": time.monotonic() - started},
+        context.images,
+        is_error=context.progress.status == "failed",
+    )
 
 
 def build_recipe_tools(context: MeasureToolContext) -> ToolTable:

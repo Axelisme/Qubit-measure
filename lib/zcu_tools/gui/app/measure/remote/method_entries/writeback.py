@@ -6,6 +6,7 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
+    optional_integer,
     optional_string,
     required_string,
 )
@@ -65,10 +66,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "role. A complex metadict proposed_value is carried as "
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
             "rpc_call on tab.writeback_set; the user's Edit dialog renders the same "
-            "model (WYSIWYG).",
+            "model (WYSIWYG). Optional operation_id requires that analysis result "
+            "before reading the draft; replaced results are rejected.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: analysis|post_analysis"),
+                optional_integer("operation_id"),
             ),
         ),
     ),

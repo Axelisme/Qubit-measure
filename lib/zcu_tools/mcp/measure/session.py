@@ -147,6 +147,7 @@ class MeasureMcpSession:
             timeout_seconds: float | None = None,
             *,
             operation_handle: int | None = None,
+            run_operation_handle: int | None = None,
             before_send: Callable[[], None] | None = None,
         ) -> dict[str, Any]:
             """Send once, admitting immediately before dispatch under the RPC lock.
@@ -154,6 +155,11 @@ class MeasureMcpSession:
             before_send may reject by raising. It must not send RPCs or block.
             """
             with self._session._rpc_lock:
+                self._session._require_connection(self._generation)
+                if run_operation_handle is not None:
+                    params = self._session._params_for_operation(
+                        params, run_operation_handle, field="run_operation_id"
+                    )
                 return self._session._send_gui_rpc(
                     self._generation,
                     method,
@@ -605,14 +611,14 @@ class MeasureMcpSession:
         return reply
 
     def _params_for_operation(
-        self, params: dict[str, Any], handle: int
+        self, params: dict[str, Any], handle: int, *, field: str = "operation_id"
     ) -> dict[str, Any]:
         """Resolve the handle on the selected GUI before sending, without reconnecting."""
-        if "operation_id" in params:
+        if field in params:
             raise ValueError("pass an operation handle, not a GUI operation id")
         for gui_id, exposed in self._gui_operations.items():
             if exposed == handle:
-                return {**params, "operation_id": gui_id}
+                return {**params, field: gui_id}
         raise GuiRpcError("unknown or expired operation", reason="unknown_op")
 
     def operation_handle_for_key(self, key: str) -> int | None:

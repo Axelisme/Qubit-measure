@@ -67,37 +67,18 @@ class LookbackGui:
         self.ran = False
         self.raw_saved = False
 
-    def __call__(self, method, params):
-        if method == "context.snapshot":
-            return {"label": "sample", "md": {}, "ml": {"modules": {}, "waveforms": {}}}
-        if method == "tab.new":
-            assert params == {"adapter_name": "lookback"}
-            return {"tab_id": "t"}
-        if method == "tab.get_cfg":
-            return deepcopy(self.publication)
-        if method == "tab.edit_cfg":
-            assert params["expected"] == self.publication["cfg_ref"]
-            for edit in params["edits"]:
-                node = self.publication["tree"]
-                for part in edit["path"]:
-                    node = node["children"][part]
-                if node["kind"] == "reference":
-                    node["ref"] = edit["value"].get("__ref") if edit["value"] else None
-                else:
-                    node.update(_scalar(edit["value"]))
-            revision = int(self.publication["cfg_ref"]["revision"]) + 1
-            self.publication["cfg_ref"]["revision"] = str(revision)
-            return deepcopy(self.publication)
-        if method == "soc.info":
-            assert params == {"include_cfg": True}
-            return {"connected": True, "cfg": {}}
-        if method == "device.list":
-            return {"devices": [{"name": "bias"}]}
-        if method == "device.snapshot":
-            assert params == {"name": "bias"}
-            return {"snapshot": {"name": "bias", "info": {"value": 0.0}}}
-        if method == "tab.snapshot":
-            return {
+    def _observations(self):
+        return {
+            "context.snapshot": {
+                "label": "sample",
+                "md": {},
+                "ml": {"modules": {}, "waveforms": {}},
+            },
+            "tab.new": {"tab_id": "t"},
+            "soc.info": {"connected": True, "cfg": {}},
+            "device.list": {"devices": [{"name": "bias"}]},
+            "device.snapshot": {"snapshot": {"name": "bias", "info": {"value": 0.0}}},
+            "tab.snapshot": {
                 "tabs": [
                     {
                         "tab_id": "t",
@@ -114,7 +95,37 @@ class LookbackGui:
                         },
                     }
                 ]
+            },
+        }
+
+    def _edit(self, params):
+        assert params["expected"] == self.publication["cfg_ref"]
+        for edit in params["edits"]:
+            node = self.publication["tree"]
+            for part in edit["path"]:
+                node = node["children"][part]
+            if node["kind"] == "reference":
+                node["ref"] = edit["value"].get("__ref") if edit["value"] else None
+            else:
+                node.update(_scalar(edit["value"]))
+        revision = int(self.publication["cfg_ref"]["revision"]) + 1
+        self.publication["cfg_ref"]["revision"] = str(revision)
+
+    def __call__(self, method, params):
+        observations = self._observations()
+        if method in observations:
+            expected = {
+                "tab.new": {"adapter_name": "lookback"},
+                "soc.info": {"include_cfg": True},
+                "device.snapshot": {"name": "bias"},
             }
+            if method in expected:
+                assert params == expected[method]
+            return deepcopy(observations[method])
+        if method in ("tab.get_cfg", "tab.edit_cfg"):
+            if method == "tab.edit_cfg":
+                self._edit(params)
+            return deepcopy(self.publication)
         if method == "tab.run_start":
             assert params == {"tab_id": "t", "expected": self.publication["cfg_ref"]}
             assert not self.ran
@@ -129,6 +140,9 @@ class LookbackGui:
             if params["operation_id"] == 82:
                 self.raw_saved = True
             return {"reason": "completed", "status": "finished"}
+        return self._analysis(method, params)
+
+    def _analysis(self, method, params):
         if method == "tab.analyze":
             assert self.raw_saved
             assert params == {"tab_id": "t", "updates": {}, "run_operation_id": 71}
