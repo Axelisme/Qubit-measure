@@ -685,6 +685,22 @@ def test_cancel_latches_intent_and_retains_original_terminal(
     assert _methods(client).count("operation.cancel") == 1
 
 
+def _admitted_save_terminal(client: MeasureClient, outcome: str) -> dict[str, Any]:
+    if outcome == "lost":
+        client.transport.close()
+        assert client.transport.on_closed is not None
+        client.transport.on_closed(EOFError("save reply lost"))
+        return {"ok": True, "result": {"image_path": "/unconfirmed/fit.png"}}
+    if outcome in _AMBIGUOUS_SAVE_ERRORS:
+        return {"ok": False, "error": _AMBIGUOUS_SAVE_ERRORS[outcome]}
+    if outcome == "rejected":
+        return {
+            "ok": False,
+            "error": {"code": "precondition_failed", "message": "disk rejected export"},
+        }
+    return {"ok": True, "result": {"image_path": "/actual/fit.png"}}
+
+
 @pytest.mark.parametrize("remaining", [False, True])
 @pytest.mark.parametrize(
     "save_outcome", ["saved", "rejected", "lost", *_AMBIGUOUS_SAVE_ERRORS]
@@ -728,22 +744,7 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         assert params["figure_name"] == "fit"
         saving.set()
         assert release.wait(10), "test did not release admitted save"
-        if save_outcome == "lost":
-            client.transport.close()
-            assert client.transport.on_closed is not None
-            client.transport.on_closed(EOFError("save reply lost"))
-            return {"ok": True, "result": {"image_path": "/unconfirmed/fit.png"}}
-        if save_outcome in _AMBIGUOUS_SAVE_ERRORS:
-            return {"ok": False, "error": _AMBIGUOUS_SAVE_ERRORS[save_outcome]}
-        if save_outcome == "rejected":
-            return {
-                "ok": False,
-                "error": {
-                    "code": "precondition_failed",
-                    "message": "disk rejected export",
-                },
-            }
-        return {"ok": True, "result": {"image_path": "/actual/fit.png"}}
+        return _admitted_save_terminal(client, save_outcome)
 
     client.transport.replies["tab.save_image"] = save
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -793,8 +794,7 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
     )
     if save_outcome != "saved":
         assert completed["error"]["phase"] == "image_save"
-    if save_outcome in _AMBIGUOUS_SAVE_ERRORS:
-        _assert_ambiguous_save_error(completed, save_outcome)
+    _assert_ambiguous_save_error(completed, save_outcome)
     assert _methods(client).count("tab.save_image") == 2
     assert "tab.get_figure" not in _methods(client)
 
@@ -1316,6 +1316,8 @@ def test_execution_query_observes_background_completion_without_reconnect(
 
 
 def _assert_ambiguous_save_error(data: dict[str, Any], failure: str) -> None:
+    if failure not in _AMBIGUOUS_SAVE_ERRORS:
+        return
     envelope = _AMBIGUOUS_SAVE_ERRORS[failure]
     assert data["error"]["code"] == envelope["code"]
     assert data["error"]["reason"] == envelope.get("reason", "gui_handler_timeout")
@@ -1424,8 +1426,7 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
         {"figure_name": name, "image_path": f"/actual/{name}.png"} for name in confirmed
     ]
     assert data["unconfirmed_image"] == unconfirmed
-    if failure in _AMBIGUOUS_SAVE_ERRORS:
-        _assert_ambiguous_save_error(data, failure)
+    _assert_ambiguous_save_error(data, failure)
     if failure == "result_rejected":
         assert data["result"] is None
         assert data["remaining_images"] is None
