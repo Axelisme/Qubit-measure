@@ -219,6 +219,7 @@ def test_start_analyze_passes_operation_plots_to_worker_adapter(qapp):
     assert bg.last_work is not None
     result = bg.last_work()
     adapter = state.get_tab("tab1").adapter
+    assert isinstance(adapter, MagicMock)
     adapter.analyze.assert_called_once()
     assert adapter.analyze.call_args.kwargs == {"plots": plots}
     assert result is adapter.analyze.return_value

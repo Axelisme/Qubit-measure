@@ -297,10 +297,9 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     plots = Plots(NonPresentingHost())
-    first, first_axes = plots.subplots("fit")
-    first_axes.plot([0, 1], [0, 1])
-    second, second_axes = plots.subplots("diagnostic")
-    second_axes.plot([0, 1], [1, 0])
+    for name, ys in (("fit", [0, 1]), ("diagnostic", [1, 0])):
+        _, axes = plots.subplots(name)
+        axes.plot([0, 1], ys)
     plots.finish()
     base = _snapshot("tab-1", has_run=True, has_analysis=True)
     assert base.analysis is not None and base.paths is not None
@@ -320,6 +319,7 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
             ),
         )
     )
+    assert snap.analysis is not None and snap.paths is not None
     ctrl.get_tab_snapshot.return_value = snap
     window = MainWindow(ctrl)
     try:

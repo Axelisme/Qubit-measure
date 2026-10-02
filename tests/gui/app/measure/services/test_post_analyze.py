@@ -206,6 +206,7 @@ def test_post_worker_receives_explicit_operation_plots(qapp):
     assert bg.last_work is not None
     result = bg.last_work()
     adapter = state.get_tab("tab1").adapter
+    assert isinstance(adapter, MagicMock)
     adapter.post_analyze.assert_called_once()
     assert adapter.post_analyze.call_args.kwargs == {"plots": plots}
     assert result is adapter.post_analyze.return_value
@@ -243,6 +244,7 @@ def test_on_post_analyze_finished_updates_state(qapp):
 
     tab = state.get_tab("tab1")
     assert tab.post_analysis.result is post_result
+    assert tab.post_analysis.plots is not None
     assert tab.post_analysis.plots is plots
     assert tab.post_analysis.plots["fit"] is figure
     assert tab.is_analyzing is False

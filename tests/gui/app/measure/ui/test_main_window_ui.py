@@ -965,9 +965,9 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
     tab.update_writeback_items.assert_not_called()
-    tab.show_analysis_figures.assert_called_once_with(
-        ctrl.get_tab_snapshot.return_value.analysis.figures
-    )
+    snapshot = ctrl.get_tab_snapshot.return_value
+    assert snapshot.analysis is not None
+    tab.show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
 
 
 def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_start(
@@ -1074,6 +1074,7 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
     )
 
     snapshot = ctrl.get_tab_snapshot.return_value
+    assert snapshot.analysis is not None and snapshot.post_analysis is not None
     tab.show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
     tab.show_post_analysis_figures.assert_called_once_with(
         snapshot.post_analysis.figures
@@ -1121,6 +1122,7 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, 
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     window._tab_widgets["tab-1"] = tab
+    assert snapshot.analysis is not None and snapshot.post_analysis is not None
     tab.show_analysis_figures(snapshot.analysis.figures)
     tab.show_post_analysis_figures(snapshot.post_analysis.figures)
 

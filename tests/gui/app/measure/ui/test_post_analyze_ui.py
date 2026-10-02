@@ -425,6 +425,7 @@ def test_take_figure_screenshot_captures_post_figure(qapp):
         analysis_figure=Figure(),
     )
     ctrl.get_tab_snapshot.return_value = snapshot
+    assert snapshot.post_analysis is not None
     tab_w.show_post_analysis_figures(snapshot.post_analysis.figures)
 
     png = window.take_figure_screenshot_for_subtab("tab-1", "post_analysis")

@@ -951,7 +951,7 @@ def test_analyze_params_cls_fallback_when_no_annotation():
         def get_analyze_params(self, result, ctx):
             return NoAnalyzeParams()
 
-        def analyze(self, req):
+        def analyze(self, req, *, plots: Plots):
             return NoAnalysisResult()
 
     # The overridden get_analyze_params has no type annotation → fallback

@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 
 
 class _MainWindowTabActions:
-    """Adapt the tab action port to MainWindow's existing private handlers."""
+    """Adapt the tab action port to MainWindow's commands."""
 
     def __init__(self, window: MainWindow) -> None:
         self._window = window
@@ -92,7 +92,7 @@ class _MainWindowTabActions:
         self._window.save_tab_data(tab_id)
 
     def save_image(self, tab_id: str, key: ArtifactKey) -> None:
-        self._window._on_save_image_clicked(tab_id, key)
+        self._window.save_tab_image(tab_id, key)
 
     def save_all(self, tab_id: str) -> None:
         self._window.save_tab_artifacts(tab_id)
@@ -860,9 +860,9 @@ class MainWindow(QMainWindow):
             lambda: self._ctrl.save_data(tab_id, path, comment=comment),
         )
 
-    def _on_save_image_clicked(self, tab_id: str, key: ArtifactKey) -> None:
-        logger.info("_on_save_image_clicked: tab_id=%r key=%r", tab_id, key)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_save_image_clicked")
+    def save_tab_image(self, tab_id: str, key: ArtifactKey) -> None:
+        logger.info("save_tab_image: tab_id=%r key=%r", tab_id, key)
+        tab_w = self._resolve_tab_widget(tab_id, "save_tab_image")
         if tab_w is None:
             return
         path = tab_w.get_image_path(key) or None
