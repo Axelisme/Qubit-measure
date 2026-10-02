@@ -541,6 +541,71 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         client.context.session.close()
 
 
+@pytest.mark.parametrize(
+    ("method_pending", "wire_op", "control"),
+    [
+        ("tab.run_start", 71, "cancel"),
+        ("tab.run_start", 71, "finish_early"),
+        ("tab.analyze", 93, "cancel"),
+    ],
+)
+def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
+    tmp_path, monkeypatch, method_pending, wire_op, control
+):
+    gui = LookbackGui()
+    pending = Event()
+    release = Event()
+    stopped = Event()
+
+    def respond(method, params):
+        if method == method_pending:
+            pending.set()
+            assert release.wait(2)
+        if method == "operation.cancel":
+            assert params == {"operation_id": wire_op}
+            stopped.set()
+            return {"status": "cancelling"}
+        if method == "operation.await" and params["operation_id"] == wire_op:
+            return (
+                {"reason": "completed", "status": "cancelled"}
+                if stopped.is_set()
+                else {"reason": "timeout"}
+            )
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert pending.wait(1)
+        execution = initial.data["execution"]
+        for _ in range(2):
+            reply = client.call(control, {"execution": execution})
+            assert reply.data[f"{control}_requested"]
+        assert not stopped.is_set()
+        release.set()
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        assert stopped.is_set()
+        assert terminal.data["status"] == (
+            "finished" if control == "finish_early" else "cancelled"
+        )
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count(method_pending) == 1
+        assert methods.count("operation.cancel") == 1
+        if method_pending == "tab.analyze":
+            assert terminal.data["analysis"]["cancel_requested"]
+            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert "tab.get_analyze_result" not in methods
+        elif control == "cancel":
+            assert "tab.save_data" not in methods
+        else:
+            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+    finally:
+        release.set()
+        stopped.set()
+        client.context.session.close()
+
+
 def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
     tmp_path, monkeypatch
 ):
