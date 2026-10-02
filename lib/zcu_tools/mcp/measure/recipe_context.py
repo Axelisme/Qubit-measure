@@ -335,6 +335,9 @@ class RecipeContext:
                     "gui_transport_timeout",
                     "connection_lost",
                     "message_too_large",
+                ) or (
+                    reason == "session_closed"
+                    and self.progress.raw_save.status == "saving"
                 )
                 self._publish(
                     raw_save=replace(
