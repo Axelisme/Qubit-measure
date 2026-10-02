@@ -382,6 +382,61 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
         client.context.session.close()
 
 
+@pytest.mark.parametrize(
+    ("partial_available", "cancel_after", "expected"),
+    [(True, False, "finished"), (False, False, "failed"), (True, True, "cancelled")],
+)
+def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
+    tmp_path, monkeypatch, partial_available, cancel_after, expected
+):
+    gui = LookbackGui()
+    release_run = Event()
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == 71:
+            return (
+                {"reason": "completed", "status": "cancelled"}
+                if release_run.is_set() else {"reason": "timeout"}
+            )
+        if method == "operation.cancel":
+            assert params == {"operation_id": 71}
+            return {"status": "cancelling"}
+        reply = gui(method, params)
+        if method == "tab.snapshot" and gui.ran:
+            reply["tabs"][0]["result_state"]["available"] = partial_available
+        return reply
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        execution = initial.data["execution"]
+        early = client.call("finish_early", {"op": initial.data["run_op"]})
+        assert early.data["finish_early_requested"]
+        assert not early.data["cancel_requested"]
+        client.call("finish_early", {"execution": execution})
+        if cancel_after:
+            client.call("cancel", {"execution": execution})
+        release_run.set()
+        result = client.call("wait", {"execution": execution, "timeout": 2})
+        assert result.data["status"] == expected, result.data
+        assert result.data["run_outcome"]["status"] == "cancelled"
+        if expected == "finished":
+            assert result.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert result.data["analysis"]["status"] == "finished"
+        elif expected == "failed":
+            assert result.data["error"]["reason"] == "run_result_unavailable"
+            assert result.data["raw_save"]["status"] == "not_started"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("operation.cancel") == 1
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == int(expected == "finished")
+        assert methods.count("tab.analyze") == int(expected == "finished")
+    finally:
+        release_run.set()
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,

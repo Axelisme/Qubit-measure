@@ -194,6 +194,13 @@ def cancel(
     return {"status": "cancelling"}
 
 
+def finish_early(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> ToolReply:
+    """Stop only a recipe's Run, keeping usable partial results for its pipeline."""
+    raise NotImplementedError("Recipe finish_early control is not implemented")
+
+
 def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
@@ -218,6 +225,21 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
                         "minimum": 0,
                         "maximum": 300,
                     },
+                },
+                "oneOf": [
+                    {"required": ["op"], "not": {"required": ["execution"]}},
+                    {"required": ["execution"], "not": {"required": ["op"]}},
+                ],
+            },
+        },
+        "finish_early": {
+            "handler": partial(finish_early, ctx),
+            "description": "Stop a recipe Run early and continue with usable partial data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "op": {"type": "integer"},
+                    "execution": {"type": "string", "minLength": 1},
                 },
                 "oneOf": [
                     {"required": ["op"], "not": {"required": ["execution"]}},
