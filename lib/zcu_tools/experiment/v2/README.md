@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 — JPA records
+**Last updated:** 2026-10-02 (CPMG and grouped records)
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -72,6 +72,10 @@ Single-tone 的 Freq／Length 與 dual-tone 的 Freq／Length／Power 使用 exp
 ## JPA records
 
 JPA Freq／Flux／Power／Check／OneToneFlux 以 explicit RunContext 執行，回傳純 Result；cfg 與資料由前端配成 RunRecord。前三者的分析接 explicit source、None options 與 Plots，回傳最佳 scalar；Check 只發布 fit 圖，OneToneFlux 不提供 analysis。Run 的 measurement 圖歸本次 Plots。Freq／Power 保留隨機內部掃描點與無連線點圖，Flux 保留 Gaussian smoothing，pump off/on check 結束時仍保持 ON。AutoOptimize 的 grouped records 另行遷移。
+
+## CPMG grouped records
+
+CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。detune_ratio 與 earlystop_snr 屬於 run cfg，分析選项屬於 CPMGAnalyzeOptions。共用 GroupedAxesSpec 保存與載入 record；lengths role 保留每列時間座標，signals role 與既有 grouped v2 schema 不變。
 
 ## 目錄佈局
 

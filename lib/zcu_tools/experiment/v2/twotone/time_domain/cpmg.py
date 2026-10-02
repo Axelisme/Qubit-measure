@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
@@ -16,7 +14,6 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     US_TO_S,
-    AbsExperiment,
     GroupedAxesSpec,
     GroupedLoadData,
     RoleAxisSpec,
@@ -24,11 +21,13 @@ from zcu_tools.experiment import (
     RoleZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, setup_devices
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -58,7 +57,6 @@ class CPMG_Result:
     ns: NDArray[np.int64]
     delays: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: CPMG_Cfg | None = None
 
 
 class CPMG_ModuleCfg(ConfigBase):
@@ -78,6 +76,15 @@ class CPMG_Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: CPMG_SweepCfg
     length_range: list[tuple[float, float]] | tuple[float, float]
     length_expts: int
+    detune_ratio: float = 0.0
+    earlystop_snr: float | None = None
+
+
+@dataclass(frozen=True)
+class CPMGAnalyzeOptions:
+    fit_fringe: bool = True
+    t2r: float | None = None
+    t1: float | None = None
 
 
 CPMG_LENGTHS_ROLE = "lengths"
@@ -104,8 +111,8 @@ def save_cpmg_grouped_result(
     )
 
 
-def load_cpmg_grouped_result(filepath: str) -> CPMG_Result:
-    return CPMG_GROUPED_AXES_SPEC.load_result(filepath)
+def load_cpmg_grouped_result(source: Path) -> RunRecord[CPMG_Cfg, CPMG_Result]:
+    return CPMG_GROUPED_AXES_SPEC.load(source)
 
 
 def _validate_cpmg_arrays(
@@ -148,7 +155,6 @@ def _build_cpmg_result(data: GroupedLoadData[CPMG_Cfg]) -> CPMG_Result:
         ns=ns,
         delays=delays,
         signals=signals,
-        cfg_snapshot=data.cfg_snapshot,
     )
 
 
@@ -188,20 +194,24 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
+class CPMG_Exp:
     def run(
         self,
-        soc,
-        soccfg,
         cfg: CPMG_Cfg,
         *,
-        detune_ratio: float = 0.0,
-        earlystop_snr: float | None = None,
+        context: RunContext,
         acquire_kwargs: dict[str, Any] | None = None,
     ) -> CPMG_Result:
-        orig_cfg = deepcopy(cfg)
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        detune_ratio, earlystop_snr = cfg.detune_ratio, cfg.earlystop_snr
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal.event,
+        )
         modules = cfg.modules
 
         pi2_pulse = modules.pi2_pulse
@@ -258,107 +268,101 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             nonlocal current_snr
             current_snr = snr
 
-        with LivePlot2DwithLine(
-            "Number of Pi", "Time idxs", line_axis=1, num_lines=2
-        ) as viewer:
-            current_length_idx = 0
-            signals_buffer = SignalBuffer(
-                (len(times), len(length_idxs)),
-                on_update=lambda data: update_viewer(data),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement", "Number of Pi", "Time idxs", line_axis=1, num_lines=2
+        )
+        current_length_idx = 0
+        signals_buffer = SignalBuffer(
+            (len(times), len(length_idxs)),
+            on_update=lambda data: update_viewer(data),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
 
-                def update_viewer(data: NDArray[np.complex128]) -> None:
-                    viewer.update(
-                        times.astype(np.float64),
-                        lengths[current_length_idx],
-                        cpmg_signal2real(data),
-                        title=f"snr = {current_snr:.1f}" if current_snr else None,
+            def update_viewer(data: NDArray[np.complex128]) -> None:
+                viewer.update(
+                    times.astype(np.float64),
+                    lengths[current_length_idx],
+                    cpmg_signal2real(data),
+                    title=f"snr = {current_snr:.1f}" if current_snr else None,
+                )
+
+            for idx, (time_value, step) in enumerate(sched.scan("times", times)):
+                current_length_idx = idx
+                cfg = step.cfg
+                modules = cfg.modules
+
+                time = int(time_value)
+                pi2_pulse = modules.pi2_pulse
+                pi_pulse = modules.pi_pulse
+                dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
+
+                length_sweep = make_sweep(
+                    start=length_ranges[idx, 0],
+                    stop=length_ranges[idx, 1],
+                    expts=cfg.length_expts,
+                )
+                cfg.sweep.length = length_sweep
+                length_param = sweep2param("length", length_sweep)
+                detune_param = (
+                    360
+                    * detune_ratio
+                    * sweep2param(
+                        "length",
+                        make_sweep(start=0, step=1, expts=length_sweep.expts),
                     )
+                )
 
-                for idx, (time_value, step) in enumerate(sched.scan("times", times)):
-                    current_length_idx = idx
-                    cfg = step.cfg
-                    modules = cfg.modules
+                interval = length_param / (2 * time)
 
-                    time = int(time_value)
-                    pi2_pulse = modules.pi2_pulse
-                    pi_pulse = modules.pi_pulse
-                    dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
-
-                    cfg.sweep.length = make_sweep(
-                        start=length_ranges[idx, 0],
-                        stop=length_ranges[idx, 1],
-                        expts=cfg.length_expts,
-                    )
-                    length_sweep = cfg.sweep.length
-                    assert length_sweep is not None
-                    length_param = sweep2param("length", length_sweep)
-                    detune_param = (
-                        360
-                        * detune_ratio
-                        * sweep2param(
-                            "length",
-                            make_sweep(start=0, step=1, expts=length_sweep.expts),
-                        )
-                    )
-
-                    interval = length_param / (2 * time)
-
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
-                            Delay("first_delay", interval - 0.5 * dpulse_len),
-                            Repeat("pi_loop", time - 1).add_content(
-                                [
-                                    Pulse("pi_pulse", pi_pulse, block_mode=False),
-                                    SoftDelay("inner_delay", 2 * interval),
-                                ]
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
+                        Delay("first_delay", interval - 0.5 * dpulse_len),
+                        Repeat("pi_loop", time - 1).add_content(
+                            [
+                                Pulse("pi_pulse", pi_pulse, block_mode=False),
+                                SoftDelay("inner_delay", 2 * interval),
+                            ]
+                        ),
+                        Pulse("last_pi_pulse", pi_pulse, block_mode=False),
+                        Delay("last_delay", interval + 0.5 * dpulse_len),
+                        Pulse(
+                            name="pi2_pulse2",
+                            cfg=pi2_pulse.with_updates(
+                                phase=pi2_pulse.phase + detune_param
                             ),
-                            Pulse("last_pi_pulse", pi_pulse, block_mode=False),
-                            Delay("last_delay", interval + 0.5 * dpulse_len),
-                            Pulse(
-                                name="pi2_pulse2",
-                                cfg=pi2_pulse.with_updates(
-                                    phase=pi2_pulse.phase + detune_param
-                                ),
-                            ),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("length", length_sweep)
-                        .build_and_acquire(
-                            stop_condition=snr_checker(
-                                signals_buffer[step],
-                                earlystop_snr,
-                                lambda x: rotate2real(x).real,
-                                after_check=update_snr,
-                            ),
-                            **(acquire_kwargs or {}),
-                        )
+                        ),
+                        Readout("readout", modules.readout),
                     )
+                    .declare_sweep("length", length_sweep)
+                    .build_and_acquire(
+                        stop_condition=snr_checker(
+                            signals_buffer[step],
+                            earlystop_snr,
+                            lambda x: rotate2real(x).real,
+                            after_check=update_snr,
+                        ),
+                        **(acquire_kwargs or {}),
+                    )
+                )
 
-        # record result
-        self.last_result = CPMG_Result(
+        return CPMG_Result(
             ns=times,
             delays=lengths,
             signals=signals_buffer.array,
-            cfg_snapshot=orig_cfg,
         )
-
-        return self.last_result
 
     def analyze(
         self,
-        result: CPMG_Result | None = None,
-        fit_fringe: bool = True,
-        t2r: float | None = None,
-        t1: float | None = None,
-    ) -> Figure:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+        source: RunRecord[CPMG_Cfg, CPMG_Result],
+        options: CPMGAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> None:
+        result = source.result
+        fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
 
         times, lengths, signals2D = result.ns, result.delays, result.signals
 
@@ -376,7 +380,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         t2s = np.full(len(times), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
-        for i, (real_signal, lens) in enumerate(zip(real_signals2D, lengths)):
+        for i, (real_signal, lens) in enumerate(
+            zip(real_signals2D, lengths, strict=False)
+        ):
             if np.any(np.isnan(real_signal)):
                 continue
 
@@ -393,9 +399,8 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
-        assert isinstance(ax1, Axes)
-        assert isinstance(ax2, Axes)
+        fig, _ = plots.subplots("fit", nrows=1, ncols=2, figsize=(8, 3))
+        ax1, ax2 = fig.axes
 
         X = np.broadcast_to(times[None, :], norm_signals.T.shape)
         Y = lengths.T
@@ -416,26 +421,20 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         fig.tight_layout()
 
-        return fig
-
     def save(
         self,
-        filepath: str,
-        result: CPMG_Result | None = None,
+        source: RunRecord[CPMG_Cfg, CPMG_Result],
+        destination: Path,
+        *,
         comment: str | None = None,
         tag: str = "twotone/ge/cpmg",
     ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-        CPMG_GROUPED_AXES_SPEC.save_experiment_result(
-            filepath,
-            result,
+        CPMG_GROUPED_AXES_SPEC.save(
+            source,
+            destination,
             comment=comment,
             tag=tag,
-            make_comment_fn=make_comment,
         )
 
-    def load(self, filepath: str) -> CPMG_Result:
-        self.last_result = load_cpmg_grouped_result(filepath)
-        return self.last_result
+    def load(self, source: Path) -> RunRecord[CPMG_Cfg, CPMG_Result]:
+        return load_cpmg_grouped_result(source)

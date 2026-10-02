@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
+from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 
 import numpy as np
@@ -28,6 +29,7 @@ from zcu_tools.datafile import (
     save_grouped_labber_data,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 
 __all__ = [
     "Axis",
@@ -358,10 +360,6 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         if not is_dataclass(self.result_type):
             raise TypeError(f"result_type {self.result_type!r} must be a dataclass")
         result_fields = {f.name for f in fields(self.result_type)}  # type: ignore[arg-type]
-        if "cfg_snapshot" not in result_fields:
-            raise ValueError(
-                f"{self.result_type.__name__} must declare a 'cfg_snapshot' field"
-            )
 
         seen: set[DatasetRole] = set()
         for role in self.roles:
@@ -403,42 +401,38 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
             metadata=LabberMetadata(comment=comment, tags=tag or self.tag),
         )
 
-    def save_experiment_result(
+    def save(
         self,
-        filepath: str,
-        result: T_Result,
+        source: RunRecord[T_Config, T_Result],
+        destination: Path,
         *,
         comment: str | None = None,
         tag: str | None = None,
-        make_comment_fn: Callable[[T_Config, str | None], str] | None = None,
-    ) -> str:
-        cfg = getattr(result, "cfg_snapshot")
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        if make_comment_fn is None:
-            from zcu_tools.experiment.utils import make_comment
+    ) -> None:
+        if source.cfg is None:
+            raise ValueError("Cannot save a RunRecord without cfg")
+        from zcu_tools.experiment.utils import make_comment
 
-            make_comment_fn = make_comment
-        return self.save_grouped_result(
-            filepath,
-            result,
-            comment=make_comment_fn(cfg, comment),
+        self.save_grouped_result(
+            str(destination),
+            source.result,
+            comment=make_comment(source.cfg, comment),
             tag=tag,
         )
 
-    def load_result(self, filepath: str) -> T_Result:
+    def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
         grouped = load_grouped_labber_data(
-            filepath,
+            str(source),
             required_roles=self.required_roles,
         )
-        return self.result_from_grouped_data(grouped, source=filepath)
+        return self.record_from_grouped_data(grouped, source=str(source))
 
-    def result_from_grouped_data(
+    def record_from_grouped_data(
         self,
         grouped: GroupedLabberData,
         *,
         source: str | None = None,
-    ) -> T_Result:
+    ) -> RunRecord[T_Config, T_Result]:
         self._validate_grouped_roles(grouped)
         cfg_snapshot = self._cfg_from_comment(grouped.metadata.comment, source=source)
         loaded_roles = {
@@ -464,7 +458,7 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
             )
         if self.result_validator is not None:
             self.result_validator(result)
-        return result
+        return RunRecord(cfg=cfg_snapshot, result=result)
 
     def _validate_grouped_roles(self, grouped: GroupedLabberData) -> None:
         expected = set(self.required_roles)
