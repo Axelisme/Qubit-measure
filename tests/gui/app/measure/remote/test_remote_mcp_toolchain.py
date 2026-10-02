@@ -312,6 +312,9 @@ def test_run_snapshot_identifies_the_operation_that_published_its_result(fx):
 
 
 def test_loaded_result_does_not_inherit_the_previous_run_operation(fx, monkeypatch):
+    monkeypatch.setattr(
+        FakeAdapter, "capabilities", replace(FakeAdapter.capabilities, load_data=True)
+    )
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
         _completed_run(fx, sock, tab)
