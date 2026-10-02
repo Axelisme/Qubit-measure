@@ -118,7 +118,8 @@ from __future__ import annotations
 # v75: explicit cfg refs replace the per-connection cfg seen guard for Run.
 # v76: waveform saving returns only success/status; preview is a separate read.
 # v78: operation-bound result inputs, figure reads and named image saves.
-WIRE_VERSION = 78
+# v79: optional figure-free interactive command receipts.
+WIRE_VERSION = 79
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -172,4 +173,5 @@ WIRE_VERSION = 78
 # v106: run callers submit their observed cfg identity and revision.
 # v107: Run admits a valid cfg ref across connections, retaining non-cfg guards.
 # v110: commit provenance and captured inputs with named plots; reject replaced saves.
-GUI_VERSION = 110
+# v111: preserve interactive validation and operation receipt without PNG rendering.
+GUI_VERSION = 111
