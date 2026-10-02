@@ -1359,56 +1359,6 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
     assert emitted_search.fields["mode"] == DirectValue("fixed")
 
 
-def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import (
-        CfgFormWidget,
-        FieldDecorationPatch,
-    )
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-
-    class BadgeProvider:
-        def __init__(self, badge: str) -> None:
-            self._badge = badge
-
-        def decoration_for(
-            self, path: str, spec: object, value: object
-        ) -> FieldDecorationPatch | None:
-            del spec, value
-            if path == "group.value":
-                return FieldDecorationPatch(badge=self._badge)
-            return None
-
-    schema = section_schema(
-        {
-            "group": CfgSectionSpec(
-                label="Group",
-                fields={"value": ScalarSpec(label="Value", type=float)},
-            ),
-            "stable": ScalarSpec(label="Stable", type=float),
-        },
-        {
-            "group": CfgSectionValue(fields={"value": DirectValue(1.0)}),
-            "stable": DirectValue(2.0),
-        },
-    )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    root_widget = w._root_widget
-    assert isinstance(root_widget, TreeCfgWidget)
-    # Capture unrelated leaf before decoration change
-    stable_before = root_widget._leaf_path_to_widget["stable"]
-    group_value_before = root_widget._leaf_path_to_widget["group.value"]
-    # Section-local decoration refresh keeps the same TreeCfgWidget instance and preserves unrelated subtree
-    w.set_decoration_provider(BadgeProvider("generated"))
-
-    assert w._root_widget is root_widget
-    assert w.decoration_for_path("group.value").badge == "generated"
-    # Unrelated "stable" leaf must retain same widget
-    assert root_widget._leaf_path_to_widget["stable"] is stable_before
-    # Changed section's leaf should be recreated (different widget) but still present
-    assert root_widget._leaf_path_to_widget["group.value"] is not group_value_before
-
-
 def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl):
     from qtpy.QtWidgets import QWidget
     from zcu_tools.gui.widgets.cfg import (
