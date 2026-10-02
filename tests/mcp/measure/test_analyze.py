@@ -281,16 +281,20 @@ def test_unfinished_analysis_never_reads_success_payload(
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
-    result = _data(reply)
+    result = json.loads(reply["content"][0]["text"])
+    assert bool(reply.get("isError")) == (status == "failed")
     assert result["status"] == status
     assert isinstance(result["op"], int)
+    assert result["execution"]
+    assert result["result"] is None
+    assert result["save_status"] == "not_started"
     if status == "failed":
-        assert result["error"] == "fit failed"
+        assert result["error"]["message"] == "fit failed"
+        assert result["error"]["phase"] == "operation"
     assert len(reply["content"]) == 1
-    expected_methods = ["tab.analyze", "operation.await"]
-    if status == "running":
-        expected_methods.append("operation.progress")
-    assert _methods(client) == expected_methods
+    methods = _methods(client)
+    assert methods[0] == "tab.analyze"
+    assert methods[1:] and set(methods[1:]) == {"operation.await"}
 
 
 @pytest.mark.parametrize("has_figure", [True, False])
@@ -390,14 +394,25 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
 ):
     def respond(name, params):
         if name == method:
-            return {"operation_id": 71, "interactive": False, "params": {}}
+            return {
+                "operation_id": 71, "interactive": False, "params": {},
+                "invalidated_on_success": [],
+            }
         if name == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
-            return {"summary": {"frequency": 5.0}}
+            return {
+                "summary": {"frequency": 5.0}, "params": {},
+                "operation_state": {
+                    ("analysis_state" if stage == "primary" else "post_analysis_state"): {
+                        "figure_names": ["fit"],
+                    }
+                },
+            }
+        if name == "tab.save_image":
+            return {"image_path": "/actual/fit.png"}
         assert name == "tab.get_figure"
-        Path(params["out_path"]).write_bytes(png)
-        return {"saved_to": params["out_path"]}
+        return {"png_b64": base64.b64encode(png).decode()}
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(
@@ -406,10 +421,13 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
     assert reply["isError"] is True
     assert len(reply["content"]) == 1
     assert reply["content"][0]["type"] == "text"
-    assert "Invalid PNG image" in reply["content"][0]["text"]
+    data = json.loads(reply["content"][0]["text"])
+    assert data["status"] == "failed"
+    assert "Invalid PNG image" in data["error"]["message"]
+    assert data["error"]["phase"] == "figure_read"
+    assert data["result"]["summary"] == {"frequency": 5.0}
+    assert data["saved_images"] == [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+    assert data["save_status"] == "saved"
     assert _methods(client) == [
-        method,
-        "operation.await",
-        result_method,
-        "tab.get_figure",
+        method, "operation.await", result_method, "tab.save_image", "tab.get_figure",
     ]

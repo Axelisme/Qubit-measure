@@ -1,5 +1,6 @@
 """Connection-bound calls cannot cross GUI incarnations or overlap RPC state."""
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
@@ -121,7 +122,7 @@ def test_status_received_discovery_reply_survives_eof(
         pytest.param(
             "tab_analyze",
             {"tab": "t"},
-            {"tab.analyze": {"operation_id": 7, "interactive": False}},
+            {"tab.analyze": {"operation_id": 7, "interactive": False, "params": {}, "invalidated_on_success": []}},
             "tab.analyze",
             id="analysis-wait",
         ),
@@ -335,6 +336,7 @@ def test_assembled_multistep_tools_do_not_cross_connections(
         timeout_seconds: float | None = None,
         *,
         operation_handle: int | None = None,
+        before_send: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         reply = real_send(
             connection,
@@ -342,6 +344,7 @@ def test_assembled_multistep_tools_do_not_cross_connections(
             params,
             timeout_seconds,
             operation_handle=operation_handle,
+            before_send=before_send,
         )
         change_connection(method)
         return reply
@@ -363,6 +366,13 @@ def test_assembled_multistep_tools_do_not_cross_connections(
         else:
             assert result["completed"] == []
             assert result["not_started"] == ["primary"]
+    elif tool == "tab_analyze" and not replies["tab.analyze"]["interactive"]:
+        result = client.call(tool, arguments)
+        assert result.is_error
+        assert result.data["status"] == "failed"
+        assert result.data["error"]["reason"] == "connection_lost"
+        assert result.data["op"] == 1
+        client.context.session.close()
     else:
         with pytest.raises(GuiRpcError) as error:
             client.call(tool, arguments)

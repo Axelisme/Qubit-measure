@@ -183,7 +183,7 @@ class MeasureMcpSession:
         self._resource_lock = RLock()
         self._close_lock = Lock()
         self._closed = Event()
-        self.executions = AnalysisExecutions(self)
+        self.executions = AnalysisExecutions(self, self._closed)
         self._generation = 0
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
