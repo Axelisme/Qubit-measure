@@ -121,8 +121,11 @@ def h_tab_interact(
             figure = next(iter(figures.values()), None) if figures else None
             return {
                 **_project(
-                    plugin, state, figure,
-                    preview_active=False, include_figure=include_figure,
+                    plugin,
+                    state,
+                    figure,
+                    preview_active=False,
+                    include_figure=include_figure,
                 ),
                 "operation_id": operation_id,
             }
@@ -136,8 +139,11 @@ def h_tab_interact(
     figure, preview_active = presentation if presentation is not None else (None, False)
     return {
         **_project(
-            plugin, state, figure,
-            preview_active=preview_active, include_figure=include_figure,
+            plugin,
+            state,
+            figure,
+            preview_active=preview_active,
+            include_figure=include_figure,
         ),
         "operation_id": operation_id,
     }

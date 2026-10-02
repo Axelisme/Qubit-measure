@@ -258,9 +258,7 @@ def test_socket_done_receipt_skips_png_and_settles_original_operation(
         assert rejected["error"]["code"] == "invalid_params"
         assert _interact(sock, tab_id, include_figure=False)["result"] == initial
 
-        done = _interact(
-            sock, tab_id, {"command": "done"}, include_figure=False
-        )
+        done = _interact(sock, tab_id, {"command": "done"}, include_figure=False)
         assert done["ok"] is True
         result = done["result"]
         assert result == {**initial, "figure": None, "preview_active": False}
