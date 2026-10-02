@@ -306,7 +306,8 @@ class AnalysisExecution:
             if unconfirmed is not None:
                 # Timeouts and failed reply encoding do not settle the admitted save.
                 known_rejection = (
-                    code not in (None, "timeout") and reason != "response_encoding_failed"
+                    code not in (None, "timeout")
+                    and reason != "response_encoding_failed"
                 )
                 save_status = "incomplete" if known_rejection else "unknown"
                 if known_rejection:

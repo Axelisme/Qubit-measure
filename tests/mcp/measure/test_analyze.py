@@ -730,7 +730,9 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
             return _result_reply(
-                "analysis", ["prefix", "fit", "residual"] if remaining else ["prefix", "fit"], {}
+                "analysis",
+                ["prefix", "fit", "residual"] if remaining else ["prefix", "fit"],
+                {},
             )
         if method == "operation.cancel":
             return {"status": "finished"}
@@ -790,7 +792,8 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
     )
     assert completed["unconfirmed_image"] == ("fit" if unknown else None)
     assert completed["remaining_images"] == (
-        ([] if save_outcome == "saved" else ["fit"]) + (["residual"] if remaining else [])
+        ([] if save_outcome == "saved" else ["fit"])
+        + (["residual"] if remaining else [])
     )
     if save_outcome != "saved":
         assert completed["error"]["phase"] == "image_save"
