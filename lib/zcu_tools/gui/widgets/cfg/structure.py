@@ -814,7 +814,6 @@ class TreeCfgWidget(QWidget):
                 dec = self._context.decoration_for_path(child_path, child_field)
             except Exception:
                 dec = None
-        # Section
         if isinstance(child_field, SectionField):
             label = decorated_label(child_field, key, child_path, self._context)
             item = QTreeWidgetItem(parent_item, (label, ""))
@@ -836,7 +835,6 @@ class TreeCfgWidget(QWidget):
             item.setExpanded(self._expanded_state.get(child_path, True))
             self._add_section_children(item, child_field, child_path, depth + 1)
             return
-        # Reference
         if isinstance(child_field, ReferenceField):
             label = decorated_label(child_field, key, child_path, self._context)
             item = QTreeWidgetItem(parent_item, (label, ""))
@@ -1021,7 +1019,6 @@ class TreeCfgWidget(QWidget):
                     (child_field, _on_ref_enabled_changed)
                 )
             return
-        # Sweep / CenteredSweep / Scalar / Literal leaf
         leaf_label = decorated_label(child_field, key, child_path, self._context)
         item = QTreeWidgetItem(parent_item, (leaf_label, ""))
         item.setData(0, Qt.ItemDataRole.UserRole, child_path)
