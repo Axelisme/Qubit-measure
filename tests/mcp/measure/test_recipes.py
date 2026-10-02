@@ -583,6 +583,7 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
             )
         )
         controller.start()
+        state = client.call("status", {"execution": execution})
         for _ in range(100):
             state = client.call("status", {"execution": execution})
             if state["cancel_requested"]:
