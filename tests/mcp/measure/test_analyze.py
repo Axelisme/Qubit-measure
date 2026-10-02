@@ -117,9 +117,7 @@ def _result_reply(
     }
 
 
-@pytest.mark.parametrize(
-    "payload", [None, {"command": "set_value", "args": {"x": 2}}]
-)
+@pytest.mark.parametrize("payload", [None, {"command": "set_value", "args": {"x": 2}}])
 def test_interact_forwards_once_and_materializes_session_image(
     tmp_path, clients, monkeypatch, payload
 ):
@@ -184,7 +182,10 @@ def test_interact_headless_and_wire_failure_do_not_retry(
     assert len(reply["content"]) == 1
     assert "no active session" in reply["content"][0]["text"]
     assert client.transport.sent == [
-        ("tab.interact", {"tab_id": "t", "payload": {"command": "done"}, "include_figure": False})
+        (
+            "tab.interact",
+            {"tab_id": "t", "payload": {"command": "done"}, "include_figure": False},
+        )
     ]
 
 
@@ -437,18 +438,33 @@ def test_done_joins_original_completion_without_duplicate_saves(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {"operation_id": 71, "interactive": True, "params": {"gain": 2},
-                    "invalidated_on_success": []}
+            return {
+                "operation_id": 71,
+                "interactive": True,
+                "params": {"gain": 2},
+                "invalidated_on_success": [],
+            }
         if method == "tab.interact":
             if "payload" in params:
                 assert params["payload"] == {"command": "done"}
                 assert params["include_figure"] is False
                 done.set()
-            return {"operation_id": 71, "state": {"value": 3},
-                    "commands": [{"name": "done"}], "figure": None}
+            return {
+                "operation_id": 71,
+                "state": {"value": 3},
+                "commands": [{"name": "done"}],
+                "figure": None,
+            }
         if method == "operation.await":
-            return ({"reason": "completed", "status": outcome, "error": "fit failed" if outcome == "failed" else None}
-                    if done.is_set() else {"reason": "user_feedback", "status": "running"})
+            return (
+                {
+                    "reason": "completed",
+                    "status": outcome,
+                    "error": "fit failed" if outcome == "failed" else None,
+                }
+                if done.is_set()
+                else {"reason": "user_feedback", "status": "running"}
+            )
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"gain": 2})
         if method == "tab.save_image":
@@ -458,10 +474,17 @@ def test_done_joins_original_completion_without_duplicate_saves(
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond)
-    started = (_data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
-               if registered else None)
-    reply = _call_stdio(monkeypatch, client, "tab_interact",
-                        {"tab": "t", "payload": {"command": "done"}})
+    started = (
+        _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+        if registered
+        else None
+    )
+    reply = _call_stdio(
+        monkeypatch,
+        client,
+        "tab_interact",
+        {"tab": "t", "payload": {"command": "done"}},
+    )
     assert bool(reply.get("isError")) is (outcome == "failed")
     completed = json.loads(reply["content"][0]["text"])
     assert completed["status"] == outcome
@@ -469,11 +492,18 @@ def test_done_joins_original_completion_without_duplicate_saves(
     execution = completed["execution"]
     if started is not None:
         assert execution == started["execution"]
-    terminal = _data(_call_stdio(monkeypatch, client, "wait", {"execution": execution, "timeout": 0}))
+    terminal = _data(
+        _call_stdio(monkeypatch, client, "wait", {"execution": execution, "timeout": 0})
+    )
     assert terminal["status"] == outcome
-    assert completed["save_status"] == ("saved" if outcome == "finished" else "not_started")
-    assert completed["saved_images"] == ([{"figure_name": "fit", "image_path": "/actual/fit.png"}]
-                                         if outcome == "finished" else [])
+    assert completed["save_status"] == (
+        "saved" if outcome == "finished" else "not_started"
+    )
+    assert completed["saved_images"] == (
+        [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+        if outcome == "finished"
+        else []
+    )
     if outcome == "finished":
         assert completed["params"] == {"gain": 2}
         _assert_figure(reply, present=True)
@@ -484,8 +514,14 @@ def test_done_joins_original_completion_without_duplicate_saves(
     assert methods.count("tab.interact") == 1 + int(registered)
     assert methods.count("tab.get_analyze_result") == int(outcome == "finished")
     assert methods.count("tab.save_image") == int(outcome == "finished")
-    assert set(methods) <= {"tab.analyze", "tab.interact", "operation.await",
-                            "tab.get_analyze_result", "tab.save_image", "tab.get_figure"}
+    assert set(methods) <= {
+        "tab.analyze",
+        "tab.interact",
+        "operation.await",
+        "tab.get_analyze_result",
+        "tab.save_image",
+        "tab.get_figure",
+    }
 
 
 @pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])

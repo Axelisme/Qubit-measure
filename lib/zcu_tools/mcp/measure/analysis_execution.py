@@ -108,7 +108,7 @@ class AnalysisExecution:
         connection: GuiConnection,
         session: MeasureMcpSession,
         closed: Event,
-        invalidated: list[str],
+        invalidated: list[str] | None,
     ) -> None:
         self._snapshot = snapshot
         self._connection = connection
@@ -147,7 +147,7 @@ class AnalysisExecution:
                 ),
             )
 
-    def observe_interaction(self, reply: ToolReply) -> None:
+    def observe_interaction(self, reply: ToolReply, *, done: bool = False) -> None:
         """Keep the latest handoff without replacing an observed completion."""
         with self._condition:
             if self._snapshot.phase != "operation":
@@ -157,6 +157,7 @@ class AnalysisExecution:
                 self._snapshot,
                 interaction=deepcopy(reply.data),
                 figure=reply.data.get("figure"),
+                status="running" if done else self._snapshot.status,
             )
             self._condition.notify_all()
 
@@ -370,6 +371,8 @@ class AnalysisExecutions:
         tab: str,
         stage: AnalysisStage,
         started: dict[str, Any],
+        *,
+        interaction: dict[str, Any] | None = None,
     ) -> AnalysisExecution:
         """Retain the delivered start receipt, even when close wins admission."""
         with self._lock:
@@ -384,6 +387,7 @@ class AnalysisExecutions:
                     op=op,
                     params=deepcopy(started["params"]),
                     status="interactive" if started.get("interactive") else "running",
+                    interaction=deepcopy(interaction),
                 ),
                 connection,
                 self._session,

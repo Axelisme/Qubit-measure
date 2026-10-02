@@ -54,9 +54,27 @@ def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         params["payload"] = payload
+    done = params.get("payload", {}).get("command") == "done"
+    if done:
+        params["include_figure"] = False
     ctx = ctx.bound()
     reply = dict(ctx.send_gui_rpc("tab.interact", params))
     execution = ctx.session.executions.for_op(reply["handle"])
+    if done:
+        if execution is None:
+            execution = ctx.session.executions.start(
+                ctx.gui,
+                tab,
+                "primary",
+                {
+                    "handle": reply["handle"],
+                    "params": None,
+                    "invalidated_on_success": None,
+                },
+                interaction=reply,
+            )
+        execution.observe_interaction(ToolReply(reply), done=True)
+        return execution.wait(2.0)
     figure = reply["figure"]
     images: tuple[PngImage, ...] = ()
     delivery_error = False
