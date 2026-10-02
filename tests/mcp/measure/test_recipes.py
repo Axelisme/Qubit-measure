@@ -340,6 +340,48 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
         client.context.session.close()
 
 
+def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
+    tmp_path, monkeypatch
+):
+    gui = LookbackGui()
+    stopped = Event()
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == 71:
+            if stopped.is_set():
+                return {"reason": "completed", "status": "cancelled"}
+            return {"reason": "timeout"}
+        if method == "operation.cancel":
+            assert params == {"operation_id": 71}
+            stopped.set()
+            return {"status": "cancelling"}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        execution = initial.data["execution"]
+        cancelled = client.call("cancel", {"execution": execution})
+        assert cancelled.data["cancel_requested"]
+        assert cancelled.data["execution"] == execution
+        client.call("cancel", {"op": initial.data["run_op"]})
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        assert terminal.data["status"] == "cancelled"
+        assert terminal.data["run_outcome"]["status"] == "cancelled"
+        before = client.call("status", {"execution": execution})
+        client.call("cancel", {"execution": execution})
+        assert client.call("status", {"execution": execution}) == before
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("operation.cancel") == 1
+        assert methods.count("tab.run_start") == 1
+        assert "tab.save_data" not in methods
+        assert "tab.analyze" not in methods
+    finally:
+        stopped.set()
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
