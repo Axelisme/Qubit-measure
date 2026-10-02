@@ -5,15 +5,12 @@ from __future__ import annotations
 import base64
 from functools import partial
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 
 from PIL import Image
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-from zcu_tools.mcp.measure.tools_operation import wait
-from zcu_tools.mcp.measure.tools_tab import tab_get
 
 
 def tab_run(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, int]:
@@ -69,25 +66,8 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
             },
             interaction.images,
         )
-    outcome = wait(ctx, {"op": op, "timeout": 2.0})
-    if outcome["status"] != "finished":
-        return ToolReply({**outcome, "op": op})
-    section = "analysis" if stage == "primary" else "post"
-    result = tab_get(ctx, {"tab": tab, "include": [section]})[section]
-    if "summary" not in result:
-        raise RuntimeError("finished analysis has no result")
-    figure = result["figure"]
-    images = () if figure is None else (_png_image(Path(figure).read_bytes()),)
-    return ToolReply(
-        {
-            "status": "finished",
-            "summary": result["summary"],
-            "figure": figure,
-            "params": started["params"],
-            "invalidated": started["invalidated_on_success"],
-        },
-        images,
-    )
+    execution = ctx.session.executions.start(ctx.gui, tab, stage, started)
+    return execution.wait(2.0)
 
 
 def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:

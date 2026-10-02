@@ -33,7 +33,7 @@ def clients(tmp_path: Path) -> Iterator[list[MeasureClient]]:
     created: list[MeasureClient] = []
     yield created
     for client in created:
-        client.context.session.cleanup_pngs()
+        client.context.session.close()
 
 
 def _client(
@@ -189,22 +189,37 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
                 "invalidated_on_success": ["post.writeback"],
             }
         if name == "operation.await":
-            assert params["timeout"] == 2.0
+            assert params["operation_id"] == 71
+            assert 0 < params["timeout"] <= 0.25
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
-            return {"summary": {"frequency": 5.0}}
+            assert params == {"tab_id": "t", "operation_id": 71}
+            return {
+                "summary": {"frequency": 5.0},
+                "params": {"gain": 2, "model": "fit"},
+                "operation_state": {
+                    f"{pane}_state": {
+                        "figure_names": ["fit", "residual"] if has_figure else [],
+                        "has_figure": has_figure,
+                        "available": True,
+                    },
+                },
+            }
+        if name == "tab.save_image":
+            assert params == {
+                "tab_id": "t", "subtab_id": pane,
+                "figure_name": params["figure_name"], "image_path": None,
+                "operation_id": 71,
+            }
+            return {"image_path": f"/actual/{params['figure_name']}.png"}
         if name == "tab.get_figure":
-            assert params["subtab_id"] == pane
-            Path(params["out_path"]).write_bytes(_PNG)
-            return {"saved_to": params["out_path"]}
+            assert params == {
+                "tab_id": "t", "subtab_id": pane, "operation_id": 71,
+            }
+            return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(name)
 
     client = _client(tmp_path, clients, respond)
-    if not has_figure:
-        client.transport.replies["tab.get_figure"] = {
-            "ok": False,
-            "error": {"code": "precondition_failed", "message": "no figure"},
-        }
     reply = _call_stdio(
         monkeypatch,
         client,
@@ -212,19 +227,30 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         {"tab": "t", "stage": stage, "params": {"gain": 2}},
     )
     result = _data(reply)
-    assert result == {
-        "status": "finished",
-        "summary": {"frequency": 5.0},
-        "figure": result["figure"],
-        "params": {"gain": 2, "model": "fit"},
-        "invalidated": ["post.writeback"],
-    }
+    assert result["status"] == "finished"
+    assert result["execution"]
+    assert result["stage"] == stage
+    assert result["tab"] == "t"
+    assert isinstance(result["op"], int)
+    assert result["result"]["summary"] == {"frequency": 5.0}
+    assert result["result"]["params"] == {"gain": 2, "model": "fit"}
+    assert result["params"] == result["result"]["params"]
+    assert result["invalidated"] == ["post.writeback"]
+    assert result["operation_outcome"]["status"] == "finished"
+    assert result["save_status"] == ("saved" if has_figure else "not_available")
+    assert result["saved_images"] == (
+        [
+            {"figure_name": "fit", "image_path": "/actual/fit.png"},
+            {"figure_name": "residual", "image_path": "/actual/residual.png"},
+        ] if has_figure else []
+    )
+    assert result["remaining_images"] == []
+    assert result["unconfirmed_image"] is None
+    assert result["error"] is None
     _assert_figure(reply, present=has_figure)
     assert _methods(client) == [
-        method,
-        "operation.await",
-        result_method,
-        "tab.get_figure",
+        method, "operation.await", result_method,
+        *(["tab.save_image", "tab.save_image", "tab.get_figure"] if has_figure else []),
     ]
 
 

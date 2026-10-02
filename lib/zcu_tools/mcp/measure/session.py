@@ -176,11 +176,14 @@ class MeasureMcpSession:
         resolve_connect_port: ResolveConnectPortFn,
         port_is_open: PortIsOpenFn,
     ) -> None:
+        from zcu_tools.mcp.measure.analysis_execution import AnalysisExecutions
+
         self._config = config
         self._rpc_lock = RLock()
         self._resource_lock = RLock()
         self._close_lock = Lock()
         self._closed = Event()
+        self.executions = AnalysisExecutions(self)
         self._generation = 0
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
@@ -217,6 +220,7 @@ class MeasureMcpSession:
     def close(self) -> None:
         """Permanently stop admission, disconnect, drain work, then remove PNGs."""
         self._closed.set()
+        self.executions.stop_admission()
         with self._close_lock:
             if self._bridge is not None:
                 self._bridge.disconnect()
@@ -226,6 +230,7 @@ class MeasureMcpSession:
                 pass
             if self._bridge is not None:
                 self._bridge.disconnect()
+            self.executions.join()
             self.cleanup_pngs()
 
     def _require_open(self) -> None:
