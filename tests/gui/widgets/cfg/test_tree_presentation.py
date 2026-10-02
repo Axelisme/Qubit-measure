@@ -46,7 +46,10 @@ from zcu_tools.gui.widgets.cfg import (
     TreeCfgWidget,
 )
 from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget, SweepWidget
+from zcu_tools.gui.widgets.cfg.structure import _branch_color
 from zcu_tools.resources.context import MetaDict
+
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
 
 
 @pytest.fixture()
@@ -403,6 +406,182 @@ def test_tree_indentation_and_header_and_connectors(qapp, ctrl):
     top = tree.topLevelItem(0)
     assert top is not None
     assert top.parent() is None
+
+
+def _luminance(hex_color: str) -> float:
+    h = hex_color.lstrip("#")
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    # perceived luminance
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+# Candidate 466122625829ff779e721127ed15bd08fe69f58c pastel palette (light)
+_CANDIDATE_PASTELS = ("#e2ebf6", "#e3f0e6", "#f4e9d2", "#eadff1", "#dceeee")
+
+
+def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
+    """A1: depth colors cycle on guide-line segments, darker than candidate, stable under h-scroll, not row backgrounds."""
+    # Verify palette is darker than candidate 466122 pastel set
+    for new in TREE_DEPTH_COLORS:
+        new_lum = _luminance(new)
+        # Every new color must be visibly darker than the lightest candidate (≈ 235 avg)
+        # Candidate luminance range ~ 230-235; new should be < 180 to be clearly darker
+        assert new_lum < 180, (
+            f"{new} luminance {new_lum:.1f} not < 180 (darker than candidate)"
+        )
+        # Also ensure darker than each candidate individually
+        for pastel in _CANDIDATE_PASTELS:
+            assert new_lum < _luminance(pastel) - 40, (
+                f"{new} not sufficiently darker than candidate {pastel}"
+            )
+
+    # Verify helper cycles correctly
+    for idx in range(10):
+        exp = TREE_DEPTH_COLORS[idx % len(TREE_DEPTH_COLORS)].lower()
+        got = _branch_color(idx).name().lower()
+        assert got == exp
+
+    # Build deep chain to check painting
+    l6 = CfgSectionSpec(label="L6", fields={"leaf": ScalarSpec(label="Leaf", type=int)})
+    l5 = CfgSectionSpec(label="L5", fields={"c": l6})
+    l4 = CfgSectionSpec(label="L4", fields={"c": l5})
+    l3 = CfgSectionSpec(label="L3", fields={"c": l4})
+    l2 = CfgSectionSpec(label="L2", fields={"c": l3})
+    l1 = CfgSectionSpec(label="L1", fields={"c": l2})
+    root_spec = CfgSectionSpec(label="Root", fields={"c": l1})
+
+    def leaf_val(v):
+        return CfgSectionValue(fields={"leaf": DirectValue(v)})
+
+    v6 = leaf_val(1)
+    v5 = CfgSectionValue(fields={"c": v6})
+    v4 = CfgSectionValue(fields={"c": v5})
+    v3 = CfgSectionValue(fields={"c": v4})
+    v2 = CfgSectionValue(fields={"c": v3})
+    v1 = CfgSectionValue(fields={"c": v2})
+    root_val = CfgSectionValue(fields={"c": v1})
+    schema = CfgSchema(spec=root_spec, value=root_val)
+
+    ctrl = MagicMock()
+    configure_cfg_lookup(ctrl)
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.get_current_md.return_value = MetaDict()
+    ctrl.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
+    ctrl.arb_waveforms.list_data_keys.return_value = []
+    ctrl.list_device_names.return_value = []
+
+    w = CfgFormWidget()
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    w.attach(draft)
+    qapp.processEvents()
+    assert isinstance(w._root_widget, TreeCfgWidget)
+    tree = w._root_widget._tree
+    assert tree.isHeaderHidden() is True
+    assert tree.indentation() == 10
+    assert tree.rootIsDecorated() is False
+
+    # Rows should NOT have depth background colors
+    depth_set = {c.lower() for c in TREE_DEPTH_COLORS}
+
+    items = []
+    cur = tree.topLevelItem(0)
+    assert cur is not None
+    items.append(cur)
+    while cur.childCount() > 0:
+        nxt = cur.child(0)
+        assert nxt is not None
+        cur = nxt
+        items.append(cur)
+    for it in items:
+        bg = it.background(0).color().name().lower()
+        assert bg not in depth_set
+
+    # Guide-line painting: depth is per-segment column, normalized for h-scroll
+    from qtpy.QtCore import QRect
+    from qtpy.QtWidgets import QStyle, QStyleOptionViewItem
+    from zcu_tools.gui.widgets.cfg.structure import _TreeBranchStyle
+
+    style = _TreeBranchStyle()
+    deep_index = tree.model().index(0, 0)
+    for _ in range(5):
+        if deep_index.isValid() and tree.model().rowCount(deep_index) > 0:
+            deep_index = tree.model().index(0, 0, deep_index)
+        else:
+            break
+    if not deep_index.isValid():
+        last_item = items[-1]
+        deep_index = (
+            tree.indexFromItem(last_item)
+            if hasattr(tree, "indexFromItem")
+            else deep_index
+        )
+
+    # segment at viewport x=0 => depth 0 even with deep row
+    painter = MagicMock()
+    painter.save = MagicMock()
+    painter.restore = MagicMock()
+    painter.drawLine = MagicMock()
+    painter.setPen = MagicMock()
+    option = QStyleOptionViewItem()
+    option.rect = QRect(0, 0, 10, 20)
+    option.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
+    if deep_index.isValid():
+        option.index = deep_index  # type: ignore[attr-defined]
+    style.drawPrimitive(
+        QStyle.PrimitiveElement.PE_IndicatorBranch, option, painter, tree
+    )  # type: ignore[arg-type]
+    assert painter.setPen.called
+    pen = painter.setPen.call_args[0][0]
+    pen_color = pen.color().name().lower()
+    expected_segment_color = TREE_DEPTH_COLORS[0].lower()
+    assert pen_color == expected_segment_color
+
+    # x=20 => depth 2
+    painter2 = MagicMock()
+    painter2.save = MagicMock()
+    painter2.restore = MagicMock()
+    painter2.drawLine = MagicMock()
+    painter2.setPen = MagicMock()
+    option2 = QStyleOptionViewItem()
+    option2.rect = QRect(20, 0, 10, 20)
+    option2.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
+    if deep_index.isValid():
+        option2.index = deep_index  # type: ignore[attr-defined]
+    style.drawPrimitive(
+        QStyle.PrimitiveElement.PE_IndicatorBranch, option2, painter2, tree
+    )  # type: ignore[arg-type]
+    pen2 = painter2.setPen.call_args[0][0]
+    assert pen2.color().name().lower() == TREE_DEPTH_COLORS[2].lower()
+
+    # stable under horizontal scroll
+    if hasattr(tree, "horizontalScrollBar"):
+        h_bar = tree.horizontalScrollBar()
+        orig_range = (h_bar.minimum(), h_bar.maximum())
+        orig_val = h_bar.value()
+        h_bar.setRange(0, 100)
+        h_bar.setValue(15)
+        qapp.processEvents()
+        painter3 = MagicMock()
+        painter3.save = MagicMock()
+        painter3.restore = MagicMock()
+        painter3.drawLine = MagicMock()
+        painter3.setPen = MagicMock()
+        option3 = QStyleOptionViewItem()
+        option3.rect = QRect(5, 0, 10, 20)  # viewport 5 + 15 => logical 20 => depth 2
+        option3.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
+        if deep_index.isValid():
+            option3.index = deep_index  # type: ignore[attr-defined]
+        style.drawPrimitive(
+            QStyle.PrimitiveElement.PE_IndicatorBranch, option3, painter3, tree
+        )  # type: ignore[arg-type]
+        pen3 = painter3.setPen.call_args[0][0]
+        assert pen3.color().name().lower() == TREE_DEPTH_COLORS[2].lower()
+        h_bar.setRange(*orig_range)
+        h_bar.setValue(orig_val)
+    w.detach()
+    draft.close()
 
 
 def test_tree_depth_color_cycling_and_own_depth(qapp, ctrl):
