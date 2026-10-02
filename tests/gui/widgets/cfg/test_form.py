@@ -1670,8 +1670,9 @@ def test_custom_reference_renders_header_and_editable_leaf(
 
     leaf_key, initial_value, edited_value = leaf_values
     chosen_key = f"<Custom:{custom_spec.label}>"
+    spec = ReferenceSpec(kind=kind, label=reference_key.title(), allowed=[custom_spec])
     schema = section_schema(
-        {reference_key: ReferenceSpec(kind=kind, allowed=[custom_spec])},
+        {reference_key: spec},
         {
             reference_key: ReferenceValue(
                 chosen_key=chosen_key,
