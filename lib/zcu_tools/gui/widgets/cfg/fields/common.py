@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast
 
-from qtpy.QtCore import QSize, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QDoubleValidator, QIntValidator  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import QSize, Qt
+from qtpy.QtGui import QDoubleValidator, QIntValidator
+from qtpy.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
     QComboBox,
@@ -76,12 +76,12 @@ class ElidedLabel(QLabel):
         fm = self.fontMetrics()
         elided = fm.elidedText(
             self._full_text,
-            Qt.ElideRight,  # type: ignore[attr-defined]
+            Qt.TextElideMode.ElideRight,
             self.maximumWidth(),
         )
         super().setText(elided)
 
-    def resizeEvent(self, event: Any) -> None:  # type: ignore[override]
+    def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
         self._update_elided()
 
@@ -135,7 +135,7 @@ def make_value_widget(
         w = QSpinBox()
         w.setRange(-(2**31), 2**31 - 1)
         w.setValue(int(default))
-        w.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        w.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         w.setEnabled(editable)
         return w
@@ -144,7 +144,7 @@ def make_value_widget(
         w.setRange(-1e12, 1e12)
         w.setDecimals(decimals if decimals is not None else 6)
         w.setValue(float(default))
-        w.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        w.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         w.setEnabled(editable)
         return w
@@ -258,7 +258,7 @@ class _SweepPairRow(QWidget):
         self._right.setParent(self)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-    def sizeHint(self) -> QSize:  # type: ignore[override]
+    def sizeHint(self) -> QSize:
         left_hint = self._left.sizeHint()
         right_hint = self._right.sizeHint()
         return QSize(
@@ -266,7 +266,7 @@ class _SweepPairRow(QWidget):
             max(left_hint.height(), right_hint.height()),
         )
 
-    def minimumSizeHint(self) -> QSize:  # type: ignore[override]
+    def minimumSizeHint(self) -> QSize:
         left_hint = self._left.minimumSizeHint()
         right_hint = self._right.minimumSizeHint()
         return QSize(
@@ -274,7 +274,7 @@ class _SweepPairRow(QWidget):
             max(left_hint.height(), right_hint.height()),
         )
 
-    def resizeEvent(self, event: Any) -> None:  # type: ignore[override]
+    def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
         available = max(0, self.width() - self._SPACING)
         left_width = available // 2
@@ -397,7 +397,7 @@ class LiteralWidget(QLineEdit):
         self._field = field
         self.setText(str(field.spec.value))
         self.setReadOnly(True)
-        self.setFocusPolicy(Qt.NoFocus)  # type: ignore[attr-defined]
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
 
     @property
@@ -600,8 +600,8 @@ class ScalarInputWidget(QWidget):
             return
         if not isinstance(widget, (QAbstractSpinBox, QLineEdit)):
             return
-        widget.setContextMenuPolicy(Qt.CustomContextMenu)  # type: ignore[attr-defined]
-        widget.customContextMenuRequested.connect(  # type: ignore[attr-defined]
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
             lambda pos, w=widget: self._show_context_menu(w, w.mapToGlobal(pos))
         )
 

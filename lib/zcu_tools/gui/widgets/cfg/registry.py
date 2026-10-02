@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Protocol, Self, cast, final, runtime_checkable
 
-from qtpy.QtWidgets import QLineEdit, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QLineEdit, QWidget
 
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,

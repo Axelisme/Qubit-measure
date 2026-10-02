@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qtpy.QtWidgets import QLabel, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QLabel, QWidget
 
 from ..decoration import FieldDecorationProtocol
 
