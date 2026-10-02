@@ -50,6 +50,48 @@ def test_session_close_retires_pngs_and_refuses_future_work(tmp_path: Path) -> N
         session.cleanup_pngs()
 
 
+def test_close_waits_for_owned_png_write_and_prevents_directory_recreation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_client(tmp_path)
+    session = client.context.session
+    entered, release, disconnected = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    real_write = Path.write_bytes
+    real_close = client.transport.close
+
+    def write(path: Path, data: bytes) -> int:
+        entered.set()
+        assert release.wait(3), "test did not release admitted PNG write"
+        return real_write(path, data)
+
+    def disconnect() -> None:
+        real_close()
+        disconnected.set()
+
+    monkeypatch.setattr(Path, "write_bytes", write)
+    monkeypatch.setattr(client.transport, "close", disconnect)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        writing = pool.submit(session.write_png, b"admitted-image")
+        try:
+            assert entered.wait(1)
+            closing = pool.submit(session.close)
+            assert disconnected.wait(1)
+            later_write = pool.submit(session.write_png, b"too-late-image")
+        finally:
+            release.set()
+        image = writing.result(timeout=1)
+        closing.result(timeout=1)
+        with pytest.raises(GuiRpcError) as error:
+            later_write.result(timeout=1)
+        assert error.value.reason == "session_closed"
+    assert not image.exists()
+    assert not image.parent.exists()
+
+
 def test_session_close_wakes_an_inflight_rpc_without_waiting_for_rpc_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
