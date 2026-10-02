@@ -674,6 +674,32 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         client.context.session.close()
 
 
+def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safely(
+    tmp_path, monkeypatch
+):
+    def fail_start(self):
+        raise RuntimeError("no thread resources")
+
+    client = make_client(tmp_path, LookbackGui())
+    monkeypatch.setattr(Thread, "start", fail_start)
+    try:
+        reply = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert reply.is_error
+        assert reply.data["status"] == "failed"
+        assert reply.data["error"]["phase"] == "preparing"
+        assert reply.data["error"]["reason"] == "worker_start_failed"
+        assert reply.data["error"]["message"] == "no thread resources"
+        execution = reply.data["execution"]
+        state = client.call("status", {"execution": execution})
+        assert state["status"] == "failed"
+        cancelled = client.call("cancel", {"execution": execution})
+        assert cancelled.data["status"] == "failed"
+        assert not cancelled.data["cancel_requested"]
+        assert "tab.new" not in [method for method, _ in client.transport.sent]
+    finally:
+        client.context.session.close()
+
+
 def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
     tmp_path, monkeypatch
 ):
