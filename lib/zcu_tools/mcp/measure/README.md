@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-03, analysis execution and autosave
+**Last updated:** 2026-10-03, Lookback recipes and execution control
 
 # `zcu_tools/mcp/measure/`
 
@@ -49,7 +49,7 @@ cfg 與 source_basis，不因後續來源變更而替換輸入。
 
 `shutdown`等待回覆中的GUI PID自然退出，最多五秒，不以shared PID file選程序。不呼叫bridge.stop或送終止信號；請求或等待逾時回stopped=false，讓操作者處理，不自動重試。
 
-`MeasureMcpSession.close()` 永久拒絕新 execution，先喚醒等待、斷線並解除 pending RPC，再 join 本 session 的分析 workers，最後清理 PNG。關閉與 PNG 寫入共用資源鎖，不讓清理後的目錄重生。Server 在 `finally` 呼叫 close，不依賴正常 EOF。這不取消 GUI 已接受的副作用，也不保證硬體停止。
+`MeasureMcpSession.close()` 永久拒絕新 execution，先喚醒等待、斷線並解除 pending RPC，再 join 本 session 的 recipe 與分析 workers，最後清理 PNG。關閉與 PNG 寫入共用資源鎖，不讓清理後的目錄重生。Server 在 `finally` 呼叫 close，不依賴正常 EOF。這不取消 GUI 已接受的副作用，也不保證硬體停止。
 
 ## Library 編輯
 
@@ -62,6 +62,32 @@ Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，M
 `tab_interact` 只轉送一次 active plugin command，不解讀實驗專屬命令。省略 payload 時回 committed state、commands、info、preview_active 與 figure，不改焦點。GUI 先驗證 command，再跟隨 Analysis pane 執行。此介面採 best-effort，不加 seen guard，後提交者為準；沒有來源鎖或重試。
 
 保留命令 `done` 使用 `include_figure=false`，先取得原 operation 的 receipt，不讓 PNG 渲染失敗遮住已接受的命令。MCP 隨後 join 該 op 的 execution；GUI-origin session 尚無 execution 時，done 建立 Primary 完成責任。Done 驗證失敗不保存，也不終止仍可編輯的 session。純讀與普通 command 不接管未登記的 GUI-origin session；已有 execution 時更新其 interaction 快照。Done 以前的 PNG 失敗回 tool error，保留 op／execution，不取消互動。
+
+## Recipes
+
+Root `recipes/` 是普通 Python package。`recipes/__init__.py` 明確登記名稱、schema 與函式，
+MCP assembly 使用同一份 registry 建立 tools。編輯 recipe 函式即可調整流程，沒有目錄掃描或熱重載。
+GUI 仍擁有 cfg defaults、validation、資源 guard 與結果。
+
+`lookback` 新建 tab，或以 `reuse_tab_id` 重設指定的 idle Lookback tab。
+兩條路使用同一套有限參數。明確無效輸入不 fallback，reuse 失敗不另建替代 tab。
+頻率來自明確參數、指定 library readout 的有效 leaf 或 `r_f`。
+沒有可用頻率時回 `needs_parameters`，不以 GUI 模板的盲選頻率開始 Run。
+
+`RecipeContext` 持有固定 GUI binding 與整段進度，只執行一次 Run。
+Raw save 與 Primary analysis 都帶原 Run 來源，GUI 拒絕已被另一輪資料取代的來源。
+Raw 確認成功後才交給既有 AnalysisExecution 分析、逐張存圖與交付 PNG。
+最後讀取同次分析的 writeback 候選，不自動 accept。失敗保留已確認的 raw、圖像路徑與分析結果。
+
+首次 recipe 呼叫最多等 300 秒，逾時返回 execution，worker 繼續。
+`status(execution)` 與 `wait(execution)` 讀取這段流程的本地快照，互動階段立即交接。
+`cancel` 與 `finish_early` 恰好接受 op 或 execution 之一。Recipe 的原 Run op 或目前 op
+都定位同一個控制狀態。Finish early 只在 Run 階段適用，有可用 partial data 才繼續保存與分析。
+Cancel 優先，禁止開始新的保存、分析或 writeback 讀取。已開始的 raw save 不可取消，
+仍等待真成功、失敗或 unknown，不以取消意圖掩蓋保存失敗。
+
+Recipe 沒有重試、tab 自動清理或持久 recovery。背景工作不重連另一個 GUI，
+session close 停止 admission、解除 pending RPC 並 join workers，不保證硬體已停止。
 
 ## Analysis execution
 
