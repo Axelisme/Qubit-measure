@@ -14,8 +14,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtCore import QCoreApplication
-from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.measure.registry import register_all
@@ -49,8 +50,6 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.plotting import FigureContainer
-from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
@@ -163,7 +162,10 @@ def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
         1j * values[:, None] * freqs[None, :] / 10
     )
     cf.state.update_tab_result(
-        tab_id, SimpleNamespace(signals=signals, values=values, freqs=freqs)
+        tab_id,
+        RunRecord(
+            cfg=None, result=FreqFluxResult(signals=signals, values=values, freqs=freqs)
+        ),
     )
     token = cf.ctrl.analyze(tab_id, FluxPickParams())
     cf.view.mount_interactive_analysis.assert_called_once()
@@ -185,13 +187,6 @@ def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
             return True
         time.sleep(step_ms / 1000)
     return False
-
-
-def _make_figure_container() -> FigureContainer:
-    stack = QStackedWidget()
-    placeholder = QLabel("(placeholder)")
-    stack.addWidget(placeholder)
-    return FigureContainer(stack, placeholder)
 
 
 # ---------------------------------------------------------------------------
@@ -848,19 +843,6 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
         DisconnectDeviceRequest(name="flux", remember=False)
     )
     assert _wait_for(lambda: cf.state.get_device("flux") is None)
-
-
-def test_run_clears_active_figure_container_after_finish(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.view.make_run_container.return_value = _make_figure_container()
-
-    cf.ctrl.start_run(
-        tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
-    )
-
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    assert has_current_container() is False
 
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):

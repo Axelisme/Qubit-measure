@@ -36,7 +36,7 @@ def _is_permanently_allowed(path: Path) -> bool:
         or path == Path("runtime.py")
         or path
         in {
-            Path("plotting/backend.py"),
+            Path("plotting/explicit.py"),
             Path("plotting/container.py"),
             Path("plotting/host.py"),
         }

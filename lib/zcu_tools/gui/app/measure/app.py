@@ -16,7 +16,6 @@ from zcu_tools.gui.runtime import (
     GuiAssembly,
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
-    PlotPolicy,
 )
 
 if TYPE_CHECKING:
@@ -53,7 +52,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
     spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
         app_name="measure",
         app_slug="measure",
-        plot_policy=PlotPolicy.EMBEDDED_BACKEND,
         default_control_port=8765,
         logging_extra_namespaces=("zcu_tools.experiment.v2_gui",),
     )

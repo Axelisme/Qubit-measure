@@ -13,8 +13,8 @@
 
 ## GUI Service Architecture
 
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與繪圖責任。
-- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、plotting 與 remote 的責任分界。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與 explicit plotting 責任。
+- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、rendering 初始化與 remote 的責任分界。
 
 ## Cfg / Value Model
 

@@ -1,7 +1,7 @@
 """Shared process runtime for standalone GUI apps.
 
 The runtime owns process-level mechanics shared by GUI entry points:
-logging, matplotlib backend policy, QApplication setup, remote-control socket
+logging, rendering initialization, QApplication setup, remote-control socket
 start/stop, and exit-code handling. App modules provide only their fixed
 runtime contract plus app-specific assembly/lifecycle behavior.
 """
@@ -11,20 +11,11 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, TypeVar, cast
 
 from zcu_tools.gui.logging_setup import setup_gui_logging
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
-
-
-class PlotPolicy(Enum):
-    """Matplotlib process policy for a GUI app."""
-
-    EMBEDDED_BACKEND = "embedded_backend"
-    AGG_ONLY = "agg_only"
-    NONE = "none"
 
 
 @dataclass(frozen=True)
@@ -33,7 +24,6 @@ class GuiRuntimeSpec:
 
     app_name: str
     app_slug: str
-    plot_policy: PlotPolicy
     default_control_port: int
     logging_group: str = "gui"
     logging_extra_namespaces: tuple[str, ...] = ()
@@ -138,7 +128,6 @@ def launch_gui_runtime(
         extra_namespaces=spec.logging_extra_namespaces,
         group=spec.logging_group,
     )
-    _configure_pre_qt_plot_policy(spec.plot_policy)
     control = build_control_options(spec, options)
     behavior = behavior_cls(*args, **kwargs)
     return run_gui_runtime(behavior, control)
@@ -149,7 +138,7 @@ def run_gui_runtime(
 ) -> int:
     """Run an already-instantiated GUI behavior on the Qt event loop."""
     app = _get_or_create_qapplication()
-    _configure_post_qt_plot_policy(behavior.spec.plot_policy, app)
+    _initialize_rendering(app)
 
     assembly = behavior.assemble(control)
     _validate_control_assembly(control, assembly)
@@ -195,35 +184,16 @@ def _start_control_adapter(
     return True
 
 
-def _configure_pre_qt_plot_policy(policy: PlotPolicy) -> None:
-    if policy is PlotPolicy.EMBEDDED_BACKEND:
-        from zcu_tools.gui.plotting.setup import configure_matplotlib_backend
+def _initialize_rendering(app: GuiApplication) -> None:
+    from zcu_tools.gui.plotting import (
+        ensure_host,
+        install_mathtext_lock,
+        prewarm_mathtext,
+        set_shutting_down,
+    )
 
-        configure_matplotlib_backend()
-    elif policy is PlotPolicy.AGG_ONLY:
-        import matplotlib
-
-        matplotlib.use("Agg")
-    elif policy is PlotPolicy.NONE:
-        return
-    else:  # pragma: no cover - Enum exhaustiveness guard.
-        raise ValueError(f"unknown plot policy: {policy!r}")
-
-
-def _configure_post_qt_plot_policy(policy: PlotPolicy, app: GuiApplication) -> None:
-    if policy is PlotPolicy.NONE:
-        return
-
-    from zcu_tools.gui.plotting import install_mathtext_lock, prewarm_mathtext
-
-    if policy is PlotPolicy.EMBEDDED_BACKEND:
-        from zcu_tools.gui.plotting import ensure_host, set_shutting_down
-
-        ensure_host()
-        app.aboutToQuit.connect(lambda: set_shutting_down(True))
-    elif policy is not PlotPolicy.AGG_ONLY:
-        raise ValueError(f"unknown plot policy: {policy!r}")
-
+    ensure_host()
+    app.aboutToQuit.connect(lambda: set_shutting_down(True))
     install_mathtext_lock()
     prewarm_mathtext()
 
@@ -246,7 +216,6 @@ __all__ = [
     "GuiRuntimeBehavior",
     "GuiRuntimeSpec",
     "GuiWindow",
-    "PlotPolicy",
     "GuiApplication",
     "SignalLike",
     "build_control_options",

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-02 — 顯式 RunContext 與取消訊號
+**Last updated:** 2026-10-02, explicit plot host
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -187,7 +187,7 @@ Shared layers:
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
-- `zcu_tools.gui.plotting`：matplotlib backend、figure routing、host/container/export
+- `zcu_tools.gui.plotting`：explicit figure host、container、export
   substrate。
 - `zcu_tools.mcp.measure`：agent-facing MCP policy layer and tool surface。
 
@@ -196,7 +196,7 @@ Shared layers:
 `MeasureGuiBehavior` is the process-runtime behavior for the shared
 `gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
 persistence caretaker, and the app-local `RemoteControlAdapter`
-without owning process policy such as logging, matplotlib backend selection,
+without owning process policy such as logging, rendering initialization,
 `QApplication`, control option construction, or exit-code handling. The
 standalone launcher is the process entrypoint; this module does not expose a
 second `run_app` path. After the window is shown, `after_show` opens the same
@@ -598,9 +598,8 @@ Progress is operation-scoped:
   progress view does not keep an operation pending.
 - Agent polling reads by operation id.
 
-已遷移的adapter在每次run/analyze操作中接收明確的`Plots`；Qt host綁定該pane的
-`FigureContainer`，普通Figure在完成後呈現，liveplot的artist工作交給owner thread。
-舊adapter仍可能使用`gui.plotting`的pyplot routing backend，直到全部實驗遷移完成。
+Adapter 在每次 run/analyze 操作中接收明確的 `Plots`。Qt host 綁定該 pane 的
+`FigureContainer`，普通 Figure 在完成後呈現，liveplot 的 artist 工作交給 owner thread。
 關閉視窗不會將plot host設為全域shutdown；Qt runtime在`aboutToQuit`處理該狀態。
 Figure export uses fixed
 logical sizes so outputs do not depend on window size: saved images use a 12×9 inch

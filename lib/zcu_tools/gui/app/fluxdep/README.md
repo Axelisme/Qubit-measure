@@ -100,18 +100,12 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
 **v2 search 診斷圖走共用 plot substrate**（`zcu_tools.gui.plotting`，與 measure 共用）：
 [search kernel](../../../analysis/fluxdep/README.md) 只算數值；
 [診斷圖 builder](../../../plotting/fluxdep/README.md) 回傳原生 Agg Figure。Qt 在主執行緒記錄搜尋結果後，才建圖、adopt `diagnostic` 並透過 Plots／QtPlotHost 呈現。Panel 持有明確的 owner scheduler 與 presentation 使用期；替換和關窗 release，舊原生圖仍可保存。診斷圖失敗另報 warning，結果與 export 仍可用。Notebook caller 以 IPython display 發布普通圖。
-Process runtime 的舊 backend 初始化仍待整體退場，search 不再使用其 routing。共用套件:
-- `plotting/backend.py`（client）：`module://zcu_tools.gui.plotting.backend`，攔 `plt.figure()` →
-  attach 到當前 `FigureContainer`；`plt.show()` → activate（**未 attach 則 raise**，Fast-Fail 統一）；
-  `GuiFigureCanvas.draw_idle` 吃跨線程。
-- `plotting/host.py`：單一主線程 bridge QObject（訊號在 host）+ figure registry + lifecycle。
-- `plotting/routing.py`：task-local `ContextVar`（共用版統一用此，fluxdep 單槽是退化用法）。
-- `runtime.py`：`FluxDepGuiBehavior.spec` 宣告 app slug、default control port
-  與 embedded plot policy；`gui.runtime` 在 behavior 建立前設定 logging 與
-  matplotlib backend，建立 `QApplication` 後處理 `ensure_host()` /
-  `aboutToQuit→set_shutting_down(True)` / adapter start-stop。`app.py` 的
-  behavior 只做 controller/window/adapter wiring；process entrypoint 只在
-  `scripts/run_fluxdep_gui.py`。
+共用套件分工：
+- `plotting/host.py` 提供 explicit attach／remove 的主執行緒 bridge 與 figure registry。
+- `runtime.py` 在 behavior 建立前設定 logging，在 QApplication 建立後初始化
+  host、shutdown callback 與 mathtext 支援，不切換全域 Matplotlib backend。
+- `FluxDepGuiBehavior.spec` 宣告 app slug 與 default control port。`app.py` 只做
+  controller/window/adapter wiring；程序入口位於 `scripts/run_fluxdep_gui.py`。
 - **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
   worker 經 `compute_search(pbar_factory=...)` 安裝進度通知。主執行緒的成功 callback 先記錄結果，
   再透過該 panel 的 explicit host 呈現診斷圖。
@@ -212,9 +206,7 @@ search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（預設按 `viz.derive_auto_limits` = notebook
     `auto_derive_limits`）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
   AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
-- **pyplot Gcf 累積坑**：診斷圖 builder 的 `plt.figure()` 不 close 會堆進 pyplot 全域 figure 堆疊，
-  第二次 search 的 `plt.show()` 會作用在已 detach 的舊 figure → backend raise「not attached」+ 圖只剩標題。
-  修法：`_on_search` 每次 `plt.close("all")` 清 Gcf（只丟 pyplot 引用，已內嵌的 canvas 仍活在 container）。
+- Search 診斷图 builder 建立原生 Agg Figure，不登記 pyplot manager。Panel 替換或關閉時 release presentation，不以全域 `plt.close("all")` 管理其他 caller 的圖。
 - `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
   與任意 `transitions{n}`/`mirror{n}` 動態 list 群）——這正是 extra_items 的設計用途，**不改 pydantic/
   dataclass**（會更弱型）。

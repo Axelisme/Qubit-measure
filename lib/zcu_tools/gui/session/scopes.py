@@ -3,9 +3,6 @@
 ``progress_ambient`` is the only helper here: it carries the pbar ContextVar
 into a worker thread. It is session-layer (no Qt, no figure routing) so both
 the session device service and the app-layer run/analyze services can use it.
-
-``figure_ambient`` (app-layer, Qt-dependent) lives in
-``gui/app/measure/services/scopes.py``.
 """
 
 from __future__ import annotations
@@ -23,8 +20,7 @@ def progress_ambient(
     current thread.  If ``pbar_factory`` is ``None`` this is a no-op.
 
     Session-layer: imports only ``progress_bar.interface`` (no Qt, no routing).
-    Used by device-setup work thunks (session) and by run work thunks (app,
-    nesting inside ``figure_ambient``).
+    Used by device-setup work thunks (session) and run work thunks (app).
     """
     if pbar_factory is None:
         with nullcontext():
