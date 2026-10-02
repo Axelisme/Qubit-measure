@@ -95,6 +95,7 @@ class RunAnalyzeControlPort(Protocol):
     ) -> int: ...
     def get_interactive(self, tab_id: str) -> ActiveInteractive | None: ...
     def get_interactive_operation(self, tab_id: str) -> int | None: ...
+    def require_run_operation(self, tab_id: str, operation_id: int) -> None: ...
     def require_analysis_operation(
         self,
         tab_id: str,
@@ -225,6 +226,9 @@ class RunAnalyzeControlFacet:
     def get_interactive_operation(self, tab_id: str) -> int | None:
         return self._analyze.get_interactive_operation(tab_id)
 
+    def require_run_operation(self, tab_id: str, operation_id: int) -> None:
+        self._state.require_run_operation(tab_id, operation_id)
+
     def require_analysis_operation(
         self,
         tab_id: str,
@@ -259,6 +263,8 @@ class RunAnalyzeControlFacet:
         run_operation_id: int | None = None,
     ) -> int:
         self._access.require_available()
+        if run_operation_id is not None:
+            self._state.require_run_operation(tab_id, run_operation_id)
         permit = self._guard.acquire_analyze_permit(tab_id)
         self._ensure_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)

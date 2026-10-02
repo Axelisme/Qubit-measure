@@ -95,6 +95,9 @@ def h_tab_analyze(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    run_operation_id = cast(int | None, params.get("run_operation_id"))
+    if run_operation_id is not None:
+        control.require_run_operation(tab_id, run_operation_id)
     snap = control.get_tab_snapshot(tab_id)
     # Order the checks by the true cause: analyze params only exist once a run
     # produced a result (they are built from it). A run-in-flight / failed /
@@ -139,7 +142,7 @@ def h_tab_analyze(
             invalidated.append("post.writeback")
     follow_tab(adapter, tab_id, "analysis")
     operation_id = control.analyze(
-        tab_id, updated, run_operation_id=cast(int | None, params["run_operation_id"])
+        tab_id, updated, run_operation_id=run_operation_id
     )
     return {
         "operation_id": operation_id,
