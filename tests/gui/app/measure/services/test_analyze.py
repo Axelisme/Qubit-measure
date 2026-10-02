@@ -201,6 +201,27 @@ def test_start_analyze_rejects_busy_tab(qapp):
 # ---------------------------------------------------------------------------
 
 
+def test_finished_analysis_keeps_captured_inputs_across_later_edits(qapp):
+    state = _make_state()
+    svc, bg = _make_service(state, EventBus())
+    supplied = {"threshold": 0.3}
+    token = svc.start_analyze(
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=supplied
+    )
+    state.update_tab_analyze_param_instance("tab1", {"threshold": 0.7})
+    result = MagicMock()
+    result.figure = None
+    assert bg.last_on_done is not None
+    bg.last_on_done(result)
+    supplied["threshold"] = 0.5
+    state.update_tab_analyze_param_instance("tab1", {"threshold": 0.9})
+    pane = state.get_tab("tab1").analysis
+    assert pane.result is result
+    assert pane.source_operation_id == token
+    assert pane.result_params == {"threshold": 0.3}
+    assert pane.params == {"threshold": 0.9}
+
+
 def test_on_analyze_finished_updates_state(qapp):
     state = _make_state()
     bus = EventBus()
