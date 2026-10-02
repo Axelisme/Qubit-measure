@@ -1091,7 +1091,7 @@ def test_save_image_delegates_to_save_control(fx):
         side_effect=AssertionError("tab.save_image must use save_control")
     )
     fx.service.save_control.save_image = MagicMock(  # type: ignore[method-assign]
-        side_effect=lambda _tab, _key, path: path
+        side_effect=lambda _tab, _key, path, *, operation_id: path
     )
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)

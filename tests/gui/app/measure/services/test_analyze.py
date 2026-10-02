@@ -465,7 +465,7 @@ def test_finished_analysis_keeps_captured_inputs_across_later_edits(qapp):
     svc, bg = _make_service(state, EventBus())
     supplied = {"threshold": 0.3}
     token = svc.start_analyze(
-        AnalyzePermit(tab_id="tab1"), analyze_params_instance=supplied
+        AnalyzePermit(tab_id="tab1"), analyze_params_instance=supplied, plots=_plots()
     )
     state.update_tab_analyze_param_instance("tab1", {"threshold": 0.7})
     result = MagicMock()
@@ -845,7 +845,11 @@ def test_cancelled_interaction_retains_previous_pane_operation_sources(qapp):
         "pick", 2, (), lambda _state: None, lambda _value: MagicMock(figure=None)
     )
     token = svc.start_plugin(
-        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+        AnalyzePermit(tab_id="tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance={},
+        plots=_plots(),
     )
     assert svc.get_interactive_operation("tab1") == token
     assert svc.cancel_interactive("tab1") is True

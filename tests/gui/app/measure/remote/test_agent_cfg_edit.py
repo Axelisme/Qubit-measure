@@ -189,10 +189,10 @@ def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch
     release = Event()
     original_run = FakeAdapter.run
 
-    def blocked_run(self, req, raw_cfg):
+    def blocked_run(self, req, raw_cfg, *, context):
         if not release.wait(timeout=5):
             raise TimeoutError("test did not release the fake run")
-        return original_run(self, req, raw_cfg)
+        return original_run(self, req, raw_cfg, context=context)
 
     monkeypatch.setattr(FakeAdapter, "run", blocked_run)
     sock = open_client(fixture.service.port)

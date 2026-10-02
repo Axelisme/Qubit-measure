@@ -216,7 +216,9 @@ def test_finished_post_analysis_keeps_captured_inputs_across_later_edits(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     supplied = {"threshold": 0.3}
-    token = svc.start_post_analyze("tab1", post_analyze_params_instance=supplied)
+    token = svc.start_post_analyze(
+        "tab1", post_analyze_params_instance=supplied, plots=Plots(NonPresentingHost())
+    )
     state.update_tab_post_analyze_param_instance("tab1", {"threshold": 0.7})
     result = MagicMock()
     result.figure = None
