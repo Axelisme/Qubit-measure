@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import asdict, is_dataclass
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
@@ -17,6 +18,14 @@ from .tab import tab_operation_state
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+
+def _params_to_wire(params: object) -> dict[str, object] | None:
+    if params is None:
+        return None
+    if not is_dataclass(params) or isinstance(params, type):
+        return {}
+    return asdict(params)
 
 
 def h_analyze_cancel(
@@ -53,7 +62,9 @@ def h_tab_get_analyze_result(
         )
     reply = {"summary": to_summary()}
     if operation_id is not None:
+        pane = control.get_tab_snapshot(tab_id).analysis
         reply.update(
+            params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
         )
@@ -63,8 +74,6 @@ def h_tab_get_analyze_result(
 def h_tab_get_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    import dataclasses
-
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
@@ -74,11 +83,7 @@ def h_tab_get_analyze_params(
         adapter.tab_control.get_tab_adapter_name(tab_id), stage="primary"
     )
     ap = None if snap.analysis is None else snap.analysis.params
-    if ap is None:
-        return {"analyze_params": None, "definitions": definitions}
-    if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
-        return {"analyze_params": {}, "definitions": definitions}
-    return {"analyze_params": dataclasses.asdict(ap), "definitions": definitions}
+    return {"analyze_params": _params_to_wire(ap), "definitions": definitions}
 
 
 def h_tab_analyze(
@@ -163,7 +168,9 @@ def h_tab_get_post_analyze_result(
         )
     reply = {"summary": to_summary()}
     if operation_id is not None:
+        pane = control.get_tab_snapshot(tab_id).post_analysis
         reply.update(
+            params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
         )
@@ -173,8 +180,6 @@ def h_tab_get_post_analyze_result(
 def h_tab_get_post_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    import dataclasses
-
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
@@ -184,11 +189,7 @@ def h_tab_get_post_analyze_params(
         adapter.tab_control.get_tab_adapter_name(tab_id), stage="post"
     )
     pp = None if snap.post_analysis is None else snap.post_analysis.params
-    if pp is None:
-        return {"post_analyze_params": None, "definitions": definitions}
-    if not dataclasses.is_dataclass(pp) or isinstance(pp, type):
-        return {"post_analyze_params": {}, "definitions": definitions}
-    return {"post_analyze_params": dataclasses.asdict(pp), "definitions": definitions}
+    return {"post_analyze_params": _params_to_wire(pp), "definitions": definitions}
 
 
 def h_tab_post_analyze(

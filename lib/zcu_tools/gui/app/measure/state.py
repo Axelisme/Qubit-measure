@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
@@ -73,6 +74,7 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     writeback_draft: object | None = None
     image_path_override: str | None = None
     source_operation_id: int | None = None
+    result_params: T_AnalyzeParams | None = None
 
 
 @dataclass
@@ -83,6 +85,7 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     writeback_draft: object | None = None
     image_path_override: str | None = None
     source_operation_id: int | None = None
+    result_params: T_AnalyzeParams | None = None
 
 
 @dataclass
@@ -511,6 +514,7 @@ class State(SessionState):
             AnalysisPaneState(
                 result=analyze_result,
                 source_operation_id=source_operation_id,
+                result_params=deepcopy(params),
                 figure=figure,
                 params=params,
                 writeback_draft=writeback_draft,
@@ -601,6 +605,7 @@ class State(SessionState):
             PostAnalysisPaneState(
                 result=post_analyze_result,
                 source_operation_id=source_operation_id,
+                result_params=deepcopy(params),
                 figure=figure,
                 params=params,
                 writeback_draft=writeback_draft,

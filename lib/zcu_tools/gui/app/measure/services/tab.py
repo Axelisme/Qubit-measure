@@ -133,6 +133,7 @@ class TabService:
                 image_path=analysis_image_path,
                 has_writeback_draft=tab.analysis.writeback_draft is not None,
                 source_operation_id=tab.analysis.source_operation_id,
+                result_params=tab.analysis.result_params,
             ),
             post_analysis=PostAnalysisPaneSnapshot(
                 params=tab.post_analysis.params,
@@ -142,6 +143,7 @@ class TabService:
                 image_path=post_image_path,
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
                 source_operation_id=tab.post_analysis.source_operation_id,
+                result_params=tab.post_analysis.result_params,
             ),
             save=SavePaneSnapshot(data_path=data_path, comment=tab.save.comment),
             paths=TabPathsSnapshot(

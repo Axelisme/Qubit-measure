@@ -122,6 +122,7 @@ class AnalysisPaneSnapshot:
     image_path: PathResourceSnapshot
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
+    result_params: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +134,7 @@ class PostAnalysisPaneSnapshot:
     image_path: PathResourceSnapshot
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
+    result_params: object | None = None
 
 
 @dataclass(frozen=True, slots=True)

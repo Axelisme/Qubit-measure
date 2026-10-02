@@ -12,6 +12,11 @@ from ._helpers import Fixture, call, mcp_client, open_client
 
 
 @dataclass
+class ScalarParams:
+    threshold: float
+
+
+@dataclass
 class ScalarResult:
     value: float
     figure: Figure | None
@@ -97,6 +102,46 @@ def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path)
         assert second["summary"] == current.result.to_summary_dict()
     finally:
         bridge.disconnect()
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
+    fx, stage
+):
+    tab = fx.ctrl.new_tab("fake")
+    fx.state.update_tab_result(tab, object())
+    if stage == "post_analysis":
+        _install_result(fx, tab, "analysis", 1.0, 100)
+    original = ScalarParams(0.3)
+    update_params = (
+        fx.state.update_tab_analyze_param_instance
+        if stage == "analysis"
+        else fx.state.update_tab_post_analyze_param_instance
+    )
+    update_params(tab, original)
+    _install_result(fx, tab, stage, 3.0, 101)
+    # The installed result owns a detached input, not the next-edit draft.
+    original.threshold = 0.5
+    update_params(tab, ScalarParams(0.7))
+    with open_client(fx.service.port) as sock:
+        observed = call(
+            sock, _result_method(stage), {"tab_id": tab, "operation_id": 101}
+        )["result"]
+        assert observed["params"] == {"threshold": 0.3}
+        assert observed["summary"] == {"value": 3.0}
+        assert call(sock, _result_method(stage), {"tab_id": tab})["result"] == {
+            "summary": {"value": 3.0}
+        }
+        _install_result(fx, tab, stage, 7.0, 102)
+        replaced = call(
+            sock, _result_method(stage), {"tab_id": tab, "operation_id": 101}
+        )
+        assert replaced["error"]["reason"] == "result_superseded"
+        current = call(
+            sock, _result_method(stage), {"tab_id": tab, "operation_id": 102}
+        )["result"]
+        assert current["params"] == {"threshold": 0.7}
+        assert current["summary"] == {"value": 7.0}
 
 
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
