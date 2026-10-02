@@ -349,7 +349,7 @@ def test_setup_flux_point_updates_selected_device_before_setup(
         value: ExpCfgModel, devices, *, progress: bool, cancel_signal
     ) -> None:
         assert devices is env.context.devices
-        assert cancel_signal is env.context.cancel_signal.event
+        assert cancel_signal is env.context.cancel_signal
         setup_calls.append((value, progress))
 
     monkeypatch.setattr(acquire_mod, "setup_devices", record_setup)
