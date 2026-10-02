@@ -15,7 +15,7 @@ _PNG = base64.b64decode(
 )
 
 
-def _scalar(value):
+def _scalar(value: object) -> dict[str, Any]:
     return {
         "kind": "scalar",
         "valid": True,
@@ -29,7 +29,7 @@ def _scalar(value):
     }
 
 
-def _section(**children):
+def _section(**children: dict[str, Any]) -> dict[str, Any]:
     return {"kind": "section", "valid": True, "children": children}
 
 
@@ -37,7 +37,7 @@ class LookbackGui:
     """GUI collaborator with distinct Run, save and analysis wire identities."""
 
     def __init__(self):
-        self.publication = {
+        self.publication: dict[str, Any] = {
             "cfg_ref": {"cfg_id": "cfg", "revision": "2"},
             "status": "Valid",
             "source_basis": [],
@@ -67,7 +67,7 @@ class LookbackGui:
         self.ran = False
         self.raw_saved = False
 
-    def _observations(self):
+    def _observations(self) -> dict[str, dict[str, Any]]:
         return {
             "context.snapshot": {
                 "label": "sample",
@@ -98,7 +98,7 @@ class LookbackGui:
             },
         }
 
-    def _edit(self, params):
+    def _edit(self, params: dict[str, Any]) -> None:
         assert params["expected"] == self.publication["cfg_ref"]
         for edit in params["edits"]:
             node = self.publication["tree"]
@@ -111,7 +111,7 @@ class LookbackGui:
         revision = int(self.publication["cfg_ref"]["revision"]) + 1
         self.publication["cfg_ref"]["revision"] = str(revision)
 
-    def __call__(self, method, params):
+    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
         if method in observations:
             expected = {
@@ -142,7 +142,7 @@ class LookbackGui:
             return {"reason": "completed", "status": "finished"}
         return self._analysis(method, params)
 
-    def _analysis(self, method, params):
+    def _analysis(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.analyze":
             assert self.raw_saved
             assert params == {"tab_id": "t", "updates": {}, "run_operation_id": 71}
