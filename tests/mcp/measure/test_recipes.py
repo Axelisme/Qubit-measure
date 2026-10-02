@@ -16,8 +16,8 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
 ):
     tab = reuse_tab_id or "new"
     publication = {
-        "cfg_ref": {"identity": "cfg", "revision": "2"},
-        "status": "valid",
+        "cfg_ref": {"cfg_id": "cfg", "revision": "2"},
+        "status": "Valid",
         "source_basis": [],
         "diagnostics": [],
         "tree": {
@@ -46,7 +46,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         if method == "tab.snapshot":
             return {"tabs": [{
                 "tab_id": tab,
-                "adapter_name": "Lookback",
+                "adapter_name": "lookback",
                 "interaction": {
                     "is_running": False, "is_analyzing": False, "is_saving_data": False
                 },
