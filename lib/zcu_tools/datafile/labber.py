@@ -1163,18 +1163,9 @@ def _read_single_log(f, log):
     return z, axes, ts_rel
 
 
-def _read_uniform_multi_channel_log(
-    f: h5py.File, log: h5py.File | h5py.Group
-) -> tuple[
-    dict[str, tuple[str, np.ndarray]],
-    list[tuple[str, str, np.ndarray]],
-    np.ndarray | None,
-]:
-    """Read one scalar multi-channel log with strict Labber bookkeeping."""
-    if "Traces" in log:
-        raise ValueError("grouped v2 does not support vector or trace log channels")
-
-    source = log if "Log list" in log else f
+def _read_v2_log_channel_bookkeeping(
+    source: h5py.File | h5py.Group, channel_source: h5py.File | h5py.Group
+) -> tuple[list[str], h5py.Dataset, h5py.Group]:
     log_list = source.get("Log list")
     if not isinstance(log_list, h5py.Dataset):
         raise ValueError("grouped v2 log is missing Log list")
@@ -1184,7 +1175,6 @@ def _read_uniform_multi_channel_log(
     if len(set(channel_names)) != len(channel_names):
         raise ValueError("grouped v2 log channel labels must be unique")
 
-    channel_source = log if "Channels" in log else f
     channels_dataset = channel_source.get("Channels")
     if not isinstance(channels_dataset, h5py.Dataset):
         raise ValueError("grouped v2 log is missing Channels")
@@ -1211,7 +1201,12 @@ def _read_uniform_multi_channel_log(
     ]
     if set(configured_defaults) != set(channel_names):
         raise ValueError("grouped v2 Labber channel bookkeeping is inconsistent")
+    return channel_names, channels_dataset, instrument_config
 
+
+def _read_v2_scalar_data_columns(
+    log: h5py.File | h5py.Group, channel_names: list[str]
+) -> tuple[h5py.Group, np.ndarray, list[tuple[str, str]]]:
     data_group = log.get("Data")
     if not isinstance(data_group, h5py.Group):
         raise ValueError("grouped v2 log is missing Data group")
@@ -1222,7 +1217,7 @@ def _read_uniform_multi_channel_log(
     ):
         raise ValueError("grouped v2 Data group is incomplete")
     data = np.asarray(data_dataset[()])
-    n_x, n_col, n_entry = data.shape
+    _n_x, n_col, _n_entry = data.shape
     columns = [
         (_decode(name) or "", _decode(info) or "")
         for name, info in channel_names_dataset[()]
@@ -1238,10 +1233,15 @@ def _read_uniform_multi_channel_log(
     if any(info for _name, info in columns[:n_axes]):
         raise ValueError("grouped v2 step-channel columns have invalid bookkeeping")
 
-    step_dims = _read_strict_v2_step_dimensions(
-        log, data_group, n_x=n_x, n_entry=n_entry, n_axes=n_axes
-    )
-    step_names = [name for name, _info in columns[:n_axes]]
+    return data_group, data, columns
+
+
+def _validate_v2_step_bookkeeping(
+    source: h5py.File | h5py.Group,
+    channels_dataset: h5py.Dataset,
+    instrument_config: h5py.Group,
+    step_names: list[str],
+) -> None:
     configured_steps = [
         _decode(row["name"]) or ""
         for row in channels_dataset[()]
@@ -1266,7 +1266,15 @@ def _read_uniform_multi_channel_log(
     ):
         raise ValueError("grouped v2 step-channel bookkeeping is inconsistent")
 
-    units = _channel_units(f, log)
+
+def _decode_v2_common_grid(
+    data: np.ndarray,
+    columns: list[tuple[str, str]],
+    step_dims: list[int],
+    units: dict[str, str],
+) -> list[tuple[str, str, np.ndarray]]:
+    n_x, _n_col, n_entry = data.shape
+    n_axes = len(step_dims)
     axes: list[tuple[str, str, np.ndarray]] = []
     for k in range(n_axes):
         name = columns[k][0]
@@ -1291,6 +1299,40 @@ def _read_uniform_multi_channel_log(
             expected_steps[:, col, :] = axes[col][2][multi[j]][None, :]
     if not np.array_equal(data[:, :n_axes, :], expected_steps, equal_nan=True):
         raise ValueError("grouped v2 step-coordinate columns do not match the grid")
+    return axes
+
+
+def _read_uniform_multi_channel_log(
+    f: h5py.File, log: h5py.File | h5py.Group
+) -> tuple[
+    dict[str, tuple[str, np.ndarray]],
+    list[tuple[str, str, np.ndarray]],
+    np.ndarray | None,
+]:
+    """Read one scalar multi-channel log with strict Labber bookkeeping."""
+    if "Traces" in log:
+        raise ValueError("grouped v2 does not support vector or trace log channels")
+
+    source = log if "Log list" in log else f
+    channel_source = log if "Channels" in log else f
+    channel_names, channels_dataset, instrument_config = (
+        _read_v2_log_channel_bookkeeping(source, channel_source)
+    )
+    data_group, data, columns = _read_v2_scalar_data_columns(log, channel_names)
+    n_x, n_col, n_entry = data.shape
+    n_axes = n_col - 2 * len(channel_names)
+    step_dims = _read_strict_v2_step_dimensions(
+        log, data_group, n_x=n_x, n_entry=n_entry, n_axes=n_axes
+    )
+    _validate_v2_step_bookkeeping(
+        source,
+        channels_dataset,
+        instrument_config,
+        [name for name, _info in columns[:n_axes]],
+    )
+    units = _channel_units(f, log)
+    axes = _decode_v2_common_grid(data, columns, step_dims, units)
+    outer_shape = tuple(step_dims[1:][::-1])
 
     values_by_channel: dict[str, tuple[str, np.ndarray]] = {}
     for index, name in enumerate(channel_names):
