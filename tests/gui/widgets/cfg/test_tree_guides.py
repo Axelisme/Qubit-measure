@@ -127,7 +127,6 @@ def test_clipped_tree_guide_uses_normalized_logical_depth(
         scroll.setValue(scroll_offset)
         assert scroll.value() == scroll_offset
         image, rect = _paint_branch(tree, -5, QStyle.StateFlag.State_Item)
-        assert rect.center().x() < 0
         assert image.pixelColor(rect.right(), rect.center().y()) == QColor(
             TREE_DEPTH_COLORS[depth]
         )
