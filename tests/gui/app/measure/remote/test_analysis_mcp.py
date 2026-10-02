@@ -97,7 +97,12 @@ def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path)
         assert not previous.is_active
         current = fx.state.get_tab(tab).analysis
         assert current.writeback_draft is not previous
-        assert second["summary"] == current.result.to_summary_dict()
+        assert second["result"]["summary"] == current.result.to_summary_dict()
+        assert second["save_status"] == "saved"
+        assert second["saved_images"]
+        assert all(
+            Path(item["image_path"]).is_file() for item in second["saved_images"]
+        )
     finally:
         bridge.disconnect()
 
