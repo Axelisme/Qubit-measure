@@ -99,6 +99,23 @@ class _RpcFailure(RuntimeError):
         self.cause = cause
 
 
+@dataclass(frozen=True)
+class CancelError:
+    reason: str
+    message: str
+    code: str | None = None
+
+
+@dataclass(frozen=True)
+class GuiCancel:
+    status: Literal["requested", "not_cancellable", "not_needed", "failed"]
+    error: CancelError | None = None
+
+
+class _ContinuationCancelled(Exception):
+    """A latched intent stopped a not-yet-admitted continuation step."""
+
+
 class AnalysisExecution:
     """One fixed GUI binding and detached observations of its completion."""
 
@@ -118,6 +135,7 @@ class AnalysisExecution:
         self._condition = Condition()
         self._images: tuple[PngImage, ...] = ()
         self._thread: Thread | None = None
+        self._gui_cancel: GuiCancel | None = None
 
     def snapshot(self) -> ExecutionSnapshot:
         with self._condition:
@@ -149,7 +167,56 @@ class AnalysisExecution:
 
     def cancel(self) -> ToolReply:
         """Latch continuation cancellation, then request stop on the original binding."""
-        raise NotImplementedError("execution cancellation is not implemented")
+        with self._condition:
+            if self._snapshot.phase == "terminal":
+                return self._cancel_reply(GuiCancel("not_needed"))
+            if self._snapshot.cancel_requested:
+                self._condition.wait_for(lambda: self._gui_cancel is not None)
+                assert self._gui_cancel is not None
+                return self._cancel_reply(self._gui_cancel)
+            self._snapshot = replace(
+                self._snapshot, cancel_requested=True, status="running"
+            )
+            self._condition.notify_all()
+        # Never hold the execution lock while waiting for RPC serialization.
+        try:
+            reply = self._connection.read_internal(
+                "operation.cancel", {}, operation_handle=self._snapshot.op
+            )
+            status = reply.get("status")
+            if status == "cancelling":
+                result = GuiCancel("requested")
+            elif status in ("finished", "cancelled"):
+                result = GuiCancel("not_needed")
+            else:
+                raise GuiRpcError(
+                    "invalid cancel reply", reason="incompatible_wire"
+                )
+        except Exception as exc:  # noqa: BLE001 - cancellation retains partial intent
+            if isinstance(exc, GuiRpcError) and exc.reason == "not_cancellable":
+                result = GuiCancel("not_cancellable")
+            else:
+                result = GuiCancel(
+                    "failed",
+                    CancelError(
+                        (exc.reason or "cancel_failed")
+                        if isinstance(exc, GuiRpcError)
+                        else "cancel_failed",
+                        str(exc),
+                        exc.code if isinstance(exc, GuiRpcError) else None,
+                    ),
+                )
+        with self._condition:
+            self._gui_cancel = result
+            self._condition.notify_all()
+            return self._cancel_reply(result)
+
+    def _cancel_reply(self, result: GuiCancel) -> ToolReply:
+        return ToolReply(
+            {**asdict(deepcopy(self._snapshot)), "gui_cancel": asdict(result)},
+            self._images,
+            is_error=result.status == "failed",
+        )
 
     def observe_interaction(self, reply: ToolReply, *, done: bool = False) -> None:
         """Keep the latest handoff without replacing an observed completion."""
@@ -195,6 +262,8 @@ class AnalysisExecution:
         with self._condition:
             if self._closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
+            if phase != "operation" and self._snapshot.cancel_requested:
+                raise _ContinuationCancelled
             self._snapshot = replace(
                 self._snapshot,
                 phase=phase,
@@ -221,6 +290,8 @@ class AnalysisExecution:
                 operation_handle=self._snapshot.op,
                 before_send=lambda: self._admit(phase, image),
             )
+        except _ContinuationCancelled:
+            raise
         except Exception as exc:
             raise _RpcFailure(phase, exc) from exc
 
@@ -257,10 +328,26 @@ class AnalysisExecution:
             if not self._await_operation():
                 return
             self._complete_analysis()
+        except _ContinuationCancelled:
+            self._finish()
         except _RpcFailure as failure:
             self._fail(failure.cause, failure.phase)
         except Exception as exc:  # noqa: BLE001 - worker boundary must publish every failure
             self._fail(exc)
+
+    def _finish(self, **changes: Any) -> None:
+        with self._condition:
+            snapshot = replace(self._snapshot, **changes)
+            save_status = snapshot.save_status
+            if save_status == "saving" and snapshot.unconfirmed_image is None:
+                save_status = "incomplete" if snapshot.remaining_images else "saved"
+            self._snapshot = replace(
+                snapshot,
+                status="cancelled" if snapshot.cancel_requested else "finished",
+                phase="terminal",
+                save_status=save_status,
+            )
+            self._condition.notify_all()
 
     def _await_operation(self) -> bool:
         while True:
@@ -311,9 +398,7 @@ class AnalysisExecution:
             result=result, params=deepcopy(result.params), remaining_images=names
         )
         if not names:
-            self._publish(
-                save_status="not_available", status="finished", phase="terminal"
-            )
+            self._finish(save_status="not_available")
             return
         saved: list[SavedImage] = []
         for index, name in enumerate(names):
@@ -352,10 +437,7 @@ class AnalysisExecution:
         path = self._session.write_png(image.data)
         with self._condition:
             self._images = (image,)
-            self._snapshot = replace(
-                self._snapshot, figure=str(path), status="finished", phase="terminal"
-            )
-            self._condition.notify_all()
+            self._finish(figure=str(path))
 
 
 class AnalysisExecutions:
