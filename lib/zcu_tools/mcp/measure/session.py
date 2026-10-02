@@ -160,7 +160,7 @@ class MeasureMcpSession:
 
         def expose_operation(self, gui_id: object) -> int:
             with self._session._rpc_lock:
-                self._session._require_connection(self._generation)
+                self._session._require_generation(self._generation)
                 return self._session._expose_operation(gui_id)
 
     def __init__(
