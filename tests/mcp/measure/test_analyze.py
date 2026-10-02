@@ -100,6 +100,18 @@ def _methods(client: MeasureClient) -> list[str]:
     ]
 
 
+def _result_reply(pane: str, names: list[str], params: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "summary": {"frequency": 5.0},
+        "params": params,
+        "operation_state": {
+            f"{pane}_state": {
+                "figure_names": names, "has_figure": bool(names), "available": True,
+            },
+        },
+    }
+
+
 @pytest.mark.parametrize(
     "payload", [None, {"command": "set_value", "args": {"x": 2}}, {"command": "done"}]
 )
@@ -194,17 +206,10 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
             assert params == {"tab_id": "t", "operation_id": 71}
-            return {
-                "summary": {"frequency": 5.0},
-                "params": {"gain": 2, "model": "fit"},
-                "operation_state": {
-                    f"{pane}_state": {
-                        "figure_names": ["fit", "residual"] if has_figure else [],
-                        "has_figure": has_figure,
-                        "available": True,
-                    },
-                },
-            }
+            return _result_reply(
+                pane, ["fit", "residual"] if has_figure else [],
+                {"gain": 2, "model": "fit"},
+            )
         if name == "tab.save_image":
             assert params == {
                 "tab_id": "t",
@@ -411,19 +416,9 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
         if name == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
-            return {
-                "summary": {"frequency": 5.0},
-                "params": {},
-                "operation_state": {
-                    (
-                        "analysis_state"
-                        if stage == "primary"
-                        else "post_analysis_state"
-                    ): {
-                        "figure_names": ["fit"],
-                    }
-                },
-            }
+            return _result_reply(
+                "analysis" if stage == "primary" else "post_analysis", ["fit"], {},
+            )
         if name == "tab.save_image":
             return {"image_path": "/actual/fit.png"}
         assert name == "tab.get_figure"
@@ -452,3 +447,94 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
         "tab.save_image",
         "tab.get_figure",
     ]
+
+
+@pytest.mark.parametrize(
+    "failure,phase,save_status,confirmed,unconfirmed",
+    [
+        ("result_rejected", "result_read", "not_started", [], None),
+        ("save_rejected", "image_save", "incomplete", ["fit"], None),
+        ("save_lost", "image_save", "unknown", ["fit"], "residual"),
+        ("save_bad_path", "image_save", "unknown", ["fit"], "residual"),
+        ("after_result_eof", "image_save", "incomplete", [], None),
+        ("after_save_eof", "figure_read", "saved", ["fit", "residual"], None),
+        ("preview_rejected", "figure_read", "saved", ["fit", "residual"], None),
+        ("local_write", "figure_read", "saved", ["fit", "residual"], None),
+    ],
+)
+def test_analysis_failure_retains_confirmed_prefix_without_replay(
+    tmp_path, clients, monkeypatch, failure, phase, save_status, confirmed, unconfirmed,
+):
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {
+                "operation_id": 71, "interactive": False, "params": {"gain": 2},
+                "invalidated_on_success": [],
+            }
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.get_analyze_result":
+            if failure == "after_result_eof":
+                client.transport.is_open = False
+            return _result_reply("analysis", ["fit", "residual"], {"gain": 2})
+        if method == "tab.save_image":
+            if params["figure_name"] == "residual":
+                if failure == "save_lost":
+                    client.transport.is_open = False
+                    raise OSError("socket closed during image save")
+                if failure == "save_bad_path":
+                    return {"image_path": None}
+                if failure == "after_save_eof":
+                    client.transport.is_open = False
+            return {"image_path": f"/actual/{params['figure_name']}.png"}
+        assert method == "tab.get_figure"
+        return {"png_b64": base64.b64encode(_PNG).decode()}
+
+    client = _client(tmp_path, clients, respond)
+    rejection = {
+        "ok": False,
+        "error": {
+            "code": "precondition_failed", "reason": "superseded_result",
+            "message": "original analysis was replaced",
+        },
+    }
+    if failure == "result_rejected":
+        client.transport.replies["tab.get_analyze_result"] = rejection
+    elif failure == "save_rejected":
+        client.transport.replies["tab.save_image"] = lambda params: (
+            rejection if params["figure_name"] == "residual"
+            else {"ok": True, "result": {"image_path": "/actual/fit.png"}}
+        )
+    elif failure == "preview_rejected":
+        client.transport.replies["tab.get_figure"] = rejection
+    elif failure == "local_write":
+        def reject_write(path, data):
+            raise OSError("preview filesystem is full")
+
+        monkeypatch.setattr(Path, "write_bytes", reject_write)
+
+    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    assert reply["isError"] is True
+    assert len(reply["content"]) == 1
+    data = json.loads(reply["content"][0]["text"])
+    assert data["status"] == "failed"
+    assert data["error"]["phase"] == phase
+    assert data["save_status"] == save_status
+    assert data["saved_images"] == [
+        {"figure_name": name, "image_path": f"/actual/{name}.png"} for name in confirmed
+    ]
+    assert data["unconfirmed_image"] == unconfirmed
+    if failure == "result_rejected":
+        assert data["result"] is None
+        assert data["remaining_images"] is None
+    else:
+        assert data["result"]["summary"] == {"frequency": 5.0}
+        assert data["remaining_images"] == [name for name in ["fit", "residual"] if name not in confirmed]
+    assert data["figure"] is None
+    methods = _methods(client)
+    assert methods.count("tab.analyze") == 1
+    assert methods.count("tab.get_analyze_result") == 1
+    assert methods.count("tab.get_figure") == (1 if failure in ("preview_rejected", "local_write") else 0)
+    assert [params["figure_name"] for method, params in client.transport.sent if method == "tab.save_image"] == (
+        [] if failure in ("result_rejected", "after_result_eof") else ["fit", "residual"]
+    )
