@@ -4,6 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils import make_comment, parse_comment
 from zcu_tools.experiment.v2.singleshot import amp_rabi, len_rabi
 from zcu_tools.experiment.v2.singleshot.amp_rabi import AmpRabiCfg, AmpRabiExp
@@ -87,18 +90,22 @@ def test_rabi_uses_cfg_calibration_after_md_changes(
     md.g_center = 100 + 100j
     observed = []
 
+    acquired = MagicMock()
+
     def record_run(self, cfg, *, context):
         observed.append((cfg, context))
-        return "acquired"
+        return acquired
 
     monkeypatch.setattr(experiment_type, "run", record_run)
     request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
     plots = Plots(NonPresentingHost())
     try:
         result = adapter_type().run(
-            request, schema_to_resolved_dict(snapshot), plots=plots
+            request,
+            schema_to_resolved_dict(snapshot),
+            context=RunContext(request.soc, request.soccfg, plots, {}, StopSignal()),
         )
-        assert result == "acquired"
+        assert result.result is acquired
         cfg, context = observed[0]
         assert context.soc is request.soc
         assert context.soccfg is request.soccfg
@@ -124,9 +131,6 @@ def test_rabi_experiment_result_preserves_calibration_used_for_live_classificati
         ml=ml,
         device_snapshot={},
     )
-    viewer = MagicMock()
-    viewer.__enter__.return_value = viewer
-    monkeypatch.setattr(experiment_module, "LivePlot1D", lambda *args, **kwargs: viewer)
     monkeypatch.setattr(
         experiment_module, "setup_devices", lambda *args, **kwargs: None
     )
@@ -143,20 +147,28 @@ def test_rabi_experiment_result_preserves_calibration_used_for_live_classificati
             else np.array([-1 + 0.25j, 2 - 0.5j])
         ),
     )
-    if cfg_type is AmpRabiCfg:
-        result = experiment_type().run(MagicMock(), MagicMock(), cfg)
-    else:
-        with pytest.warns(UserWarning, match="reps will be overwritten"):
-            result = experiment_type().run(MagicMock(), MagicMock(), cfg)
-    np.testing.assert_array_equal(
-        viewer.update.call_args.args[1], [[0.5], [0.5], [0.0]]
-    )
-    assert result.cfg_snapshot is not None
-    assert result.cfg_snapshot.g_center == -1 + 0.25j
-    assert result.cfg_snapshot.e_center == 2 - 0.5j
-    assert result.cfg_snapshot.radius == 0.75
-    cfg.g_center = 10j
-    assert result.cfg_snapshot.g_center == -1 + 0.25j
+    plots = Plots(NonPresentingHost())
+    context = RunContext(MagicMock(), MagicMock(), plots, {}, StopSignal())
+    try:
+        if cfg_type is AmpRabiCfg:
+            result = experiment_type().run(cfg, context=context)
+        else:
+            with pytest.warns(UserWarning, match="reps will be overwritten"):
+                result = experiment_type().run(cfg, context=context)
+        source = RunRecord(cfg, result)
+        np.testing.assert_array_equal(
+            [line.get_ydata() for line in plots["measurement"].axes[0].lines],
+            [[0.5], [0.5], [0.0]],
+        )
+        assert source.cfg is not None
+        assert source.cfg.g_center == -1 + 0.25j
+        assert source.cfg.e_center == 2 - 0.5j
+        assert source.cfg.radius == 0.75
+        cfg.g_center = 10j
+        assert source.cfg.g_center == -1 + 0.25j
+    finally:
+        plots.finish(present=False)
+        plots.release()
 
 
 def test_rabi_direct_override_and_experiment_comment_round_trip(

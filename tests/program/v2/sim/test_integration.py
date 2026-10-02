@@ -55,7 +55,8 @@ import matplotlib
 # never display them (the autouse _close_matplotlib_figures fixture cleans up).
 matplotlib.use("Agg")
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from threading import Event
 from typing import Any
 
@@ -83,18 +84,21 @@ from zcu_tools.experiment.v2.singleshot.t1 import (
     t1_with_tone_sweep as singleshot_t1_tone_sweep,
 )
 from zcu_tools.experiment.v2.twotone.freq import (
+    FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqModuleCfg,
     FreqSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
+    AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiExp,
     AmpRabiModuleCfg,
     AmpRabiSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
+    LenRabiAnalyzeOptions,
     LenRabiCfg,
     LenRabiExp,
     LenRabiModuleCfg,
@@ -108,12 +112,14 @@ from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1SweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
+    T2EchoAnalyzeOptions,
     T2EchoCfg,
     T2EchoExp,
     T2EchoModuleCfg,
     T2EchoSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
+    T2RamseyAnalyzeOptions,
     T2RamseyCfg,
     T2RamseyExp,
     T2RamseyModuleCfg,
@@ -223,6 +229,16 @@ def _sim_dephasing(*, T2: float, T2_star: float) -> SimParams:
 @pytest.mark.filterwarnings(
     "ignore:fit_func failed; returning init_p fallback with infinite covariance:RuntimeWarning"
 )
+@contextmanager
+def _simulation_context(soc: Any, soccfg: Any) -> Generator[RunContext]:
+    plots = Plots(NonPresentingHost())
+    try:
+        yield RunContext(soc, soccfg, plots, {}, StopSignal())
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
 def test_freq_recovers_f_qubit() -> None:
     """twotone freq fit recovers the injected absolute f_qubit.
 
@@ -262,8 +278,14 @@ def test_freq_recovers_f_qubit() -> None:
     )
 
     exp = FreqExp()
-    result = exp.run(soc, soccfg, cfg)
-    fit_freq, _freq_err, _fwhm, _fwhm_err, _fig = exp.analyze(result, model_type="lor")
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result),
+            FreqAnalyzeOptions(model_type="lor"),
+            plots=context.plots,
+        )
+    fit_freq = analysis.freq
 
     # f_qubit < f_dds so the analyzer axis is un-folded: the recovered peak must
     # land on the true injected f_qubit to within a few sweep steps (step = 5 MHz).
@@ -311,8 +333,12 @@ def test_amp_rabi_recovers_pi_gain() -> None:
     )
 
     exp = AmpRabiExp()
-    result = exp.run(soc, soccfg, cfg)
-    pi_gain, _pi_gain_err, _pi2_gain, _pi2_gain_err, _fig = exp.analyze(result)
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result), AmpRabiAnalyzeOptions(), plots=context.plots
+        )
+    pi_gain = analysis.pi_amp
 
     # Recovered pi gain == pi_gain_len / length.
     assert pi_gain == pytest.approx(expected_pi_gain, rel=0.05)
@@ -360,11 +386,14 @@ def test_len_rabi_recovers_gain_scaling() -> None:
             relax_delay=_RESET_RELAX_DELAY,
         )
         exp = LenRabiExp()
-        result = exp.run(soc, soccfg, cfg)
-        pi_len, _pi_len_err, _pi2_len, _pi2_len_err, rabi_freq, _rabi_f_err, _fig = (
-            exp.analyze(result, decay=False, fit_phase=True)
-        )
-        return pi_len, rabi_freq
+        with _simulation_context(soc, soccfg) as context:
+            result = exp.run(cfg, context=context)
+            analysis = exp.analyze(
+                RunRecord(cfg, result),
+                LenRabiAnalyzeOptions(decay=False, fit_phase=True),
+                plots=context.plots,
+            )
+        return analysis.pi_len, analysis.rabi_f
 
     pi_len_lo, freq_lo = _run(0.4)
     pi_len_hi, freq_hi = _run(0.8)
@@ -838,10 +867,14 @@ def _run_ramsey(sim: SimParams, detune: float = 2.0) -> tuple[float, float, floa
     )
     exp = T2RamseyExp()
     # true_detune is the detune after length rounding; the fringe fit recovers it.
-    result = exp.run(soc, soccfg, cfg, detune=detune)
-    true_detune = result.true_activate_detune
-    t2r, _t2rerr, fit_detune, _detune_err, _fig = exp.analyze(result)
-    return t2r, fit_detune, true_detune
+    cfg.detune = detune
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result), T2RamseyAnalyzeOptions(), plots=context.plots
+        )
+    assert result.true_activate_detune is not None
+    return analysis.t2r, analysis.detune, result.true_activate_detune
 
 
 def _run_echo(sim: SimParams) -> float:
@@ -885,9 +918,15 @@ def _run_echo(sim: SimParams) -> float:
     exp = T2EchoExp()
     # Echo runs on resonance (detune=0); the pi pulse refocuses the static detune
     # regardless, so the engine's ensemble average leaves only the homogeneous T2.
-    result, _true_detune = exp.run(soc, soccfg, cfg, detune=0.0)
-    t2e, _t2eerr, _detune, _detune_err, _fig = exp.analyze(result, fit_method="decay")
-    return t2e
+    cfg.detune = 0.0
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result),
+            T2EchoAnalyzeOptions(fit_method="decay"),
+            plots=context.plots,
+        )
+    return analysis.t2e
 
 
 def test_t2ramsey_recovers_t2_star_and_detuning() -> None:

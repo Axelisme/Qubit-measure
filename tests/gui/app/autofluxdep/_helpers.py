@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.device import BaseDevice
+from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.autofluxdep.cfg import (
@@ -672,11 +673,18 @@ ACQUIRE_READOUT = {
 }
 
 
-def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any):
+def make_acquire_env(
+    ctrl: Controller,
+    *,
+    flux: float,
+    flux_idx: int,
+    cancel_signal: StopSignal | None = None,
+    **kw: Any,
+) -> RunEnv:
     """A ``RunEnv`` carrying the connected mock soc/soccfg + the fake_flux pick.
 
-    Mirrors what ``Orchestrator._make_env`` curries for a real run, so a Node
-    built off this env runs the same real-acquire path a full run would.
+    The node owns an isolated in-memory flux device and matching snapshot;
+    the controller supplies only the connected mock soc/soccfg.
     Extra keyword args (schema / ml / result / tools) flow straight through —
     ``schema`` is the placement's ``NodeCfgSchema`` (build it via ``node_schema``).
     """
@@ -685,13 +693,19 @@ def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any)
     )
 
     ctx = ctrl.state.session_env
+    flux_device = FakeDevice(fast_mode=True)
     return RunEnv(
         flux=flux,
         flux_idx=flux_idx,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         **kw,
-        context=make_run_context(soc=ctx.soc, soccfg=ctx.soccfg),
-        device_snapshot={},
+        context=make_run_context(
+            soc=ctx.soc,
+            soccfg=ctx.soccfg,
+            devices={FAKE_FLUX_DEVICE_NAME: flux_device},
+            cancel_signal=cancel_signal,
+        ),
+        device_snapshot={FAKE_FLUX_DEVICE_NAME: flux_device.get_info()},
     )
 
 
