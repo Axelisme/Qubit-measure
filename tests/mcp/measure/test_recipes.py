@@ -438,6 +438,53 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         client.context.session.close()
 
 
+@pytest.mark.parametrize("save_succeeds", [True, False])
+def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
+    tmp_path, monkeypatch, save_succeeds
+):
+    gui = LookbackGui()
+    saving = Event()
+    release_save = Event()
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == 82:
+            saving.set()
+            if not release_save.is_set():
+                return {"reason": "timeout"}
+            if not save_succeeds:
+                return {"reason": "completed", "status": "failed", "error": "disk full"}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert saving.wait(1)
+        execution = initial.data["execution"]
+        early = client.call("finish_early", {"execution": execution})
+        assert early.data["status"] == "not_applicable"
+        cancelled = client.call("cancel", {"execution": execution})
+        assert cancelled.data["gui_cancel"]["status"] == "not_cancellable"
+        assert cancelled.data["cancel_requested"]
+        assert cancelled.data["raw_save"]["status"] == "saving"
+        assert cancelled.data["raw_save"]["path"] is None
+        release_save.set()
+        final = client.call("wait", {"execution": execution, "timeout": 2})
+        assert not final.is_error  # Successful query, even when execution failed.
+        assert final.data["status"] == ("cancelled" if save_succeeds else "failed")
+        assert final.data["raw_save"]["status"] == ("saved" if save_succeeds else "failed")
+        assert final.data["raw_save"]["path"] == ("/actual/raw.h5" if save_succeeds else None)
+        if not save_succeeds:
+            assert final.data["error"]["reason"] == "raw_save_failed"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.save_data") == 1
+        assert "operation.cancel" not in methods
+        assert "tab.analyze" not in methods
+    finally:
+        release_save.set()
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
