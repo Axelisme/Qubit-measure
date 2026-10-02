@@ -407,7 +407,6 @@ def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
     assert ("operation.progress", {"operation_id": 999}) not in client.transport.sent
 
 
-
 @pytest.mark.parametrize(
     ("tool", "arguments", "message"),
     [

@@ -457,7 +457,6 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
     ]
 
 
-
 @pytest.mark.parametrize("outcome", ["finished", "failed"])
 def test_execution_query_observes_background_completion_without_reconnect(
     tmp_path, clients, monkeypatch, outcome
@@ -491,15 +490,19 @@ def test_execution_query_observes_background_completion_without_reconnect(
         assert awaiting.wait(2)
         assert started["status"] == "running"
         execution = started["execution"]
-        running = _data(_call_stdio(
-            monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
-        ))
+        running = _data(
+            _call_stdio(
+                monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
+            )
+        )
         assert running["status"] == "running"
         assert running["cancel_requested"] is False
         assert running["elapsed_s"] >= 0
         snapshot = client.call("status", {"execution": execution})
         snapshot["params"]["model"] = "caller mutation"
-        assert client.call("status", {"execution": execution})["params"] == {"model": "fit"}
+        assert client.call("status", {"execution": execution})["params"] == {
+            "model": "fit"
+        }
         assert _methods(client) == ["tab.analyze", "operation.await"]
         release.set()
         completed_reply = _call_stdio(
@@ -509,19 +512,28 @@ def test_execution_query_observes_background_completion_without_reconnect(
         assert completed["status"] == outcome
         assert completed["operation_outcome"]["status"] == outcome
         assert completed["cancel_requested"] is False
-        assert completed["save_status"] == ("saved" if outcome == "finished" else "not_started")
+        assert completed["save_status"] == (
+            "saved" if outcome == "finished" else "not_started"
+        )
         assert completed["saved_images"] == (
             [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
-            if outcome == "finished" else []
+            if outcome == "finished"
+            else []
         )
         _assert_figure(completed_reply, present=outcome == "finished")
         sent = list(client.transport.sent)
         client.transport.close()
-        terminal = _data(_call_stdio(monkeypatch, client, "status", {"execution": execution}))
-        repeated = _data(_call_stdio(
-            monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
-        ))
-        assert terminal == {key: value for key, value in repeated.items() if key != "elapsed_s"}
+        terminal = _data(
+            _call_stdio(monkeypatch, client, "status", {"execution": execution})
+        )
+        repeated = _data(
+            _call_stdio(
+                monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
+            )
+        )
+        assert terminal == {
+            key: value for key, value in repeated.items() if key != "elapsed_s"
+        }
         assert terminal["status"] == outcome
         assert client.transport.sent == sent
     finally:
