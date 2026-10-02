@@ -1629,85 +1629,53 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
     assert literal_edits[0].isEnabled() is False
 
 
-def test_module_reference_renders_header_and_editable_leaf(qapp, ctrl):
+@pytest.mark.parametrize(
+    ("kind", "reference_key", "custom_spec", "leaf_values"),
+    [
+        pytest.param(
+            "module",
+            "pulse",
+            CfgSectionSpec(
+                label="Pulse Shape",
+                fields={
+                    "type": LiteralSpec("pulse"),
+                    "gain": ScalarSpec(label="Gain", type=float),
+                },
+            ),
+            ("gain", 0.25, 0.75),
+            id="module",
+        ),
+        pytest.param(
+            "waveform",
+            "waveform",
+            CfgSectionSpec(
+                label="Gaussian",
+                fields={
+                    "style": LiteralSpec("gauss"),
+                    "sigma": ScalarSpec(label="Sigma", type=float),
+                },
+            ),
+            ("sigma", 0.5, 0.125),
+            id="waveform",
+        ),
+    ],
+)
+def test_custom_reference_renders_header_and_editable_leaf(
+    qapp, ctrl, kind, reference_key, custom_spec, leaf_values
+):
     from qtpy.QtCore import Qt
     from qtpy.QtWidgets import QComboBox, QLineEdit, QTreeWidget
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
-    custom_spec = CfgSectionSpec(
-        label="Pulse Shape",
-        fields={
-            "type": LiteralSpec("pulse"),
-            "gain": ScalarSpec(label="Gain", type=float),
-        },
-    )
+    leaf_key, initial_value, edited_value = leaf_values
+    chosen_key = f"<Custom:{custom_spec.label}>"
     schema = section_schema(
-        {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[custom_spec])},
+        {reference_key: ReferenceSpec(kind=kind, allowed=[custom_spec])},
         {
-            "pulse": ReferenceValue(
-                chosen_key="<Custom:Pulse Shape>",
-                value=CfgSectionValue(fields={"gain": DirectValue(0.25)}),
-            )
-        },
-    )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    w.show()
-
-    ref_widget = w.findChild(ReferenceWidget)
-    assert ref_widget is not None
-
-    combo = ref_widget.findChild(QComboBox)
-    assert combo is not None
-    assert combo.currentText() == "Pulse Shape"
-    assert combo.currentData() == "<Custom:Pulse Shape>"
-
-    tree = w.findChild(QTreeWidget)
-    assert tree is not None
-    leaves = tree.findItems(
-        "Gain", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive
-    )
-    assert len(leaves) == 1
-    editor = tree.itemWidget(leaves[0], 1)
-    assert editor is not None
-    line = editor.findChild(QLineEdit)
-    assert line is not None
-    assert line.text() == "0.25"
-    line.setText("0.75")
-
-    reference = w.read_values().fields["pulse"]
-    assert isinstance(reference, ReferenceValue)
-    assert reference.chosen_key == "<Custom:Pulse Shape>"
-    gain = reference.value.fields["gain"]
-    assert isinstance(gain, DirectValue)
-    assert gain.value == 0.75
-    w.detach()
-
-
-def test_waveform_reference_renders_header_and_editable_leaf(qapp, ctrl):
-    from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QComboBox, QLineEdit, QTreeWidget
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-
-    custom_spec = CfgSectionSpec(
-        label="Gaussian",
-        fields={
-            "style": LiteralSpec("gauss"),
-            "sigma": ScalarSpec(label="Sigma", type=float),
-        },
-    )
-    schema = section_schema(
-        {
-            "waveform": ReferenceSpec(
-                kind="waveform", label="Waveform", allowed=[custom_spec]
-            )
-        },
-        {
-            "waveform": ReferenceValue(
-                chosen_key="<Custom:Gaussian>",
-                value=CfgSectionValue(fields={"sigma": DirectValue(0.5)}),
+            reference_key: ReferenceValue(
+                chosen_key=chosen_key,
+                value=CfgSectionValue(fields={leaf_key: DirectValue(initial_value)}),
             )
         },
     )
@@ -1718,28 +1686,29 @@ def test_waveform_reference_renders_header_and_editable_leaf(qapp, ctrl):
     assert ref_widget is not None
     combo = ref_widget.findChild(QComboBox)
     assert combo is not None
-    assert combo.currentText() == "Gaussian"
-    assert combo.currentData() == "<Custom:Gaussian>"
+    assert combo.currentText() == custom_spec.label
+    assert combo.currentData() == chosen_key
 
     tree = w.findChild(QTreeWidget)
     assert tree is not None
     leaves = tree.findItems(
-        "Sigma", Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive
+        custom_spec.fields[leaf_key].label,
+        Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive,
     )
     assert len(leaves) == 1
     editor = tree.itemWidget(leaves[0], 1)
     assert editor is not None
     line = editor.findChild(QLineEdit)
     assert line is not None
-    assert line.text() == "0.5"
-    line.setText("0.125")
+    assert line.text() == str(initial_value)
+    line.setText(str(edited_value))
 
-    reference = w.read_values().fields["waveform"]
+    reference = w.read_values().fields[reference_key]
     assert isinstance(reference, ReferenceValue)
-    assert reference.chosen_key == "<Custom:Gaussian>"
-    sigma = reference.value.fields["sigma"]
-    assert isinstance(sigma, DirectValue)
-    assert sigma.value == 0.125
+    assert reference.chosen_key == chosen_key
+    leaf = reference.value.fields[leaf_key]
+    assert isinstance(leaf, DirectValue)
+    assert leaf.value == edited_value
     w.detach()
 
 
