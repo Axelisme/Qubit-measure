@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02 — JPA records
+**Last updated:** 2026-10-02 (Readout AutoOpt records)
 
 # measure experiment adapters
 
@@ -46,6 +46,7 @@ Single／dual-tone reset 的五個 adapters 將同次 cfg／Result 配成 RunRec
 Singleshot Amp／Len Rabi、Check、ResetCheck、AC Stark 的 run 回傳 RunRecord，FIT 使用 explicit source／typed options／Plots，不在 GUI 數值結果保存 Figure。Rabi 保留完整 numeric fit 供共同 calibration writeback 判斷；ResetCheck 只投影 populations summary，不推導 reset fidelity。Check 的 GE centers 與 AC Stark 的 chi／kappa 仍由分析當次 md 讀取，再交 core options。
 Singleshot T1／Tone／Tone sweep adapters 直接組裝含 uniform 的 typed cfg，將同次 cfg／Result 配成 RunRecord。FIT 向本次 Plots 發布 fit 圖；Tone 保留 t1_with_tone writeback，其餘兩者只提交空數值結果。Correction／photon-axis 參數仍從分析當次 md 讀取。
 Singleshot MIST Freq／Power／FreqPower adapters 將本次校準 cfg 與純 Result 配成 RunRecord。FIT 使用 explicit source 與 typed options，只提交空數值結果，fit 圖另交 Plots。Confusion matrix 仍讀分析當次 md；只有 Power 使用 ac_stark_coeff／log_scale，FreqPower 不轉交無作用的參數。
+Readout AutoOpt 將 num_points 保留在 typed cfg，run 配對 cfg／Result，FIT 只發布三個最佳 scalar 與具名 fit；readout_dpm 由 source.cfg 產生，缺 cfg 時只保留 scalar writeback。Canonical load/save 委派核心的 grouped record 入口。
 Readout optimize Freq／FreqGain／Length／Power adapters 將 cfg／Result 配成 RunRecord，FIT 將表單 smoothing／duration／penalty 轉為 core options，只提交 best scalar 與獨立具名 fit。Writeback 保留 best_ro_* scalar；readout_dpm 以 source.cfg 的 pulse readout 配合當次 md 補足缺少的最佳值，cfg=None 時略過 module，不以目前表單補來源。
 JPA Freq／Flux／Power／Check／OneToneFlux 的 run 配對 cfg／Result。四個 FIT 使用 explicit source 與本次 Plots，前三者只回傳最佳 scalar，Check 為空數值結果。Flux／Power 保留 GUI 圖軸重標政策與 best_jpa_* writeback，缺 cfg 也可離線分析；OneToneFlux 沒有 analysis 或 writeback。AutoOptimize grouped 路徑另行遷移。
 `RunRequest`只提供SoC handles與detached device snapshot；Base assembler

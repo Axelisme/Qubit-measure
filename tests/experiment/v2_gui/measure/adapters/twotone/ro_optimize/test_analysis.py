@@ -5,10 +5,15 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import AutoOptResult
 from zcu_tools.experiment.v2.twotone.ro_optimize.freq import FreqResult
 from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import FreqGainResult
 from zcu_tools.experiment.v2.twotone.ro_optimize.length import LengthResult
 from zcu_tools.experiment.v2.twotone.ro_optimize.power import PowerResult
+from zcu_tools.experiment.v2_gui.measure.adapters.twotone.ro_optimize.auto import (
+    RoOptAutoAdapter,
+    RoOptAutoAnalyzeParams,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.ro_optimize.freq import (
     RoOptFreqAdapter,
     RoOptFreqAnalyzeParams,
@@ -41,12 +46,23 @@ from zcu_tools.program.v2 import PulseReadoutCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
-@pytest.fixture(params=["freq", "freq_gain", "length", "power"])
+@pytest.fixture(params=["freq", "freq_gain", "length", "power", "auto"])
 def readout_case(request):
     freqs = np.array([6000.0, 6010.0, 6020.0])
     gains = np.array([0.1, 0.2, 0.3])
     snrs = np.array([1.0, 5.0, 1.0])
     cases = {
+        "auto": (
+            RoOptAutoAdapter(),
+            RoOptAutoAnalyzeParams(),
+            AutoOptResult(np.column_stack([freqs, gains, [1.0, 2.0, 3.0]]), snrs),
+            {
+                "freq": make_sweep_range(6000.0, 6020.0, expts=3),
+                "gain": make_sweep_range(0.1, 0.3, expts=3),
+                "length": make_sweep_range(1.0, 3.0, expts=3),
+            },
+            {"best_freq": 6010.0, "best_gain": 0.2, "best_length": 2.0},
+        ),
         "freq": (
             RoOptFreqAdapter(),
             RoOptFreqAnalyzeParams(smooth=0.05, smooth_method="gaussian"),
@@ -134,6 +150,7 @@ def test_selected_source_drives_fit_and_readout_writeback(
                 },
             },
             "sweep": sweep,
+            **({"num_points": 10} if isinstance(adapter, RoOptAutoAdapter) else {}),
             "reps": 10,
             "rounds": 1,
             "relax_delay": 5.0,
@@ -154,6 +171,14 @@ def test_selected_source_drives_fit_and_readout_writeback(
     assert tuple(plots) == ("fit",)
     assert plots["fit"] is not other_plots["fit"]
     assert plots["fit"].axes[0].get_xlabel()
+    if isinstance(adapter, RoOptAutoAdapter):
+        assert len(plots["fit"].axes) == 4
+        for ax, key in zip(
+            plots["fit"].axes[1:],
+            ("best_freq", "best_gain", "best_length"),
+            strict=True,
+        ):
+            np.testing.assert_allclose(ax.lines[0].get_xdata(), expected[key])
 
     items = adapter.get_writeback_items(WritebackRequest(source, answer, ctx))
     scalars = {
