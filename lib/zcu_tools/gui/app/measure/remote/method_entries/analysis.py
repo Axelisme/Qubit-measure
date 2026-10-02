@@ -81,6 +81,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 required_string("tab_id"),
                 default_object("updates", "Analyze param updates"),
+                optional_integer("run_operation_id"),
             ),
         ),
         agent=AgentMethodPolicy(

@@ -367,6 +367,53 @@ def test_save_data_rejects_a_superseded_run_without_changing_the_draft(
         assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("replacement", ["run", "load", "unknown", "no_result"])
+def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
+    fx, monkeypatch, replacement
+):
+    monkeypatch.setattr(
+        FakeAdapter, "capabilities", replace(FakeAdapter.capabilities, load_data=True)
+    )
+    tab = fx.ctrl.new_tab("fake")
+    with open_client(fx.service.port) as sock:
+        original = 1000
+        if replacement != "no_result":
+            original = _completed_run(fx, sock, tab)
+            if replacement == "run":
+                _completed_run(fx, sock, tab)
+            elif replacement == "load":
+                record = fx.ctrl.get_tab_snapshot(tab).run.result
+                monkeypatch.setattr(FakeAdapter, "load", lambda self, request: record)
+                fx.ctrl.load_tab_result(tab, "loaded.hdf5")
+            else:
+                original += 1000
+            prior = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
+            assert call(
+                sock, "operation.await", {"operation_id": prior, "timeout": 2}
+            )["result"]["status"] == "finished"
+        before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
+        params_before = call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"]
+        result_before = call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]
+        fx.view.select_tab_pane.reset_mock()
+        reply = call(
+            sock,
+            "tab.analyze",
+            {"tab_id": tab, "run_operation_id": original, "updates": {"threshold": 0.7}},
+        )
+        if reply["ok"]:
+            call(sock, "operation.await", {
+                "operation_id": reply["result"]["operation_id"], "timeout": 2
+            })
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "precondition_failed"
+        assert reply["error"]["reason"] == "result_superseded"
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
+        assert call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"] == params_before
+        assert call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"] == result_before
+        fx.view.select_tab_pane.assert_not_called()
+        assert call(sock, "operation.active")["result"]["operations"] == []
+
+
 @pytest.mark.parametrize("keep_partial", [True, False])
 def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
     fx, monkeypatch: pytest.MonkeyPatch, keep_partial: bool

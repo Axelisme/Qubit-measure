@@ -86,7 +86,13 @@ class RunAnalyzeControlPort(Protocol):
 
     def cancel_analyze(self, tab_id: str) -> bool: ...
     def get_tab_analyze_result(self, tab_id: str) -> object | None: ...
-    def analyze(self, tab_id: str, analyze_params_instance: object) -> int: ...
+    def analyze(
+        self,
+        tab_id: str,
+        analyze_params_instance: object,
+        *,
+        run_operation_id: int | None = None,
+    ) -> int: ...
     def get_interactive(self, tab_id: str) -> ActiveInteractive | None: ...
     def get_interactive_operation(self, tab_id: str) -> int | None: ...
     def require_analysis_operation(
@@ -245,7 +251,13 @@ class RunAnalyzeControlFacet:
             host.unmount_interactive_analysis(tab_id, restore_result=True)
         return terminal
 
-    def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
+    def analyze(
+        self,
+        tab_id: str,
+        analyze_params_instance: object,
+        *,
+        run_operation_id: int | None = None,
+    ) -> int:
         self._access.require_available()
         permit = self._guard.acquire_analyze_permit(tab_id)
         self._ensure_tab_idle(tab_id)
