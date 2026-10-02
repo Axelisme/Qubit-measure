@@ -29,7 +29,7 @@ class _Core:
         self.fail_run = False
         self.contexts: list[RunContext] = []
         self.saved: list[tuple[RunRecord[_Cfg, float], Path]] = []
-        self.metadata: tuple[str | None, str | None, str | None, int] | None = None
+        self.metadata: tuple[str | None, str | None] | None = None
 
     def run(self, config: _Cfg, *, context: RunContext) -> float:
         self.contexts.append(context)
@@ -65,21 +65,13 @@ class _Core:
         *,
         comment: str | None = None,
         tag: str | None = None,
-        server_ip: str | None = None,
-        port: int = 4999,
     ) -> None:
         with destination.open("x", encoding="utf-8") as file:
             file.write(str(source.result))
         self.saved.append((source, destination))
-        self.metadata = (comment, tag, server_ip, port)
+        self.metadata = (comment, tag)
 
-    def load(
-        self,
-        source: Path,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
-    ) -> RunRecord[_Cfg, float]:
+    def load(self, source: Path) -> RunRecord[_Cfg, float]:
         if source.name == "missing":
             raise FileNotFoundError(source)
         return RunRecord(cfg=_Cfg(scale=5.0), result=5.0)
@@ -226,13 +218,11 @@ def test_save_uses_explicit_source_and_returns_exact_or_unique_path(
         unique=True,
         comment="measurement A",
         tag="trial",
-        server_ip="example.invalid",
-        port=8123,
     )
     assert unique == tmp_path / "data_1.hdf5"
     assert unique.read_text(encoding="utf-8") == "3.0"
     assert core.saved == [(source, unique)]
-    assert core.metadata == ("measurement A", "trial", "example.invalid", 8123)
+    assert core.metadata == ("measurement A", "trial")
 
     exact = adapter.save(source, tmp_path / "exact.h5")
     assert exact == tmp_path / "exact.hdf5"

@@ -20,7 +20,10 @@ from zcu_tools.experiment import (
     RoleZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.plotting.plots import NonPresentingHost
 
 
 class _GroupedCfg(ExpCfgModel):
@@ -104,6 +107,44 @@ _GROUPED_SPEC = GroupedAxesSpec(
     result_builder=_build_result,
     result_validator=_validate_result,
 )
+
+
+class _GroupedCore:
+    def run(self, config: _GroupedCfg, *, context: RunContext) -> _GroupedResult:
+        raise NotImplementedError("Persistence-only test collaborator")
+
+    def save(
+        self,
+        source: RunRecord[_GroupedCfg, _GroupedResult],
+        destination: Path,
+        *,
+        comment: str | None = None,
+        tag: str | None = None,
+    ) -> None:
+        _GROUPED_SPEC.save(source, destination, comment=comment, tag=tag)
+
+    def load(self, source: Path) -> RunRecord[_GroupedCfg, _GroupedResult]:
+        return _GROUPED_SPEC.load(source)
+
+
+def test_notebook_grouped_persistence_roundtrip(tmp_path: Path) -> None:
+    adapter = NotebookAdapter(_GroupedCore(), host=NonPresentingHost())
+    source = RunRecord(
+        cfg=_GroupedCfg(name="notebook"),
+        result=_GroupedResult(
+            params=np.array([[6123.0, 0.1], [6124.0, 0.2]]),
+            scores=np.array([1.0, 2.0]),
+        ),
+    )
+
+    written = adapter.save(source, tmp_path / "grouped.hdf5", comment="note")
+    loaded = adapter.load(written)
+
+    assert written == tmp_path / "grouped.hdf5"
+    assert adapter.last_run is loaded
+    assert loaded.cfg == source.cfg
+    np.testing.assert_array_equal(loaded.result.params, source.result.params)
+    np.testing.assert_array_equal(loaded.result.scores, source.result.scores)
 
 
 def test_grouped_axes_spec_saves_and_loads_typed_result(tmp_path: Path) -> None:
