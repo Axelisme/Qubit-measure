@@ -1,6 +1,6 @@
 # 實驗核心、前端包裝與具名圖形產物
 
-**狀態：** 69 個核心、相關 caller 與共用依賴已在 integration 完成實作，舊自訂 pyplot routing backend 已退場。整體終審與 landing 尚未完成。本文仍是 ADR 草案，不代表持久分支已採用，也不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。
+**狀態：** 69 個核心、相關 caller 與共用依賴已在 integration 完成實作，舊自訂 pyplot routing backend 已退場。整體雙軸報告已交付；正式接受與 landing 仍由任務紀錄及使用者授權決定。本文仍是 ADR 草案，不代表持久分支已採用，也不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。
 
 ## 問題
 
@@ -176,7 +176,7 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - Measure 的 ArtifactKey 以 stage 與圖名識別成果。ArtifactTracker 記錄每張圖是否曾成功保存，SaveService 捕捉本次保存來源與目的地。Save All 選尚未保存的成果，個別失敗不撤銷先前成功項。
 - [Session](../../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
 
-三個參考實驗已有各自的軟體接受紀錄。其餘核心與 callers 已整合，整體 Standards／Spec review 尚未完成。集中行為測試兩次得到 7431 passed、7 skipped；7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
+三個參考實驗已有各自的軟體接受紀錄。其餘核心與 callers 已整合。全 task 的 Standards／Spec 唯讀報告未列硬性標準違規或規格缺口，Standards 另保留三項設計觀察。這些報告不等於正式接受或 landing 授權。集中行為測試兩次得到 7431 passed、7 skipped；7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
 
 本次未操作硬體，也未重跑所有 Notebook cells 或 FFmpeg。既有 VSCode 60-frame 人工觀察只覆蓋當時的探針與版本。Standalone [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於新的 Plots host。
 
