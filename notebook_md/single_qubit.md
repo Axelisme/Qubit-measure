@@ -103,8 +103,6 @@ md.ro_ch = 0
 
 # Initialize devices
 
-重新初始化前，先執行下方 Disconnect，關閉目前連線。
-
 ```python
 import pyvisa
 from zcu_tools.device import DeviceManager
@@ -215,8 +213,6 @@ ml, md = em.use_flux(label="051115_2.000mA")
 env = CfgEnv(md=md, ml=ml, device_manager=device_manager)
 ml, md
 ```
-
-切換 flux folder 後，重新執行本節。`make_cfg` 會讀取當下的裝置設定；更新裝置或 `md` 參數後，重新執行所需量測的 cfg cell。
 
 # Lookback
 
@@ -401,10 +397,6 @@ res_gain_filepath = res_gain_exp.save(
 ```
 
 ## Flux dependence
-
-量測完成後，執行選線 cell。拖曳兩條譜線，確認選點後按 Done，再執行下一格。Cancel 不會產生本次選線結果。
-
-按 Done 後，可由下方 cell 查看並保存選線圖。若取消本次操作，先重新執行選線 cell。
 
 ```python
 cur_value = flux_yoko.set_current(-5e-3)
