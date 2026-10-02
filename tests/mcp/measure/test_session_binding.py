@@ -103,7 +103,9 @@ def test_pending_eof_reports_connection_lost_without_replaying_rpc(
 
     monkeypatch.setattr(client.transport, "send_line", send)
     with ThreadPoolExecutor(max_workers=1) as pool:
-        pending = pool.submit(binding.send_gui_rpc, "context.labels", {}, timeout=1.0)
+        pending = pool.submit(
+            binding.send_gui_rpc, "context.labels", {}, timeout_seconds=1.0
+        )
         try:
             assert sent.wait(1)
             client.transport.close()
