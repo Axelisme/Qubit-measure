@@ -30,13 +30,18 @@ RECIPES = (
                 **{
                     name: {"type": ["string", "null"], "minLength": 1}
                     for name in (
-                        "reuse_tab_id", "readout_ref", "use_reset", "init_pulse_ref"
+                        "reuse_tab_id",
+                        "readout_ref",
+                        "use_reset",
+                        "init_pulse_ref",
                     )
                 },
                 **{
                     name: {"type": ["number", "null"]}
                     for name in (
-                        "frequency_mhz", "readout_length_us", "trigger_offset_us"
+                        "frequency_mhz",
+                        "readout_length_us",
+                        "trigger_offset_us",
                     )
                 },
                 "rounds": {"type": ["integer", "null"]},

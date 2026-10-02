@@ -4,7 +4,6 @@ from functools import partial
 from typing import Any
 
 from recipes import RECIPES, RecipeDefinition
-
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.recipe_context import RecipeContext, RecipeError
@@ -26,9 +25,7 @@ def run_recipe(
         )
         context.progress.status = "failed"
         context.progress.phase = "terminal"
-    return ToolReply(
-        context.snapshot(), is_error=context.progress.status == "failed"
-    )
+    return ToolReply(context.snapshot(), is_error=context.progress.status == "failed")
 
 
 def build_recipe_tools(context: MeasureToolContext) -> ToolTable:

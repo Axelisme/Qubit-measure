@@ -4,7 +4,6 @@ from copy import deepcopy
 from typing import Any
 
 import pytest
-
 from zcu_tools.mcp.core.reply import ToolReply
 
 from ._support import make_client
@@ -29,7 +28,9 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
                     "valid": True,
                     "children": {
                         "readout": {
-                            "kind": "reference", "ref": None, "valid": True,
+                            "kind": "reference",
+                            "ref": None,
+                            "valid": True,
                             "children": {},
                         },
                     },
@@ -44,13 +45,19 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         if method == "tab.new":
             return {"tab_id": tab}
         if method == "tab.snapshot":
-            return {"tabs": [{
-                "tab_id": tab,
-                "adapter_name": "lookback",
-                "interaction": {
-                    "is_running": False, "is_analyzing": False, "is_saving_data": False
-                },
-            }]}
+            return {
+                "tabs": [
+                    {
+                        "tab_id": tab,
+                        "adapter_name": "lookback",
+                        "interaction": {
+                            "is_running": False,
+                            "is_analyzing": False,
+                            "is_saving_data": False,
+                        },
+                    }
+                ]
+            }
         if method in ("tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg"):
             return deepcopy(publication)
         raise AssertionError(f"Missing frequency must not start work: {method}")
@@ -62,7 +69,9 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters"
         assert reply.data["tab"] == tab
-        assert [item["parameter"] for item in reply.data["missing"]] == ["frequency_mhz"]
+        assert [item["parameter"] for item in reply.data["missing"]] == [
+            "frequency_mhz"
+        ]
         assert reply.is_error is False
         methods = [method for method, _ in client.transport.sent]
         assert "tab.run_start" not in methods
