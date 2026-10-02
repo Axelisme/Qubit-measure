@@ -469,7 +469,6 @@ from zcu_tools.notebook.experiments import FluxDepAnalyzer, FluxDepPickerOptions
 
 res_flux_exp = NotebookAdapter(FluxDepExp(), soc=soc, soccfg=soccfg, devices=device_manager.get_all_devices())
 flux_run = res_flux_exp.run(cfg)
-flux_analyzer = FluxDepAnalyzer()
 ```
 
 ```python
@@ -483,7 +482,7 @@ flux_filepath = res_flux_exp.save(
 離線時可用 `NotebookAdapter(FluxDepExp()).load(flux_filepath)` 取得 RunRecord，再傳給獨立選線工具，不需要 soc／soccfg。有效資料的 cfg 可以是 None，選線仍可完成，預設 canonical saver 則拒絕缺 cfg 的來源。`save` 明確接收來源，`unique=True` 由 Adapter 選擇未占用路徑並回傳實際 Path，不建立鎖或完整 analysis session 檔案。
 
 ```python
-flux_pick = flux_analyzer.start(flux_run, FluxDepPickerOptions())
+flux_pick = FluxDepAnalyzer().start(flux_run, FluxDepPickerOptions())
 # Select the two lines, then click Done before running the next cell.
 ```
 
