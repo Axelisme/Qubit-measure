@@ -13,6 +13,7 @@ from matplotlib.figure import Figure
 from zcu_tools.analysis.fluxdep.line_state import FluxPickAnalysis, FluxPickState
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepResult
+from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxCfg, FreqFluxResult
 from zcu_tools.notebook.experiments import (
     FluxDepAnalysisRecord,
     FluxDepAnalyzer,
@@ -88,6 +89,43 @@ def test_done_publishes_source_options_numeric_result_and_named_figure(
     finally:
         if not control.is_finished:
             control.cancel()
+        if analyzer.analysis_plots is not None:
+            analyzer.analysis_plots.release()
+
+
+def test_twotone_pick_keeps_captured_source_and_retains_figure(tmp_path: Path) -> None:
+    data = make_result()
+    source: RunRecord[FreqFluxCfg, FreqFluxResult] = RunRecord(
+        cfg=None,
+        result=FreqFluxResult(data.values, data.freqs, data.signals),
+    )
+    analyzer = FluxDepAnalyzer[FreqFluxCfg, FreqFluxResult](NonPresentingHost())
+    first = analyzer.start(source, FluxDepPickerOptions(-0.2, 0.3))
+    other: RunRecord[FreqFluxCfg, FreqFluxResult] = RunRecord(
+        cfg=None,
+        result=FreqFluxResult(data.values, data.freqs + 10.0, data.signals * 2),
+    )
+    second = analyzer.start(other, FluxDepPickerOptions(-0.1, 0.4))
+    try:
+        second.cancel()
+        assert analyzer.analysis is None
+        first.set_positions(-0.15, 0.35)
+        record = first.done()
+        assert analyzer.analysis is record
+        assert record.source is source
+        assert record.source.result is source.result
+        assert record.options.flux_half == pytest.approx(-0.15)
+        assert record.result.flux_period == pytest.approx(1.0)
+        plots = analyzer.analysis_plots
+        assert plots is not None
+        plots.release()
+        record.figures["pick"].savefig(tmp_path / "twotone-pick.png")
+        assert (tmp_path / "twotone-pick.png").stat().st_size > 0
+    finally:
+        if not first.is_finished:
+            first.cancel()
+        if not second.is_finished:
+            second.cancel()
         if analyzer.analysis_plots is not None:
             analyzer.analysis_plots.release()
 

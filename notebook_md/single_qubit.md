@@ -50,7 +50,7 @@ from zcu_tools.resources.sample_table import (
 )
 from zcu_tools.notebook.utils import dump_device_info, gc_collect, make_sweep, savefig
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.datafile import create_datafolder, reserve_labber_filepath
+from zcu_tools.datafile import create_datafolder
 from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
 from zcu_tools.notebook import NotebookAdapter
 ```
@@ -279,9 +279,9 @@ md.timeFly
 
 ```python
 filename = f"lookback_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(lookback_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lookback_filepath = lookback_exp.save(
-    lookback_run,
+    lookback_analysis.source,
     Path(database_path) / f"{filename}@{em.label}.hdf5",
     unique=True,
     comment=f"timeFly = {md.timeFly}us",
@@ -357,9 +357,9 @@ md.rf_w = kappa
 
 ```python
 filename = f"{res_name}_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(res_freq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 res_freq_filepath = res_freq_exp.save(
-    res_freq_run,
+    res_freq_analysis.source,
     Path(database_path) / f"{filename}@{em.label}.hdf5",
     unique=True,
     comment=str(params),
@@ -562,13 +562,18 @@ exp_cfg = {
 cfg = make_cfg(exp_cfg, ze.jpa.OneToneFluxCfg, env, overrides={'reps': 100, 'rounds': 10})
 
 
-jpa_flux_onetone_exp = ze.jpa.OneToneFluxExp()
-_ = jpa_flux_onetone_exp.run(soc, soccfg, cfg)
+jpa_flux_onetone_exp = NotebookAdapter(
+    ze.jpa.OneToneFluxExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+jpa_flux_onetone_run = jpa_flux_onetone_exp.run(cfg)
 ```
 
 ```python
 jpa_flux_onetone_exp.save(
-    filepath=reserve_labber_filepath(os.path.join(database_path, "JPA_flux_onetone")),
+    jpa_flux_onetone_run,
+    Path(os.path.join(database_path, "JPA_flux_onetone")),
+    unique=True,
 )
 ```
 
@@ -589,23 +594,30 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.jpa.FreqCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-jpa_freq_exp = ze.jpa.FreqExp()
-_ = jpa_freq_exp.run(soc, soccfg, cfg)
+jpa_freq_exp = NotebookAdapter(
+    ze.jpa.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+jpa_freq_run = jpa_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.best_jpa_freq, fig = jpa_freq_exp.analyze()
+jpa_freq_analysis = jpa_freq_exp.analyze(None, source=jpa_freq_run)
+md.best_jpa_freq = jpa_freq_analysis.result.best_freq
+fig = jpa_freq_analysis.figures["fit"]
 md.best_jpa_freq
 ```
 
 ```python
 filename = f"JPA_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(jpa_freq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_freq_exp.save(
-    filepath=reserve_labber_filepath(
+    jpa_freq_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -638,23 +650,30 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.jpa.FluxCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-jpa_flux_exp = ze.jpa.FluxExp()
-_ = jpa_flux_exp.run(soc, soccfg, cfg)
+jpa_flux_exp = NotebookAdapter(
+    ze.jpa.FluxExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+jpa_flux_run = jpa_flux_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.best_jpa_flux, fig = jpa_flux_exp.analyze()
+jpa_flux_analysis = jpa_flux_exp.analyze(None, source=jpa_flux_run)
+md.best_jpa_flux = jpa_flux_analysis.result.best_flux
+fig = jpa_flux_analysis.figures["fit"]
 md.best_jpa_flux * 1e3
 ```
 
 ```python
 filename = f"JPA_flux_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(jpa_flux_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_flux_exp.save(
-    filepath=reserve_labber_filepath(
+    jpa_flux_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -679,23 +698,30 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.jpa.PowerCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-jpa_pdr_exp = ze.jpa.PowerExp()
-_ = jpa_pdr_exp.run(soc, soccfg, cfg)
+jpa_pdr_exp = NotebookAdapter(
+    ze.jpa.PowerExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+jpa_pdr_run = jpa_pdr_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.best_jpa_power, fig = jpa_pdr_exp.analyze()
+jpa_pdr_analysis = jpa_pdr_exp.analyze(None, source=jpa_pdr_run)
+md.best_jpa_power = jpa_pdr_analysis.result.best_power
+fig = jpa_pdr_analysis.figures["fit"]
 md.best_jpa_power
 ```
 
 ```python
 filename = f"JPA_power_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(jpa_pdr_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_pdr_exp.save(
-    filepath=reserve_labber_filepath(
+    jpa_pdr_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -725,25 +751,34 @@ exp_cfg = {
     },
     "relax_delay": 30.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.jpa.JPAOptCfg, env, overrides={'reps': 1000, 'rounds': 1})
+cfg = make_cfg(exp_cfg, ze.jpa.JPAOptCfg, env, overrides={'reps': 1000, 'rounds': 1, 'num_points': 10000})
 
-jpa_opt_exp = ze.jpa.AutoOptimizeExp()
-_ = jpa_opt_exp.run(soc, soccfg, cfg, num_points=10000)
+jpa_opt_exp = NotebookAdapter(
+    ze.jpa.AutoOptimizeExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+jpa_opt_run = jpa_opt_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.best_jpa_flux, md.best_jpa_freq, md.best_jpa_power, fig = jpa_opt_exp.analyze()
+jpa_opt_analysis = jpa_opt_exp.analyze(None, source=jpa_opt_run)
+md.best_jpa_flux = jpa_opt_analysis.result.best_flux
+md.best_jpa_freq = jpa_opt_analysis.result.best_freq
+md.best_jpa_power = jpa_opt_analysis.result.best_power
+fig = jpa_opt_analysis.figures["fit"]
 1e3 * md.best_jpa_flux, 1e-3 * md.best_jpa_freq, md.best_jpa_power
 ```
 
 ```python
 filename = f"JPA_opt_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(jpa_opt_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_opt_exp.save(
-    filepath=reserve_labber_filepath(
+    jpa_opt_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -773,22 +808,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.jpa.CheckCfg, env, overrides={'reps': 1000, 'rounds': 5})
 
-jpa_check_exp = ze.jpa.CheckExp()
-_ = jpa_check_exp.run(soc, soccfg, cfg)
+jpa_check_exp = NotebookAdapter(
+    ze.jpa.CheckExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+jpa_check_run = jpa_check_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = jpa_check_exp.analyze()
+jpa_check_analysis = jpa_check_exp.analyze(None, source=jpa_check_run)
+fig = jpa_check_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"JPA_check_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(jpa_check_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_check_exp.save(
-    filepath=reserve_labber_filepath(
+    jpa_check_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -872,13 +913,21 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-qub_freq_exp = ze.twotone.FreqExp()
-_ = qub_freq_exp.run(soc, soccfg, cfg)
+qub_freq_exp = NotebookAdapter(
+    ze.twotone.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+qub_freq_run = qub_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-f, _, kappa, _, fig = qub_freq_exp.analyze()
+from zcu_tools.experiment.v2.twotone.freq import FreqAnalyzeOptions
+
+qub_freq_analysis = qub_freq_exp.analyze(FreqAnalyzeOptions(), source=qub_freq_run)
+f = qub_freq_analysis.result.freq
+kappa = qub_freq_analysis.result.fwhm
+fig = qub_freq_analysis.figures["fit"]
 f
 ```
 
@@ -893,12 +942,14 @@ md.qf_w = kappa
 
 ```python
 filename = f"{qub_name}_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(qub_freq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_freq_exp.save(
-    filepath=reserve_labber_filepath(
+    qub_freq_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"frequency = {f}MHz",
+    unique=True,
 )
 ```
 
@@ -944,24 +995,35 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-qub_lenrabi_exp = ze.twotone.rabi.LenRabiExp()
-_ = qub_lenrabi_exp.run(soc, soccfg, cfg)
+qub_lenrabi_exp = NotebookAdapter(
+    ze.twotone.rabi.LenRabiExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+qub_lenrabi_run = qub_lenrabi_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.pi_len, _, md.pi2_len, _, md.rabi_f, _, fig = qub_lenrabi_exp.analyze(decay=True)
+from zcu_tools.experiment.v2.twotone.rabi.len_rabi import LenRabiAnalyzeOptions
+
+qub_lenrabi_analysis = qub_lenrabi_exp.analyze(LenRabiAnalyzeOptions(decay=True), source=qub_lenrabi_run)
+md.pi_len = qub_lenrabi_analysis.result.pi_len
+md.pi2_len = qub_lenrabi_analysis.result.pi2_len
+md.rabi_f = qub_lenrabi_analysis.result.rabi_f
+fig = qub_lenrabi_analysis.figures["fit"]
 md.pi_len, md.pi2_len, md.rabi_f
 ```
 
 ```python
 filename = f"{qub_name}_rabi_length_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(qub_lenrabi_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_lenrabi_exp.save(
-    filepath=reserve_labber_filepath(
+    qub_lenrabi_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us",
+    unique=True,
 )
 ```
 
@@ -1013,24 +1075,34 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.rabi.AmpRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-qub_amprabi_exp = ze.twotone.rabi.AmpRabiExp()
-_ = qub_amprabi_exp.run(soc, soccfg, cfg)
+qub_amprabi_exp = NotebookAdapter(
+    ze.twotone.rabi.AmpRabiExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+qub_amprabi_run = qub_amprabi_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.pi_gain, _, md.pi2_gain, _, fig = qub_amprabi_exp.analyze(skip=1)
+from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import AmpRabiAnalyzeOptions
+
+qub_amprabi_analysis = qub_amprabi_exp.analyze(AmpRabiAnalyzeOptions(skip=1), source=qub_amprabi_run)
+md.pi_gain = qub_amprabi_analysis.result.pi_amp
+md.pi2_gain = qub_amprabi_analysis.result.pi2_amp
+fig = qub_amprabi_analysis.figures["fit"]
 md.pi_gain, md.pi2_gain
 ```
 
 ```python
 filename = f"{qub_name}_rabi_amplitude_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(qub_amprabi_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_amprabi_exp.save(
-    filepath=reserve_labber_filepath(
+    qub_amprabi_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"pi gain = {md.pi_gain}\npi/2 gain = {md.pi2_gain}",
+    unique=True,
 )
 ```
 
@@ -1098,13 +1170,19 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-single_reset_freq_exp = ze.twotone.reset.single_tone.FreqExp()
-_ = single_reset_freq_exp.run(soc, soccfg, cfg)
+single_reset_freq_exp = NotebookAdapter(
+    ze.twotone.reset.single_tone.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+single_reset_freq_run = single_reset_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-f, kappa, fig = single_reset_freq_exp.analyze()
+single_reset_freq_analysis = single_reset_freq_exp.analyze(None, source=single_reset_freq_run)
+f = single_reset_freq_analysis.result.freq
+kappa = single_reset_freq_analysis.result.fwhm
+fig = single_reset_freq_analysis.figures["fit"]
 f
 ```
 
@@ -1114,12 +1192,14 @@ md.reset_f = f
 
 ```python
 filename = f"{qub_name}_sidereset_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(single_reset_freq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_freq_exp.save(
-    filepath=reserve_labber_filepath(
+    single_reset_freq_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"frequency = {f}MHz",
+    unique=True,
 )
 ```
 
@@ -1151,22 +1231,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.LengthCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-single_reset_length_exp = ze.twotone.reset.single_tone.LengthExp()
-_ = single_reset_length_exp.run(soc, soccfg, cfg)
+single_reset_length_exp = NotebookAdapter(
+    ze.twotone.reset.single_tone.LengthExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+single_reset_length_run = single_reset_length_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = single_reset_length_exp.analyze()
+single_reset_length_analysis = single_reset_length_exp.analyze(None, source=single_reset_length_run)
+fig = single_reset_length_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sidereset_length_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(single_reset_length_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_length_exp.save(
-    filepath=reserve_labber_filepath(
+    single_reset_length_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1209,22 +1295,29 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
-single_reset_check_exp = ze.twotone.reset.RabiCheckExp()
-_ = single_reset_check_exp.run(soc, soccfg, cfg)
+single_reset_check_exp = NotebookAdapter(
+    ze.twotone.reset.RabiCheckExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+single_reset_check_run = single_reset_check_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-reset_check_fit, fig = single_reset_check_exp.analyze()
+single_reset_check_analysis = single_reset_check_exp.analyze(None, source=single_reset_check_run)
+reset_check_fit = single_reset_check_analysis.result
+fig = single_reset_check_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sidereset_check_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(single_reset_check_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_check_exp.save(
-    filepath=reserve_labber_filepath(
+    single_reset_check_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1268,13 +1361,19 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-dualreset_freq1_exp = ze.twotone.FreqExp()
-_ = dualreset_freq1_exp.run(soc, soccfg, cfg)
+dualreset_freq1_exp = NotebookAdapter(
+    ze.twotone.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+dualreset_freq1_run = dualreset_freq1_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-f, _, kappa, _, fig = dualreset_freq1_exp.analyze()
+dualreset_freq1_analysis = dualreset_freq1_exp.analyze(FreqAnalyzeOptions(), source=dualreset_freq1_run)
+f = dualreset_freq1_analysis.result.freq
+kappa = dualreset_freq1_analysis.result.fwhm
+fig = dualreset_freq1_analysis.figures["fit"]
 f
 ```
 
@@ -1285,12 +1384,14 @@ md.resetf1_w = kappa
 
 ```python
 filename = f"{qub_name}_dualreset_freq1_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(dualreset_freq1_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_freq1_exp.save(
-    filepath=reserve_labber_filepath(
+    dualreset_freq1_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"frequency = {f}MHz",
+    unique=True,
 )
 ```
 
@@ -1353,17 +1454,25 @@ exp_cfg = {
     # "relax_delay": 5 / rf_w,  # us
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000, 'method': 'hard'})
 
-dualreset_freq2_exp = ze.twotone.reset.dual_tone.FreqExp()
-_ = dualreset_freq2_exp.run(soc, soccfg, cfg, method="hard")
+dualreset_freq2_exp = NotebookAdapter(
+    ze.twotone.reset.dual_tone.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+dualreset_freq2_run = dualreset_freq2_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
-f1, f2, fig = dualreset_freq2_exp.analyze(smooth=0.5, xname=xlabal, yname=ylabal)
+from zcu_tools.experiment.v2.twotone.reset.dual_tone.freq import FreqAnalyzeOptions as ResetFreqAnalyzeOptions
+
+dualreset_freq2_analysis = dualreset_freq2_exp.analyze(ResetFreqAnalyzeOptions(smooth=0.5, xname=xlabal, yname=ylabal), source=dualreset_freq2_run)
+f1 = dualreset_freq2_analysis.result.freq1
+f2 = dualreset_freq2_analysis.result.freq2
+fig = dualreset_freq2_analysis.figures["fit"]
 f1, f2
 ```
 
@@ -1374,12 +1483,14 @@ reset_f2 = f2
 
 ```python
 filename = f"{qub_name}_dualreset_both_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(dualreset_freq2_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_freq2_exp.save(
-    filepath=reserve_labber_filepath(
+    dualreset_freq2_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"frequency = ({reset_f1:.1f}, {reset_f2:.1f})MHz",
+    unique=True,
 )
 ```
 
@@ -1437,25 +1548,35 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-dualreset_gain_exp = ze.twotone.reset.dual_tone.PowerExp()
-_ = dualreset_gain_exp.run(soc, soccfg, cfg)
+dualreset_gain_exp = NotebookAdapter(
+    ze.twotone.reset.dual_tone.PowerExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+dualreset_gain_run = dualreset_gain_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
-gain1, gain2, fig = dualreset_gain_exp.analyze(xname=xlabal, yname=ylabal)
+from zcu_tools.experiment.v2.twotone.reset.dual_tone.power import PowerAnalyzeOptions as ResetPowerAnalyzeOptions
+
+dualreset_gain_analysis = dualreset_gain_exp.analyze(ResetPowerAnalyzeOptions(xname=xlabal, yname=ylabal), source=dualreset_gain_run)
+gain1 = dualreset_gain_analysis.result.gain1
+gain2 = dualreset_gain_analysis.result.gain2
+fig = dualreset_gain_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_dualreset_gain_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(dualreset_gain_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_gain_exp.save(
-    filepath=reserve_labber_filepath(
+    dualreset_gain_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"best gain = ({gain1:.1f}, {gain2:.1f})",
+    unique=True,
 )
 ```
 
@@ -1487,16 +1608,21 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.LengthCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-dualreset_len_exp = ze.twotone.reset.dual_tone.LengthExp()
-_ = dualreset_len_exp.run(soc, soccfg, cfg)
+dualreset_len_exp = NotebookAdapter(
+    ze.twotone.reset.dual_tone.LengthExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+dualreset_len_run = dualreset_len_exp.run(cfg)
 ```
 
 ```python
 filename = f"{qub_name}_dualreset_time_{time.strftime('%H%M')}"
 dualreset_len_exp.save(
-    filepath=reserve_labber_filepath(
+    dualreset_len_run,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1526,16 +1652,21 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
-dualreset_check_exp = ze.twotone.reset.RabiCheckExp()
-_ = dualreset_check_exp.run(soc, soccfg, cfg)
+dualreset_check_exp = NotebookAdapter(
+    ze.twotone.reset.RabiCheckExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+dualreset_check_run = dualreset_check_exp.run(cfg)
 ```
 
 ```python
 filename = f"{qub_name}_dualreset_check_{time.strftime('%H%M')}"
 dualreset_check_exp.save(
-    filepath=reserve_labber_filepath(
+    dualreset_check_run,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1568,23 +1699,30 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-rabifreq_exp = ze.twotone.rabi.LenRabiExp()
-_ = rabifreq_exp.run(soc, soccfg, cfg)
+rabifreq_exp = NotebookAdapter(
+    ze.twotone.rabi.LenRabiExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+rabifreq_run = rabifreq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-*_, md.rabi_f, _, fig = rabifreq_exp.analyze(decay=True)
+rabifreq_analysis = rabifreq_exp.analyze(LenRabiAnalyzeOptions(decay=True), source=rabifreq_run)
+md.rabi_f = rabifreq_analysis.result.rabi_f
+fig = rabifreq_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_rabi_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(rabifreq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 rabifreq_exp.save(
-    filepath=reserve_labber_filepath(
+    rabifreq_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us",
+    unique=True,
 )
 ```
 
@@ -1640,22 +1778,32 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.FreqGainCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-bathreset_freq_exp = ze.twotone.reset.bath.FreqGainExp()
-_ = bathreset_freq_exp.run(soc, soccfg, cfg)
+bathreset_freq_exp = NotebookAdapter(
+    ze.twotone.reset.bath.FreqGainExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+bathreset_freq_run = bathreset_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.bathreset_gain, md.bathreset_freq, fig = bathreset_freq_exp.analyze(smooth=1)
+from zcu_tools.experiment.v2.twotone.reset.bath.freq import FreqGainAnalyzeOptions
+
+bathreset_freq_analysis = bathreset_freq_exp.analyze(FreqGainAnalyzeOptions(smooth=1), source=bathreset_freq_run)
+md.bathreset_gain = bathreset_freq_analysis.result.gain
+md.bathreset_freq = bathreset_freq_analysis.result.freq
+fig = bathreset_freq_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_bathreset_freqgain_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(bathreset_freq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_freq_exp.save(
-    filepath=reserve_labber_filepath(
+    bathreset_freq_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1704,13 +1852,17 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.LengthCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-bathreset_len_exp = ze.twotone.reset.bath.LengthExp()
-_ = bathreset_len_exp.run(soc, soccfg, cfg)
+bathreset_len_exp = NotebookAdapter(
+    ze.twotone.reset.bath.LengthExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+bathreset_len_run = bathreset_len_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = bathreset_len_exp.analyze()
+bathreset_len_analysis = bathreset_len_exp.analyze(None, source=bathreset_len_run)
+fig = bathreset_len_analysis.figures["fit"]
 ```
 
 ```python
@@ -1719,11 +1871,13 @@ bath_reset_len = 10.0  # us
 
 ```python
 filename = f"{qub_name}_bathreset_len_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(bathreset_len_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_len_exp.save(
-    filepath=reserve_labber_filepath(
+    bathreset_len_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1763,22 +1917,30 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.PhaseCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-bathreset_phase_exp = ze.twotone.reset.bath.PhaseExp()
-_ = bathreset_phase_exp.run(soc, soccfg, cfg)
+bathreset_phase_exp = NotebookAdapter(
+    ze.twotone.reset.bath.PhaseExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+bathreset_phase_run = bathreset_phase_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-max_phase, min_phase, fig = bathreset_phase_exp.analyze()
+bathreset_phase_analysis = bathreset_phase_exp.analyze(None, source=bathreset_phase_run)
+max_phase = bathreset_phase_analysis.result.max_phase
+min_phase = bathreset_phase_analysis.result.min_phase
+fig = bathreset_phase_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_bathreset_phase_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(bathreset_phase_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_phase_exp.save(
-    filepath=reserve_labber_filepath(
+    bathreset_phase_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1828,22 +1990,29 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-bathreset_rabicheck_exp = ze.twotone.reset.RabiCheckExp()
-_ = bathreset_rabicheck_exp.run(soc, soccfg, cfg)
+bathreset_rabicheck_exp = NotebookAdapter(
+    ze.twotone.reset.RabiCheckExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+bathreset_rabicheck_run = bathreset_rabicheck_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-reset_check_fit, fig = bathreset_rabicheck_exp.analyze()
+bathreset_rabicheck_analysis = bathreset_rabicheck_exp.analyze(None, source=bathreset_rabicheck_run)
+reset_check_fit = bathreset_rabicheck_analysis.result
+fig = bathreset_rabicheck_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_bathreset_check_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(bathreset_rabicheck_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_rabicheck_exp.save(
-    filepath=reserve_labber_filepath(
+    bathreset_rabicheck_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1886,30 +2055,42 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, env, overrides={'reps': 2000, 'rounds': 40})
+cfg = make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, env, overrides={'reps': 2000, 'rounds': 40, 'fail_retry': 3})
 
-qub_flux_exp = ze.twotone.FreqFluxExp()
-_ = qub_flux_exp.run(soc, soccfg, cfg, fail_retry=3)
+qub_flux_exp = NotebookAdapter(
+    ze.twotone.FreqFluxExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+qub_flux_run = qub_flux_exp.run(cfg)
 ```
 
 ```python
 filename = f"{qub_name}_flux_{time.strftime('%H%M')}"
-qub_flux_exp.save(
-    filepath=reserve_labber_filepath(os.path.join(database_path, filename)),
-)
+qub_flux_exp.save(qub_flux_run, Path(database_path) / filename, unique=True)
 ```
 
 ```python
 %matplotlib widget
-actline = qub_flux_exp.analyze(
-    # flux_half=md.flx_half,
-    # flux_int=md.flx_int,
+from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxCfg, FreqFluxResult
+
+qub_flux_analyzer = FluxDepAnalyzer[FreqFluxCfg, FreqFluxResult]()
+qub_flux_picker = qub_flux_analyzer.start(
+    qub_flux_run,
+    FluxDepPickerOptions(
+        # flux_half=md.flx_half,
+        # flux_int=md.flx_int,
+    ),
 )
 ```
 
 ```python
-md.flx_half, md.flx_int = actline.get_positions()
-md.flx_period = 2 * abs(md.flx_half - md.flx_int)
+# Click Done in the picker before reading the committed selection.
+qub_flux_selection = qub_flux_picker.record
+if qub_flux_selection is None:
+    raise RuntimeError("Complete the flux picker with Done first")
+md.flx_half = qub_flux_selection.result.flux_half
+md.flx_int = qub_flux_selection.result.flux_int
+md.flx_period = qub_flux_selection.result.flux_period
 md.flx_half, md.flx_int
 ```
 
@@ -1947,15 +2128,20 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-qub_pdr_exp = ze.twotone.PowerExp()
-_ = qub_pdr_exp.run(soc, soccfg, cfg)
+qub_pdr_exp = NotebookAdapter(
+    ze.twotone.PowerExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+qub_pdr_run = qub_pdr_exp.run(cfg)
 ```
 
 ```python
 qub_pdr_exp.save(
-    filepath=reserve_labber_filepath(
+    qub_pdr_run,
+    Path(
         os.path.join(database_path, f"{qub_name}_pdr@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -1996,13 +2182,20 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.CKP_Cfg, env, overrides={'reps': 100, 'rounds': 100})
 
-ckp_exp = ze.twotone.CKP_Exp()
-_ = ckp_exp.run(soc, soccfg, cfg)
+ckp_exp = NotebookAdapter(
+    ze.twotone.CKP_Exp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+ckp_run = ckp_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-chi, kappa, center_freq, fig = ckp_exp.analyze()
+ckp_analysis = ckp_exp.analyze(None, source=ckp_run)
+chi = ckp_analysis.result.chi
+kappa = ckp_analysis.result.kappa
+center_freq = ckp_analysis.result.res_freq
+fig = ckp_analysis.figures["fit"]
 ```
 
 ```python
@@ -2013,11 +2206,13 @@ md.readout_f = center_freq
 
 ```python
 filename = f"{qub_name}_ckp_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(ckp_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 ckp_exp.save(
-    filepath=reserve_labber_filepath(
+    ckp_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -2048,23 +2243,33 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.DispersiveCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-dispersive_shift_exp = ze.twotone.DispersiveExp()
-_ = dispersive_shift_exp.run(soc, soccfg, cfg)
+dispersive_shift_exp = NotebookAdapter(
+    ze.twotone.DispersiveExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+dispersive_shift_run = dispersive_shift_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.chi, rf_w, fig = dispersive_shift_exp.analyze()
+from zcu_tools.experiment.v2.twotone.dispersive import DispersiveAnalyzeOptions
+
+dispersive_shift_analysis = dispersive_shift_exp.analyze(DispersiveAnalyzeOptions(), source=dispersive_shift_run)
+md.chi = dispersive_shift_analysis.result.chi
+rf_w = dispersive_shift_analysis.result.avg_fwhm
+fig = dispersive_shift_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_dispersive_gain{cfg.modules.readout.pulse_cfg.gain:.3f}_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(dispersive_shift_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dispersive_shift_exp.save(
-    filepath=reserve_labber_filepath(
+    dispersive_shift_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"chi = {md.chi:.3g} MHz, kappa = {rf_w:.3g} MHz",
+    unique=True,
 )
 ```
 
@@ -2108,27 +2313,34 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 10})
+cfg = make_cfg(exp_cfg, ze.twotone.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 10, 'earlystop_snr': 50})
 
-ac_stark_exp = ze.twotone.AcStarkExp()
-_ = ac_stark_exp.run(soc, soccfg, cfg, earlystop_snr=50)
+ac_stark_exp = NotebookAdapter(
+    ze.twotone.AcStarkExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+ac_stark_run = ac_stark_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.ac_stark_coeff, fig = ac_stark_exp.analyze(
-    chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.01
-)
+from zcu_tools.experiment.v2.twotone.ac_stark import AcStarkAnalyzeOptions
+
+ac_stark_analysis = ac_stark_exp.analyze(AcStarkAnalyzeOptions(chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.01), source=ac_stark_run)
+md.ac_stark_coeff = ac_stark_analysis.result.ac_coeff
+fig = ac_stark_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_ac_stark_freq{cfg.modules.stark_pulse1.freq:.3f}MHz_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(ac_stark_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 ac_stark_exp.save(
-    filepath=reserve_labber_filepath(
+    ac_stark_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     # comment=f"ac_stark_coeff = {md.ac_stark_coeff:.3g} MHz",
+    unique=True,
 )
 ```
 
@@ -2154,22 +2366,30 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.AllXYCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-allxy_exp = ze.twotone.AllXY_Exp()
-_ = allxy_exp.run(soc, soccfg, cfg)
+allxy_exp = NotebookAdapter(
+    ze.twotone.AllXY_Exp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+allxy_run = allxy_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = allxy_exp.analyze()
+from zcu_tools.experiment.v2.twotone.allxy import AllXYAnalyzeOptions
+
+allxy_analysis = allxy_exp.analyze(AllXYAnalyzeOptions(), source=allxy_run)
+fig = allxy_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_allxy_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(allxy_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 allxy_exp.save(
-    filepath=reserve_labber_filepath(
+    allxy_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -2195,22 +2415,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.RBCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-rb_exp = ze.twotone.RB_Exp()
-_ = rb_exp.run(soc, soccfg, cfg)
+rb_exp = NotebookAdapter(
+    ze.twotone.RB_Exp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+rb_run = rb_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-_, _, fig = rb_exp.analyze()
+rb_analysis = rb_exp.analyze(None, source=rb_run)
+fig = rb_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_rb_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(rb_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 rb_exp.save(
-    filepath=reserve_labber_filepath(
+    rb_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -2226,23 +2452,27 @@ exp_cfg = {
         "readout": "readout_rf",
         # "readout": "readout_dpm",
     },
-    "sweep": list(range(0, 11)),
+    "n_times": 10,
     "relax_delay": 30.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.ZigZagCfg, env, overrides={'reps': 1000, 'rounds': 100})
-
 repeat_on = "X90_pulse"
+cfg = make_cfg(exp_cfg, ze.twotone.ZigZagCfg, env, overrides={'reps': 1000, 'rounds': 100, 'repeat_on': repeat_on})
 
-zigzag_exp = ze.twotone.ZigZagExp()
-_ = zigzag_exp.run(soc, soccfg, cfg, repeat_on=repeat_on)
+zigzag_exp = NotebookAdapter(
+    ze.twotone.ZigZagExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+zigzag_run = zigzag_exp.run(cfg)
 ```
 
 ```python
 filename = f"{qub_name}_zigzag_{repeat_on}_{time.strftime('%m%d')}"
 zigzag_exp.save(
-    filepath=reserve_labber_filepath(
+    zigzag_run,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -2272,7 +2502,8 @@ exp_cfg = {
         "readout": "readout_rf",
         # "readout": "readout_dpm",
     },
-    "sweep": {"times": list(range(0, 7))},
+    "sweep": {},
+    "n_times": 6,
     "relax_delay": 100.5,  # us
 }
 if repeat_on == "X90_pulse":
@@ -2284,16 +2515,23 @@ elif repeat_on == "X180_pulse":
     exp_cfg["sweep"].update(gain=make_sweep(md.pi_gain * 0.8, md.pi_gain * 1.2, 101))
 else:
     raise ValueError(f"Invalid repeat_on: {repeat_on}")
-cfg = make_cfg(exp_cfg, ze.twotone.ZigZagScanCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.ZigZagScanCfg, env, overrides={'reps': 100, 'rounds': 100, 'repeat_on': repeat_on})
 
 
-zigzag_scan_exp = ze.twotone.ZigZagScanExp()
-_ = zigzag_scan_exp.run(soc, soccfg, cfg, repeat_on=repeat_on)
+zigzag_scan_exp = NotebookAdapter(
+    ze.twotone.ZigZagScanExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+zigzag_scan_run = zigzag_scan_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-best_x, fig = zigzag_scan_exp.analyze(find_range=(None, None))
+from zcu_tools.experiment.v2.twotone.zigzag_sweep import ZigZagScanAnalyzeOptions
+
+zigzag_scan_analysis = zigzag_scan_exp.analyze(ZigZagScanAnalyzeOptions(find_range=(None, None)), source=zigzag_scan_run)
+best_x = zigzag_scan_analysis.result.min_value
+fig = zigzag_scan_analysis.figures["fit"]
 ```
 
 ```python
@@ -2302,11 +2540,13 @@ gc_collect()
 
 ```python
 filename = f"{qub_name}_zigzag_sweep_{repeat_on}_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(zigzag_scan_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 zigzag_scan_exp.save(
-    filepath=reserve_labber_filepath(
+    zigzag_scan_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -2375,13 +2615,20 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-opt_ro_freq_exp = ze.twotone.ro_optimize.FreqExp()
-_ = opt_ro_freq_exp.run(soc, soccfg, cfg)
+opt_ro_freq_exp = NotebookAdapter(
+    ze.twotone.ro_optimize.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+opt_ro_freq_run = opt_ro_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-best_freq, fig = opt_ro_freq_exp.analyze(smooth=2)
+from zcu_tools.experiment.v2.twotone.ro_optimize.freq import FreqAnalyzeOptions as ROFreqAnalyzeOptions
+
+opt_ro_freq_analysis = opt_ro_freq_exp.analyze(ROFreqAnalyzeOptions(smooth=2), source=opt_ro_freq_run)
+best_freq = opt_ro_freq_analysis.result.best_freq
+fig = opt_ro_freq_analysis.figures["fit"]
 best_freq
 ```
 
@@ -2391,12 +2638,14 @@ md.best_ro_freq = best_freq
 
 ```python
 filename = f"{qub_name}_ro_opt_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(opt_ro_freq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_freq_exp.save(
-    filepath=reserve_labber_filepath(
+    opt_ro_freq_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"optimal frequency = {best_freq:.1f}MHz",
+    unique=True,
 )
 ```
 
@@ -2436,13 +2685,20 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-opt_ro_pdr_exp = ze.twotone.ro_optimize.PowerExp()
-_ = opt_ro_pdr_exp.run(soc, soccfg, cfg)
+opt_ro_pdr_exp = NotebookAdapter(
+    ze.twotone.ro_optimize.PowerExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+opt_ro_pdr_run = opt_ro_pdr_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-best_gain, fig = opt_ro_pdr_exp.analyze(penalty_ratio=0.5)
+from zcu_tools.experiment.v2.twotone.ro_optimize.power import PowerAnalyzeOptions as ROPowerAnalyzeOptions
+
+opt_ro_pdr_analysis = opt_ro_pdr_exp.analyze(ROPowerAnalyzeOptions(penalty_ratio=0.5), source=opt_ro_pdr_run)
+best_gain = opt_ro_pdr_analysis.result.best_gain
+fig = opt_ro_pdr_analysis.figures["fit"]
 best_gain
 ```
 
@@ -2452,12 +2708,14 @@ md.best_ro_gain = best_gain
 
 ```python
 filename = f"{qub_name}_ro_opt_gain_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(opt_ro_pdr_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_pdr_exp.save(
-    filepath=reserve_labber_filepath(
+    opt_ro_pdr_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"optimal power = {best_gain:.2f}",
+    unique=True,
 )
 ```
 
@@ -2496,13 +2754,21 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqGainCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-opt_ro_freq_pdr_exp = ze.twotone.ro_optimize.FreqGainExp()
-_ = opt_ro_freq_pdr_exp.run(soc, soccfg, cfg)
+opt_ro_freq_pdr_exp = NotebookAdapter(
+    ze.twotone.ro_optimize.FreqGainExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+opt_ro_freq_pdr_run = opt_ro_freq_pdr_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-best_freq, best_gain, fig = opt_ro_freq_pdr_exp.analyze()
+from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import FreqGainAnalyzeOptions as ROFreqGainAnalyzeOptions
+
+opt_ro_freq_pdr_analysis = opt_ro_freq_pdr_exp.analyze(ROFreqGainAnalyzeOptions(), source=opt_ro_freq_pdr_run)
+best_freq = opt_ro_freq_pdr_analysis.result.best_freq
+best_gain = opt_ro_freq_pdr_analysis.result.best_gain
+fig = opt_ro_freq_pdr_analysis.figures["fit"]
 best_freq, best_gain
 ```
 
@@ -2513,12 +2779,14 @@ md.best_ro_gain = best_gain
 
 ```python
 filename = f"{qub_name}_ro_opt_gain_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(opt_ro_freq_pdr_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_freq_pdr_exp.save(
-    filepath=reserve_labber_filepath(
+    opt_ro_freq_pdr_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"optimal freq = {best_freq:.2f}, power = {best_gain:.2f}",
+    unique=True,
 )
 ```
 
@@ -2550,13 +2818,20 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.LengthCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-opt_ro_len_exp = ze.twotone.ro_optimize.LengthExp()
-_ = opt_ro_len_exp.run(soc, soccfg, cfg)
+opt_ro_len_exp = NotebookAdapter(
+    ze.twotone.ro_optimize.LengthExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+opt_ro_len_run = opt_ro_len_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-best_length, fig = opt_ro_len_exp.analyze(t0=5.0)
+from zcu_tools.experiment.v2.twotone.ro_optimize.length import LengthAnalyzeOptions as ROLengthAnalyzeOptions
+
+opt_ro_len_analysis = opt_ro_len_exp.analyze(ROLengthAnalyzeOptions(t0=5.0), source=opt_ro_len_run)
+best_length = opt_ro_len_analysis.result.best_length
+fig = opt_ro_len_analysis.figures["fit"]
 best_length
 ```
 
@@ -2566,12 +2841,14 @@ md.best_ro_length = best_length
 
 ```python
 filename = f"{qub_name}_ro_opt_length_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(opt_ro_len_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_len_exp.save(
-    filepath=reserve_labber_filepath(
+    opt_ro_len_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"optimal readout length = {best_length:.2f}us",
+    unique=True,
 )
 ```
 
@@ -2617,24 +2894,33 @@ exp_cfg = {
         "length": make_sweep(5.0, 10.0, 51),
     },
 }
-cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.AutoOptCfg, env, overrides={'reps': 1000, 'rounds': 10})
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.AutoOptCfg, env, overrides={'reps': 1000, 'rounds': 10, 'num_points': 1001})
 
-auto_opt_ro_exp = ze.twotone.ro_optimize.AutoOptExp()
-_ = auto_opt_ro_exp.run(soc, soccfg, cfg, num_points=1001)
+auto_opt_ro_exp = NotebookAdapter(
+    ze.twotone.ro_optimize.AutoOptExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+auto_opt_ro_run = auto_opt_ro_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.best_ro_freq, md.best_ro_gain, md.best_ro_length, fig = auto_opt_ro_exp.analyze()
+auto_opt_ro_analysis = auto_opt_ro_exp.analyze(None, source=auto_opt_ro_run)
+md.best_ro_freq = auto_opt_ro_analysis.result.best_freq
+md.best_ro_gain = auto_opt_ro_analysis.result.best_gain
+md.best_ro_length = auto_opt_ro_analysis.result.best_length
+fig = auto_opt_ro_analysis.figures["fit"]
 md.best_ro_freq, md.best_ro_gain, md.best_ro_length
 ```
 
 ```python
 filename = f"{qub_name}_ro_opt_auto_{time.strftime('%m%d')}"
 auto_opt_ro_exp.save(
-    filepath=reserve_labber_filepath(
+    auto_opt_ro_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -2688,24 +2974,40 @@ cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T2RamseyCfg, env, overrides={'rep
 
 activate_detune = 0.05 / cfg.sweep.length.step
 
-t2ramsey_exp = ze.twotone.time_domain.T2RamseyExp()
-_, true_detune = t2ramsey_exp.run(soc, soccfg, cfg, detune=activate_detune)
+cfg = cfg.with_updates(detune=activate_detune)
+
+t2ramsey_exp = NotebookAdapter(
+    ze.twotone.time_domain.T2RamseyExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+t2ramsey_run = t2ramsey_exp.run(cfg)
+true_detune = t2ramsey_run.result.true_activate_detune
+if true_detune is None:
+    raise ValueError("The run did not return its applied detuning")
 ```
 
 ```python
 %matplotlib inline
-md.t2r, md.t2r_err, detune, _, fig = t2ramsey_exp.analyze(fit_fringe=True)
+from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import T2RamseyAnalyzeOptions
+
+t2ramsey_analysis = t2ramsey_exp.analyze(T2RamseyAnalyzeOptions(fit_fringe=True), source=t2ramsey_run)
+md.t2r = t2ramsey_analysis.result.t2r
+md.t2r_err = t2ramsey_analysis.result.t2r_err
+detune = t2ramsey_analysis.result.detune
+fig = t2ramsey_analysis.figures["fit"]
 print(f"real detune: {(detune - true_detune) * 1e3:.1f}kHz")
 ```
 
 ```python
 filename = f"{qub_name}_t2ramsey_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(t2ramsey_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2ramsey_exp.save(
-    filepath=reserve_labber_filepath(
+    t2ramsey_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"activate detune = {true_detune:.3f}MHz\nt2r = {md.t2r:.3f}us",
+    unique=True,
 )
 ```
 
@@ -2790,24 +3092,33 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
-t1_with_tone_exp = ze.twotone.time_domain.T1WithToneExp()
-_ = t1_with_tone_exp.run(soc, soccfg, cfg)
+t1_with_tone_exp = NotebookAdapter(
+    ze.twotone.time_domain.T1WithToneExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+t1_with_tone_run = t1_with_tone_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-md.t1_with_tone, _, fig = t1_with_tone_exp.analyze(dual_exp=False)
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1WithToneAnalyzeOptions
+
+t1_with_tone_analysis = t1_with_tone_exp.analyze(T1WithToneAnalyzeOptions(dual_exp=False), source=t1_with_tone_run)
+md.t1_with_tone = t1_with_tone_analysis.result.t1
+fig = t1_with_tone_analysis.figures["fit"]
 md.t1_with_tone
 ```
 
 ```python
 filename = f"{qub_name}_t1_with_tone_gain{cfg.modules.test_pulse.gain:.2f}_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(t1_with_tone_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_with_tone_exp.save(
-    filepath=reserve_labber_filepath(
+    t1_with_tone_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"t1 = {md.t1_with_tone:.3f}us",
+    unique=True,
 )
 ```
 
@@ -2839,22 +3150,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.twotone.time_domain.ScanT1WithToneCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-t1_with_tone_sweep_exp = ze.twotone.time_domain.ScanT1WithToneExp()
-_ = t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
+t1_with_tone_sweep_exp = NotebookAdapter(
+    ze.twotone.time_domain.ScanT1WithToneExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+t1_with_tone_sweep_run = t1_with_tone_sweep_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-*_, fig = t1_with_tone_sweep_exp.analyze()
+t1_with_tone_sweep_analysis = t1_with_tone_sweep_exp.analyze(None, source=t1_with_tone_sweep_run)
+fig = t1_with_tone_sweep_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_t1_with_tone_sweep_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(t1_with_tone_sweep_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_with_tone_sweep_exp.save(
-    filepath=reserve_labber_filepath(
+    t1_with_tone_sweep_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -2879,23 +3196,39 @@ cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T2EchoCfg, env, overrides={'reps'
 
 activate_detune = 0.1 / cfg.sweep.length.step
 
-t2echo_exp = ze.twotone.time_domain.T2EchoExp()
-_, true_detune = t2echo_exp.run(soc, soccfg, cfg, detune=activate_detune)
+cfg = cfg.with_updates(detune=activate_detune)
+
+t2echo_exp = NotebookAdapter(
+    ze.twotone.time_domain.T2EchoExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+t2echo_run = t2echo_exp.run(cfg)
+true_detune = t2echo_run.result.true_activate_detune
+if true_detune is None:
+    raise ValueError("The run did not return its applied detuning")
 ```
 
 ```python
 %matplotlib inline
-md.t2e, md.t2e_err, detune, _, fig = t2echo_exp.analyze(fit_method="fringe")
+from zcu_tools.experiment.v2.twotone.time_domain.t2echo import T2EchoAnalyzeOptions
+
+t2echo_analysis = t2echo_exp.analyze(T2EchoAnalyzeOptions(fit_method="fringe"), source=t2echo_run)
+md.t2e = t2echo_analysis.result.t2e
+md.t2e_err = t2echo_analysis.result.t2e_err
+detune = t2echo_analysis.result.detune
+fig = t2echo_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_t2echo_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(t2echo_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2echo_exp.save(
-    filepath=reserve_labber_filepath(
+    t2echo_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"activate detune = {true_detune:.3f}MHz\nt2echo = {md.t2e:.3f}us",
+    unique=True,
 )
 ```
 
@@ -2922,25 +3255,32 @@ exp_cfg = {
     # "relax_delay": 30.0,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.time_domain.CPMG_Cfg, env, overrides={'reps': 1000, 'rounds': 100})
-
 detune_ratio = 0.1
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.CPMG_Cfg, env, overrides={'reps': 1000, 'rounds': 100, 'detune_ratio': detune_ratio})
 
-cpmg_exp = ze.twotone.time_domain.CPMG_Exp()
-_ = cpmg_exp.run(soc, soccfg, cfg, detune_ratio=detune_ratio)
+cpmg_exp = NotebookAdapter(
+    ze.twotone.time_domain.CPMG_Exp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+cpmg_run = cpmg_exp.run(cfg)
 ```
 
 ```python
-fig = cpmg_exp.analyze(fit_fringe=True)
+from zcu_tools.experiment.v2.twotone.time_domain.cpmg import CPMGAnalyzeOptions
+
+cpmg_analysis = cpmg_exp.analyze(CPMGAnalyzeOptions(fit_fringe=True), source=cpmg_run)
+fig = cpmg_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_cpmg_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(cpmg_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 cpmg_exp.save(
-    filepath=reserve_labber_filepath(
+    cpmg_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -3131,23 +3471,31 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.singleshot.CheckCfg, env, overrides={'shots': 10000})
 
-sh_exp = ze.singleshot.CheckExp()
-_ = sh_exp.run(soc, soccfg, cfg)
+sh_exp = NotebookAdapter(
+    ze.singleshot.CheckExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_run = sh_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = sh_exp.analyze(md.g_center, md.e_center, md.ge_radius, max_point=10000)
+from zcu_tools.experiment.v2.singleshot.check import CheckAnalyzeOptions
+
+sh_analysis = sh_exp.analyze(CheckAnalyzeOptions(md.g_center, md.e_center, md.ge_radius, max_point=10000), source=sh_run)
+fig = sh_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sh_g_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
-sh_ge_exp.save(
-    filepath=reserve_labber_filepath(
+savefig(sh_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
+sh_exp.save(
+    sh_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"g: {md.g_center:.3}, e: {md.e_center:.3}, radius: {md.ge_radius:.3}, ",
+    unique=True,
 )
 ```
 
@@ -3175,24 +3523,30 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.2, 51),
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.LenRabiCfg, env, overrides={'reps': 1000, 'rounds': 100, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
+# Retain 1000 * 100 acquisitions as raw IQ shots for the joint fit.
+cfg = make_cfg(exp_cfg, ze.singleshot.LenRabiCfg, env, overrides={'shots': 100000, 'reps': 100000, 'rounds': 1, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_lenrabi_exp = ze.singleshot.LenRabiExp()
-_ = sh_lenrabi_exp.run(soc, soccfg, cfg)
+sh_lenrabi_exp = NotebookAdapter(
+    ze.singleshot.LenRabiExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_lenrabi_run = sh_lenrabi_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = sh_lenrabi_exp.analyze(
-    confusion_matrix=md.confusion_matrix,
-)
+from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiAnalyzeOptions as SSLenRabiAnalyzeOptions
+
+sh_lenrabi_analysis = sh_lenrabi_exp.analyze(SSLenRabiAnalyzeOptions(), source=sh_lenrabi_run)
+fig = sh_lenrabi_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sh_rabi_length_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(sh_lenrabi_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_lenrabi_exp.save(
-    filepath=reserve_labber_filepath(
+    sh_lenrabi_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=(
@@ -3201,6 +3555,7 @@ sh_lenrabi_exp.save(
         f"radius: {md.ge_radius:.3}, "
         f"confusion:{md.confusion_matrix}"
     ),
+    unique=True,
 )
 ```
 
@@ -3220,22 +3575,29 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 50.1, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1Cfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1Cfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius, 'uniform': True})
 
-sh_t1_exp = ze.singleshot.t1.T1Exp()
-_ = sh_t1_exp.run(soc, soccfg, cfg, uniform=True)
+sh_t1_exp = NotebookAdapter(
+    ze.singleshot.t1.T1Exp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_t1_run = sh_t1_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = sh_t1_exp.analyze(confusion_matrix=md.confusion_matrix, skip=1)
+from zcu_tools.experiment.v2.singleshot.t1.t1 import T1AnalyzeOptions as SST1AnalyzeOptions
+
+sh_t1_analysis = sh_t1_exp.analyze(SST1AnalyzeOptions(confusion_matrix=md.confusion_matrix, skip=1), source=sh_t1_run)
+fig = sh_t1_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sh_t1_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(sh_t1_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_exp.save(
-    filepath=reserve_labber_filepath(
+    sh_t1_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=(
@@ -3244,6 +3606,7 @@ sh_t1_exp.save(
         f"radius: {md.ge_radius:.3}, "
         f"confusion:{md.confusion_matrix}"
     ),
+    unique=True,
 )
 ```
 
@@ -3265,17 +3628,23 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius, 'uniform': True})
 
-sh_t1_with_tone_exp = ze.singleshot.t1.T1WithToneExp()
-_ = sh_t1_with_tone_exp.run(soc, soccfg, cfg, uniform=True)
+sh_t1_with_tone_exp = NotebookAdapter(
+    ze.singleshot.t1.T1WithToneExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_t1_with_tone_run = sh_t1_with_tone_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-t1, t1_b, fig = sh_t1_with_tone_exp.analyze(
-    confusion_matrix=md.confusion_matrix, skip=2
-)
+from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone import T1WithToneAnalyzeOptions as SST1WithToneAnalyzeOptions
+
+sh_t1_with_tone_analysis = sh_t1_with_tone_exp.analyze(SST1WithToneAnalyzeOptions(confusion_matrix=md.confusion_matrix, skip=2), source=sh_t1_with_tone_run)
+t1 = sh_t1_with_tone_analysis.result.t1
+t1_b = sh_t1_with_tone_analysis.result.t1_b
+fig = sh_t1_with_tone_analysis.figures["fit"]
 ```
 
 ```python
@@ -3284,9 +3653,10 @@ md.t1_with_tone = t1
 
 ```python
 filename = f"{qub_name}_sh_t1_with_tone_gain{cfg.modules.probe_pulse.gain:.3f}_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(sh_t1_with_tone_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_with_tone_exp.save(
-    filepath=reserve_labber_filepath(
+    sh_t1_with_tone_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=(
@@ -3295,6 +3665,7 @@ sh_t1_with_tone_exp.save(
         f"radius: {md.ge_radius:.3}, "
         f"confusion:{md.confusion_matrix}"
     ),
+    unique=True,
 )
 ```
 
@@ -3326,22 +3697,27 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneSweepCfg, env, overrides={'reps': 1000, 'rounds': 1, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_t1_with_tone_sweep_exp = ze.singleshot.t1.T1WithToneSweepExp()
-_ = sh_t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
+sh_t1_with_tone_sweep_exp = NotebookAdapter(
+    ze.singleshot.t1.T1WithToneSweepExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_t1_with_tone_sweep_run = sh_t1_with_tone_sweep_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = sh_t1_with_tone_sweep_exp.analyze(
-    ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix
-)
+from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import T1WithToneSweepAnalyzeOptions
+
+sh_t1_with_tone_sweep_analysis = sh_t1_with_tone_sweep_exp.analyze(T1WithToneSweepAnalyzeOptions(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix), source=sh_t1_with_tone_sweep_run)
+fig = sh_t1_with_tone_sweep_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sh_t1_with_tone_sweep_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(sh_t1_with_tone_sweep_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_with_tone_sweep_exp.save(
-    filepath=reserve_labber_filepath(
+    sh_t1_with_tone_sweep_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=(
@@ -3351,6 +3727,7 @@ sh_t1_with_tone_sweep_exp.save(
         f"ac_stark_coeff: {md.ac_stark_coeff:.3}, "
         f"confusion:{md.confusion_matrix}"
     ),
+    unique=True,
 )
 ```
 
@@ -3386,23 +3763,31 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.singleshot.mist.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_mist_exp = ze.singleshot.mist.PowerExp()
-_ = sh_mist_exp.run(soc, soccfg, cfg)
+sh_mist_exp = NotebookAdapter(
+    ze.singleshot.mist.PowerExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_mist_run = sh_mist_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = sh_mist_exp.analyze(
-    ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix
+from zcu_tools.experiment.v2.singleshot.mist.power import PowerAnalyzeOptions as SSMistPowerAnalyzeOptions
+
+sh_mist_analysis = sh_mist_exp.analyze(
+    SSMistPowerAnalyzeOptions(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix),
+    source=sh_mist_run,
 )
+fig = sh_mist_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sh_mist_g_short_{time.strftime('%H%M')}"
 # filename = f"{qub_name}_sh_mist_steady_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(sh_mist_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_mist_exp.save(
-    filepath=reserve_labber_filepath(
+    sh_mist_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=(
@@ -3412,6 +3797,7 @@ sh_mist_exp.save(
         f"ac_stark_coeff: {md.ac_stark_coeff:.3}, "
         f"confusion:{md.confusion_matrix}"
     ),
+    unique=True,
 )
 ```
 
@@ -3444,24 +3830,32 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.singleshot.CheckCfg, env, overrides={'shots': 1000000})
 
-sh_mist_exp = ze.singleshot.CheckExp()
-_ = sh_mist_exp.run(soc, soccfg, cfg)
+sh_mist_check_exp = NotebookAdapter(
+    ze.singleshot.CheckExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_mist_check_run = sh_mist_check_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = sh_mist_exp.analyze(md.g_center, md.e_center, md.ge_radius)
+sh_mist_check_analysis = sh_mist_check_exp.analyze(
+    CheckAnalyzeOptions(md.g_center, md.e_center, md.ge_radius), source=sh_mist_check_run,
+)
+fig = sh_mist_check_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sh_mist_steady_gain{cfg.modules.probe_pulse.gain:.4f}_{time.strftime('%H%M')}"
 # filename = f"{qub_name}_sh_e_mist_short_gain{cfg.modules.probe_pulse.gain:.4f}_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
-sh_mist_exp.save(
-    filepath=reserve_labber_filepath(
+savefig(sh_mist_check_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
+sh_mist_check_exp.save(
+    sh_mist_check_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"g: {md.g_center:.3}, e: {md.e_center:.3}, radius: {md.ge_radius:.3}, ",
+    unique=True,
 )
 ```
 
@@ -3506,15 +3900,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.singleshot.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 2, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_ac_stark_exp = ze.singleshot.AcStarkExp()
-_ = sh_ac_stark_exp.run(soc, soccfg, cfg)
+sh_ac_stark_exp = NotebookAdapter(
+    ze.singleshot.AcStarkExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+sh_ac_stark_run = sh_ac_stark_exp.run(cfg)
+```
+
+```python
+%matplotlib inline
+from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkAnalyzeOptions as SSAcStarkAnalyzeOptions
+
+sh_ac_stark_analysis = sh_ac_stark_exp.analyze(SSAcStarkAnalyzeOptions(chi=md.chi, kappa=md.rf_w, confusion_matrix=md.confusion_matrix, cutoff=0.05), source=sh_ac_stark_run)
+ac_stark_coeff = sh_ac_stark_analysis.result.ac_stark_coeff
+fig = sh_ac_stark_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_sh_ac_stark_rf{cfg.modules.stark_pulse1.freq:.1f}MHz_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(sh_ac_stark_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_ac_stark_exp.save(
-    filepath=reserve_labber_filepath(
+    sh_ac_stark_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=(
@@ -3523,16 +3930,7 @@ sh_ac_stark_exp.save(
         f"radius: {md.ge_radius:.3}, "
         f"confusion:{md.confusion_matrix}"
     ),
-)
-```
-
-```python
-%matplotlib inline
-ac_stark_coeff, fig = sh_ac_stark_exp.analyze(
-    md.chi,
-    kappa=md.rf_w,
-    confusion_matrix=md.confusion_matrix,
-    cutoff=0.05,
+    unique=True,
 )
 ```
 
@@ -3592,25 +3990,31 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.mist.PowerDepCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-mist_exp = ze.mist.PowerDepExp()
-_ = mist_exp.run(soc, soccfg, cfg)
+mist_exp = NotebookAdapter(
+    ze.mist.PowerDepExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+mist_run = mist_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = mist_exp.analyze(
-    ac_coeff=md.ac_stark_coeff,
-)
+from zcu_tools.experiment.v2.mist.power_dep.single_trace import PowerDepAnalyzeOptions
+
+mist_analysis = mist_exp.analyze(PowerDepAnalyzeOptions(ac_coeff=md.ac_stark_coeff), source=mist_run)
+fig = mist_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_mist_e_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(mist_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 mist_exp.save(
-    filepath=reserve_labber_filepath(
+    mist_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
     comment=f"ac_stark_coeff: {md.ac_stark_coeff:.3}",
+    unique=True,
 )
 ```
 
@@ -3659,22 +4063,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.fastflux.TwotoneCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-lf_twotone_exp = ze.fastflux.TwoToneExp()
-_ = lf_twotone_exp.run(soc, soccfg, cfg)
+lf_twotone_exp = NotebookAdapter(
+    ze.fastflux.TwoToneExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+lf_twotone_run = lf_twotone_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = lf_twotone_exp.analyze()
+lf_twotone_analysis = lf_twotone_exp.analyze(None, source=lf_twotone_run)
+fig = lf_twotone_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_fastflux_twotone_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(lf_twotone_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_twotone_exp.save(
-    filepath=reserve_labber_filepath(
+    lf_twotone_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -3718,22 +4128,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.fastflux.distortion.AccPhaseCfg, env, overrides={'reps': 100, 'rounds': 500})
 
-lf_dt_ap_exp = ze.fastflux.distortion.AccPhaseExp()
-_ = lf_dt_ap_exp.run(soc, soccfg, cfg)
+lf_dt_ap_exp = NotebookAdapter(
+    ze.fastflux.distortion.AccPhaseExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+lf_dt_ap_run = lf_dt_ap_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = lf_dt_ap_exp.analyze()
+lf_dt_ap_analysis = lf_dt_ap_exp.analyze(None, source=lf_dt_ap_run)
+fig = lf_dt_ap_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_flux_distortion_accphase_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(lf_dt_ap_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_dt_ap_exp.save(
-    filepath=reserve_labber_filepath(
+    lf_dt_ap_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -3770,22 +4186,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.fastflux.distortion.PhaseCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-lf_dt_p_exp = ze.fastflux.distortion.PhaseExp()
-_ = lf_dt_p_exp.run(soc, soccfg, cfg)
+lf_dt_p_exp = NotebookAdapter(
+    ze.fastflux.distortion.PhaseExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+lf_dt_p_run = lf_dt_p_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = lf_dt_p_exp.analyze()
+lf_dt_p_analysis = lf_dt_p_exp.analyze(None, source=lf_dt_p_run)
+fig = lf_dt_p_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_flux_distortion_phase_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(lf_dt_p_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_dt_p_exp.save(
-    filepath=reserve_labber_filepath(
+    lf_dt_p_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -3830,22 +4252,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.fastflux.distortion.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-lf_dt_freq_exp = ze.fastflux.distortion.FreqExp()
-_ = lf_dt_freq_exp.run(soc, soccfg, cfg)
+lf_dt_freq_exp = NotebookAdapter(
+    ze.fastflux.distortion.FreqExp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+lf_dt_freq_run = lf_dt_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = lf_dt_freq_exp.analyze()
+lf_dt_freq_analysis = lf_dt_freq_exp.analyze(None, source=lf_dt_freq_run)
+fig = lf_dt_freq_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_flux_distortion_freq_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(lf_dt_freq_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_dt_freq_exp.save(
-    filepath=reserve_labber_filepath(
+    lf_dt_freq_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 
@@ -3883,22 +4311,28 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.fastflux.T1Cfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-lf_t1_exp = ze.fastflux.T1Exp()
-_ = lf_t1_exp.run(soc, soccfg, cfg)
+lf_t1_exp = NotebookAdapter(
+    ze.fastflux.T1Exp(), soc=soc, soccfg=soccfg,
+    devices=device_manager.get_all_devices(),
+)
+lf_t1_run = lf_t1_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = lf_t1_exp.analyze()
+lf_t1_analysis = lf_t1_exp.analyze(None, source=lf_t1_run)
+fig = lf_t1_analysis.figures["fit"]
 ```
 
 ```python
 filename = f"{qub_name}_fastflux_t1_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+savefig(lf_t1_analysis.figures["fit"], os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_t1_exp.save(
-    filepath=reserve_labber_filepath(
+    lf_t1_analysis.source,
+    Path(
         os.path.join(database_path, f"{filename}@{em.label}")
     ),
+    unique=True,
 )
 ```
 

@@ -1,14 +1,15 @@
-"""Notebook control for OneTone flux-dependent sweeps and committed picks."""
+"""Notebook control for flux-dependent spectra and committed picks."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Generic
 
 import ipywidgets as widgets
 from IPython import display as ipython_display
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from typing_extensions import TypeVar
 
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import (
@@ -20,6 +21,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
 )
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepResult
+from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxCfg, FreqFluxResult
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import PlotHost, Plots
@@ -35,20 +37,23 @@ class FluxDepPickerOptions:
     magnitude_only: bool = False
 
 
-FluxDepAnalysisRecord = AnalysisRecord[
-    FluxDepCfg, FluxDepResult, FluxPickState, FluxPickAnalysis
-]
+CfgT = TypeVar("CfgT", bound=FluxDepCfg | FreqFluxCfg, default=FluxDepCfg)
+ResultT = TypeVar(
+    "ResultT", bound=FluxDepResult | FreqFluxResult, default=FluxDepResult
+)
+
+FluxDepAnalysisRecord = AnalysisRecord[CfgT, ResultT, FluxPickState, FluxPickAnalysis]
 
 
-class FluxDepInteraction:
+class FluxDepInteraction(Generic[CfgT, ResultT]):
     """Preview an explicit source; publish only after Done finishes successfully."""
 
     def __init__(
         self,
-        source: RunRecord[FluxDepCfg, FluxDepResult],
+        source: RunRecord[CfgT, ResultT],
         options: FluxDepPickerOptions,
         host: PlotHost,
-        publish: Callable[[FluxDepAnalysisRecord, Plots], None],
+        publish: Callable[[FluxDepAnalysisRecord[CfgT, ResultT], Plots], None],
     ) -> None:
         data = source.result
         inputs = FluxPickInputs(data.signals, data.values, data.freqs)
@@ -68,7 +73,7 @@ class FluxDepInteraction:
         self._host = host
         self._publish = publish
         self.is_finished = False
-        self.record: FluxDepAnalysisRecord | None = None
+        self.record: FluxDepAnalysisRecord[CfgT, ResultT] | None = None
         self.plots: Plots | None = None
         self.figure = Figure(figsize=(8, 5))
         FigureCanvasAgg(self.figure)
@@ -143,7 +148,7 @@ class FluxDepInteraction:
         self.picker.apply_positions(half, integer)
         self._refresh()
 
-    def done(self) -> FluxDepAnalysisRecord:
+    def done(self) -> FluxDepAnalysisRecord[CfgT, ResultT]:
         """Commit the captured source, terminal state and native pick figure.
 
         Invalid separation leaves this interaction editable. Other failures retire
@@ -174,7 +179,9 @@ class FluxDepInteraction:
         try:
             plots.adopt("pick", make_flux_pick_figure(self._inputs, state))
             figures = plots.finish()
-            record = FluxDepAnalysisRecord(self._source, state, result, figures)
+            record = FluxDepAnalysisRecord[CfgT, ResultT](
+                self._source, state, result, figures
+            )
             self._retire_preview()
         except BaseException as error:
             cleanup_errors: list[BaseException] = []
@@ -285,7 +292,7 @@ class FluxDepInteraction:
             self.status.value = str(error)
 
 
-class FluxDepAnalyzer:
+class FluxDepAnalyzer(Generic[CfgT, ResultT]):
     """Analyze explicit run records independently of acquisition and persistence.
 
     Start captures one source. Later adapter run/load calls cannot replace it or
@@ -295,14 +302,14 @@ class FluxDepAnalyzer:
 
     def __init__(self, host: PlotHost | None = None) -> None:
         self._host = NotebookPlotHost() if host is None else host
-        self.analysis: FluxDepAnalysisRecord | None = None
+        self.analysis: FluxDepAnalysisRecord[CfgT, ResultT] | None = None
         self.analysis_plots: Plots | None = None
 
     def start(
         self,
-        source: RunRecord[FluxDepCfg, FluxDepResult],
+        source: RunRecord[CfgT, ResultT],
         options: FluxDepPickerOptions | None = None,
-    ) -> FluxDepInteraction:
+    ) -> FluxDepInteraction[CfgT, ResultT]:
         return FluxDepInteraction(
             source,
             FluxDepPickerOptions() if options is None else options,
@@ -310,6 +317,8 @@ class FluxDepAnalyzer:
             self._publish,
         )
 
-    def _publish(self, record: FluxDepAnalysisRecord, plots: Plots) -> None:
+    def _publish(
+        self, record: FluxDepAnalysisRecord[CfgT, ResultT], plots: Plots
+    ) -> None:
         self.analysis = record
         self.analysis_plots = plots
