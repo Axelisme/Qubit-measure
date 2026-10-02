@@ -396,7 +396,12 @@ class RecipeContext:
             operation_handle=started["handle"],
             before_send=lambda: self._admit("writeback_read"),
         )
-        self._publish(writeback=writeback, status="finished", phase="terminal")
+        with self._condition:
+            self._publish(
+                writeback=writeback,
+                status="cancelled" if self.progress.cancel_requested else "finished",
+                phase="terminal",
+            )
 
     def _retain_analysis(self, execution: AnalysisExecution) -> None:
         """Deliver a stop that raced with the admitted analysis start receipt."""
