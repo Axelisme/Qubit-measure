@@ -95,7 +95,7 @@ class _RpcFailure(RuntimeError):
 
     def __init__(self, phase: ExecutionPhase, cause: Exception) -> None:
         super().__init__(str(cause))
-        self.phase = phase
+        self.phase: ExecutionPhase = phase
         self.cause = cause
 
 
