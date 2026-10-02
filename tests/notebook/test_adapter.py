@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -10,6 +11,7 @@ from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -27,6 +29,7 @@ class _Core:
     def __init__(self) -> None:
         self.fail_analysis = False
         self.fail_run = False
+        self.signal_outcome: Literal["stopped", "failed", "interrupted"] | None = None
         self.contexts: list[RunContext] = []
         self.saved: list[tuple[RunRecord[_Cfg, float], Path]] = []
         self.metadata: tuple[str | None, str | None] | None = None
@@ -39,6 +42,12 @@ class _Core:
         config.scale = 99.0
         if self.fail_run:
             raise ValueError("Run failed after creating a diagnostic figure")
+        if self.signal_outcome == "stopped":
+            context.cancel_signal.set()
+        elif self.signal_outcome is not None:
+            context.cancel_signal.set_error(
+                self.signal_outcome, "Acquisition failed", OSError("Device unavailable")
+            )
         return result
 
     def analyze(
@@ -289,7 +298,9 @@ def test_run_requires_explicit_device_mapping_before_starting_operation() -> Non
     assert adapter.last_run is None
 
 
-@pytest.mark.parametrize("failure", ["core", "finish"])
+@pytest.mark.parametrize(
+    "failure", ["core", "finish", "signal-failed", "signal-interrupted"]
+)
 def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     core = _Core()
     host = _Host()
@@ -302,10 +313,18 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     previous_analysis_presentation = adapter.analysis_presentation
     core.fail_run = failure == "core"
     host.fail_present = failure == "finish"
+    if failure.startswith("signal-"):
+        core.signal_outcome = "failed" if failure == "signal-failed" else "interrupted"
     cfg = _Cfg(scale=9.0)
+    error_type = ScheduleOutcomeError if failure.startswith("signal-") else ValueError
 
-    with pytest.raises(ValueError, match="failed"):
+    with pytest.raises(error_type, match="failed") as raised:
         adapter.run(cfg)
+
+    if isinstance(raised.value, ScheduleOutcomeError):
+        assert raised.value.status == core.signal_outcome
+        assert isinstance(raised.value.__cause__, OSError)
+        assert str(raised.value.__cause__) == "Device unavailable"
 
     assert cfg.scale == 9.0
     assert adapter.last_run is previous_run
@@ -317,6 +336,24 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     np.testing.assert_array_equal(
         previous_analysis.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
     )
+
+
+def test_stopped_partial_run_without_error_is_committed() -> None:
+    core = _Core()
+    host = _Host()
+    adapter = NotebookAdapter(
+        core, soc=object(), soccfg=object(), devices={}, host=host
+    )
+    previous = adapter.load(Path("loaded"))
+    core.signal_outcome = "stopped"
+
+    partial = adapter.run(_Cfg(scale=9.0))
+
+    assert partial is adapter.last_run
+    assert partial is not previous
+    assert partial.result == 9.0
+    assert core.contexts[-1].cancel_signal.is_set()
+    assert host.released == []
 
 
 @pytest.mark.parametrize("failure", ["core", "finish"])
