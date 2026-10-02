@@ -1,6 +1,6 @@
 # 實驗核心、前端包裝與具名圖形產物
 
-**狀態：** 69 個核心、相關 caller 與共用依賴已在 integration 完成實作，舊自訂 pyplot routing backend 已退場。整體雙軸審查發現的接縫缺口正在修正，正式接受尚未完成，landing 另需使用者授權。本文仍是 ADR 草案，不代表持久分支已採用，也不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。
+**狀態：** 69 個核心、相關 caller 與共用依賴已在本 task 分支完成實作，舊自訂 pyplot routing backend 已退場。修正候選已完成集中軟體驗證及雙軸審查。正式接受以 task 的逐列證據與裁決紀錄為準，landing 另需使用者授權。本文仍是 ADR 草案，不代表持久分支已採用，也不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。
 
 ## 問題
 
@@ -116,9 +116,9 @@ GUI 的 Use Simulate Env 入口由獨立 coordinator 編排，不由一般 soc_c
 - 不以單一同步方法統一互動 session；通用繪圖不保證自動提供互動輸入。
 - 接受未遷移實驗在中間階段報錯，避免維護第二套繪圖或分析協議；代價是必須逐項追蹤遷移與驗證，不能只用三個標準實驗通過推定整批完成。
 
-## 七項核准政策與待落實接縫
+## 七項核准政策與驗證接縫
 
-下列政策已核准，部分共用繪圖與保存能力已落實，但完整 caller 遷移尚未完成。末節列出接線與驗證義務，不能將政策核准或底層能力通過視為端到端保證。
+下列政策與完整 caller 遷移已在本 task 分支實作。末節保留接線與驗證義務，正式接受仍須逐項對照證據，不能只憑政策核准或底層能力通過推定。
 
 ### G1：一般圖與 liveplot
 
@@ -176,7 +176,9 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - Measure 的 ArtifactKey 以 stage 與圖名識別成果。ArtifactTracker 記錄每張圖是否曾成功保存，SaveService 捕捉本次保存來源與目的地。Save All 選尚未保存的成果，個別失敗不撤銷先前成功項。
 - [Session](../../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
 
-三個參考實驗已有各自的軟體接受紀錄。其餘核心與 callers 已整合。全 task 的專門 Standards／Spec 審查指出 Notebook 失敗提交、grouped persistence 接線及 typed analysis 等缺口；修正候選仍須驗證與重新審查。報告不等於正式接受或 landing 授權。修正前集中行為測試兩次得到 7431 passed、7 skipped；7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
+三個參考實驗已有各自的軟體接受紀錄，其餘核心與 callers 已完成遷移。全 task 的 Standards／Spec 審查指出的 Notebook 失敗提交、grouped persistence 接線及 typed analysis 缺口已修正。修正後的兩軸審查沒有新增 findings，報告本身不等於正式接受或 landing 授權。
+
+2026-10-02 的修正候選通過集中行為測試，結果為 7435 passed、7 skipped。7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
 
 本次未操作硬體，也未重跑所有 Notebook cells 或 FFmpeg。既有 VSCode 60-frame 人工觀察只覆蓋當時的探針與版本。Standalone [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於新的 Plots host。
 
