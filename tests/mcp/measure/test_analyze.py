@@ -162,7 +162,9 @@ def test_interact_headless_and_wire_failure_do_not_retry(
     tmp_path, clients, monkeypatch
 ):
     client = _client(
-        tmp_path, clients, lambda method, params: {"operation_id": 71, "state": {}, "figure": None}
+        tmp_path,
+        clients,
+        lambda method, params: {"operation_id": 71, "state": {}, "figure": None},
     )
     reply = _call_stdio(monkeypatch, client, "tab_interact", {"tab": "t"})
     assert _data(reply) == {"handle": 1, "state": {}, "figure": None}
@@ -358,7 +360,8 @@ def test_interactive_start_hands_off_current_state_without_waiting(
         assert data["interaction"][key] == interaction[key]
     _assert_figure(reply, present=has_figure)
     assert [m for m in _methods(client) if m != "operation.await"] == [
-        "tab.analyze", "tab.interact"
+        "tab.analyze",
+        "tab.interact",
     ]
 
 
@@ -369,15 +372,24 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
     def respond(method, params):
         if method == "tab.analyze":
             return {
-                "operation_id": 71, "interactive": True, "params": {"gain": 2},
+                "operation_id": 71,
+                "interactive": True,
+                "params": {"gain": 2},
                 "invalidated_on_success": ["post_analysis"],
             }
         if method == "tab.interact":
-            return {"operation_id": 71, "state": {"value": 3},
-                    "commands": [{"name": "done"}], "figure": None}
+            return {
+                "operation_id": 71,
+                "state": {"value": 3},
+                "commands": [{"name": "done"}],
+                "figure": None,
+            }
         if method == "operation.await":
-            return ({"reason": "completed", "status": "finished"} if done.is_set()
-                    else {"reason": "user_feedback", "status": "running"})
+            return (
+                {"reason": "completed", "status": "finished"}
+                if done.is_set()
+                else {"reason": "user_feedback", "status": "running"}
+            )
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"gain": 2})
         if method == "tab.save_image":
@@ -394,17 +406,26 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
     assert not saving.is_set()
     done.set()  # The GUI user, not an MCP command, completes the original operation.
     assert saving.wait(2), "completion stopped when the first tool call returned"
-    reply = _call_stdio(monkeypatch, client, "wait", {"execution": execution, "timeout": 2})
+    reply = _call_stdio(
+        monkeypatch, client, "wait", {"execution": execution, "timeout": 2}
+    )
     completed = _data(reply)
     assert completed["execution"] == execution
     assert completed["op"] == started["op"]
     assert completed["status"] == "finished"
-    assert completed["saved_images"] == [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+    assert completed["saved_images"] == [
+        {"figure_name": "fit", "image_path": "/actual/fit.png"}
+    ]
     assert completed["invalidated"] == ["post_analysis"]
     _assert_figure(reply, present=True)
     effects = [m for m in _methods(client) if m != "operation.await"]
-    assert effects == ["tab.analyze", "tab.interact", "tab.get_analyze_result",
-                       "tab.save_image", "tab.get_figure"]
+    assert effects == [
+        "tab.analyze",
+        "tab.interact",
+        "tab.get_analyze_result",
+        "tab.save_image",
+        "tab.get_figure",
+    ]
 
 
 @pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])
@@ -413,11 +434,20 @@ def test_malformed_interactive_image_is_a_tool_error_not_a_success(
 ):
     def respond(method, params):
         if method == "tab.analyze":
-            return {"operation_id": 71, "interactive": True, "params": {}, "invalidated_on_success": []}
+            return {
+                "operation_id": 71,
+                "interactive": True,
+                "params": {},
+                "invalidated_on_success": [],
+            }
         if method == "operation.await":
             return {"reason": "user_feedback", "status": "running"}
         assert method == "tab.interact"
-        return {"operation_id": 71, "figure": {"png_b64": "not valid base64!"}, "state": {}}
+        return {
+            "operation_id": 71,
+            "figure": {"png_b64": "not valid base64!"},
+            "state": {},
+        }
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(monkeypatch, client, tool, {"tab": "t"})
@@ -441,11 +471,20 @@ def test_invalid_interactive_png_is_a_tool_error_without_retry(
 ):
     def respond(method, params):
         if method == "tab.analyze":
-            return {"operation_id": 71, "interactive": True, "params": {}, "invalidated_on_success": []}
+            return {
+                "operation_id": 71,
+                "interactive": True,
+                "params": {},
+                "invalidated_on_success": [],
+            }
         if method == "operation.await":
             return {"reason": "user_feedback", "status": "running"}
         assert method == "tab.interact"
-        return {"operation_id": 71, "figure": {"png_b64": base64.b64encode(png).decode()}, "state": {}}
+        return {
+            "operation_id": 71,
+            "figure": {"png_b64": base64.b64encode(png).decode()},
+            "state": {},
+        }
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(monkeypatch, client, tool, {"tab": "t"})

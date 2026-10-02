@@ -138,9 +138,13 @@ class AnalysisExecution:
                 asdict(snapshot),
                 self._images,
                 is_error=snapshot.status == "failed"
-                or (snapshot.status == "interactive" and bool(
-                    snapshot.interaction and snapshot.interaction.get("delivery_error")
-                )),
+                or (
+                    snapshot.status == "interactive"
+                    and bool(
+                        snapshot.interaction
+                        and snapshot.interaction.get("delivery_error")
+                    )
+                ),
             )
 
     def observe_interaction(self, reply: ToolReply) -> None:
@@ -150,7 +154,8 @@ class AnalysisExecution:
                 return
             self._images = reply.images
             self._snapshot = replace(
-                self._snapshot, interaction=deepcopy(reply.data),
+                self._snapshot,
+                interaction=deepcopy(reply.data),
                 figure=reply.data.get("figure"),
             )
             self._condition.notify_all()

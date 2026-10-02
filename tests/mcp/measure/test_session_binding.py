@@ -136,7 +136,14 @@ def test_status_received_discovery_reply_survives_eof(
         pytest.param(
             "tab_analyze",
             {"tab": "t"},
-            {"tab.analyze": {"operation_id": 7, "interactive": True}},
+            {
+                "tab.analyze": {
+                    "operation_id": 7,
+                    "interactive": True,
+                    "params": {},
+                    "invalidated_on_success": [],
+                }
+            },
             "tab.analyze",
             id="analysis-interaction",
         ),
@@ -395,6 +402,7 @@ def test_assembled_multistep_tools_do_not_cross_connections(
                 "failed at 'beta'; confirmed prefix: {'alpha': {'before': 1, 'after': 2}}"
                 in str(error.value)
             )
+    client.context.session.close()
     assert changed
     assert second.sent == replacement_at_cut
     assert sum(method == cut_after for method, _ in client.transport.sent) == 1
