@@ -371,6 +371,14 @@ class AnalysisExecutions:
             execution.start()
             return execution
 
+    def get(self, execution: str) -> AnalysisExecution:
+        """Resolve a session-local execution without binding or reconnecting."""
+        raise NotImplementedError("execution lookup is not implemented")
+
+    def snapshots(self) -> list[ExecutionSnapshot]:
+        """Return detached snapshots of every execution in this session."""
+        raise NotImplementedError("execution listing is not implemented")
+
     def stop_admission(self) -> None:
         """Permanently reject new workers and wake existing ones."""
         self._closed.set()

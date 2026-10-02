@@ -6,6 +6,7 @@ import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import pytest
@@ -454,6 +455,77 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
         "tab.save_image",
         "tab.get_figure",
     ]
+
+
+
+@pytest.mark.parametrize("outcome", ["finished", "failed"])
+def test_execution_query_observes_background_completion_without_reconnect(
+    tmp_path, clients, monkeypatch, outcome
+):
+    release = Event()
+    awaiting = Event()
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {
+                "operation_id": 71,
+                "interactive": False,
+                "params": {"model": "fit"},
+                "invalidated_on_success": [],
+            }
+        if method == "operation.await":
+            awaiting.set()
+            assert release.wait(10), "test did not release the GUI operation"
+            return {"reason": "completed", "status": outcome, "error": None}
+        if method == "tab.get_analyze_result":
+            return _result_reply("analysis", ["fit"], {"model": "fit"})
+        if method == "tab.save_image":
+            return {"image_path": "/actual/fit.png"}
+        if method == "tab.get_figure":
+            return {"png_b64": base64.b64encode(_PNG).decode()}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    try:
+        started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+        assert awaiting.wait(2)
+        assert started["status"] == "running"
+        execution = started["execution"]
+        running = _data(_call_stdio(
+            monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
+        ))
+        assert running["status"] == "running"
+        assert running["cancel_requested"] is False
+        assert running["elapsed_s"] >= 0
+        snapshot = client.call("status", {"execution": execution})
+        snapshot["params"]["model"] = "caller mutation"
+        assert client.call("status", {"execution": execution})["params"] == {"model": "fit"}
+        assert _methods(client) == ["tab.analyze", "operation.await"]
+        release.set()
+        completed_reply = _call_stdio(
+            monkeypatch, client, "wait", {"execution": execution, "timeout": 2}
+        )
+        completed = _data(completed_reply)
+        assert completed["status"] == outcome
+        assert completed["operation_outcome"]["status"] == outcome
+        assert completed["cancel_requested"] is False
+        assert completed["save_status"] == ("saved" if outcome == "finished" else "not_started")
+        assert completed["saved_images"] == (
+            [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+            if outcome == "finished" else []
+        )
+        _assert_figure(completed_reply, present=outcome == "finished")
+        sent = list(client.transport.sent)
+        client.transport.close()
+        terminal = _data(_call_stdio(monkeypatch, client, "status", {"execution": execution}))
+        repeated = _data(_call_stdio(
+            monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
+        ))
+        assert terminal == {key: value for key, value in repeated.items() if key != "elapsed_s"}
+        assert terminal["status"] == outcome
+        assert client.transport.sent == sent
+    finally:
+        release.set()
 
 
 def _inject_analysis_rejection(
