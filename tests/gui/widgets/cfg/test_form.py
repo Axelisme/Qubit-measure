@@ -283,54 +283,20 @@ def test_optional_scalar_widget_round_trips_value(qapp):
 
 
 def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget, default_cfg_renderers
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-
-    inner_spec = CfgSectionSpec(
-        label="Inner",
-        fields={"value": ScalarSpec(label="Value", type=int)},
-    )
-    inner_value = CfgSectionValue(fields={"value": DirectValue(1)})
-    schema = section_schema(
-        {"ref": ReferenceSpec(kind="module", allowed=[inner_spec])},
-        {
-            "ref": ReferenceValue(
-                chosen_key="<Custom:Inner>",
-                value=inner_value,
-            )
-        },
-    )
-    renderers = default_cfg_renderers()
-    form = CfgFormWidget(renderers=renderers)
-
-    attach_draft(form, schema, ctrl)
-
-    root = form._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Reference header widget is still rendered via the shared registry
-    assert root._ref_headers
-    header = root._ref_headers[0]
-    assert header._context.registry is renderers  # type: ignore[attr-defined]
-    # Leaf widgets also use the same registry
-    assert root._leaf_widgets
-    leaf = root._leaf_widgets[0]
-    assert leaf._field is not None  # type: ignore[attr-defined]
-
-
-def test_custom_reference_factory_renders_actual_widget(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit, QWidget
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 
-    calls: list[tuple[CfgField, FieldRenderContext]] = []
+    contexts: list[FieldRenderContext] = []
+    defaults = default_cfg_renderers()
 
-    def reference_factory(
+    def recording_factory(
         field: CfgField,
         context: FieldRenderContext,
     ) -> FieldWidgetProtocol:
-        calls.append((field, context))
-        widget = ReferenceWidget(cast(ReferenceField, field), context=context)
-        widget.setObjectName("custom-reference")
+        contexts.append(context)
+        widget = defaults.resolve(field)(field, context)
+        assert isinstance(widget, QWidget)
+        widget.setObjectName(f"custom-{context.path}")
         return widget
 
     inner_spec = CfgSectionSpec(
@@ -346,19 +312,24 @@ def test_custom_reference_factory_renders_actual_widget(qapp, ctrl):
             )
         },
     )
-    registry = _registry_with_factories({ReferenceField: reference_factory})
+    registry = _registry_with_factories(
+        {ReferenceField: recording_factory, ScalarField: recording_factory}
+    )
     form = CfgFormWidget(renderers=registry)
 
     attach_draft(form, schema, ctrl)
 
-    root = form._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Reference header is rendered via registry factory
-    assert len(root._ref_headers) == 1  # type: ignore[attr-defined]
-    assert root._ref_headers[0].objectName() == "custom-reference"  # type: ignore[attr-defined]
-    assert [(context.path, context.registry) for _, context in calls] == [
-        ("reference", registry)
+    assert sorted(context.path for context in contexts) == [
+        "reference",
+        "reference.value",
     ]
+    assert all(context.registry is registry for context in contexts)
+    assert form.findChild(QWidget, "custom-reference") is not None
+    leaf = form.findChild(QWidget, "custom-reference.value")
+    assert leaf is not None
+    editor = leaf.findChild(QLineEdit)
+    assert editor is not None
+    assert editor.text() == "1"
 
 
 def test_scalar_widget_minimum_width_reduced(qapp):
