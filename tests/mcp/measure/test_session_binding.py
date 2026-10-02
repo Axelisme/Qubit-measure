@@ -30,6 +30,66 @@ def make_restartable_client(
     return client, second
 
 
+def prime_operation_discovery(client: MeasureClient, gui_id: int = 1) -> None:
+    client.transport.replies.update(
+        {
+            "state.has_project": {"ok": True, "result": {"value": False}},
+            "state.has_active_context": {"ok": True, "result": {"value": False}},
+            "state.has_soc": {"ok": True, "result": {"value": False}},
+            "context.active": {"ok": True, "result": {"label": None}},
+            "device.list": {"ok": True, "result": {"devices": []}},
+            "predictor.info": {"ok": True, "result": {"loaded": False}},
+            "tab.snapshot": {
+                "ok": True,
+                "result": {
+                    "tabs": [
+                        {
+                            "tab_id": "t",
+                            "adapter_name": "lookback",
+                            "interaction": {
+                                "is_running": True,
+                                "has_run_result": False,
+                            },
+                        }
+                    ]
+                },
+            },
+        }
+    )
+
+    client.transport.replies["operation.active"] = {
+        "ok": True,
+        "result": {"operations": [{"op": gui_id, "kind": "run", "tab": "t"}]},
+    }
+
+
+def test_status_received_discovery_reply_survives_eof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, second = make_restartable_client(tmp_path, monkeypatch)
+    binding = client.context.session.bind()
+    prime_operation_discovery(client, gui_id=77)
+    real_send = client.transport.send_line
+
+    def send(payload: dict[str, Any]) -> None:
+        real_send(payload)
+        if payload["method"] == "operation.active":
+            client.context.bridge.disconnect()
+
+    monkeypatch.setattr(client.transport, "send_line", send)
+    result = client.call("status", {})
+    assert result["tabs"] == [{"tab": "t", "experiment": "lookback", "running": True}]
+    assert result["running"] == [{"op": 1, "kind": "run", "tab": "t"}]
+    assert result["context"] == {"active": None}
+    with pytest.raises(GuiRpcError) as error:
+        binding.read_internal("operation.active", {})
+    assert error.value.reason == "connection_lost"
+    assert not second.sent
+    assert client.transport.sent.count(("operation.active", {})) == 1
+    client.context.session.connect_to_gui(port=9912, launch="never", clean=False)
+    assert client.context.session.bind().expose_operation(77) == 2
+
+
 @pytest.mark.parametrize("connection_change", ["eof", "reconnect"])
 @pytest.mark.parametrize(
     ("tool", "arguments", "replies", "cut_after"),
@@ -501,36 +561,7 @@ def test_operation_discovery_does_not_expose_an_old_reply_in_a_new_gui(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str
 ) -> None:
     client, second = make_restartable_client(tmp_path, monkeypatch)
-    client.transport.replies.update(
-        {
-            "state.has_project": {"ok": True, "result": {"value": False}},
-            "state.has_active_context": {"ok": True, "result": {"value": False}},
-            "state.has_soc": {"ok": True, "result": {"value": False}},
-            "context.active": {"ok": True, "result": {"label": None}},
-            "device.list": {"ok": True, "result": {"devices": []}},
-            "predictor.info": {"ok": True, "result": {"loaded": False}},
-            "tab.snapshot": {
-                "ok": True,
-                "result": {
-                    "tabs": [
-                        {
-                            "tab_id": "t",
-                            "adapter_name": "lookback",
-                            "interaction": {
-                                "is_running": True,
-                                "has_run_result": False,
-                            },
-                        }
-                    ]
-                },
-            },
-        }
-    )
-
-    client.transport.replies["operation.active"] = {
-        "ok": True,
-        "result": {"operations": [{"op": 1, "kind": "run", "tab": "t"}]},
-    }
+    prime_operation_discovery(client)
     real_send = client.context.bridge.send_rpc_raw
 
     def reconnect_after_reply(
