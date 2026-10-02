@@ -151,18 +151,15 @@ class NotebookAdapter(Generic[CoreT]):
     def load(
         self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
         source: Path,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
     ) -> RunRecord[CfgT, ResultT]:
-        record = self._core.load(source, server_ip=server_ip, port=port)
+        record = self._core.load(source)
         self._last_run = record
         self._analysis = None
         self.run_presentation = None
         self.analysis_presentation = None
         return record
 
-    def save(  # noqa: PLR0913 - explicit uniqueness plus core persistence options
+    def save(
         self: NotebookAdapter[RecordExperiment[CfgT, ResultT]],
         source: RunRecord[CfgT, ResultT],
         destination: Path,
@@ -170,8 +167,6 @@ class NotebookAdapter(Generic[CoreT]):
         unique: bool = False,
         comment: str | None = None,
         tag: str | None = None,
-        server_ip: str | None = None,
-        port: int = 4999,
     ) -> Path:
         path = Path(
             reserve_labber_filepath(str(destination))
@@ -183,7 +178,5 @@ class NotebookAdapter(Generic[CoreT]):
             path,
             comment=comment,
             tag=tag,
-            server_ip=server_ip,
-            port=port,
         )
         return path

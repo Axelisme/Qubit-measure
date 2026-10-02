@@ -27,17 +27,9 @@ class RecordExperiment(Protocol[CfgT, ResultT]):
         *,
         comment: str | None = None,
         tag: str | None = None,
-        server_ip: str | None = None,
-        port: int = 4999,
     ) -> None: ...
 
-    def load(
-        self,
-        source: Path,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
-    ) -> RunRecord[CfgT, ResultT]: ...
+    def load(self, source: Path) -> RunRecord[CfgT, ResultT]: ...
 
 
 class SynchronousExperiment(

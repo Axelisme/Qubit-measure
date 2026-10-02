@@ -1,6 +1,5 @@
 """Stateless persistence for record-based experiments."""
 
-import os
 from pathlib import Path
 from typing import Any, ClassVar, Generic, TypeVar
 
@@ -91,13 +90,8 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         *,
         comment: str | None = None,
         tag: str | None = None,
-        server_ip: str | None = None,
-        port: int = 4999,
     ) -> None:
-        from zcu_tools.datafile import (
-            save_labber_data,
-            upload_to_server,
-        )
+        from zcu_tools.datafile import save_labber_data
         from zcu_tools.experiment.utils import make_comment
 
         spec = self._spec()
@@ -114,29 +108,17 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         ]
         z = (spec.z.label, spec.z.unit, np.asarray(getattr(result, spec.z.field_name)))
 
-        saved_path = save_labber_data(
+        save_labber_data(
             str(destination), z=z, axes=axes, comment=comment, tags=tag or spec.tag
         )
-        if server_ip is not None:
-            upload_to_server(saved_path, server_ip, port)
-            os.remove(saved_path)
 
-    def load(
-        self,
-        source: Path,
-        *,
-        server_ip: str | None = None,
-        port: int = 4999,
-    ) -> RunRecord[T_Config, T_Result]:
-        from zcu_tools.datafile import download_from_server, load_labber_data
+    def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
+        from zcu_tools.datafile import load_labber_data
         from zcu_tools.experiment.utils import parse_comment
 
         spec = self._spec()
 
         filepath = str(source)
-        if server_ip is not None and not source.exists():
-            download_from_server(filepath, server_ip, port)
-
         ld = load_labber_data(filepath)
         self._validate_canonical_labber_data(ld, spec)
 

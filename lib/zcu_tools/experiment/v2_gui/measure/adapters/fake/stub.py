@@ -98,16 +98,12 @@ class FakeExp:
         *,
         comment: str | None = None,
         tag: str | None = None,
-        server_ip: str | None = None,
-        port: int = 4999,
     ) -> None:
         """The no-hardware harness intentionally leaves data persistence inert."""
-        _ = source, destination, comment, tag, server_ip, port
+        _ = source, destination, comment, tag
 
-    def load(
-        self, source: Path, *, server_ip: str | None = None, port: int = 4999
-    ) -> FakeRunResult:
-        del source, server_ip, port
+    def load(self, source: Path) -> FakeRunResult:
+        del source
         raise NotImplementedError(
             "The inert FakeAdapter harness has no data file format"
         )
