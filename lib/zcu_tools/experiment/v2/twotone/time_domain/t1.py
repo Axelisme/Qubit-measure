@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -91,6 +92,8 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
     Applies a π pulse and then waits for a variable time before readout
     to measure the qubit's energy relaxation.
     """
+
+    Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
 
     # times stored as seconds on disk -> scale=US_TO_S
     AXES_SPEC = AxesSpec(
@@ -267,6 +270,8 @@ class T1WithToneAnalyzeOptions:
 
 
 class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
+    Options: ClassVar[type[T1WithToneAnalyzeOptions]] = T1WithToneAnalyzeOptions
+
     # times stored as seconds on disk -> scale=US_TO_S
     AXES_SPEC = AxesSpec(
         axes=(Axis("times", "Time", "s", US_TO_S),),

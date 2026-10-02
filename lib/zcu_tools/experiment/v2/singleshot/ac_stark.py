@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -129,6 +130,8 @@ class AcStarkPlotOptions:
 
 
 class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
+    Options: ClassVar[type[AcStarkAnalyzeOptions]] = AcStarkAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(

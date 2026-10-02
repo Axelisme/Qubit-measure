@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -75,6 +75,8 @@ class FreqAnalysis:
 
 
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+    Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
+
     # freq stores MHz on disk -> scale=IDENTITY (1.0)
     AXES_SPEC = AxesSpec(
         axes=(Axis("freqs", "Frequency", "MHz"),),

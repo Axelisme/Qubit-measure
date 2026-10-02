@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -78,6 +78,8 @@ class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
+    Options: ClassVar[type[LenRabiAnalyzeOptions]] = LenRabiAnalyzeOptions
+
     # lengths stored in seconds on disk (mem us) -> scale=US_TO_S; z complex
     AXES_SPEC = AxesSpec(
         axes=(Axis("lengths", "Length", "s", US_TO_S),),

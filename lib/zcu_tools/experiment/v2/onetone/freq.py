@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -161,6 +161,8 @@ def homophasal_sweep2array(
 
 
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+    Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
+
     # freq stores Hz on disk -> scale=MHZ_TO_HZ (disk = memory * 1e6)
     AXES_SPEC = AxesSpec(
         axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),

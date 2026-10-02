@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -91,6 +92,8 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
+    Options: ClassVar[type[FluxDepAnalyzeOptions]] = FluxDepAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("gains", "Power", "a.u."),

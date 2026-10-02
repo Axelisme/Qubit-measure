@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -76,6 +76,8 @@ class PowerAnalysis:
 
 
 class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+    Options: ClassVar[type[PowerAnalyzeOptions]] = PowerAnalyzeOptions
+
     # gains stored as-is on disk -> scale=IDENTITY (default)
     AXES_SPEC = AxesSpec(
         axes=(Axis("gains", "Probe Power", "a.u."),),

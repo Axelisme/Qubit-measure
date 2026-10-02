@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -79,6 +80,8 @@ class PowerAnalyzeOptions:
 
 
 class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+    Options: ClassVar[type[PowerAnalyzeOptions]] = PowerAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(

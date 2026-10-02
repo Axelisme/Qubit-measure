@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -61,6 +62,8 @@ class CheckAnalyzeOptions:
 
 
 class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
+    Options: ClassVar[type[CheckAnalyzeOptions]] = CheckAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(Axis("shots", "shot", "point", dtype=np.int64),),
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),

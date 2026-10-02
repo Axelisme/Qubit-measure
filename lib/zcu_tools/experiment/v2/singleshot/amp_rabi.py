@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -110,6 +110,8 @@ class AmpRabiAnalyzeOptions:
 
 
 class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
+    Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("shot_indices", "Shot Index", "None", dtype=np.int64),

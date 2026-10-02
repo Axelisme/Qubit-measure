@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -80,6 +81,8 @@ class T2RamseyAnalysis:
 
 
 class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
+    Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
+
     # times stored as seconds on disk -> scale=US_TO_S
     AXES_SPEC = AxesSpec(
         axes=(Axis("times", "Time", "s", US_TO_S),),

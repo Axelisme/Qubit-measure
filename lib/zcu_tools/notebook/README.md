@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-02, Options namespace
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -14,9 +14,11 @@ nb_adapter = NotebookAdapter(
 )
 exp = nb_adapter(T1Exp())
 _ = exp.run(cfg)
-_ = exp.analyze(T1AnalyzeOptions(skip=3))
+_ = exp.analyze(T1Exp.Options(skip=3))
 saved = exp.save(destination, unique=True)
 ```
+
+Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.PostOptions(...)`，不必再匯入各自的 Options 型別。NotebookExperiment 不轉送核心屬性，所以不是 `exp.Options(...)`。
 
 每次包裝產生獨立的 `NotebookExperiment[CoreT]`，不在環境入口共用 records。建構不查裝置、不連線、不 setup。Run 需要 soc、soccfg 與 manager，無裝置時明確提供空 DeviceManager。每次 run 從綁定的 manager 取得一次 driver mapping，該次執行固定使用；同一 manager 的 registry 更新在下一次 run 生效。重新賦值 Notebook 變數不會重綁入口，換用另一組環境時由 caller 重建。
 

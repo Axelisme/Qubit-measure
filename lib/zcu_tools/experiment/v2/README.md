@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-02, Options namespace
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -101,6 +101,8 @@ experiment/v2/
 ## 實驗特有的分析與保存
 
 實驗基底、RunRecord 與 Result 契約見[父層實驗介面](../README.md#實驗介面與資料)。以下記錄 v2 實驗特有的分析與資料形狀。
+
+有分析選項的實驗以 `Experiment.Options` 公開其既有 options 類別，例如 `T1Exp.Options(skip=1)`。GE 另以 `GE_Exp.PostOptions` 提供 post-analysis 選項。類屬性引用型別，不保存共用 instance；欄位與預設仍由原 options 定義擁有。沒有選項的實驗不補空 Options。這些屬性不是共用 Protocol 的要求。
 
 CKP numeric analysis先從ground/excited maps抽取resonance trace，再透過
 `analysis.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance

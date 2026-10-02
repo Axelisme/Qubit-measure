@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import ClassVar, Literal, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -268,6 +268,9 @@ class GE_Cfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
+    Options: ClassVar[type[GEAnalyzeOptions]] = GEAnalyzeOptions
+    PostOptions: ClassVar[type[GEPostAnalyzeOptions]] = GEPostAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(

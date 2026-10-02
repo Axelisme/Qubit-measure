@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from matplotlib import rcParams
@@ -160,6 +161,8 @@ class AllXYAnalyzeOptions:
 
 
 class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
+    Options: ClassVar[type[AllXYAnalyzeOptions]] = AllXYAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(Axis("gate_idxs", "Gate Pair Index", "", IDENTITY, np.int64),),
         z=ZSpec("signals", "Signal", "a.u."),

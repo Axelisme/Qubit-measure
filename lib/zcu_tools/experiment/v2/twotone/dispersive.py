@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -86,6 +86,8 @@ class DispersiveAnalysis:
 
 
 class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
+    Options: ClassVar[type[DispersiveAnalyzeOptions]] = DispersiveAnalyzeOptions
+
     # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ; outer ge index -> IDENTITY
     AXES_SPEC = AxesSpec(
         axes=(

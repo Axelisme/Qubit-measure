@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -89,6 +90,8 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
+    Options: ClassVar[type[FreqGainAnalyzeOptions]] = FreqGainAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("freqs", "Cavity Frequency", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),

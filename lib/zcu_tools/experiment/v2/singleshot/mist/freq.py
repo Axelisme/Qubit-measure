@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -78,6 +79,8 @@ class FreqAnalyzeOptions:
 
 
 class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
+    Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(

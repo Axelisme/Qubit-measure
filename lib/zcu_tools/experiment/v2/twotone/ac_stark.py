@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.image import NonUniformImage
@@ -141,6 +142,8 @@ class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
+    Options: ClassVar[type[AcStarkAnalyzeOptions]] = AcStarkAnalyzeOptions
+
     # gains stored in a.u. -> IDENTITY; freqs stored in Hz on disk -> MHZ_TO_HZ
     AXES_SPEC = AxesSpec(
         axes=(
@@ -351,6 +354,8 @@ class AcStarkRamseyCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
+    Options: ClassVar[type[AcStarkRamseyAnalyzeOptions]] = AcStarkRamseyAnalyzeOptions
+
     # gains stored in a.u. -> IDENTITY; lengths stored in s on disk -> US_TO_S
     AXES_SPEC = AxesSpec(
         axes=(

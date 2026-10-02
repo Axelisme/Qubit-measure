@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -73,6 +74,8 @@ class AmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
+    Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(Axis("amps", "Gain", ""),),
         z=ZSpec("signals", "Signal", "a.u."),

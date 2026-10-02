@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -204,6 +204,8 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
 
 
 class CPMG_Exp:
+    Options: ClassVar[type[CPMGAnalyzeOptions]] = CPMGAnalyzeOptions
+
     def run(
         self,
         cfg: CPMG_Cfg,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -82,6 +82,8 @@ class T2EchoAnalysis:
 
 
 class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
+    Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
+
     # times stores us in memory, s on disk -> scale=US_TO_S
     AXES_SPEC = AxesSpec(
         axes=(Axis("times", "Time", "s", scale=US_TO_S),),

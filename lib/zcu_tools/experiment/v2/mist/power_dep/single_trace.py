@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -72,6 +73,8 @@ class PowerDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
+    Options: ClassVar[type[PowerDepAnalyzeOptions]] = PowerDepAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(Axis("gains", "Drive Power", "a.u."),),
         z=ZSpec("signals", "Signal", "a.u."),

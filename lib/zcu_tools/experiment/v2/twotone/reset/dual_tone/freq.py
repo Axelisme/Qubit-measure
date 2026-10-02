@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -91,6 +91,8 @@ class FreqAnalysis:
 
 
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+    Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
+
     # signals memory layout is (Nfreq1, Nfreq2) = (outer, inner); native save/load
     # expect z == (outer, inner) == reversed(axes lengths), so axes order is
     # (freqs2 inner, freqs1 outer). both axes store MHz on disk (disk Hz).

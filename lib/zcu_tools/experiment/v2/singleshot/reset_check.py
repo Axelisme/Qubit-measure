@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -130,6 +131,8 @@ class ResetCheckAnalyzeOptions:
 
 
 class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
+    Options: ClassVar[type[ResetCheckAnalyzeOptions]] = ResetCheckAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("population_states", "GE Population", "None", dtype=np.int64),

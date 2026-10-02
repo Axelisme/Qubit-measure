@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -80,6 +80,8 @@ class FreqGainAnalysis:
 
 
 class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
+    Options: ClassVar[type[FreqGainAnalyzeOptions]] = FreqGainAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("gains", "Gain", "a.u.", scale=IDENTITY),

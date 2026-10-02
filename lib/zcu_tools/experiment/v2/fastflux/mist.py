@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.image import NonUniformImage
@@ -73,6 +74,8 @@ class MistAnalyzeOptions:
 
 
 class MistExp(PersistableExperiment[MistResult, MistCfg]):
+    Options: ClassVar[type[MistAnalyzeOptions]] = MistAnalyzeOptions
+
     # both axes are gains in a.u. (no MHz/us conversion) -> scale=IDENTITY.
     # inner-first: signals.shape == (len(flux_gains), len(mist_gains)) ==
     # reversed(axes) lengths, so mist_gains is the inner axis, flux_gains the outer.

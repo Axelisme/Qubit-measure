@@ -39,7 +39,7 @@ Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒�
 
 共用包裝層隔離 caller cfg／options 與 core 工作輸入，成功後保留該次來源與選項。Record 的欄位關聯固定，不深拷貝大型 Result，不凍結 Figure artists。Record-owned cfg／options 可被使用者刻意修改，不提供 deep-freeze、讀取時複製或完整不可變歷史保證。
 
-同步核心 options 與 Analysis 是實驗專屬 typed 資料，options 欄位擁有預設值，不另設 Notebook defaults 或動態簽名。Analysis 不含 Figure 或 writeback。Notebook 同步入口回傳 AnalysisRecord，互動工具也保留成功成果的來源、實際 options 與純圖。Notebook 的 analyze(options, *, source=None) 與 save(destination, *, source=None) 預設最近成功 run／load 的 last_run，無來源就拒絕。分析歷史 source 不改 last_run 或 save 的預設來源。Core 與獨立互動工具仍要求明確來源。Notebook 不新增 writeback。
+同步核心 options 與 Analysis 是實驗專屬 typed 資料，options 欄位擁有預設值，不另設 Notebook defaults 或動態簽名。實驗類別以 `Options` 引用既有分析選項型別，有獨立 post-analysis 選項時使用 `PostOptions`。Caller 以 `T1Exp.Options(...)` 建立獨立物件，不另匯入 Options。沒有選項的實驗不補空型別，共用 Protocol 不增加這項要求，NotebookExperiment 不轉送這些類屬性。Analysis 不含 Figure 或 writeback。Notebook 同步入口回傳 AnalysisRecord，互動工具也保留成功成果的來源、實際 options 與純圖。Notebook 的 analyze(options, *, source=None) 與 save(destination, *, source=None) 預設最近成功 run／load 的 last_run，無來源就拒絕。分析歷史 source 不改 last_run 或 save 的預設來源。Core 與獨立互動工具仍要求明確來源。Notebook 不新增 writeback。
 
 GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選項、隨機 seed、時間或其他重現資訊。Framework 保存來源、插件輸出與圖，不追查插件的隱式依賴，也不保證完整 options 或可重現性。`params` 保持表單輸入，不在 Done 時替換成終態 options；不新增通用 committed-options owner。GUI 與 remote 讀同一份已提交輸出。
 

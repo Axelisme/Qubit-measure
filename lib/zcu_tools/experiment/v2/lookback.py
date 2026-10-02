@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -67,6 +68,8 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 
 
 class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
+    Options: ClassVar[type[LookbackAnalyzeOptions]] = LookbackAnalyzeOptions
+
     # times stored in seconds on disk -> scale=US_TO_S (mem us)
     AXES_SPEC = AxesSpec(
         axes=(Axis("times", "Time", "s", US_TO_S),),

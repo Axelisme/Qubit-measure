@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -79,6 +80,8 @@ class FreqPowerAnalyzeOptions:
 
 
 class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
+    Options: ClassVar[type[FreqPowerAnalyzeOptions]] = FreqPowerAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(

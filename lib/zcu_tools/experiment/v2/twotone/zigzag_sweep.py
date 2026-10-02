@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -80,6 +80,8 @@ class ZigZagScanAnalysis:
 
 
 class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
+    Options: ClassVar[type[ZigZagScanAnalyzeOptions]] = ZigZagScanAnalyzeOptions
+
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},

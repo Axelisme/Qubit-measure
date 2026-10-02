@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -101,6 +102,8 @@ class T1AnalyzeOptions:
 
 
 class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+    Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(

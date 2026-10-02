@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -118,6 +119,8 @@ class T1WithToneAnalysis:
 
 
 class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
+    Options: ClassVar[type[T1WithToneAnalyzeOptions]] = T1WithToneAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(

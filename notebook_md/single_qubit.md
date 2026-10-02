@@ -245,7 +245,6 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.LookbackCfg, env, overrides={'rounds': 500})
 
-from zcu_tools.experiment.v2.lookback import LookbackAnalyzeOptions
 
 lookback_exp = nb_adapter(ze.LookbackExp())
 _ = lookback_exp.run(cfg)
@@ -253,7 +252,7 @@ _ = lookback_exp.run(cfg)
 
 ```python
 lookback_analysis = lookback_exp.analyze(
-    LookbackAnalyzeOptions(ratio=0.1, smooth=1.0)
+    ze.LookbackExp.Options(ratio=0.1, smooth=1.0)
 )
 predict_offset = lookback_analysis.result.predict_offset
 fig = lookback_analysis.figures["fit"]
@@ -318,7 +317,6 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, ze.onetone.FreqCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-from zcu_tools.experiment.v2.onetone.freq import FreqAnalyzeOptions
 
 res_freq_exp = nb_adapter(ze.onetone.FreqExp())
 _ = res_freq_exp.run(cfg)
@@ -326,7 +324,7 @@ _ = res_freq_exp.run(cfg)
 
 ```python
 res_freq_analysis = res_freq_exp.analyze(
-    FreqAnalyzeOptions(model_type="hm", fit_bg_amp_slope=True)
+    ze.onetone.FreqExp.Options(model_type="hm", fit_bg_amp_slope=True)
 )
 f = res_freq_analysis.result.freq
 kappa = res_freq_analysis.result.fwhm
@@ -866,9 +864,8 @@ _ = qub_freq_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.freq import FreqAnalyzeOptions
 
-qub_freq_analysis = qub_freq_exp.analyze(FreqAnalyzeOptions())
+qub_freq_analysis = qub_freq_exp.analyze(ze.twotone.FreqExp.Options())
 f = qub_freq_analysis.result.freq
 kappa = qub_freq_analysis.result.fwhm
 fig = qub_freq_analysis.figures["fit"]
@@ -944,9 +941,8 @@ _ = qub_lenrabi_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.rabi.len_rabi import LenRabiAnalyzeOptions
 
-qub_lenrabi_analysis = qub_lenrabi_exp.analyze(LenRabiAnalyzeOptions(decay=True))
+qub_lenrabi_analysis = qub_lenrabi_exp.analyze(ze.twotone.rabi.LenRabiExp.Options(decay=True))
 md.pi_len = qub_lenrabi_analysis.result.pi_len
 md.pi2_len = qub_lenrabi_analysis.result.pi2_len
 md.rabi_f = qub_lenrabi_analysis.result.rabi_f
@@ -1020,9 +1016,8 @@ _ = qub_amprabi_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import AmpRabiAnalyzeOptions
 
-qub_amprabi_analysis = qub_amprabi_exp.analyze(AmpRabiAnalyzeOptions(skip=1))
+qub_amprabi_analysis = qub_amprabi_exp.analyze(ze.twotone.rabi.AmpRabiExp.Options(skip=1))
 md.pi_gain = qub_amprabi_analysis.result.pi_amp
 md.pi2_gain = qub_amprabi_analysis.result.pi2_amp
 fig = qub_amprabi_analysis.figures["fit"]
@@ -1290,7 +1285,7 @@ _ = dualreset_freq1_exp.run(cfg)
 
 ```python
 %matplotlib inline
-dualreset_freq1_analysis = dualreset_freq1_exp.analyze(FreqAnalyzeOptions())
+dualreset_freq1_analysis = dualreset_freq1_exp.analyze(ze.twotone.FreqExp.Options())
 f = dualreset_freq1_analysis.result.freq
 kappa = dualreset_freq1_analysis.result.fwhm
 fig = dualreset_freq1_analysis.figures["fit"]
@@ -1383,9 +1378,8 @@ _ = dualreset_freq2_exp.run(cfg)
 %matplotlib inline
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
-from zcu_tools.experiment.v2.twotone.reset.dual_tone.freq import FreqAnalyzeOptions as ResetFreqAnalyzeOptions
 
-dualreset_freq2_analysis = dualreset_freq2_exp.analyze(ResetFreqAnalyzeOptions(smooth=0.5, xname=xlabal, yname=ylabal))
+dualreset_freq2_analysis = dualreset_freq2_exp.analyze(ze.twotone.reset.dual_tone.FreqExp.Options(smooth=0.5, xname=xlabal, yname=ylabal))
 f1 = dualreset_freq2_analysis.result.freq1
 f2 = dualreset_freq2_analysis.result.freq2
 fig = dualreset_freq2_analysis.figures["fit"]
@@ -1471,9 +1465,8 @@ _ = dualreset_gain_exp.run(cfg)
 %matplotlib inline
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
-from zcu_tools.experiment.v2.twotone.reset.dual_tone.power import PowerAnalyzeOptions as ResetPowerAnalyzeOptions
 
-dualreset_gain_analysis = dualreset_gain_exp.analyze(ResetPowerAnalyzeOptions(xname=xlabal, yname=ylabal))
+dualreset_gain_analysis = dualreset_gain_exp.analyze(ze.twotone.reset.dual_tone.PowerExp.Options(xname=xlabal, yname=ylabal))
 gain1 = dualreset_gain_analysis.result.gain1
 gain2 = dualreset_gain_analysis.result.gain2
 fig = dualreset_gain_analysis.figures["fit"]
@@ -1608,7 +1601,7 @@ _ = rabifreq_exp.run(cfg)
 
 ```python
 %matplotlib inline
-rabifreq_analysis = rabifreq_exp.analyze(LenRabiAnalyzeOptions(decay=True))
+rabifreq_analysis = rabifreq_exp.analyze(ze.twotone.rabi.LenRabiExp.Options(decay=True))
 md.rabi_f = rabifreq_analysis.result.rabi_f
 fig = rabifreq_analysis.figures["fit"]
 ```
@@ -1683,9 +1676,8 @@ _ = bathreset_freq_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.reset.bath.freq import FreqGainAnalyzeOptions
 
-bathreset_freq_analysis = bathreset_freq_exp.analyze(FreqGainAnalyzeOptions(smooth=1))
+bathreset_freq_analysis = bathreset_freq_exp.analyze(ze.twotone.reset.bath.FreqGainExp.Options(smooth=1))
 md.bathreset_gain = bathreset_freq_analysis.result.gain
 md.bathreset_freq = bathreset_freq_analysis.result.freq
 fig = bathreset_freq_analysis.figures["fit"]
@@ -2121,9 +2113,8 @@ _ = dispersive_shift_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.dispersive import DispersiveAnalyzeOptions
 
-dispersive_shift_analysis = dispersive_shift_exp.analyze(DispersiveAnalyzeOptions())
+dispersive_shift_analysis = dispersive_shift_exp.analyze(ze.twotone.DispersiveExp.Options())
 md.chi = dispersive_shift_analysis.result.chi
 rf_w = dispersive_shift_analysis.result.avg_fwhm
 fig = dispersive_shift_analysis.figures["fit"]
@@ -2189,9 +2180,8 @@ _ = ac_stark_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.ac_stark import AcStarkAnalyzeOptions
 
-ac_stark_analysis = ac_stark_exp.analyze(AcStarkAnalyzeOptions(chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.01))
+ac_stark_analysis = ac_stark_exp.analyze(ze.twotone.AcStarkExp.Options(chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.01))
 md.ac_stark_coeff = ac_stark_analysis.result.ac_coeff
 fig = ac_stark_analysis.figures["fit"]
 ```
@@ -2236,9 +2226,8 @@ _ = allxy_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.allxy import AllXYAnalyzeOptions
 
-allxy_analysis = allxy_exp.analyze(AllXYAnalyzeOptions())
+allxy_analysis = allxy_exp.analyze(ze.twotone.AllXY_Exp.Options())
 fig = allxy_analysis.figures["fit"]
 ```
 
@@ -2376,9 +2365,8 @@ _ = zigzag_scan_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.zigzag_sweep import ZigZagScanAnalyzeOptions
 
-zigzag_scan_analysis = zigzag_scan_exp.analyze(ZigZagScanAnalyzeOptions(find_range=(None, None)))
+zigzag_scan_analysis = zigzag_scan_exp.analyze(ze.twotone.ZigZagScanExp.Options(find_range=(None, None)))
 best_x = zigzag_scan_analysis.result.min_value
 fig = zigzag_scan_analysis.figures["fit"]
 ```
@@ -2469,9 +2457,8 @@ _ = opt_ro_freq_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.ro_optimize.freq import FreqAnalyzeOptions as ROFreqAnalyzeOptions
 
-opt_ro_freq_analysis = opt_ro_freq_exp.analyze(ROFreqAnalyzeOptions(smooth=2))
+opt_ro_freq_analysis = opt_ro_freq_exp.analyze(ze.twotone.ro_optimize.FreqExp.Options(smooth=2))
 best_freq = opt_ro_freq_analysis.result.best_freq
 fig = opt_ro_freq_analysis.figures["fit"]
 best_freq
@@ -2535,9 +2522,8 @@ _ = opt_ro_pdr_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.ro_optimize.power import PowerAnalyzeOptions as ROPowerAnalyzeOptions
 
-opt_ro_pdr_analysis = opt_ro_pdr_exp.analyze(ROPowerAnalyzeOptions(penalty_ratio=0.5))
+opt_ro_pdr_analysis = opt_ro_pdr_exp.analyze(ze.twotone.ro_optimize.PowerExp.Options(penalty_ratio=0.5))
 best_gain = opt_ro_pdr_analysis.result.best_gain
 fig = opt_ro_pdr_analysis.figures["fit"]
 best_gain
@@ -2600,9 +2586,8 @@ _ = opt_ro_freq_pdr_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import FreqGainAnalyzeOptions as ROFreqGainAnalyzeOptions
 
-opt_ro_freq_pdr_analysis = opt_ro_freq_pdr_exp.analyze(ROFreqGainAnalyzeOptions())
+opt_ro_freq_pdr_analysis = opt_ro_freq_pdr_exp.analyze(ze.twotone.ro_optimize.FreqGainExp.Options())
 best_freq = opt_ro_freq_pdr_analysis.result.best_freq
 best_gain = opt_ro_freq_pdr_analysis.result.best_gain
 fig = opt_ro_freq_pdr_analysis.figures["fit"]
@@ -2660,9 +2645,8 @@ _ = opt_ro_len_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.ro_optimize.length import LengthAnalyzeOptions as ROLengthAnalyzeOptions
 
-opt_ro_len_analysis = opt_ro_len_exp.analyze(ROLengthAnalyzeOptions(t0=5.0))
+opt_ro_len_analysis = opt_ro_len_exp.analyze(ze.twotone.ro_optimize.LengthExp.Options(t0=5.0))
 best_length = opt_ro_len_analysis.result.best_length
 fig = opt_ro_len_analysis.figures["fit"]
 best_length
@@ -2813,9 +2797,8 @@ if true_detune is None:
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import T2RamseyAnalyzeOptions
 
-t2ramsey_analysis = t2ramsey_exp.analyze(T2RamseyAnalyzeOptions(fit_fringe=True))
+t2ramsey_analysis = t2ramsey_exp.analyze(ze.twotone.time_domain.T2RamseyExp.Options(fit_fringe=True))
 md.t2r = t2ramsey_analysis.result.t2r
 md.t2r_err = t2ramsey_analysis.result.t2r_err
 detune = t2ramsey_analysis.result.detune
@@ -2845,7 +2828,7 @@ md.q_f
 調整等待時間的範圍與點數後執行量測，再選擇擬合要略過的資料點。以下分別示範一般 T1、With Tone 與 With Sweep Tone。
 
 ```python
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1AnalyzeOptions, T1Exp
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Exp
 from zcu_tools.notebook import NotebookAdapter
 
 exp_cfg = {
@@ -2876,7 +2859,7 @@ _ = t1_exp.run(cfg)
 ```
 
 ```python
-t1_record = t1_exp.analyze(T1AnalyzeOptions(dual_exp=False, skip=1))
+t1_record = t1_exp.analyze(T1Exp.Options(dual_exp=False, skip=1))
 analysis = t1_record.result
 md.t1, md.t1err = analysis.t1, analysis.t1_err
 fig = t1_record.figures["fit"]
@@ -2919,9 +2902,8 @@ _ = t1_with_tone_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1WithToneAnalyzeOptions
 
-t1_with_tone_analysis = t1_with_tone_exp.analyze(T1WithToneAnalyzeOptions(dual_exp=False))
+t1_with_tone_analysis = t1_with_tone_exp.analyze(ze.twotone.time_domain.T1WithToneExp.Options(dual_exp=False))
 md.t1_with_tone = t1_with_tone_analysis.result.t1
 fig = t1_with_tone_analysis.figures["fit"]
 md.t1_with_tone
@@ -3020,9 +3002,8 @@ if true_detune is None:
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.twotone.time_domain.t2echo import T2EchoAnalyzeOptions
 
-t2echo_analysis = t2echo_exp.analyze(T2EchoAnalyzeOptions(fit_method="fringe"))
+t2echo_analysis = t2echo_exp.analyze(ze.twotone.time_domain.T2EchoExp.Options(fit_method="fringe"))
 md.t2e = t2echo_analysis.result.t2e
 md.t2e_err = t2echo_analysis.result.t2e_err
 detune = t2echo_analysis.result.detune
@@ -3072,9 +3053,8 @@ _ = cpmg_exp.run(cfg)
 ```
 
 ```python
-from zcu_tools.experiment.v2.twotone.time_domain.cpmg import CPMGAnalyzeOptions
 
-cpmg_analysis = cpmg_exp.analyze(CPMGAnalyzeOptions(fit_fringe=True))
+cpmg_analysis = cpmg_exp.analyze(ze.twotone.time_domain.CPMG_Exp.Options(fit_fringe=True))
 fig = cpmg_analysis.figures["fit"]
 ```
 
@@ -3143,11 +3123,7 @@ jpa_sgs.get_info()
 先執行 GE 量測與 FIT，再執行 post analysis。Post analysis 使用前一格得到的校準結果，不需要重跑量測。
 
 ```python
-from zcu_tools.experiment.v2.singleshot.ge import (
-    GE_Exp,
-    GEAnalyzeOptions,
-    GEPostAnalyzeOptions,
-)
+from zcu_tools.experiment.v2.singleshot.ge import GE_Exp
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.notebook.experiments import GEPostAnalyzer
 
@@ -3189,7 +3165,7 @@ ge_post_analyzer = GEPostAnalyzer(ge_core)
 
 ```python
 ge_primary = sh_ge_exp.analyze(
-    GEAnalyzeOptions(
+    GE_Exp.Options(
         initial_state="ground",
         backend="center",
         # length_ratio=cfg.modules.readout.ro_cfg.ro_length / md.t1_with_tone,
@@ -3236,7 +3212,7 @@ md.g_center, md.e_center, md.ge_s
 ```python
 ge_post_record = ge_post_analyzer.analyze(
     ge_primary,
-    GEPostAnalyzeOptions(consider_other=False),
+    GE_Exp.PostOptions(consider_other=False),
 )
 ge_post = ge_post_record.result
 md.confusion_matrix = ge_post.confusion.matrix
@@ -3278,9 +3254,8 @@ _ = sh_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.singleshot.check import CheckAnalyzeOptions
 
-sh_analysis = sh_exp.analyze(CheckAnalyzeOptions(md.g_center, md.e_center, md.ge_radius, max_point=10000))
+sh_analysis = sh_exp.analyze(ze.singleshot.CheckExp.Options(md.g_center, md.e_center, md.ge_radius, max_point=10000))
 fig = sh_analysis.figures["fit"]
 ```
 
@@ -3329,9 +3304,8 @@ _ = sh_lenrabi_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiAnalyzeOptions as SSLenRabiAnalyzeOptions
 
-sh_lenrabi_analysis = sh_lenrabi_exp.analyze(SSLenRabiAnalyzeOptions())
+sh_lenrabi_analysis = sh_lenrabi_exp.analyze(ze.singleshot.LenRabiExp.Options())
 fig = sh_lenrabi_analysis.figures["fit"]
 ```
 
@@ -3376,9 +3350,8 @@ _ = sh_t1_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.singleshot.t1.t1 import T1AnalyzeOptions as SST1AnalyzeOptions
 
-sh_t1_analysis = sh_t1_exp.analyze(SST1AnalyzeOptions(confusion_matrix=md.confusion_matrix, skip=1))
+sh_t1_analysis = sh_t1_exp.analyze(ze.singleshot.t1.T1Exp.Options(confusion_matrix=md.confusion_matrix, skip=1))
 fig = sh_t1_analysis.figures["fit"]
 ```
 
@@ -3425,9 +3398,8 @@ _ = sh_t1_with_tone_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone import T1WithToneAnalyzeOptions as SST1WithToneAnalyzeOptions
 
-sh_t1_with_tone_analysis = sh_t1_with_tone_exp.analyze(SST1WithToneAnalyzeOptions(confusion_matrix=md.confusion_matrix, skip=2))
+sh_t1_with_tone_analysis = sh_t1_with_tone_exp.analyze(ze.singleshot.t1.T1WithToneExp.Options(confusion_matrix=md.confusion_matrix, skip=2))
 t1 = sh_t1_with_tone_analysis.result.t1
 t1_b = sh_t1_with_tone_analysis.result.t1_b
 fig = sh_t1_with_tone_analysis.figures["fit"]
@@ -3488,9 +3460,8 @@ _ = sh_t1_with_tone_sweep_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import T1WithToneSweepAnalyzeOptions
 
-sh_t1_with_tone_sweep_analysis = sh_t1_with_tone_sweep_exp.analyze(T1WithToneSweepAnalyzeOptions(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix))
+sh_t1_with_tone_sweep_analysis = sh_t1_with_tone_sweep_exp.analyze(ze.singleshot.t1.T1WithToneSweepExp.Options(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix))
 fig = sh_t1_with_tone_sweep_analysis.figures["fit"]
 ```
 
@@ -3550,10 +3521,9 @@ _ = sh_mist_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.singleshot.mist.power import PowerAnalyzeOptions as SSMistPowerAnalyzeOptions
 
 sh_mist_analysis = sh_mist_exp.analyze(
-    SSMistPowerAnalyzeOptions(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix),
+    ze.singleshot.mist.PowerExp.Options(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix),
 )
 fig = sh_mist_analysis.figures["fit"]
 ```
@@ -3613,7 +3583,7 @@ _ = sh_mist_check_exp.run(cfg)
 ```python
 %matplotlib inline
 sh_mist_check_analysis = sh_mist_check_exp.analyze(
-    CheckAnalyzeOptions(md.g_center, md.e_center, md.ge_radius),
+    ze.singleshot.CheckExp.Options(md.g_center, md.e_center, md.ge_radius),
 )
 fig = sh_mist_check_analysis.figures["fit"]
 ```
@@ -3678,9 +3648,8 @@ _ = sh_ac_stark_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkAnalyzeOptions as SSAcStarkAnalyzeOptions
 
-sh_ac_stark_analysis = sh_ac_stark_exp.analyze(SSAcStarkAnalyzeOptions(chi=md.chi, kappa=md.rf_w, confusion_matrix=md.confusion_matrix, cutoff=0.05))
+sh_ac_stark_analysis = sh_ac_stark_exp.analyze(ze.singleshot.AcStarkExp.Options(chi=md.chi, kappa=md.rf_w, confusion_matrix=md.confusion_matrix, cutoff=0.05))
 ac_stark_coeff = sh_ac_stark_analysis.result.ac_stark_coeff
 fig = sh_ac_stark_analysis.figures["fit"]
 ```
@@ -3764,9 +3733,8 @@ _ = mist_exp.run(cfg)
 
 ```python
 %matplotlib inline
-from zcu_tools.experiment.v2.mist.power_dep.single_trace import PowerDepAnalyzeOptions
 
-mist_analysis = mist_exp.analyze(PowerDepAnalyzeOptions(ac_coeff=md.ac_stark_coeff))
+mist_analysis = mist_exp.analyze(ze.mist.PowerDepExp.Options(ac_coeff=md.ac_stark_coeff))
 fig = mist_analysis.figures["fit"]
 ```
 
