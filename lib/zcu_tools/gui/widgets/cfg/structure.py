@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 from typing import cast, final
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QColor, QPainter, QPen  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor, QPainter, QPen
+from qtpy.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QProxyStyle,
@@ -62,7 +62,7 @@ class _TreeBranchStyle(QProxyStyle):
     longer use depth backgrounds (A1).
     """
 
-    def drawPrimitive(  # type: ignore[override]
+    def drawPrimitive(
         self,
         element: QStyle.PrimitiveElement,
         option: QStyleOption | None,
@@ -70,17 +70,17 @@ class _TreeBranchStyle(QProxyStyle):
         widget: QWidget | None = None,
     ) -> None:
         if option is None or painter is None:
-            super().drawPrimitive(element, option, painter, widget)  # type: ignore[arg-type]
-            return
-        if element != QStyle.PrimitiveElement.PE_IndicatorBranch:  # type: ignore[attr-defined]
             super().drawPrimitive(element, option, painter, widget)
             return
-        state = option.state  # type: ignore[attr-defined]
-        has_sibling = bool(state & QStyle.StateFlag.State_Sibling)  # type: ignore[attr-defined]
-        has_item = bool(state & QStyle.StateFlag.State_Item)  # type: ignore[attr-defined]
+        if element != QStyle.PrimitiveElement.PE_IndicatorBranch:
+            super().drawPrimitive(element, option, painter, widget)
+            return
+        state = option.state
+        has_sibling = bool(state & QStyle.StateFlag.State_Sibling)
+        has_item = bool(state & QStyle.StateFlag.State_Item)
         if not (has_sibling or has_item):
             return
-        rect = option.rect  # type: ignore[attr-defined]
+        rect = option.rect
         x = rect.center().x()
         y = rect.center().y()
         # A1: depth is per-segment indentation column only, normalized for horizontal viewport offset
@@ -117,16 +117,16 @@ def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
     """Create the shared dense tree viewport and keep its branch style alive."""
     tree = QTreeWidget()
     tree.setObjectName("cfgTree")
-    tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
-    tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-    tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+    tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     tree.setHeaderHidden(True)
     tree.setColumnCount(2)
     tree.setRootIsDecorated(False)
     tree.setIndentation(_INDENTATION_PX)
     tree.setAlternatingRowColors(False)
-    tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)  # type: ignore[attr-defined]
-    tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
+    tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     font = tree.font()
     font.setPixelSize(_TREE_FONT_SIZE_PX)
     tree.setFont(font)
@@ -135,8 +135,8 @@ def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
     tree.setStyle(style)
     header = tree.header()
     assert header is not None
-    header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # type: ignore[attr-defined]
-    header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
     return tree, style
 
 
