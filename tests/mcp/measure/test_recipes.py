@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
 
@@ -291,6 +292,51 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path
         assert methods.count("tab.run_start") == methods.count("tab.analyze") == 1
     finally:
         done.set()
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("held_op", [71, 82, 93])
+def test_session_close_drains_recipe_work_and_rejects_new_admission(
+    tmp_path, monkeypatch, held_op
+):
+    gui = LookbackGui()
+    pending = Event()
+    disconnected = Event()
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == held_op:
+            pending.set()
+            assert disconnected.wait(2), "Session must disconnect before joining"
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    close_transport = client.transport.close
+
+    def disconnect():
+        close_transport()
+        disconnected.set()
+
+    monkeypatch.setattr(client.transport, "close", disconnect)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert pending.wait(1)
+        client.context.session.close()
+        before = len(client.transport.sent)
+        result = client.call("status", {"execution": initial.data["execution"]})
+        assert result["status"] == "failed", result
+        assert result["phase"] == "terminal"
+        assert result["error"]["reason"] in ("session_closed", "connection_lost")
+        if held_op == 82:
+            assert result["raw_save"]["status"] == "unknown"
+            assert result["raw_save"]["reserved_path"] == "/actual/raw.h5"
+            assert result["raw_save"]["path"] is None
+        with pytest.raises(GuiRpcError, match="closed"):
+            client.call("lookback", {"frequency_mhz": 6020.0})
+        client.context.session.close()
+        assert len(client.transport.sent) == before
+    finally:
+        disconnected.set()
         client.context.session.close()
 
 
