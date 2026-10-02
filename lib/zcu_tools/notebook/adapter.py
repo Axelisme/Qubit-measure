@@ -87,6 +87,7 @@ class NotebookAdapter(Generic[CoreT]):
         )
         try:
             result = self._core.run(deepcopy(retained_cfg), context=context)
+            context.cancel_signal.raise_if_error()
             plots.finish()
             record = RunRecord(cfg=retained_cfg, result=result)
         except BaseException as error:
