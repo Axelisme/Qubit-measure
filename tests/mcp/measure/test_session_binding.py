@@ -388,7 +388,6 @@ def test_assembled_multistep_tools_do_not_cross_connections(
             result.data["error"]["reason"],
             result.data["op"],
         ) == (True, "failed", "connection_lost", 1)
-        client.context.session.close()
     else:
         with pytest.raises(GuiRpcError) as error:
             client.call(tool, arguments)
