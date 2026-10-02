@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 
-from qtpy.QtCore import Qt, QTimer, Signal
+from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtGui import QBrush, QColor
 from qtpy.QtWidgets import (
     QHBoxLayout,

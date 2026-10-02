@@ -81,7 +81,7 @@ class ElidedLabel(QLabel):
         )
         super().setText(elided)
 
-    def resizeEvent(self, event: Any) -> None:
+    def resizeEvent(self, event: Any) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         self._update_elided()
 
@@ -274,7 +274,7 @@ class _SweepPairRow(QWidget):
             max(left_hint.height(), right_hint.height()),
         )
 
-    def resizeEvent(self, event: Any) -> None:
+    def resizeEvent(self, event: Any) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         available = max(0, self.width() - self._SPACING)
         left_width = available // 2

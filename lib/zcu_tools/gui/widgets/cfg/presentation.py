@@ -26,7 +26,7 @@ from .registry import FieldRenderContext
 
 logger = logging.getLogger(__name__)
 
-# Tone -> QColor map derived from single _TONE_STYLES source in fields._decoration.
+# Tone -> QColor map derived from single TONE_STYLES source in fields._decoration.
 # Built lazily to avoid circular import (presentation -> fields -> containers -> presentation).
 _TONE_QCOLOR: dict[str, QColor] = {}
 
@@ -35,10 +35,10 @@ def _ensure_tone_colors() -> None:
     if _TONE_QCOLOR:
         return
     try:
-        from .fields._decoration import _TONE_STYLES
+        from .fields._decoration import TONE_STYLES
     except Exception:
         return
-    for _tone, _style in _TONE_STYLES.items():
+    for _tone, _style in TONE_STYLES.items():
         try:
             _hex = _style.split(":")[1].strip().rstrip(";")
             _TONE_QCOLOR[_tone] = QColor(_hex)
@@ -130,11 +130,11 @@ def apply_form_widget_decoration(
     if decoration is None:
         return
     from .fields._decoration import (
-        _decoration_widget_state,
+        decoration_widget_state,
     )
 
     # Use single decoration state (enabled/tooltip/tone) so form and tree share projection
-    enabled, tooltip, style = _decoration_widget_state(decoration)
+    enabled, tooltip, style = decoration_widget_state(decoration)
     value_widget.setEnabled(enabled)
     if tooltip:
         value_widget.setToolTip(tooltip)
@@ -155,12 +155,12 @@ def apply_tree_item_decoration(
     if decoration is None:
         return
     from .fields._decoration import (
-        _decoration_widget_state,
+        decoration_widget_state,
     )
 
     _ensure_tone_colors()
     # Use single decoration state (enabled/tooltip/tone) from _decoration projection
-    enabled, tooltip, style = _decoration_widget_state(decoration)
+    enabled, tooltip, style = decoration_widget_state(decoration)
     if not enabled:
         if control is not None:
             control.setEnabled(False)
