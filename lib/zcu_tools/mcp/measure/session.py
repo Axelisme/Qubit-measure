@@ -484,6 +484,8 @@ class MeasureMcpSession:
             raise GuiRpcError(f"unknown GUI method {method!r}", reason="unknown_method")
         if timeout_seconds is None:
             timeout_seconds = entry["timeout_seconds"] + 1.0
+        if before_send is not None:
+            before_send()
         try:
             resp = self._bound_rpc(generation, method, params, timeout_seconds)
         except GuiTransportTimeoutError as exc:
