@@ -7,7 +7,7 @@ import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from typing import Any
 
 import pytest
@@ -856,6 +856,110 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     assert completed["save_status"] == "not_started"
     assert "tab.save_image" not in _methods(client)
     assert "tab.get_figure" not in _methods(client)
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+def test_close_after_start_receipt_retains_operation_without_new_work(
+    tmp_path, clients, monkeypatch, interactive
+):
+    send_rpc = GuiConnection.send_gui_rpc
+
+    def respond(method, params):
+        assert method == "tab.analyze"
+        return {"operation_id": 71, "interactive": interactive, "params": {}, "invalidated_on_success": []}
+
+    client = _client(tmp_path, clients, respond)
+
+    def send(connection, method, params, *args, **kwargs):
+        reply = send_rpc(connection, method, params, *args, **kwargs)
+        if method == "tab.analyze":
+            client.context.session.close()
+        return reply
+
+    monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
+    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    assert reply["isError"] is True
+    stopped = json.loads(reply["content"][0]["text"])
+    assert stopped["op"] == 1
+    assert stopped["tab"] == "t"
+    assert stopped["status"] == "failed"
+    assert stopped["error"]["reason"] == "session_closed"
+    assert stopped["operation_outcome"] is None
+    assert stopped["cancel_requested"] is False
+    assert stopped["save_status"] == "not_started"
+    assert _methods(client) == ["tab.analyze"]
+    assert client.call("status", {"execution": stopped["execution"]}) == stopped
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+def test_worker_start_failure_keeps_the_admitted_operation_receipt(
+    tmp_path, clients, monkeypatch, interactive
+):
+    start_thread = Thread.start
+
+    def start(thread):
+        if thread.name.startswith("analysis-"):
+            raise RuntimeError("no worker available")
+        start_thread(thread)
+
+    monkeypatch.setattr(Thread, "start", start)
+
+    def respond(method, params):
+        assert method == "tab.analyze"
+        return {"operation_id": 71, "interactive": interactive, "params": {}, "invalidated_on_success": []}
+
+    client = _client(tmp_path, clients, respond)
+    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    assert reply["isError"] is True
+    stopped = json.loads(reply["content"][0]["text"])
+    assert stopped["op"] == 1
+    assert stopped["status"] == "failed"
+    assert stopped["error"]["reason"] == "worker_start_failed"
+    assert stopped["operation_outcome"] is None
+    assert _methods(client) == ["tab.analyze"]
+
+
+def test_gui_completion_during_initial_handoff_keeps_the_execution(
+    tmp_path, clients, monkeypatch
+):
+    saved = Event()
+    send_rpc = GuiConnection.send_gui_rpc
+
+    def send(connection, method, params, *args, **kwargs):
+        if method == "tab.interact":
+            assert saved.wait(3), "analysis did not continue before initial read"
+        return send_rpc(connection, method, params, *args, **kwargs)
+
+    monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {"operation_id": 71, "interactive": True, "params": {}, "invalidated_on_success": []}
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.get_analyze_result":
+            return _result_reply("analysis", ["fit"], {})
+        if method == "tab.save_image":
+            return {"image_path": "/actual/fit.png"}
+        if method == "tab.get_figure":
+            saved.set()
+            return {"png_b64": base64.b64encode(_PNG).decode()}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    client.transport.replies["tab.interact"] = {
+        "ok": False,
+        "error": {"code": "precondition_failed", "message": "interactive session already completed"},
+    }
+    started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+    assert started["op"] == 1
+    completed = _data(
+        _call_stdio(monkeypatch, client, "wait", {"execution": started["execution"], "timeout": 2})
+    )
+    assert completed["status"] == "finished"
+    assert completed["saved_images"] == [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+    assert _methods(client).count("tab.analyze") == 1
+    assert _methods(client).count("tab.save_image") == 1
 
 
 @pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])
