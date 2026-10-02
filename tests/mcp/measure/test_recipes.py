@@ -541,6 +541,42 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         client.context.session.close()
 
 
+def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
+    tmp_path, monkeypatch
+):
+    gui = LookbackGui()
+    reading = Event()
+    release = Event()
+
+    def respond(method, params):
+        if method == "tab.writeback_preview":
+            reading.set()
+            assert release.wait(2)
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert reading.wait(1)
+        execution = initial.data["execution"]
+        cancelled = client.call("cancel", {"execution": execution})
+        assert cancelled.data["cancel_requested"]
+        release.set()
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        assert terminal.data["status"] == "cancelled"
+        assert terminal.data["cancel_requested"]
+        assert terminal.data["writeback"]["items"][0]["proposed"] == 0.24
+        assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert terminal.data["analysis"]["status"] == "finished"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.writeback_preview") == 1
+        assert "operation.cancel" not in methods
+    finally:
+        release.set()
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
