@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from qtpy.QtCore import Qt, QTimer, Signal
+from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
     QScrollArea,
     QSizePolicy,
