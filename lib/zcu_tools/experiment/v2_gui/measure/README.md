@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui.measure` — measure-gui adapters
 
-**Last updated:** 2026-10-01 — 三標準 records／canonical load 與 main local analysis
+**Last updated:** 2026-10-02 (Record-only adapters)
 
 `experiment/v2_gui/measure/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/measure/` →
@@ -137,8 +137,7 @@ adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedErro
 adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()` 拒絕的資料
 直接回報原始錯誤。`BaseAdapter.load` 只讀取結果，不修改 tab cfg；GUI
 `LoadService.load_result` 只從 loaded RunRecord.cfg 嘗試回填 tab 與 Config editor。
-缺失或不可採用的 cfg 不撤回有效資料，tab cfg 保持不變。已遷移的 T1／GE／OneTone FluxDep 用
-RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。OneTone FluxDep 的互動分析由 frontend 擁有，其他實驗仍待遷移。
+缺失或不可採用的 cfg 不撤回有效資料，tab cfg 保持不變。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
@@ -172,7 +171,7 @@ opaque draft，adapter不接觸Writeback implementation。
 `singleshot/amp_rabi` 與 `singleshot/reset_check` 的 `g_center`、`e_center`、`radius` 是正式 experiment cfg
 欄位，預設 expression 指向 md 的 `g_center`、`e_center`、`ge_radius`。
 缺值保持 invalid；operator 可改用 direct complex／float 值。Run 凍結已解析的
-cfg 校正值，沿用 BaseAdapter.run；結果的 cfg_snapshot 保留本次使用的值。
+cfg 校正值，沿用 BaseAdapter.run；RunRecord.cfg 保留本次使用的值。
 兩者都沿用可調整的 Reps／Rounds；Amp Rabi 串接各 round 的 raw IQ，reset-check 平均各 round 的 populations。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
@@ -191,22 +190,22 @@ twotone `ro_optimize/length` 的 GUI analyze param 對外命名為 `duration_t0`
 
 twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；writeback
 產生兩層 readout writeback：`best_ro_freq` / `best_ro_gain` / `best_ro_length`
-仍是 MetaDict scalar；當 run result 帶有 `cfg_snapshot` 且三個 best 值可由本次
+仍是 MetaDict scalar；當來源 RunRecord 的 `source.cfg` 非 None 且三個 best 值可由本次
 analyze result 加上 current MetaDict 補齊且皆為 finite number 時，adapter 同時提出
 ModuleLibrary `readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
 readout role proposal；缺值或 non-finite 值只略過 module writeback。
-`readout_dpm` 以 `cfg_snapshot.modules.readout` 作為 template，將 readout
+`readout_dpm` 以 `source.cfg.modules.readout` 作為 template，將 readout
 pulse/readout 頻率設為 `best_ro_freq`、pulse gain 設為 `best_ro_gain`、pulse
 waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、
 ADC readout length 設為 `best_ro_length`。
 
-`onetone/freq` analyze 仍寫回 MetaDict `r_f` / `rf_w` / `theta0`；當 run result 帶有
-`cfg_snapshot` 且 `cfg_snapshot.modules.readout` 是 pulse readout 時，adapter 也提出
+`onetone/freq` analyze 仍寫回 MetaDict `r_f` / `rf_w` / `theta0`；當來源 RunRecord 的
+`source.cfg` 非 None 且 `source.cfg.modules.readout` 是 pulse readout 時，adapter 也提出
 ModuleLibrary `readout_rf`，並以 writeback `role_id="readout"` 標示它是 Pulse
 readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id。
 `readout_rf` 以該 snapshot readout 作為 template，只用 fitted `r_f` 覆寫
 `pulse_cfg.freq` / `ro_cfg.ro_freq`，gain、waveform length/style、channels、ADC
-readout length、trigger timing 等欄位都沿用 snapshot。`cfg_snapshot is None` 或
+readout length、trigger timing 等欄位都沿用 snapshot。`source.cfg is None` 或
 readout 不是 pulse readout 時，module writeback graceful skip，只保留 MetaDict items。
 
 `onetone/freq` 的 `fit_bg_amp_slope` 預設開啟，`fit_bg_phase_curvature` 預設關閉；
@@ -337,9 +336,9 @@ IQ centers與confusion matrix。Amp固定無衰減／零相位，提供Initial S
 每個校準 adapter 在 `get_writeback_items` 內呼它，傳入該 reset 型別的 `field_md_map`
 （dotted 欄位 path ↔ md key）與 `target`/`desc`。
 
-- **gate**：該 module 需要的 md key **全部齊**（`md_has_key`）且 `cfg_snapshot` 非 None
+- **gate**：該 module 需要的 md key **全部齊**（`md_has_key`）且 `source.cfg` 非 None
   才提供；否則回 `[]`（只剩既有 md item）。
-- **組裝**：齊了就以**這次** `run_result.cfg_snapshot.modules.tested_reset` 為模板，經
+- **組裝**：齊了就以**這次** `source.cfg.modules.tested_reset` 為模板，經
   `module_cfg_to_value` 建成 `(spec, value)`，把每個校準欄位**從 md 覆寫**
   （`value.with_field(path, float(md[key]))`），包成
   `ModuleWriteback(edit_schema=CfgSchema(spec, value))`。
@@ -369,7 +368,7 @@ IQ centers與confusion matrix。Amp固定無衰減／零相位，提供Initial S
   tomography phase 是同一 Result 的內部 sweep axis，不再拆成四個 phase-resolved sidecar
   檔，也不再 `save` fast-fail。
 - **D5**：length / 部分掃描是「看曲線」型，analyze 只渲圖、不抽純量 → 無 md writeback。
-- **graceful without snapshot**：`cfg_snapshot is None`（如從檔載入）時，module
+- **graceful without snapshot**：`source.cfg is None`（如從檔載入）時，module
   writeback 全略過，只剩既有 md item。
 
 三個 singleshot 分析（ge / len_rabi / amp_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 描述 pulse 前狀態，不是第一個掃描點；啟用 phase offset 時也不等同於模型外推的零 length population。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。

@@ -1,27 +1,8 @@
-"""Experiment persistence and interfaces during the explicit-result migration.
-
-``PersistableExperiment`` maps an explicit Result through ``AXES_SPEC`` without
-keeping operation state. ``AbsExperiment``, ``ExperimentProtocol`` and the result
-bookkeeping decorators still serve experiments whose callers have not migrated.
-"""
-
-from __future__ import annotations
+"""Stateless persistence for record-based experiments."""
 
 import os
-from collections.abc import Callable
-from functools import wraps
-from inspect import signature
 from pathlib import Path
-from typing import (
-    Any,
-    ClassVar,
-    Concatenate,
-    Generic,
-    ParamSpec,
-    Protocol,
-    TypeVar,
-    runtime_checkable,
-)
+from typing import Any, ClassVar, Generic, TypeVar
 
 import numpy as np
 
@@ -29,111 +10,8 @@ from zcu_tools.experiment.axes_spec import AxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 
-__all__ = [
-    "AbsExperiment",
-    "PersistableExperiment",
-    "ExperimentProtocol",
-    "record_result",
-    "retrieve_result",
-]
-
 T_Result = TypeVar("T_Result")
 T_Config = TypeVar("T_Config", bound=ExpCfgModel)
-T_Config_contra = TypeVar("T_Config_contra", bound=ExpCfgModel, contravariant=True)
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
-def record_result(
-    fn: Callable[Concatenate[Any, P], R],
-) -> Callable[Concatenate[Any, P], R]:
-    """Cache the method's returned Result on ``self.last_result`` (run/load).
-
-    Preserves the wrapped method's exact signature via ``ParamSpec``.
-    """
-
-    @wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> R:
-        result = fn(self, *args, **kwargs)
-        self.last_result = result
-        return result
-
-    return wrapper
-
-
-def retrieve_result(
-    fn: Callable[Concatenate[Any, P], R],
-) -> Callable[Concatenate[Any, P], R]:
-    """Fall the ``result`` argument back to ``self.last_result`` when omitted/None
-    (analyze/save). The wrapped method still asserts non-None.
-
-    ``result`` is located by name via the bound signature, so it works wherever
-    it sits in the parameter list (1st in analyze, 2nd in save).
-    """
-    sig = signature(fn)
-
-    @wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> R:
-        bound = sig.bind(self, *args, **kwargs)
-        bound.apply_defaults()
-        if bound.arguments.get("result") is None:
-            bound.arguments["result"] = self.last_result
-        return fn(*bound.args, **bound.kwargs)
-
-    return wrapper
-
-
-@runtime_checkable
-class ExperimentProtocol(Protocol[T_Result, T_Config_contra]):
-    """Pre-migration structural contract for stateful experiment callers.
-
-    Experiments may add methods (e.g. ``calc_confusion_matrix``).
-    ``run``/``analyze`` keyword surfaces are per-experiment. Migrated cores use
-    explicit Results instead of this protocol's cached-result contract.
-
-    ``T_Config_contra`` is contravariant: it appears only in input (``cfg``)
-    position, so an experiment over a wider cfg satisfies a protocol over a
-    narrower one.
-    """
-
-    last_result: T_Result | None
-
-    def run(
-        self,
-        soc: Any,
-        soccfg: Any,
-        cfg: T_Config_contra,
-        /,
-        *args: Any,
-        **kwargs: Any,
-    ) -> T_Result: ...
-
-    def analyze(
-        self, result: T_Result | None = ..., /, *args: Any, **kwargs: Any
-    ) -> Any: ...
-
-    def save(
-        self,
-        filepath: str,
-        result: T_Result | None = ...,
-        comment: str | None = ...,
-        tag: str | None = ...,
-        **kwargs: Any,
-    ) -> None: ...
-
-    def load(self, filepath: str, **kwargs: Any) -> T_Result: ...
-
-
-class AbsExperiment(Generic[T_Result, T_Config]):
-    """Minimal base: just the ``last_result`` cache.
-
-    Native persistence (``save``/``load`` via ``AXES_SPEC``) is OPT-IN — inherit
-    ``PersistableExperiment`` instead to gain it. Un-migrated experiments keep
-    their own incompatible ``save``/``load`` signatures off this minimal base.
-    """
-
-    def __init__(self) -> None:
-        self.last_result: T_Result | None = None
 
 
 class PersistableExperiment(Generic[T_Result, T_Config]):

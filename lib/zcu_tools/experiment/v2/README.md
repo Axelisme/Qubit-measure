@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 (Explicit workflow figures)
+**Last updated:** 2026-10-02 (Stateless core contract)
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -101,7 +101,7 @@ experiment/v2/
 
 ## 實驗特有的分析與保存
 
-實驗基底、`last_result` 與 Result 契約見[父層實驗介面](../README.md#實驗介面與資料)。以下記錄 v2 實驗特有的分析與資料形狀。
+實驗基底、RunRecord 與 Result 契約見[父層實驗介面](../README.md#實驗介面與資料)。以下記錄 v2 實驗特有的分析與資料形狀。
 
 CKP numeric analysis先從ground/excited maps抽取resonance trace，再透過
 `analysis.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance
@@ -170,51 +170,15 @@ matrix的估計流程。
 
 ## 典型 `Exp.run()` 範本（以 `onetone/freq.py` 為例）
 
-幾乎所有 `*Exp.run()` 都遵循這個樣板：
+一般核心實驗的入口是 `run(cfg, *, context: RunContext) -> Result`。硬體與具名 devices 由 context 傳入，cfg 只含這次操作的設定。Result 只含資料。NotebookAdapter 或 GUI adapter 將原始 cfg 與 Result 配成 RunRecord，不在核心快取上一輪結果。
 
-```python
-@record_result                                                  # 自動把回傳值寫進 last_result
-def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-    orig_cfg = deepcopy(cfg)                                     # 1. 執行前快照（給 cfg_snapshot）
-    setup_devices(cfg, progress=True)
-    modules = cfg.modules
+1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
+2. 從 `context.plots.liveplot_1d("measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
+3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
+4. Schedule 接 `stop=context.cancel_signal`，將外部取消傳給 acquire。Device setup 接 `cancel_signal=context.cancel_signal.event`；直接 acquire 的路徑也必須傳入 cancel flag。
+5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
 
-    freqs = sweep2array(cfg.sweep.freq, "freq", {...})          # 2. 預測 sweep 點（已 round 到 ZCU 格點）
-
-    with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:   # 3. 即時繪圖
-        signals_buffer = SignalBuffer(
-            (len(freqs),),
-            on_update=lambda data: viewer.update(freqs, signal2real(data)),
-        )
-        with Schedule(cfg, signals_buffer) as sched:
-            freq_sweep = sched.cfg.sweep.freq
-            sched.cfg.modules.readout.set_param("freq", sweep2param(...))
-            _ = (
-                sched.prog_builder(soc, soccfg)
-                .add_reset(
-                    "reset",
-                    sched.cfg.modules.reset,
-                )
-                .add(
-                    PulseReadout("readout", sched.cfg.modules.readout),
-                )
-                .declare_sweep("freq", freq_sweep)
-                .build_and_acquire()
-            )
-
-        return FreqResult(                                      # 4. 回傳（cfg 走 cfg_snapshot）
-            freqs=freqs, signals=signals_buffer.array, cfg_snapshot=orig_cfg
-        )
-```
-
-關鍵元素：
-
-1. **`orig_cfg = deepcopy(cfg)`**：在方法最開頭就拍下執行前快照，最後以 `cfg_snapshot=orig_cfg` 寫進 Result。不另存 `last_cfg`，cfg 一律由 Result 攜帶（見[父層實驗介面](../README.md#實驗介面與資料)）。`run()` 的輸入 `cfg` 是 `CfgModel` 型別（型別即驗證），不在方法內重做 `model_validate`。
-2. **`sweep2array`**（`utils/round_zcu.py`）把 `SweepCfg` 展成實際會量到的點（已套 ZCU 的 freq/time/gain 量化），用來畫圖 / 存檔。
-3. **`with Schedule(cfg, signals_buffer) as sched`** 是一般單次 run scope；`sched.cfg` 是 runner-owned deepcopy，mutation 不會汙染 `orig_cfg` 或 caller 傳入的 cfg。`Schedule` 可用 `env=RunEnv(...)` 接 typed dataclass 依賴；env 只放穩定 run context，不放 scan/repeat 動態 value/index，loop state 由 `ScheduleStep.value` / `index` / `path` 表示。`ProgramBuilder.build()` 回傳 program；`run_program(program)` 執行既有 integrated-acquire program；`build_and_acquire()` 直接建立 isolated cfg / program、執行 acquire 並寫回 buffer。`reps` / `rounds` 由 builder 建出的 `program.cfg_model` 讀取；builder owner cfg 可以是 experiment cfg，`ProgramBuilder` 只抽取 `ProgramV2Cfg` runtime 欄位，也可用 `prog_builder(..., cfg=program_cfg)` 明確覆寫；已是 `ProgramV2Cfg` 的 instance/subclass 會保留原型別，沒有任何 runtime 欄位的 cfg 會 fast-fail。Decimated trace 走 `run_program_decimated(...)` / `build_and_acquire_decimated(...)`，不用參數切換 acquire mode；若需先 build program 才能知道 buffer shape，使用 `sched.register_buffer(signals_buffer)` 註冊 caller 建好的 buffer。round-level `update_hook`、`cancel_flag`、pbar 與 raw2signal 由 Schedule runtime 持有，不再透過 `Task` 包裝。
-4. **LivePlot**：從 `zcu_tools.plotting.liveplot` 匯入 `LivePlot1D` / `LivePlot2D`；兩者是 context manager。常規寫法是在 `SignalBuffer(on_update=...)` 裡每次以當前完整 buffer ndarray 重畫；`SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 update，`trigger_update()` 可手動刷新。
-5. **回傳 Result**：`run()` 直接 `return XxxResult(...)`，由 `@record_result` decorator 寫入 `last_result`（給 `analyze` / `save` 使用），Result 內部攜帶 `cfg_snapshot`。
-
+Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result 規則見 [runtime README](runtime/README.md)。
 目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback.py`、`fake.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*`、`mist/*`、`autofluxdep/*` 與 `overnight/*`。
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
@@ -244,7 +208,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 只有兩類「副本外操作」是有意保留的：
 
-- **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, progress=True)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
+- **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.cancel_signal.event)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
 - **singleshot 強制 reps/rounds**：singleshot 家族（`ge` / `check` / ...）的 `run()` 開頭以 `cfg = deepcopy(cfg)` 重綁本地副本後才改 `cfg.rounds = 1` / `cfg.reps = cfg.shots`，並在覆寫前 `warnings.warn(...)`。重綁後的 mutation 作用在本地副本，非副本外。
 
 ---
@@ -325,8 +289,8 @@ executor leaf contract 由 `runtime/task.py` 擁有：`Acquirer`、`TaskPlotter`
 ## 寫新 Experiment 時的檢查清單
 
 1. 定義 `XxxModuleCfg` / `XxxSweepCfg`（通常繼承 `ConfigBase`）與 `XxxCfg = ProgramV2Cfg + ExpCfgModel + 自己欄位`。
-2. 繼承 `PersistableExperiment[T_Result, XxxCfg]`（要有持久化）並宣告 class-level `AXES_SPEC`（`AxesSpec`）即繼承 `save` / `load`；只需自行實作 `run`（套 `@record_result`）/ `analyze`（套 `@retrieve_result`）。Result dataclass 須有 `cfg_snapshot` 欄位。
-3. `run()` 模板：開頭 `orig_cfg = deepcopy(cfg)` → `sweep2array` → `with LivePlot` → 宣告 `signals_buffer = SignalBuffer(..., on_update=...)`（預設 complex dtype 省略 `dtype=`）→ `with Schedule(cfg, signals_buffer) as sched` → 用 `_ = (sched.prog_builder(...).declare_sweep(...).build_and_acquire())` 或 host `sched.scan(...)` 量測 → 回傳 `XxxResult(..., cfg_snapshot=orig_cfg)`（`@record_result` 自動寫入 `last_result`，不存 `last_cfg`）。
+2. 需要單一 canonical 檔案持久化時，繼承 `PersistableExperiment[T_Result, XxxCfg]` 並宣告 class-level `AXES_SPEC`，即取得 explicit RunRecord 的 save／load。Result dataclass 只放資料，cfg 由 RunRecord 持有。Grouped roles 使用共用 grouped persistence 接縫。
+3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `stop_condition=snr_checker(...)`。
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`AXES_SPEC.tag` 取有層次的 on-disk 名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
