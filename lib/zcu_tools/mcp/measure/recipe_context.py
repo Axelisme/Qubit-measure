@@ -490,7 +490,9 @@ class RecipeContext:
             raise
 
     def needs_parameters(self, missing: list[MissingParameter]) -> None:
-        self._publish(missing=missing, status="needs_parameters", phase="terminal")
+        with self._condition:
+            self._admit("preparing")
+            self._publish(missing=missing, status="needs_parameters", phase="terminal")
 
 
 class RecipeExecutions:
