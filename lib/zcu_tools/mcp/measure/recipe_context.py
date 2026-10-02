@@ -246,7 +246,18 @@ class RecipeContext:
             reply = execution.wait(0.25)
             with self._condition:
                 self.images = reply.images
-                self._publish(analysis=reply.data)
+                self._publish(
+                    analysis=reply.data,
+                    status="interactive"
+                    if reply.data["status"] == "interactive"
+                    else "running",
+                )
+            if reply.data["status"] == "interactive":
+                # Interactive waits return immediately. Pace local observation while
+                # the analysis owner continues to track the original operation.
+                if self._closed.wait(0.25):
+                    raise GuiRpcError("MCP session is closed", reason="session_closed")
+                continue
             if reply.data["status"] != "running":
                 break
         if reply.data["status"] == "failed":
