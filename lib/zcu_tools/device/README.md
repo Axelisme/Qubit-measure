@@ -1,14 +1,14 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-09-27 — disconnect 契約核對
+**Last updated:** 2026-10-02 — instance manager
 
-這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
+這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
 ---
 
 ## 架構一覽（一句話版）
 
-`BaseDevice` 封裝 pyvisa session；各硬體子類負責 SCPI 字串；`BaseDeviceInfo`（Pydantic model，繼承 `ConfigBase`）作為 setup/readback 的序列化結構；`DeviceInfo` 是 Union TypeAlias 匯總所有已知子類型；`GlobalDeviceManager` 以名稱為 key 管理已連線的裝置實例，方便實驗 config（YAML/JSON）直接驅動硬體。
+`BaseDevice` 封裝 pyvisa session；各硬體子類負責 SCPI 字串；`BaseDeviceInfo`（Pydantic model，繼承 `ConfigBase`）作為 setup/readback 的序列化結構；`DeviceInfo` 是 Union TypeAlias 匯總所有已知子類型；`DeviceManager` 以名稱為 key 管理已連線的裝置實例，方便實驗 config（YAML/JSON）直接驅動硬體。
 
 ```text
 BaseDeviceInfo (Pydantic ConfigBase)
@@ -20,7 +20,7 @@ BaseDevice (ABC, wraps pyvisa session)
  ┌────┴──────────────────┬─────────┐
  YOKOGS200    RohdeSchwarzSGS100A  FakeDevice
       ↑ register_device
-GlobalDeviceManager (classmethods only, module-level registry)
+DeviceManager (instance-owned registry and close claims)
 
 DeviceInfo = Union[
     YOKOGS200Info,
@@ -51,7 +51,7 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 `with_updates(**kwargs)`：拒絕修改 `type` / `address`（protected fields），確保 immutable identity；其他欄位透過 Pydantic `model_validate` 更新。
 
-**`DeviceInfo` TypeAlias**（`__init__.py:12`）匯總所有已知 info model，供 `GlobalDeviceManager` API 型別標注用。
+**`DeviceInfo` TypeAlias**（`__init__.py:12`）匯總所有已知 info model，供 `DeviceManager` API 型別標注用。
 
 ---
 
@@ -102,15 +102,15 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 **呼叫端行為**：GUI `gui/session/services/device.py` 的 worker 呼叫 `driver.setup()`；若拋出 `DeviceBusyError`，錯誤訊息（含 device 名與 address）直接透過 `_on_setup_failed` 呈現給用戶，不做 retry/swallow。`device/manager.py` 的 `setup_devices` 呼叫路徑同理，`DeviceBusyError` 會直接炸掉實驗（預期行為）。
 
-**manager 鎖的職責邊界**：`GlobalDeviceManager._lock` 只守 **registry dict**（哪個名字對應哪個實例）。device 操作在 manager 鎖外執行。兩條 thread 用同一名字 `get_device("flux")` 取得**同一個**實例後，mutating operation 由該 instance 的 `_op_lock` 序列化；getter 只會在實際 `query()` 時等待 `_io_lock` 的短 I/O transaction。
+**manager 鎖的職責邊界**：`DeviceManager._lock` 只守 **registry dict**（哪個名字對應哪個實例）。device 操作在 manager 鎖外執行。兩條 thread 用同一名字 `get_device("flux")` 取得**同一個**實例後，mutating operation 由該 instance 的 `_op_lock` 序列化；getter 只會在實際 `query()` 時等待 `_io_lock` 的短 I/O transaction。
 
 **持鎖期間禁止 GUI 回呼**：持鎖區段內不得 emit Qt signal 或觸發 GUI 回呼（現狀本來就沒有，維持），以免鎖內等待主執行緒造成跨鎖等待。
 
 ---
 
-## `GlobalDeviceManager`（`manager.py:14`）
+## `DeviceManager`（`manager.py:14`）
 
-Process-wide registry（class-level `_devices` dict）：
+每個 manager 擁有自己的 registry、lock 與 close claims。共享 driver 的 callers 必須共享同一 manager，不由不同 manager 重複取得關閉權。
 
 | API | 用途 |
 | --- | ---- |
@@ -148,9 +148,9 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
   再試一定成功或所有資源都已斷線。factory owner 要在所管理的 device 成功 disconnect 後
   才關閉 ResourceManager；disconnect 不等於硬體已處於安全狀態。
 
-**使用慣例**：在 notebook / 實驗腳本啟動時一次 `register_device`，之後以名稱（如 `"flux"`, `"qubit_lo"`）在任何地方取用。`register_device` 只接受 `BaseDevice` instance，duck object 或裸 mock 會在入口 fail-fast。`setup_devices` 通常接受從 YAML / JSON 讀出的 config block。
+**使用慣例**：在 notebook / 實驗腳本啟動時一次 `register_device`，之後以名稱（如 `"flux"`, `"qubit_lo"`）透過同一 manager 取用。`register_device` 只接受 `BaseDevice` instance，duck object 或裸 mock 會在入口 fail-fast。`setup_devices` 通常接受從 YAML / JSON 讀出的 config block。
 
-**Thread safety（鎖分層）**：class 內含 `_lock: threading.RLock`，職責是保護 **registry dict**（`_devices`）的讀寫——僅此而已。`device.setup()` / `device.get_info()` 全部在 manager 鎖**外**執行。各 device 自己用 `_op_lock` 管 mutating operation、`_io_lock` 管單次 session transaction；A 裝置正在跑長時間 ramp 時，對 B 裝置的 `get_info()` 不會被 A 阻塞，對 A 自己的 `get_info()` 也只等待短 I/O 而不等待整段 ramp。
+**Thread safety（鎖分層）**：每個 instance 內含 `_lock: threading.RLock`，職責是保護 **registry dict**（`_devices`）的讀寫——僅此而已。`device.setup()` / `device.get_info()` 全部在 manager 鎖**外**執行。各 device 自己用 `_op_lock` 管 mutating operation、`_io_lock` 管單次 session transaction；A 裝置正在跑長時間 ramp 時，對 B 裝置的 `get_info()` 不會被 A 阻塞，對 A 自己的 `get_info()` 也只等待短 I/O 而不等待整段 ramp。
 
 **`setup_devices` 的兩段式流程**：
 1. **鎖內驗證**：先在 manager 鎖內一次性驗完 `dev_cfg` 裡所有 name 是否已註冊，並取出 instance 引用快照。任一 name 不存在立即 `ValueError`，整批都不執行（fast-fail）。
@@ -158,9 +158,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
    `device.setup(cfg, progress=progress, stop_event=resolved_cancel_signal)`。期間
    manager 鎖已釋放；busy device 會 raise `DeviceBusyError`（fail-fast，不吞）。
 
-**setup cancel scope**：`cancel_signal` 明確提供 non-`None`
-`threading.Event` 時優先；`cancel_signal=None` 視為未提供，會讀取
-`device_setup_cancel_scope(cancel_signal)` 登記在目前 call stack 的 ambient 訊號；兩者都沒有時維持 `None`。若 resolved cancel signal 在任何 device setup 前已經 set，`setup_devices` 會在完成 registry name validation 後直接 return，不觸碰硬體。這讓 measure-gui run worker 可在不修改每個 experiment call site 的情況下，把 Stop 按鈕的 run-local `threading.Event` 傳給實驗內部的 `setup_devices`。
+**顯式取消**：`setup_devices` 只使用 caller 傳入的 `cancel_signal`，不讀 ambient scope。整批名稱驗證先於取消短路；Event 已 set 時不再開始下一台 setup。
 
 **`get_info` / `get_all_info`**：在 manager 鎖內僅做 instance 解析（複用 `get_device` / `get_all_devices`），鎖外才呼叫各裝置的 `get_info()`。`get_all_devices` 回傳 dict shallow copy，外部迭代不 race 於並發的 register/drop。
 
@@ -223,7 +221,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 - `_setup(cfg, *, progress, stop_event)` 呼叫 `set_output` + 更新 `_rampstep` + `_set_value_smart`（透傳 `stop_event`）。
 - `get_info()` 回傳當前記憶體狀態。
 
-這個類別設計目標是「可被 `GlobalDeviceManager` 註冊」，模擬完整 ramp 行為（含 pbar + 協作取消）。
+這個類別設計目標是「可被 `DeviceManager` 註冊」，模擬完整 ramp 行為（含 pbar + 協作取消）。
 
 ---
 
@@ -245,16 +243,17 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 ```python
 import pyvisa
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import DeviceManager
 from zcu_tools.device.yoko import YOKOGS200, YOKOGS200Info
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A, RohdeSchwarzSGS100AInfo
 
+manager = DeviceManager()
 rm = pyvisa.ResourceManager()
 flux = YOKOGS200("USB0::...::INSTR", rm)
 lo   = RohdeSchwarzSGS100A("TCPIP::...::INSTR", rm)
 
-GlobalDeviceManager.register_device("flux", flux)
-GlobalDeviceManager.register_device("qubit_lo", lo)
+manager.register_device("flux", flux)
+manager.register_device("qubit_lo", lo)
 
 # 用 Pydantic model 建立 cfg（也可從 YAML/JSON dict 用 model_validate）：
 dev_cfg = {
@@ -263,10 +262,10 @@ dev_cfg = {
     "qubit_lo": RohdeSchwarzSGS100AInfo(address="TCPIP::...::INSTR", output="on",
                                         IQ="on", freq_Hz=5.0e9, power_dBm=10.0),
 }
-GlobalDeviceManager.setup_devices(dev_cfg, progress=True)
+manager.setup_devices(dev_cfg, progress=True)
 
 # 存檔當前狀態：
-snapshot = GlobalDeviceManager.get_all_info()
+snapshot = manager.get_all_info()
 ```
 
 ---
@@ -285,14 +284,14 @@ snapshot = GlobalDeviceManager.get_all_info()
    - **不需要** `typeguard.check_type`；base `setup()` 已完成型別/地址檢查。
 4. `info_model = XxxInfo` 必須設定正確（class definition guard 先檢查，`BaseDevice.setup` 再用 `isinstance(cfg, self.info_model)` 做 runtime sanity check）；`XxxInfo.type` literal 供序列化辨別用。
 5. 在 `__init__.py` 的 `DeviceInfo` Union 加入 `XxxInfo`，並加進 `__all__`。
-6. 在使用端 `GlobalDeviceManager.register_device(name, instance)`。
+6. 在使用端 `manager.register_device(name, instance)`。
 
 ---
 
 ## 已知侷限 / 維護提醒
 
 - 預設 `BaseDevice._open_session()` 直接 import `pyvisa`（lazy import）；執行環境需先裝 `pyvisa` 與對應 VISA backend（NI-VISA / pyvisa-py）。`FakeDevice` override `_open_session()`，不需要 pyvisa。
-- `GlobalDeviceManager._devices` 是 class-level state，測試或多實驗混用時要注意汙染；必要時手動 `drop_device`。
+- manager 不在 destructor 關閉設備；建立者明確執行 disconnect，成功後才關閉其 ResourceManager。
 - `YOKOGS200.set_voltage/set_current` 在 output off 且目標值非零時會拒絕執行；呼叫端要先明確開啟 output。
 - 安全上限是**硬編碼**在程式內，若更換樣品 / 線路需直接改 `_check_voltage` / `_check_current`。
 - `RohdeSchwarzSGS100A` 沒有 ramp，改功率是瞬態——必要時呼叫端自行步進。
@@ -303,7 +302,7 @@ snapshot = GlobalDeviceManager.get_all_info()
 ## 原始碼出處
 
 - `lib/zcu_tools/device/base.py` — `BaseDeviceInfo`（Pydantic ConfigBase）, `BaseDevice`
-- `lib/zcu_tools/device/manager.py` — `GlobalDeviceManager`
+- `lib/zcu_tools/device/manager.py` — `DeviceManager`
 - `lib/zcu_tools/device/cancel_scope.py` — device setup ambient cancel scope
 - `lib/zcu_tools/device/__init__.py` — `DeviceInfo` Union TypeAlias 與對外匯出
 - `lib/zcu_tools/device/yoko.py` — `YOKOGS200Info`, `YOKOGS200`

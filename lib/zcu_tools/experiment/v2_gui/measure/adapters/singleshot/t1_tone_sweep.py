@@ -26,12 +26,15 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from zcu_tools.experiment.v2.singleshot.t1 import (
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import (
+    T1WithToneSweepAnalyzeOptions,
     T1WithToneSweepCfg,
     T1WithToneSweepExp,
+    T1WithToneSweepResult,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
@@ -43,10 +46,10 @@ from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
     RunRequest,
     SessionEnv,
-    require_soc_handles,
 )
 from zcu_tools.gui.cfg import (
     EvalValue,
@@ -54,17 +57,15 @@ from zcu_tools.gui.cfg import (
     SweepValue,
     resolved_direct_number,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import readout_probe_freq, readout_probe_freq_range
 
-SsT1ToneSweepRunResult: TypeAlias = Any  # T1WithToneSweepResult (frozen domain)
+SsT1ToneSweepRunResult: TypeAlias = RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]
 
 
 @dataclass
-class SsT1ToneSweepAnalyzeResult(FigureOnlyAnalyzeResult):
-    # The 3×3 rate landscape is look-at-the-grid: the domain analyze fits the
-    # transition rates per outer-sweep point and renders them, returning only a
-    # Figure. No writeback. ``figure`` is inherited.
+class SsT1ToneSweepAnalyzeResult(AnalyzeResultBase):
     pass
 
 
@@ -158,31 +159,17 @@ class _SsT1ToneSweepBase(
             .build()
         )
 
-    def build_exp_cfg(
-        self, raw_cfg: dict[str, object], req: RunRequest
-    ) -> T1WithToneSweepCfg:
-        # Pop ``uniform`` before lowering — it is a run-only flag.
-        cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("uniform", None)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def _uniform(self, raw_cfg: dict[str, object]) -> bool:
-        value = raw_cfg.get("uniform", True)
-        if not isinstance(value, bool):
-            raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
-        return value
-
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object]
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
     ) -> SsT1ToneSweepRunResult:
-        # Uniform remains an explicit domain run option.
-        soc, soccfg = require_soc_handles(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        uniform = self._uniform(raw_cfg)
-        return T1WithToneSweepExp().run(soc, soccfg, cfg, uniform=uniform)
+        return RunRecord(cfg, T1WithToneSweepExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[SsT1ToneSweepRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[SsT1ToneSweepRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> SsT1ToneSweepAnalyzeResult:
         # ``ac_coeff`` (= md 'ac_stark_coeff') rescales the outer x-axis to photon
         # number; ``confusion_matrix`` readout-corrects; both are md inputs, not
@@ -190,13 +177,14 @@ class _SsT1ToneSweepBase(
         # axis.
         ac_coeff = req.md.get("ac_stark_coeff")
         confusion = req.md.get("confusion_matrix")
-        fig = T1WithToneSweepExp().analyze(
+        T1WithToneSweepExp().analyze(
             req.run_result,
-            ac_coeff=ac_coeff,
-            confusion_matrix=confusion,
-            xlabel=self.outer_label,
+            T1WithToneSweepAnalyzeOptions(
+                ac_coeff=ac_coeff, confusion_matrix=confusion, xlabel=self.outer_label
+            ),
+            plots=plots,
         )
-        return SsT1ToneSweepAnalyzeResult(figure=fig)
+        return SsT1ToneSweepAnalyzeResult()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_ss_t1_tone_sweep_{self.filename_token}_{time.strftime('%m%d')}"

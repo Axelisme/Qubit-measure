@@ -1,6 +1,6 @@
 """IOManager tests (real ContextManager).
 
-GlobalDeviceManager registry CRUD coverage lives in
+DeviceManager registry CRUD coverage lives in
 ``services/test_device_manager.py`` alongside the rest of the device-registry
 tests — this file is IOManager-only.
 """

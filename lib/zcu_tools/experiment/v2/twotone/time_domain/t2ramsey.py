@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import ClassVar
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
@@ -18,14 +16,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -49,8 +47,7 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 class T2RamseyResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    true_activate_detune: float
-    cfg_snapshot: T2RamseyCfg | None = None
+    true_activate_detune: float | None = None
 
 
 class T2RamseyModuleCfg(ConfigBase):
@@ -66,9 +63,26 @@ class T2RamseySweepCfg(ConfigBase):
 class T2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T2RamseyModuleCfg
     sweep: T2RamseySweepCfg
+    detune: float = 0.0
+
+
+@dataclass(frozen=True)
+class T2RamseyAnalyzeOptions:
+    fit_fringe: bool = True
+    fit_phase: bool = False
+
+
+@dataclass(frozen=True)
+class T2RamseyAnalysis:
+    t2r: float
+    t2r_err: float
+    detune: float
+    detune_err: float
 
 
 class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
+    Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
+
     # times stored as seconds on disk -> scale=US_TO_S
     AXES_SPEC = AxesSpec(
         axes=(Axis("times", "Time", "s", US_TO_S),),
@@ -78,19 +92,17 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         tag="twotone/ge/t2ramsey",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: T2RamseyCfg,
-        *,
-        detune: float = 0.0,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> T2RamseyResult:
-        orig_cfg = deepcopy(cfg)
+    def run(self, cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        detune = cfg.detune
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         length_sweep = cfg.sweep.length
@@ -114,61 +126,56 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
             true_detune = 0.0
 
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
-        with LivePlot1D(
-            "Time (us)", "Real Signal", segment_kwargs={"title": title}
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(
-                    lengths, t2ramsey_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                cfg = sched.cfg
-                modules = cfg.modules
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Time (us)", "Real Signal", title=title
+        )
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, t2ramsey_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            cfg = sched.cfg
+            modules = cfg.modules
 
-                length_sweep = cfg.sweep.length
-                length_param = sweep2param("length", length_sweep)
-                detune_param = 360 * detune * length_param
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+            detune_param = 360 * detune * length_param
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("pi2_pulse1", modules.pi2_pulse),
-                        Delay("t2_delay", delay=length_param),
-                        Pulse(
-                            name="pi2_pulse2",
-                            cfg=modules.pi2_pulse.with_updates(
-                                phase=modules.pi2_pulse.phase + detune_param
-                            ),
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("pi2_pulse1", modules.pi2_pulse),
+                    Delay("t2_delay", delay=length_param),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg=modules.pi2_pulse.with_updates(
+                            phase=modules.pi2_pulse.phase + detune_param
                         ),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+                    ),
+                    Readout("readout", modules.readout),
                 )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire()
+            )
 
-        # record result
         return T2RamseyResult(
             times=lengths,
             signals=signals_buffer.array,
-            cfg_snapshot=orig_cfg,
             true_activate_detune=true_detune,
         )
 
-    @retrieve_result
     def analyze(
         self,
-        result: T2RamseyResult | None = None,
+        source: RunRecord[T2RamseyCfg, T2RamseyResult],
+        options: T2RamseyAnalyzeOptions,
         *,
-        fit_fringe: bool = True,
-        fit_phase: bool = False,
-    ) -> tuple[float, float, float, float, Figure]:
+        plots: Plots,
+    ) -> T2RamseyAnalysis:
         """fit_phase frees the fringe phase; decay-only fits ignore this option."""
-        assert result is not None, "no result found"
+        result = source.result
+        fit_fringe = options.fit_fringe
+        fit_phase = options.fit_phase
 
         lengths, signals = result.times, result.signals
 
@@ -191,8 +198,7 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
             detune = 0.0
             detune_err = 0.0
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(lengths, y_fit, label="fit")
@@ -209,4 +215,9 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
 
         fig.tight_layout()
 
-        return t2r, t2rerr, detune, detune_err, fig
+        return T2RamseyAnalysis(
+            t2r=float(t2r),
+            t2r_err=float(t2rerr),
+            detune=float(detune),
+            detune_err=float(detune_err),
+        )

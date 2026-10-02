@@ -5,9 +5,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 
@@ -19,14 +17,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     BathReset,
     ProgramV2Cfg,
@@ -50,7 +48,6 @@ class LengthResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
     phases: NDArray[np.float64] = dataclass_field(default_factory=_default_phase_values)
-    cfg_snapshot: LengthCfg | None = None
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -89,17 +86,20 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         tag="twotone/reset/bath/length",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
-        cfg: LengthCfg,
+        config: LengthCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> LengthResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         rounds = cfg.rounds  # round loop is driven by Schedule.repeat below
@@ -129,66 +129,71 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
             return mean_signals  # (lengths, 4)
 
-        with LivePlot1D("Length (us)", "Signal (a.u.)") as viewer:
-            buffer = SignalBuffer(
-                (rounds, len(lengths), 4),
-                on_update=lambda data: viewer.update(
-                    lengths, bathreset_signal2real(average_signals(data))
-                ),
-            )
-            with Schedule(cfg, buffer) as sched:
-                length_values = lengths.tolist()
-                for _, rep in sched.repeat("rounds", rounds):
-                    for length, step in rep.scan("length", length_values):
-                        step.cfg.rounds = 1
-                        modules = step.cfg.modules
-                        tested_reset = modules.tested_reset
-                        tested_reset.set_param("qub_length", length)
-                        tested_reset.set_param("res_length", length + length_diff)
-                        tested_reset.set_param(
-                            "pi2_phase", QickSweep1D("phase", 0.0, 270.0)
-                        )
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Length (us)", "Signal (a.u.)"
+        )
+        buffer = SignalBuffer(
+            (rounds, len(lengths), 4),
+            on_update=lambda data: viewer.update(
+                lengths, bathreset_signal2real(average_signals(data))
+            ),
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            length_values = lengths.tolist()
+            for _, rep in sched.repeat("rounds", rounds):
+                for length, step in rep.scan("length", length_values):
+                    step.cfg.rounds = 1
+                    modules = step.cfg.modules
+                    tested_reset = modules.tested_reset
+                    tested_reset.set_param("qub_length", length)
+                    tested_reset.set_param("res_length", length + length_diff)
+                    tested_reset.set_param(
+                        "pi2_phase", QickSweep1D("phase", 0.0, 270.0)
+                    )
 
-                        cache_key = float(tested_reset.qubit_tone_cfg.waveform.length)
-                        builder = step.prog_builder(soc, soccfg)
-                        program = prog_cache.get(cache_key)
-                        if program is None:
-                            program = (
-                                builder.add(
-                                    Reset("reset", modules.reset),
-                                    Pulse("init_pulse", modules.init_pulse),
-                                    BathReset("tested_reset", tested_reset),
-                                    Readout("readout", modules.readout),
-                                )
-                                .declare_sweep("phase", 4)
-                                .build()
+                    cache_key = float(tested_reset.qubit_tone_cfg.waveform.length)
+                    builder = step.prog_builder(soc, soccfg)
+                    program = prog_cache.get(cache_key)
+                    if program is None:
+                        program = (
+                            builder.add(
+                                Reset("reset", modules.reset),
+                                Pulse("init_pulse", modules.init_pulse),
+                                BathReset("tested_reset", tested_reset),
+                                Readout("readout", modules.readout),
                             )
-                            prog_cache[cache_key] = program
+                            .declare_sweep("phase", 4)
+                            .build()
+                        )
+                        prog_cache[cache_key] = program
 
-                        _ = builder.run_program(program, **(acquire_kwargs or {}))
-                signals = average_signals(buffer.array)
+                    _ = builder.run_program(program)
+        signals = average_signals(buffer.array)
 
         return LengthResult(
             lengths=lengths,
             signals=signals,
             phases=_default_phase_values(),
-            cfg_snapshot=orig_cfg,
         )
 
-    @retrieve_result
-    def analyze(self, result: LengthResult | None = None) -> Figure:
-        assert result is not None, "no result found"
+    def analyze(
+        self,
+        source: RunRecord[LengthCfg, LengthResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> None:
+        del options
+        result = source.result
 
         lens, signals = result.lengths, result.signals
 
         real_signals = bathreset_signal2real(signals)
 
-        fig, ax = plt.subplots()
+        _, ax = plots.subplots("fit")
 
         ax.plot(lens, real_signals, marker=".")
         ax.set_xlabel("Length (us)")
         ax.set_ylabel("Signal (a.u.)")
         ax.set_title("Bath Reset Length Measurement")
         ax.grid(True)
-
-        return fig

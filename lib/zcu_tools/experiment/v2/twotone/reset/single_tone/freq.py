@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_qubit_freq
@@ -18,14 +15,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -46,7 +43,6 @@ from zcu_tools.utils.process import rotate2real
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: FreqCfg | None = None
 
 
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -69,6 +65,12 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FreqSweepCfg
 
 
+@dataclass(frozen=True)
+class FreqAnalysis:
+    freq: float
+    fwhm: float
+
+
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     AXES_SPEC = AxesSpec(
         axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
@@ -78,12 +80,15 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         tag="twotone/reset/single_tone/freq",
     )
 
-    @record_result
-    def run(
-        self, soc, soccfg, cfg: FreqCfg, *, acquire_kwargs: dict[str, Any] | None = None
-    ) -> FreqResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         reset_cfg = modules.tested_reset
@@ -93,36 +98,41 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse_cfg.ch},
         )
 
-        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs),),
-                on_update=lambda data: viewer.update(freqs, reset_signal2real(data)),
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Frequency (MHz)", "Amplitude"
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs),),
+            on_update=lambda data: viewer.update(freqs, reset_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            modules.tested_reset.set_param(
+                "freq", sweep2param("freq", sched.cfg.sweep.freq)
             )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                modules.tested_reset.set_param(
-                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    PulseReset("tested_reset", modules.tested_reset),
+                    Readout("readout", modules.readout),
                 )
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        PulseReset("tested_reset", modules.tested_reset),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("freq", sched.cfg.sweep.freq)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-                signals = signals_buffer.array
+                .declare_sweep("freq", sched.cfg.sweep.freq)
+                .build_and_acquire()
+            )
 
-        return FreqResult(freqs, signals, cfg_snapshot=orig_cfg)
+        return FreqResult(freqs, signals_buffer.array)
 
-    @retrieve_result
-    def analyze(self, result: FreqResult | None = None) -> tuple[float, float, Figure]:
-        assert result is not None, "no result found"
+    def analyze(
+        self,
+        source: RunRecord[FreqCfg, FreqResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> FreqAnalysis:
+        del options
+        result = source.result
 
         freqs, signals = result.freqs, result.signals
 
@@ -137,7 +147,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             freqs, real_signals, type="lor"
         )
 
-        fig, ax = plt.subplots(figsize=config.figsize)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
         ax.plot(freqs, y_fit, label=f"fit, FWHM = {fwhm:.1g} MHz")
@@ -151,4 +161,4 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        return freq, fwhm, fig
+        return FreqAnalysis(freq=float(freq), fwhm=float(fwhm))

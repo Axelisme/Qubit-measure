@@ -6,9 +6,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
+    T2RamseyAnalyzeOptions,
     T2RamseyCfg,
     T2RamseyExp,
     T2RamseyResult,
@@ -35,13 +36,13 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
+from zcu_tools.plotting.plots import Plots
 
 logger = logging.getLogger(__name__)
 
 
-T2RamseyRunResult: TypeAlias = T2RamseyResult
+T2RamseyRunResult: TypeAlias = RunRecord[T2RamseyCfg, T2RamseyResult]
 
 
 @dataclass
@@ -60,7 +61,6 @@ class T2RamseyAnalyzeResult(AnalyzeResultBase):
     # fringe fit ran (``fit_fringe`` True). Decay-only fits report 0.0.
     detune: float
     fit_fringe: bool
-    figure: Figure
 
 
 class T2RamseyAdapter(
@@ -155,36 +155,37 @@ class T2RamseyAdapter(
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2RamseyCfg:
-        # Strip the run-only detune_ratio knob before lowering to T2RamseyCfg,
-        # which would reject the unknown key.
-        return super().build_exp_cfg(strip_detune_ratio(raw_cfg), req)
+        cfg = super().build_exp_cfg(strip_detune_ratio(raw_cfg), req)
+        cfg.detune = resolve_detune(detune_ratio_of(raw_cfg), cfg.sweep.length.step)
+        return cfg
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> T2RamseyRunResult:
-        soc, soccfg = require_soc_handles(req)
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> T2RamseyRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        # detune_ratio (fringes-per-step) → absolute applied detune (MHz) over the
-        # lowered length sweep step (SweepCfg guarantees step != 0 for expts > 1).
-        detune = resolve_detune(detune_ratio_of(raw_cfg), cfg.sweep.length.step)
-        # T2RamseyExp.run returns (result, true_detune); the GUI run contract
-        # returns only the Result. Stash true_detune for the q_f writeback and
-        # log the realized detune.
-        result = self.exp_cls().run(soc, soccfg, cfg, detune=detune)
-        logger.info("T2 Ramsey true detune: %.3f MHz", result.true_activate_detune)
-        return result
+        result = self.exp_cls().run(cfg, context=context)
+        logger.info("T2Ramsey true detune: %s MHz", result.true_activate_detune)
+        return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeParams]
+        self,
+        req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> T2RamseyAnalyzeResult:
         params = req.analyze_params
-        t2r, t2r_err, detune, _, fig = T2RamseyExp().analyze(
-            req.run_result, fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
+        analysis = T2RamseyExp().analyze(
+            req.run_result,
+            T2RamseyAnalyzeOptions(
+                fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
+            ),
+            plots=plots,
         )
         return T2RamseyAnalyzeResult(
-            t2r=t2r,
-            t2r_err=t2r_err,
-            detune=detune,
+            t2r=analysis.t2r,
+            t2r_err=analysis.t2r_err,
+            detune=analysis.detune,
             fit_fringe=params.fit_fringe,
-            figure=fig,
         )
 
     def get_writeback_items(
@@ -202,17 +203,17 @@ class T2RamseyAdapter(
         # q_f writeback mirrors the notebook:
         #   q_f = pi2_pulse.freq + true_detune - fitted_fringe_detune.
         # Only emit it when the fringe fit ran (a fitted detune exists), the run
-        # captured the cfg_snapshot (pi2 freq source), and the realized
+        # captured the source cfg (pi2 freq source), and the realized
         # true_detune from this run is known — never propose a NaN q_f.
-        snapshot = req.run_result.cfg_snapshot
+        snapshot = req.run_result.cfg
         if (
             result.fit_fringe
             and snapshot is not None
-            and req.run_result.true_activate_detune is not None
+            and req.run_result.result.true_activate_detune is not None
         ):
             q_f = (
                 snapshot.modules.pi2_pulse.freq
-                + req.run_result.true_activate_detune
+                + req.run_result.result.true_activate_detune
                 - result.detune
             )
             items.append(

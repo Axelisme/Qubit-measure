@@ -3,10 +3,9 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -15,12 +14,13 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
@@ -39,7 +39,6 @@ from .util import classify_result, plot_with_classified, raw_shots_to_signal
 class CheckResult:
     shots: NDArray[np.int64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: CheckCfg | None = None
 
 
 class CheckModuleCfg(ConfigBase):
@@ -54,7 +53,17 @@ class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     shots: int
 
 
+@dataclass(frozen=True)
+class CheckAnalyzeOptions:
+    g_center: complex
+    e_center: complex
+    radius: float
+    max_point: int = 5000
+
+
 class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
+    Options: ClassVar[type[CheckAnalyzeOptions]] = CheckAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(Axis("shots", "shot", "point", dtype=np.int64),),
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
@@ -63,22 +72,32 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         tag="singleshot/check",
     )
 
-    @record_result
-    def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
+    def run(self, cfg: CheckCfg, *, context: RunContext) -> CheckResult:
+        soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         # Validate and setup configuration
         if cfg.rounds != 1:
-            warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
+            warnings.warn(
+                "rounds will be overwritten to 1 for singleshot measurement",
+                stacklevel=2,
+            )
             cfg.rounds = 1
 
         if cfg.reps != 1:
-            warnings.warn("reps will be overwritten by singleshot measurement shots")
+            warnings.warn(
+                "reps will be overwritten by singleshot measurement shots", stacklevel=2
+            )
         cfg.reps = cfg.shots
 
-        setup_devices(cfg, progress=True)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
 
         signals_buffer = SignalBuffer((cfg.shots,))
-        with Schedule(cfg, signals_buffer) as sched:
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             modules = sched.cfg.modules
             program = (
                 sched.prog_builder(soc, soccfg)
@@ -98,26 +117,19 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                 signals_buffer.set(raw_shots_to_signal(program))
             signals = signals_buffer.array
 
-        # Cache results
         shots = np.arange(cfg.shots, dtype=np.int64)
-        self.last_result = CheckResult(shots=shots, signals=signals, cfg_snapshot=cfg)
+        return CheckResult(shots=shots, signals=signals)
 
-        return self.last_result
-
-    @retrieve_result
     def analyze(
         self,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
-        result: CheckResult | None = None,
-        max_point: int = 5000,
-    ) -> Figure:
-        assert result is not None, "no result found"
-
-        signals = result.signals
-
-        fig, ax = plt.subplots(figsize=(6, 6))
+        source: RunRecord[CheckCfg, CheckResult],
+        options: CheckAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> None:
+        signals = source.result.signals
+        g_center, e_center, radius = options.g_center, options.e_center, options.radius
+        _, ax = plots.subplots("fit", figsize=(6, 6))
 
         mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
         ng = mask_g.sum() / signals.shape[0]
@@ -125,11 +137,9 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         no = mask_o.sum() / signals.shape[0]
 
         plot_with_classified(
-            ax, signals, g_center, e_center, radius, max_point=max_point
+            ax, signals, g_center, e_center, radius, max_point=options.max_point
         )
 
         ax.set_title(
             f"Population: Ground: {ng:.1%}, Excited: {ne:.1%}, Other: {no:.1%}"
         )
-
-        return fig

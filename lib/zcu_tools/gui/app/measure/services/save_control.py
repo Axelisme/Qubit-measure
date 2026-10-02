@@ -5,13 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.figure_export import resolve_figure_path
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .ports import SaveDestination
@@ -42,14 +41,14 @@ class SaveControlPort(Protocol):
         self,
         tab_id: str,
         *,
-        artifacts: tuple[ArtifactKind, ...] | None = None,
-        paths: Mapping[ArtifactKind, str] | None = None,
+        artifacts: tuple[ArtifactKey, ...] | None = None,
+        paths: Mapping[ArtifactKey, str] | None = None,
         comment: str | None = None,
     ) -> SaveArtifactsSubmission: ...
 
-    def save_image(self, tab_id: str, image_path: str | None = None) -> str: ...
-
-    def save_post_image(self, tab_id: str, image_path: str | None = None) -> str: ...
+    def save_image(
+        self, tab_id: str, key: ArtifactKey, image_path: str | None = None
+    ) -> str: ...
 
 
 class SaveControlFacet:
@@ -101,43 +100,51 @@ class SaveControlFacet:
         self,
         tab_id: str,
         *,
-        artifacts: tuple[ArtifactKind, ...] | None = None,
-        paths: Mapping[ArtifactKind, str] | None = None,
+        artifacts: tuple[ArtifactKey, ...] | None = None,
+        paths: Mapping[ArtifactKey, str] | None = None,
         comment: str | None = None,
     ) -> SaveArtifactsSubmission:
         permit = self._guard.acquire_save_permit(tab_id)
         self._require_tab_idle(tab_id)
-        available = {a.kind: a for a in self._state.get_artifact_snapshots(tab_id)}
-        selected = (
-            tuple(kind for kind, a in available.items() if a.is_saveable)
-            if artifacts is None
-            else artifacts
-        )
+        available = {a.key: a for a in self._state.get_artifact_snapshots(tab_id)}
+        overrides = paths if paths is not None else {}
+        data_key = ArtifactKey(ArtifactKind.DATA)
+        if artifacts is None:
+            data_draft_changed = (
+                data_key in overrides
+                and overrides[data_key] != available[data_key].default_path
+            ) or (
+                comment is not None
+                and comment != self._state.get_tab(tab_id).save.comment
+            )
+            selected = tuple(
+                key
+                for key, artifact in available.items()
+                if artifact.needs_save
+                or (key == data_key and artifact.is_saveable and data_draft_changed)
+            )
+        else:
+            selected = artifacts
         if not selected or len(set(selected)) != len(selected):
             raise FailedPreconditionError(
                 "Save requires a nonempty unique artifact set"
             )
-        overrides = paths if paths is not None else {}
         if set(overrides) - set(selected):
             raise FailedPreconditionError("Save paths must name selected artifacts")
         destinations = []
-        for kind in selected:
-            if kind not in available or not available[kind].is_saveable:
-                raise FailedPreconditionError(f"Artifact {kind.value} is not saveable")
-            path = overrides.get(kind, available[kind].default_path)
+        for key in selected:
+            if key not in available or not available[key].is_saveable:
+                raise FailedPreconditionError(f"Artifact {key!r} is not saveable")
+            path = overrides.get(key, available[key].default_path)
             if path is None or not path.strip():
-                raise FailedPreconditionError(
-                    f"Artifact {kind.value} has an empty path"
-                )
-            destinations.append(SaveDestination(kind, path))
+                raise FailedPreconditionError(f"Artifact {key!r} has an empty path")
+            destinations.append(SaveDestination(key, path))
         resolve_artifact_destinations(tuple(destinations))
-        setters = {
-            ArtifactKind.DATA: self._tab.update_tab_data_path_override,
-            ArtifactKind.ANALYSIS: self._tab.update_tab_analysis_image_path_override,
-            ArtifactKind.POST_ANALYSIS: self._tab.update_tab_post_analysis_image_path_override,
-        }
-        for kind, path in overrides.items():
-            setters[kind](tab_id, path)
+        for key, path in overrides.items():
+            if key.kind is ArtifactKind.DATA:
+                self._tab.update_tab_data_path_override(tab_id, path)
+            else:
+                self._tab.update_tab_image_path_override(tab_id, key, path)
         if comment is not None:
             self._state.update_tab_comment(tab_id, comment)
         if overrides or comment is not None:
@@ -150,50 +157,35 @@ class SaveControlFacet:
             permit, tuple(destinations), self._state.get_tab(tab_id).save.comment
         )
 
-    def save_image(self, tab_id: str, image_path: str | None = None) -> str:
+    def save_image(
+        self, tab_id: str, key: ArtifactKey, image_path: str | None = None
+    ) -> str:
+        if key.kind is ArtifactKind.DATA:
+            raise FailedPreconditionError("Data is not an image artifact")
         if image_path is not None and not image_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty image path")
         permit = self._guard.acquire_save_permit(tab_id)
         self._require_tab_idle(tab_id)
+        artifacts = {a.key: a for a in self._state.get_artifact_snapshots(tab_id)}
+        if key not in artifacts or not artifacts[key].is_saveable:
+            raise FailedPreconditionError(f"Artifact {key!r} is not saveable")
+        path = image_path if image_path is not None else artifacts[key].default_path
+        if path is None or not path.strip():
+            raise FailedPreconditionError(
+                f"Tab {tab_id!r} has no image path configured"
+            )
+        resolved = resolve_artifact_destinations(
+            (SaveDestination(key=key, path=path),)
+        )[0].path
         if image_path is not None:
-            self._tab.update_tab_analysis_image_path_override(tab_id, image_path)
+            self._tab.update_tab_image_path_override(tab_id, key, image_path)
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id, TabInteractionFact.SAVE_DRAFT_COMMITTED
                 )
             )
-        resolved = self._tab.get_tab_analysis_image_path(tab_id)
-        if resolved is None:
-            raise FailedPreconditionError(
-                f"Tab {tab_id!r} has no analysis image path configured"
-            )
-        resolved = resolve_figure_path(resolved)
-        self._save.save_image_sync(permit, resolved)
+        self._save.save_image_sync(permit, key, resolved)
         self._notify_info(f"Image saved to {resolved}")
-        return resolved
-
-    def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
-        if image_path is not None and not image_path.strip():
-            raise FailedPreconditionError(
-                f"Tab {tab_id!r} has an empty post image path"
-            )
-        permit = self._guard.acquire_save_permit(tab_id)
-        self._require_tab_idle(tab_id)
-        if image_path is not None:
-            self._tab.update_tab_post_analysis_image_path_override(tab_id, image_path)
-            self._bus.emit(
-                TabInteractionChangedPayload(
-                    tab_id, TabInteractionFact.SAVE_DRAFT_COMMITTED
-                )
-            )
-        resolved = self._tab.get_tab_post_analysis_image_path(tab_id)
-        if resolved is None:
-            raise FailedPreconditionError(
-                f"Tab {tab_id!r} has no post-analysis image path configured"
-            )
-        resolved = resolve_figure_path(resolved)
-        self._save.save_post_image_sync(permit, resolved)
-        self._notify_info(f"Post-analysis image saved to {resolved}")
         return resolved
 
     def _require_tab_idle(self, tab_id: str) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 # Default poll pacing for the white-noise mock path (no SimParams).
@@ -190,7 +191,7 @@ class MockQickSoc(QickConfig):
         # and routes through the SimEngine instead of the white-noise path (D1).
         #
         # FLUX-AWARE-MOCK copy-on-input: keep an *internal* copy of the SimParams
-        # so that set_flux_device (and any future per-soc mutation) never writes
+        # so that per-soc parameter mutation never writes
         # through to the caller's instance.  The GUI mock-connect path passes the
         # shared singleton DEFAULT_SIMPARAM (params.py), so mutating it in place
         # would alias across every mock soc; the copy makes each soc own its params.
@@ -212,6 +213,7 @@ class MockQickSoc(QickConfig):
         # cached inside the engine on first call).
         self._sim_engine: SimEngine | None = None
         self._sim_round_idx: int = 0
+        self._flux_source: Callable[[], float] | None = None
 
     # --- no-op hardware control ---
     # Accept *args/**kwargs so signature drift across QICK versions doesn't
@@ -274,31 +276,23 @@ class MockQickSoc(QickConfig):
         (child_seed,) = self._sim_root_seed_sequence.spawn(1)
         return child_seed
 
-    def set_flux_device(self, name: str | None) -> None:
-        """Bind (or unbind) the operating-flux source device (FLUX-AWARE-MOCK).
+    @property
+    def flux_source(self) -> Callable[[], float] | None:
+        """The explicitly bound live value reader, borrowed by each acquire."""
+        return self._flux_source
 
-        Sets ``flux_device`` on this soc's *internal* SimParams copy, so the next
-        acquire's SimEngine reads the named ``FakeDevice``'s live value (mapped
-        through ``value_to_flux``) instead of the fixed reduced flux = 1.0.  The
-        device need not be registered yet — binding only records the name;
-        resolution and the FakeDevice check happen lazily at acquire time
-        (engine._operating_signal), so this can be called before the device is
-        connected.  Pass ``name=None`` to fall back to the fixed operating point.
+    def set_flux_source(self, read_value: Callable[[], float] | None) -> None:
+        """Bind a validated environment's value reader, or select fixed flux.
 
-        Raises if this soc carries no SimParams: a flux_device binding is
-        meaningless on the white-noise mock (no SimEngine reads it), so silently
-        accepting it would hide a wiring mistake (fast-fail).  ``with_updates``
-        re-validates and returns a fresh instance, preserving the copy-on-input
-        isolation.
+        The environment owner resolves and validates the device before binding.
+        The reader is called lazily once per acquire, never stored in SimParams.
+        Failed binding leaves the previous source intact.
         """
-
         if self._sim_params is None:
-            raise RuntimeError(
-                "set_flux_device requires a SimParams-backed mock soc; this soc "
-                "was built without sim (white-noise path), so a flux_device "
-                "binding has no SimEngine to read it"
-            )
-        self._sim_params = self._sim_params.with_updates(flux_device=name)
+            raise RuntimeError("set_flux_source requires a SimParams-backed mock soc")
+        if read_value is not None and not callable(read_value):
+            raise TypeError("flux source must be callable or None")
+        self._flux_source = read_value
 
     def set_sim_engine(self, engine: SimEngine) -> None:
         """Attach the SimEngine compute handle for this acquire() (sim path).

@@ -3,11 +3,8 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -18,14 +15,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -46,7 +43,6 @@ from zcu_tools.utils.process import rotate2real
 class LengthResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: LengthCfg | None = None
 
 
 def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -79,17 +75,15 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         tag="twotone/reset/dual_tone/length",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: LengthCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> LengthResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run(self, cfg: LengthCfg, *, context: RunContext) -> LengthResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         length_sweep = cfg.sweep.length
@@ -107,7 +101,8 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         )
         if not np.allclose(pulse1_lengths, pulse2_lengths, atol=1e-2):
             warnings.warn(
-                "Sweep lengths for pulse1 and pulse2 are different. This may lead to unexpected results."
+                "Sweep lengths for pulse1 and pulse2 are different. This may lead to unexpected results.",
+                stacklevel=2,
             )
         if np.any(pulse2_lengths + length_diff < 0):
             raise ValueError(
@@ -115,44 +110,47 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             )
         lengths = pulse1_lengths  # Use pulse1 lengths as the x-axis values
 
-        with LivePlot1D("Length (us)", "Amplitude") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(
-                    lengths, reset_length_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                tested_reset_cfg = modules.tested_reset
-                pulse1_cfg = tested_reset_cfg.pulse1_cfg
-                pulse2_cfg = tested_reset_cfg.pulse2_cfg
+        viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Amplitude")
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(
+                lengths, reset_length_signal2real(data)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            tested_reset_cfg = modules.tested_reset
+            pulse1_cfg = tested_reset_cfg.pulse1_cfg
+            pulse2_cfg = tested_reset_cfg.pulse2_cfg
 
-                length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
-                length1_param = sweep2param("length", sched.cfg.sweep.length)
-                pulse1_cfg.set_param("length", length1_param)
-                pulse2_cfg.set_param("length", length1_param + length_diff)
+            length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
+            length1_param = sweep2param("length", sched.cfg.sweep.length)
+            pulse1_cfg.set_param("length", length1_param)
+            pulse2_cfg.set_param("length", length1_param + length_diff)
 
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        TwoPulseReset("tested_reset", tested_reset_cfg),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("length", sched.cfg.sweep.length)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    TwoPulseReset("tested_reset", tested_reset_cfg),
+                    Readout("readout", modules.readout),
                 )
-                signals = signals_buffer.array
+                .declare_sweep("length", sched.cfg.sweep.length)
+                .build_and_acquire()
+            )
 
-        return LengthResult(lengths, signals, cfg_snapshot=orig_cfg)
+        return LengthResult(lengths, signals_buffer.array)
 
-    @retrieve_result
-    def analyze(self, result: LengthResult | None = None) -> Figure:
-        assert result is not None, "no result found"
+    def analyze(
+        self,
+        source: RunRecord[LengthCfg, LengthResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> None:
+        del options
+        result = source.result
 
         lens, signals = result.lengths, result.signals
 
@@ -163,16 +161,12 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
 
         real_signals = reset_length_signal2real(signals)
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(lens, real_signals, marker=".")
         ax.set_xlabel("ProbeTime (us)", fontsize=14)
         ax.set_ylabel("Signal (a.u.)", fontsize=14)
         ax.grid(True)
         ax.tick_params(axis="both", which="major", labelsize=12)
-        plt.show()
 
         fig.tight_layout()
-
-        return fig

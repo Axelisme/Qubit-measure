@@ -301,9 +301,8 @@ class ProjectContextPort(Protocol):
 class DeviceRegistryPort(Protocol):
     """Device registry seam a session service depends on.
 
-    The five methods mirror ``GlobalDeviceManager``'s classmethod surface, but
-    expressed as instance methods so ``DeviceService`` can swap the concrete
-    singleton for an in-memory fake in tests (ADR-0066).
+    Production supplies a session-owned DeviceManager. Tests may inject an
+    in-memory registry with the same instance interface (ADR-0066).
     """
 
     def register_device(self, name: str, device: Any) -> None: ...

@@ -85,6 +85,8 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 from ._helpers import (
     NodeFieldSpec,
     NodeSectionSpec,
@@ -1978,6 +1980,8 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
         flux_idx=0,
         schema=builder.make_default_schema(),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     dependency_readout = {
         "type": "readout/pulse",
@@ -2041,6 +2045,8 @@ def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
         flux_idx=1,
         schema=builder.make_default_schema(),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     knobs = env.schema.lower(ml)
 
@@ -2080,7 +2086,14 @@ def test_qubit_freq_make_cfg_uses_default_gain_before_linewidth_feedback():
             "qub_gain": 0.2,
         }
     )
-    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
+    )
 
     cfg = builder.make_cfg(
         env,
@@ -2101,6 +2114,8 @@ def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():
         flux_idx=0,
         schema=builder.make_default_schema(),
         ml=ModuleLibrary(),
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
@@ -2123,6 +2138,8 @@ def test_lenrabi_make_cfg_uses_const_waveform_when_named_waveform_missing():
         flux_idx=0,
         schema=builder.make_default_schema(),
         ml=ModuleLibrary(),
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
@@ -2144,6 +2161,8 @@ def test_mist_make_cfg_uses_schema_defaults():
         flux_idx=0,
         schema=builder.make_default_schema(),
         ml=ml,
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"success": 1.0}, modules={"pi_pulse": _PI_PULSE, "opt_readout": _READOUT}
@@ -2172,6 +2191,8 @@ def test_mist_make_cfg_uses_const_waveform_when_named_waveform_missing():
         flux_idx=0,
         schema=builder.make_default_schema(),
         ml=ModuleLibrary(),
+        context=make_run_context(),
+        device_snapshot={},
     )
     snap = Snapshot(
         {"success": 1.0}, modules={"pi_pulse": _PI_PULSE, "opt_readout": _READOUT}

@@ -14,6 +14,7 @@ from qtpy.QtGui import (  # type: ignore[attr-defined]
     QPen,
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,7 +30,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
@@ -72,6 +73,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import WritebackItem
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.services import TabSnapshot
+    from zcu_tools.plotting.figures import FigureCollection
 
 
 class TabActions(Protocol):
@@ -93,9 +95,7 @@ class TabActions(Protocol):
 
     def save_data(self, tab_id: str) -> None: ...
 
-    def save_image(self, tab_id: str) -> None: ...
-
-    def save_post_image(self, tab_id: str) -> None: ...
+    def save_image(self, tab_id: str, key: ArtifactKey) -> None: ...
 
     def save_all(self, tab_id: str) -> None: ...
 
@@ -305,6 +305,25 @@ class ExpTabWidget(QWidget):
         self._left_edge_handle = _PanelEdgeHandle(self._content_widget)
         self._left_edge_handle.clicked.connect(self._toggle_left_panel)
 
+        self._build_run_panel()
+        self._build_analysis_panel()
+        self._build_post_analysis_panel()
+        self._build_data_panel()
+        self._build_guide_panel()
+
+        splitter.addWidget(self._left_tabs)
+
+        splitter.addWidget(self._build_plot_area())
+
+        splitter.setCollapsible(0, True)
+        self._update_left_panel_controls()
+        self._schedule_handle_layout()
+        # Right pane follows left selection
+        self._left_tabs.currentChanged.connect(self._on_left_tab_changed)
+        # Initially show Run
+        self._on_left_tab_changed(self._left_tabs.currentIndex())
+
+    def _build_run_panel(self) -> None:
         # ── Tab: Run (always) ──────────────────────────────────────
         run_panel = QWidget()
         run_layout = QVBoxLayout(run_panel)
@@ -313,7 +332,7 @@ class ExpTabWidget(QWidget):
 
         self.cfg_form = ResourceCfgFormWidget(
             dialog_presenter=self._dialog_presenter,
-            text_input_enhancer=make_value_source_input_enhancer(ctrl),
+            text_input_enhancer=make_value_source_input_enhancer(self._ctrl),
         )
         run_layout.addWidget(self.cfg_form, stretch=1)
 
@@ -347,6 +366,7 @@ class ExpTabWidget(QWidget):
         self._run_panel = run_panel
         self._left_tabs.addTab(run_panel, "Run")
 
+    def _build_analysis_panel(self) -> None:
         # ── Tab: Analysis (only when analysis capability present) ──
         if self._has_analysis:
             # Single-column 13 px ledger with whole-header folding; Analyze sits
@@ -405,6 +425,8 @@ class ExpTabWidget(QWidget):
             self._analysis_tab_index = self._left_tabs.addTab(
                 analysis_container, "Analysis"
             )
+
+    def _build_post_analysis_panel(self) -> None:
         # ── Tab: Post-Analysis (only when post capability true) ────
         if self._has_post:
             post_scroll = QScrollArea()
@@ -447,8 +469,9 @@ class ExpTabWidget(QWidget):
             self._post_panel = post_scroll
             self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
 
+    def _build_data_panel(self) -> None:
         # ── Tab: Data (always) — save center ──────────────────────
-        self._save_center = ArtifactSaveCenter(self.tab_id, capabilities)
+        self._save_center = ArtifactSaveCenter(self.tab_id, self._capabilities)
         self._save_center.bind_comment_changed(self._on_comment_changed)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
@@ -456,6 +479,7 @@ class ExpTabWidget(QWidget):
         self._save_panel = save_scroll
         self._left_tabs.addTab(save_scroll, "Data")
 
+    def _build_guide_panel(self) -> None:
         # ── Tab: Guide (always) ──────────────────────────────────
         guide_scroll = QScrollArea()
         guide_scroll.setWidgetResizable(True)
@@ -469,8 +493,53 @@ class ExpTabWidget(QWidget):
         self._guide_panel = guide_scroll
         self._left_tabs.addTab(guide_scroll, "Guide")
 
-        splitter.addWidget(self._left_tabs)
+    def _build_analysis_figure_pane(self) -> None:
+        # Analysis figure pane (only when analysis present)
+        if self._has_analysis:
+            self._analysis_stack = QStackedWidget()
+            self._analysis_placeholder = QLabel("(no plot yet)")
+            self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+            self._analysis_stack.addWidget(self._analysis_placeholder)
+            self._analysis_container = FigureContainer(
+                self._analysis_stack, self._analysis_placeholder
+            )
+            self._analysis_figures: FigureCollection | None = None
+            self._analysis_panel_right = QWidget()
+            analysis_right = QVBoxLayout(self._analysis_panel_right)
+            analysis_right.setContentsMargins(0, 0, 0, 0)
+            self._analysis_selector = QComboBox()
+            self._analysis_selector.setAccessibleName("Analysis figure")
+            self._analysis_selector.hide()
+            self._analysis_selector.currentIndexChanged.connect(
+                self._on_analysis_figure_selected
+            )
+            analysis_right.addWidget(self._analysis_selector)
+            analysis_right.addWidget(self._analysis_stack, stretch=1)
 
+    def _build_post_figure_pane(self) -> None:
+        # Post figure pane (only when post present)
+        if self._has_post:
+            self._post_stack = QStackedWidget()
+            self._post_placeholder = QLabel("(no plot yet)")
+            self._post_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+            self._post_stack.addWidget(self._post_placeholder)
+            self._post_container = FigureContainer(
+                self._post_stack, self._post_placeholder
+            )
+            self._post_figures: FigureCollection | None = None
+            self._post_panel_right = QWidget()
+            post_right = QVBoxLayout(self._post_panel_right)
+            post_right.setContentsMargins(0, 0, 0, 0)
+            self._post_selector = QComboBox()
+            self._post_selector.setAccessibleName("Post-analysis figure")
+            self._post_selector.hide()
+            self._post_selector.currentIndexChanged.connect(
+                self._on_post_figure_selected
+            )
+            post_right.addWidget(self._post_selector)
+            post_right.addWidget(self._post_stack, stretch=1)
+
+    def _build_plot_area(self) -> QWidget:
         # ── Right pane: per-pane figure containers ────────────────
         plot_panel = QWidget()
         self._plot_layout = QVBoxLayout(plot_panel)
@@ -484,25 +553,8 @@ class ExpTabWidget(QWidget):
         self._run_stack.addWidget(self._run_placeholder)
         self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
 
-        # Analysis figure pane (only when analysis present)
-        if self._has_analysis:
-            self._analysis_stack = QStackedWidget()
-            self._analysis_placeholder = QLabel("(no plot yet)")
-            self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-            self._analysis_stack.addWidget(self._analysis_placeholder)
-            self._analysis_container = FigureContainer(
-                self._analysis_stack, self._analysis_placeholder
-            )
-
-        # Post figure pane (only when post present)
-        if self._has_post:
-            self._post_stack = QStackedWidget()
-            self._post_placeholder = QLabel("(no plot yet)")
-            self._post_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-            self._post_stack.addWidget(self._post_placeholder)
-            self._post_container = FigureContainer(
-                self._post_stack, self._post_placeholder
-            )
+        self._build_analysis_figure_pane()
+        self._build_post_figure_pane()
 
         # Data preview gallery — Variant A stacked rail (S1, S3)
         self._data_gallery = DataFigurePreviewGallery(
@@ -516,22 +568,14 @@ class ExpTabWidget(QWidget):
 
         self._right_stack.addWidget(self._run_stack)
         if self._has_analysis:
-            self._right_stack.addWidget(self._analysis_stack)
+            self._right_stack.addWidget(self._analysis_panel_right)
         if self._has_post:
-            self._right_stack.addWidget(self._post_stack)
+            self._right_stack.addWidget(self._post_panel_right)
         self._right_stack.addWidget(self._data_gallery)
         self._right_stack.addWidget(self._right_placeholder)
 
         self._plot_layout.addWidget(self._right_stack, stretch=1)
-        splitter.addWidget(plot_panel)
-
-        splitter.setCollapsible(0, True)
-        self._update_left_panel_controls()
-        self._schedule_handle_layout()
-        # Right pane follows left selection
-        self._left_tabs.currentChanged.connect(self._on_left_tab_changed)
-        # Initially show Run
-        self._on_left_tab_changed(self._left_tabs.currentIndex())
+        return plot_panel
 
     # ------------------------------------------------------------------
     # Capability helpers
@@ -697,10 +741,6 @@ class ExpTabWidget(QWidget):
                 )
         assert snapshot.paths is not None
         self.set_data_path(snapshot.paths.data.path or "")
-        if self._has_analysis:
-            self.set_analysis_image_path(snapshot.paths.analysis_image.path or "")
-        if self._has_post:
-            self.set_post_image_path(snapshot.paths.post_analysis_image.path or "")
         self.update_interaction_state(snapshot)
         self._bind_to_controller(actions)
 
@@ -753,24 +793,14 @@ class ExpTabWidget(QWidget):
     def set_data_path(self, data_path: str) -> None:
         self._save_center.set_data_path(data_path)
 
-    def set_analysis_image_path(self, image_path: str) -> None:
-        self._require_analysis()
-        self._save_center.set_analysis_path(image_path)
-
-    def set_post_image_path(self, image_path: str) -> None:
-        self._require_post()
-        self._save_center.set_post_analysis_path(image_path)
+    def set_image_path(self, key: ArtifactKey, path: str) -> None:
+        self._save_center.set_image_path(key, path)
 
     def get_data_path(self) -> str:
         return self._save_center.get_data_path()
 
-    def get_image_path(self) -> str:
-        self._require_analysis()
-        return self._save_center.get_analysis_path()
-
-    def get_post_image_path(self) -> str:
-        self._require_post()
-        return self._save_center.get_post_analysis_path()
+    def get_image_path(self, key: ArtifactKey) -> str:
+        return self._save_center.path_for(key)
 
     def get_comment(self) -> str:
         return self._save_center.get_comment()
@@ -823,12 +853,7 @@ class ExpTabWidget(QWidget):
 
     def prepare_run_container(self) -> FigureContainer:
         """Clear Run and every downstream presentation for a new run."""
-        self._run_container.clear_dynamic_canvases()
-        if self._has_analysis:
-            self._analysis_container.clear_dynamic_canvases()
-        if self._has_post:
-            self._post_container.clear_dynamic_canvases()
-        self._refresh_data_gallery()
+        self.clear_all_figures()
         return self._run_container
 
     def prepare_analysis_container(self) -> FigureContainer:
@@ -852,9 +877,10 @@ class ExpTabWidget(QWidget):
     def mount_interactive_widget(self, widget: QWidget) -> None:
         """Mount an interactive analysis widget as the visible plot content (analysis pane)."""
         self._require_analysis()
+        self._analysis_selector.hide()
         self._analysis_stack.addWidget(widget)
         self._analysis_stack.setCurrentWidget(widget)
-        self._right_stack.setCurrentWidget(self._analysis_stack)
+        self._right_stack.setCurrentWidget(self._analysis_panel_right)
 
     def interactive_frontend(self) -> InteractiveFrontend | None:
         """Return only the currently mounted interactive analysis presentation."""
@@ -905,8 +931,18 @@ class ExpTabWidget(QWidget):
         self._run_container.clear_dynamic_canvases()
         if self._has_analysis:
             self._analysis_container.clear_dynamic_canvases()
+            self._analysis_figures = None
+            self._analysis_selector.blockSignals(True)
+            self._analysis_selector.clear()
+            self._analysis_selector.blockSignals(False)
+            self._analysis_selector.hide()
         if self._has_post:
             self._post_container.clear_dynamic_canvases()
+            self._post_figures = None
+            self._post_selector.blockSignals(True)
+            self._post_selector.clear()
+            self._post_selector.blockSignals(False)
+            self._post_selector.hide()
         self._refresh_data_gallery()
 
     def show_run_figure(self, fig: Figure) -> None:
@@ -919,27 +955,60 @@ class ExpTabWidget(QWidget):
         logger.debug("show_run_figure: tab_id=%r canvas set", self.tab_id)
         self._refresh_data_gallery()
 
-    def show_analysis_figure(self, fig: Figure) -> None:
-        """Embed a matplotlib Figure in the Analysis pane and bring it to front."""
+    def show_analysis_figures(self, figures: FigureCollection | None) -> None:
         self._require_analysis()
-        canvas = attach_existing_figure_to_container(fig, self._analysis_container)
-        draw = getattr(canvas, "draw", None)
-        if not callable(draw):
-            raise RuntimeError("Attached analysis canvas does not support draw()")
-        draw()
-        logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
+        self._show_named_figures("analysis", figures)
+
+    def show_post_analysis_figures(self, figures: FigureCollection | None) -> None:
+        self._require_post()
+        self._show_named_figures("post_analysis", figures)
+
+    def _show_named_figures(
+        self,
+        pane: Literal["analysis", "post_analysis"],
+        figures: FigureCollection | None,
+    ) -> None:
+        if pane == "analysis":
+            selector = self._analysis_selector
+            container = self._analysis_container
+            previous = self._analysis_figures
+        else:
+            selector = self._post_selector
+            container = self._post_container
+            previous = self._post_figures
+        if figures is not previous:
+            selector.blockSignals(True)
+            try:
+                selector.clear()
+                if figures is not None:
+                    selector.addItems(list(figures))
+            finally:
+                selector.blockSignals(False)
+            if pane == "analysis":
+                self._analysis_figures = figures
+            else:
+                self._post_figures = figures
+        selector.setVisible(bool(figures))
+        if not figures:
+            container.clear_dynamic_canvases()
+        else:
+            name = selector.currentText()
+            if name not in figures:
+                raise RuntimeError(f"No selected {pane} figure in {self.tab_id!r}")
+            canvas = attach_existing_figure_to_container(figures[name], container)
+            draw = getattr(canvas, "draw", None)
+            if not callable(draw):
+                raise RuntimeError("Attached figure canvas does not support draw()")
+            draw()
         self._refresh_data_gallery()
 
-    def show_post_analysis_figure(self, fig: Figure) -> None:
-        """Embed a matplotlib Figure in the Post-Analysis pane."""
-        self._require_post()
-        canvas = attach_existing_figure_to_container(fig, self._post_container)
-        draw = getattr(canvas, "draw", None)
-        if not callable(draw):
-            raise RuntimeError("Attached post canvas does not support draw()")
-        draw()
-        logger.debug("show_post_analysis_figure: tab_id=%r canvas set", self.tab_id)
-        self._refresh_data_gallery()
+    def _on_analysis_figure_selected(self, index: int) -> None:
+        if index >= 0 and self._analysis_figures is not None:
+            self._show_named_figures("analysis", self._analysis_figures)
+
+    def _on_post_figure_selected(self, index: int) -> None:
+        if index >= 0 and self._post_figures is not None:
+            self._show_named_figures("post_analysis", self._post_figures)
 
     def _on_reset_cfg_clicked(self) -> None:
         confirmed = self._dialog_presenter.confirm(
@@ -998,10 +1067,10 @@ class ExpTabWidget(QWidget):
             self._right_stack.setCurrentWidget(self._run_stack)
             return
         if self._has_analysis and widget is self._analysis_panel:
-            self._right_stack.setCurrentWidget(self._analysis_stack)
+            self._right_stack.setCurrentWidget(self._analysis_panel_right)
             return
         if self._has_post and widget is self._post_panel:
-            self._right_stack.setCurrentWidget(self._post_stack)
+            self._right_stack.setCurrentWidget(self._post_panel_right)
             return
         if widget is self._save_panel:
             self._refresh_data_gallery()
@@ -1120,23 +1189,19 @@ class ExpTabWidget(QWidget):
             actions.refresh_interaction(tab_id)
 
         def data_path_cb(_text: str) -> None:
-            data_path = self.get_data_path()
-            self._ctrl.update_tab_data_path(tab_id, data_path if data_path else None)
-            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
+            with self._save_center.retain_local_path_edit(
+                ArtifactKey(ArtifactKind.DATA)
+            ):
+                data_path = self.get_data_path()
+                self._ctrl.update_tab_data_path(
+                    tab_id, data_path if data_path else None
+                )
+                self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
-        def analysis_image_cb(_text: str) -> None:
-            image_path = self.get_image_path()
-            self._ctrl.update_tab_analysis_image_path(
-                tab_id, image_path if image_path else None
-            )
-            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
-
-        def post_image_cb(_text: str) -> None:
-            image_path = self.get_post_image_path()
-            self._ctrl.update_tab_post_analysis_image_path(
-                tab_id, image_path if image_path else None
-            )
-            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
+        def image_path_cb(key: ArtifactKey, text: str) -> None:
+            with self._save_center.retain_local_path_edit(key):
+                self._ctrl.update_tab_image_path(tab_id, key, text if text else None)
+                self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
         self.cfg_form.validity_changed.connect(validity_cb)
 
@@ -1147,15 +1212,13 @@ class ExpTabWidget(QWidget):
                     tab_id, instance
                 )
             )
-            self._save_center.bind_analysis_path_changed(analysis_image_cb)
         if self._has_post:
             self.post_analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
                     tab_id, instance
                 )
             )
-            self._save_center.bind_post_path_changed(post_image_cb)
-
+        self._save_center.bind_image_path_changed(image_path_cb)
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
         if self._capabilities.load_data:
@@ -1166,27 +1229,18 @@ class ExpTabWidget(QWidget):
             self.writeback_widget.apply_requested.connect(
                 lambda: actions.apply_writeback(tab_id)
             )
-            self._save_center.bind_save(
-                ArtifactKind.ANALYSIS, lambda: actions.save_image(tab_id)
+            self._save_center.bind_image_save(
+                lambda key: actions.save_image(tab_id, key)
             )
         if self._has_post:
             self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
             self.post_writeback_widget.apply_requested.connect(
                 lambda: actions.apply_post_writeback(tab_id)
             )
-            self._save_center.bind_save(
-                ArtifactKind.POST_ANALYSIS, lambda: actions.save_post_image(tab_id)
-            )
-        self._save_center.bind_save(
-            ArtifactKind.DATA, lambda: actions.save_data(tab_id)
-        )
+        self._save_center.bind_save_data(lambda: actions.save_data(tab_id))
 
         self._validity_cb = validity_cb
         self._data_path_cb = data_path_cb
-        if self._has_analysis:
-            self._analysis_image_cb = analysis_image_cb
-        if self._has_post:
-            self._post_image_cb = post_image_cb
 
     def _on_progress_changed(self) -> None:
         models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
@@ -1198,10 +1252,7 @@ class ExpTabWidget(QWidget):
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)
         self._save_center.unbind_data_path_changed(self._data_path_cb)
-        if self._has_analysis:
-            self._save_center.unbind_analysis_path_changed(self._analysis_image_cb)
-        if self._has_post:
-            self._save_center.unbind_post_path_changed(self._post_image_cb)
+        self._save_center.unbind_image_path_changed()
         self._progress_unsub()
         self.cfg_form.detach()
         self._actions = None

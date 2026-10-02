@@ -1,113 +1,88 @@
 from __future__ import annotations
 
-import time
 from copy import deepcopy
 from dataclasses import dataclass
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
 
-from zcu_tools.experiment import AbsExperiment, ExpCfgModel
-from zcu_tools.experiment.utils import make_comment
+from zcu_tools.experiment import MHZ_TO_HZ, AxesSpec, Axis, PersistableExperiment, ZSpec
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import SignalBuffer
-from zcu_tools.plotting.liveplot import LivePlot1D, make_plot_frame
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import SweepCfg
 
 
 @dataclass(frozen=True)
 class FakeResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: FakeCfg | None = None
 
 
-class FakeCfg(ExpCfgModel): ...
+class FakeCfg(ExpCfgModel):
+    sweep: SweepCfg = Field(
+        default_factory=lambda: SweepCfg(start=4.5, stop=5.5, expts=201, step=0.005)
+    )
+    rounds: int = Field(default=100, ge=1)
+    noise_scale: float = Field(default=0.1, ge=0)
+    round_delay: float = Field(default=0.01, ge=0)
 
 
 def fake_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
-    def run(self, cfg: FakeCfg) -> FakeResult:
-        orig_cfg = deepcopy(cfg)
+class FakeExp(PersistableExperiment[FakeResult, FakeCfg]):
+    """Hardware-free Gaussian acquisition using explicit operation plots."""
 
-        # Predicted frequency points (before mapping to ADC domain)
-        freqs = np.linspace(4.5, 5.5, 201)  # MHz
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FakeResult,
+        cfg_type=FakeCfg,
+        tag="fake",
+    )
 
-        round_n = 100
-
-        # run experiment
-        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs),),
-                on_update=lambda data: viewer.update(freqs, fake_signal2real(data)),
-            )
-            signal_buffer = []
-            for _ in range(round_n):
-                # Simulate the measurement of the signal at the given frequency
-                raw_signal = (
-                    np.exp(-((freqs - 5.0) ** 2) / (2 * 0.1**2))
-                    + 0.1 * np.random.randn()
-                    + 1j * 0.1 * np.random.randn()
-                )
-                signal_buffer.append(raw_signal)
-                signals_buffer.set(np.mean(signal_buffer, axis=0))
-                time.sleep(0.01)  # Simulate time delay for measurement
-            signals = signals_buffer.array
-
-        # record result
-        self.last_result = FakeResult(
-            freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+    def run(self, config: FakeCfg, *, context: RunContext) -> FakeResult:
+        cfg = deepcopy(config)
+        freqs = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Frequency (MHz)", "Amplitude"
         )
+        signals_buffer = SignalBuffer(
+            (len(freqs),),
+            on_update=lambda data: viewer.update(freqs, fake_signal2real(data)),
+        )
+        signal_buffer = []
+        for _ in range(cfg.rounds):
+            if context.cancel_signal.is_set():
+                break
+            # Each round adds scalar complex noise to the whole Gaussian trace.
+            raw_signal = (
+                np.exp(-((freqs - 5.0) ** 2) / (2 * 0.1**2))
+                + cfg.noise_scale * np.random.randn()
+                + 1j * cfg.noise_scale * np.random.randn()
+            )
+            signal_buffer.append(raw_signal)
+            signals_buffer.set(np.mean(signal_buffer, axis=0))
+            context.cancel_signal.event.wait(cfg.round_delay)
+        signals_buffer.trigger_update(flush=True)
+        return FakeResult(freqs=freqs, signals=signals_buffer.array)
 
-        return self.last_result
-
-    def analyze(self, result: FakeResult | None = None) -> Figure:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        freqs = result.freqs
-        signals = result.signals
-
-        real_signals = fake_signal2real(signals)
-
-        fig, ((ax,),) = make_plot_frame(1, 1)
-
-        ax.plot(freqs, real_signals, label="Signal")
+    def analyze(
+        self,
+        source: RunRecord[FakeCfg, FakeResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> None:
+        del options
+        _, ax = plots.subplots("fit")
+        ax.plot(
+            source.result.freqs, fake_signal2real(source.result.signals), label="Signal"
+        )
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Amplitude")
-
-        return fig
-
-    def save(
-        self,
-        filepath: str,
-        result: FakeResult | None = None,
-        comment: str | None = None,
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        cfg = result.cfg_snapshot
-        if cfg is None:
-            raise ValueError("cfg_snapshot is None")
-        comment = make_comment(cfg, comment)
-
-    def load(self, filepath: str, **kwargs) -> FakeResult:
-        freqs = np.linspace(4.5, 5.5, 201)  # MHz
-        signals = (
-            np.exp(-((freqs - 5.0) ** 2) / (2 * 0.1**2))
-            + 0.1 * np.random.randn(len(freqs))
-            + 1j * 0.1 * np.random.randn(len(freqs))
-        )
-
-        freqs = freqs.astype(np.float64)
-        signals = signals.astype(np.complex128)
-
-        self.last_result = FakeResult(freqs=freqs, signals=signals)
-
-        return self.last_result

@@ -107,8 +107,8 @@ _NUMBA_MIN_SINGLE_NODE_WORK_UNITS = 100_000
 _SEGMENT_PROPAGATOR_CACHE_SIZE = 4096
 
 # Default operating flux: reduced flux Phi/Phi0 = 1.0 (R-3).  This is the operating
-# point when no device is bound; the FLUX-AWARE-MOCK path (SimParams.flux_device,
-# see _reduced_operating_flux) overrides it by reading a live FakeDevice value.  The
+# point when no source is bound; an injected value reader overrides it with
+# the environment's live FakeDevice value.  The
 # simulation is a device-pipeline validator, so by default it pins one operating
 # point instead of deriving it from the experiment cfg's ``dev`` map.  The engine
 # works in true (absolute, non-folded) frequencies throughout; the mock gen f_dds is
@@ -387,6 +387,7 @@ class SimEngine:
         cancel_flag: CancelFlagProtocol | None = None,
         *,
         rng_seed: int | np.random.SeedSequence | None = None,
+        flux_source: Callable[[], float] | None = None,
     ) -> None:
         """Build a per-acquire simulation engine.
 
@@ -411,6 +412,7 @@ class SimEngine:
 
         self.program = program
         self.sim = sim
+        self._flux_source = flux_source
         self._cancel_flag = cancel_flag
 
         # Deterministic per-(sweep-point, read) blob grids plus integration
@@ -913,55 +915,10 @@ class SimEngine:
 
     # ------------------------------------------------------- operating point
     def _reduced_operating_flux(self) -> float:
-        """Resolve the reduced operating flux Phi/Phi0 for this acquire.
-
-        FLUX-AWARE-MOCK: the operating flux is normally pinned at reduced flux =
-        1.0 (R-3), but ``SimParams.flux_device`` opts into reading it live from a
-        connected device.  This is a deliberate cross-layer reach: the engine
-        lives in ``program/v2/sim/`` yet, when bound, peers into the
-        ``GlobalDeviceManager`` registry (``device/``) to read the *current*
-        device value, because the mock soc must mirror the real rig where the
-        software flux sweep sets a YOKO/FakeDevice value per acquire and the qubit
-        frequency follows it.  The read is intentionally lazy and happens once per
-        acquire: a fresh SimEngine is built on every ``MyProgramV2.acquire`` (see
-        base._attach_sim_engine), so reading here is equivalent to "read the live
-        flux just before each acquisition".  Within a single acquire the flux is
-        constant (the runner does software-per-acquire: set device value, then run
-        one acquire), which is exactly the assumption the flux-constant caches in
-        :meth:`_operating_signal` rely on.
-
-        Only a ``FakeDevice`` is supported as the source: the simulation models a
-        dev-only mock rig, and a FakeDevice exposes a plain in-memory ``value`` the
-        engine can read without any instrument I/O.  A missing device or a
-        non-FakeDevice is a wiring mistake, so fail-fast here (the binding itself,
-        via ``set_flux_device``, is permitted before the device is registered;
-        the resolution is what enforces the contract).
-        """
-
-        flux_device = self.sim.flux_device
-        if flux_device is None:
-            # No binding -> fixed operating point (reduced flux = 1.0, R-3).
+        """Read this acquire's operating point from its explicit value source."""
+        if self._flux_source is None:
             return _SIM_OPERATING_FLUX
-
-        # Lazy local import (FLUX-AWARE-MOCK): keep the device dependency off the
-        # sim package's import graph.  ``device/`` never imports ``program/v2/sim``,
-        # so there is no import cycle; importing inside the function also avoids
-        # paying the device import cost on the (default) fixed-flux path.
-        from zcu_tools.device import FakeDevice, GlobalDeviceManager
-
-        dev = GlobalDeviceManager.get_device(flux_device)
-        if not isinstance(dev, FakeDevice):
-            raise TypeError(
-                f"SimEngine flux_device {flux_device!r} must be a FakeDevice "
-                f"(the mock simulation only reads a FakeDevice's in-memory value); "
-                f"got {type(dev).__name__}"
-            )
-
-        # Map the live device value to reduced flux through THIS SimParams' affine
-        # (flux_half / flux_period / flux_bias), the same alignment predict_freq
-        # uses internally, so the operating point stays self-consistent.
-        device_value = dev.get_value()
-        return self._predictor.value_to_flux(device_value)
+        return self._predictor.value_to_flux(self._flux_source())
 
     def _operating_signal(self) -> tuple[float, float, float]:
         """Return (cached) ``(f_qubit_ghz, rf_g, rf_e)`` at the operating flux.

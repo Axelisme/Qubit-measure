@@ -1,3 +1,5 @@
+from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+
 from .multi_executor import MultiMeasurementExecutor
 from .result_tree import ResultNode, ResultTree, ResultUpdateEvent
 from .schedule import (
@@ -6,14 +8,10 @@ from .schedule import (
     RunStatus,
     Schedule,
     ScheduleOutcome,
-    ScheduleOutcomeError,
     ScheduleStep,
     SignalBuffer,
-    StopSignal,
-    current_stop_signal,
     default_decimated_raw2signal_fn,
     default_raw2signal_fn,
-    schedule_stop_scope,
 )
 from .task import (
     Acquirer,
@@ -44,8 +42,6 @@ __all__ = [
     "StopSignal",
     "TaskPersister",
     "TaskPlotter",
-    "current_stop_signal",
     "default_decimated_raw2signal_fn",
     "default_raw2signal_fn",
-    "schedule_stop_scope",
 ]

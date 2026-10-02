@@ -15,8 +15,6 @@ from typing import (
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from zcu_tools.device import DeviceInfo
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.resources.context import ModuleLibrary
@@ -128,9 +126,8 @@ class AnalyzeResultBase:
         return result
 
 
-class AnalyzeResultWithFigure(Protocol):
-    @property
-    def figure(self) -> Figure | None: ...
+class AnalyzeResult(Protocol):
+    """Numeric analysis payload; figures belong to the operation's plots."""
 
     def to_summary_dict(self) -> dict[str, object]: ...
 
@@ -144,13 +141,11 @@ class NoAnalyzeParams:
 class NoAnalysisResult(AnalyzeResultBase):
     """Default analyze-result type for adapters without analysis."""
 
-    figure: Figure | None = None
-
 
 # PEP 696 defaults: adapters without analysis omit the last two generic args
 # (BaseAdapter[Cfg, Result]) and these No* types fill in automatically.
 T_AnalyzeResult = TypeVar(
-    "T_AnalyzeResult", bound=AnalyzeResultWithFigure, default=NoAnalysisResult
+    "T_AnalyzeResult", bound=AnalyzeResult, default=NoAnalysisResult
 )
 T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=NoAnalyzeParams)
 
@@ -188,7 +183,7 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
 # ---------------------------------------------------------------------------
 # Post-analysis (AdapterCapabilities.post_analysis) — a second analysis layer
 # that operates *on top of* the primary ``analyze`` result. It mirrors the
-# primary analyze chain (request + figure-carrying result), but carries the
+# primary analyze chain (request + numeric result), but carries the
 # primary ``analyze_result`` in addition to the raw ``run_result`` because a
 # post-analysis typically refines/recomputes from the primary fit (centres,
 # threshold, …) plus the raw shots.
@@ -207,7 +202,7 @@ class PostAnalyzeResultBase(AnalyzeResultBase):
 # default-bearing T_AnalyzeResult in PostAnalyzeRequest's parameter list.
 T_PostAnalyzeResult = TypeVar(
     "T_PostAnalyzeResult",
-    bound=AnalyzeResultWithFigure,
+    bound=AnalyzeResult,
     default=NoAnalysisResult,
 )
 T_PostAnalyzeParams = TypeVar("T_PostAnalyzeParams", default=NoAnalyzeParams)

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, TypeAlias
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from zcu_tools.datafile import save_labber_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -21,6 +22,7 @@ from zcu_tools.gui.app.measure.adapter import (
     LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
+    SaveDataRequest,
     SessionEnv,
 )
 
@@ -31,18 +33,18 @@ class _Cfg(ExpCfgModel):
 
 @dataclass(frozen=True)
 class _LoadedResult:
-    path: str
+    path: Path
+
+
+_LoadedRecord: TypeAlias = RunRecord[_Cfg, _LoadedResult]
 
 
 class _LoadExp:
-    last_path: ClassVar[str | None] = None
-
-    def load(self, filepath: str) -> _LoadedResult:
-        type(self).last_path = filepath
-        return _LoadedResult(path=filepath)
+    def load(self, filepath: Path) -> _LoadedRecord:
+        return RunRecord(cfg=None, result=_LoadedResult(path=filepath))
 
 
-class _LoadAdapter(BaseAdapter[_Cfg, _LoadedResult, NoAnalysisResult, NoAnalyzeParams]):
+class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeParams]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE
     )
@@ -57,7 +59,7 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedResult, NoAnalysisResult, NoAnalyzeP
 
 
 class _InvalidCanonicalExp:
-    def load(self, filepath: str) -> _LoadedResult:
+    def load(self, filepath: Path) -> _LoadedRecord:
         raise ValueError(f"invalid canonical data: {filepath}")
 
 
@@ -86,8 +88,8 @@ class _InternalTypeErrorExp:
     def __init__(self) -> None:
         raise TypeError("constructor bug")
 
-    def load(self, filepath: str) -> _LoadedResult:
-        return _LoadedResult(path=filepath)
+    def load(self, filepath: Path) -> _LoadedRecord:
+        return RunRecord(cfg=None, result=_LoadedResult(path=filepath))
 
 
 class _InternalTypeErrorAdapter(_LoadAdapter):
@@ -101,8 +103,9 @@ def _request(path: str = "/tmp/result.hdf5") -> LoadDataRequest:
 def test_base_adapter_load_calls_canonical_experiment_load() -> None:
     result = _LoadAdapter().load(_request("/tmp/canonical.hdf5"))
 
-    assert result == _LoadedResult(path="/tmp/canonical.hdf5")
-    assert _LoadExp.last_path == "/tmp/canonical.hdf5"
+    assert result == RunRecord(
+        cfg=None, result=_LoadedResult(path=Path("/tmp/canonical.hdf5"))
+    )
 
 
 def test_base_adapter_load_preserves_canonical_validation_error() -> None:
@@ -133,3 +136,45 @@ def test_base_adapter_load_raises_explicit_unsupported(adapter_cls: type[_LoadAd
 def test_base_adapter_load_preserves_constructor_internal_type_error() -> None:
     with pytest.raises(TypeError, match="constructor bug"):
         _InternalTypeErrorAdapter().load(_request())
+
+
+@pytest.mark.parametrize("missing_cfg", [False, True])
+def test_base_adapter_save_passes_explicit_record_to_override(
+    tmp_path: Path, missing_cfg: bool
+) -> None:
+    received: list[tuple[_LoadedRecord, Path, str | None]] = []
+
+    class Saver(_LoadExp):
+        def save(
+            self,
+            source: _LoadedRecord,
+            destination: Path,
+            *,
+            comment: str | None = None,
+        ) -> None:
+            received.append((source, destination, comment))
+
+    class Adapter(_LoadAdapter):
+        exp_cls = Saver
+
+    source = RunRecord(
+        cfg=None if missing_cfg else _Cfg(),
+        result=_LoadedResult(path=tmp_path / "source.hdf5"),
+    )
+    destination = tmp_path / "exact.hdf5"
+    request = SaveDataRequest(
+        run_result=source,
+        data_path=str(destination),
+        md=MagicMock(),
+        ml=MagicMock(),
+        chip_name="chip",
+        qub_name="qubit",
+        res_name="resonator",
+        active_label="data",
+        comment="override metadata",
+    )
+
+    Adapter().save(request)
+
+    assert received == [(source, destination, "override metadata")]
+    assert received[0][0] is source

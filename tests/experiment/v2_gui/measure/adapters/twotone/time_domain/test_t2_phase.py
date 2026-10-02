@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.experiment.v2.twotone.time_domain.t2echo import T2EchoResult
-from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import T2RamseyResult
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.time_domain.t2echo import T2EchoCfg, T2EchoResult
+from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
+    T2RamseyCfg,
+    T2RamseyResult,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain.t2echo import (
     T2EchoAdapter,
     T2EchoAnalyzeParams,
@@ -22,6 +24,7 @@ from zcu_tools.gui.app.measure.adapter.analyze_params import (
     describe_analyze_params,
     reconstruct_params,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -32,21 +35,28 @@ def _analyze(
     echo: bool,
     fit_phase: bool,
     fringe: bool = True,
-) -> tuple[float, Figure]:
+) -> tuple[float, Plots]:
     md, ml = MetaDict(), ModuleLibrary()
+    plots = Plots(NonPresentingHost())
     if echo:
         params = T2EchoAnalyzeParams(
             fit_method="fringe" if fringe else "decay", fit_phase=fit_phase
         )
-        result = T2EchoAdapter().analyze(
-            AnalyzeRequest(T2EchoResult(times, signals), params, md, ml, None)
+        source = RunRecord[T2EchoCfg, T2EchoResult](
+            cfg=None, result=T2EchoResult(times, signals)
         )
-        return result.t2e, result.figure
+        result = T2EchoAdapter().analyze(
+            AnalyzeRequest(source, params, md, ml, None), plots=plots
+        )
+        return result.t2e, plots
     params_r = T2RamseyAnalyzeParams(fit_fringe=fringe, fit_phase=fit_phase)
-    result_r = T2RamseyAdapter().analyze(
-        AnalyzeRequest(T2RamseyResult(times, signals, 0.0), params_r, md, ml, None)
+    source_r = RunRecord[T2RamseyCfg, T2RamseyResult](
+        cfg=None, result=T2RamseyResult(times, signals, 0.0)
     )
-    return result_r.t2r, result_r.figure
+    result_r = T2RamseyAdapter().analyze(
+        AnalyzeRequest(source_r, params_r, md, ml, None), plots=plots
+    )
+    return result_r.t2r, plots
 
 
 @pytest.mark.parametrize("echo", [False, True])
@@ -59,15 +69,16 @@ def test_t2_phase_recovers_fringe_and_coherence(echo: bool, phase: float) -> Non
         * np.exp(-times / 25)
         * np.cos(2 * np.pi * 0.4 * times + np.radians(phase))
     ).astype(np.complex128)
-    t2, figure = _analyze(times, signals, echo=echo, fit_phase=phase != 0.0)
+    t2, plots = _analyze(times, signals, echo=echo, fit_phase=phase != 0.0)
     try:
         assert t2 == pytest.approx(25, rel=0.001)
-        observed, fitted = figure.axes[0].lines[:2]
+        observed, fitted = plots["fit"].axes[0].lines[:2]
         np.testing.assert_allclose(
             np.asarray(fitted.get_ydata()), np.asarray(observed.get_ydata()), atol=1e-5
         )
     finally:
-        plt.close(figure)
+        plots.finish()
+        plots.release()
 
 
 @pytest.mark.parametrize("echo", [False, True])
@@ -78,9 +89,9 @@ def test_t2_phase_toggle_changes_shifted_fringe_fit(echo: bool) -> None:
     ).astype(np.complex128)
     residuals = []
     for fit_phase in (False, True):
-        _, figure = _analyze(times, signals, echo=echo, fit_phase=fit_phase)
+        _, plots = _analyze(times, signals, echo=echo, fit_phase=fit_phase)
         try:
-            observed, fitted = figure.axes[0].lines[:2]
+            observed, fitted = plots["fit"].axes[0].lines[:2]
             residuals.append(
                 float(
                     np.mean(
@@ -93,7 +104,8 @@ def test_t2_phase_toggle_changes_shifted_fringe_fit(echo: bool) -> None:
                 )
             )
         finally:
-            plt.close(figure)
+            plots.finish()
+            plots.release()
     assert residuals[0] > 1e-3
     assert residuals[1] < 1e-10
 
@@ -103,13 +115,14 @@ def test_t2_decay_ignores_phase_option(echo: bool) -> None:
     times = np.linspace(0, 12, 301)
     signals = (0.2 + 0.8 * np.exp(-times / 5)).astype(np.complex128)
     for fit_phase in (False, True):
-        t2, figure = _analyze(
+        t2, plots = _analyze(
             times, signals, echo=echo, fit_phase=fit_phase, fringe=False
         )
         try:
             assert t2 == pytest.approx(5, rel=1e-5)
         finally:
-            plt.close(figure)
+            plots.finish()
+            plots.release()
 
 
 @pytest.mark.parametrize("echo", [False, True])

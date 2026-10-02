@@ -3,8 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.analysis.fluxdep.line_state import (
+    FluxPickInputs,
+    FluxPickState,
+    fold_initial_lines,
+)
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.fluxdep import (
     FreqFluxCfg,
     FreqFluxExp,
@@ -23,7 +28,8 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend im
     make_flux_pick_frontend,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
-    make_flux_pick_plugin,
+    FluxPickPlugin,
+    render_flux_pick,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
@@ -44,8 +50,9 @@ if TYPE_CHECKING:
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
+    from zcu_tools.plotting.plots import Plots
 
-FluxDepRunResult: TypeAlias = FreqFluxResult
+FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 
 
 class FluxDepAdapter(
@@ -115,6 +122,13 @@ class FluxDepAdapter(
         ),
     )
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> FluxDepRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FreqFluxExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -151,21 +165,35 @@ class FluxDepAdapter(
         )
 
     def make_interactive_plugin(
-        self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams]
-    ) -> PluginDefinition[Any, Any]:
+        self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams], *, plots: Plots
+    ) -> FluxPickPlugin:
+        result = req.run_result.result
+        inputs = FluxPickInputs(result.signals, result.values, result.freqs)
+        half, integer = fold_initial_lines(
+            inputs.dev_values, req.md.get("flx_half"), req.md.get("flx_int")
+        )
         # Two-tone spectra may carry useful phase information.
-        return make_flux_pick_plugin(req, force_magnitude=False)
+        return FluxPickPlugin(
+            inputs,
+            FluxPickState(
+                flux_half=half, flux_int=integer, conjugate=False, magnitude_only=False
+            ),
+            plots=plots,
+            result_builder=render_flux_pick,
+        )
 
     def make_interactive_frontend(
         self,
         plugin: PluginDefinition[Any, Any],
         session: Session[Any],
         env: InteractiveFrontendEnv,
-        request_finish: Callable[[Figure], bool],
+        request_finish: Callable[[], bool],
         request_cancel: Callable[[], bool],
+        *,
+        plots: Plots,
     ) -> InteractiveFrontend:
         return make_flux_pick_frontend(
-            plugin, session, env, request_finish, request_cancel
+            plugin, session, env, request_finish, request_cancel, plots=plots
         )
 
     def get_writeback_items(
@@ -195,7 +223,7 @@ class FluxDepAdapter(
         dev_raw = cfg_raw.pop("dev")
         if not isinstance(dev_raw, dict):
             raise RuntimeError("FluxDep dev section must lower to a dict")
-        dev_patch: dict[str, dict] = {}
+        dev_patch: dict[str, dict[str, str]] = {}
         for label_key, device_name in dev_raw.items():
             if not isinstance(device_name, str) or not device_name:
                 raise RuntimeError(

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any, TypeAlias, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
+import pytest
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import (
     Acquirer,
     ComposedMeasurementBundle,
@@ -21,6 +24,7 @@ from zcu_tools.experiment.v2.runtime import (
     TaskPlotter,
 )
 from zcu_tools.experiment.v2.utils import Result
+from zcu_tools.plotting.plots import LinePlot, NonPresentingHost, Plots
 
 FakeResult: TypeAlias = dict[str, NDArray[np.float64]]
 
@@ -34,21 +38,20 @@ class ExecEnv:
     current_index: int = -1
 
 
-class FakePlotter:
+class RecordingHost(NonPresentingHost):
     def __init__(self) -> None:
+        self.presented: list[Figure] = []
         self.refresh_count = 0
-        self.entered = False
-        self.exited = False
+        self.released: list[Figure] = []
 
-    def __enter__(self) -> FakePlotter:
-        self.entered = True
-        return self
+    def present(self, figure: Figure) -> None:
+        self.presented.append(figure)
 
-    def __exit__(self, *_exc: object) -> None:
-        self.exited = True
-
-    def refresh(self) -> None:
+    def refresh(self, figure: Figure, *, final: bool = False) -> None:
         self.refresh_count += 1
+
+    def release(self, figure: Figure) -> None:
+        self.released.append(figure)
 
 
 class FakeTask(MeasurementTask[ExecCfg, ExecEnv, FakeResult, Any, NDArray[np.float64]]):
@@ -97,8 +100,14 @@ class FakeTask(MeasurementTask[ExecCfg, ExecEnv, FakeResult, Any, NDArray[np.flo
     def num_axes(self) -> dict[str, int]:
         return {"value": 1}
 
-    def make_plotter(self, name: str, axs: dict[str, Any]) -> dict[str, object]:
-        return {"value": object()}
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> dict[str, LinePlot]:
+        return {
+            "value": plots.liveplot_1d(
+                figure_name, "index", "value", axes=axs["value"][0], title=name
+            )
+        }
 
     def update_plotter(
         self,
@@ -106,6 +115,11 @@ class FakeTask(MeasurementTask[ExecCfg, ExecEnv, FakeResult, Any, NDArray[np.flo
         event: ResultUpdateEvent[ExecEnv, FakeResult],
         result: FakeResult,
     ) -> None:
+        plotters["value"].update(
+            np.arange(result["value"].size, dtype=np.float64),
+            result["value"],
+            refresh=False,
+        )
         self.plot_events.append(
             (
                 event.measurement_name,
@@ -132,17 +146,8 @@ class FakeExecutor(
     def __init__(self, outer_values: NDArray[np.float64]) -> None:
         super().__init__()
         self.outer_values = outer_values
-        self.fake_plotter = FakePlotter()
-        self.last_fig: Figure | None = None
-
-    def make_plotter(self) -> Any:
-        fig = plt.figure()
-        self.last_fig = fig
-        plotters_map = {
-            name: task.make_plotter(name, {})
-            for name, task in self.measurements.items()
-        }
-        return fig, self.fake_plotter, plotters_map, None
+        self.host = RecordingHost()
+        self.plots = Plots(self.host)
 
     def run(self, retry_time: int = 0) -> dict[str, FakeResult]:
         env = ExecEnv()
@@ -161,6 +166,8 @@ class FakeExecutor(
                     env=env,
                     outer_values=self.outer_values,
                     run_loop=run_loop,
+                    stop=StopSignal(),
+                    plots=self.plots,
                 )
             ),
         )
@@ -191,8 +198,14 @@ class SplitPlotter(TaskPlotter[ExecEnv, FakeResult, Any]):
     def num_axes(self) -> dict[str, int]:
         return {"value": 1}
 
-    def make_plotter(self, name: str, axs: dict[str, Any]) -> dict[str, object]:
-        return {"value": object()}
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> dict[str, LinePlot]:
+        return {
+            "value": plots.liveplot_1d(
+                figure_name, "index", "value", axes=axs["value"][0], title=name
+            )
+        }
 
     def update_plotter(
         self,
@@ -234,11 +247,71 @@ def test_multi_executor_template_lifecycle_and_per_node_plot_update() -> None:
     assert [event[0] for event in first.plot_events] == ["first", "first"]
     assert [event[1] for event in first.plot_events] == [0, 1]
     assert [event[2] for event in first.plot_events] == [True, True]
-    assert executor.fake_plotter.entered is True
-    assert executor.fake_plotter.exited is True
-    assert executor.fake_plotter.refresh_count == 4
-    assert executor.last_fig is not None
-    assert not plt.fignum_exists(executor.last_fig.number)
+    figure = executor.plots["measurement"]
+    assert executor.host.presented == [figure]
+    assert executor.host.refresh_count == 4
+    assert executor.host.released == []
+    np.testing.assert_array_equal(figure.axes[0].lines[0].get_ydata(), [0.0, 1.0])
+    np.testing.assert_array_equal(figure.axes[1].lines[0].get_ydata(), [10.0, 11.0])
+    figures = executor.plots.finish()
+    executor.plots.release()
+    assert executor.host.released == [figure]
+    output = BytesIO()
+    figures["measurement"].savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG")
+
+
+@pytest.mark.parametrize(
+    ("stop_at", "fail_at", "status"),
+    [(None, None, "completed"), (1, None, "interrupted"), (None, 1, "failed")],
+)
+def test_multi_executor_movie_retains_partial_frames_and_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+    stop_at: int | None,
+    fail_at: int | None,
+    status: str,
+) -> None:
+    frames: list[NDArray[np.float64]] = []
+    finished: list[bool] = []
+
+    class Writer:
+        def __init__(self, *, fps: int) -> None:
+            self.figure: Figure | None = None
+
+        @classmethod
+        def isAvailable(cls) -> bool:
+            return True
+
+        def setup(self, figure: Figure, filename: str, dpi: int) -> None:
+            self.figure = figure
+
+        def grab_frame(self) -> None:
+            assert self.figure is not None
+            frames.append(np.array(self.figure.axes[0].lines[0].get_ydata()))
+
+        def finish(self) -> None:
+            finished.append(True)
+
+    monkeypatch.setattr("matplotlib.animation.FFMpegWriter", Writer)
+    task = FakeTask(offset=4.0, stop_at=stop_at, fail_always_at=fail_at)
+    executor = FakeExecutor(np.array([0.0, 1.0])).add_measurements({"task": task})
+    executor.record_animation("unused.mp4")
+
+    result = executor.run()
+    assert executor.last_run_outcome is not None
+    assert executor.last_run_outcome.status == status
+    assert task.cleanup_count == 1
+    assert finished == [True]
+    assert len(frames) == (2 if status == "completed" else 1)
+    np.testing.assert_allclose(frames[-1], result["task"]["value"], equal_nan=True)
+    figures = executor.plots.finish()
+    executor.plots.release()
+    assert finished == [True]
+    np.testing.assert_allclose(
+        np.asarray(figures["measurement"].axes[0].lines[0].get_ydata()),
+        result["task"]["value"],
+        equal_nan=True,
+    )
 
 
 def test_multi_executor_retries_measurement_and_reinitializes_task() -> None:
@@ -315,7 +388,7 @@ def test_composed_measurement_bundle_delegates_components() -> None:
     env = ExecEnv(current_index=0)
 
     bundle.init(dynamic_pbar=True)
-    with Schedule(ExecCfg(), tree, env=env) as sched:
+    with Schedule(ExecCfg(), tree, env=env, stop=StopSignal()) as sched:
         _, outer_step = next(sched.scan("outer", np.array([0.0], dtype=np.float64)))
         bundle.run(outer_step.child("bundle"))
     bundle.cleanup()
@@ -330,7 +403,11 @@ def test_composed_measurement_bundle_delegates_components() -> None:
         result=result,
         flush=True,
     )
-    plotters = bundle.make_plotter("bundle", {})
+    plots = Plots(NonPresentingHost())
+    _, ax = plots.subplots("measurement")
+    plotters = bundle.make_plotter(
+        "bundle", {"value": [ax]}, plots=plots, figure_name="measurement"
+    )
     bundle.update_plotter(plotters, event, result)
     bundle.save("unused", np.array([0.0], dtype=np.float64), result, None, "bundle")
 

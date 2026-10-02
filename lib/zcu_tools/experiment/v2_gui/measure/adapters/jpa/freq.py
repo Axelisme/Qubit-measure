@@ -9,10 +9,10 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.jpa import FreqCfg, FreqExp
 from zcu_tools.experiment.v2.jpa.jpa_freq import FreqResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
@@ -34,8 +34,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import lower_jpa_rf_dev
+
+JpaFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 _JPA_FREQ_SWEEP_EXPTS = 101
 # Bring-up seed: ±2% around the centre. These are inspectable starting bounds,
@@ -73,11 +76,10 @@ def jpa_freq_sweep_seed(
 @dataclass
 class JpaFreqAnalyzeResult(AnalyzeResultBase):
     best_freq: float
-    figure: Figure
 
 
 class JpaFreqAdapter(
-    BaseAdapter[FreqCfg, FreqResult, JpaFreqAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[FreqCfg, JpaFreqRunResult, JpaFreqAnalyzeResult, NoAnalyzeParams]
 ):
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
@@ -155,14 +157,20 @@ class JpaFreqAdapter(
         # Pure preflight over the detached request snapshot.
         lower_jpa_rf_dev(raw_cfg, req.device_snapshot)
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> JpaFreqRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, FreqExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[FreqResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[JpaFreqRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> JpaFreqAnalyzeResult:
-        best_freq, fig = FreqExp().analyze(req.run_result)
-        return JpaFreqAnalyzeResult(best_freq=best_freq, figure=fig)
+        answer = FreqExp().analyze(req.run_result, None, plots=plots)
+        return JpaFreqAnalyzeResult(best_freq=answer.best_freq)
 
     def get_writeback_items(
-        self, req: WritebackRequest[FreqResult, JpaFreqAnalyzeResult]
+        self, req: WritebackRequest[JpaFreqRunResult, JpaFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
             MetaDictWriteback(

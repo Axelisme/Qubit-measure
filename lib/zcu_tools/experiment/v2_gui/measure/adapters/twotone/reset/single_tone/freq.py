@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.single_tone.freq import (
     FreqCfg,
     FreqExp,
@@ -29,13 +29,15 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.plotting.plots import Plots
 
-SingleToneFreqRunResult: TypeAlias = FreqResult
+SingleToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 def _reset_freq_range(ctx: SessionEnv) -> SweepValue:
@@ -57,7 +59,6 @@ def _reset_freq_range(ctx: SessionEnv) -> SweepValue:
 class SingleToneFreqAnalyzeResult(AnalyzeResultBase):
     freq: float
     fwhm: float
-    figure: Figure
 
 
 class SingleToneFreqAdapter(
@@ -149,11 +150,21 @@ class SingleToneFreqAdapter(
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SingleToneFreqRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FreqExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[SingleToneFreqRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[SingleToneFreqRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> SingleToneFreqAnalyzeResult:
-        freq, fwhm, fig = FreqExp().analyze(req.run_result)
-        return SingleToneFreqAnalyzeResult(freq=freq, fwhm=fwhm, figure=fig)
+        result = FreqExp().analyze(req.run_result, None, plots=plots)
+        return SingleToneFreqAnalyzeResult(freq=result.freq, fwhm=result.fwhm)
 
     def get_writeback_items(
         self,
@@ -178,7 +189,7 @@ class SingleToneFreqAdapter(
         items.extend(
             reset_module_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 target="reset_10",
                 field_md_map=[("pulse_cfg.freq", "reset_f")],
                 desc="Reset with one pulse from 1 to 0",

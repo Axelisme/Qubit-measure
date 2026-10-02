@@ -5,25 +5,27 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.single_tone.length import (
     LengthCfg,
     LengthExp,
     LengthResult,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
     md,
     reset_module_writeback_items,
-    run_figure_only_analyze,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -31,15 +33,15 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
-SingleToneLengthRunResult: TypeAlias = LengthResult
+SingleToneLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 
 @dataclass
-class SingleToneLengthAnalyzeResult(FigureOnlyAnalyzeResult):
-    # D5: the length sweep is a look-at-the-curve fit — analysis renders the decay
-    # trace for the Analyze tab but extracts no scalar, so there is no writeback.
-    # The single ``figure`` field is inherited from FigureOnlyAnalyzeResult.
+class SingleToneLengthAnalyzeResult(AnalyzeResultBase):
+    """The fit publishes a curve without fitted scalar output."""
+
     pass
 
 
@@ -79,7 +81,7 @@ class SingleToneLengthAdapter(
             "tested single-pulse reset (carrying its md-linked sideband "
             "frequency) registered as the final reset module; the user picks "
             "the final reset length in the writeback dialog. Skipped when no "
-            "cfg_snapshot is available (e.g. loaded from file)."
+            "source cfg is available (e.g. loaded from file)."
         ),
         recommended=(
             "A length sweep from ~0.1 us to a few times the expected reset "
@@ -118,10 +120,21 @@ class SingleToneLengthAdapter(
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SingleToneLengthRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = LengthExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[SingleToneLengthRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[SingleToneLengthRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> SingleToneLengthAnalyzeResult:
-        return run_figure_only_analyze(LengthExp, SingleToneLengthAnalyzeResult, req)
+        LengthExp().analyze(req.run_result, None, plots=plots)
+        return SingleToneLengthAnalyzeResult()
 
     def get_writeback_items(
         self,
@@ -135,7 +148,7 @@ class SingleToneLengthAdapter(
         items.extend(
             reset_module_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 target="reset_10",
                 field_md_map=[("pulse_cfg.freq", "reset_f")],
                 desc="Reset with one pulse from 1 to 0",

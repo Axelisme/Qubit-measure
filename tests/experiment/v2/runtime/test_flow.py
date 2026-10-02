@@ -14,7 +14,6 @@ from zcu_tools.experiment.v2.runtime import (
     ScheduleStep,
     SignalBuffer,
     StopSignal,
-    schedule_stop_scope,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
@@ -448,18 +447,6 @@ class StopBeforeDataProgram:
         raise NotImplementedError
 
 
-def test_schedule_stop_scope_supplies_default_stop_signal() -> None:
-    stop = StopSignal()
-    stop.set()
-
-    with schedule_stop_scope(stop):
-        with Schedule(_cfg()) as sched:
-            assert sched.is_stop()
-
-    with Schedule(_cfg()) as sched:
-        assert not sched.is_stop()
-
-
 def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
     root = {"task": {"signals": np.full((1,), np.nan)}}
     updates: list[tuple[tuple[Any, ...], np.ndarray]] = []
@@ -476,7 +463,7 @@ def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
         buffer.set(np.array([1.0]))
         buffer.set(np.array([2.0]))
 
-    with Schedule(_cfg(), result_buffer) as sched:
+    with Schedule(_cfg(), result_buffer, stop=StopSignal()) as sched:
         sched.batch({"task": child})
 
     np.testing.assert_allclose(root["task"]["signals"], np.array([2.0]))
@@ -490,7 +477,9 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
     module = FakeModule("readout")
     init_cfg = _cfg(reps=5, rounds=7)
 
-    with Schedule(init_cfg, SignalBuffer((1,), dtype=np.float64)) as sched:
+    with Schedule(
+        init_cfg, SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+    ) as sched:
         builder = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
             .add(module)
@@ -511,7 +500,9 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
     assert program.reps == 5
     assert program.rounds == 7
 
-    with Schedule(init_cfg, SignalBuffer((1,), dtype=np.float64)) as sched:
+    with Schedule(
+        init_cfg, SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+    ) as sched:
         fresh_program = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
             .add(module)
@@ -526,7 +517,9 @@ def test_program_builder_projects_mapping_cfg_to_program_cfg() -> None:
     FakeProgram.instances.clear()
     init_cfg = {"reps": 3, "rounds": 4, "experiment_only": "ignored"}
 
-    with Schedule(init_cfg, SignalBuffer((1,), dtype=np.float64)) as sched:
+    with Schedule(
+        init_cfg, SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+    ) as sched:
         program = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
             .add(FakeModule("readout"))
@@ -544,6 +537,7 @@ def test_program_builder_rejects_cfg_without_program_fields() -> None:
     with Schedule(
         {"experiment_only": "ignored"},
         SignalBuffer((1,), dtype=np.float64),
+        stop=StopSignal(),
     ) as sched:
         builder = sched.prog_builder(
             "soc", "soccfg", program_cls=FakeProgram, marker="kw"
@@ -562,7 +556,9 @@ def test_program_builder_accepts_cfg_override() -> None:
     FakeProgram.instances.clear()
 
     with Schedule(
-        {"reps": 1, "rounds": 1}, SignalBuffer((1,), dtype=np.float64)
+        {"reps": 1, "rounds": 1},
+        SignalBuffer((1,), dtype=np.float64),
+        stop=StopSignal(),
     ) as sched:
         program = (
             sched.prog_builder(
@@ -590,7 +586,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
         on_update=lambda data: buffer_updates.append(data.copy()),
         update_interval=None,
     )
-    with Schedule(_cfg(reps=4, rounds=2), signals_buffer) as sched:
+    with Schedule(_cfg(reps=4, rounds=2), signals_buffer, stop=StopSignal()) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
             .add(module)
@@ -624,24 +620,21 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
 
 def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
-    ambient_stop = StopSignal()
+    run_stop = StopSignal()
 
-    with schedule_stop_scope(ambient_stop):
-        with Schedule(_cfg(reps=4, rounds=2), signals_buffer) as sched:
-            result = (
-                sched.prog_builder(
-                    "soc", "soccfg", program_cls=FakeProgram, marker="kw"
-                )
-                .add(FakeModule("readout"))
-                .build_and_acquire(
-                    raw2signal_fn=_identity_array,
-                    stop_condition=lambda: True,
-                )
+    with Schedule(_cfg(reps=4, rounds=2), signals_buffer, stop=run_stop) as sched:
+        result = (
+            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
+            .add(FakeModule("readout"))
+            .build_and_acquire(
+                raw2signal_fn=_identity_array,
+                stop_condition=lambda: True,
             )
-            assert sched.outcome.status == "completed"
-            assert ambient_stop.is_set() is False
-            assert ambient_stop.error is None
-            ambient_stop.raise_if_error()
+        )
+        assert sched.outcome.status == "completed"
+        assert run_stop.is_set() is False
+        assert run_stop.error is None
+        run_stop.raise_if_error()
 
     np.testing.assert_allclose(result, np.array([2.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
@@ -651,7 +644,9 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
     progress_bars: list[RecordingProgressBar] = []
 
     def run_root_acquire(progress_leave: bool | None = None) -> None:
-        with Schedule(_cfg(rounds=2), SignalBuffer((1,), dtype=np.float64)) as sched:
+        with Schedule(
+            _cfg(rounds=2), SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+        ) as sched:
             builder = sched.prog_builder(
                 "soc",
                 "soccfg",
@@ -678,7 +673,7 @@ def test_build_and_acquire_rebuilds_program_on_retry():
     FlakyBuildProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
             .add(FakeModule("readout"))
@@ -693,21 +688,20 @@ def test_build_and_acquire_rebuilds_program_on_retry():
     assert FlakyBuildProgram.instances[1].acquire_count == 1
 
 
-def test_build_and_acquire_retry_clears_ambient_failure_cause():
+def test_build_and_acquire_retry_clears_shared_failure_cause():
     FlakyBuildProgram.instances.clear()
-    ambient_stop = StopSignal()
+    run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with schedule_stop_scope(ambient_stop):
-        with Schedule(_cfg(rounds=1), signals_buffer) as sched:
-            result = (
-                sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
-                .add(FakeModule("readout"))
-                .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
-            )
-            assert sched.outcome.status == "completed"
-            assert ambient_stop.error is None
-            ambient_stop.raise_if_error()
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=run_stop) as sched:
+        result = (
+            sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
+            .add(FakeModule("readout"))
+            .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
+        )
+        assert sched.outcome.status == "completed"
+        assert run_stop.error is None
+        run_stop.raise_if_error()
 
     np.testing.assert_allclose(result, np.array([4.0]))
 
@@ -716,7 +710,7 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
     InterruptingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=InterruptingProgram)
             .add(FakeModule("readout"))
@@ -735,7 +729,7 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
 def test_build_and_acquire_first_round_stop_returns_nan_partial():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=2), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched:
         StopBeforeDataProgram.external_stop = sched.stop
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=StopBeforeDataProgram)
@@ -755,7 +749,7 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
     AlwaysFailingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
             .add(FakeModule("readout"))
@@ -773,26 +767,25 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
     assert AlwaysFailingProgram.instances[1].acquire_count == 1
 
 
-def test_build_and_acquire_records_failed_outcome_on_ambient_stop_signal():
+def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
     AlwaysFailingProgram.instances.clear()
-    ambient_stop = StopSignal()
+    run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with schedule_stop_scope(ambient_stop):
-        with Schedule(_cfg(rounds=1), signals_buffer) as sched:
-            result = (
-                sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
-                .add(FakeModule("readout"))
-                .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
-            )
-            assert sched.outcome.status == "failed"
-            assert ambient_stop.error is not None
-            assert ambient_stop.error.status == "failed"
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=run_stop) as sched:
+        result = (
+            sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
+            .add(FakeModule("readout"))
+            .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
+        )
+        assert sched.outcome.status == "failed"
+        assert run_stop.error is not None
+        assert run_stop.error.status == "failed"
 
-        with pytest.raises(
-            ScheduleOutcomeError, match="RuntimeError: permanent failure"
-        ) as exc_info:
-            ambient_stop.raise_if_error()
+    with pytest.raises(
+        ScheduleOutcomeError, match="RuntimeError: permanent failure"
+    ) as exc_info:
+        run_stop.raise_if_error()
 
     assert exc_info.value.exception is sched.outcome.exception
     np.testing.assert_allclose(result, np.array([2.0]))
@@ -897,7 +890,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
 def test_scan_returns_partial_when_program_build_fails():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for value, step in sched.scan("value", [0.0, 1.0, 2.0]):
             setattr(step.cfg, "value", value)
             step.prog_builder(
@@ -923,7 +916,7 @@ def test_run_program_reuses_caller_owned_program_cache():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
     programs: dict[float, FakeCachedProgram] = {}
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for value, step in sched.scan("value", [1.0, 1.0, 2.0]):
             setattr(step.cfg, "value", value)
             builder = step.prog_builder(
@@ -956,7 +949,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
         update_interval=None,
     )
 
-    with Schedule(_cfg(reps=1, rounds=2), signals_buffer) as sched:
+    with Schedule(_cfg(reps=1, rounds=2), signals_buffer, stop=StopSignal()) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeDecimatedProgram)
             .add(FakeModule("readout"))
@@ -981,7 +974,7 @@ def test_schedule_registers_program_derived_buffer_before_decimated_run():
     FakeDecimatedProgram.instances.clear()
     buffer_updates: list[np.ndarray] = []
 
-    with Schedule(_cfg(reps=1, rounds=2)) as sched:
+    with Schedule(_cfg(reps=1, rounds=2), stop=StopSignal()) as sched:
         builder = sched.prog_builder(
             "soc",
             "soccfg",
@@ -1010,6 +1003,7 @@ def test_schedule_rejects_multiple_root_buffers_at_construction() -> None:
             _cfg(),
             RecordingBuffer(np.zeros((1,))),
             RecordingBuffer(np.zeros((1,))),
+            stop=StopSignal(),
         )
 
 
@@ -1017,7 +1011,7 @@ def test_schedule_rejects_registering_multiple_root_buffers() -> None:
     first = RecordingBuffer(np.zeros((1,)))
     second = RecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg(), first) as sched:
+    with Schedule(_cfg(), first, stop=StopSignal()) as sched:
         with np.testing.assert_raises_regex(
             ValueError, "at most one root result buffer"
         ):
@@ -1027,7 +1021,7 @@ def test_schedule_rejects_registering_multiple_root_buffers() -> None:
 def test_schedule_allows_registering_one_root_buffer_later() -> None:
     buffer = RecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg()) as sched:
+    with Schedule(_cfg(), stop=StopSignal()) as sched:
         sched.register_buffer(buffer)
         assert sched.data is buffer.data
 
@@ -1035,7 +1029,7 @@ def test_schedule_allows_registering_one_root_buffer_later() -> None:
 def test_schedule_root_trigger_update_passes_none_step() -> None:
     buffer = RootUpdateRecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg(), buffer) as sched:
+    with Schedule(_cfg(), buffer, stop=StopSignal()) as sched:
         sched.trigger_update(flush=True)
 
     assert buffer.calls == [(None, True)]
@@ -1076,7 +1070,9 @@ def test_schedule_uses_own_stop_signal():
 
 
 def test_schedule_operations_require_context():
-    sched = Schedule(_cfg(rounds=1), SignalBuffer((1,), dtype=np.float64))
+    sched = Schedule(
+        _cfg(rounds=1), SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+    )
 
     try:
         sched.prog_builder("soc", "soccfg", marker="x")
@@ -1089,7 +1085,7 @@ def test_schedule_operations_require_context():
 def test_schedule_step_data_operations_require_context() -> None:
     root = {"child": {"signals": np.full((1,), np.nan)}}
 
-    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
         step = next(iter(sched.batch({"child": lambda child: child}).values()))
         assert step.path == ("child",)
 
@@ -1112,7 +1108,7 @@ def test_schedule_step_data_operations_require_context() -> None:
 def test_schedule_requires_explicit_modules():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         builder = sched.prog_builder("soc", "soccfg", marker="x")
         try:
             builder.build()
@@ -1125,7 +1121,7 @@ def test_schedule_requires_explicit_modules():
 def test_schedule_scan_targets_buffer_step_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for value, step in sched.scan("value", [10.0, 20.0, 30.0]):
             assert step.value == value
             assert isinstance(step.index, int)
@@ -1146,7 +1142,7 @@ def test_schedule_scan_targets_buffer_step_without_mutating_env():
 def test_schedule_repeat_targets_step_buffer_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for index, step in sched.repeat("round", 3, interval=0.0):
             assert step.index == index
             assert step.value == index
@@ -1166,7 +1162,7 @@ def test_schedule_repeat_targets_step_buffer_without_mutating_env():
 def test_schedule_env_accepts_dataclass_context():
     env = FlowEnv(label="typed", scale=2.0)
 
-    with Schedule(_cfg(), env=env) as sched:
+    with Schedule(_cfg(), env=env, stop=StopSignal()) as sched:
         assert sched.env.label == "typed"
         for value, step in sched.scan("value", [3.0]):
             assert step.env is env
@@ -1176,7 +1172,7 @@ def test_schedule_env_accepts_dataclass_context():
 def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
     signals_buffer = SignalBuffer((2, 3), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         for repeat_index, repeat_step in sched.repeat("round", 2):
             for length_value, step in repeat_step.scan("length", [10.0, 20.0, 30.0]):
                 assert step.path == (repeat_index, step.index)
@@ -1196,7 +1192,7 @@ def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
 
 
 def test_schedule_repeat_validates_times_and_interval():
-    with Schedule(_cfg()) as sched:
+    with Schedule(_cfg(), stop=StopSignal()) as sched:
         try:
             list(sched.repeat("round", -1))
         except ValueError as exc:
@@ -1215,7 +1211,7 @@ def test_schedule_repeat_validates_times_and_interval():
 def test_schedule_repeat_obeys_stop_signal():
     seen: list[int] = []
 
-    with Schedule(_cfg()) as sched:
+    with Schedule(_cfg(), stop=StopSignal()) as sched:
         for index, _step in sched.repeat("round", 3):
             seen.append(index)
             sched.set_stop()
@@ -1239,7 +1235,7 @@ def test_schedule_batch_runs_children_with_isolated_cfgs():
         return getattr(step.cfg, "marker")
 
     init_cfg = _cfg(marker="base")
-    with Schedule(init_cfg) as sched:
+    with Schedule(init_cfg, stop=StopSignal()) as sched:
         results = sched.batch({"a": child_a, "b": child_b})
         assert getattr(sched.cfg, "marker") == "base"
 
@@ -1266,7 +1262,7 @@ def test_schedule_batch_returns_partial_on_child_exception_without_retry():
         later_called = True
         return "later"
 
-    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
         results = sched.batch({"child": failing, "later": later})
         assert results == {}
         assert sched.outcome.status == "failed"
@@ -1291,7 +1287,7 @@ def test_schedule_batch_string_key_default_program_target_marks_failed_outcome()
             raw2signal_fn=_identity_array,
         )
 
-    with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
         results = sched.batch({"child": child})
         assert results == {}
         assert sched.outcome.status == "failed"
@@ -1315,7 +1311,7 @@ def test_schedule_batch_string_key_uses_child_local_default_buffer():
             raw2signal_fn=_identity_array,
         )
 
-    with Schedule(_cfg(rounds=1), RecordingBuffer(root)) as sched:
+    with Schedule(_cfg(rounds=1), RecordingBuffer(root), stop=StopSignal()) as sched:
         sched.batch({"child": child})
 
     assert np.allclose(root["child"]["signals"], [6.0])
@@ -1346,14 +1342,14 @@ def test_schedule_child_buffer_validates_target_before_acquire() -> None:
         else:
             raise AssertionError("buffer should reject non-array targets")
 
-    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
         sched.batch({"child": child})
 
 
 def test_schedule_child_local_buffers_are_cleared_after_batch() -> None:
     root = {"child": {"signals": np.full((1,), np.nan)}}
 
-    with Schedule(_cfg(), RecordingBuffer(root)) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
 
         def child(step):
             signals_step = step.child("signals")
@@ -1381,7 +1377,7 @@ def test_schedule_batch_does_not_retry_keyboard_interrupt():
         later_called = True
         return "later"
 
-    with Schedule(_cfg()) as sched:
+    with Schedule(_cfg(), stop=StopSignal()) as sched:
         results = sched.batch({"a": interrupted, "b": later})
         assert sched.is_stop() is True
         assert sched.outcome.status == "interrupted"

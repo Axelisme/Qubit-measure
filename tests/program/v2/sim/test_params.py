@@ -85,13 +85,6 @@ class TestSimParamsConstruction:
         assert p.readout_decay_threshold_ratio == 0.1
         assert p.readout_decay_exponent == 1.0
         assert p.seed is None
-        # FLUX-AWARE-MOCK: flux_device defaults to None (fixed reduced flux = 1.0).
-        assert p.flux_device is None
-
-    def test_flux_device_explicit(self) -> None:
-        # FLUX-AWARE-MOCK: flux_device names a device whose live value drives flux.
-        p = SimParams(**_VALID, flux_device="flux")
-        assert p.flux_device == "flux"
 
     def test_optional_fields_explicit(self) -> None:
         p = SimParams(**_VALID, flux_bias=0.0005, Temp=0.035, seed=42)

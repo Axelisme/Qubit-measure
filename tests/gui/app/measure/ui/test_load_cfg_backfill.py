@@ -5,6 +5,7 @@ import pytest
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QFileDialog, QLineEdit, QPushButton, QTabWidget
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -42,7 +43,7 @@ class RuntimeCfg(ExpCfgModel):
 
 @dataclass
 class Result:
-    cfg_snapshot: RuntimeCfg | None
+    data_path: str
 
 
 class LoadAdapter(OldAdapter):
@@ -50,8 +51,9 @@ class LoadAdapter(OldAdapter):
         load_data=True, analysis=AnalysisMode.NONE
     )
 
-    def load(self, req: LoadDataRequest) -> Result:
-        return Result(None if req.data_path == "missing.hdf5" else RuntimeCfg())
+    def load(self, req: LoadDataRequest) -> RunRecord[RuntimeCfg, Result]:
+        cfg = None if req.data_path == "missing.hdf5" else RuntimeCfg()
+        return RunRecord(cfg=cfg, result=Result(req.data_path))
 
 
 @pytest.fixture
@@ -210,7 +212,9 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     assert state.active_tab_id == focused
     assert window.get_view_snapshot()["active_tab_id"] == focused
 
-    def reject_load(self: LoadAdapter, req: LoadDataRequest) -> Result:
+    def reject_load(
+        self: LoadAdapter, req: LoadDataRequest
+    ) -> RunRecord[RuntimeCfg, Result]:
         raise LoadDataError("bad data", reason_code="invalid_data_file")
 
     monkeypatch.setattr(LoadAdapter, "load", reject_load)

@@ -1,5 +1,7 @@
 """Search kernel and pyplot diagnostic integration contracts."""
 
+from io import BytesIO
+
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
@@ -70,11 +72,22 @@ def test_builder_matches_notebook_figure_and_show(tmp_path, monkeypatch):
     result = search_database(*args[:4], ParamBounds(EJ=args[4], EC=args[5], EL=args[6]))
     fig = make_search_diagnostic_figure(result)
     shows = []
-    monkeypatch.setattr(plt, "show", lambda: shows.append(True))
+    monkeypatch.setattr(
+        "zcu_tools.notebook.analysis.fluxdep.fitting.display", shows.append
+    )
     _, notebook_fig = search_in_database(*args, plot=True)
     try:
         assert notebook_fig is not None
-        assert shows == [True]
+        image = BytesIO()
+        notebook_fig.savefig(image, format="png")
+        assert len(shows) == 1
+        assert shows[0].data == image.getvalue()
+        assert fig.canvas.manager is None
+        assert notebook_fig.canvas.manager is None
+        params, hidden = search_in_database(*args, plot=False)
+        assert params == result.params
+        assert hidden is None
+        assert len(shows) == 1
         assert len(fig.axes) == len(notebook_fig.axes) == 4
         assert fig.get_suptitle() == notebook_fig.get_suptitle()
         assert fig.axes[0].get_xlabel() == notebook_fig.axes[0].get_xlabel() == "Flux"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
@@ -22,6 +21,8 @@ class FallbackBackend(LivePlotBackend):
     def make_plot_frame(
         self, n_row: int, n_col: int, plot_instant: bool = False, **kwargs: Any
     ) -> tuple[Figure, list[list[Axes]]]:
+        import matplotlib.pyplot as plt
+
         kwargs.setdefault("squeeze", False)
         kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
         fig, axs_nd = plt.subplots(n_row, n_col, **kwargs)
@@ -38,9 +39,13 @@ class FallbackBackend(LivePlotBackend):
         fig.show(warn=False)
 
     def refresh_figure(self, fig: Figure) -> None:
+        import matplotlib.pyplot as plt
+
         fig.canvas.draw_idle()
         if plt.isinteractive():
             plt.pause(0.001)
 
     def close_figure(self, fig: Figure) -> None:
+        import matplotlib.pyplot as plt
+
         plt.close(fig)

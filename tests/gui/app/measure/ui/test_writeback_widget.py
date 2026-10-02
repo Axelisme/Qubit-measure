@@ -13,6 +13,8 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QTableWidget,
 )
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
@@ -26,6 +28,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -50,10 +53,17 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     schema = adapter.make_default_cfg(ctx)
     from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 
+    run_plots = Plots(NonPresentingHost())
     result = adapter.run(
         RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
         schema_to_raw_dict(schema, ctx.md, ctx.ml),
+        context=RunContext(
+            ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+        ),
     )
+    run_plots.finish()
+    run_plots.release()
+    analysis_plots = Plots(NonPresentingHost())
     analyze_result = adapter.analyze(
         AnalyzeRequest(
             run_result=result,
@@ -61,8 +71,11 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
             md=ctx.md,
             ml=ctx.ml,
             predictor=ctx.predictor,
-        )
+        ),
+        plots=analysis_plots,
     )
+    analysis_plots.finish()
+    analysis_plots.release()
     items = list(
         adapter.get_writeback_items(
             WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)

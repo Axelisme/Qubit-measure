@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 
 
 def make_search_diagnostic_figure(result: DatabaseSearchResult) -> Figure:
-    """Create the pyplot-managed diagnostic Figure without showing it."""
-    fig = plt.figure(figsize=(10, 7))
-    assert isinstance(fig, Figure)
+    """Create a native diagnostic Figure without registering or presenting it."""
+    fig = Figure(figsize=(10, 7))
+    FigureCanvasAgg(fig)
     gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 
     fig.suptitle(

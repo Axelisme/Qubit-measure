@@ -17,6 +17,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.device import BaseDevice
+from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePlan,
@@ -45,10 +49,28 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
     from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, Notify
+
+
+def make_run_context(
+    *,
+    soc: Any = None,
+    soccfg: Any = None,
+    devices: Mapping[str, BaseDevice[Any]] | None = None,
+    cancel_signal: StopSignal | None = None,
+) -> RunContext:
+    return RunContext(
+        soc=soc,
+        soccfg=soccfg,
+        devices={} if devices is None else devices,
+        plots=Plots(NonPresentingHost()),
+        cancel_signal=StopSignal() if cancel_signal is None else cancel_signal,
+    )
+
 
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
 NodeField = tuple[str, CfgNodeSpec, Any]
@@ -407,58 +429,25 @@ def _default_test_simparams() -> Any:
 
 
 def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
-    """Establish a mock SoC synchronously-enough for a headless test.
-
-    The session ``ConnectionService`` settles a mock connect via
-    ``QTimer.singleShot``, so we drive it through the controller's public connect
-    API and pump a ``QEventLoop`` until the outcome signal fires (the same pattern
-    measure-gui's tests use). The autouse ``qapp`` fixture has already created the
-    QApplication. On return, ``ctrl.state.session_env.soc`` is the MockSoc and
-    ``has_setup`` is true.
-
-    FLUX-AWARE-MOCK: a mock connect also fires the shared MockFluxProvisioner,
-    which registers + ramps a ``fake_flux`` FakeDevice through the controller's
-    BackgroundRunner (async). We pump until that settles so a flux-aware acquire
-    sees the operating value and no background op is left running at teardown
-    (an unquiesced worker QThread segfaults the process). Best-effort with a
-    timeout — a test that does not exercise flux still returns promptly.
-    """
-    from qtpy.QtCore import QCoreApplication, QEventLoop
-    from zcu_tools.gui.session.services.connection import ConnectMockRequest
-    from zcu_tools.gui.session.services.mock_flux import (
-        FAKE_FLUX_DEVICE_NAME,
-        FAKE_FLUX_INITIAL_VALUE,
-    )
-    from zcu_tools.gui.session.state import DeviceStatus
+    """Wait for the explicit environment entry, including device initialization."""
+    from qtpy.QtCore import QCoreApplication
 
     ensure_test_project(ctrl)
-    loop = QEventLoop()
-    ctrl.bind_connection_outcome(
-        on_finished=loop.quit, on_failed=lambda _msg: loop.quit()
-    )
-    # Use poll_latency=0.0 by default in tests to skip mock sleep overhead.
-    # The SimEngine physics (IQ values, noise, fits) is unaffected by this field.
     if sim_params is None:
         sim_params = _default_test_simparams()
-    ctrl.start_connect(ConnectMockRequest(sim_params=sim_params))
-    loop.exec()
-
-    # Drive the async fake_flux provisioning (connect + initial-value ramp) to
-    # completion before returning.
+    finished: list[bool] = []
+    errors: list[str] = []
+    ctrl.setup_control.bind_connection_outcome(
+        lambda: finished.append(True), errors.append
+    )
+    ctrl.setup_control.start_simulated_environment(sim_params=sim_params)
     app = QCoreApplication.instance()
     assert app is not None
     deadline = time.monotonic() + 3.0
-    while time.monotonic() < deadline:
+    while time.monotonic() < deadline and not (finished or errors):
         app.processEvents()
-        dev = ctrl.state.get_device(FAKE_FLUX_DEVICE_NAME)
-        if (
-            dev is not None
-            and dev.status is DeviceStatus.CONNECTED
-            and dev.info is not None
-            and getattr(dev.info, "value", None) == FAKE_FLUX_INITIAL_VALUE
-        ):
-            break
         time.sleep(0.005)
+    assert finished, errors or "Simulated environment setup timed out"
 
 
 def pump_controller_until_idle(ctrl: Controller, *, timeout: float = 5.0) -> None:
@@ -554,10 +543,10 @@ def make_builder(
                 return None
             return result_factory(schema, flux)
 
-        def make_plotter(self, figure: Any) -> Any:
+        def make_plotter(self, plots: Plots, figure_name: str) -> Any:
             if plotter_factory is None:
                 return None
-            return plotter_factory(figure)
+            return plotter_factory(plots[figure_name])
 
     b = _AdHocBuilder()
     b.name = name
@@ -684,24 +673,39 @@ ACQUIRE_READOUT = {
 }
 
 
-def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any):
+def make_acquire_env(
+    ctrl: Controller,
+    *,
+    flux: float,
+    flux_idx: int,
+    cancel_signal: StopSignal | None = None,
+    **kw: Any,
+) -> RunEnv:
     """A ``RunEnv`` carrying the connected mock soc/soccfg + the fake_flux pick.
 
-    Mirrors what ``Orchestrator._make_env`` curries for a real run, so a Node
-    built off this env runs the same real-acquire path a full run would.
+    The node owns an isolated in-memory flux device and matching snapshot;
+    the controller supplies only the connected mock soc/soccfg.
     Extra keyword args (schema / ml / result / tools) flow straight through —
     ``schema`` is the placement's ``NodeCfgSchema`` (build it via ``node_schema``).
     """
-    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
+    from zcu_tools.gui.session.services.simulated_environment import (
+        FAKE_FLUX_DEVICE_NAME,
+    )
 
     ctx = ctrl.state.session_env
+    flux_device = FakeDevice(fast_mode=True)
     return RunEnv(
         flux=flux,
         flux_idx=flux_idx,
-        soc=ctx.soc,
-        soccfg=ctx.soccfg,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         **kw,
+        context=make_run_context(
+            soc=ctx.soc,
+            soccfg=ctx.soccfg,
+            devices={FAKE_FLUX_DEVICE_NAME: flux_device},
+            cancel_signal=cancel_signal,
+        ),
+        device_snapshot={FAKE_FLUX_DEVICE_NAME: flux_device.get_info()},
     )
 
 

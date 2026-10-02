@@ -7,7 +7,7 @@ class FakeDeviceRegistry:
     """In-memory DeviceRegistryPort for unit tests.
 
     MagicMock drivers are useful for asserting service interactions, but the
-    production GlobalDeviceManager intentionally accepts only BaseDevice
+    production DeviceManager intentionally accepts only BaseDevice
     instances. This registry keeps those concerns separate.
     """
 

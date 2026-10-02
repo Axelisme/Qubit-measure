@@ -8,6 +8,8 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.plotting.plots import Plots
+
 from .base import GE_FitResult, fidelity_func
 from .center import fit_ge_by_center
 from .manual import fit_ge_manual
@@ -87,9 +89,11 @@ def singleshot_visualize(
 def singleshot_ge_analysis(
     signals: NDArray[np.complex128],
     angle: float | None = None,
-    backend: Literal["center", "regression", "pca"] = "pca",
+    backend: Literal["center", "pca"] = "pca",
+    *,
+    plots: Plots,
     **kwargs,
-) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
+) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     """
     Analyze ground and excited state signals to determine classification parameters.
 
@@ -103,28 +107,23 @@ def singleshot_ge_analysis(
         First row should contain ground state signals, second row excited state signals.
     angle : float, default=None
         if given, use this angle for rotation, ignore backend
-    backend : Literal["center", "regression", "pca"], default="pca"
-        Method used for determining optimal rotation angle:
-        - "center": Uses median of ground and excited signal clusters to determine rotation.
-        - "regression": Uses logistic regression to find optimal decision boundary.
-        - "pca": Uses PCA to find optimal rotation angle.
+    backend : Literal["center", "pca"], default="pca"
+        Method used for determining the rotation angle when angle is absent.
+    plots : Plots
+        Operation that owns the named fit figure.
 
     Returns
     -------
-    tuple[float, float, float, np.ndarray]
-        A tuple containing:
-        - fidelity: The assignment fidelity between ground and excited states (0.5-1.0)
-        - threshold: The optimal threshold value for state discrimination
-        - theta_deg: The optimal rotation angle in degrees
-        - populations: The populations of ground and excited states
+    tuple[float, NDArray, GE_FitResult]
+        Assignment fidelity, refined preparation populations and calibration.
     """
     if angle is not None:
-        return fit_ge_manual(signals, angle, **kwargs)
+        return fit_ge_manual(signals, angle, plots=plots, **kwargs)
 
     if backend == "center":
-        return fit_ge_by_center(signals, **kwargs)
+        return fit_ge_by_center(signals, plots=plots, **kwargs)
     if backend == "pca":
-        return fit_ge_by_pca(signals, **kwargs)
+        return fit_ge_by_pca(signals, plots=plots, **kwargs)
 
     raise ValueError(f"Unknown backend: {backend}")
 

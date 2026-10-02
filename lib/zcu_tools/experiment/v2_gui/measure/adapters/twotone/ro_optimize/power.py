@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.ro_optimize.power import (
+    PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
     PowerResult,
@@ -25,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeResultBase,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -32,8 +34,9 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
-RoOptPowerRunResult: TypeAlias = PowerResult
+RoOptPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 
 @dataclass
@@ -50,7 +53,6 @@ class RoOptPowerAnalyzeParams:
 @dataclass
 class RoOptPowerAnalyzeResult(AnalyzeResultBase):
     best_gain: float
-    figure: Figure
 
 
 class RoOptPowerAdapter(
@@ -121,17 +123,32 @@ class RoOptPowerAdapter(
             .build()
         )
 
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> RoOptPowerRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, PowerExp().run(cfg, context=context))
+
     def analyze(
-        self, req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams]
+        self,
+        req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> RoOptPowerAnalyzeResult:
         params = req.analyze_params
-        best_gain, fig = PowerExp().analyze(
-            req.run_result,
+        options = PowerAnalyzeOptions(
             penalty_ratio=params.penalty_ratio,
             smooth=params.smooth,
             smooth_method=params.smooth_method,
         )
-        return RoOptPowerAnalyzeResult(best_gain=best_gain, figure=fig)
+        result = PowerExp().analyze(req.run_result, options, plots=plots)
+        return RoOptPowerAnalyzeResult(
+            best_gain=result.best_gain,
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[RoOptPowerRunResult, RoOptPowerAnalyzeResult]
@@ -147,7 +164,7 @@ class RoOptPowerAdapter(
         items.extend(
             readout_dpm_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 proposed={"best_ro_gain": result.best_gain},
             )
         )

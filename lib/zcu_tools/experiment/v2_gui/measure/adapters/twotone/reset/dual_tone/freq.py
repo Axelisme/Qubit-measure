@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.dual_tone.freq import (
+    FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
     FreqResult,
@@ -33,16 +34,16 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.gui.cfg import (
     EvalValue,
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import RESET_120_FIELD_MD_MAP
 
-DualToneFreqRunResult: TypeAlias = FreqResult
+DualToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 def _reset_freq_axis(
@@ -86,7 +87,6 @@ class DualToneFreqAnalyzeParams:
 class DualToneFreqAnalyzeResult(AnalyzeResultBase):
     freq1: float
     freq2: float
-    figure: Figure
 
 
 class DualToneFreqAdapter(
@@ -169,23 +169,32 @@ class DualToneFreqAdapter(
             .build()
         )
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> DualToneFreqRunResult:
-        # The dual-tone freq map runs as a 2D hard sweep (both freq axes are QICK
-        # register sweeps); the notebook drives FreqExp.run with method="hard".
-        # BaseAdapter.run does not pass method, so override to inject it while
-        # keeping the same soc-handle / build-cfg policy.
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
+        cfg = super().build_exp_cfg(raw_cfg, req)
+        return cfg.with_updates(method="hard")
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> DualToneFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        soc, soccfg = require_soc_handles(req)
-        return self.exp_cls().run(soc, soccfg, cfg, method="hard")
+        result = FreqExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[DualToneFreqRunResult, DualToneFreqAnalyzeParams]
+        self,
+        req: AnalyzeRequest[DualToneFreqRunResult, DualToneFreqAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> DualToneFreqAnalyzeResult:
         params = req.analyze_params
-        freq1, freq2, fig = FreqExp().analyze(
-            req.run_result, smooth=params.smooth, smooth_method=params.smooth_method
+        result = FreqExp().analyze(
+            req.run_result,
+            FreqAnalyzeOptions(
+                smooth=params.smooth, smooth_method=params.smooth_method
+            ),
+            plots=plots,
         )
-        return DualToneFreqAnalyzeResult(freq1=freq1, freq2=freq2, figure=fig)
+        return DualToneFreqAnalyzeResult(freq1=result.freq1, freq2=result.freq2)
 
     def get_writeback_items(
         self,
@@ -207,7 +216,7 @@ class DualToneFreqAdapter(
         items.extend(
             reset_module_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 target="reset_120",
                 field_md_map=RESET_120_FIELD_MD_MAP,
                 desc="Reset with two pulse from 1 to 2 to 0",

@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
     AutoOptCfg,
     AutoOptExp,
@@ -29,13 +29,13 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
-RoOptAutoRunResult: TypeAlias = AutoOptResult
+RoOptAutoRunResult: TypeAlias = RunRecord[AutoOptCfg, AutoOptResult]
 
 
 @dataclass
@@ -50,7 +50,6 @@ class RoOptAutoAnalyzeResult(AnalyzeResultBase):
     best_freq: float
     best_gain: float
     best_length: float
-    figure: Figure
 
 
 class RoOptAutoAdapter(
@@ -145,34 +144,27 @@ class RoOptAutoAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> AutoOptCfg:
-        cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("num_points", None)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def _num_points(self, raw_cfg: dict[str, object]) -> int:
-        value = raw_cfg.get("num_points")
-        if not isinstance(value, int):
-            raise ValueError("num_points must be an integer")
-        if value <= 0:
-            raise ValueError("num_points must be positive")
-        return value
-
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> RoOptAutoRunResult:
-        soc, soccfg = require_soc_handles(req)
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> RoOptAutoRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        num_points = self._num_points(raw_cfg)
-        return AutoOptExp().run(soc, soccfg, cfg, num_points=num_points)
+        return RunRecord(cfg, AutoOptExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[RoOptAutoRunResult, RoOptAutoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[RoOptAutoRunResult, RoOptAutoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> RoOptAutoAnalyzeResult:
-        best_freq, best_gain, best_length, fig = AutoOptExp().analyze(req.run_result)
+        result = AutoOptExp().analyze(req.run_result, None, plots=plots)
         return RoOptAutoAnalyzeResult(
-            best_freq=best_freq,
-            best_gain=best_gain,
-            best_length=best_length,
-            figure=fig,
+            best_freq=result.best_freq,
+            best_gain=result.best_gain,
+            best_length=result.best_length,
         )
 
     def get_writeback_items(
@@ -199,7 +191,7 @@ class RoOptAutoAdapter(
         items.extend(
             readout_dpm_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 proposed={
                     "best_ro_freq": result.best_freq,
                     "best_ro_gain": result.best_gain,

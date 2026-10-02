@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-09-27 — shared database search kernel
+**Last updated:** 2026-10-01 — shared terminal flux-pick analysis
 
 本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -14,7 +14,7 @@
 - `processing.py`：頻譜轉實數/正規化、2D peak detection、point downsample、mirror difference。
 - `selection.py`：brush selection 的幾何規則，供 grid mask 與 joint point cloud 使用。
 - `onetone.py`：one-tone 最大色散頻率、切面平滑、peak detection 與點位輸出。
-- `line_state.py`：Qt-free `FluxPickState` 與唯讀輸入、初值折疊、移線/交換、mirror-loss 與 auto-align 候選計算。狀態不保存選線、preview 或 Figure。
+- `line_state.py`：Qt-free `FluxPickState` 與唯讀輸入、初值折疊、移線／交換、mirror-loss 與 auto-align 候選計算。`analyze_flux_pick` 驗證終態最小間距，回傳 device-axis 單位的 FluxPickAnalysis，period 是兩線距離的兩倍。計算不改輸入；狀態不保存選線、preview 或 Figure。
 - `line_picker.py`：既有 notebook Matplotlib picker；measure Qt frontend 只用它維護本地 artists/timer，並以 `show_state()` 將 committed state 重投影到畫面。
 
 ## 邊界

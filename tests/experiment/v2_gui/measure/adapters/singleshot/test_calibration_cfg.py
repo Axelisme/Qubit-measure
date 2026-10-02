@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils import make_comment, parse_comment
 from zcu_tools.experiment.v2.runtime import ProgramBuilder
 from zcu_tools.experiment.v2.singleshot import ac_stark
@@ -33,7 +35,23 @@ from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_resolved_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import DirectValue, EvalValue
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+
+@pytest.fixture
+def context_factory():
+    sessions = []
+
+    def make(request):
+        plots = Plots(NonPresentingHost())
+        sessions.append(plots)
+        return RunContext(request.soc, request.soccfg, plots, {}, StopSignal())
+
+    yield make
+    for plots in sessions:
+        plots.finish(present=False)
+        plots.release()
 
 
 @pytest.fixture(
@@ -90,20 +108,6 @@ def calibration(request, monkeypatch):
 
     monkeypatch.setattr(module, "setup_devices", lambda *args, **kwargs: None)
     monkeypatch.setattr(module, "sweep2array", lambda *args, **kwargs: np.array([0.1]))
-    viewer = MagicMock()
-    viewer.__enter__.return_value = viewer
-    for name in ("LivePlot1D", "LivePlot2D", "MultiLivePlot"):
-        monkeypatch.setattr(module, name, lambda *args, **kwargs: viewer, raising=False)
-    monkeypatch.setattr(
-        module,
-        "make_plot_frame",
-        lambda rows, cols, **kwargs: (
-            MagicMock(),
-            [[MagicMock() for _ in range(cols)] for _ in range(rows)],
-        ),
-        raising=False,
-    )
-    monkeypatch.setattr(module, "close_figure", lambda *args: None, raising=False)
     acquisition = MagicMock()
     monkeypatch.setattr(ProgramBuilder, "build_and_acquire", acquisition)
     try:
@@ -112,16 +116,43 @@ def calibration(request, monkeypatch):
         draft.close()
 
 
-def test_population_run_uses_cfg_calibration_and_preserves_result_snapshot(calibration):
+def test_population_gui_run_passes_resolved_calibration_and_explicit_context(
+    calibration, monkeypatch, context_factory
+):
+    adapter, md, _ml, draft, _acquisition = calibration
+    snapshot = draft.snapshot()
+    md.g_center = 100j
+    observed = []
+
+    def record_run(self, cfg, *, context):
+        observed.append((cfg, context))
+        return "acquired"
+
+    monkeypatch.setattr(adapter.exp_cls, "run", record_run)
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    context = context_factory(request)
+    result = adapter.run(request, schema_to_resolved_dict(snapshot), context=context)
+    assert result.result == "acquired"
+    cfg, observed_context = observed[0]
+    assert observed_context is context
+    assert context.soc is request.soc
+    assert context.soccfg is request.soccfg
+    assert (cfg.g_center, cfg.e_center, cfg.radius) == (-1 + 0.25j, 2 - 0.5j, 0.75)
+
+
+def test_population_experiment_preserves_calibration_used_for_acquisition(
+    calibration, context_factory
+):
     adapter, md, _ml, draft, acquisition = calibration
     snapshot = draft.snapshot()
     assert snapshot.value.fields["g_center"] == EvalValue(
         "g_center", resolved=-1 + 0.25j
     )
     md.g_center = 100j
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    cfg = adapter.build_exp_cfg(schema_to_resolved_dict(snapshot), request)
     result = adapter.run(
-        RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
-        schema_to_resolved_dict(snapshot),
+        request, schema_to_resolved_dict(snapshot), context=context_factory(request)
     )
     acquisition.assert_called()
     for call in acquisition.call_args_list:
@@ -130,7 +161,7 @@ def test_population_run_uses_cfg_calibration_and_preserves_result_snapshot(calib
             call.kwargs["e_center"],
             call.kwargs["ge_radius"],
         ) == (-1 + 0.25j, 2 - 0.5j, 0.75)
-    cfg = result.cfg_snapshot
+    cfg = result.cfg
     assert (cfg.g_center, cfg.e_center, cfg.radius) == (-1 + 0.25j, 2 - 0.5j, 0.75)
     draft.set_target("g_center", DirectValue(5j))
     assert cfg.g_center == -1 + 0.25j
@@ -143,25 +174,31 @@ def test_population_run_uses_cfg_calibration_and_preserves_result_snapshot(calib
     )
 
 
-def test_population_direct_override_does_not_write_md(calibration):
+def test_population_direct_override_does_not_write_md(calibration, context_factory):
     adapter, md, _ml, draft, acquisition = calibration
     draft.set_target("g_center", DirectValue(3 + 4j))
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
     result = adapter.run(
-        RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
+        request,
         schema_to_resolved_dict(draft.snapshot()),
+        context=context_factory(request),
     )
-    assert result.cfg_snapshot.g_center == 3 + 4j
+    assert result.cfg.g_center == 3 + 4j
     assert acquisition.call_args.kwargs["g_center"] == 3 + 4j
     assert md.g_center == -1 + 0.25j
 
 
-def test_population_invalid_calibration_rejects_acquisition(calibration):
+def test_population_invalid_calibration_rejects_acquisition(
+    calibration, context_factory
+):
     adapter, _md, _ml, draft, acquisition = calibration
     draft.set_target("g_center", EvalValue("missing_center"))
     assert not draft.is_valid()
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
     with pytest.raises(RuntimeError, match="missing_center"):
         adapter.run(
-            RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
+            request,
             schema_to_resolved_dict(draft.snapshot()),
+            context=context_factory(request),
         )
     acquisition.assert_not_called()

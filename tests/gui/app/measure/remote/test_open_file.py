@@ -5,6 +5,7 @@ from typing import ClassVar
 
 import pytest
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -28,7 +29,7 @@ class LoadedCfg(ExpCfgModel):
 
 @dataclass
 class LoadedResult:
-    cfg_snapshot: LoadedCfg | None
+    data_path: str
 
 
 class FileAdapter(OldAdapter):
@@ -36,10 +37,11 @@ class FileAdapter(OldAdapter):
         load_data=True, analysis=AnalysisMode.NONE
     )
 
-    def load(self, req: LoadDataRequest) -> LoadedResult:
+    def load(self, req: LoadDataRequest) -> RunRecord[LoadedCfg, LoadedResult]:
         if req.data_path == "bad.h5":
             raise ValueError("wrong experiment")
-        return LoadedResult(None if req.data_path == "no-cfg.h5" else LoadedCfg())
+        cfg = None if req.data_path == "no-cfg.h5" else LoadedCfg()
+        return RunRecord(cfg=cfg, result=LoadedResult(req.data_path))
 
 
 @pytest.fixture
@@ -92,8 +94,9 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
     assert outcome["cfg_backfill"] == backfill
     assert fx.state.active_tab_id == tab
     assert fx.state.session_env.soc is None
-    assert fx.state.get_tab(tab).run.result == LoadedResult(
-        None if backfill == "not_applied" else LoadedCfg()
+    assert fx.state.get_tab(tab).run.result == RunRecord(
+        cfg=None if backfill == "not_applied" else LoadedCfg(),
+        result=LoadedResult(path),
     )
     assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
         "knob"
@@ -135,7 +138,9 @@ def test_open_file_backfill_failure_retains_loaded_result(app, monkeypatch):
     assert reply["result"]["cfg_backfill"] == "not_applied"
     tab = reply["result"]["tab_id"]
     assert fx.state.active_tab_id == tab
-    assert fx.state.get_tab(tab).run.result == LoadedResult(LoadedCfg())
+    assert fx.state.get_tab(tab).run.result == RunRecord(
+        cfg=LoadedCfg(), result=LoadedResult("saved.h5")
+    )
     assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
         "knob"
     ] == DirectValue(7)

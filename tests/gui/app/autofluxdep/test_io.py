@@ -17,6 +17,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import (
 )
 from zcu_tools.gui.app.autofluxdep.orchestrator import Orchestrator
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 from ._helpers import make_builder, place
 
 # --- Snapshot: read-only projection of declared keys ---
@@ -100,7 +102,7 @@ def test_orchestrator_fast_fails_on_undeclared_value():
         )  # "b" not in provides
     )
     with pytest.raises(PatchContractError):
-        Orchestrator([bad]).run([0.0])
+        Orchestrator([bad], context=make_run_context(), device_snapshot={}).run([0.0])
 
 
 def test_orchestrator_fast_fails_on_undeclared_module():
@@ -110,4 +112,4 @@ def test_orchestrator_fast_fails_on_undeclared_module():
         )  # provides_modules empty
     )
     with pytest.raises(PatchContractError):
-        Orchestrator([bad]).run([0.0])
+        Orchestrator([bad], context=make_run_context(), device_snapshot={}).run([0.0])

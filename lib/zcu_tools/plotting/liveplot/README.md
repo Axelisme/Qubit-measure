@@ -1,8 +1,8 @@
 # `zcu_tools.plotting.liveplot` 模組重點筆記
 
-**Last updated:** 2026-09-27 — measure app path rename
+**Last updated:** 2026-10-02, standalone backend 與 explicit plots
 
-供 Notebook、experiment runtime 與註冊 backend 的 GUI 使用的即時 matplotlib 繪圖能力。Plotter 以各自的 typed `update()` 增量更新 segment，再透過 active backend 刷新 figure；frontend 的選擇不由 plotter 偵測。家族定位見 [plotting/README.md](../README.md)。
+此模組提供 standalone live plotters 與只接受 Axes 的 segments。Standalone plotter 以 typed `update()` 更新 segment，再透過 active backend 刷新 figure。Operation-owned Plots 使用 explicit axes 與 host，不透過 standalone backend 呈現。家族定位見 [plotting/README.md](../README.md)。
 
 ## 模組分層
 
@@ -13,12 +13,12 @@
 2. `backend/` — backend 契約、註冊與內建 backend
    - `backend/base.py`：`LivePlotBackend` ABC，四個 abstractmethod（`make_plot_frame` / `instant_plot` / `refresh_figure` / `close_figure`）。**liveplot 對前端無認知**：它只驅動「當前 active backend」，不知道也不偵測誰是 GUI。
    - `backend/__init__.py`：active backend **選擇順序**（與 matplotlib backend 名稱解耦）：
-     1. 經 `set_liveplot_backend(backend)`（ContextVar context manager，per-task）註冊者 —— GUI run worker 用它註冊自己的 Qt backend。
+     1. 經 `set_liveplot_backend(backend)`（ContextVar context manager，per-task）註冊者。
      2. `set_default_liveplot_backend(backend)` 設的 process-wide 預設。
      3. 都沒有時，依 matplotlib backend 名稱兜底（名稱含 `nbagg` 或 `widget` → `JupyterBackend`，其餘 → `FallbackBackend`）。
-   - 內建 backend（純 matplotlib，**零 gui/Qt 認知**）：`JupyterBackend`（notebook display）、`FallbackBackend`（`plt.subplots` / `draw_idle`）。
+   - 內建 backend（純 matplotlib，**零 gui/Qt 認知**）：`JupyterBackend`（notebook display）、`FallbackBackend`（`plt.subplots` / `draw_idle`）。pyplot 與 Notebook display 依賴在相應操作執行時才載入；匯入 segment 不初始化 pyplot，也不要求安裝 IPython。
    - 對外統一入口（皆 dispatch 到 `active_backend()`）：`make_plot_frame` / `instant_plot` / `refresh_figure` / `close_figure`。
-   - GUI 的 backend（`QtLivePlotBackend`）**住在 `gui/app/measure/driven/`、不在 liveplot**：它靠註冊進來，故合法認識 gui（`plot_host`），依賴方向 gui → liveplot。它的 `make_plot_frame` 走 `plt.subplots`（被 GUI custom mpl backend 攔截、attach 進 `FigureContainer`），與裸 `plt.subplots()` 及 analysis figure 同一條渲染路徑；`refresh` marshalling 到主線程；`instant_plot`/`close` no-op（figure 建圖當下已 attach、生命週期歸 container）。
+   - GUI 使用 explicit Plots／QtPlotHost，不註冊 standalone liveplot backend。
    - `jupyter` 另保留 module-level `instant_plot` / `grab_frame_with_instant_plot`（notebook 動畫特例直接 import 用）。
 
 3. `segments/` — 與 backend 解耦的純繪圖單元（只吃 `Axes`）
@@ -84,10 +84,7 @@ with MultiLivePlot(fig, {
 - LivePlot 類若要保留圖（例如後續 `savefig`），請設定 `auto_close=False`。
 - 各個單一 segment 的 LivePlot 包裝層（`LivePlot1D`、`LivePlot2D`、`LivePlotScatter`）刻意保留樣板結構，不把 `update()` 放進公共基底，理由是 `update()` 簽名各不相同，強行統一會犧牲型別提示。
 - `active_backend()` 每次呼叫都重新解析（不快取），以保留執行期切換 backend 的彈性。`MultiLivePlot.refresh()` 透過 `backend.refresh_figure()` 呼叫，與 `BaseSegmentLivePlot` 一致。
-- GUI 模式下 LivePlot 嵌進 tab，靠的是 GUI run worker **註冊** `QtLivePlotBackend`（`set_liveplot_backend`），非 liveplot 偵測 routing context。liveplot 對 GUI 零認知。
-- 純桌面 `qtagg`（非 GUI、非 notebook）跑 LivePlot **刻意走 `FallbackBackend`**（`fig.show` + `draw_idle` 已足夠），非另設專屬 qt backend；要 qt 特化再 `set_liveplot_backend` 註冊即可。GUI 的 Qt 整合由 `QtLivePlotBackend` 提供。
-- `LivePlot` run 與 pyplot analysis **共用同一條渲染路徑**：兩者都經 `plt.subplots`/`plt.figure` → GUI custom mpl backend（`GuiFigureManager`）→ attach 進 `FigureContainer`。worker 端的 `draw_idle` 由 `GuiFigureCanvas` 覆寫 marshalling 到主線程，故不會遞迴建圖。
-- Qt bridge 的初始化 thread 很重要；若 bridge 首次在 worker thread 建立，Qt canvas 可能被當成獨立視窗或 attach 失敗，因此 `FigureContainer` 需要在 GUI thread 提前確立 host bridge。
+- 純桌面 qtagg 的 standalone plotter 使用 FallbackBackend，透過 `fig.show` 與 `draw_idle` 呈現。需要自訂 frontend 時可註冊 LivePlotBackend。
 
 ## Notebook figure 生命週期
 
@@ -95,4 +92,4 @@ with MultiLivePlot(fig, {
 backend 在 context 結束時處理 close；在 ipympl/widget 下這避免存活 canvas 在 cell 結束時
 再次顯示。需要保留 figure 供後續 `savefig` 時可以用 `auto_close=False`，但 notebook 中
 可能看到第二次顯示。這裡不覆寫 ipympl 私有 `_ipython_display_` 協議來消除此副作用。
-GUI 註冊的 backend 對 close 需求不直接銷毀宿主 figure，圖由 GUI container 管理。
+GUI 的 operation-owned Plots 不使用這段 standalone close policy；其 host release 只釋放 presentation。

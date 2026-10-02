@@ -33,6 +33,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import fit_rabi
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.autofluxdep._support.acquire import (
@@ -88,6 +89,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep, Need
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -344,10 +346,10 @@ class LenRabiNode(Node):
             ),
             update_interval=None,
         )
-        with Schedule(cfg, signal_buffer) as sched:
+        with Schedule(cfg, signal_buffer, stop=env.context.cancel_signal) as sched:
             builder = sched.prog_builder(
-                env.soc,
-                env.soccfg,
+                env.context.soc,
+                env.context.soccfg,
                 cfg=cfg,
                 program_cls=ModularProgramV2,
             )
@@ -572,9 +574,10 @@ class LenRabiBuilder(Builder):
         lengths = sweepcfg_to_axis(knobs["sweep_range"])
         return Sweep1DResult.allocate(flux, lengths, x_label="pulse length (us)")
 
-    def make_plotter(self, figure: Any) -> ColormapLinePlotter:
+    def make_plotter(self, plots: Plots, figure_name: str) -> ColormapLinePlotter:
         return ColormapLinePlotter(
-            figure,
+            plots,
+            figure_name,
             title="lenrabi",
             y_label="Pulse length (us)",
             num_lines=3,
@@ -736,7 +739,9 @@ class LenRabiBuilder(Builder):
             )
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
-        return ml.make_cfg(raw_cfg, LenRabiCfgTemplate)
+        return assemble_experiment_cfg(
+            raw_cfg, LenRabiCfgTemplate, ml=ml, device_snapshot=env.device_snapshot
+        )
 
 
 EXPERIMENT = LenRabiBuilder()

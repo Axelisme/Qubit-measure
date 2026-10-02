@@ -13,23 +13,19 @@ from .axes_spec import (
     RoleZSpec,
     ZSpec,
 )
-from .base import (
-    AbsExperiment,
-    ExperimentProtocol,
-    PersistableExperiment,
-    record_result,
-    retrieve_result,
-)
+from .base import PersistableExperiment
 from .cfg_model import ExpCfgModel
+from .interfaces import RecordExperiment, SynchronousExperiment
+from .records import AnalysisRecord, RunRecord
 
 __all__ = [
     "config",
     "ExpCfgModel",
-    "AbsExperiment",
+    "RunRecord",
+    "AnalysisRecord",
+    "RecordExperiment",
+    "SynchronousExperiment",
     "PersistableExperiment",
-    "ExperimentProtocol",
-    "record_result",
-    "retrieve_result",
     "Axis",
     "ZSpec",
     "AxesSpec",

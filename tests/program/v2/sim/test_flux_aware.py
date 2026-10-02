@@ -1,33 +1,10 @@
-"""Tests for the FLUX-AWARE-MOCK runtime flux binding.
-
-The mock soc can read its operating flux live from a connected ``FakeDevice``
-instead of pinning it at reduced flux = 1.0.  This is the per-acquire coupling
-that mirrors a real software flux sweep (set device value -> run one acquire ->
-qubit frequency follows).  Covers:
-
-- copy-on-input: ``set_flux_device`` on one mock soc never mutates a shared
-  SimParams (e.g. the GUI singleton), so two socs built from the same params are
-  independent.
-- engine reads flux: a bound FakeDevice's value sets the operating point, so the
-  engine's ``f_qubit`` / dressed resonator track ``value_to_flux(value)``.
-- per-acquire reread: changing the FakeDevice value and acquiring again moves the
-  resonator dip (each acquire builds a fresh engine that reads the live value).
-- fallback: ``flux_device=None`` reproduces the fixed reduced flux = 1.0 path.
-- fail-fast: an unregistered device or a non-FakeDevice raises at acquire time;
-  ``set_flux_device`` on a sim-less white-noise soc raises.
-
-``GlobalDeviceManager`` is a class-level singleton, so an autouse fixture clears
-its registry around every test (mirrors tests/device/test_manager_lock.py).
-"""
+"""Public mock acquisition and explicit live flux-source contracts."""
 
 from __future__ import annotations
 
-import threading
-
 import numpy as np
 import pytest
-from zcu_tools.device import FakeDevice, GlobalDeviceManager
-from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
+from zcu_tools.device import FakeDevice
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -38,7 +15,6 @@ from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-# Same operating regime as test_engine: a finite gap + clear dispersive shift.
 _SIM = SimParams(
     EJ=8.5,
     EC=1.0,
@@ -59,15 +35,6 @@ _SIM = SimParams(
 )
 
 
-@pytest.fixture(autouse=True)
-def _clean_registry():
-    """Keep GlobalDeviceManager's singleton registry empty around each test."""
-
-    GlobalDeviceManager._devices.clear()
-    yield
-    GlobalDeviceManager._devices.clear()
-
-
 def _predictor() -> FluxoniumPredictor:
     return FluxoniumPredictor(
         params=(_SIM.EJ, _SIM.EC, _SIM.EL),
@@ -77,20 +44,11 @@ def _predictor() -> FluxoniumPredictor:
     )
 
 
-def _engine(prog: ModularProgramV2, soc) -> SimEngine:
-    """Build a SimEngine off the soc's internal SimParams copy (narrowed not-None)."""
-
-    sim = soc._sim_params
-    assert sim is not None
-    return SimEngine(prog, sim)
-
-
-def _compiled_onetone(soc, soccfg) -> ModularProgramV2:
-    """A minimal compiled onetone program usable to build a SimEngine directly."""
-
+def _compiled_onetone(soccfg) -> ModularProgramV2:
     sw = SweepCfg(start=7000.0, stop=7200.0, expts=11, step=20.0)
-    ro_param = sweep2param("ro_freq", sw)
-    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    readout = DirectReadoutCfg(
+        ro_ch=0, ro_length=1.0, ro_freq=sweep2param("ro_freq", sw)
+    ).build("ro")
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=20, rounds=1),
@@ -101,159 +59,83 @@ def _compiled_onetone(soc, soccfg) -> ModularProgramV2:
     return prog
 
 
-# ----------------------------------------------------------- copy-on-input
+def test_flux_binding_is_local_to_soc_and_preserves_parameter_values():
+    before = _SIM.model_dump()
+    first, _ = make_mock_soc(sim=_SIM)
+    second, _ = make_mock_soc(sim=_SIM)
+    device = FakeDevice(fast_mode=True)
+    first.set_flux_source(device.get_value)
+    assert first.flux_source is not None
+    assert first.flux_source() == device.get_value()
+    assert second.flux_source is None
+    assert first.sim_params is not _SIM
+    assert first.sim_params is not None
+    assert first.sim_params.model_dump() == before
+    assert _SIM.model_dump() == before
 
 
-def test_set_flux_device_does_not_mutate_shared_params():
-    """copy-on-input: binding flux on one soc leaves the shared SimParams untouched."""
-
-    shared = _SIM  # stand-in for the shared GUI DEFAULT_SIMPARAM singleton
-    soc_a, _ = make_mock_soc(sim=shared)
-    soc_b, _ = make_mock_soc(sim=shared)
-
-    soc_a.set_flux_device("flux")
-
-    # The caller's SimParams and the other soc's internal copy are unaffected.
-    assert shared.flux_device is None
-    assert soc_b._sim_params is not None
-    assert soc_b._sim_params.flux_device is None
-    assert soc_a._sim_params is not None
-    assert soc_a._sim_params.flux_device == "flux"
-
-
-def test_make_mock_soc_copies_params():
-    """The soc holds its own SimParams copy, not the caller's instance."""
-
-    soc, _ = make_mock_soc(sim=_SIM)
-    assert soc._sim_params is not None
-    assert soc._sim_params is not _SIM
-
-
-def test_set_flux_device_without_sim_raises():
-    """A white-noise soc (no SimParams) rejects a flux_device binding (fast-fail)."""
-
-    soc, _ = make_mock_soc()  # sim=None
-    assert soc._sim_params is None
+def test_white_noise_soc_rejects_flux_binding():
+    soc, _ = make_mock_soc()
     with pytest.raises(RuntimeError, match="requires a SimParams"):
-        soc.set_flux_device("flux")
+        soc.set_flux_source(lambda: 0.0)
 
 
-# ----------------------------------------------------------- engine reads flux
+def test_invalid_binding_preserves_previous_source():
+    soc, _ = make_mock_soc(sim=_SIM)
+
+    def source() -> float:
+        return 0.5
+
+    soc.set_flux_source(source)
+    with pytest.raises(TypeError, match="callable"):
+        soc.set_flux_source("unresolved-device")  # type: ignore[arg-type]
+    assert soc.flux_source is source
 
 
-def test_engine_operating_flux_tracks_device_value():
-    """A bound FakeDevice's value sets the engine's reduced operating flux."""
-
-    device_value = 0.8  # value_to_flux -> (0.8 + 0.2 - 0.0)/1.0 + 0.5 = 1.5
-    dev = FakeDevice(fast_mode=True)
-    dev.set_value(device_value)
-    GlobalDeviceManager.register_device("flux", dev)
-
+def test_unbinding_restores_fixed_flux_acquisition():
     soc, soccfg = make_mock_soc(sim=_SIM)
-    soc.set_flux_device("flux")
-    prog = _compiled_onetone(soc, soccfg)
 
-    engine = _engine(prog, soc)
-    f_qubit_ghz, _rf_g, _rf_e = engine._operating_signal()
+    def source() -> float:
+        return _predictor().flux_to_value(1.0)
 
-    # The engine must land on f_qubit at value_to_flux(device_value), i.e. the same
-    # number predict_freq gives for that raw device value.
-    pred = _predictor()
-    expected_mhz = float(pred.predict_freq(device_value))
-    assert f_qubit_ghz * 1e3 == pytest.approx(expected_mhz, rel=1e-9)
-
-
-def test_engine_fallback_matches_fixed_flux():
-    """flux_device=None reproduces the fixed reduced flux = 1.0 operating point."""
-
-    soc, soccfg = make_mock_soc(sim=_SIM)  # no flux_device binding
-    prog = _compiled_onetone(soc, soccfg)
-
-    engine = _engine(prog, soc)
-    f_qubit_ghz, _rf_g, _rf_e = engine._operating_signal()
-
-    pred = _predictor()
-    fixed_value = pred.flux_to_value(1.0)
-    expected_mhz = float(pred.predict_freq(fixed_value))
-    assert f_qubit_ghz * 1e3 == pytest.approx(expected_mhz, rel=1e-9)
+    prog = _compiled_onetone(soccfg)
+    soc.set_flux_source(source)
+    bound = SimEngine(prog, _SIM, flux_source=soc.flux_source).compute_round(0)
+    soc.set_flux_source(None)
+    unbound = SimEngine(prog, _SIM, flux_source=soc.flux_source).compute_round(0)
+    np.testing.assert_array_equal(bound[0], unbound[0])
 
 
-def test_engine_flux_change_moves_f_qubit_per_acquire():
-    """Changing the device value between engine builds moves f_qubit (reread)."""
+def test_engine_reads_source_once_per_acquire_not_per_round():
+    _, soccfg = make_mock_soc(sim=_SIM)
+    prog = _compiled_onetone(soccfg)
+    values = iter([0.0, 0.5])
+    reads = []
 
-    dev = FakeDevice(fast_mode=True)
-    GlobalDeviceManager.register_device("flux", dev)
+    def read_value():
+        value = next(values)
+        reads.append(value)
+        return value
 
+    first = SimEngine(prog, _SIM, flux_source=read_value)
+    first.compute_round(0)
+    first.compute_round(1)
+    assert reads == [0.0]
+    second = SimEngine(prog, _SIM, flux_source=read_value)
+    second.compute_round(0)
+    assert reads == [0.0, 0.5]
+
+
+def test_source_failure_propagates_without_fixed_flux_fallback():
     soc, soccfg = make_mock_soc(sim=_SIM)
-    soc.set_flux_device("flux")
-    prog = _compiled_onetone(soc, soccfg)
 
-    # Two values whose reduced fluxes (0.7 and 1.2) are NOT mirror images about an
-    # integer/half-integer sweet spot, so f_qubit genuinely differs between them.
-    dev.set_value(0.0)  # value_to_flux -> 0.7
-    f1 = _engine(prog, soc)._operating_signal()[0]
+    def failed_source():
+        raise RuntimeError("flux source unavailable")
 
-    dev.set_value(0.5)  # value_to_flux -> 1.2
-    f2 = _engine(prog, soc)._operating_signal()[0]
-
-    # Different flux -> different qubit frequency (the binding is read live).
-    assert abs(f1 - f2) > 1e-3
-
-
-# ----------------------------------------------------------- fail-fast
-
-
-def test_engine_unregistered_device_raises():
-    """A flux_device naming an unregistered device fails at resolution time."""
-
-    soc, soccfg = make_mock_soc(sim=_SIM)
-    soc.set_flux_device("missing")
-    prog = _compiled_onetone(soc, soccfg)
-
-    engine = _engine(prog, soc)
-    with pytest.raises(ValueError, match="not found"):
-        engine._operating_signal()
-
-
-def test_engine_non_fake_device_raises():
-    """A non-FakeDevice flux source fails fast (only FakeDevice is supported)."""
-
-    class _NotFakeInfo(BaseDeviceInfo):
-        type: str = "NotFakeDevice"
-
-    class _NotFakeDevice(BaseDevice[_NotFakeInfo]):
-        info_model = _NotFakeInfo
-
-        def __init__(self) -> None:
-            super().__init__("not-fake", None)
-
-        def _open_session(self, rm):
-            return None
-
-        def _setup(
-            self,
-            cfg: _NotFakeInfo,
-            *,
-            progress: bool = True,
-            stop_event: threading.Event | None = None,
-        ) -> None:
-            return None
-
-        def get_info(self) -> _NotFakeInfo:
-            return _NotFakeInfo(address=self.address)
-
-    GlobalDeviceManager.register_device("flux", _NotFakeDevice())
-
-    soc, soccfg = make_mock_soc(sim=_SIM)
-    soc.set_flux_device("flux")
-    prog = _compiled_onetone(soc, soccfg)
-
-    engine = _engine(prog, soc)
-    with pytest.raises(TypeError, match="must be a FakeDevice"):
-        engine._operating_signal()
-
-
-# ----------------------------------------------------------- end-to-end acquire
+    soc.set_flux_source(failed_source)
+    prog = _compiled_onetone(soccfg)
+    with pytest.raises(RuntimeError, match="flux source unavailable"):
+        prog.acquire(soc, progress=False)
 
 
 def test_acquire_dip_tracks_flux():
@@ -267,10 +149,9 @@ def test_acquire_dip_tracks_flux():
     from zcu_tools.program.v2.sim.readout import resonator_freqs
 
     dev = FakeDevice(fast_mode=True)
-    GlobalDeviceManager.register_device("flux", dev)
 
     soc, soccfg = make_mock_soc(sim=_SIM)
-    soc.set_flux_device("flux")
+    soc.set_flux_source(dev.get_value)
     pred = _predictor()
 
     def _dip_freq(device_value: float) -> float:

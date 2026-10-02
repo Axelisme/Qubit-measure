@@ -13,18 +13,23 @@ directly (replacing the old `_on_run_*` method calls).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.device import BaseDevice, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer, current_stop_signal
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeResult
+from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import (
+    FakeResult,
+    FakeRunResult,
+)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -46,6 +51,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DirectValue,
     EvalValue,
     ScalarSpec,
 )
@@ -61,6 +67,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -100,6 +107,10 @@ def _make_state(
         ),
     )
     return state, tab_id, adapter
+
+
+def _plots() -> Plots:
+    return Plots(NonPresentingHost())
 
 
 def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
@@ -193,6 +204,7 @@ def _make_run_service(
     *,
     fail_submit: bool = False,
     mock_emit: bool = True,
+    devices: Mapping[str, BaseDevice[Any]] | None = None,
 ) -> tuple[RunService, OperationGate, _FakeBg, OperationHandles]:
     bg = _FakeBg(fail_submit=fail_submit)
     bus = EventBus()
@@ -203,7 +215,15 @@ def _make_run_service(
     writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, bg, bus)  # type: ignore[arg-type]
-    svc = RunService(state, runner, bus, handles, writeback, gate=gate)
+    svc = RunService(
+        state,
+        runner,
+        bus,
+        handles,
+        writeback,
+        gate=gate,
+        devices=lambda: {} if devices is None else devices,
+    )
     return svc, gate, bg, handles
 
 
@@ -228,7 +248,7 @@ def test_run_started_and_terminal_events_keep_operation_origin(
     )
 
     with svc._bus.origin(origin):  # type: ignore[attr-defined]
-        token = svc.start_run(_make_permit(state, tab_id, adapter))
+        token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
     assert bg.last_on_done is not None
     bg.last_on_done(object())
 
@@ -259,7 +279,7 @@ def test_start_run_acquires_lease_and_submits_to_bg():
     state, tab_id, adapter = _make_state()
     svc, gate, bg, _ = _make_run_service(state)
 
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # bg.submit was called (work captured in _FakeBg)
     assert bg.last_work is not None
@@ -274,13 +294,11 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 def test_worker_executes_permit_after_model_changes_and_releases_lease():
     state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
     state.session_env.md.update(gain=0.25)
-    cfg = make_cfg(
-        CfgSchema(
-            CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
-            CfgSectionValue(fields={"gain": EvalValue("gain")}),
-        ),
-        state=state,
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
+        CfgSectionValue(fields={"gain": EvalValue("gain")}),
     )
+    cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).cfg = cfg
     permit = GuardService(state).acquire_run_permit(
         tab_id, expected_revision=CfgRevision(0)
@@ -288,24 +306,37 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     svc, gate, bg, _ = _make_run_service(state)
     result = object()
     adapter.run.return_value = result
+    plots = _plots()
 
-    svc.start_run(permit)
+    svc.start_run(permit, plots=plots)
+    schema.value.fields["gain"] = DirectValue(0.75)
     state.session_env.md.update(gain=0.75)
     state.version.bump("context")
     cfg.refresh(cfg.observe().ref.revision)
     bg.run_work()
 
-    adapter.run.assert_called_once_with(permit.request, {"gain": 0.25})
+    context = adapter.run.call_args.kwargs["context"]
+    adapter.run.assert_called_once_with(permit.request, {"gain": 0.25}, context=context)
+    assert context.plots is plots
+    assert context.soc is permit.request.soc
+    assert context.soccfg is permit.request.soccfg
     assert state.get_tab(tab_id).run.result is result
+    # Run plots are view-only; the canonical run pane owns only the result.
+    assert state.get_tab(tab_id).analysis.plots is None
+    assert state.get_tab(tab_id).post_analysis.plots is None
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
 
 
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
     class RecordingSnapshotAdapter(FakeAdapter):
-        def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeResult:
+        def run(
+            self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        ) -> FakeRunResult:
             # Controlled execution produces an artifact with the real domain cfg builder.
-            return FakeResult(np.empty(0), self.build_exp_cfg(raw_cfg, req))
+            return RunRecord(
+                cfg=self.build_exp_cfg(raw_cfg, req), result=FakeResult(np.empty(0))
+            )
 
     state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
     adapter = RecordingSnapshotAdapter()
@@ -322,16 +353,16 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     accepted_basis = permit.accepted_cfg.source_basis
     service, _gate, background, _handles = _make_run_service(state)
 
-    service.start_run(permit)
+    service.start_run(permit, plots=_plots())
     state.session_env.md.update(gain=0.75)
     state.version.bump("context")
     after = cfg.refresh(cfg.observe().ref.revision)
     background.run_work()
 
     result = state.get_tab(tab_id).run.result
-    assert isinstance(result, FakeResult)
-    assert result.cfg_snapshot is not None
-    assert result.cfg_snapshot.gain == 0.25
+    assert isinstance(result, RunRecord)
+    assert result.cfg is not None
+    assert result.cfg.gain == 0.25
     assert permit.accepted_cfg.ref == accepted_ref
     assert permit.accepted_cfg.source_basis == accepted_basis
     assert after.ref != accepted_ref
@@ -344,7 +375,7 @@ def test_start_run_rejects_when_tab_busy():
     svc, gate, bg, _ = _make_run_service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
-        svc.start_run(_make_permit(state, tab_id, adapter))
+        svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
@@ -357,7 +388,7 @@ def test_start_run_releases_lease_when_submit_raises():
     svc, gate, bg, _ = _make_run_service(state, fail_submit=True)
 
     with pytest.raises(RuntimeError, match="worker boom"):
-        svc.start_run(_make_permit(state, tab_id, adapter))
+        svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert not gate.has_active(OperationKind.RUN)
     assert not state.is_tab_running(tab_id)
@@ -385,7 +416,7 @@ def _last_run_finished_payload(bus_emit: MagicMock):
 def test_run_finished_emits_outcome_finished():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # Trigger on_done without cancel → finished
     assert bg.last_on_done is not None
@@ -400,10 +431,37 @@ def test_run_finished_emits_outcome_finished():
     )
 
 
+@pytest.mark.parametrize("cancel_requested", [False, True])
+def test_result_commit_failure_settles_run_as_failed(
+    monkeypatch, cancel_requested: bool
+) -> None:
+    state, tab_id, adapter = _make_state()
+    svc, _gate, bg, handles = _make_run_service(state)
+    plots = _plots()
+    plots.subplots("trace")
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=plots)
+    monkeypatch.setattr(
+        state,
+        "update_tab_result",
+        MagicMock(side_effect=RuntimeError("commit refused")),
+    )
+    if cancel_requested:
+        assert svc.cancel_run()
+    assert bg.last_on_done is not None
+    bg.last_on_done(object())
+
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error == "commit refused"
+    assert svc.active_token is None
+    assert not state.is_tab_running(tab_id)
+    assert state.get_tab(tab_id).run.result is None
+
+
 def test_run_failed_emits_outcome_failed_with_message():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
@@ -416,8 +474,12 @@ def test_run_failed_emits_outcome_failed_with_message():
 def test_schedule_failure_reports_failed_not_cancelled():
     state, tab_id, adapter = _make_state()
 
-    def run_with_schedule_failure(*_args: Any) -> object:
-        with Schedule(ProgramV2Cfg(), SignalBuffer((1,), dtype=np.float64)) as sched:
+    def run_with_schedule_failure(*_args: Any, context: RunContext) -> object:
+        with Schedule(
+            ProgramV2Cfg(),
+            SignalBuffer((1,), dtype=np.float64),
+            stop=context.cancel_signal,
+        ) as sched:
             _ = (
                 sched.prog_builder(
                     "soc",
@@ -431,7 +493,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
     adapter.run.side_effect = run_with_schedule_failure
     svc, _gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_permit(state, tab_id, adapter))
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     bg.run_work()
 
@@ -449,7 +511,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
 def test_cancel_run_sets_operation_stop_event():
     state, tab_id, adapter = _make_state()
     svc, gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_permit(state, tab_id, adapter))
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert handles.poll(token) is None  # still pending before cancel
     svc.cancel_run()
@@ -462,33 +524,76 @@ def test_cancel_run_stops_experiment_setup_devices_before_first_device():
     state, tab_id, adapter = _make_state()
     dev = FakeDevice(fast_mode=True)
     cfg = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.1)
-    GlobalDeviceManager.register_device("run-dev", dev)
 
-    def run_setup_devices(*_args: Any) -> object:
+    def run_setup_devices(*_args: Any, context: RunContext) -> object:
         exp_cfg = ExpCfgModel(dev={"run-dev": cfg})
-        setup_devices(exp_cfg, progress=False)
+        setup_devices(
+            exp_cfg,
+            context.devices,
+            progress=False,
+            cancel_signal=context.cancel_signal,
+        )
         return object()
 
-    try:
-        adapter.run.side_effect = run_setup_devices
-        svc, _gate, bg, handles = _make_run_service(state)
-        token = svc.start_run(_make_permit(state, tab_id, adapter))
-        svc.cancel_run()
-        bg.run_work()
+    adapter.run.side_effect = run_setup_devices
+    svc, _gate, bg, handles = _make_run_service(state, devices={"run-dev": dev})
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
+    svc.cancel_run()
+    bg.run_work()
 
-        assert dev.get_output() == "off"
-        assert dev.get_value() == 0.0
-        outcome = handles.poll(token)
-        assert outcome is not None
-        assert outcome.status == "cancelled"
-    finally:
-        GlobalDeviceManager.drop_device("run-dev", ignore_error=True)
+    assert dev.get_output() == "off"
+    assert dev.get_value() == 0.0
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.status == "cancelled"
+
+
+def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
+    state, tab_id, adapter = _make_state()
+    first_device = FakeDevice(fast_mode=True)
+    second_device = FakeDevice(fast_mode=True)
+    devices = {"flux": first_device}
+    contexts: list[RunContext] = []
+    cfg = ExpCfgModel(
+        dev={"flux": FakeDeviceInfo(address="none", output="on", value=0.5)}
+    )
+
+    def run_setup(*_args: Any, context: RunContext) -> object:
+        contexts.append(context)
+        setup_devices(cfg, context.devices, cancel_signal=context.cancel_signal)
+        if len(contexts) == 1:
+            context.cancel_signal.set_error("failed", "first run failed", None)
+        return object()
+
+    adapter.run.side_effect = run_setup
+    service, gate, background, handles = _make_run_service(state, devices=devices)
+    permit = _make_permit(state, tab_id, adapter)
+    first_token = service.start_run(permit, plots=_plots())
+    devices["flux"] = second_device
+    background.run_work()
+
+    first_outcome = handles.poll(first_token)
+    assert first_outcome is not None and first_outcome.status == "failed"
+    assert first_device.get_value() == 0.5
+    assert second_device.get_value() == 0.0
+    assert not gate.has_active(OperationKind.RUN)
+
+    second_token = service.start_run(permit, plots=_plots())
+    background.run_work()
+
+    second_outcome = handles.poll(second_token)
+    assert second_outcome is not None and second_outcome.status == "finished"
+    assert second_device.get_value() == 0.5
+    assert contexts[0].cancel_signal is not contexts[1].cancel_signal
+    assert contexts[1].cancel_signal.error is None
+    assert contexts[0].plots is not contexts[1].plots
+    assert not gate.has_active(OperationKind.RUN)
 
 
 def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # Simulate: cancel sets stop_event, then worker returns partial result
     svc.cancel_run()
@@ -505,7 +610,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
 def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     # Simulate: cancel + worker errors
     svc.cancel_run()
@@ -521,7 +626,7 @@ def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
 def test_bg_done_without_cancel_reports_finished():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
     result = object()
 
     assert bg.last_on_done is not None
@@ -535,7 +640,7 @@ def test_bg_done_without_cancel_reports_finished():
 def test_bg_done_after_cancel_reports_cancelled_with_partial():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     svc.cancel_run()  # sets the captured stop_event
     partial = object()
@@ -551,15 +656,13 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
     state, tab_id, adapter = _make_state()
     partial = object()
 
-    def run_after_retry_reset(*_args: Any) -> object:
-        stop = current_stop_signal()
-        assert stop is not None
-        stop.clear_stop()
+    def run_after_retry_reset(*_args: Any, context: RunContext) -> object:
+        context.cancel_signal.clear_stop()
         return partial
 
     adapter.run.side_effect = run_after_retry_reset
     svc, _gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_permit(state, tab_id, adapter))
+    token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     svc.cancel_run()
     bg.run_work()
@@ -575,7 +678,7 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
 def test_bg_error_without_cancel_reports_failed():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
@@ -588,7 +691,7 @@ def test_bg_error_without_cancel_reports_failed():
 def test_bg_error_after_cancel_reports_cancelled_without_result():
     state, tab_id, adapter = _make_state()
     svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     svc.cancel_run()
     assert bg.last_on_error is not None

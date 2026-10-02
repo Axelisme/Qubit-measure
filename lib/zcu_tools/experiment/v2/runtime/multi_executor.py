@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Generic, Self
 
 import numpy as np
-from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
@@ -21,13 +19,10 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     ScheduleOutcome,
     ScheduleStep,
     StopSignal,
-    current_stop_signal,
 )
-from zcu_tools.experiment.v2.runtime.task import MeasurementBundle
+from zcu_tools.experiment.v2.runtime.task import MeasurementBundle, TaskLivePlot
 from zcu_tools.experiment.v2.utils import Result
-from zcu_tools.plotting.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
-from zcu_tools.plotting.liveplot.backend import close_figure
-from zcu_tools.plotting.liveplot.backend.jupyter import grab_frame_with_instant_plot
+from zcu_tools.plotting.plots import MovieRecording, Plots
 from zcu_tools.utils.debug import log_current_exception
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
@@ -68,8 +63,11 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         self.record_path.parent.mkdir(parents=True, exist_ok=True)
         return self
 
-    def make_ax_layout(self) -> tuple[Figure, dict[str, dict[str, list[Axes]]]]:
-        assert len(self.measurements) > 0
+    def make_ax_layout(
+        self, *, plots: Plots, figure_name: str
+    ) -> tuple[Figure, dict[str, dict[str, list[Axes]]]]:
+        if not self.measurements:
+            raise ValueError("No measurements added")
 
         num_axes_map = {
             ms_name: dict(sorted(ms.num_axes().items(), key=lambda x: -x[1]))
@@ -80,76 +78,58 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
             sum(num_axes.values()) for num_axes in num_axes_map.values()
         )
 
+        if total_num_axes < 1:
+            raise ValueError("Measurements require at least one plot axis")
         n_row = int(total_num_axes**0.5)
         n_col = int(np.ceil(total_num_axes / n_row))
-        fig, axs = make_plot_frame(
-            n_row,
-            n_col,
-            plot_instant=True,
+        fig, _ = plots.subplots(
+            figure_name,
+            nrows=n_row,
+            ncols=n_col,
+            squeeze=False,
             figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row)),
         )
 
         # collect axes into dict
         axs_map: dict[str, dict[str, list[Axes]]] = defaultdict(dict)
-        i, j = 0, 0
+        axes = iter(fig.axes)
         for ms_name, num_axes in num_axes_map.items():
             for ax_name, ax_num in num_axes.items():
                 for _ in range(ax_num):
-                    axs_map[ms_name].setdefault(ax_name, []).append(axs[i][j])
-                    j += 1
-                    if j == n_col:
-                        j = 0
-                        i += 1
+                    axs_map[ms_name].setdefault(ax_name, []).append(next(axes))
 
         return fig, axs_map
 
     def make_plotter(
-        self,
-    ) -> tuple[
-        Figure,
-        MultiLivePlot[tuple[str, str]],
-        dict[str, Mapping[str, AbsLivePlot]],
-        FFMpegWriter | None,
-    ]:
-        fig, axs_map = self.make_ax_layout()
-
-        if self.record_path is not None:
-            if shutil.which("ffmpeg") is None:
-                raise RuntimeError(
-                    "FFmpeg is not found. Please install FFmpeg and add it to your "
-                    "PATH to record animations."
-                )
-            writer: FFMpegWriter | None = FFMpegWriter(fps=30)
-            assert writer is not None
-            writer.setup(fig, str(self.record_path), dpi=200)
-        else:
-            writer = None
-
+        self, *, plots: Plots, figure_name: str
+    ) -> tuple[dict[str, Mapping[str, TaskLivePlot]], MovieRecording | None]:
+        _, axs_map = self.make_ax_layout(plots=plots, figure_name=figure_name)
         plotters_map = {
-            ms_name: ms.make_plotter(ms_name, axs_map[ms_name])
+            ms_name: ms.make_plotter(
+                ms_name, axs_map[ms_name], plots=plots, figure_name=figure_name
+            )
             for ms_name, ms in self.measurements.items()
         }
-
-        T = TypeVar("T")
-
-        def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> dict[tuple[str, str], T]:
-            return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
-
-        plotter = MultiLivePlot(fig, flatten_dict(plotters_map))
-        return fig, plotter, plotters_map, writer
+        writer = (
+            plots.record_animation(figure_name, self.record_path)
+            if self.record_path is not None
+            else None
+        )
+        return plotters_map, writer
 
     def _default_batch_result(self) -> dict[str, Result]:
         return {name: ms.get_default_result() for name, ms in self.measurements.items()}
 
-    def _make_result_tree(
+    def _make_result_tree(  # noqa: PLR0913 - explicit result, presentation and recording owners
         self,
         data: list[dict[str, Result]],
         *,
         env: T_Env,
         outer_values: T_Axis,
-        plotter: MultiLivePlot[tuple[str, str]],
-        plotters_map: Mapping[str, Mapping[str, AbsLivePlot]],
-        writer: FFMpegWriter | None,
+        plots: Plots,
+        figure_name: str,
+        plotters_map: Mapping[str, Mapping[str, TaskLivePlot]],
+        writer: MovieRecording | None,
     ) -> ResultTree[T_Env]:
         tree: ResultTree[T_Env] = ResultTree(data, outer_values=outer_values, env=env)
 
@@ -159,10 +139,9 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         ) -> Callable[[ResultUpdateEvent[T_Env, Any]], None]:
             def update(event: ResultUpdateEvent[T_Env, Any]) -> None:
                 measurement.update_plotter(plotters_map[name], event, event.result)
-                if self.record_path is not None:
-                    assert writer is not None
-                    grab_frame_with_instant_plot(writer)
-                plotter.refresh()
+                if writer is not None:
+                    writer.grab_frame()
+                plots.refresh(figure_name)
 
             return update
 
@@ -176,6 +155,8 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
         *,
         cfg: T_Cfg,
         env: T_Env,
+        stop: StopSignal,
+        plots: Plots,
         outer_values: T_Axis,
         run_loop: Callable[[Schedule[T_Cfg, T_Env]], None],
     ) -> Mapping[str, Result]:
@@ -184,37 +165,34 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
 
         init_result = [self._default_batch_result() for _ in range(len(outer_values))]
 
-        fig, plotter, plotters_map, writer = self.make_plotter()
-        stop = current_stop_signal() or StopSignal()
-        result_tree = self._make_result_tree(
-            init_result,
-            env=env,
-            outer_values=outer_values,
-            plotter=plotter,
-            plotters_map=plotters_map,
-            writer=writer,
-        )
-
+        figure_name = "measurement"
+        plotters_map, writer = self.make_plotter(plots=plots, figure_name=figure_name)
         try:
+            result_tree = self._make_result_tree(
+                init_result,
+                env=env,
+                outer_values=outer_values,
+                plots=plots,
+                figure_name=figure_name,
+                plotters_map=plotters_map,
+                writer=writer,
+            )
             with Schedule(cfg, result_tree, env=env, stop=stop) as sched:
-                with plotter:
-                    try:
-                        for measurement in self.measurements.values():
-                            measurement.init(dynamic_pbar=True)
-                        run_loop(sched)
-                    except KeyboardInterrupt as exc:
-                        sched._mark_interrupted(exc)
-                    except Exception:
-                        log_current_exception(logger, "measurement executor failed")
-                        raise
-                    finally:
-                        for measurement in self.measurements.values():
-                            measurement.cleanup()
-                        if self.record_path is not None:
-                            assert writer is not None
-                            writer.finish()
+                try:
+                    for measurement in self.measurements.values():
+                        measurement.init(dynamic_pbar=True)
+                    run_loop(sched)
+                except KeyboardInterrupt as exc:
+                    sched._mark_interrupted(exc)
+                except Exception:
+                    log_current_exception(logger, "measurement executor failed")
+                    raise
+                finally:
+                    for measurement in self.measurements.values():
+                        measurement.cleanup()
         finally:
-            close_figure(fig)
+            if writer is not None:
+                writer.finish()
 
         signals_dict = {
             name: result_tree.measurement_result(name)

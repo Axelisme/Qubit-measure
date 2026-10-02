@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import matplotlib as mpl
-import matplotlib.pyplot as plt
-from IPython.display import display
-from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from .base import LivePlotBackend
 
+if TYPE_CHECKING:
+    from matplotlib.animation import FFMpegWriter
+
 
 def instant_plot(fig: Figure) -> None:
+    from IPython.display import display
+
     # Force ipympl to display the live canvas before subsequent update calls.
     canvas = fig.canvas
 
@@ -85,6 +87,7 @@ class JupyterBackend(LivePlotBackend):
     def make_plot_frame(
         self, n_row: int, n_col: int, plot_instant: bool = False, **kwargs: Any
     ) -> tuple[Figure, list[list[Axes]]]:
+        import matplotlib.pyplot as plt
         import numpy as np
 
         kwargs.setdefault("squeeze", False)
@@ -104,4 +107,6 @@ class JupyterBackend(LivePlotBackend):
         fig.canvas.draw()
 
     def close_figure(self, fig: Figure) -> None:
+        import matplotlib.pyplot as plt
+
         plt.close(fig)

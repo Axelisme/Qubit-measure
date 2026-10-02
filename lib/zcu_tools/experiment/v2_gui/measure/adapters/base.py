@@ -4,9 +4,11 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from inspect import signature
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
 from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -28,15 +30,12 @@ from zcu_tools.gui.app.measure.adapter import (
     T_Result,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from zcu_tools.experiment.v2_gui.measure.adapters._support.schema_builder import (
         MeasureCfgDefinition,
     )
@@ -44,6 +43,7 @@ if TYPE_CHECKING:
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
+    from zcu_tools.plotting.plots import Plots
 
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list
 # (Cfg, Result, AnalyzeResult, AnalyzeParams).
@@ -340,20 +340,20 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         )
 
     def analyze(
-        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
+        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams], *, plots: Plots
     ) -> T_AnalyzeResult:
         """Run analysis on a completed run result.
 
         Default raises — see ``get_analyze_params`` for the rationale.
         """
-        del req
+        del req, plots
         raise NotImplementedError(
             f"{type(self).__name__} declares analysis support but does not "
             "override analyze"
         )
 
     def make_interactive_plugin(
-        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
+        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams], *, plots: Plots
     ) -> PluginDefinition[Any, Any]:
         raise NotImplementedError("override make_interactive_plugin")
 
@@ -362,8 +362,10 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         plugin: PluginDefinition[Any, Any],
         session: Session[Any],
         env: InteractiveFrontendEnv,
-        request_finish: Callable[[Figure], bool],
+        request_finish: Callable[[], bool],
         request_cancel: Callable[[], bool],
+        *,
+        plots: Plots,
     ) -> InteractiveFrontend:
         raise NotImplementedError("override make_interactive_frontend")
 
@@ -409,6 +411,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def post_analyze(
         self,
         req: PostAnalyzeRequest[T_Result, T_AnalyzeResult, Any],
+        *,
+        plots: Plots,
     ) -> PostAnalyzeResultBase:
         """Run a second analysis on top of the primary analyze result.
 
@@ -416,7 +420,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         request carries both the raw ``run_result`` and the primary
         ``analyze_result`` so the post-analysis can refine/recompute from either.
         """
-        del req
+        del req, plots
         raise NotImplementedError(
             f"{type(self).__name__} declares post-analysis support but does not "
             "override post_analyze"
@@ -456,12 +460,11 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             return _analyze_params_generic_arg(cls)
         return ret
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> T_Result:
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> T_Result:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        if self.capabilities.requires_soc:
-            soc, soccfg = require_soc_handles(req)
-            return self.exp_cls().run(soc, soccfg, cfg)
-        return self.exp_cls().run(req.soc, req.soccfg, cfg)
+        return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
     def load(self, req: LoadDataRequest) -> T_Result:
         if not _can_construct_without_args(self.exp_cls):
@@ -474,7 +477,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading canonical result files"
             )
-        return cast(T_Result, load(filepath=req.data_path))
+        return cast(T_Result, load(Path(req.data_path)))
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]
@@ -522,4 +525,4 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return self.make_default_save_paths(ctx)
 
     def save(self, req: SaveDataRequest[T_Result]) -> None:
-        self.exp_cls().save(filepath=req.data_path, result=req.run_result)
+        self.exp_cls().save(req.run_result, Path(req.data_path), comment=req.comment)

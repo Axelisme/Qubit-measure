@@ -10,24 +10,28 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting.resonance.hanger import HangerModel
 from zcu_tools.analysis.fitting.resonance.transmission import TransmissionModel
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment.base import AbsExperiment
+from zcu_tools.experiment.axes_spec import MHZ_TO_HZ, AxesSpec, Axis, ZSpec
+from zcu_tools.experiment.base import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.onetone.freq import (
+    FreqAnalysis,
+    FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
-    FreqModuleCfg,
     FreqResult,
-    FreqSweepCfg,
 )
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
@@ -43,6 +47,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    LoadDataRequest,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
@@ -54,11 +59,10 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    AbsReadoutCfg,
     ProgramV2Cfg,
-    PulseReadoutCfg,
+    ReadoutCfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -110,7 +114,7 @@ Param: TypeAlias = "HangerSimParams | TransmissionSimParams"
 class FakeFreqModuleCfg(ConfigBase):
     # Mirrors the real onetone ExpCfg modules: readout only. No init_pulse (no
     # qubit-drive pulse) and no reset (one-tone runs without a qubit reset).
-    readout: AbsReadoutCfg
+    readout: ReadoutCfg
 
 
 class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
@@ -124,7 +128,7 @@ class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
 # ---------------------------------------------------------------------------
 
 
-FakeFreqRunResult: TypeAlias = FreqResult
+FakeFreqRunResult: TypeAlias = RunRecord[FakeFreqCfg, FreqResult]
 
 
 def _freq_sweep_default(ctx: SessionEnv) -> SweepValue:
@@ -144,7 +148,6 @@ class FakeFreqAnalyzeResult(AnalyzeResultBase):
     freq: float
     fwhm: float
     params: dict[str, Any]
-    figure: Figure
 
 
 @dataclass
@@ -165,13 +168,21 @@ class FakeFreqAnalyzeParams:
 # ---------------------------------------------------------------------------
 
 
-class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
+class FakeFreqExp(PersistableExperiment[FreqResult, FakeFreqCfg]):
     """Simulated FreqExp: same run/analyze/save interface, no hardware required.
 
     The ground-truth resonance (``model_type`` + ``params``) is supplied at
     construction, NOT carried in the cfg — so the cfg's sweep is set
     independently and the analysis must genuinely find the dip.
     """
+
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=FreqResult,
+        cfg_type=FakeFreqCfg,
+        tag="fake/freq",
+    )
 
     def __init__(self, model_type: Literal["t", "hm"], params: Param) -> None:
         self._model_type = model_type
@@ -189,7 +200,8 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
         assert isinstance(p, TransmissionSimParams)
         return TransmissionModel.calc_signals(freqs, p.freq, p.Ql, a0, p.edelay)
 
-    def run(self, cfg: FakeFreqCfg) -> FreqResult:
+    def run(self, config: FakeFreqCfg, *, context: RunContext) -> FreqResult:
+        cfg = deepcopy(config)
         sweep = cfg.sweep.freq
         freqs = np.linspace(sweep.start, sweep.stop, sweep.expts)
 
@@ -197,49 +209,42 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
         sigma = self._params.noise_scale / np.sqrt(cfg.reps * cfg.rounds)
         rng = np.random.default_rng()
 
-        with LivePlot1D("Frequency (MHz)", "Amplitude", auto_close=False) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs),),
-                on_update=lambda data: viewer.update(freqs, np.abs(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                accumulated = np.zeros(len(freqs), dtype=np.complex128)
-                rounds_done = 0
-                for _round_idx, _step in sched.repeat("round", cfg.rounds):
-                    noise = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
-                    noise_i = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
-                    accumulated += clean + noise + 1j * noise_i
-                    rounds_done += 1
-                    if not cfg.fast_mode:
-                        for _ in range(len(freqs)):
-                            time.sleep(0.0005)
-                    signals_buffer.set(accumulated / rounds_done)
-                if rounds_done == 0:
-                    signals_buffer.set(accumulated)
-                signals = signals_buffer.array
+        viewer = context.plots.liveplot_1d(
+            "measurement", "Frequency (MHz)", "Amplitude"
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs),),
+            on_update=lambda data: viewer.update(freqs, np.abs(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            accumulated = np.zeros(len(freqs), dtype=np.complex128)
+            rounds_done = 0
+            for _round_idx, _step in sched.repeat("round", cfg.rounds):
+                noise = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
+                noise_i = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
+                accumulated += clean + noise + 1j * noise_i
+                rounds_done += 1
+                if not cfg.fast_mode:
+                    for _ in range(len(freqs)):
+                        time.sleep(0.0005)
+                signals_buffer.set(accumulated / rounds_done)
+            if rounds_done == 0:
+                signals_buffer.set(accumulated)
+            signals_buffer.trigger_update(flush=True)
+            signals = signals_buffer.array
 
         return FreqResult(freqs=freqs, signals=signals)
 
     @staticmethod
     def analyze(
-        result: FreqResult | None = None,
+        source: FakeFreqRunResult,
+        options: FreqAnalyzeOptions,
         *,
-        model_type: Literal["hm", "t", "auto"] = "auto",
-        fit_bg_amp_slope: bool = False,
-        fit_bg_phase_curvature: bool = False,
-    ) -> tuple[float, float, dict[str, Any], Figure]:
-        # Analysis is blind by construction — it only sees the result, never the
-        # ground-truth sim params; no instance state needed.
-        assert result is not None
-        return FreqExp().analyze(
-            result,
-            model_type=model_type,
-            fit_bg_amp_slope=fit_bg_amp_slope,
-            fit_bg_phase_curvature=fit_bg_phase_curvature,
-        )
-
-    def save(self, result: FreqResult) -> None:
-        pass  # no real hardware, skip HDF5 persistence
+        plots: Plots,
+    ) -> FreqAnalysis:
+        # Fitting needs only measured data, not acquisition cfg or simulation truth.
+        fitting_source = RunRecord[FreqCfg, FreqResult](cfg=None, result=source.result)
+        return FreqExp().analyze(fitting_source, options, plots=plots)
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +263,7 @@ class FakeFreqAdapter(
     """Simulated one-tone frequency sweep.  No hardware required."""
 
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False
+        requires_soc=False, load_data=True
     )
     exp_cls = FakeFreqExp
     ExpCfg_cls = FakeFreqCfg
@@ -350,38 +355,36 @@ class FakeFreqAdapter(
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
         return super().build_exp_cfg({**raw_cfg, "fast_mode": self._fast_mode}, req)
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> FakeFreqRunResult:
-        import dataclasses
-
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> FakeFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FakeFreqExp(self._model_type, self._params).run(cfg)
-        freq_cfg = FreqCfg(
-            reps=cfg.reps,
-            rounds=cfg.rounds,
-            relax_delay=cfg.relax_delay,
-            modules=FreqModuleCfg(
-                readout=cast(PulseReadoutCfg, cfg.modules.readout),
-            ),
-            sweep=FreqSweepCfg(freq=cfg.sweep.freq),
-        )
-        return dataclasses.replace(result, cfg_snapshot=freq_cfg)
+        result = FakeFreqExp(self._model_type, self._params).run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
+    def load(self, req: LoadDataRequest) -> FakeFreqRunResult:
+        return FakeFreqExp(self._model_type, self._params).load(Path(req.data_path))
 
     def analyze(
         self,
         req: AnalyzeRequest[FakeFreqRunResult, FakeFreqAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> FakeFreqAnalyzeResult:
         analyze_params = req.analyze_params
-        freq, fwhm, fit_params, figure = FakeFreqExp.analyze(
+        analysis = FakeFreqExp.analyze(
             req.run_result,
-            model_type=analyze_params.model_type,
-            fit_bg_amp_slope=analyze_params.fit_bg_amp_slope,
-            fit_bg_phase_curvature=analyze_params.fit_bg_phase_curvature,
+            FreqAnalyzeOptions(
+                model_type=analyze_params.model_type,
+                fit_bg_amp_slope=analyze_params.fit_bg_amp_slope,
+                fit_bg_phase_curvature=analyze_params.fit_bg_phase_curvature,
+            ),
+            plots=plots,
         )
         return FakeFreqAnalyzeResult(
-            freq=freq,
-            fwhm=fwhm,
-            params=fit_params,
-            figure=figure,
+            freq=analysis.freq,
+            fwhm=analysis.fwhm,
+            params=analysis.params,
         )
 
     def get_writeback_items(
@@ -402,20 +405,12 @@ class FakeFreqAdapter(
         ]
 
     def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
-        # Pure-mock default: no HDF5 (no real instrument data). When the adapter
-        # was built with persist_data=True, write the simulated sweep so the
-        # "data saved to <path>" report is truthful and the file exists.
         if not self._persist_data:
             return
-        from zcu_tools.datafile import reserve_labber_filepath, save_labber_data
-
-        result = req.run_result
-        save_labber_data(
-            reserve_labber_filepath(req.data_path),
-            z=("Signal", "a.u.", result.signals),
-            axes=[("Frequency", "Hz", result.freqs * 1e6)],
+        FakeFreqExp(self._model_type, self._params).save(
+            req.run_result,
+            Path(req.data_path),
             comment=req.comment or "fake/freq simulated data",
-            tags="fake/freq",
         )
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

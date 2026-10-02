@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import zcu_tools.analysis.fitting.resonance.base as resonance_base
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.resonance import (
     HangerModel,
@@ -851,13 +852,16 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
     signals = truth_fn(freqs, **truth_kwargs, **common)
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=True)
 
+    supplied = Figure(figsize=(9, 8))
     fig = model.visualize_fit(
         freqs,
         signals,
         params,  # type: ignore[arg-type]
+        figure=supplied,
         fit_bg_amp_slope=True,
         fit_bg_phase_curvature=False,
     )
+    assert fig is supplied
     try:
         iq_ax, phase_ax, magnitude_ax = fig.axes
         iq_data = next(
@@ -940,13 +944,16 @@ def test_visualization_omits_background_when_fit_is_disabled(
     signals = truth_fn(freqs, **truth_kwargs, **common)
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=False)
 
+    supplied = Figure(figsize=(9, 8))
     fig = model.visualize_fit(
         freqs,
         signals,
         params,  # type: ignore[arg-type]
+        figure=supplied,
         fit_bg_amp_slope=False,
         fit_bg_phase_curvature=False,
     )
+    assert fig is supplied
     try:
         magnitude_ax = fig.axes[2]
         labels = [line.get_label() for line in magnitude_ax.lines]
@@ -1010,13 +1017,16 @@ def test_visualization_shows_phase_curvature_only_when_enabled() -> None:
         fit_bg_phase_curvature=True,
     )
 
+    supplied = Figure(figsize=(9, 8))
     fig = TransmissionModel.visualize_fit(
         freqs,
         signals,
         params,
+        figure=supplied,
         fit_bg_amp_slope=False,
         fit_bg_phase_curvature=True,
     )
+    assert fig is supplied
     try:
         magnitude_ax = fig.axes[2]
         assert any("rad/MHz" in text.get_text() for text in magnitude_ax.texts)

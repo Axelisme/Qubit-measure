@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.rabi_check import (
+    RabiCheckCfg,
     RabiCheckResult,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.reset.check import (
@@ -18,6 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     NoAnalyzeParams,
 )
 from zcu_tools.gui.cfg import CfgSectionSpec
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 def test_reset_check_adapter_exposes_fit_summary() -> None:
@@ -38,15 +40,15 @@ def test_reset_check_adapter_exposes_fit_summary() -> None:
         ),
     )
     req = AnalyzeRequest(
-        run_result=result,
+        run_result=RunRecord[RabiCheckCfg, RabiCheckResult](cfg=None, result=result),
         analyze_params=NoAnalyzeParams(),
         md=cast(Any, None),
         ml=cast(Any, None),
         predictor=None,
     )
-    out = RabiCheckAdapter().analyze(req)
-
+    plots = Plots(NonPresentingHost())
     try:
+        out = RabiCheckAdapter().analyze(req, plots=plots)
         assert isinstance(out, RabiCheckAnalyzeResult)
         summary = out.to_summary_dict()
         assert summary["before_amplitude"] == pytest.approx(1.0)
@@ -59,9 +61,10 @@ def test_reset_check_adapter_exposes_fit_summary() -> None:
         assert summary["frequency_cycles_per_gain"] == pytest.approx(2.0)
         assert "figure" not in summary
         assert "fidelity" not in summary
-        assert len(out.figure.axes) == 2
+        assert len(plots["fit"].axes) == 2
     finally:
-        plt.close(out.figure)
+        plots.finish(present=False)
+        plots.release()
 
 
 def test_reset_check_cfg_has_one_rabi_pulse_field() -> None:

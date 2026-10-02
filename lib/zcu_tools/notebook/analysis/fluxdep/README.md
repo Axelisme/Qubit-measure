@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-09-27 — database search wrapper
+**Last updated:** 2026-10-02 — explicit diagnostic display
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 [`notebook_md/analysis/fluxdep_fit.md`](../../../../../notebook_md/analysis/fluxdep_fit.md) 使用。
@@ -64,7 +64,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 
 ### 1. `search_in_database(fluxs, freqs, datapath, transitions, EJb, ECb, ELb)`
 
-呼叫共用 [`analysis.fluxdep.search_database`](../../../analysis/fluxdep/README.md) 後，以共用 [診斷圖 builder](../../../plotting/fluxdep/README.md) 建圖並 `plt.show()`；原 `(params, fig)` 回傳與 `plot=False` 行為維持不變。數值搜尋由 kernel 在預先生成的 Fluxonium 資料庫中執行：
+呼叫共用 [`analysis.fluxdep.search_database`](../../../analysis/fluxdep/README.md) 後，以共用 [診斷圖 builder](../../../plotting/fluxdep/README.md) 建立原生 Agg Figure 並以 IPython `display(Image(...))` 顯示 PNG 診斷圖（不依賴 inline formatter 或 widget backend），不依賴 pyplot manager；原 `(params, fig)` 回傳與 `plot=False` 行為維持不變。數值搜尋由 kernel 在預先生成的 Fluxonium 資料庫中執行：
 
 - **資料庫結構**（由 `scripts/generate_fluxonium_sample.py` 產生）：
   - `fluxs`：(N_flux,) 通量點

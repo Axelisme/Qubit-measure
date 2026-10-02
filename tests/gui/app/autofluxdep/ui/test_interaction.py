@@ -1125,6 +1125,22 @@ def test_run_builds_liveplot_canvas_for_measurement_node(app):
     result = ctrl.state.run_results["qubit_freq"]
     assert not np.isnan(result.signal[-1]).any()  # the last row was filled
 
+    from io import BytesIO
+
+    retained = win.figures
+    figure = retained["qubit_freq"]
+    assert figure is canvas.figure
+    saved = BytesIO()
+    figure.savefig(saved, format="png")
+    assert saved.getvalue().startswith(b"\x89PNG")
+
+    _run_to_completion(ctrl, win)
+    assert win.figures["qubit_freq"] is not figure
+    assert retained["qubit_freq"] is figure
+    after = BytesIO()
+    figure.savefig(after, format="png")
+    assert after.getvalue() == saved.getvalue()
+
 
 def test_run_switches_detail_to_run_tab(app):
     ctrl, win = app

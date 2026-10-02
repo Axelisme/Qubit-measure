@@ -28,7 +28,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2D
+from zcu_tools.plotting.plots import HeatmapPlot, LinePlot, Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -52,10 +52,10 @@ class MistResult(TypedDict, closed=True):
 
 
 class MistPlotDict(TypedDict, closed=True):
-    populations_g: LivePlot2D
-    populations_e: LivePlot2D
-    populations_o: LivePlot2D
-    current: LivePlot1D
+    populations_g: HeatmapPlot
+    populations_e: HeatmapPlot
+    populations_o: HeatmapPlot
+    current: LinePlot
 
 
 class MistModuleCfg(ConfigBase):
@@ -329,8 +329,6 @@ class MistTask(
         self.cfg = cfg
         self.last_cfg = cfg.model_copy(deep=True)
 
-        setup_devices(self.cfg, progress=True)
-
         # initial values, may be rounded later
         self.gains = sweep2array(self.cfg.sweep.gain)
         self.acquire_kwargs = {
@@ -346,10 +344,19 @@ class MistTask(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop,
+        )
         self.gains = sweep2array(
             self.cfg.sweep.gain,
             "gain",
-            {"soccfg": state.env.soccfg, "gen_ch": self.cfg.modules.probe_pulse.ch},
+            {
+                "soccfg": state.env.context.soccfg,
+                "gen_ch": self.cfg.modules.probe_pulse.ch,
+            },
         )
         populations_step = state.child("populations", cfg=self.cfg)
         _ = populations_step.buffer((len(self.gains), 2), dtype=np.float64)
@@ -360,7 +367,9 @@ class MistTask(
         modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
         _ = (
-            populations_step.prog_builder(state.env.soc, state.env.soccfg)
+            populations_step.prog_builder(
+                state.env.context.soc, state.env.context.soccfg
+            )
             .add(
                 Reset("reset", modules.reset),
                 Pulse("init_pulse", cfg=modules.init_pulse),
@@ -394,54 +403,55 @@ class MistTask(
     def num_axes(self) -> dict[str, int]:
         return dict(populations_g=1, populations_e=1, populations_o=1, current=1)
 
-    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> MistPlotDict:
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> MistPlotDict:
+        def configure_current(ax: Axes) -> None:
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
+
         return MistPlotDict(
-            populations_g=LivePlot2D(
+            populations_g=plots.liveplot_2d(
+                figure_name,
                 "Iteration",
                 "Time (us)",
                 uniform=False,
-                existed_axes=[axs["populations_g"]],
-                segment_kwargs=dict(
-                    title=f"{name} Ground",
-                ),
+                axes=axs["populations_g"][0],
+                title=f"{name} Ground",
             ),
-            populations_e=LivePlot2D(
+            populations_e=plots.liveplot_2d(
+                figure_name,
                 "Iteration",
                 "Time (us)",
                 uniform=False,
-                existed_axes=[axs["populations_e"]],
-                segment_kwargs=dict(
-                    title=f"{name} Excited",
-                ),
+                axes=axs["populations_e"][0],
+                title=f"{name} Excited",
             ),
-            populations_o=LivePlot2D(
+            populations_o=plots.liveplot_2d(
+                figure_name,
                 "Iteration",
                 "Time (us)",
                 uniform=False,
-                existed_axes=[axs["populations_o"]],
-                segment_kwargs=dict(
-                    title=f"{name} Other",
-                ),
+                axes=axs["populations_o"][0],
+                title=f"{name} Other",
             ),
-            current=LivePlot1D(
+            current=plots.liveplot_1d(
+                figure_name,
                 "Time (us)",
                 "Population",
-                existed_axes=[axs["current"]],
-                segment_kwargs=dict(
-                    title=f"{name} Current",
-                    num_lines=3,
-                    line_kwargs=[
-                        dict(label="Ground"),
-                        dict(label="Excited"),
-                        dict(label="Other"),
-                    ],
-                ),
+                axes=axs["current"][0],
+                title=f"{name} Current",
+                num_lines=3,
+                configure_axes=configure_current,
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: MistPlotDict,
         event: ResultUpdateEvent[OvernightEnv, MistResult],
         results: MistResult,
     ) -> None:

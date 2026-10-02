@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadService
@@ -39,9 +40,8 @@ class NullableRuntimeCfg(ExpCfgModel):
     reps: object = None
 
 
-@dataclass
-class Result:
-    cfg_snapshot: ExpCfgModel | None
+def make_record(cfg: ExpCfgModel | None) -> RunRecord[ExpCfgModel, object]:
+    return RunRecord(cfg=cfg, result=object())
 
 
 @dataclass
@@ -89,7 +89,7 @@ def make_app(*, device: bool = False) -> LoadApp:
     cfg = resources.create("tab", lambda: schema)
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(load_data=True)
-    adapter.load.return_value = Result(RuntimeCfg())
+    adapter.load.return_value = make_record(RuntimeCfg())
     state.add_tab("tab", Session(adapter_name="test", adapter=adapter, cfg=cfg))
     options = MagicMock(return_value=["stable"] if device else [])
     service = LoadService(state, MagicMock(), provide_options=options)
@@ -146,7 +146,7 @@ def test_unavailable_snapshot_keeps_cfg_and_loaded_result(
     app: LoadApp, snapshot
 ) -> None:
     before = app.cfg.observe()
-    app.adapter.load.return_value = Result(snapshot)
+    app.adapter.load.return_value = make_record(snapshot)
     outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
@@ -166,7 +166,7 @@ def test_invalid_complete_candidate_keeps_input_and_revision(app: LoadApp) -> No
 
 def test_nonoptional_null_snapshot_keeps_resource(app: LoadApp) -> None:
     before = app.cfg.observe()
-    app.adapter.load.return_value = Result(NullableRuntimeCfg())
+    app.adapter.load.return_value = make_record(NullableRuntimeCfg())
     outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
@@ -177,7 +177,7 @@ def test_missing_device_option_without_other_fields_keeps_cfg(
     device_app: LoadApp,
 ) -> None:
     app = device_app
-    app.adapter.load.return_value = Result(
+    app.adapter.load.return_value = make_record(
         ExpCfgModel(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     before = app.cfg.observe()
@@ -191,7 +191,7 @@ def test_missing_device_option_preserves_selector_when_other_fields_apply(
     device_app: LoadApp,
 ) -> None:
     app = device_app
-    app.adapter.load.return_value = Result(
+    app.adapter.load.return_value = make_record(
         RuntimeCfg(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     before = app.cfg.observe()
@@ -208,7 +208,7 @@ def test_candidate_device_missing_from_fixed_source_rejects_complete_backfill(
 ) -> None:
     app = device_app
     app.options.return_value = ["stable", "new"]
-    app.adapter.load.return_value = Result(
+    app.adapter.load.return_value = make_record(
         RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     before = app.cfg.observe()
@@ -233,7 +233,7 @@ def test_option_failure_keeps_entire_cfg_and_loaded_result(
     device_app: LoadApp, response
 ) -> None:
     app = device_app
-    app.adapter.load.return_value = Result(
+    app.adapter.load.return_value = make_record(
         RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
     if isinstance(response, Exception):

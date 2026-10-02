@@ -3,10 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import ClassVar
 
 import numpy as np
-import plotly.graph_objects as go
 from numpy.typing import NDArray
 from pydantic import Field
 
@@ -17,18 +16,18 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
+    config,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     setup_devices,
 )
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
-from zcu_tools.plotting.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -48,7 +47,6 @@ class FluxDepResult:
     values: NDArray[np.float64]
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: FluxDepCfg | None = None
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -61,9 +59,16 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
         return mist_signals
 
     ref_signals = np.sort(mist_signals.flatten())[: int(0.5 * mist_signals.size)]
-    mist_signals = np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
+    return np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
 
-    return mist_signals
+
+@dataclass(frozen=True)
+class FluxDepAnalyzeOptions:
+    flux_half: float | None = None
+    flux_period: float | None = None
+    ac_coeff: float | None = None
+    secondary_xaxis: bool = True
+    auto_range: bool = True
 
 
 class FluxDepModuleCfg(ConfigBase):
@@ -87,6 +92,8 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
+    Options: ClassVar[type[FluxDepAnalyzeOptions]] = FluxDepAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis("gains", "Power", "a.u."),
@@ -98,16 +105,14 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         tag="mist/flux_dep",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
-        cfg: FluxDepCfg,
+        config: FluxDepCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> FluxDepResult:
-        orig_cfg = deepcopy(cfg)
+        cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
         modules = cfg.modules
 
         # predict sweep points
@@ -118,102 +123,94 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
-        with LivePlot2DwithLine(
+        viewer = context.plots.liveplot_2d_with_line(
+            "measurement",
             "Flux device value",
             "Readout power (a.u.)",
             line_axis=1,
             num_lines=5,
             title="MIST over FLux",
-        ) as viewer:
-            signals_buffer = SignalBuffer(
-                (len(values), len(gains)),
-                on_update=lambda data: viewer.update(
-                    values, gains, mist_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for flux, step in sched.scan("flux", values.tolist()):
-                    set_flux_in_dev_cfg(step.cfg.dev, flux)
-                    setup_devices(step.cfg, progress=False)
-                    modules = step.cfg.modules
-                    modules.probe_pulse.set_param(
-                        "gain", sweep2param("gain", step.cfg.sweep.gain)
-                    )
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Pulse("init_pulse", modules.init_pulse),
-                            Pulse("probe_pulse", modules.probe_pulse),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("gain", step.cfg.sweep.gain)
-                        .build_and_acquire(
-                            **(acquire_kwargs or {}),
-                        )
-                    )
-                signals = signals_buffer.array
-
-        return FluxDepResult(
-            values=values, gains=gains, signals=signals, cfg_snapshot=orig_cfg
         )
+        signals_buffer = SignalBuffer(
+            (len(values), len(gains)),
+            on_update=lambda data: viewer.update(values, gains, mist_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for flux, step in sched.scan("flux", values.tolist()):
+                set_flux_in_dev_cfg(step.cfg.dev, flux)
+                setup_devices(
+                    step.cfg,
+                    context.devices,
+                    progress=False,
+                    cancel_signal=context.cancel_signal,
+                )
+                modules = step.cfg.modules
+                modules.probe_pulse.set_param(
+                    "gain", sweep2param("gain", step.cfg.sweep.gain)
+                )
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        Pulse("probe_pulse", modules.probe_pulse),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("gain", step.cfg.sweep.gain)
+                    .build_and_acquire()
+                )
 
-    @retrieve_result
+        return FluxDepResult(values=values, gains=gains, signals=signals_buffer.array)
+
     def analyze(
         self,
-        result: FluxDepResult | None = None,
+        source: RunRecord[FluxDepCfg, FluxDepResult],
+        options: FluxDepAnalyzeOptions,
         *,
-        flux_half: float | None = None,
-        flux_period: float | None = None,
-        ac_coeff: float | None = None,
-        fig: go.Figure | None = None,
-        secondary_xaxis: bool = True,
-        auto_range: bool = True,
-        **fig_kwargs,
-    ) -> go.Figure:
-        assert result is not None, "no result found"
+        plots: Plots,
+    ) -> None:
+        result = source.result
+        flux_half, flux_period = options.flux_half, options.flux_period
+        if options.secondary_xaxis and (flux_half is None or flux_period is None):
+            raise ValueError("Secondary flux axis requires flux_half and flux_period")
 
-        dev_values = result.values
-        gains = result.gains
-        signals = result.signals
-
+        dev_values, gains, signals = result.values, result.gains, result.signals
         if flux_half is not None and flux_period is not None:
             xs = np.asarray(value2flux(dev_values, flux_half, flux_period))
-        else:
-            xs = dev_values
-
-        amp_diff = mist_signal2real(signals)
-
-        if fig is None:
-            fig = go.Figure()
-        assert fig is not None
-
-        if flux_half is not None and flux_period is not None:
             xlabel = r"$\phi$ (a.u.)"
         else:
+            xs = dev_values
             xlabel = r"$A$ (mA)"
-        fig.update_xaxes(title_text=xlabel, title_font_size=14)
 
-        if ac_coeff is None:
+        amp_diff = mist_signal2real(signals)
+        if options.ac_coeff is None:
             ys = gains
             ylabel = "probe gain (a.u.)"
         else:
-            ys = ac_coeff * gains**2
+            ys = options.ac_coeff * gains**2
             ylabel = r"$\bar n$"
         ys = np.asarray(ys)
-        fig.update_yaxes(title_text=ylabel, title_font_size=12)
 
-        fig.add_trace(
-            go.Heatmap(x=xs, y=ys, z=amp_diff.T, showscale=False, colorscale="Greys"),
-            **fig_kwargs,
-        )
+        _, ax = plots.subplots("fit", figsize=config.figsize)
+        ax.pcolormesh(xs, ys, amp_diff.T, shading="nearest", cmap="Greys")
+        ax.set_xlabel(xlabel, fontsize=14)
+        ax.set_ylabel(ylabel, fontsize=12)
 
-        if secondary_xaxis:
-            assert flux_half is not None and flux_period is not None
-            add_secondary_xaxis(fig, xs, dev_values, **fig_kwargs)
+        if options.secondary_xaxis:
+            # Match the source samples and scientific labels of the former overlay.
+            count = len(xs)
+            if count <= 12:
+                tick_indices = np.arange(count)
+            else:
+                tick_indices = np.unique(
+                    np.round(np.linspace(0, count - 1, 12)).astype(int)
+                )
+            secondary = ax.secondary_xaxis("top")
+            secondary.set_xticks(
+                xs[tick_indices],
+                labels=[f"{value:.1e}" for value in dev_values[tick_indices]],
+            )
 
-        if auto_range:
-            fig.update_xaxes(range=[xs[0], xs[-1]])
-            fig.update_yaxes(range=[ys[0], ys[-1]])
-
-        return fig
+        if options.auto_range:
+            ax.set_xlim(xs[0], xs[-1])
+            ax.set_ylim(ys[0], ys[-1])

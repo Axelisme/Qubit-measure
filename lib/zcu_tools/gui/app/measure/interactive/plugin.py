@@ -6,8 +6,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Generic, TypeVar
 
-from matplotlib.figure import Figure
-
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import ParamSpec
 from zcu_tools.gui.session.ports import OwnerScheduler
@@ -72,7 +70,6 @@ class PluginDefinition(Generic[S, R]):
     commands: tuple[Command[S], ...]
     can_finish: Callable[[S], None]
     build_result: Callable[[S], R]
-    attach_figure: Callable[[R, Figure], R] | None = None
     project_state: Callable[[S], object] = _project_state
     _background: BackgroundSubmitter | None = field(
         init=False, default=None, repr=False, compare=False
@@ -86,8 +83,6 @@ class PluginDefinition(Generic[S, R]):
             raise ValueError(f"duplicate interactive commands for {self.plugin_id!r}")
         if not callable(self.can_finish) or not callable(self.build_result):
             raise TypeError("interactive plugin terminal callbacks must be callable")
-        if self.attach_figure is not None and not callable(self.attach_figure):
-            raise TypeError("interactive plugin attach_figure must be callable")
         if not callable(self.project_state):
             raise TypeError("interactive plugin project_state must be callable")
 
@@ -127,13 +122,10 @@ class PluginDefinition(Generic[S, R]):
                 return command.execute(session, params)
         raise InvalidInputError(f"unknown interactive command {name!r}")
 
-    def finish(self, session: Session[S], figure: Figure | None = None) -> R:
+    def finish(self, session: Session[S]) -> R:
         """Validate before closing input; result failure leaves the gate terminal."""
         session.ensure_input_open()
         committed = session.snapshot()
         self.can_finish(committed)
         session.close_input()
-        result = self.build_result(committed)
-        if figure is not None and self.attach_figure is not None:
-            return self.attach_figure(result, figure)
-        return result
+        return self.build_result(committed)

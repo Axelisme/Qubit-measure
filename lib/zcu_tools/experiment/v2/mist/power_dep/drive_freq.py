@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -19,14 +15,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -45,7 +41,6 @@ class DriveFreqResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: DriveFreqCfg | None = None
 
 
 def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -86,17 +81,20 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
         tag="mist/",
     )
 
-    @record_result
     def run(
         self,
-        soc,
-        soccfg,
-        cfg: DriveFreqCfg,
+        config: DriveFreqCfg,
         *,
-        acquire_kwargs: dict[str, Any] | None = None,
+        context: RunContext,
     ) -> DriveFreqResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         freq_sweep = cfg.sweep.freq
@@ -110,51 +108,53 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
             gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
 
-        with LivePlot2D("Pulse frequency (MHz)", "Pulse gain (a.u.)") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(freqs), len(gains)),
-                on_update=lambda data: viewer.update(
-                    freqs, gains, drivefreq_signal2real(data)
-                ),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                modules.probe_pulse.set_param(
-                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
-                )
-                modules.probe_pulse.set_param(
-                    "gain", sweep2param("gain", sched.cfg.sweep.gain)
-                )
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        Pulse("probe_pulse", modules.probe_pulse),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("freq", sched.cfg.sweep.freq)
-                    .declare_sweep("gain", sched.cfg.sweep.gain)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-                signals = signals_buffer.array
-
-        return DriveFreqResult(
-            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
+        viewer = context.plots.liveplot_2d(
+            "measurement", "Pulse frequency (MHz)", "Pulse gain (a.u.)"
         )
+        signals_buffer = SignalBuffer(
+            (len(freqs), len(gains)),
+            on_update=lambda data: viewer.update(
+                freqs, gains, drivefreq_signal2real(data)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            modules.probe_pulse.set_param(
+                "freq", sweep2param("freq", sched.cfg.sweep.freq)
+            )
+            modules.probe_pulse.set_param(
+                "gain", sweep2param("gain", sched.cfg.sweep.gain)
+            )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
+                )
+                .declare_sweep("freq", sched.cfg.sweep.freq)
+                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .build_and_acquire()
+            )
 
-    @retrieve_result
-    def analyze(self, result: DriveFreqResult | None = None) -> Figure:
-        assert result is not None, "no result found"
+        return DriveFreqResult(gains=gains, freqs=freqs, signals=signals_buffer.array)
+
+    def analyze(
+        self,
+        source: RunRecord[DriveFreqCfg, DriveFreqResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> None:
+        del options
+        result = source.result
 
         freqs, gains, signals = result.freqs, result.gains, result.signals
 
         real_signals = drivefreq_signal2real(signals)
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(ax, Axes)
+        _, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.imshow(
             real_signals.T,
@@ -166,5 +166,3 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
         )
         ax.set_xlabel("Pulse frequency (MHz)", fontsize=14)
         ax.set_ylabel("Pulse gain (a.u.)", fontsize=14)
-
-        return fig

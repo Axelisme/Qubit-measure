@@ -34,6 +34,8 @@ Feedback 是 run-lived 且 placement-scoped 的 capability，不讓同一 Builde
 
 App 的 `RunSession` 可跨多個同程序 execution segment。每個 Run／Continue segment 使用自己的 `OperationRunner` operation 與 hardware lease。Pause 在 flux boundary 結束 segment：已完成的 point 先 commit，artifact 記錄 non-terminal pause；lease 釋放，InfoStore、feedback、結果和 writer 保留供同一 session Continue。Continue 開新 operation，從保存的 cursor 恢復。Stop 是 terminal cancellation／finalize，Restart 建立新 session，不沿用舊 feedback。Failure 不會改標為 Pause。App 在 running／paused 時守住 workflow input mutation；釋放 lease 不表示硬體狀態不變。這不是從 artifact 還原的跨程序 resume，也不保證硬體自動復原。
 
+每個 segment 建立新的 RunContext、Plots 與 StopSignal，借用 session 固定的 driver 綁定及觀測設定 snapshot。Pause／Continue 保留硬體 handles，不保留上一個 token 的 error。Executor 與 GUI Node 將 StopSignal 顯式交給 Schedule，device setup 使用同一 Event；只有 progress 保留 ambient scope。GUI Orchestrator 在接受 Node Patch 前檢查共享 error，避免取得部分資料後誤報成功。Workflow 的舊 figure publishing 仍待完整遷移，context 的建立不代表原繪圖入口已退場。
+
 取得 raw data、fit 成功與提供合格 Patch 是三個不同事件。資料可保留，而 operation 仍維持 failure outcome。Data-driven early stop 只結束當次 acquire；使用者取消走 run stop。Runtime 的 program-acquire retry 和 executor 的 per-measurement retry 各有自己的 attempt 邊界，不推廣成 GUI Node 自動 retry。具體 API 與 liveplot、retry 使用方法見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)；app 的 run 操作與 artifact 見 [autofluxdep README](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。遠端目前只觀測 app-owned state，不授權遠端 Run、Stop 或 cfg mutation。
 
 ## 取捨

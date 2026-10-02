@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -20,13 +21,14 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.plotting.plots import Plots
 
 
 class DummyExp:
     """Structural ExperimentProtocol stub for the Registry-level test."""
 
-    def run(self, soc, soccfg, cfg, **kwargs):
-        del soc, soccfg, cfg, kwargs
+    def run(self, cfg, *, context: RunContext):
+        del cfg, context
         return object()
 
     def save(self, filepath, result, **kwargs):
@@ -81,25 +83,25 @@ class DummyAdapter:
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         del req, raw_cfg
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]):
-        del req, raw_cfg
+    def run(self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext):
+        del req, raw_cfg, context
         return object()
 
     def load(self, req: LoadDataRequest):
         del req
         return object()
 
-    def analyze(self, req: AnalyzeRequest[object, DummyAnalyzeParams]):
-        del req
+    def analyze(self, req: AnalyzeRequest[object, DummyAnalyzeParams], *, plots: Plots):
+        del req, plots
         return DummyAnalyzeResult()
 
     def make_interactive_plugin(
-        self, request: AnalyzeRequest[object, DummyAnalyzeParams]
+        self, req: AnalyzeRequest[object, DummyAnalyzeParams], *, plots: Plots
     ):
         raise NotImplementedError
 
     def make_interactive_frontend(
-        self, plugin, session, env, request_finish, request_cancel
+        self, plugin, session, env, request_finish, request_cancel, *, plots: Plots
     ):
         raise NotImplementedError
 
@@ -126,8 +128,8 @@ class DummyAdapter:
         del analyze_result, ctx
         raise NotImplementedError
 
-    def post_analyze(self, req: object) -> None:
-        del req
+    def post_analyze(self, req: object, *, plots: Plots) -> None:
+        del req, plots
         raise NotImplementedError
 
     def get_post_writeback_items(

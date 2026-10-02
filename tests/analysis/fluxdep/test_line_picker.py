@@ -15,6 +15,7 @@ from zcu_tools.analysis.fluxdep import (
     move_line,
     swap_lines,
 )
+from zcu_tools.analysis.fluxdep.line_state import analyze_flux_pick
 
 
 def _spectrum(n_dev: int = 60, n_freq: int = 30):
@@ -53,6 +54,42 @@ def test_flux_pick_inputs_own_read_only_data_with_axis_separation() -> None:
     assert inputs.signals[0, 0] == expected
     assert not inputs.signals.flags.writeable
     assert inputs.min_distance == pytest.approx(0.1)
+
+
+def test_analyze_flux_pick_returns_terminal_positions_and_period_without_mutation() -> (
+    None
+):
+    signals, devs, freqs = _spectrum()
+    inputs = FluxPickInputs(signals, devs, freqs)
+    state = FluxPickState(
+        flux_half=1.5, flux_int=-1.0, conjugate=True, magnitude_only=True
+    )
+
+    analysis = analyze_flux_pick(inputs, state)
+
+    assert analysis.flux_half == 1.5
+    assert analysis.flux_int == -1.0
+    assert analysis.flux_period == 5.0
+    assert state == FluxPickState(
+        flux_half=1.5, flux_int=-1.0, conjugate=True, magnitude_only=True
+    )
+    np.testing.assert_array_equal(inputs.signals, signals)
+    np.testing.assert_array_equal(inputs.dev_values, devs)
+    np.testing.assert_array_equal(inputs.freqs, freqs)
+
+
+def test_analyze_flux_pick_rejects_close_lines_without_mutation() -> None:
+    signals, devs, freqs = _spectrum()
+    inputs = FluxPickInputs(signals, devs, freqs)
+    state = FluxPickState(flux_half=0.0, flux_int=0.05)
+
+    with pytest.raises(ValueError, match="flux lines must remain separated"):
+        analyze_flux_pick(inputs, state)
+
+    assert state == FluxPickState(flux_half=0.0, flux_int=0.05)
+    np.testing.assert_array_equal(inputs.signals, signals)
+    np.testing.assert_array_equal(inputs.dev_values, devs)
+    np.testing.assert_array_equal(inputs.freqs, freqs)
 
 
 def test_flux_pick_inputs_reject_mismatched_signal_shape() -> None:

@@ -29,6 +29,8 @@ from zcu_tools.simulate.fluxonium.physical_fit import (
     FluxoniumModelSnapshot,
 )
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 
 @dataclass
 class _Provider:
@@ -87,6 +89,8 @@ def _env(
         schema=schema,
         tools=tools,
         feedback=feedback_view,
+        context=make_run_context(),
+        device_snapshot={},
     )
 
 

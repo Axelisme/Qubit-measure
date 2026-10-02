@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.state import SessionState
+    from zcu_tools.program.v2.mocksoc import MockQickSoc
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +112,37 @@ class SoCConnectionService:
         """Whether the successful GUI connection is the offline mock board."""
         return isinstance(self._connected_request, ConnectMockRequest)
 
+    def get_bound_mock(
+        self, source: Callable[[], float]
+    ) -> tuple[MockQickSoc, SocCfgHandle] | None:
+        """Return an existing physics mock bound to this exact source."""
+        from zcu_tools.program.v2.mocksoc import MockQickSoc
+
+        env = self._state.session_env
+        if (
+            isinstance(env.soc, MockQickSoc)
+            and env.soc.flux_source == source
+            and env.soc.sim_params is not None
+            and env.soccfg is not None
+        ):
+            return env.soc, env.soccfg
+        return None
+
+    def install_prepared_mock(self, soc: MockQickSoc, soccfg: SocCfgHandle) -> None:
+        """Publish a fully assembled mock on the owner loop.
+
+        The environment coordinator holds the SOC_CONNECT lease across device
+        preparation and this commit. This command does not start another connect.
+        """
+        if soc.flux_source is None or soc.sim_params is None:
+            raise ValueError("A prepared mock requires a bound physics flux source")
+        if (
+            self._state.session_env.soc is soc
+            and self._state.session_env.soccfg is soccfg
+        ):
+            return
+        self._apply_connection(soc, soccfg, ConnectMockRequest(soc.sim_params))
+
     def connected_endpoint(self) -> dict[str, str | int | None]:
         """The last successful remote address, including GUI-initiated connects."""
         if isinstance(self._connected_request, ConnectRemoteRequest):
@@ -164,9 +197,8 @@ class SoCConnectionService:
         wire connect and the GUI's connect button cannot race), minting a token
         purely as the lease handle (no async await: the work runs inline here, not
         on a bg thread). On success it calls the shared ``_apply_connection`` — the
-        identical side-effect routine the async finished-handler uses — so the
-        FLUX-AWARE-MOCK provisioning (driven off the emitted SocChangedPayload),
-        the State write and the soc version bump are byte-for-byte the same.
+        identical State write and soc version bump as the async path. This low-level
+        connection does not provision devices or a simulated environment.
         """
         if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")

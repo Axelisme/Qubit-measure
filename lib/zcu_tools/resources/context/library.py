@@ -7,7 +7,6 @@ from typing import Any, TypeVar, cast
 import yaml
 from yaml.nodes import MappingNode
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.program.v2 import (
     AbsModuleCfg,
     AbsWaveformCfg,
@@ -59,7 +58,6 @@ class ModuleDumper(yaml.SafeDumper):
 # 註冊自定義的 dict 處理函數
 ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 
-T_ExpCfg = TypeVar("T_ExpCfg", bound=ExpCfgModel)
 T_ModuleCfg = TypeVar("T_ModuleCfg", bound=AbsModuleCfg)
 T_WaveformCfg = TypeVar("T_WaveformCfg", bound=AbsWaveformCfg)
 
@@ -146,13 +144,6 @@ class ModuleLibrary(SyncFile):
 
         with open(path, "w") as f:
             yaml.dump(dump_cfg, f, Dumper=ModuleDumper, sort_keys=False)
-
-    def make_cfg(
-        self, exp_cfg: dict[str, Any], cfg_model: type[T_ExpCfg], **kwargs
-    ) -> T_ExpCfg:
-        from zcu_tools.experiment.cfg_assembler import make_cfg
-
-        return make_cfg(exp_cfg, cfg_model, ml=self, overrides=kwargs or None)
 
     @auto_sync("write")
     def register_waveform(self, **wav_kwargs: dict[str, Any] | WaveformCfg) -> None:

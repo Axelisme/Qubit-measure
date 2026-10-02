@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import cast
+from typing import ClassVar
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from pydantic import field_serializer
@@ -23,6 +21,8 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.singleshot.util import (
@@ -31,13 +31,7 @@ from zcu_tools.experiment.v2.singleshot.util import (
     raw_population_signal,
 )
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import (
-    LivePlot1D,
-    LivePlot2D,
-    MultiLivePlot,
-    make_plot_frame,
-)
-from zcu_tools.plotting.liveplot.backend import close_figure
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -61,7 +55,6 @@ class AcStarkResult:
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
-    cfg_snapshot: AcStarkCfg | None = None
 
 
 def get_resonance_freq(
@@ -73,7 +66,7 @@ def get_resonance_freq(
     s_freqs = []
 
     prev_freq = np.nan
-    for x, pop in zip(xs, populations):
+    for x, pop in zip(xs, populations, strict=False):
         if np.any(np.isnan(pop)):
             continue
 
@@ -116,7 +109,29 @@ class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
         return str(value)
 
 
+@dataclass(frozen=True)
+class AcStarkAnalyzeOptions:
+    chi: float
+    kappa: float
+    confusion_matrix: NDArray[np.float64] | None = None
+    cutoff: float | None = None
+
+
+@dataclass(frozen=True)
+class AcStarkAnalysis:
+    ac_stark_coeff: float
+
+
+@dataclass(frozen=True)
+class AcStarkPlotOptions:
+    ac_coeff: float
+    confusion_matrix: NDArray[np.float64] | None = None
+    cutoff: float | None = None
+
+
 class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
+    Options: ClassVar[type[AcStarkAnalyzeOptions]] = AcStarkAnalyzeOptions
+
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(
@@ -143,12 +158,18 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
 
     def run(
         self,
-        soc,
-        soccfg,
         cfg: AcStarkCfg,
+        *,
+        context: RunContext,
     ) -> AcStarkResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+        soc, soccfg = context.soc, context.soccfg
+        cfg = deepcopy(cfg)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         gain_sweep = cfg.sweep.gain
@@ -169,116 +190,91 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
             allow_array=True,
         )
 
-        fig, axs = make_plot_frame(2, 2, plot_instant=True, figsize=(8, 6))
+        def configure_axes(ax: Axes) -> None:
+            ax.set_ylim(0.0, 1.0)
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
+                line.set_label(label)
+            ax.legend()
 
-        def make_plotter2d(ax: Axes) -> LivePlot2D:
-            return LivePlot2D(
+        g_2d, e_2d, o_2d = (
+            context.plots.liveplot_2d(
+                f"measurement_{state}",
                 "Stark Pulse Gain (a.u.)",
                 "Probe Frequency (MHz)",
+                title=state.capitalize(),
                 uniform=False,
-                segment_kwargs=dict(vmin=0.0, vmax=1.0),
-                existed_axes=[[ax]],
+                clim=(0.0, 1.0),
             )
-
-        def make_plotter1d(ax: Axes) -> LivePlot1D:
-            ax.set_ylim(0.0, 1.0)
-            return LivePlot1D(
-                "Probe Frequency (MHz)",
-                "Population",
-                existed_axes=[[ax]],
-                segment_kwargs=dict(
-                    num_lines=3,
-                    line_kwargs=[
-                        dict(label="Ground"),
-                        dict(label="Excited"),
-                        dict(label="Other"),
-                    ],
-                ),
-            )
-
-        with MultiLivePlot(
-            fig,
-            dict(
-                g_2d=make_plotter2d(axs[0][0]),
-                e_2d=make_plotter2d(axs[0][1]),
-                o_2d=make_plotter2d(axs[1][0]),
-                cur_1d=make_plotter1d(axs[1][1]),
-            ),
-        ) as viewer:
-            g_2d = cast(LivePlot2D, viewer.get_plotter("g_2d"))
-            e_2d = cast(LivePlot2D, viewer.get_plotter("e_2d"))
-            o_2d = cast(LivePlot2D, viewer.get_plotter("o_2d"))
-            cur_1d = cast(LivePlot1D, viewer.get_plotter("cur_1d"))
-            current_index = 0
-
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                i = current_index
-
-                populations = calc_populations(data)
-
-                g_2d.update(gains, freqs, populations[..., 0], refresh=False)
-                e_2d.update(gains, freqs, populations[..., 1], refresh=False)
-                o_2d.update(gains, freqs, populations[..., 2], refresh=False)
-                cur_1d.update(freqs, populations[i, :].T, refresh=False)
-
-                viewer.refresh()
-
-            buffer = SignalBuffer(
-                (len(gains), len(freqs), 2),
-                dtype=np.float64,
-                on_update=plot_fn,
-            )
-            with Schedule(cfg, buffer) as sched:
-                sched.cfg.modules.stark_pulse2.set_param(
-                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
-                )
-                for gain_idx, (gain, step) in enumerate(
-                    sched.scan("resonator gain", gains.tolist())
-                ):
-                    modules = step.cfg.modules
-                    modules.stark_pulse1.set_param("gain", gain)
-                    current_index = gain_idx
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add_reset("reset", modules.reset)
-                        .add_pulse("init_pulse", modules.init_pulse)
-                        .add_pulse(
-                            "stark_pulse1",
-                            modules.stark_pulse1,
-                            block_mode=False,
-                        )
-                        .add_pulse("stark_pulse2", modules.stark_pulse2)
-                        .add_readout("readout", modules.readout)
-                        .declare_sweep("freq", step.cfg.sweep.freq)
-                        .build_and_acquire(
-                            raw2signal_fn=raw_population_signal,
-                            g_center=orig_cfg.g_center,
-                            e_center=orig_cfg.e_center,
-                            ge_radius=orig_cfg.radius,
-                        )
-                    )
-            signals = buffer.array
-        close_figure(fig)
-
-        # Cache results
-        self.last_result = AcStarkResult(
-            gains=gains, freqs=freqs, populations=signals, cfg_snapshot=orig_cfg
+            for state in ("ground", "excited", "other")
         )
+        cur_1d = context.plots.liveplot_1d(
+            "measurement_current",
+            "Probe Frequency (MHz)",
+            "Population",
+            num_lines=3,
+            configure_axes=configure_axes,
+        )
+        current_index = 0
 
-        return self.last_result
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            i = current_index
+
+            populations = calc_populations(data)
+
+            g_2d.update(gains, freqs, populations[..., 0])
+            e_2d.update(gains, freqs, populations[..., 1])
+            o_2d.update(gains, freqs, populations[..., 2])
+            cur_1d.update(freqs, populations[i, :].T)
+
+        buffer = SignalBuffer(
+            (len(gains), len(freqs), 2),
+            dtype=np.float64,
+            on_update=plot_fn,
+        )
+        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            sched.cfg.modules.stark_pulse2.set_param(
+                "freq", sweep2param("freq", sched.cfg.sweep.freq)
+            )
+            for gain_idx, (gain, step) in enumerate(
+                sched.scan("resonator gain", gains.tolist())
+            ):
+                modules = step.cfg.modules
+                modules.stark_pulse1.set_param("gain", gain)
+                current_index = gain_idx
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add_reset("reset", modules.reset)
+                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_pulse(
+                        "stark_pulse1",
+                        modules.stark_pulse1,
+                        block_mode=False,
+                    )
+                    .add_pulse("stark_pulse2", modules.stark_pulse2)
+                    .add_readout("readout", modules.readout)
+                    .declare_sweep("freq", step.cfg.sweep.freq)
+                    .build_and_acquire(
+                        raw2signal_fn=raw_population_signal,
+                        g_center=cfg.g_center,
+                        e_center=cfg.e_center,
+                        ge_radius=cfg.radius,
+                    )
+                )
+        signals = buffer.array
+        return AcStarkResult(gains=gains, freqs=freqs, populations=signals)
 
     def analyze(
         self,
-        chi: float,
-        result: AcStarkResult | None = None,
+        source: RunRecord[AcStarkCfg, AcStarkResult],
+        options: AcStarkAnalyzeOptions,
         *,
-        kappa: float,
-        confusion_matrix: NDArray[np.float64] | None = None,
-        cutoff: float | None = None,
-    ) -> tuple[float, Figure]:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
+        plots: Plots,
+    ) -> AcStarkAnalysis:
+        result = source.result
+        chi, kappa = options.chi, options.kappa
+        confusion_matrix, cutoff = options.confusion_matrix, options.cutoff
 
         gains, freqs, populations = result.gains, result.freqs, result.populations
 
@@ -317,8 +313,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         # plot the data and the fitted polynomial
         avg_n = ac_coeff * gains2
 
-        fig, ax1 = plt.subplots()
-        assert isinstance(fig, Figure)
+        fig, ax1 = plots.subplots("fit")
 
         # Use NonUniformImage for better visualization with gain^2 as x-axis
         im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
@@ -341,10 +336,8 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         # Create secondary x-axis for gain^2 (Readout Gain²)
         ax2 = ax1.twiny()
 
-        # main x-axis: avg_n, secondary x-axis: gain^2
-        # avg_n = ac_coeff * gains^2
+        # The secondary axis converts average photon number back to drive gain.
         ax1.set_xticks(ax1.get_xticks())
-        # ax1.set_xticklabels([f"{avg_n:.1f}" for avg_n in ax1.get_xticks()])
         ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
 
         # 上方次 x 軸顯示 gain
@@ -361,19 +354,18 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
 
         fig.tight_layout()
 
-        return ac_coeff, fig
+        return AcStarkAnalysis(ac_stark_coeff=float(ac_coeff))
 
     def plot(
         self,
-        result: AcStarkResult | None = None,
+        source: RunRecord[AcStarkCfg, AcStarkResult],
+        options: AcStarkPlotOptions,
         *,
-        ac_coeff: float,
-        confusion_matrix: NDArray[np.float64] | None = None,
-        cutoff: float | None = None,
-    ) -> Figure:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
+        plots: Plots,
+    ) -> None:
+        result = source.result
+        ac_coeff = options.ac_coeff
+        confusion_matrix, cutoff = options.confusion_matrix, options.cutoff
 
         gains, freqs, populations = result.gains, result.freqs, result.populations
 
@@ -392,8 +384,10 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         # plot the data and the fitted polynomial
         photons = ac_coeff * gains2
 
-        # fig, ax1 = plt.subplots(figsize=config.figsize)
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
+        fig, _ = plots.subplots(
+            "populations", nrows=1, ncols=3, figsize=(12, 4), sharey=True
+        )
+        ax1, ax2, ax3 = fig.axes
 
         max_p = np.max(populations).item()
 
@@ -433,5 +427,3 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         ax3.set_xlabel(r"$\bar n$", fontsize=14)
 
         fig.tight_layout()
-
-        return fig

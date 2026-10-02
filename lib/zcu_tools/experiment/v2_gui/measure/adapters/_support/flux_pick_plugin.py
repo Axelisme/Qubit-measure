@@ -12,6 +12,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
     FluxPickState,
     align_lines,
+    analyze_flux_pick,
     fold_initial_lines,
     move_line,
     swap_lines,
@@ -26,6 +27,8 @@ from zcu_tools.gui.app.measure.interactive import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
+from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
+from zcu_tools.plotting.plots import Plots
 
 from .interactive_flux_pick import FluxPickResult
 
@@ -40,6 +43,19 @@ class FluxPickActions:
     apply_alignment: Action[FluxPickState, tuple[float, float]]
 
 
+def render_flux_pick(
+    inputs: FluxPickInputs, state: FluxPickState, plots: Plots
+) -> FluxPickResult:
+    """Build a GUI-owned terminal result from captured inputs and committed state."""
+    analysis = analyze_flux_pick(inputs, state)
+    plots.adopt("pick", make_flux_pick_figure(inputs, state))
+    return FluxPickResult(
+        flx_half=analysis.flux_half,
+        flx_int=analysis.flux_int,
+        flx_period=analysis.flux_period,
+    )
+
+
 class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
     """Captured numeric inputs and typed actions stay with this one operation."""
 
@@ -52,7 +68,19 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
         "_next_listener",
     )
 
-    def __init__(self, inputs: FluxPickInputs, seed: FluxPickState) -> None:
+    def __init__(
+        self,
+        inputs: FluxPickInputs,
+        seed: FluxPickState,
+        *,
+        plots: Plots,
+        result_builder: Callable[
+            [FluxPickInputs, FluxPickState, Plots], FluxPickResult
+        ],
+    ) -> None:
+        def build_result(state: FluxPickState) -> FluxPickResult:
+            return result_builder(inputs, state, plots)
+
         actions = FluxPickActions(
             move=Action(lambda state, pair: _move(state, pair, inputs.min_distance)),
             conjugate=Action(_set_conjugate),
@@ -99,12 +127,7 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
                 ),
             ),
             can_finish=lambda state: _require_finishable(state, inputs.min_distance),
-            build_result=lambda state: FluxPickResult(
-                flx_half=state.flux_half,
-                flx_int=state.flux_int,
-                flx_period=2 * abs(state.flux_int - state.flux_half),
-            ),
-            attach_figure=lambda result, figure: replace(result, figure=figure),
+            build_result=build_result,
             project_state=lambda state: {
                 "flux_half": state.flux_half,
                 "flux_int": state.flux_int,
@@ -237,7 +260,11 @@ def _apply_alignment(
 
 
 def make_flux_pick_plugin(
-    req: AnalyzeRequest[Any, Any], *, force_magnitude: bool
+    req: AnalyzeRequest[Any, Any],
+    *,
+    force_magnitude: bool,
+    plots: Plots,
+    result_builder: Callable[[FluxPickInputs, FluxPickState, Plots], FluxPickResult],
 ) -> FluxPickPlugin:
     """Capture a read-only spectrum, fold the two calibrated seed positions."""
     result = req.run_result
@@ -248,4 +275,6 @@ def make_flux_pick_plugin(
     return FluxPickPlugin(
         inputs,
         FluxPickState(flux_half=half, flux_int=integer, magnitude_only=force_magnitude),
+        plots=plots,
+        result_builder=result_builder,
     )

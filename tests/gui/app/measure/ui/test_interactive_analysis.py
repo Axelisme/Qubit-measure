@@ -23,9 +23,11 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend im
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
     make_flux_pick_plugin,
+    render_flux_pick,
 )
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
@@ -43,7 +45,7 @@ class _DeferredEnv:
         self.pending.append((compute, on_done, on_error))
 
 
-def _frontend(qapp, *, finish=None):
+def _frontend(qapp):
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
@@ -54,17 +56,19 @@ def _frontend(qapp, *, finish=None):
         ml=ModuleLibrary(),
         predictor=None,
     )
-    plugin = make_flux_pick_plugin(req, force_magnitude=True)
+    plots = Plots(NonPresentingHost())
+    plugin = make_flux_pick_plugin(
+        req, force_magnitude=True, plots=plots, result_builder=render_flux_pick
+    )
     session = plugin.open(ManualOwnerScheduler())
     env = _DeferredEnv()
     plugin.bind_background(env.run_background)
     completed = []
     cancelled = []
 
-    def on_finish(figure):
-        if finish is not None:
-            return finish(session, figure)
-        completed.append(plugin.finish(session, figure))
+    def on_finish():
+        completed.append(plugin.finish(session))
+        plots.finish()
         session.dispose()
         return True
 
@@ -237,7 +241,7 @@ def test_preview_cancels_on_escape_hide_and_finish_uses_committed_values(qapp):
     _button(widget, "Done").click()
     assert len(completed) == 1
     assert completed[0].flx_half == start.flux_half
-    assert completed[0].figure is widget.figure
+    assert completed[0].flx_int == start.flux_int
     _button(widget, "Done").click()
     assert len(completed) == 1
     widget.deleteLater()

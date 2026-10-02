@@ -208,7 +208,15 @@ def build_app_services(
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state)
     load = LoadService(state, writeback, provide_options=bindings.provide_options)
-    run = RunService(state, runner, bus, handles, writeback, gate=operation_gate)
+    run = RunService(
+        state,
+        runner,
+        bus,
+        handles,
+        writeback,
+        gate=operation_gate,
+        devices=device.get_connected_devices,
+    )
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
     save = SaveService(state, runner, bus, owner_scheduler=QtOwnerScheduler())

@@ -5,24 +5,26 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.twotone.reset.dual_tone.length import (
     LengthCfg,
     LengthExp,
     LengthResult,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     md,
     reset_module_writeback_items,
-    run_figure_only_analyze,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    AnalyzeResultBase,
     NoAnalyzeParams,
+    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -30,17 +32,17 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import RESET_120_FIELD_MD_MAP
 
-DualToneLengthRunResult: TypeAlias = LengthResult
+DualToneLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 
 @dataclass
-class DualToneLengthAnalyzeResult(FigureOnlyAnalyzeResult):
-    # D5: the length sweep is a look-at-the-curve fit — analysis renders the decay
-    # trace for the Analyze tab but extracts no scalar, so there is no writeback.
-    # The single ``figure`` field is inherited from FigureOnlyAnalyzeResult.
+class DualToneLengthAnalyzeResult(AnalyzeResultBase):
+    """The fit publishes a curve without fitted scalar output."""
+
     pass
 
 
@@ -81,7 +83,7 @@ class DualToneLengthAdapter(
             "tested two-pulse reset (carrying its md-linked sideband "
             "frequencies and gains) registered as the final reset module; the "
             "user picks the final reset length in the writeback dialog. "
-            "Skipped when no cfg_snapshot is available (e.g. loaded from file)."
+            "Skipped when no source cfg is available (e.g. loaded from file)."
         ),
         recommended=(
             "A length sweep from ~0.05 us to a few times the expected reset "
@@ -123,10 +125,21 @@ class DualToneLengthAdapter(
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> DualToneLengthRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = LengthExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
     def analyze(
-        self, req: AnalyzeRequest[DualToneLengthRunResult, NoAnalyzeParams]
+        self,
+        req: AnalyzeRequest[DualToneLengthRunResult, NoAnalyzeParams],
+        *,
+        plots: Plots,
     ) -> DualToneLengthAnalyzeResult:
-        return run_figure_only_analyze(LengthExp, DualToneLengthAnalyzeResult, req)
+        LengthExp().analyze(req.run_result, None, plots=plots)
+        return DualToneLengthAnalyzeResult()
 
     def get_writeback_items(
         self,
@@ -140,7 +153,7 @@ class DualToneLengthAdapter(
         items.extend(
             reset_module_writeback_items(
                 req.ctx,
-                req.run_result.cfg_snapshot,
+                req.run_result.cfg,
                 target="reset_120",
                 field_md_map=RESET_120_FIELD_MD_MAP,
                 desc="Reset with two pulse from 1 to 2 to 0",

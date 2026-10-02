@@ -122,8 +122,8 @@ def test_tab_get_summary_reads_explicit_tab_without_changing_focus(
                     },
                     "save_paths": {
                         "data_path": "next.h5",
-                        "analysis_image_path": "analysis.png",
-                        "post_analysis_image_path": "post.png",
+                        "analysis_images": {},
+                        "post_analysis_images": {},
                     },
                 }
             ]
@@ -228,25 +228,40 @@ def test_tab_get_analyze_params_includes_definitions_and_current_values(
 def test_tab_get_projects_complete_gui_artifacts_with_cfg(tmp_path: Path) -> None:
     artifacts = [
         {
+            "key": "data",
             "kind": "data",
+            "figure_name": None,
             "status": "unsaved_changes",
             "default_path": "next.h5",
             "last_saved_path": "previous_1.hdf5",
             "is_saveable": True,
         },
         {
+            "key": "analysis:fit",
             "kind": "analysis",
+            "figure_name": "fit",
             "status": "saved",
             "default_path": "analysis.png",
             "last_saved_path": "analysis.png",
             "is_saveable": True,
         },
         {
-            "kind": "post_analysis",
+            "key": "analysis:residual",
+            "kind": "analysis",
+            "figure_name": "residual",
             "status": "not_saved",
-            "default_path": None,
+            "default_path": "residual.png",
             "last_saved_path": None,
-            "is_saveable": False,
+            "is_saveable": True,
+        },
+        {
+            "key": "post:detail",
+            "kind": "post_analysis",
+            "figure_name": "detail",
+            "status": "not_saved",
+            "default_path": "post-detail.png",
+            "last_saved_path": None,
+            "is_saveable": True,
         },
     ]
 
@@ -275,9 +290,18 @@ def test_tab_get_projects_complete_gui_artifacts_with_cfg(tmp_path: Path) -> Non
     )
     assert result["cfg"] == reply("tab.get_cfg", {"tab_id": "old-tab"})
     assert result["artifacts"] == [
-        {**artifacts[0], "key": "data", "kind": "data"},
-        {**artifacts[1], "key": "analysis", "kind": "image"},
-        {**artifacts[2], "key": "post", "kind": "image"},
+        {
+            key: item[key]
+            for key in (
+                "key",
+                "status",
+                "default_path",
+                "last_saved_path",
+                "is_saveable",
+            )
+        }
+        | {"kind": "data" if item["kind"] == "data" else "image"}
+        for item in artifacts
     ]
     assert [
         method

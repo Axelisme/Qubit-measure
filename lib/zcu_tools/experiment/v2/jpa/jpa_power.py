@@ -4,9 +4,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 
@@ -18,10 +17,10 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
     config,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     setup_devices,
@@ -29,7 +28,7 @@ from zcu_tools.experiment.utils import (
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.plotting.liveplot import LivePlotScatter
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -47,7 +46,11 @@ from zcu_tools.program.v2 import (
 class PowerResult:
     powers: NDArray[np.float64]
     signals: NDArray[np.float64]
-    cfg_snapshot: PowerCfg | None = None
+
+
+@dataclass(frozen=True)
+class PowerAnalysis:
+    best_power: float
 
 
 class PowerModuleCfg(ConfigBase):
@@ -79,52 +82,70 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         tag="jpa/power",
     )
 
-    @record_result
-    def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
-        orig_cfg = deepcopy(cfg)
+    def run(self, cfg: PowerCfg, *, context: RunContext) -> PowerResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
         jpa_powers = sweep2array(cfg.sweep.jpa_power, allow_array=True)
         np.random.shuffle(jpa_powers[1:-1])
 
-        with LivePlotScatter("Power (dBm)", "Signal Difference") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(jpa_powers),),
-                dtype=np.float64,
-                on_update=lambda data: viewer.update(jpa_powers, np.abs(data)),
-            )
-            with Schedule(cfg, signals_buffer) as sched:
-                for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
-                    set_power_in_dev_cfg(
-                        step.cfg.dev,
-                        jpa_power,
-                        label="jpa_rf_dev",
+        def configure_axes(ax: Axes) -> None:
+            ax.lines[0].set_linestyle("None")
+            ax.lines[0].set_marker("o")
+
+        viewer = context.plots.liveplot_1d(
+            "measurement",
+            "Power (dBm)",
+            "Signal Difference",
+            configure_axes=configure_axes,
+        )
+        signals_buffer = SignalBuffer(
+            (len(jpa_powers),),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(jpa_powers, np.abs(data)),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
+                set_power_in_dev_cfg(
+                    step.cfg.dev,
+                    jpa_power,
+                    label="jpa_rf_dev",
+                )
+                setup_devices(
+                    step.cfg,
+                    context.devices,
+                    progress=False,
+                    cancel_signal=context.cancel_signal,
+                )
+                modules = step.cfg.modules
+                tracker = MomentTracker()
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Readout("readout", modules.readout),
                     )
-                    setup_devices(step.cfg, progress=False)
-                    modules = step.cfg.modules
-                    tracker = MomentTracker()
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("ge", 2)
-                        .build_and_acquire(
-                            raw2signal_fn=lambda raw: snr_as_signal(
+                    .declare_sweep("ge", 2)
+                    .build_and_acquire(
+                        raw2signal_fn=lambda raw, tracker=tracker, skew_penalty=step.cfg.skew_penalty: (
+                            snr_as_signal(
                                 [tracker],
                                 ge_axis=1,
-                                skew_penalty=sched.cfg.skew_penalty,
-                            ),
-                            trackers=[tracker],
-                        )
+                                skew_penalty=skew_penalty,
+                            )
+                        ),
+                        trackers=[tracker],
                     )
-                signals = signals_buffer.array
+                )
+            signals = signals_buffer.array
 
-        return PowerResult(powers=jpa_powers, signals=signals, cfg_snapshot=orig_cfg)
+        return PowerResult(powers=jpa_powers, signals=signals)
 
-    @retrieve_result
-    def analyze(self, result: PowerResult | None = None) -> tuple[float, Figure]:
-        assert result is not None, "no result found"
+    def analyze(
+        self, source: RunRecord[PowerCfg, PowerResult], options: None, *, plots: Plots
+    ) -> PowerAnalysis:
+        del options
+        result = source.result
 
         jpa_powers = result.powers
         signals = result.signals
@@ -133,7 +154,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         max_idx = np.nanargmax(snrs)
         best_jpa_power = jpa_powers[max_idx]
 
-        fig, ax = plt.subplots(figsize=config.figsize)
+        fig, ax = plots.subplots("fit", figsize=config.figsize)
         ax.scatter(jpa_powers, snrs, label="signal difference", s=1)
         ax.axvline(
             best_jpa_power,
@@ -147,4 +168,4 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         ax.grid(True)
         fig.tight_layout()
 
-        return float(best_jpa_power), fig
+        return PowerAnalysis(best_power=float(best_jpa_power))

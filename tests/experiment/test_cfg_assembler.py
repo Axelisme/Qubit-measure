@@ -4,11 +4,11 @@ from typing import Any
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import FakeDeviceInfo
-from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg, make_cfg
+from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
+from zcu_tools.experiment.cfg_assembler import CfgEnv, assemble_experiment_cfg, make_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.program.v2 import PulseCfg
-from zcu_tools.resources.context import ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class _DeviceOnlyCfg(ExpCfgModel):
@@ -20,6 +20,7 @@ class _PulseModules(ConfigBase):
 
 
 class _PulseExperimentCfg(ExpCfgModel):
+    reps: int = 1
     modules: _PulseModules
 
 
@@ -67,25 +68,37 @@ def test_assemble_experiment_cfg_uses_explicit_device_snapshot() -> None:
     assert snapshot["flux"].value == pytest.approx(1.0)
 
 
-def test_make_cfg_with_explicit_snapshot_does_not_read_global_devices(
+def test_make_cfg_reads_current_devices_without_setup_or_mutating_prior_cfg() -> None:
+    manager = DeviceManager()
+    device = FakeDevice(fast_mode=True)
+    manager.register_device("flux", device)
+    env = CfgEnv(md=MetaDict(), ml=ModuleLibrary(), device_manager=manager)
+    raw = {"dev": {"flux": {"output": "on"}}}
+
+    first = make_cfg(raw, _DeviceOnlyCfg, env)
+    device.set_value(0.4)
+    second = make_cfg(raw, _DeviceOnlyCfg, env)
+    _assert_fake_device_value(first, "flux", 0.0)
+    _assert_fake_device_value(second, "flux", 0.4)
+    assert device.get_output() == "off"
+    assert raw == {"dev": {"flux": {"output": "on"}}}
+
+
+def test_make_cfg_propagates_device_read_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_get_all_info() -> dict[str, FakeDeviceInfo]:
-        raise AssertionError("GlobalDeviceManager must not be read")
+    device = FakeDevice(fast_mode=True)
+    manager = DeviceManager()
+    manager.register_device("flux", device)
+    env = CfgEnv(md=MetaDict(), ml=ModuleLibrary(), device_manager=manager)
+    make_cfg({}, _DeviceOnlyCfg, env)
 
-    monkeypatch.setattr(
-        "zcu_tools.experiment.cfg_assembler.GlobalDeviceManager.get_all_info",
-        fail_get_all_info,
-    )
+    def failed_read():
+        raise RuntimeError("device read failed")
 
-    cfg = make_cfg(
-        {"dev": {"flux": {"value": 3.0}}},
-        _DeviceOnlyCfg,
-        ml=ModuleLibrary(),
-        device_snapshot={"flux": _device(1.0)},
-    )
-
-    _assert_fake_device_value(cfg, "flux", 3.0)
+    monkeypatch.setattr(device, "get_info", failed_read)
+    with pytest.raises(RuntimeError, match="device read failed"):
+        make_cfg({}, _DeviceOnlyCfg, env)
 
 
 def test_assemble_experiment_cfg_uses_ml_from_each_call() -> None:
@@ -108,32 +121,14 @@ def test_assemble_experiment_cfg_uses_ml_from_each_call() -> None:
     assert cfg_b.modules.drive.freq == pytest.approx(2000.0)
 
 
-def test_module_library_make_cfg_forwards_to_cfg_assembler(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ml = ModuleLibrary()
-    sentinel = object()
-    calls: dict[str, object] = {}
-
-    def fake_make_cfg(
-        raw_cfg: dict[str, Any],
-        cfg_model: type[_DeviceOnlyCfg],
-        *,
-        ml: ModuleLibrary,
-        overrides: dict[str, Any] | None = None,
-    ) -> object:
-        calls["raw_cfg"] = raw_cfg
-        calls["cfg_model"] = cfg_model
-        calls["ml"] = ml
-        calls["overrides"] = overrides
-        return sentinel
-
-    monkeypatch.setattr("zcu_tools.experiment.cfg_assembler.make_cfg", fake_make_cfg)
-
-    assert ml.make_cfg({"reps": 1}, _DeviceOnlyCfg, relax_delay=2.0) is sentinel
-    assert calls == {
-        "raw_cfg": {"reps": 1},
-        "cfg_model": _DeviceOnlyCfg,
-        "ml": ml,
-        "overrides": {"relax_delay": 2.0},
-    }
+def test_make_cfg_uses_each_environment_library_and_overrides() -> None:
+    manager = DeviceManager()
+    raw = {"modules": {"drive": "drive"}}
+    first = CfgEnv(md=MetaDict(), ml=_ml_with_drive(1000.0), device_manager=manager)
+    second = CfgEnv(md=MetaDict(), ml=_ml_with_drive(2000.0), device_manager=manager)
+    cfg_a = make_cfg(raw, _PulseExperimentCfg, first)
+    cfg_b = make_cfg(raw, _PulseExperimentCfg, second, overrides={"reps": 3})
+    assert cfg_a.modules.drive.freq == pytest.approx(1000.0)
+    assert cfg_b.modules.drive.freq == pytest.approx(2000.0)
+    assert cfg_b.reps == 3
+    assert raw == {"modules": {"drive": "drive"}}

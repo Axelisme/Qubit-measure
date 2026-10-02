@@ -78,6 +78,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .arb_waveform import ArbWaveformPort
+    from .artifact_tracker import ArtifactKey
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
@@ -974,11 +975,10 @@ class Controller(SessionControllerMixin):
     ) -> SaveDataSubmission:
         return self._save_control.save_data(tab_id, data_path, comment=comment)
 
-    def save_image(self, tab_id: str, image_path: str | None = None) -> str:
-        return self._save_control.save_image(tab_id, image_path)
-
-    def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
-        return self._save_control.save_post_image(tab_id, image_path)
+    def save_image(
+        self, tab_id: str, key: ArtifactKey, image_path: str | None = None
+    ) -> str:
+        return self._save_control.save_image(tab_id, key, image_path)
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -1328,21 +1328,10 @@ class Controller(SessionControllerMixin):
             ),
         )
 
-    def update_tab_analysis_image_path(
-        self, tab_id: str, image_path: str | None
+    def update_tab_image_path(
+        self, tab_id: str, key: ArtifactKey, image_path: str | None
     ) -> None:
-        self._tab_svc.update_tab_analysis_image_path_override(tab_id, image_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
-            ),
-        )
-
-    def update_tab_post_analysis_image_path(
-        self, tab_id: str, image_path: str | None
-    ) -> None:
-        self._tab_svc.update_tab_post_analysis_image_path_override(tab_id, image_path)
+        self._tab_svc.update_tab_image_path_override(tab_id, key, image_path)
         self._bus.emit(
             TabInteractionChangedPayload(
                 tab_id=tab_id,

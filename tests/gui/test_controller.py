@@ -14,9 +14,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtCore import QCoreApplication
-from qtpy.QtWidgets import QLabel, QStackedWidget
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxResult
 from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.measure.registry import register_all
@@ -24,6 +24,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,
 )
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -49,11 +50,13 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.plotting import FigureContainer
-from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.gui.session.services.device import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+)
 from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import (
@@ -159,7 +162,10 @@ def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
         1j * values[:, None] * freqs[None, :] / 10
     )
     cf.state.update_tab_result(
-        tab_id, SimpleNamespace(signals=signals, values=values, freqs=freqs)
+        tab_id,
+        RunRecord(
+            cfg=None, result=FreqFluxResult(signals=signals, values=values, freqs=freqs)
+        ),
     )
     token = cf.ctrl.analyze(tab_id, FluxPickParams())
     cf.view.mount_interactive_analysis.assert_called_once()
@@ -181,13 +187,6 @@ def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
             return True
         time.sleep(step_ms / 1000)
     return False
-
-
-def _make_figure_container() -> FigureContainer:
-    stack = QStackedWidget()
-    placeholder = QLabel("(placeholder)")
-    stack.addWidget(placeholder)
-    return FigureContainer(stack, placeholder)
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +258,9 @@ def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
 
     assert cancelled is True
     # The View's interactive host is torn down (dual of mount_interactive_analysis).
-    cf.view.unmount_interactive_analysis.assert_called_once_with(tab_id)
+    cf.view.unmount_interactive_analysis.assert_called_once_with(
+        tab_id, restore_result=True
+    )
     # is_analyzing cleared -> the tab is no longer busy and can be closed.
     assert cf.state.is_tab_analyzing(tab_id) is False
     cf.ctrl.close_tab(tab_id)
@@ -270,7 +271,9 @@ def test_cancel_analyze_without_interactive_is_graceful(cf):
     tab_id = cf.ctrl.new_tab("fake")
     # No interactive analyze in flight -> graceful no-op (still unmounts defensively).
     assert cf.ctrl.cancel_analyze(tab_id) is False
-    cf.view.unmount_interactive_analysis.assert_called_once_with(tab_id)
+    cf.view.unmount_interactive_analysis.assert_called_once_with(
+        tab_id, restore_result=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -416,9 +419,12 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     captured: dict[str, dict[str, object]] = {}
     real_adapter = cf.state.get_tab(tab_id).adapter
 
-    def _capture_run(req, raw_cfg):
+    acquired = object()
+
+    def _capture_run(req, raw_cfg, *, context):
         captured["cfg"] = raw_cfg
-        return real_adapter.run(req, raw_cfg)
+        assert isinstance(context.plots, Plots)
+        return acquired
 
     spy = MagicMock(spec=FakeAdapter)
     spy.capabilities = real_adapter.capabilities
@@ -432,6 +438,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     assert captured["cfg"]["reps"] == 42
+    assert cf.ctrl.get_tab_snapshot(tab_id).run.result is acquired
 
 
 def test_start_run_emits_run_started(cf):
@@ -478,7 +485,11 @@ def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
         cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    cf.state.update_tab_analyze(tab_id, object(), Figure())
+    plots = Plots(NonPresentingHost())
+    plots.adopt("fit", Figure())
+    plots.finish()
+    plots.release()
+    cf.state.update_tab_analyze(tab_id, object(), plots)
 
     def write_data(req) -> None:
         Path(req.data_path).write_bytes(b"offline adapter output")
@@ -486,13 +497,17 @@ def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
     # FakeAdapter's default save is a no-op; exercise real filesystem I/O here.
     monkeypatch.setattr(cf.state.get_tab(tab_id).adapter, "save", write_data)
     cf.ctrl.update_tab_data_path(tab_id, str(tmp_path / "data"))
-    cf.ctrl.update_tab_analysis_image_path(tab_id, str(tmp_path / "analysis.png"))
+    cf.ctrl.update_tab_image_path(
+        tab_id,
+        ArtifactKey(ArtifactKind.ANALYSIS, "fit"),
+        str(tmp_path / "analysis.png"),
+    )
     submission = cf.ctrl.save_artifacts(tab_id)
     with pytest.raises(FailedPreconditionError, match="no cancellation point"):
         cf.ctrl.operation_control.cancel_operation(submission.operation_id)
     assert _wait_for(lambda: not cf.state.is_tab_busy(tab_id))
     artifacts = cf.ctrl.get_tab_snapshot(tab_id).artifacts
-    assert {a.kind for a in artifacts} == {ArtifactKind.DATA, ArtifactKind.ANALYSIS}
+    assert {a.key.kind for a in artifacts} == {ArtifactKind.DATA, ArtifactKind.ANALYSIS}
     assert all(a.status is SaveStatus.SAVED for a in artifacts)
     assert all(a.last_saved_path is not None for a in artifacts)
     assert all(Path(d.path).is_file() for d in submission.destinations)
@@ -552,7 +567,7 @@ def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, so
         cf.bus.subscribe(RunFinishedPayload, terminal.append)
         entered, release = threading.Event(), threading.Event()
 
-        def partial_run(*_args):
+        def partial_run(*_args, **_kwargs):
             entered.set()
             if not release.wait(3):
                 raise RuntimeError("test did not release partial run")
@@ -730,7 +745,9 @@ def test_draft_context_rejects_real_run_and_save(cf):
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_data(tab_id, "/tmp/data.h5")
     with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.save_image(tab_id, "/tmp/image.png")
+        cf.ctrl.save_image(
+            tab_id, ArtifactKey(ArtifactKind.ANALYSIS, "fit"), "/tmp/image.png"
+        )
 
 
 @dataclass
@@ -822,20 +839,10 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
     dev = cf.state.get_device("flux")
     assert dev is not None and dev.status is DeviceStatus.CONNECTED
     cf.view.show_status_message.assert_called()
-    GlobalDeviceManager.drop_device("flux", ignore_error=True)
-
-
-def test_run_clears_active_figure_container_after_finish(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.view.make_run_container.return_value = _make_figure_container()
-
-    cf.ctrl.start_run(
-        tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
+    cf.ctrl._dev_svc.start_disconnect_device(
+        DisconnectDeviceRequest(name="flux", remember=False)
     )
-
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    assert has_current_container() is False
+    assert _wait_for(lambda: cf.state.get_device("flux") is None)
 
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):

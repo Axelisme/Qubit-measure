@@ -173,10 +173,9 @@ def tab_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any
             )
     if "artifacts" in include:
         assert snap is not None
-        keys = {"data": "data", "analysis": "analysis", "post_analysis": "post"}
         result["artifacts"] = [
             {
-                "key": keys[artifact["kind"]],
+                "key": artifact["key"],
                 "kind": "data" if artifact["kind"] == "data" else "image",
                 "status": artifact["status"],
                 "default_path": artifact["default_path"],

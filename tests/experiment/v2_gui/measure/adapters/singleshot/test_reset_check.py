@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.reset_check import ResetCheckResult
 from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.reset_check import (
     SsResetCheckAdapter,
 )
 from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, NoAnalyzeParams
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 def test_adapter_analyzes_populations_with_external_correction() -> None:
@@ -18,8 +19,11 @@ def test_adapter_analyzes_populations_with_external_correction() -> None:
     populations = np.tile([0.85, 0.1, 0.05], (4, 3, 1))
     measured = populations @ matrix
     req = AnalyzeRequest(
-        run_result=ResetCheckResult(
-            np.arange(4, dtype=float), np.arange(3), measured[..., :2]
+        run_result=RunRecord(
+            cfg=None,
+            result=ResetCheckResult(
+                np.arange(4, dtype=float), np.arange(3), measured[..., :2]
+            ),
         ),
         analyze_params=NoAnalyzeParams(),
         md=cast(Any, {"confusion_matrix": matrix}),
@@ -27,12 +31,16 @@ def test_adapter_analyzes_populations_with_external_correction() -> None:
         predictor=None,
     )
     assert ADAPTERS["singleshot/reset_check"] is SsResetCheckAdapter
-    out = SsResetCheckAdapter().analyze(req)
+    plots = Plots(NonPresentingHost())
     try:
+        out = SsResetCheckAdapter().analyze(req, plots=plots)
+        figure = plots.finish(present=False)["populations"]
+        assert len(figure.axes[0].lines) == 9
         summary = out.to_summary_dict()
         assert summary["reset_mean_excited_population"] == pytest.approx(0.1)
         assert summary["reset_max_other_population"] == pytest.approx(0.05)
         assert summary["analyzed_reset_points"] == 4
         assert "readout_condition_number" not in summary
     finally:
-        plt.close(out.figure)
+        plots.finish(present=False)
+        plots.release()

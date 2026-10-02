@@ -1,4 +1,4 @@
-"""Concurrency tests for GlobalDeviceManager's registry-scoped lock.
+"""Concurrency tests for manager's registry-scoped lock.
 
 The manager _lock must protect only the registry dict (register/drop/get).
 Long I/O operations — setup() ramps, get_info() SCPI reads — must run outside
@@ -19,31 +19,15 @@ import pytest
 from zcu_tools.device import (
     DeviceCloseFailure,
     DeviceCloseInProgressError,
+    DeviceManager,
     FakeDevice,
     FakeDeviceInfo,
-    GlobalDeviceManager,
-    device_setup_cancel_scope,
 )
 
-# ---------------------------------------------------------------------------
-# Fixture: clean registry before/after each test
-# ---------------------------------------------------------------------------
 
-
-@pytest.fixture(autouse=True)
-def clean_registry() -> object:
-    """Ensure GlobalDeviceManager._devices is empty before and after each test.
-
-    GlobalDeviceManager is a class-level singleton; without cleanup a test's
-    registrations would leak into subsequent tests and cause spurious failures.
-    In-flight close claims are cleared too so a failed test cannot leave a
-    stale identity claimed for the next one.
-    """
-    GlobalDeviceManager._devices.clear()
-    GlobalDeviceManager._close_claims.clear()
-    yield
-    GlobalDeviceManager._devices.clear()
-    GlobalDeviceManager._close_claims.clear()
+@pytest.fixture
+def manager() -> DeviceManager:
+    return DeviceManager()
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +114,9 @@ def _hook_close(
 # ---------------------------------------------------------------------------
 
 
-def test_get_info_not_blocked_by_concurrent_setup_on_other_device() -> None:
+def test_get_info_not_blocked_by_concurrent_setup_on_other_device(
+    manager: DeviceManager,
+) -> None:
     """get_info("B") must return before device A's ramp finishes.
 
     Old implementation: manager._lock was held for the entire setup() call,
@@ -151,8 +137,8 @@ def test_get_info_not_blocked_by_concurrent_setup_on_other_device() -> None:
     """
     dev_a = _make_slow_ramp_device()
     dev_b = _make_fast_device()
-    GlobalDeviceManager.register_device("A", dev_a)
-    GlobalDeviceManager.register_device("B", dev_b)
+    manager.register_device("A", dev_a)
+    manager.register_device("B", dev_b)
 
     cfg_a = FakeDeviceInfo(
         address="none", output="on", value=1.0, rampstep=dev_a._rampstep
@@ -161,7 +147,7 @@ def test_get_info_not_blocked_by_concurrent_setup_on_other_device() -> None:
         address="none", output="on", value=0.5, rampstep=dev_b._rampstep
     )
     # Pre-configure B so get_info() has a meaningful state to return.
-    GlobalDeviceManager.setup_devices({"B": cfg_b})
+    manager.setup_devices({"B": cfg_b})
 
     ramp_started = threading.Event()
     writer_done = threading.Event()
@@ -178,14 +164,14 @@ def test_get_info_not_blocked_by_concurrent_setup_on_other_device() -> None:
 
     def writer() -> None:
         try:
-            GlobalDeviceManager.setup_devices({"A": cfg_a})
+            manager.setup_devices({"A": cfg_a})
         finally:
             dev_a._setup = original_setup  # type: ignore[method-assign]
             writer_done.set()
 
     def reader() -> None:
         ramp_started.wait()  # wait until A's ramp is in progress
-        GlobalDeviceManager.get_info("B")
+        manager.get_info("B")
         # Record whether writer_done was already set at the moment get_info returned.
         writer_done_at_get_info_time.append(writer_done.is_set())
         get_info_returned.set()
@@ -213,24 +199,55 @@ def test_get_info_not_blocked_by_concurrent_setup_on_other_device() -> None:
     )
 
 
-def test_register_device_rejects_non_base_device_without_mutating_registry() -> None:
+def test_register_device_rejects_non_base_device_without_mutating_registry(
+    manager: DeviceManager,
+) -> None:
     bad_device = cast(Any, object())
 
     with pytest.raises(TypeError, match="register_device expected BaseDevice"):
-        GlobalDeviceManager.register_device("bad", bad_device)
+        manager.register_device("bad", bad_device)
 
-    assert "bad" not in GlobalDeviceManager.get_all_devices()
+    assert "bad" not in manager.get_all_devices()
 
 
-def test_register_device_accepts_base_device() -> None:
+def test_managers_isolate_names_setup_and_disconnect(manager: DeviceManager) -> None:
+    other = DeviceManager()
+    first = _make_fast_device()
+    second = _make_fast_device()
+    manager.register_device("flux", first)
+    other.register_device("flux", second)
+
+    manager.setup_devices(
+        {"flux": FakeDeviceInfo(address="none", output="on", value=0.5)},
+        progress=False,
+    )
+    assert manager.get_device("flux") is first
+    assert other.get_device("flux") is second
+    assert second.get_value() == 0.0
+
+    manager.close_all_devices()
+    assert manager.get_all_devices() == {}
+    assert other.get_device("flux") is second
+    assert second.get_value() == 0.0
+
+
+def test_get_all_devices_is_an_independent_mapping(manager: DeviceManager) -> None:
+    device = _make_fast_device()
+    manager.register_device("flux", device)
+    snapshot = manager.get_all_devices()
+    snapshot.clear()
+    assert manager.get_device("flux") is device
+
+
+def test_register_device_accepts_base_device(manager: DeviceManager) -> None:
     dev = _make_fast_device()
 
-    GlobalDeviceManager.register_device("ok", dev)
+    manager.register_device("ok", dev)
 
-    assert GlobalDeviceManager.get_device("ok") is dev
+    assert manager.get_device("ok") is dev
 
 
-def test_get_all_info_returns_correct_snapshot() -> None:
+def test_get_all_info_returns_correct_snapshot(manager: DeviceManager) -> None:
     """get_all_info() returns the current state of all registered devices.
 
     This is a functional regression check: the new out-of-lock implementation
@@ -238,14 +255,14 @@ def test_get_all_info_returns_correct_snapshot() -> None:
     """
     dev_a = _make_fast_device()
     dev_b = _make_fast_device()
-    GlobalDeviceManager.register_device("A", dev_a)
-    GlobalDeviceManager.register_device("B", dev_b)
+    manager.register_device("A", dev_a)
+    manager.register_device("B", dev_b)
 
     cfg_a = FakeDeviceInfo(address="none", output="on", value=0.3, rampstep=0.1)
     cfg_b = FakeDeviceInfo(address="none", output="off", value=0.7, rampstep=0.1)
-    GlobalDeviceManager.setup_devices({"A": cfg_a, "B": cfg_b})
+    manager.setup_devices({"A": cfg_a, "B": cfg_b})
 
-    all_info = GlobalDeviceManager.get_all_info()
+    all_info = manager.get_all_info()
 
     assert set(all_info.keys()) == {"A", "B"}
 
@@ -260,26 +277,28 @@ def test_get_all_info_returns_correct_snapshot() -> None:
     assert info_b.output == "off"
 
 
-def test_setup_devices_fast_fails_on_unknown_name() -> None:
+def test_setup_devices_fast_fails_on_unknown_name(manager: DeviceManager) -> None:
     """Unknown device name in setup_devices raises ValueError before any setup."""
     dev = _make_fast_device()
-    GlobalDeviceManager.register_device("known", dev)
+    manager.register_device("known", dev)
 
     cfg = FakeDeviceInfo(address="none", output="on", value=0.0, rampstep=0.1)
     with pytest.raises(ValueError, match="unknown"):
-        GlobalDeviceManager.setup_devices({"known": cfg, "unknown": cfg})
+        manager.setup_devices({"known": cfg, "unknown": cfg})
 
 
-def test_setup_devices_validates_all_names_before_any_setup() -> None:
+def test_setup_devices_validates_all_names_before_any_setup(
+    manager: DeviceManager,
+) -> None:
     """If any name is missing the whole batch is rejected — no partial setup."""
     dev_a = _make_fast_device()
-    GlobalDeviceManager.register_device("A", dev_a)
+    manager.register_device("A", dev_a)
     # "B" is not registered.
 
     cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
 
     with pytest.raises(ValueError, match="B"):
-        GlobalDeviceManager.setup_devices({"A": cfg, "B": cfg})
+        manager.setup_devices({"A": cfg, "B": cfg})
 
     # A must not have been set up (value stays at the default 0.0).
     assert dev_a.get_value() == 0.0, (
@@ -288,15 +307,17 @@ def test_setup_devices_validates_all_names_before_any_setup() -> None:
     )
 
 
-def test_setup_devices_validates_names_before_cancel_short_circuit() -> None:
+def test_setup_devices_validates_names_before_cancel_short_circuit(
+    manager: DeviceManager,
+) -> None:
     dev = _make_fast_device()
-    GlobalDeviceManager.register_device("known", dev)
+    manager.register_device("known", dev)
     cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
     cancel_signal = threading.Event()
     cancel_signal.set()
 
     with pytest.raises(ValueError, match="unknown"):
-        GlobalDeviceManager.setup_devices(
+        manager.setup_devices(
             {"known": cfg, "unknown": cfg},
             cancel_signal=cancel_signal,
         )
@@ -305,38 +326,28 @@ def test_setup_devices_validates_names_before_cancel_short_circuit() -> None:
     assert dev.get_value() == 0.0
 
 
-def test_setup_devices_explicit_cancel_signal_skips_before_first_device() -> None:
+def test_setup_devices_explicit_cancel_signal_skips_before_first_device(
+    manager: DeviceManager,
+) -> None:
     dev = _make_fast_device()
-    GlobalDeviceManager.register_device("A", dev)
+    manager.register_device("A", dev)
     cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
     cancel_signal = threading.Event()
     cancel_signal.set()
 
-    GlobalDeviceManager.setup_devices({"A": cfg}, cancel_signal=cancel_signal)
+    manager.setup_devices({"A": cfg}, cancel_signal=cancel_signal)
 
     assert dev.get_output() == "off"
     assert dev.get_value() == 0.0
 
 
-def test_setup_devices_ambient_cancel_signal_skips_before_first_device() -> None:
-    dev = _make_fast_device()
-    GlobalDeviceManager.register_device("A", dev)
-    cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
-    cancel_signal = threading.Event()
-    cancel_signal.set()
-
-    with device_setup_cancel_scope(cancel_signal):
-        GlobalDeviceManager.setup_devices({"A": cfg})
-
-    assert dev.get_output() == "off"
-    assert dev.get_value() == 0.0
-
-
-def test_setup_devices_mid_ramp_cancel_stops_before_next_device() -> None:
+def test_setup_devices_mid_ramp_cancel_stops_before_next_device(
+    manager: DeviceManager,
+) -> None:
     dev_a = _make_slow_ramp_device()
     dev_b = _make_fast_device()
-    GlobalDeviceManager.register_device("A", dev_a)
-    GlobalDeviceManager.register_device("B", dev_b)
+    manager.register_device("A", dev_a)
+    manager.register_device("B", dev_b)
     cfg_a = FakeDeviceInfo(
         address="none", output="on", value=1.0, rampstep=dev_a._rampstep
     )
@@ -346,7 +357,7 @@ def test_setup_devices_mid_ramp_cancel_stops_before_next_device() -> None:
 
     timer.start()
     try:
-        GlobalDeviceManager.setup_devices(
+        manager.setup_devices(
             {"A": cfg_a, "B": cfg_b},
             cancel_signal=cancel_signal,
         )
@@ -360,109 +371,99 @@ def test_setup_devices_mid_ramp_cancel_stops_before_next_device() -> None:
     assert dev_b.get_value() == 0.0
 
 
-def test_setup_devices_explicit_cancel_signal_overrides_ambient_signal() -> None:
-    dev = _make_fast_device()
-    GlobalDeviceManager.register_device("A", dev)
-    cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
-    ambient_cancel = threading.Event()
-    ambient_cancel.set()
-    explicit_cancel = threading.Event()
-
-    with device_setup_cancel_scope(ambient_cancel):
-        GlobalDeviceManager.setup_devices(
-            {"A": cfg},
-            cancel_signal=explicit_cancel,
-        )
-
-    assert dev.get_output() == "on"
-    assert dev.get_value() == pytest.approx(0.5)
-
-
 # ---------------------------------------------------------------------------
 # Registry-owned disconnect: close_device / close_all_devices
 # ---------------------------------------------------------------------------
 
 
-def test_close_device_missing_raises_value_error() -> None:
+def test_close_device_missing_raises_value_error(manager: DeviceManager) -> None:
     with pytest.raises(ValueError, match="not found"):
-        GlobalDeviceManager.close_device("ghost")
+        manager.close_device("ghost")
 
-    assert "ghost" not in GlobalDeviceManager.get_all_devices()
-
-
-def test_close_device_ignore_missing_is_noop() -> None:
-    GlobalDeviceManager.close_device("ghost", ignore_missing=True)
+    assert "ghost" not in manager.get_all_devices()
 
 
-def test_close_device_success_removes_all_aliases_of_identity() -> None:
+def test_close_device_ignore_missing_is_noop(manager: DeviceManager) -> None:
+    manager.close_device("ghost", ignore_missing=True)
+
+
+def test_close_device_success_removes_all_aliases_of_identity(
+    manager: DeviceManager,
+) -> None:
     dev = _make_fast_device()
     probe = _hook_close(dev)
     probe.release.set()  # no blocking needed for the success path
-    GlobalDeviceManager.register_device("A", dev)
-    GlobalDeviceManager.register_device("alias", dev)
+    manager.register_device("A", dev)
+    manager.register_device("alias", dev)
 
-    GlobalDeviceManager.close_device("A")
+    manager.close_device("A")
 
     assert len(probe.calls) == 1
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
 
-def test_close_device_failure_keeps_entries_then_retry_succeeds() -> None:
+def test_close_device_failure_keeps_entries_then_retry_succeeds(
+    manager: DeviceManager,
+) -> None:
     dev = _make_fast_device()
     probe = _hook_close(dev, fail="first")
-    GlobalDeviceManager.register_device("A", dev)
-    GlobalDeviceManager.register_device("alias", dev)
+    manager.register_device("A", dev)
+    manager.register_device("alias", dev)
 
     with pytest.raises(DeviceCloseFailure) as excinfo:
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
 
     failure = excinfo.value
     assert failure.names == ("A",)
     assert isinstance(failure.cause, RuntimeError)
     # Failure must not remove entries or aliases: they stay retryable.
-    assert set(GlobalDeviceManager.get_all_devices()) == {"A", "alias"}
+    assert set(manager.get_all_devices()) == {"A", "alias"}
 
     # The claim was released on failure: the retry reaches the device again.
     probe.release.set()
-    GlobalDeviceManager.close_device("A")
+    manager.close_device("A")
 
     assert len(probe.calls) == 2
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
 
-def test_close_all_empty_registry_is_noop() -> None:
-    GlobalDeviceManager.close_all_devices()
+def test_close_all_empty_registry_is_noop(manager: DeviceManager) -> None:
+    manager.close_all_devices()
 
 
-def test_close_all_dedupes_identity_and_closes_each_once() -> None:
+def test_close_all_dedupes_identity_and_closes_each_once(
+    manager: DeviceManager,
+) -> None:
     dev1 = _make_fast_device()
     dev2 = _make_fast_device()
     probe1 = _hook_close(dev1)
     probe2 = _hook_close(dev2)
     probe1.release.set()
     probe2.release.set()
-    GlobalDeviceManager.register_device("A", dev1)
-    GlobalDeviceManager.register_device("alias", dev1)  # same identity
-    GlobalDeviceManager.register_device("B", dev2)
+    manager.register_device("A", dev1)
+    manager.register_device("alias", dev1)  # same identity
+    manager.register_device("B", dev2)
 
-    GlobalDeviceManager.close_all_devices()
+    manager.close_all_devices()
 
     assert len(probe1.calls) == 1  # aliases dedupe to one close per identity
     assert len(probe2.calls) == 1
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
 
-def test_close_all_aggregates_named_failures_and_keeps_entries() -> None:
+def test_close_all_aggregates_named_failures_and_keeps_entries(
+    manager: DeviceManager,
+) -> None:
     dev1 = _make_fast_device()
     dev2 = _make_fast_device()
     _hook_close(dev1, fail="always")
     _hook_close(dev2, fail="always")
-    GlobalDeviceManager.register_device("A", dev1)
-    GlobalDeviceManager.register_device("alias", dev1)
-    GlobalDeviceManager.register_device("B", dev2)
+    manager.register_device("A", dev1)
+    manager.register_device("alias", dev1)
+    manager.register_device("B", dev2)
 
     with pytest.raises(ExceptionGroup) as excinfo:
-        GlobalDeviceManager.close_all_devices()
+        manager.close_all_devices()
 
     failures = [
         e for e in excinfo.value.exceptions if isinstance(e, DeviceCloseFailure)
@@ -474,44 +475,48 @@ def test_close_all_aggregates_named_failures_and_keeps_entries() -> None:
 
     # Entries stay registered for retry; claims were released (a second
     # close_device call reaches the device instead of raising InProgressError).
-    assert set(GlobalDeviceManager.get_all_devices()) == {"A", "alias", "B"}
+    assert set(manager.get_all_devices()) == {"A", "alias", "B"}
     with pytest.raises(DeviceCloseFailure):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
 
 
-def test_close_all_continues_after_failure_and_removes_successes() -> None:
+def test_close_all_continues_after_failure_and_removes_successes(
+    manager: DeviceManager,
+) -> None:
     dev1 = _make_fast_device()
     dev2 = _make_fast_device()
     _hook_close(dev1, fail="always")
     probe2 = _hook_close(dev2)
     probe2.release.set()
-    GlobalDeviceManager.register_device("A", dev1)
-    GlobalDeviceManager.register_device("B", dev2)
+    manager.register_device("A", dev1)
+    manager.register_device("B", dev2)
 
     with pytest.raises(ExceptionGroup) as excinfo:
-        GlobalDeviceManager.close_all_devices()
+        manager.close_all_devices()
 
     failures = [
         e for e in excinfo.value.exceptions if isinstance(e, DeviceCloseFailure)
     ]
     assert [e.names for e in failures] == [("A",)]
-    assert "A" in GlobalDeviceManager.get_all_devices()
-    assert "B" not in GlobalDeviceManager.get_all_devices()
+    assert "A" in manager.get_all_devices()
+    assert "B" not in manager.get_all_devices()
     assert len(probe2.calls) == 1
 
 
-def test_concurrent_same_identity_close_device_follower_fast_fails() -> None:
+def test_concurrent_same_identity_close_device_follower_fast_fails(
+    manager: DeviceManager,
+) -> None:
     """Second manager close of an in-flight identity fails fast, close once."""
     dev = _make_fast_device()
     probe = _hook_close(dev)
-    GlobalDeviceManager.register_device("A", dev)
+    manager.register_device("A", dev)
 
     leader_done = threading.Event()
     leader_errors: list[BaseException] = []
 
     def leader() -> None:
         try:
-            GlobalDeviceManager.close_device("A")
+            manager.close_device("A")
         except BaseException as exc:  # pragma: no cover - assertion below
             leader_errors.append(exc)
         finally:
@@ -522,7 +527,7 @@ def test_concurrent_same_identity_close_device_follower_fast_fails() -> None:
     assert probe.entered.wait(5.0), "leader did not enter device.close()"
 
     with pytest.raises(DeviceCloseInProgressError):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
 
     probe.release.set()
     t_leader.join(timeout=5.0)
@@ -530,17 +535,19 @@ def test_concurrent_same_identity_close_device_follower_fast_fails() -> None:
     assert not t_leader.is_alive()
     assert leader_errors == []
     assert len(probe.calls) == 1  # the follower never called device.close()
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
     # Success released the claim: closing the same identity again (after a
     # re-registration) works instead of raising DeviceCloseInProgressError.
-    GlobalDeviceManager.register_device("A", dev)
-    GlobalDeviceManager.close_device("A")
+    manager.register_device("A", dev)
+    manager.close_device("A")
     assert len(probe.calls) == 2
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
 
-def test_close_device_success_never_leaves_reclaimable_window() -> None:
+def test_close_device_success_never_leaves_reclaimable_window(
+    manager: DeviceManager,
+) -> None:
     """A follower can never re-claim an identity at the finish boundary.
 
     Regression: a successful close released the claim and removed stale
@@ -553,14 +560,14 @@ def test_close_device_success_never_leaves_reclaimable_window() -> None:
     """
     dev = _make_fast_device()
     probe = _hook_close(dev)
-    GlobalDeviceManager.register_device("A", dev)
+    manager.register_device("A", dev)
 
     leader_done = threading.Event()
     follower_observations: list[str] = []
 
     def leader() -> None:
         try:
-            GlobalDeviceManager.close_device("A")
+            manager.close_device("A")
         finally:
             leader_done.set()
 
@@ -570,7 +577,7 @@ def test_close_device_success_never_leaves_reclaimable_window() -> None:
         # still-registered identity after the claim is dropped.
         while not leader_done.is_set():
             try:
-                GlobalDeviceManager.close_device("A")
+                manager.close_device("A")
             except DeviceCloseInProgressError:
                 continue
             except ValueError:
@@ -581,7 +588,7 @@ def test_close_device_success_never_leaves_reclaimable_window() -> None:
                 return
         # Leader already finished: the alias must be gone by then.
         try:
-            GlobalDeviceManager.close_device("A")
+            manager.close_device("A")
         except ValueError:
             follower_observations.append("gone")
         else:
@@ -603,10 +610,12 @@ def test_close_device_success_never_leaves_reclaimable_window() -> None:
         "would mean the already-closed device was closed again"
     )
     assert len(probe.calls) == 1  # close-once identity guarantee
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
 
-def test_close_device_follower_fast_fails_while_leader_fails_ordinarily() -> None:
+def test_close_device_follower_fast_fails_while_leader_fails_ordinarily(
+    manager: DeviceManager,
+) -> None:
     """Follower fails fast while an in-flight close ends in ordinary failure.
 
     A3: the claim is held while the leader's close is in flight, so a
@@ -616,14 +625,14 @@ def test_close_device_follower_fast_fails_while_leader_fails_ordinarily() -> Non
     """
     dev = _make_fast_device()
     probe = _hook_close(dev, fail_after_release="ordinary")
-    GlobalDeviceManager.register_device("A", dev)
+    manager.register_device("A", dev)
 
     leader_done = threading.Event()
     leader_errors: list[BaseException] = []
 
     def leader() -> None:
         try:
-            GlobalDeviceManager.close_device("A")
+            manager.close_device("A")
         except BaseException as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
         finally:
@@ -634,7 +643,7 @@ def test_close_device_follower_fast_fails_while_leader_fails_ordinarily() -> Non
     assert probe.entered.wait(5.0), "leader did not enter device.close()"
 
     with pytest.raises(DeviceCloseInProgressError):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
     assert len(probe.calls) == 1  # follower never reached the device
 
     probe.release.set()
@@ -643,15 +652,17 @@ def test_close_device_follower_fast_fails_while_leader_fails_ordinarily() -> Non
     assert not t_leader.is_alive()
     assert len(leader_errors) == 1
     assert isinstance(leader_errors[0], DeviceCloseFailure)
-    assert "A" in GlobalDeviceManager.get_all_devices()  # entry stays retryable
+    assert "A" in manager.get_all_devices()  # entry stays retryable
 
     # Failure released the claim: the retry re-claims and reaches the device.
     with pytest.raises(DeviceCloseFailure):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
     assert len(probe.calls) == 2
 
 
-def test_close_device_follower_fast_fails_while_leader_aborts() -> None:
+def test_close_device_follower_fast_fails_while_leader_aborts(
+    manager: DeviceManager,
+) -> None:
     """Follower fails fast while an in-flight close ends in BaseException.
 
     A3: the claim is held across the ``BaseException`` too, so the follower
@@ -661,14 +672,14 @@ def test_close_device_follower_fast_fails_while_leader_aborts() -> None:
     """
     dev = _make_fast_device()
     probe = _hook_close(dev, fail_after_release="base")
-    GlobalDeviceManager.register_device("A", dev)
+    manager.register_device("A", dev)
 
     leader_done = threading.Event()
     leader_errors: list[BaseException] = []
 
     def leader() -> None:
         try:
-            GlobalDeviceManager.close_device("A")
+            manager.close_device("A")
         except BaseException as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
         finally:
@@ -679,7 +690,7 @@ def test_close_device_follower_fast_fails_while_leader_aborts() -> None:
     assert probe.entered.wait(5.0), "leader did not enter device.close()"
 
     with pytest.raises(DeviceCloseInProgressError):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
     assert len(probe.calls) == 1  # follower never reached the device
 
     probe.release.set()
@@ -688,34 +699,38 @@ def test_close_device_follower_fast_fails_while_leader_aborts() -> None:
     assert not t_leader.is_alive()
     assert len(leader_errors) == 1
     assert isinstance(leader_errors[0], KeyboardInterrupt)  # propagates unwrapped
-    assert "A" in GlobalDeviceManager.get_all_devices()
+    assert "A" in manager.get_all_devices()
 
     # BaseException released the claim: the retry re-claims and reaches the
     # device instead of raising DeviceCloseInProgressError.
     with pytest.raises(KeyboardInterrupt):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
     assert len(probe.calls) == 2
 
 
-def test_close_device_base_exception_releases_claim_and_propagates() -> None:
+def test_close_device_base_exception_releases_claim_and_propagates(
+    manager: DeviceManager,
+) -> None:
     dev = _make_fast_device()
     probe = _hook_close(dev, base_fail=True)
-    GlobalDeviceManager.register_device("A", dev)
+    manager.register_device("A", dev)
 
     with pytest.raises(KeyboardInterrupt):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
 
-    assert "A" in GlobalDeviceManager.get_all_devices()
+    assert "A" in manager.get_all_devices()
     # BaseException propagates unwrapped, but the claim is released: a second
     # call re-claims and reaches the device instead of InProgressError.
     with pytest.raises(KeyboardInterrupt):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
 
     assert len(probe.calls) == 2
-    assert "A" in GlobalDeviceManager.get_all_devices()
+    assert "A" in manager.get_all_devices()
 
 
-def test_close_all_reports_in_progress_identity_and_closes_rest() -> None:
+def test_close_all_reports_in_progress_identity_and_closes_rest(
+    manager: DeviceManager,
+) -> None:
     """Follower close_all fail-fasts the in-flight identity, closes the rest.
 
     D6: in-progress identities are not silently skipped -- the batch records
@@ -727,13 +742,13 @@ def test_close_all_reports_in_progress_identity_and_closes_rest() -> None:
     probe1 = _hook_close(dev1)
     probe2 = _hook_close(dev2)
     probe2.release.set()
-    GlobalDeviceManager.register_device("A", dev1)
-    GlobalDeviceManager.register_device("B", dev2)
+    manager.register_device("A", dev1)
+    manager.register_device("B", dev2)
 
     leader_done = threading.Event()
 
     def leader() -> None:
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
         leader_done.set()
 
     t_leader = threading.Thread(target=leader)
@@ -742,24 +757,26 @@ def test_close_all_reports_in_progress_identity_and_closes_rest() -> None:
 
     # Follower close_all: A is in progress, B is claimable and gets closed.
     with pytest.raises(ExceptionGroup) as excinfo:
-        GlobalDeviceManager.close_all_devices()
+        manager.close_all_devices()
 
     in_progress = [
         e for e in excinfo.value.exceptions if isinstance(e, DeviceCloseInProgressError)
     ]
     assert [e.names for e in in_progress] == [("A",)]
     assert len(probe2.calls) == 1
-    assert "B" not in GlobalDeviceManager.get_all_devices()
+    assert "B" not in manager.get_all_devices()
 
     probe1.release.set()
     t_leader.join(timeout=5.0)
 
     assert not t_leader.is_alive()
     assert len(probe1.calls) == 1  # A's identity was closed exactly once
-    assert "A" not in GlobalDeviceManager.get_all_devices()
+    assert "A" not in manager.get_all_devices()
 
 
-def test_close_all_follower_batch_fast_fails_all_claimed_identities() -> None:
+def test_close_all_follower_batch_fast_fails_all_claimed_identities(
+    manager: DeviceManager,
+) -> None:
     """Concurrent close_all: the follower batch fail-fasts every identity.
 
     A3: while a leader close_all holds the claims, a follower close_all
@@ -771,14 +788,14 @@ def test_close_all_follower_batch_fast_fails_all_claimed_identities() -> None:
     dev2 = _make_fast_device()
     probe1 = _hook_close(dev1)
     probe2 = _hook_close(dev2)
-    GlobalDeviceManager.register_device("A", dev1)
-    GlobalDeviceManager.register_device("B", dev2)
+    manager.register_device("A", dev1)
+    manager.register_device("B", dev2)
 
     leader_done = threading.Event()
 
     def leader() -> None:
         try:
-            GlobalDeviceManager.close_all_devices()
+            manager.close_all_devices()
         finally:
             leader_done.set()
 
@@ -787,7 +804,7 @@ def test_close_all_follower_batch_fast_fails_all_claimed_identities() -> None:
     assert probe1.entered.wait(5.0), "leader did not enter the first close()"
 
     with pytest.raises(ExceptionGroup) as excinfo:
-        GlobalDeviceManager.close_all_devices()
+        manager.close_all_devices()
 
     in_progress = [
         e for e in excinfo.value.exceptions if isinstance(e, DeviceCloseInProgressError)
@@ -803,12 +820,12 @@ def test_close_all_follower_batch_fast_fails_all_claimed_identities() -> None:
     assert not t_leader.is_alive()
     assert len(probe1.calls) == 1
     assert len(probe2.calls) == 1
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
 
-def test_close_all_follower_close_device_fast_fails_while_leader_fails_ordinarily() -> (
-    None
-):
+def test_close_all_follower_close_device_fast_fails_while_leader_fails_ordinarily(
+    manager: DeviceManager,
+) -> None:
     """close_device follower fails fast while a close_all leader fails.
 
     A3 (batch side): the claim is held for the whole batch close, so a
@@ -818,14 +835,14 @@ def test_close_all_follower_close_device_fast_fails_while_leader_fails_ordinaril
     """
     dev = _make_fast_device()
     probe = _hook_close(dev, fail_after_release="ordinary")
-    GlobalDeviceManager.register_device("A", dev)
+    manager.register_device("A", dev)
 
     leader_done = threading.Event()
     leader_errors: list[BaseException] = []
 
     def leader() -> None:
         try:
-            GlobalDeviceManager.close_all_devices()
+            manager.close_all_devices()
         except BaseException as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
         finally:
@@ -836,7 +853,7 @@ def test_close_all_follower_close_device_fast_fails_while_leader_fails_ordinaril
     assert probe.entered.wait(5.0), "leader did not enter device.close()"
 
     with pytest.raises(DeviceCloseInProgressError):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
     assert len(probe.calls) == 1  # follower never reached the device
 
     probe.release.set()
@@ -845,14 +862,16 @@ def test_close_all_follower_close_device_fast_fails_while_leader_fails_ordinaril
     assert not t_leader.is_alive()
     assert len(leader_errors) == 1
     assert isinstance(leader_errors[0], ExceptionGroup)
-    assert "A" in GlobalDeviceManager.get_all_devices()  # entry stays retryable
+    assert "A" in manager.get_all_devices()  # entry stays retryable
 
     with pytest.raises(DeviceCloseFailure):
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
     assert len(probe.calls) == 2  # retry re-claimed and reached the device
 
 
-def test_close_all_base_exception_cleans_successes_and_releases_claims() -> None:
+def test_close_all_base_exception_cleans_successes_and_releases_claims(
+    manager: DeviceManager,
+) -> None:
     """A BaseException in the batch still cleans up earlier successes.
 
     A3/D6: when a later device raises ``BaseException``, the batch propagates
@@ -866,15 +885,15 @@ def test_close_all_base_exception_cleans_successes_and_releases_claims() -> None
     probe_good = _hook_close(good)
     probe_bad = _hook_close(bad, fail_after_release="base")
     probe_good.release.set()  # good closes as soon as the batch reaches it
-    GlobalDeviceManager.register_device("good", good)
-    GlobalDeviceManager.register_device("bad", bad)
+    manager.register_device("good", good)
+    manager.register_device("bad", bad)
 
     leader_done = threading.Event()
     leader_errors: list[BaseException] = []
 
     def leader() -> None:
         try:
-            GlobalDeviceManager.close_all_devices()
+            manager.close_all_devices()
         except BaseException as exc:  # pragma: no cover - asserted below
             leader_errors.append(exc)
         finally:
@@ -886,7 +905,7 @@ def test_close_all_base_exception_cleans_successes_and_releases_claims() -> None
     assert len(probe_good.calls) == 1  # good was already closed
 
     with pytest.raises(DeviceCloseInProgressError):
-        GlobalDeviceManager.close_device("bad")
+        manager.close_device("bad")
     assert len(probe_bad.calls) == 1  # follower never reached the device
 
     probe_bad.release.set()
@@ -895,26 +914,26 @@ def test_close_all_base_exception_cleans_successes_and_releases_claims() -> None
     assert not t_leader.is_alive()
     assert len(leader_errors) == 1
     assert isinstance(leader_errors[0], KeyboardInterrupt)  # propagates unwrapped
-    devices = GlobalDeviceManager.get_all_devices()
+    devices = manager.get_all_devices()
     assert "good" not in devices  # success cleaned up despite the abort
     assert devices["bad"] is bad  # interrupted identity stays retryable
 
     # BaseException released the claim: the retry re-claims and reaches the
     # device instead of raising DeviceCloseInProgressError.
     with pytest.raises(KeyboardInterrupt):
-        GlobalDeviceManager.close_device("bad")
+        manager.close_device("bad")
     assert len(probe_bad.calls) == 2
 
 
-def test_close_device_io_not_under_registry_lock() -> None:
+def test_close_device_io_not_under_registry_lock(manager: DeviceManager) -> None:
     dev_a = _make_fast_device()
     dev_b = _make_fast_device()
     probe = _hook_close(dev_a)
-    GlobalDeviceManager.register_device("A", dev_a)
-    GlobalDeviceManager.register_device("B", dev_b)
+    manager.register_device("A", dev_a)
+    manager.register_device("B", dev_b)
 
     def closer() -> None:
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
 
     t_closer = threading.Thread(target=closer)
     t_closer.start()
@@ -924,7 +943,7 @@ def test_close_device_io_not_under_registry_lock() -> None:
     probe_result: list[object] = []
 
     def reader() -> None:
-        probe_result.append(GlobalDeviceManager.get_device("B"))
+        probe_result.append(manager.get_device("B"))
         probe_done.set()
 
     t_reader = threading.Thread(target=reader)
@@ -940,15 +959,15 @@ def test_close_device_io_not_under_registry_lock() -> None:
     assert not t_closer.is_alive()
 
 
-def test_close_all_io_not_under_registry_lock() -> None:
+def test_close_all_io_not_under_registry_lock(manager: DeviceManager) -> None:
     dev_a = _make_fast_device()
     dev_b = _make_fast_device()
     probe = _hook_close(dev_a)
-    GlobalDeviceManager.register_device("A", dev_a)
-    GlobalDeviceManager.register_device("B", dev_b)
+    manager.register_device("A", dev_a)
+    manager.register_device("B", dev_b)
 
     def closer() -> None:
-        GlobalDeviceManager.close_all_devices()
+        manager.close_all_devices()
 
     t_closer = threading.Thread(target=closer)
     t_closer.start()
@@ -958,7 +977,7 @@ def test_close_all_io_not_under_registry_lock() -> None:
     probe_result: list[object] = []
 
     def reader() -> None:
-        probe_result.append(GlobalDeviceManager.get_device("B"))
+        probe_result.append(manager.get_device("B"))
         probe_done.set()
 
     t_reader = threading.Thread(target=reader)
@@ -972,16 +991,18 @@ def test_close_all_io_not_under_registry_lock() -> None:
     probe.release.set()
     t_closer.join(timeout=5.0)
     assert not t_closer.is_alive()
-    assert GlobalDeviceManager.get_all_devices() == {}
+    assert manager.get_all_devices() == {}
 
 
-def test_close_success_keeps_replacement_and_new_devices_removes_stale_alias() -> None:
+def test_close_success_keeps_replacement_and_new_devices_removes_stale_alias(
+    manager: DeviceManager,
+) -> None:
     dev1 = _make_fast_device()
     probe1 = _hook_close(dev1)
-    GlobalDeviceManager.register_device("A", dev1)
+    manager.register_device("A", dev1)
 
     def closer() -> None:
-        GlobalDeviceManager.close_device("A")
+        manager.close_device("A")
 
     t_closer = threading.Thread(target=closer)
     t_closer.start()
@@ -995,9 +1016,9 @@ def test_close_success_keeps_replacement_and_new_devices_removes_stale_alias() -
     probe3 = _hook_close(dev3)
     probe2.release.set()
     probe3.release.set()
-    GlobalDeviceManager.register_device("A", dev2)  # overwrite warning expected
-    GlobalDeviceManager.register_device("B", dev3)
-    GlobalDeviceManager.register_device("stale", dev1)
+    manager.register_device("A", dev2)  # overwrite warning expected
+    manager.register_device("B", dev3)
+    manager.register_device("stale", dev1)
 
     probe1.release.set()
     t_closer.join(timeout=5.0)
@@ -1006,19 +1027,21 @@ def test_close_success_keeps_replacement_and_new_devices_removes_stale_alias() -
     assert len(probe1.calls) == 1
     assert len(probe2.calls) == 0  # replacement was not closed
     assert len(probe3.calls) == 0  # new device was not closed
-    devices = GlobalDeviceManager.get_all_devices()
+    devices = manager.get_all_devices()
     assert devices["A"] is dev2  # same-name replacement survives
     assert devices["B"] is dev3  # distinct new device survives
     assert "stale" not in devices  # alias of the closed identity is removed
 
 
-def test_close_all_snapshot_excludes_devices_registered_during_close() -> None:
+def test_close_all_snapshot_excludes_devices_registered_during_close(
+    manager: DeviceManager,
+) -> None:
     dev1 = _make_fast_device()
     probe1 = _hook_close(dev1)
-    GlobalDeviceManager.register_device("A", dev1)
+    manager.register_device("A", dev1)
 
     def closer() -> None:
-        GlobalDeviceManager.close_all_devices()
+        manager.close_all_devices()
 
     t_closer = threading.Thread(target=closer)
     t_closer.start()
@@ -1027,7 +1050,7 @@ def test_close_all_snapshot_excludes_devices_registered_during_close() -> None:
     dev2 = _make_fast_device()
     probe2 = _hook_close(dev2)
     probe2.release.set()
-    GlobalDeviceManager.register_device("B", dev2)
+    manager.register_device("B", dev2)
 
     probe1.release.set()
     t_closer.join(timeout=5.0)
@@ -1035,6 +1058,6 @@ def test_close_all_snapshot_excludes_devices_registered_during_close() -> None:
     assert not t_closer.is_alive()
     assert len(probe1.calls) == 1
     assert len(probe2.calls) == 0  # not part of the batch snapshot
-    devices = GlobalDeviceManager.get_all_devices()
+    devices = manager.get_all_devices()
     assert "A" not in devices
     assert devices["B"] is dev2

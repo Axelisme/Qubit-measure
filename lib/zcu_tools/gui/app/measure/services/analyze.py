@@ -4,8 +4,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from matplotlib.figure import Figure
-
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, WritebackRequest
 from zcu_tools.gui.app.measure.events.completion import AnalyzeFailedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -14,12 +12,11 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
 
 from .guard import AnalyzePermit
-from .scopes import figure_ambient
+from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
@@ -29,6 +26,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import OwnerScheduler
     from zcu_tools.gui.session.types import SessionEnv
+    from zcu_tools.plotting.plots import Plots
 
     from ..state import RetiredPaneResources
     from .ports import AnalyzeStatePort, WritebackLifecyclePort
@@ -40,6 +38,7 @@ class _AnalyzeCapture:
     context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object | None
+    plots: Plots
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +47,7 @@ class ActiveInteractive:
 
     plugin: PluginDefinition[Any, Any]
     session: Session[Any]
+    plots: Plots
 
 
 class AnalyzeService(_StagedAnalyzeService):
@@ -65,8 +65,8 @@ class AnalyzeService(_StagedAnalyzeService):
         writeback: WritebackLifecyclePort,
         handles: OperationHandles,
     ) -> None:
-        # FIT analyze is the OffMain-thread strategy with only the figure-routing
-        # scope (no progress, no cancel). It takes **only a Handle, no exclusion**
+        # FIT analyze runs off-main with explicit operation plots (no progress
+        # or cancellation scope). It takes **only a Handle, no exclusion**
         # (ADR-0066): analyze never conflicts with hardware, so it no longer fakes
         # an exclusion lease just to obtain the async handle (operation_id + await).
         # The handle is settled exactly once on the terminal slot (_finish /
@@ -88,7 +88,8 @@ class AnalyzeService(_StagedAnalyzeService):
         self,
         permit: AnalyzePermit,
         analyze_params_instance: object,
-        figure_container: FigureContainer | None = None,
+        *,
+        plots: Plots,
     ) -> int:
         # Context + run-result preconditions are proven by the AnalyzePermit;
         # tab-busy is the dynamic check that stays at the operation boundary.
@@ -117,13 +118,16 @@ class AnalyzeService(_StagedAnalyzeService):
             context=ctx,
             adapter=adapter,
             params=analyze_params_instance,
+            plots=plots,
         )
         self._captured_inputs[tab_id] = captured_inputs
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
-            # Analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0066).
-            with figure_ambient(figure_container):
-                return adapter.analyze(req)
+            return adapter.analyze(req, plots=plots)
+
+        def discard() -> None:
+            self._captured_inputs.pop(tab_id, None)
+            discard_unpublished_plots(plots)
 
         try:
             return self._submit_with_runner(
@@ -132,10 +136,14 @@ class AnalyzeService(_StagedAnalyzeService):
                 lambda record_tab_id, result: self._record(
                     record_tab_id, result, captured_inputs=captured_inputs
                 ),
+                discard,
                 "analyze failed to start",
             )
         except Exception:
-            self._captured_inputs.pop(tab_id, None)
+            try:
+                discard()
+            except Exception:
+                logger.exception("Unpublished analysis plot cleanup failed")
             raise
 
     def start_plugin(
@@ -143,6 +151,9 @@ class AnalyzeService(_StagedAnalyzeService):
         permit: AnalyzePermit,
         plugin: PluginDefinition[Any, Any],
         owner: OwnerScheduler,
+        *,
+        analyze_params_instance: object,
+        plots: Plots,
     ) -> int:
         """Capture operation inputs and register one service-owned session."""
         tab_id = permit.tab_id
@@ -154,7 +165,8 @@ class AnalyzeService(_StagedAnalyzeService):
             run_result=tab.run.result,
             context=ctx,
             adapter=tab.adapter,
-            params=tab.analysis.params,
+            params=analyze_params_instance,
+            plots=plots,
         )
         session = plugin.open(owner)
 
@@ -165,6 +177,12 @@ class AnalyzeService(_StagedAnalyzeService):
             token = self._open_token(tab_id, cancel_hook=cancel)
         except Exception:
             session.dispose()
+            try:
+                discard_unpublished_plots(plots)
+            except Exception:
+                logger.exception(
+                    "interactive start plot cleanup failed: tab_id=%r", tab_id
+                )
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id=tab_id,
@@ -173,7 +191,7 @@ class AnalyzeService(_StagedAnalyzeService):
             )
             raise
         self._captured_inputs[tab_id] = captured
-        self._interactive_instances[tab_id] = ActiveInteractive(plugin, session)
+        self._interactive_instances[tab_id] = ActiveInteractive(plugin, session, plots)
         self._interactive_tabs.add(tab_id)
         self._begin(tab_id)
         return token
@@ -182,13 +200,13 @@ class AnalyzeService(_StagedAnalyzeService):
         """Read the active plugin and session; never return a retired binding."""
         return self._interactive_instances.get(tab_id)
 
-    def finish_plugin(self, tab_id: str, figure: Figure | None = None) -> bool:
+    def finish_plugin(self, tab_id: str) -> bool:
         """Finish from the committed snapshot; validation errors leave it editable."""
         active = self._interactive_instances.get(tab_id)
         if active is None:
             return False
         try:
-            result = active.plugin.finish(active.session, figure)
+            result = active.plugin.finish(active.session)
         except Exception as exc:
             try:
                 active.session.ensure_input_open()
@@ -199,6 +217,12 @@ class AnalyzeService(_StagedAnalyzeService):
                     active.session.dispose()
                     self._interactive_tabs.discard(tab_id)
                     self._captured_inputs.pop(tab_id, None)
+                    try:
+                        discard_unpublished_plots(active.plots)
+                    except Exception:
+                        logger.exception(
+                            "interactive plot cleanup failed: tab_id=%r", tab_id
+                        )
                     logger.exception(
                         "interactive result construction failed: tab_id=%r", tab_id
                     )
@@ -263,6 +287,13 @@ class AnalyzeService(_StagedAnalyzeService):
             if active is not None:
                 active.session.dispose()
             self._captured_inputs.pop(tab_id, None)
+            if active is not None:
+                try:
+                    discard_unpublished_plots(active.plots)
+                except Exception:
+                    logger.exception(
+                        "cancelled interactive plot cleanup failed: tab_id=%r", tab_id
+                    )
             logger.info("cancel_interactive: tab_id=%r", tab_id)
             self._state.set_tab_analyzing(tab_id, False)
             self._release(tab_id, OperationOutcome("cancelled"))
@@ -298,6 +329,12 @@ class AnalyzeService(_StagedAnalyzeService):
             self._record(tab_id, analyze_result, captured_inputs=captured_inputs)
         except Exception as exc:
             logger.exception("%s finished post-processing failed: %r", tab_id, exc)
+            try:
+                discard_unpublished_plots(captured_inputs.plots)
+            except Exception:
+                logger.exception(
+                    "interactive record plot cleanup failed: tab_id=%r", tab_id
+                )
             self._state.set_tab_analyzing(tab_id, False)
             self._release(tab_id, OperationOutcome("failed", str(exc)))
             self._bus.emit(
@@ -331,6 +368,7 @@ class AnalyzeService(_StagedAnalyzeService):
                 self._writeback.teardown_draft(draft)
             except Exception:
                 logger.exception("retired analyze draft teardown failed")
+        release_retired_plots(retired)
 
     def _record(
         self,
@@ -346,6 +384,7 @@ class AnalyzeService(_StagedAnalyzeService):
         ctx = captured_inputs.context
         adapter = captured_inputs.adapter
         analyze_params = captured_inputs.params
+        plots = captured_inputs.plots
 
         proposal_items: list[Any] = []
         if run_result is not None:
@@ -362,10 +401,11 @@ class AnalyzeService(_StagedAnalyzeService):
         draft: Any | None = None
         try:
             draft = self._writeback.create_draft(proposal_items)
+            plots.finish()
             retired = self._state.update_tab_analyze(
                 tab_id,
                 analyze_result,
-                getattr(analyze_result, "figure", None),
+                plots,
                 writeback_draft=draft,
                 analyze_params_instance=analyze_params,
             )

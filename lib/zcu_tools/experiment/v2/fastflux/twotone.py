@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
@@ -17,14 +14,14 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
-    record_result,
-    retrieve_result,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.plotting.liveplot import LivePlot2D
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
     ProgramV2Cfg,
@@ -45,7 +42,6 @@ class TwoToneResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: TwotoneCfg | None = None
 
 
 def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -82,17 +78,15 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
         tag="fastflux/twotone",
     )
 
-    @record_result
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: TwotoneCfg,
-        *,
-        acquire_kwargs: dict[str, Any] | None = None,
-    ) -> TwoToneResult:
-        orig_cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def run(self, config: TwotoneCfg, *, context: RunContext) -> TwoToneResult:
+        cfg = deepcopy(config)
+        soc, soccfg = context.soc, context.soccfg
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
         modules = cfg.modules
 
         # uniform in square space
@@ -107,50 +101,55 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        with LivePlot2D("Flux Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
-            signals_buffer = SignalBuffer(
-                (len(gains), len(freqs)),
-                on_update=lambda data: viewer.update(
-                    gains, freqs, twotone_signal2real(data)
-                ),
+        viewer = context.plots.liveplot_2d(
+            "measurement", "Flux Pulse Gain (a.u.)", "Frequency (MHz)"
+        )
+        signals_buffer = SignalBuffer(
+            (len(gains), len(freqs)),
+            on_update=lambda data: viewer.update(
+                gains, freqs, twotone_signal2real(data)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            modules = sched.cfg.modules
+            modules.flux_pulse.set_param(
+                "gain", sweep2param("gain", sched.cfg.sweep.gain)
             )
-            with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                modules.flux_pulse.set_param(
-                    "gain", sweep2param("gain", sched.cfg.sweep.gain)
+            modules.qub_pulse.set_param(
+                "freq", sweep2param("freq", sched.cfg.sweep.freq)
+            )
+            _ = (
+                sched.prog_builder(soc, soccfg)
+                .add(
+                    Reset("reset", modules.reset),
+                    Join(
+                        Pulse("flux_pulse", modules.flux_pulse),
+                        Pulse("qub_pulse", modules.qub_pulse),
+                    ),
+                    Readout("readout", modules.readout),
                 )
-                modules.qub_pulse.set_param(
-                    "freq", sweep2param("freq", sched.cfg.sweep.freq)
-                )
-                _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Join(
-                            Pulse("flux_pulse", modules.flux_pulse),
-                            Pulse("qub_pulse", modules.qub_pulse),
-                        ),
-                        Readout("readout", modules.readout),
-                    )
-                    .declare_sweep("gain", sched.cfg.sweep.gain)
-                    .declare_sweep("freq", sched.cfg.sweep.freq)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
-                )
-                signals = signals_buffer.array
+                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .declare_sweep("freq", sched.cfg.sweep.freq)
+                .build_and_acquire()
+            )
 
-        return TwoToneResult(gains, freqs, signals, cfg_snapshot=orig_cfg)
+        return TwoToneResult(gains, freqs, signals_buffer.array)
 
-    @retrieve_result
-    def analyze(self, result: TwoToneResult | None = None) -> Figure:
-        assert result is not None, "No result found"
+    def analyze(
+        self,
+        source: RunRecord[TwotoneCfg, TwoToneResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> None:
+        del options  # This analysis has no configurable options.
+        result = source.result
 
         gains, freqs, signals2D = result.gains, result.freqs, result.signals
 
         real_signals = twotone_signal2real(signals2D)
 
-        fig, ax = plt.subplots()
+        fig, ax = plots.subplots("fit")
 
         ax.imshow(
             real_signals.T,
@@ -169,5 +168,3 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
         ax.set_ylabel("Frequency (MHz)")
 
         fig.tight_layout()
-
-        return fig

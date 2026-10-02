@@ -13,8 +13,8 @@
 
 ## GUI Service Architecture
 
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與繪圖責任。
-- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、plotting 與 remote 的責任分界。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與 explicit plotting 責任。
+- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、rendering 初始化與 remote 的責任分界。
 
 ## Cfg / Value Model
 
@@ -58,6 +58,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；§3 的 predictor 校正與載入敘述已被取代（現行 overlay 見 0062，按需載入的目標見 draft）。
 
 ## Draft
+
+- [實驗核心、前端包裝與具名圖形產物](draft/experiment-interface-redesign.md)：全實驗與 caller 已在 task 分支遷移，舊自訂 pyplot routing backend 已退場。修正候選已完成軟體驗證及雙軸審查；正式接受以 task 的逐列證據與裁決紀錄為準，landing 另需使用者授權。草案不代表持久分支已採用。包含 records、具名原生圖、RunContext／CfgEnv、instance DeviceManager 與模擬環境 coordinator 的分工。
 
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。

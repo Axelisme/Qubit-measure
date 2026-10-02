@@ -23,6 +23,12 @@ import numpy as np
 
 %autoreload 2
 import zcu_tools.experiment.v2.overnight as zeo
+from pydantic import TypeAdapter
+from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.notebook.plotting import NotebookPlotHost
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.context import ContextManager
 from zcu_tools.datafile import create_datafolder
 from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
@@ -54,17 +60,18 @@ print(soccfg)
 # Connect Instruments
 
 ```python
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import DeviceManager, DeviceInfo
 
 dev_info_path = f"{result_dir}/device_info.json"
 
 with open(dev_info_path, "r") as f:
-    dev_info = json.load(f)
+    dev_info = {name: TypeAdapter(DeviceInfo).validate_python(info) for name, info in json.load(f).items()}
 pprint(dev_info)
 
-resource_manager = reconnect_devices(dev_info)
-
-GlobalDeviceManager.setup_devices(dev_info, progress=True)
+device_manager = DeviceManager()
+resource_manager = reconnect_devices(dev_info, device_manager)
+device_manager.setup_devices(dev_info, progress=True)
+env = CfgEnv(md=md, ml=ml, device_manager=device_manager)
 ```
 
 # Start Measurement
@@ -79,7 +86,7 @@ measure_code: str = In[-1]  # noqa: F821 # type: ignore
 executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
     dict(
         mist_g=zeo.singleshot.MistTask(
-            ml.make_cfg(
+            make_cfg(
                 {
                     "modules": {
                         # "reset": "reset_10",
@@ -99,15 +106,15 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     "relax_delay": 50.5,  # us
                 },
                 zeo.singleshot.MistCfg,
-                reps=3000,
-                rounds=1,
+                env,
+                overrides={"reps": 3000, "rounds": 1},
             ),
             md.g_center,
             md.e_center,
             md.ge_radius,
         ),
         mist_e=zeo.singleshot.MistTask(
-            ml.make_cfg(
+            make_cfg(
                 {
                     "modules": {
                         # "reset": "reset_10",
@@ -130,15 +137,15 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     "relax_delay": 50.5,  # us
                 },
                 zeo.singleshot.MistCfg,
-                reps=3000,
-                rounds=1,
+                env,
+                overrides={"reps": 3000, "rounds": 1},
             ),
             md.g_center,
             md.e_center,
             md.ge_radius,
         ),
         mist_steady=zeo.singleshot.MistTask(
-            ml.make_cfg(
+            make_cfg(
                 {
                     "modules": {
                         "probe_pulse": {
@@ -159,8 +166,8 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     "relax_delay": 50.5,  # us
                 },
                 zeo.singleshot.MistCfg,
-                reps=3000,
-                rounds=1,
+                env,
+                overrides={"reps": 3000, "rounds": 1},
             ),
             md.g_center,
             md.e_center,
@@ -168,11 +175,18 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
         ),
     )
 )
-_ = executor.run(
-    fail_retry=3,
-    env_dict={"soccfg": soccfg, "soc": soc},
+run_plots = Plots(NotebookPlotHost())
+run_context = RunContext(
+    soc=soc, soccfg=soccfg, plots=run_plots,
+    devices=device_manager.get_all_devices(), cancel_signal=StopSignal(),
 )
+try:
+    run_results = executor.run(context=run_context, fail_retry=3)
+finally:
+    run_figures = run_plots.finish()
 ```
+
+Keep `run_figures` to inspect or save the native Matplotlib figures. Call `run_plots.release()` when the widget presentation is no longer needed. Releasing it does not destroy the retained figures.
 
 ```python
 filepath = Path(database_path, f"{filename}@{em.label}")
@@ -181,7 +195,7 @@ snapshot_dir = filepath.parent / f"{filepath.name}_snapshot"
 snapshot_dir.mkdir(parents=True, exist_ok=True)
 
 (snapshot_dir / "measure_code.py").write_text(measure_code)
-dump_device_info(str(snapshot_dir / "device_info.json"))
+dump_device_info(snapshot_dir / "device_info.json", device_manager)
 ml.clone(dst_path=snapshot_dir / "module_cfg.yaml")
 md.clone(dst_path=snapshot_dir / "meta_info.json")
 

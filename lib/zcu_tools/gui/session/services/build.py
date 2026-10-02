@@ -26,9 +26,11 @@ from zcu_tools.gui.session.progress_control import ProgressControlFacet
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.mock_flux import MockFluxProvisioner
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
+from zcu_tools.gui.session.services.simulated_environment import (
+    SimulatedEnvironmentCoordinator,
+)
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.setup_control import SetupControlFacet
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
@@ -59,6 +61,7 @@ class SessionServices:
     """The session-core services every measurement-session app builds on."""
 
     soc_connection: SoCConnectionService
+    simulated_environment: SimulatedEnvironmentCoordinator
     predictor: PredictorService
     predictor_control: PredictorControlPort
     progress_control: ProgressControlPort
@@ -97,8 +100,8 @@ def build_session_services(
     ``project_root`` anchors generated result/database paths and result-scope
     discovery;
     ``driver_factory`` defaults to the device service's built-in hardware factory
-    when omitted; ``device_registry`` defaults to the ``GlobalDeviceRegistryAdapter``
-    (production singleton) when omitted — tests inject an in-memory fake.
+    when omitted; ``device_registry`` defaults to a new session-owned
+    DeviceManager. Callers sharing drivers must supply the same registry.
     """
     value_registry = ValueRegistry()
     device = DeviceService(
@@ -124,22 +127,21 @@ def build_session_services(
     settings = ProjectSettingsService(
         context, device, state, ResultScopeManager(project_root)
     )
+    simulated_environment = SimulatedEnvironmentCoordinator(
+        bus, device, soc_connection, predictor, gate, handles
+    )
     setup_control = SetupControlFacet(
         bus=bus,
         settings=settings,
         context=context_control,
         connection=soc_connection,
+        simulated_environment=simulated_environment,
         device=device_control,
         on_project_applied=on_project_applied,
     )
-    # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED and the typed
-    # DeviceOperationFinishedPayload to chain the one-shot ramp. Both apps get mock
-    # flux provisioning for free. Not exposed on the returned bundle: nothing reads
-    # it. EventBus holds strong references to both bound subscribers, so the
-    # provisioner survives despite not being a field here.
-    MockFluxProvisioner(bus, device, predictor)
     return SessionServices(
         soc_connection=soc_connection,
+        simulated_environment=simulated_environment,
         predictor=predictor,
         predictor_control=predictor_control,
         progress_control=progress_control,

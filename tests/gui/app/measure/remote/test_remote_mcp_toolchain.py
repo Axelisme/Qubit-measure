@@ -13,8 +13,13 @@ from matplotlib import rc_context
 from matplotlib.figure import Figure
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactKey,
+    ArtifactKind,
+    SaveStatus,
+)
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.ports import (
     SaveArtifactsSubmission,
@@ -35,6 +40,7 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from ._helpers import Fixture, call, open_client, recv_push
 
@@ -47,12 +53,26 @@ def fx(qapp):
     f.stop()
 
 
+def _plots_for(figure: Figure) -> Plots:
+    plots = Plots(NonPresentingHost())
+    plots.adopt("fit", figure)
+    plots.finish()
+    return plots
+
+
 def _assert_artifacts_match_state(fx, sock, tab_id):
     artifacts = fx.state.get_artifact_snapshots(tab_id)
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
     assert snapshot["artifacts"] == [
         {
-            "kind": item.kind.value,
+            "key": "data"
+            if item.key.kind is ArtifactKind.DATA
+            else (
+                f"{'analysis' if item.key.kind is ArtifactKind.ANALYSIS else 'post'}:"
+                f"{item.key.figure_name}"
+            ),
+            "kind": item.key.kind.value,
+            "figure_name": item.key.figure_name,
             "status": item.status.value,
             "default_path": item.default_path,
             "last_saved_path": item.last_saved_path,
@@ -133,9 +153,11 @@ def test_sync_image_reply_and_artifact_name_actual_extensionless_output(
     fx.state.update_tab_result(tab, object())
     figure = Figure()
     figure.subplots().plot([0, 1], [1, 0])
-    fx.state.update_tab_analyze(tab, object(), figure)
+    fx.state.update_tab_analyze(tab, object(), _plots_for(figure))
     if pane == "post_analysis":
-        fx.state.update_tab_post_analyze(tab, object(), figure)
+        post_figure = Figure()
+        post_figure.subplots().plot([0, 1], [0, 1])
+        fx.state.update_tab_post_analyze(tab, object(), _plots_for(post_figure))
     draft = str(tmp_path / "figure")
     expected = tmp_path / f"figure.{image_format}"
     with (
@@ -146,12 +168,17 @@ def test_sync_image_reply_and_artifact_name_actual_extensionless_output(
         reply = call(
             sock,
             "tab.save_image",
-            {"tab_id": tab, "subtab_id": pane, "image_path": draft},
+            {
+                "tab_id": tab,
+                "subtab_id": pane,
+                "figure_name": "fit",
+                "image_path": draft,
+            },
         )
         assert reply["ok"] is True
         assert reply["result"]["image_path"] == str(expected)
         artifacts = _assert_artifacts_match_state(fx, sock, tab)
-    artifact = next(a for a in artifacts if a.kind.value == pane)
+    artifact = next(a for a in artifacts if a.key.kind.value == pane)
     assert artifact.status is SaveStatus.SAVED
     assert artifact.last_saved_path == str(expected)
     assert artifact.default_path == draft
@@ -225,11 +252,11 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
     release = threading.Event()
     original_analyze = FakeAdapter.analyze
 
-    def held_analyze(self, request):
+    def held_analyze(self, request, *, plots: Plots):
         entered.set()
         if not release.wait(4):
             raise TimeoutError("fake analysis release was not signalled")
-        return original_analyze(self, request)
+        return original_analyze(self, request, plots=plots)
 
     try:
         run_id = fx.ctrl.start_run(
@@ -276,11 +303,11 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
     release = threading.Event()
     original_run = FakeAdapter.run
 
-    def held_run(self, request, schema):
+    def held_run(self, request, schema, *, context: RunContext):
         entered.set()
         if not release.wait(4):
             raise TimeoutError("fake run release was not signalled")
-        return original_run(self, request, schema)
+        return original_run(self, request, schema, context=context)
 
     try:
         monkeypatch.setattr(FakeAdapter, "run", held_run)
@@ -874,8 +901,8 @@ def test_artifact_save_projects_primary_and_post_keys_through_one_command(fx, tm
     submission = SaveArtifactsSubmission(
         71,
         (
-            SaveDestination(ArtifactKind.ANALYSIS, primary),
-            SaveDestination(ArtifactKind.POST_ANALYSIS, post),
+            SaveDestination(ArtifactKey(ArtifactKind.ANALYSIS, "fit"), primary),
+            SaveDestination(ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"), post),
         ),
     )
     try:
@@ -888,21 +915,24 @@ def test_artifact_save_projects_primary_and_post_keys_through_one_command(fx, tm
                 "tab.save_artifacts",
                 {
                     "tab_id": tab_id,
-                    "artifacts": ["analysis", "post"],
-                    "paths": {"analysis": primary, "post": post},
+                    "artifacts": ["analysis:fit", "post:fit"],
+                    "paths": {"analysis:fit": primary, "post:fit": post},
                 },
             )
             assert reply["ok"] is True
             assert reply["result"] == {
                 "operation_id": 71,
-                "destinations": {"analysis": primary, "post": post},
+                "destinations": {"analysis:fit": primary, "post:fit": post},
             }
             save.assert_called_once_with(
                 tab_id,
-                artifacts=(ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS),
+                artifacts=(
+                    ArtifactKey(ArtifactKind.ANALYSIS, "fit"),
+                    ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"),
+                ),
                 paths={
-                    ArtifactKind.ANALYSIS: primary,
-                    ArtifactKind.POST_ANALYSIS: post,
+                    ArtifactKey(ArtifactKind.ANALYSIS, "fit"): primary,
+                    ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"): post,
                 },
                 comment=None,
             )
@@ -917,11 +947,12 @@ def test_artifact_save_projects_primary_and_post_keys_through_one_command(fx, tm
         {"artifacts": ["post_analysis"]},
         {"artifacts": []},
         {"artifacts": ["data", "data"]},
-        {"artifacts": ["analysis", "post", "analysis"]},
+        {"artifacts": ["analysis:fit", "post:fit", "analysis:fit"]},
+        {"artifacts": ["analysis:"]},
         {"paths": {"data": ""}},
-        {"paths": {"analysis": ""}},
-        {"paths": {"post": ""}},
-        {"paths": {"post": 2}},
+        {"paths": {"analysis:": ""}},
+        {"paths": {"post:": ""}},
+        {"paths": {"post:fit": 2}},
         {"paths": {"other": "image.png"}},
     ],
 )
@@ -1060,10 +1091,7 @@ def test_save_image_delegates_to_save_control(fx):
         side_effect=AssertionError("tab.save_image must use save_control")
     )
     fx.service.save_control.save_image = MagicMock(  # type: ignore[method-assign]
-        return_value="/tmp/image.png"
-    )
-    fx.service.save_control.save_post_image = MagicMock(  # type: ignore[method-assign]
-        return_value="/tmp/post.png"
+        side_effect=lambda _tab, _key, path: path
     )
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
@@ -1072,38 +1100,37 @@ def test_save_image_delegates_to_save_control(fx):
         resp = call(
             sock,
             "tab.save_image",
-            {"tab_id": tab_id, "subtab_id": "analysis", "image_path": "/tmp/image.png"},
+            {
+                "tab_id": tab_id,
+                "subtab_id": "analysis",
+                "figure_name": "fit",
+                "image_path": "/tmp/image.png",
+            },
         )
-        assert resp["ok"] is True
+        assert resp["ok"] is True, resp
         assert resp["result"]["image_path"] == "/tmp/image.png"
         fx.service.save_control.save_image.assert_called_once_with(
-            tab_id, "/tmp/image.png"
+            tab_id, ArtifactKey(ArtifactKind.ANALYSIS, "fit"), "/tmp/image.png"
         )
         fx.ctrl.save_image.assert_not_called()
+        fx.service.save_control.save_image.reset_mock()
         resp2 = call(
             sock,
             "tab.save_image",
             {
                 "tab_id": tab_id,
                 "subtab_id": "post_analysis",
+                "figure_name": "fit",
                 "image_path": "/tmp/post.png",
             },
         )
         assert resp2["ok"] is True
         assert resp2["result"]["image_path"] == "/tmp/post.png"
-        fx.service.save_control.save_post_image.assert_called_once_with(
-            tab_id, "/tmp/post.png"
+        fx.service.save_control.save_image.assert_called_once_with(
+            tab_id, ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"), "/tmp/post.png"
         )
     finally:
         sock.close()
-
-
-def test_save_post_image_delegates_to_save_control(fx):
-    """tab.save_post_image wire method is removed (clean break); save_image with subtab post_analysis routes to save_post_image internally."""
-    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
-
-    assert "tab.save_post_image" not in METHOD_SPECS
-    assert "tab.save_post_image" not in [m for m in METHOD_SPECS]
 
 
 def test_save_result_delegates_to_save_control(fx):

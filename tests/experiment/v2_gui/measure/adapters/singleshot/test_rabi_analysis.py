@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from typing import Any, Literal, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.amp_rabi import AmpRabiResult
-from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResult
+from zcu_tools.experiment.v2.singleshot.len_rabi import (
+    LenRabiAnalyzeOptions,
+    LenRabiCfg,
+    LenRabiExp,
+    LenRabiResult,
+)
 from zcu_tools.experiment.v2.singleshot.rabi_fit import RabiJointFitResult
 from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.amp_rabi import (
     SsAmpRabiAdapter,
@@ -24,7 +30,25 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+
+@pytest.fixture
+def plot_factory() -> Iterator[Callable[[], Plots]]:
+    sessions: list[Plots] = []
+
+    def create() -> Plots:
+        session = Plots(NonPresentingHost())
+        sessions.append(session)
+        return session
+
+    try:
+        yield create
+    finally:
+        for session in sessions:
+            session.finish(present=False)
+            session.release()
 
 
 def test_amp_analysis_has_no_decay_option() -> None:
@@ -39,6 +63,7 @@ def test_amp_analysis_has_no_decay_option() -> None:
 @pytest.mark.parametrize("fit_phase", [False, True])
 def test_len_analysis_exposes_and_forwards_decay(
     monkeypatch: pytest.MonkeyPatch,
+    plot_factory: Callable[[], Plots],
     decay: bool,
     fit_phase: bool,
     initial_state: Literal["ground", "excited"],
@@ -46,7 +71,9 @@ def test_len_analysis_exposes_and_forwards_decay(
     assert SsLenRabiAdapter.analyze_params_cls() is SsLenRabiAnalyzeParams
     assert (
         SsLenRabiAdapter()
-        .get_analyze_params(cast(LenRabiResult, object()), cast(Any, object()))
+        .get_analyze_params(
+            cast(RunRecord[LenRabiCfg, LenRabiResult], object()), cast(Any, object())
+        )
         .decay
         is True
     )
@@ -58,18 +85,18 @@ def test_len_analysis_exposes_and_forwards_decay(
 
     def fake_analyze(
         self: LenRabiExp,
-        result: LenRabiResult,
+        source: RunRecord[LenRabiCfg, LenRabiResult],
+        options: LenRabiAnalyzeOptions,
         *,
-        decay: bool,
-        fit_phase: bool,
-        initial_state: Literal["ground", "excited"],
-    ) -> tuple[RabiJointFitResult, Figure]:
-        calls.append((decay, fit_phase, initial_state))
-        return fit, figure
+        plots: Plots,
+    ) -> RabiJointFitResult:
+        calls.append((options.decay, options.fit_phase, options.initial_state))
+        plots.adopt("fit", figure)
+        return fit
 
     monkeypatch.setattr(LenRabiExp, "analyze", fake_analyze)
     req = AnalyzeRequest(
-        run_result=cast(LenRabiResult, object()),
+        run_result=cast(RunRecord[LenRabiCfg, LenRabiResult], object()),
         analyze_params=SsLenRabiAnalyzeParams(
             decay=decay, fit_phase=fit_phase, initial_state=initial_state
         ),
@@ -77,21 +104,27 @@ def test_len_analysis_exposes_and_forwards_decay(
         ml=cast(Any, None),
         predictor=None,
     )
-    out = SsLenRabiAdapter().analyze(req)
+    plots = plot_factory()
+    out = SsLenRabiAdapter().analyze(req, plots=plots)
 
     assert calls == [(decay, fit_phase, initial_state)]
     assert out.fit_result is fit
-    assert out.figure is figure
+    assert plots["fit"] is figure
 
 
-def test_phase_fit_figure_and_calibration_writeback() -> None:
+def test_phase_fit_figure_and_calibration_writeback(
+    plot_factory: Callable[[], Plots],
+) -> None:
     ctx = SessionEnv(MetaDict(), ModuleLibrary(), None, None)
     rng = np.random.default_rng(290)
     lengths = np.linspace(0.2, 1.7, 31)
     p_e = 0.5 - 0.42 * np.cos(4 * np.pi * lengths + 0.6)
     excited = rng.random((lengths.size, 1000)) < p_e[:, None]
     signals = rng.normal(np.where(excited, 1.0, -1.0), 0.18).astype(np.complex128)
-    run = LenRabiResult(lengths, np.arange(1000), signals)
+    run = RunRecord[LenRabiCfg, LenRabiResult](
+        cfg=None, result=LenRabiResult(lengths, np.arange(1000), signals)
+    )
+    plots = plot_factory()
     adapter = SsLenRabiAdapter()
     out = adapter.analyze(
         AnalyzeRequest(
@@ -100,12 +133,13 @@ def test_phase_fit_figure_and_calibration_writeback() -> None:
             ctx.md,
             ctx.ml,
             None,
-        )
+        ),
+        plots=plots,
     )
     try:
         assert out.fit_result.backend.valid
         assert out.fit_result.phase == pytest.approx(0.6, abs=0.12)
-        assert "phase=" in out.figure.axes[0].get_title()
+        assert "phase=" in plots["fit"].axes[0].get_title()
         items = adapter.get_writeback_items(WritebackRequest(run, out, ctx))
         assert {item.target_name for item in items} == {
             "g_center",
@@ -116,15 +150,16 @@ def test_phase_fit_figure_and_calibration_writeback() -> None:
         failed = replace(
             out.fit_result, backend=replace(out.fit_result.backend, valid=False)
         )
-        invalid = SsLenRabiAnalyzeResult(failed, out.figure)
+        invalid = SsLenRabiAnalyzeResult(failed)
         assert adapter.get_writeback_items(WritebackRequest(run, invalid, ctx)) == []
     finally:
-        plt.close(out.figure)
+        plots.finish(present=False)
 
 
 @pytest.mark.parametrize("initial_state", ["ground", "excited"])
 def test_amp_and_len_share_joint_analysis_and_writeback(
     initial_state: Literal["ground", "excited"],
+    plot_factory: Callable[[], Plots],
 ) -> None:
     ctx = SessionEnv(MetaDict(), ModuleLibrary(), None, None)
     rng = np.random.default_rng(238)
@@ -133,13 +168,15 @@ def test_amp_and_len_share_joint_analysis_and_writeback(
     p_e = 0.5 + (p_e0 - 0.5) * np.cos(4 * np.pi * xs)
     excited = rng.random((25, 600)) < p_e[:, None]
     raw = rng.normal(np.where(excited, 1.0, -1.0), 0.18).astype(np.complex128)
-    amp_run = AmpRabiResult(xs, np.arange(600), raw)
-    len_run = LenRabiResult(xs, np.arange(600), raw)
+    amp_run = RunRecord(cfg=None, result=AmpRabiResult(xs, np.arange(600), raw))
+    len_run = RunRecord(cfg=None, result=LenRabiResult(xs, np.arange(600), raw))
+    amp_plots, len_plots = plot_factory(), plot_factory()
     amp_adapter, len_adapter = SsAmpRabiAdapter(), SsLenRabiAdapter()
     amp_out = amp_adapter.analyze(
         AnalyzeRequest(
             amp_run, SsAmpRabiAnalyzeParams(initial_state), ctx.md, ctx.ml, None
-        )
+        ),
+        plots=amp_plots,
     )
     len_out = len_adapter.analyze(
         AnalyzeRequest(
@@ -148,7 +185,8 @@ def test_amp_and_len_share_joint_analysis_and_writeback(
             ctx.md,
             ctx.ml,
             None,
-        )
+        ),
+        plots=len_plots,
     )
     try:
         assert amp_out.fit_result.joint_fit.backend.valid
@@ -180,5 +218,5 @@ def test_amp_and_len_share_joint_analysis_and_writeback(
             == []
         )
     finally:
-        plt.close(amp_out.figure)
-        plt.close(len_out.figure)
+        amp_plots.finish(present=False)
+        len_plots.finish(present=False)

@@ -1,11 +1,29 @@
-# `zcu_tools.gui.plotting` — Qt 繪圖接入
+# GUI plotting
 
-**Last updated:** 2026-09-27 — measure app 路徑修正
+**Last updated:** 2026-10-02
 
-此目錄提供共用的 matplotlib/Qt 接入機制，不決定各 app 的 figure 接受、保留或清理政策。`setup.py` 的 `configure_matplotlib_backend()` 必須在匯入 `pyplot` 前由入口程式呼叫，選擇 process-wide 的 `module://zcu_tools.gui.plotting.backend`；若 `pyplot` 已匯入會報錯。根模組透過 `__getattr__` 延遲載入 Qt／matplotlib 相關匯出，避免單純匯入 package 就觸發重型依賴。
+此目錄提供 explicit Matplotlib／Qt 接入，不決定各 app 的 figure 接受或保存政策。
+根 package 延遲載入 Qt 與 Matplotlib 匯出。Runtime 在 QApplication 建立後初始化
+host、shutdown guard 與 mathtext lock／prewarm，不切換 process-wide backend。
 
-`backend.py` 的 `GuiFigureManager` 在 pyplot 建圖時將 canvas 交給 host，`show()` 只啟用已附著的 figure。`container.py` 的 `FigureContainer` 是包住 `QStackedWidget` 的被動容器，提供 attach、detach 與清理 canvas 的方法；建立容器時先在 GUI 主線程初始化 host bridge。`routing.py` 以 `ContextVar` 保存當前容器，供新 figure attach 使用；`host.py` 持有主線程 QObject bridge 與 weak-key figure-to-container registry。已建立 figure 的後續操作依 registry 找容器，不重新讀取 routing context。
+## Figures 與 presentation
 
-Host 透過 Qt signal 把 worker 發出的 attach、activate、refresh 等請求交給主線程；attach 等待主線程回傳 canvas。`GuiFigureCanvas.draw_idle()` 將 worker 的重繪請求送到主線程，主線程呼叫則直接使用 canvas 的 `draw_idle()`。Bridge 只接管已實作的 figure／draw 操作，不涵蓋 worker 執行的其他 Matplotlib 計算。`mathtext_lock.py` 另以 process-wide lock 序列化 mathtext parsing，並提供主線程 prewarm；它不取代 figure lifecycle 的主線程要求。另一種路徑是 worker 只通知更新資料，GUI slot 在主線程繪圖。Qt queued signal 本身不會凍結共用的可變 Result；app 必須依自己的寫入區域、讀取時機和生命週期界定資料所有權，不從 signal 推論通用同步保證。這兩種路徑及責任邊界見 [GUI ADR](../../../../docs/adr/0067-gui-application.md)。
+Caller 透過 Plots 持有具名原生 Figure，並注入 QtPlotHost。Host 使用 owner scheduler
+執行 live artist 更新與 presentation。普通圖完成後才呈現，診斷失敗不必丟棄計算結果。
+Qt canvas 與 Figure 的生命週期分開。Release 釋放 presentation，保留原圖及 Agg canvas，
+caller 仍可修改 artists 或 savefig。
 
-App 負責選定 figure 容器、設定 routing scope，以及決定 Run／Analyze figure 的生命週期。Measure app 的 `measure/driven/qt_liveplot_backend.py` 仍是 app-local adapter，`measure/services/scopes.py` 在 run worker 的 ambient scope 註冊它；不是此目錄的共用 backend。GUI 入口與 runtime 負責 process 啟動及 backend setup，這個目錄只提供機制，不接管 app 的啟停流程。
+FigureContainer 包裝 QStackedWidget 與 placeholder。host.py 維護 weak-key
+Figure-to-container registry，並透過 GUI-thread QObject 處理 explicit attach 與
+canvas removal。容器可以同時保留多張圖，重新 attach 會選取對應 canvas。
+容器 clear 清掉動態 canvas 與 registry entry，不清空原生 Figure。
+
+## Thread 與 rendering 邊界
+
+Host 必須先在 GUI thread 初始化。Runtime 與 FigureContainer 建構都確保此條件。
+Worker 不直接操作 Qt widget；liveplot update 透過 host owner 執行。
+Shared mathtext lock／prewarm 保護字型解析，不代表任意 Matplotlib 操作都 thread-safe。
+
+各 app 的互動 widget 也可以在主執行緒自持 FigureCanvasQTAgg。
+Qt、Agg 與 Notebook ipympl 能力保留，不依賴專案自訂 pyplot routing backend。
+數據、取消及 operation 的收尾仍由各 app／session owner 負責。

@@ -22,6 +22,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.orchestrator import Orchestrator
 
+from tests.gui.app.autofluxdep._helpers import make_run_context
+
 _EXPECTED_NAMES = (
     "qubit_freq",
     "lenrabi",
@@ -227,6 +229,11 @@ def test_catalog_does_not_reorder_user_workflow() -> None:
         for provider in providers
     }
 
-    orchestrator = Orchestrator(providers, cfg_snapshots=snapshots)
+    orchestrator = Orchestrator(
+        providers,
+        cfg_snapshots=snapshots,
+        context=make_run_context(),
+        device_snapshot={},
+    )
 
     assert tuple(provider.type_name for provider in orchestrator.providers) == requested

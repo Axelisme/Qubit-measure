@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
@@ -22,7 +23,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.plotting.liveplot import LivePlot1D
+from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,
@@ -92,8 +93,8 @@ class T2EchoResult(TypedDict, closed=True):
 
 
 class T2EchoPlotDict(TypedDict, closed=True):
-    t2e: LivePlot1D
-    t2e_curve: LivePlot1D
+    t2e: LinePlot
+    t2e_curve: LinePlot
 
 
 class T2EchoTask(
@@ -138,7 +139,7 @@ class T2EchoTask(
 
         len_sweep = make_sweep(*cfg_temp.sweep_range, self.num_expts)
         self.lengths = sweep2array(
-            len_sweep, "time", {"soccfg": state.env.soccfg, "scaler": 0.5}
+            len_sweep, "time", {"soccfg": state.env.context.soccfg, "scaler": 0.5}
         )
 
         cfg = cfg_temp.to_dict()
@@ -156,14 +157,19 @@ class T2EchoTask(
         signals_buffer = raw_step.buffer(self.num_expts)
         cfg = raw_step.cfg
         modules = cfg.modules
-        setup_devices(cfg, progress=False)
+        setup_devices(
+            cfg,
+            progress=False,
+            cancel_signal=state.stop,
+            devices=state.env.context.devices,
+        )
 
         detune = cfg.activate_detune
         length_sweep = cfg.sweep.length
         length_param = sweep2param("length", length_sweep)
 
         _ = (
-            raw_step.prog_builder(state.env.soc, state.env.soccfg)
+            raw_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi2_pulse1", modules.pi2_pulse),
@@ -239,27 +245,30 @@ class T2EchoTask(
     def num_axes(self) -> dict[str, int]:
         return dict(t2e=1, t2e_curve=1)
 
-    def make_plotter(self, name, axs) -> T2EchoPlotDict:
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T2EchoPlotDict:
         return T2EchoPlotDict(
-            t2e=LivePlot1D(
+            t2e=plots.liveplot_1d(
+                figure_name,
                 "Flux device value",
                 "T2 Echo (us)",
-                existed_axes=[axs["t2e"]],
-                segment_kwargs=dict(
-                    title=name + "(t2e)", line_kwargs=[dict(linestyle="None")]
-                ),
+                axes=axs["t2e"][0],
+                title=name + "(t2e)",
+                configure_axes=lambda ax: ax.lines[0].set_linestyle("None"),
             ),
-            t2e_curve=LivePlot1D(
+            t2e_curve=plots.liveplot_1d(
+                figure_name,
                 "Signal",
                 "Time (us)",
-                existed_axes=[axs["t2e_curve"]],
-                segment_kwargs=dict(title=name + "(t2e curve)"),
+                axes=axs["t2e_curve"][0],
+                title=name + "(t2e curve)",
             ),
         )
 
     def update_plotter(
         self,
-        plotters,
+        plotters: T2EchoPlotDict,
         event: ResultUpdateEvent[FluxDepEnv, T2EchoResult],
         signals: T2EchoResult,
     ) -> None:

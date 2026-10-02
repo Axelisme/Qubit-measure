@@ -24,6 +24,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
 )
 from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision, CfgStaleError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.plotting.plots import Plots
 
 from tests.gui._control_fakes import CallLog, call
 
@@ -68,14 +69,18 @@ class RecordingAdapter:
         self._log = log
         self.capabilities = SimpleNamespace(analysis=analysis)
 
-    def make_interactive_plugin(self, req: object) -> PluginDefinition[int, object]:
-        self._log.add("adapter", "make_interactive_plugin", req)
+    def make_interactive_plugin(
+        self, req: object, *, plots: Plots
+    ) -> PluginDefinition[int, object]:
+        self._log.add("adapter", "make_interactive_plugin", req, plots)
         return PluginDefinition("test", 0, (), lambda _state: None, lambda state: state)
 
     def make_interactive_frontend(
-        self, plugin, session, env, request_finish, request_cancel
+        self, plugin, session, env, request_finish, request_cancel, *, plots: Plots
     ) -> object:
-        self._log.add("adapter", "make_interactive_frontend", plugin, session, env)
+        self._log.add(
+            "adapter", "make_interactive_frontend", plugin, session, env, plots
+        )
         return object()
 
 
@@ -100,9 +105,12 @@ class RecordingRun:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def start_run(self, permit: object, live_container: object) -> int:
-        self._log.add("run", "start_run", permit, live_container)
+    def start_run(self, permit: object, *, plots: Plots) -> int:
+        self._log.add("run", "start_run", permit, plots)
         return 11
+
+    def release_view_plots(self, tab_id: str) -> None:
+        self._log.add("run", "release_view_plots", tab_id)
 
     def cancel_run(self) -> bool:
         self._log.add("run", "cancel_run")
@@ -133,14 +141,10 @@ class RecordingAnalyze:
         self._log = log
 
     def start_analyze(
-        self, permit: object, analyze_params_instance: object, figure_container: object
+        self, permit: object, analyze_params_instance: object, *, plots: Plots
     ) -> int:
         self._log.add(
-            "analyze",
-            "start_analyze",
-            permit,
-            analyze_params_instance,
-            figure_container,
+            "analyze", "start_analyze", permit, analyze_params_instance, plots
         )
         return 22
 
@@ -149,17 +153,28 @@ class RecordingAnalyze:
         permit: object,
         plugin: PluginDefinition[Any, Any],
         owner: ManualOwnerScheduler,
+        *,
+        analyze_params_instance: object,
+        plots: Plots,
     ) -> int:
-        self._log.add("analyze", "start_plugin", permit, plugin, owner)
-        self.active = ActiveInteractive(plugin, plugin.open(owner))
+        self._log.add(
+            "analyze",
+            "start_plugin",
+            permit,
+            plugin,
+            owner,
+            analyze_params_instance,
+            plots,
+        )
+        self.active = ActiveInteractive(plugin, plugin.open(owner), plots)
         return 23
 
     def get_interactive(self, tab_id: str) -> ActiveInteractive:
         self._log.add("analyze", "get_interactive", tab_id)
         return self.active
 
-    def finish_plugin(self, tab_id: str, figure: object) -> bool:
-        self._log.add("analyze", "finish_plugin", tab_id, figure)
+    def finish_plugin(self, tab_id: str) -> bool:
+        self._log.add("analyze", "finish_plugin", tab_id)
         return True
 
     def cancel_interactive(self, tab_id: str) -> bool:
@@ -178,14 +193,15 @@ class RecordingPostAnalyze:
         self,
         tab_id: str,
         post_analyze_params_instance: object,
-        figure_container: object,
+        *,
+        plots: Plots,
     ) -> int:
         self._log.add(
             "post_analyze",
             "start_post_analyze",
             tab_id,
             post_analyze_params_instance,
-            figure_container,
+            plots,
         )
         return 33
 
@@ -315,13 +331,16 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
 
     assert facet.start_run("tab-1", CfgRef(CfgId("cfg-1"), CfgRevision(0))) == 11
 
-    assert log.calls == [
+    assert log.calls[:4] == [
         call("state", "get_tab", "tab-1"),
         call("guard", "acquire_run_permit", "tab-1"),
         call("state", "is_tab_busy", "tab-1"),
         call("host", "make_run_container", "tab-1"),
-        call("run", "start_run", "run-permit", "figure-container"),
     ]
+    assert log.calls[4].target == "run"
+    assert log.calls[4].method == "start_run"
+    assert log.calls[4].args[0] == "run-permit"
+    assert isinstance(log.calls[4].args[1], Plots)
 
 
 @pytest.mark.parametrize(
@@ -352,6 +371,7 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
         call(
             "load", "load_result", SimpleNamespace(tab_id="tab-1"), "/tmp/result.hdf5"
         ),
+        call("run", "release_view_plots", "tab-1"),
         call("tab", "prepare_result_analysis", "tab-1"),
         call("bus", "emit", "TabContentChangedPayload"),
     ]
@@ -367,13 +387,15 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
 
     assert facet.analyze("tab-1", params) == 22
 
-    assert log.calls == [
+    assert log.calls[:4] == [
         call("guard", "acquire_analyze_permit", "tab-1"),
         call("state", "is_tab_busy", "tab-1"),
         call("state", "get_tab", "tab-1"),
         call("host", "make_analysis_container", "tab-1"),
-        call("analyze", "start_analyze", "analyze-permit", params, "figure-container"),
     ]
+    assert log.calls[4].method == "start_analyze"
+    assert log.calls[4].args[:2] == ("analyze-permit", params)
+    assert isinstance(log.calls[4].args[2], Plots)
 
 
 def test_interactive_analyze_mounts_render_host_session() -> None:
@@ -387,13 +409,13 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "state",
         "state",
         "adapter",
-        "tab",
         "analyze",
         "analyze",
         "host",
         "adapter",
     ]
-    assert log.calls[6].method == "start_plugin"
+    assert log.calls[5].method == "start_plugin"
+    assert log.calls[5].args[3] == "params"
 
 
 def test_interactive_mount_failure_unmounts_and_cancels_operation() -> None:
@@ -418,17 +440,13 @@ def test_post_analyze_uses_shared_live_container() -> None:
 
     assert facet.start_post_analyze("tab-1", "post-params") == 33
 
-    assert log.calls == [
+    assert log.calls[:2] == [
         call("state", "is_tab_busy", "tab-1"),
         call("host", "make_post_analysis_container", "tab-1"),
-        call(
-            "post_analyze",
-            "start_post_analyze",
-            "tab-1",
-            "post-params",
-            "figure-container",
-        ),
     ]
+    assert log.calls[2].method == "start_post_analyze"
+    assert log.calls[2].args[:2] == ("tab-1", "post-params")
+    assert isinstance(log.calls[2].args[2], Plots)
 
 
 @pytest.mark.parametrize(

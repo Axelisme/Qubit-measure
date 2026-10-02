@@ -122,7 +122,7 @@ def set_flux_by_name(
 ) -> None:
     """Write ``value`` into ``cfg.dev[name]`` (the picked flux device, by NAME).
 
-    ``cfg.dev`` is keyed by device name (``GlobalDeviceManager.get_all_info``); the
+    ``cfg.dev`` is keyed by device name (``DeviceManager.get_all_info``); the
     GUI flux picker stores a device *name* (e.g. the auto-provisioned ``fake_flux``).
     The lower layer's ``set_flux_in_dev_cfg`` resolves by ``label`` (``flux_dev``),
     a different dimension the GUI's picked device need not carry — writing by name
@@ -160,7 +160,12 @@ def setup_flux_point(cfg: ExpCfgModel, env: RunEnv, exp_name: str) -> None:
         require_flux_device(env, exp_name),
         env.flux,
     )
-    setup_devices(cfg, progress=False)
+    setup_devices(
+        cfg,
+        env.context.devices,
+        progress=False,
+        cancel_signal=env.context.cancel_signal,
+    )
 
 
 def schedule_completed(outcome: ScheduleOutcome, exp_name: str) -> bool:

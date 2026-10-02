@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.special import erfc
 from typing_extensions import (
@@ -19,6 +17,7 @@ from zcu_tools.analysis.fitting.singleshot import (
     fit_singleshot_p0,
     gauss_func,
 )
+from zcu_tools.plotting.plots import Plots
 
 
 def rotate(
@@ -185,7 +184,9 @@ def fitting_ge_and_plot(
     init_p0_e: float | None = None,
     avg_p: float | None = None,
     align_t1: bool = True,
-) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
+    *,
+    plots: Plots,
+) -> tuple[float, NDArray[np.float64], GE_FitResult]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
 
@@ -259,67 +260,72 @@ def fitting_ge_and_plot(
         raise ValueError(
             "GE fit returned invalid centers or width; calibration is unavailable"
         )
-    fig, axs = plt.subplots(2, 2, figsize=(8, 8))
-    scatter_ge_plot(axs[0, 0], (Ig, Ie), (Qg, Qe), "Rotated")
-    hist(Ig, Ie, numbins, axs[1, 0])
-    axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
-    axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
+    fig, raw_axes = plots.subplots("fit", nrows=2, ncols=2, figsize=(8, 8))
+    axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
+    scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")
+    hist(Ig, Ie, numbins, axs[1][0])
+    axs[0][1].hist(xs, bins=bins.tolist(), weights=g_pdfs, color="b", alpha=0.5)
+    axs[1][1].hist(xs, bins=bins.tolist(), weights=e_pdfs, color="r", alpha=0.5)
 
-    plt_params = dict(linestyle=":", marker="o", markersize=5)
-    axs[0, 0].plot(
+    axs[0][0].plot(
         rotated_g_center.real,
         rotated_g_center.imag,
         markerfacecolor="b",
         color="r",
-        **plt_params,
+        linestyle=":",
+        marker="o",
+        markersize=5,
     )
-    axs[0, 0].plot(
+    axs[0][0].plot(
         rotated_e_center.real,
         rotated_e_center.imag,
         markerfacecolor="r",
         color="b",
-        **plt_params,
+        linestyle=":",
+        marker="o",
+        markersize=5,
     )
-    axs[0, 0].set_xlim(np.min(bins), np.max(bins))
+    axs[0][0].set_xlim(np.min(bins), np.max(bins))
 
-    axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
+    axs[0][1].plot(xs, fit_g_pdfs, "k-", label="total")
     if length_ratio != 0.0:
-        axs[0, 1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.5, label="ideal total")
-    axs[0, 1].plot(xs, gg_fit, "b-", alpha=0.4, label="ground")
-    axs[0, 1].plot(xs, ge_fit, "r--", alpha=0.4, label="excited")
-    axs[0, 1].plot(xs, residual_g, "g--", alpha=0.5, label="other")
-    axs[0, 1].set_title(f"{p0_gg:.1%} / {p0_ge:.1%} / {p0_go:.1%}", fontsize=14)
-    axs[0, 1].legend()
-    axs[1, 1].plot(xs, fit_e_pdfs, "k-", label="total")
+        axs[0][1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.5, label="ideal total")
+    axs[0][1].plot(xs, gg_fit, "b-", alpha=0.4, label="ground")
+    axs[0][1].plot(xs, ge_fit, "r--", alpha=0.4, label="excited")
+    axs[0][1].plot(xs, residual_g, "g--", alpha=0.5, label="other")
+    axs[0][1].set_title(f"{p0_gg:.1%} / {p0_ge:.1%} / {p0_go:.1%}", fontsize=14)
+    axs[0][1].legend()
+    axs[1][1].plot(xs, fit_e_pdfs, "k-", label="total")
     if length_ratio != 0.0:
-        axs[1, 1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.5, label="ideal total")
-    axs[1, 1].plot(xs, ee_fit, "r-", alpha=0.4, label="excited")
-    axs[1, 1].plot(xs, eg_fit, "b--", alpha=0.4, label="ground")
-    axs[1, 1].plot(xs, residual_e, "g--", alpha=0.5, label="other")
-    axs[1, 1].set_title(f"{p0_eg:.1%} / {p0_ee:.1%} / {p0_eo:.1%}", fontsize=14)
-    axs[1, 1].legend()
+        axs[1][1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.5, label="ideal total")
+    axs[1][1].plot(xs, ee_fit, "r-", alpha=0.4, label="excited")
+    axs[1][1].plot(xs, eg_fit, "b--", alpha=0.4, label="ground")
+    axs[1][1].plot(xs, residual_e, "g--", alpha=0.5, label="other")
+    axs[1][1].set_title(f"{p0_eg:.1%} / {p0_ee:.1%} / {p0_eo:.1%}", fontsize=14)
+    axs[1][1].legend()
 
-    axs[1, 0].plot(xs, fit_g_pdfs, "b-", label="g")
-    axs[1, 0].plot(xs, fit_e_pdfs, "r-", label="e")
+    axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
+    axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
 
     fid, threshold = calc_fidelity(g_pdfs, e_pdfs, bins)
     ideal_fid = calc_ideal_fidelity(sg, se, s)
 
-    axs[1, 0].set_title(
+    axs[1][0].set_title(
         r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
     )
 
-    for ax in axs.flat:
-        ax.axvline(threshold, color="0.2", linestyle="--")
+    for row in axs:
+        for ax in row:
+            ax.axvline(threshold, color="0.2", linestyle="--")
 
     if logscale:
-        axs[0, 1].set_yscale("log")
-        axs[1, 0].set_yscale("log")
-        axs[1, 1].set_yscale("log")
+        axs[0][1].set_yscale("log")
+        axs[1][0].set_yscale("log")
+        axs[1][1].set_yscale("log")
         y_max, y_min = 1.5 * np.max([g_pdfs, e_pdfs]), np.min([g_pdfs, e_pdfs]) + 1e-4
-        axs[0, 1].set_ylim(y_min, y_max)
-        axs[1, 0].set_ylim(y_min, y_max)
-        axs[1, 1].set_ylim(y_min, y_max)
+        axs[0][1].set_ylim(y_min, y_max)
+        axs[1][0].set_ylim(y_min, y_max)
+        axs[1][1].set_ylim(y_min, y_max)
 
     if align_t1:
         fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
@@ -350,5 +356,4 @@ def fitting_ge_and_plot(
             g_center=rotated_g_center * np.exp(-1j * theta),
             e_center=rotated_e_center * np.exp(-1j * theta),
         ),
-        fig,
     )

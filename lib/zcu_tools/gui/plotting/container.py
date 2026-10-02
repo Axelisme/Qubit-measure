@@ -3,9 +3,8 @@
 A thin, **passive** wrapper around a ``QStackedWidget`` with a fixed placeholder.
 It holds no signals and does no thread marshalling — the host (``host.py``) owns
 the single main-thread bridge QObject and calls these synchronous methods on the
-main thread. Worker code never touches a Container directly; it only *selects*
-one via routing (``routing.routing_scope``) and the host marshals the attach/
-activate/refresh onto the main thread.
+main thread. Worker code uses an explicit plot host, which schedules artist
+updates and presentation on the owner thread.
 
 Constructing a Container ensures the host bridge is initialised on the main
 thread first (the canvas thread-affinity invariant — see ``host.ensure_host``).
@@ -13,6 +12,8 @@ thread first (the canvas thread-affinity invariant — see ``host.ensure_host``)
 
 from __future__ import annotations
 
+from matplotlib.backend_bases import FigureCanvasBase
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QStackedWidget, QWidget  # type: ignore[attr-defined]
 
@@ -48,6 +49,7 @@ class FigureContainer:
         self._stack.setCurrentWidget(canvas)
 
     def clear_dynamic_canvases(self) -> None:
+        """Remove presentation while keeping retained Figures saveable."""
         while self._stack.count() > 1:
             widget = self._stack.widget(self._stack.count() - 1)
             if widget is None:
@@ -56,5 +58,7 @@ class FigureContainer:
             figure = getattr(widget, "figure", None)
             if isinstance(figure, Figure):
                 _host.drop_from_registry(figure)
+                if isinstance(widget, FigureCanvasBase) and figure.canvas is widget:
+                    FigureCanvasAgg(figure)
             widget.deleteLater()
         self._stack.setCurrentWidget(self._placeholder)

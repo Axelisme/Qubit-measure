@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Literal, overload
 
-import matplotlib.pyplot as plt
 import numpy as np
+from IPython.display import Image, display
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
@@ -71,7 +72,9 @@ def search_in_database(
     fig: Figure | None = None
     if plot:
         fig = make_search_diagnostic_figure(result)
-        plt.show()
+        image = BytesIO()
+        fig.savefig(image, format="png")
+        display(Image(data=image.getvalue()))
     return result.params, fig
 
 

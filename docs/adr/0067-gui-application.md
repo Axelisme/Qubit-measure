@@ -32,9 +32,9 @@ Measure 的互動分析由 app service 持有已提交的 Qt-free plugin session
 
 ## 繪圖與限制
 
-通用 [liveplot](../../lib/zcu_tools/plotting/liveplot/README.md) 只認 backend 契約。GUI 選用自己的 backend 與 host，依賴方向是 GUI 指向 liveplot。Qt frontend 擁有 canvas、container、顯示與 figure 的宿主生命週期；嵌入 figure 的 close 請求交給 backend，不能假設它立即銷毀宿主 canvas。
+GUI 透過 operation-owned Plots 與明確的 QtPlotHost 使用原生 Figure。Qt frontend 擁有 canvas、container 與 presentation 的生命週期；release 不銷毀 caller 保留的 Figure。通用 [liveplot](../../lib/zcu_tools/plotting/liveplot/README.md) 的 standalone backend 契約仍服務其 public plotters，GUI 不透過該契約註冊自訂 pyplot routing。
 
-Worker 發資料通知、主線程繪圖，與 worker 呼叫既有 pyplot API、由 GUI bridge 接管其支援的 figure／draw 操作，是兩種可並存的路徑。Autofluxdep、dispersive 使用前者；measure 與 fluxdep 的部分工作使用後者。Bridge 不能保證 worker 內全部 Matplotlib 計算安全；mathtext parsing 另有 lock／prewarm。Queued signal 也不會把共用的可變 Result 變成不可變 snapshot。讀寫該資料的時機與所有權仍須由各 app 決定，不能從通知機制推論通用同步保證。具體 backend routing 與限制見 [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md)。
+Worker 可回傳資料，由主執行緒繪圖，也可透過 explicit host 的 owner scheduler 更新 live artists。兩者都不依賴 ambient pyplot routing。Mathtext parsing 保留 lock／prewarm；這不保證任意 Matplotlib 計算 thread-safe。Queued signal 也不會把共用的可變 Result 變成不可變 snapshot。各 app 仍決定資料的讀寫時機與所有權，具體 presentation 契約見 [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md)。
 
 ## 取捨與相鄰文件
 

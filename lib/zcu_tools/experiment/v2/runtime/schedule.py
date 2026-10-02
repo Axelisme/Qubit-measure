@@ -12,8 +12,6 @@ from collections.abc import (
     Sequence,
     Sized,
 )
-from contextlib import contextmanager
-from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, cast, overload
@@ -22,6 +20,7 @@ import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from typing_extensions import TypeVar
 
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -53,22 +52,6 @@ T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
 RunStatus: TypeAlias = Literal["completed", "stopped", "interrupted", "failed"]
 StopCondition: TypeAlias = Callable[[], bool]
-ErrorStatus: TypeAlias = Literal["interrupted", "failed"]
-
-
-class ScheduleOutcomeError(RuntimeError):
-    """Exception wrapper for a Schedule failure that returned partial data."""
-
-    def __init__(
-        self,
-        status: ErrorStatus,
-        reason: str,
-        exception: BaseException | None,
-    ) -> None:
-        super().__init__(reason)
-        self.status = status
-        self.reason = reason
-        self.exception = exception
 
 
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
@@ -121,55 +104,6 @@ def default_decimated_raw2signal_fn(
     return raw[0].dot([1, 1j])
 
 
-class StopSignal:
-    """Schedule-owned stop signal shared by host loops and program acquire."""
-
-    def __init__(self, event: threading.Event | None = None) -> None:
-        self._event = event if event is not None else threading.Event()
-        self._error: ScheduleOutcomeError | None = None
-        self._lock = threading.Lock()
-
-    def is_set(self) -> bool:
-        return self._event.is_set()
-
-    def set(self) -> None:
-        self._event.set()
-
-    def clear_stop(self) -> None:
-        with self._lock:
-            self._error = None
-        self._event.clear()
-
-    @property
-    def event(self) -> threading.Event:
-        return self._event
-
-    @property
-    def error(self) -> ScheduleOutcomeError | None:
-        with self._lock:
-            return self._error
-
-    def set_error(
-        self,
-        status: ErrorStatus,
-        reason: str,
-        exception: BaseException | None,
-    ) -> None:
-        error = ScheduleOutcomeError(status, reason, exception)
-        with self._lock:
-            if self._error is None:
-                self._error = error
-        self._event.set()
-
-    def raise_if_error(self) -> None:
-        error = self.error
-        if error is None:
-            return
-        if error.exception is not None:
-            raise error from error.exception
-        raise error
-
-
 class _AcquireCancelFlag:
     """Program-local stop flag that observes Schedule stop without mutating it."""
 
@@ -195,24 +129,6 @@ class ScheduleOutcome:
     @property
     def is_partial(self) -> bool:
         return self.status != "completed"
-
-
-_current_stop_signal: ContextVar[StopSignal | None] = ContextVar(
-    "zcu_tools_schedule_stop_signal", default=None
-)
-
-
-@contextmanager
-def schedule_stop_scope(stop: StopSignal) -> Iterator[StopSignal]:
-    token = _current_stop_signal.set(stop)
-    try:
-        yield stop
-    finally:
-        _current_stop_signal.reset(token)
-
-
-def current_stop_signal() -> StopSignal | None:
-    return _current_stop_signal.get()
 
 
 class SignalBuffer:
@@ -279,7 +195,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         init_cfg: T_Cfg,
         *buffers: BufferProtocol,
         env: T_Env | None = None,
-        stop: StopSignal | None = None,
+        stop: StopSignal,
     ) -> None:
         self._ensure_single_root_buffer_count(len(buffers))
         self.cfg = deepcopy(init_cfg)
@@ -289,8 +205,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._outcome = ScheduleOutcome()
         self._is_active = False
         self._is_closed = False
-        resolved_stop = stop if stop is not None else _current_stop_signal.get()
-        self._stop = resolved_stop if resolved_stop is not None else StopSignal()
+        self._stop = stop
 
     def __enter__(self) -> Schedule[T_Cfg, T_Env]:
         if self._is_closed:

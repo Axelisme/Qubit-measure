@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — headless dispersive numerical owner
+**Last updated:** 2026-10-02, explicit rendering
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -45,7 +45,7 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
   - **Auto tune（off-main）**：`controller.auto_tune` 擷取 State 後呼叫 [analysis/dispersive](../../../analysis/dispersive/README.md) 的搜尋；完成後只回填 g/r_f slider，不 accept。無 sample 線時按鈕 disable。數值 loss、solver、bounds 與科學限制由數值 owner 說明。
   - viz：`render_tune_figure`（背景+r_f 線）/ `update_bare_line`（slider 即時）/ `set_dispersion_lines`（predict 後色散線）+ sample 四件 `add_sample_line`/`move_sample_line`/`remove_sample_line`/`update_sample_dots`（`TuneArtists.samples: list[SampleArtists]`，各帶 dot_ground/excited Optional）。
 
-> **R4 不適用**：worker 只回資料不在 worker 畫圖 → 不需 routing_scope。
+Worker 只回資料，主執行緒擁有 Figure 與 canvas。Shared runtime 初始化 rendering 支援，不安裝自訂 pyplot backend。
 
 ## 效能關鍵
 - `PredictService`：薄 adapter,固定 GUI `PredictionResolution` 後委派 `FluxoniumPredictionSession`。axis-bound cache、fast/scqubits fallback 與 backend provenance 屬 simulate engine；cache key 是 `(g,bare_rf,return_dim)`（**無 step**）。綁定一組 (params, flux-axis)，inputs/preprocess 變則 Controller 重建 service/session。

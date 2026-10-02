@@ -31,10 +31,18 @@ from zcu_tools.gui.expected_error import (
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import on_post_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
+
+
+def _plots(figure: Figure | None = None) -> Plots:
+    plots = Plots(NonPresentingHost())
+    if figure is not None:
+        plots.adopt("fit", figure)
+    return plots
 
 
 def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
@@ -53,9 +61,7 @@ def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
     )
     state.update_tab_result(tab_id, object())
     if with_analyze:
-        fake_analyze = MagicMock()
-        fake_analyze.figure = None
-        state.update_tab_analyze(tab_id, fake_analyze, None)
+        state.update_tab_analyze(tab_id, object(), None)
     return state
 
 
@@ -64,6 +70,7 @@ class _FakeBg:
 
     def __init__(self, *, fail_submit: bool = False) -> None:
         self._fail_submit = fail_submit
+        self.last_work: Callable[[], Any] | None = None
         self.last_on_done: Callable[[Any], None] | None = None
         self.last_on_error: Callable[[Exception], None] | None = None
         self.submit_count = 0
@@ -79,6 +86,7 @@ class _FakeBg:
         if self._fail_submit:
             raise RuntimeError("submit boom")
         self.submit_count += 1
+        self.last_work = work
         self.last_on_done = on_done
         self.last_on_error = on_error
 
@@ -103,9 +111,7 @@ def _make_two_tab_state() -> State:
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     state.update_tab_result("tab2", object())
-    fake_analyze = MagicMock()
-    fake_analyze.figure = None
-    state.update_tab_analyze("tab2", fake_analyze, None)
+    state.update_tab_analyze("tab2", object(), None)
     return state
 
 
@@ -113,7 +119,9 @@ def test_start_post_analyze_submits_to_bg(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
 
-    svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+    svc.start_post_analyze(
+        "tab1", post_analyze_params_instance=object(), plots=_plots()
+    )
 
     assert bg.submit_count == 1
     assert state.get_tab("tab1").is_analyzing is True
@@ -126,29 +134,35 @@ def test_start_post_analyze_emits_interaction_event(qapp):
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
 
     svc, _ = _make_service(state, bus)
-    svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+    svc.start_post_analyze(
+        "tab1", post_analyze_params_instance=object(), plots=_plots()
+    )
 
     assert received == [TabInteractionFact.POST_ANALYZE_STARTED]
 
 
 def test_start_post_analyze_submit_rejection_preserves_figures(qapp):
     state = _make_state()
-    old_primary = Figure()
-    old_post = Figure()
+    old_primary = _plots(Figure())
+    old_primary.finish()
+    old_post = _plots(Figure())
+    old_post.finish()
+    state.update_tab_analyze("tab1", object(), old_primary)
+    state.update_tab_post_analyze("tab1", object(), old_post)
     tab = state.get_tab("tab1")
-    tab.analysis.figure = old_primary
-    tab.post_analysis.figure = old_post
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, _ = _make_service(state, bus, fail_submit=True)
 
     with pytest.raises(RuntimeError, match="submit boom"):
-        svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+        svc.start_post_analyze(
+            "tab1", post_analyze_params_instance=object(), plots=_plots()
+        )
 
     assert received == [TabInteractionFact.POST_ANALYZE_START_REJECTED]
-    assert tab.analysis.figure is old_primary
-    assert tab.post_analysis.figure is old_post
+    assert tab.analysis.plots is old_primary
+    assert tab.post_analysis.plots is old_post
     assert tab.is_analyzing is False
 
 
@@ -159,7 +173,9 @@ def test_start_post_analyze_gates_on_missing_primary_result(qapp):
     with pytest.raises(
         FailedPreconditionError, match="no primary analyze result"
     ) as exc_info:
-        svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+        svc.start_post_analyze(
+            "tab1", post_analyze_params_instance=object(), plots=_plots()
+        )
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
     assert bg.submit_count == 0
@@ -171,24 +187,29 @@ def test_start_post_analyze_rejects_busy_tab(qapp):
     svc, _ = _make_service(state, EventBus())
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
-        svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+        svc.start_post_analyze(
+            "tab1", post_analyze_params_instance=object(), plots=_plots()
+        )
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
 
 
-def test_start_post_analyze_work_thunk_captures_figure_container(qapp):
-    # The figure_container is captured in the work thunk's closure via
-    # ``figure_ambient`` (ADR-0066). Verify submit receives a single thunk.
+def test_post_worker_receives_explicit_operation_plots(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
-    container = MagicMock()
+    plots = _plots()
 
-    svc.start_post_analyze(
-        "tab1", post_analyze_params_instance=object(), figure_container=container
-    )
+    svc.start_post_analyze("tab1", post_analyze_params_instance=object(), plots=plots)
 
-    assert bg.submit_count == 1  # submitted with a closure thunk
+    assert bg.submit_count == 1
+    assert bg.last_work is not None
+    result = bg.last_work()
+    adapter = state.get_tab("tab1").adapter
+    assert isinstance(adapter, MagicMock)
+    adapter.post_analyze.assert_called_once()
+    assert adapter.post_analyze.call_args.kwargs == {"plots": plots}
+    assert result is adapter.post_analyze.return_value
 
 
 def test_on_post_analyze_finished_updates_state(qapp):
@@ -198,10 +219,13 @@ def test_on_post_analyze_finished_updates_state(qapp):
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, bg = _make_service(state, bus)
 
-    token = svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+    figure = Figure()
+    plots = _plots(figure)
+    token = svc.start_post_analyze(
+        "tab1", post_analyze_params_instance=object(), plots=plots
+    )
 
-    post_result = MagicMock()
-    post_result.figure = Figure()
+    post_result = object()
 
     finished: list = []
     bus.subscribe(
@@ -220,7 +244,9 @@ def test_on_post_analyze_finished_updates_state(qapp):
 
     tab = state.get_tab("tab1")
     assert tab.post_analysis.result is post_result
-    assert tab.post_analysis.figure is post_result.figure
+    assert tab.post_analysis.plots is not None
+    assert tab.post_analysis.plots is plots
+    assert tab.post_analysis.plots["fit"] is figure
     assert tab.is_analyzing is False
     assert finished == [("tab1", post_result)]
     outcome = svc._handles.poll(token)
@@ -238,7 +264,9 @@ def test_on_post_analyze_failed_resets_state(qapp):
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, bg = _make_service(state, bus)
 
-    token = svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+    token = svc.start_post_analyze(
+        "tab1", post_analyze_params_instance=object(), plots=_plots()
+    )
 
     failed: list = []
     on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
@@ -267,10 +295,14 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     svc, bg = _make_service(state, EventBus())
     handles = svc._handles
 
-    token1 = svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+    token1 = svc.start_post_analyze(
+        "tab1", post_analyze_params_instance=object(), plots=_plots()
+    )
     on_done_1 = bg.last_on_done
 
-    token2 = svc.start_post_analyze("tab2", post_analyze_params_instance=object())
+    token2 = svc.start_post_analyze(
+        "tab2", post_analyze_params_instance=object(), plots=_plots()
+    )
     on_done_2 = bg.last_on_done
 
     assert token1 != token2
@@ -278,8 +310,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert handles.poll(token2) is None
     assert handles.live_count() == 2
 
-    r1 = MagicMock()
-    r1.figure = Figure()
+    r1 = object()
     assert on_done_1 is not None
     on_done_1(r1)
 
@@ -290,8 +321,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
     assert state.get_tab("tab2").is_analyzing is True
     assert handles.live_count() == 1
 
-    r2 = MagicMock()
-    r2.figure = Figure()
+    r2 = object()
     assert on_done_2 is not None
     on_done_2(r2)
 
@@ -313,7 +343,9 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(
     svc, bg = _make_service(state, EventBus())
     handles = svc._handles
 
-    token = svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+    token = svc.start_post_analyze(
+        "tab1", post_analyze_params_instance=object(), plots=_plots()
+    )
 
     # Make the State recording raise (post_analyze primary result vanished, etc.).
     boom = RuntimeError("update boom")
@@ -322,8 +354,7 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(
     failed: list = []
     on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
-    post_result = MagicMock()
-    post_result.figure = Figure()
+    post_result = object()
     # Must not raise out of the slot (would crash Qt).
     assert bg.last_on_done is not None
     bg.last_on_done(post_result)

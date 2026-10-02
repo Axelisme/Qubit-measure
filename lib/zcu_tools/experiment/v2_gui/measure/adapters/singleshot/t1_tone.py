@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
-from matplotlib.figure import Figure
-
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone import (
+    T1WithToneAnalyzeOptions,
     T1WithToneCfg,
     T1WithToneExp,
     T1WithToneResult,
@@ -32,19 +33,17 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
 from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.plotting.plots import Plots
 
 from ._shared import readout_probe_freq
 
-# Domain T1WithToneExp.analyze returns (t1, t1_b, fig). The T1 with tone value
-# (``t1_with_tone``) is written back to the MetaDict (key ``t1_with_tone``,
-# matching single_qubit.md:3079).
-SsT1ToneRunResult: TypeAlias = T1WithToneResult
+# The numeric t1 is written to the t1_with_tone MetaDict key.
+SsT1ToneRunResult: TypeAlias = RunRecord[T1WithToneCfg, T1WithToneResult]
 
 
 def _sweep_stop_default(ctx: SessionEnv) -> float | EvalValue:
@@ -58,7 +57,6 @@ def _sweep_stop_default(ctx: SessionEnv) -> float | EvalValue:
 class SsT1ToneAnalyzeResult(AnalyzeResultBase):
     t1: float
     t1_b: float
-    figure: Figure
 
 
 class SsT1ToneAdapter(
@@ -168,36 +166,23 @@ class SsT1ToneAdapter(
             .build()
         )
 
-    def build_exp_cfg(
-        self, raw_cfg: dict[str, object], req: RunRequest
-    ) -> T1WithToneCfg:
-        # Pop ``uniform`` before lowering — it is not part of T1WithToneCfg.
-        cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("uniform", None)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def _uniform(self, raw_cfg: dict[str, object]) -> bool:
-        value = raw_cfg.get("uniform", False)
-        if not isinstance(value, bool):
-            raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
-        return value
-
-    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> SsT1ToneRunResult:
-        # Uniform remains an explicit domain run option.
-        soc, soccfg = require_soc_handles(req)
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> SsT1ToneRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
-        uniform = self._uniform(raw_cfg)
-        return T1WithToneExp().run(soc, soccfg, cfg, uniform=uniform)
+        return RunRecord(cfg, T1WithToneExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[SsT1ToneRunResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[SsT1ToneRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsT1ToneAnalyzeResult:
         # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
         confusion = req.md.get("confusion_matrix")
-        t1, t1_b, fig = T1WithToneExp().analyze(
-            req.run_result, confusion_matrix=confusion
+        result = T1WithToneExp().analyze(
+            req.run_result,
+            T1WithToneAnalyzeOptions(confusion_matrix=confusion),
+            plots=plots,
         )
-        return SsT1ToneAnalyzeResult(t1=t1, t1_b=t1_b, figure=fig)
+        return SsT1ToneAnalyzeResult(t1=result.t1, t1_b=result.t1_b)
 
     def get_writeback_items(
         self,

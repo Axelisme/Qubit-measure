@@ -10,7 +10,7 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.utils import Result
-from zcu_tools.plotting.liveplot import AbsLivePlot
+from zcu_tools.plotting.plots import HeatmapLinePlot, HeatmapPlot, LinePlot, Plots
 
 from .result_tree import ResultUpdateEvent
 from .schedule import ScheduleStep
@@ -18,7 +18,8 @@ from .schedule import ScheduleStep
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
 T_Env = TypeVar("T_Env")
 T_Result = TypeVar("T_Result", bound=Result)
-T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
+TaskLivePlot = LinePlot | HeatmapPlot | HeatmapLinePlot
+T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, TaskLivePlot])
 T_SaveAxis = TypeVar("T_SaveAxis", bound=NDArray[Any])
 
 
@@ -41,7 +42,9 @@ class TaskPlotter(ABC, Generic[T_Env, T_Result, T_PlotDict]):
     def num_axes(self) -> dict[str, int]: ...
 
     @abstractmethod
-    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotDict: ...
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T_PlotDict: ...
 
     @abstractmethod
     def update_plotter(
@@ -105,8 +108,12 @@ class ComposedMeasurementBundle(
     def num_axes(self) -> dict[str, int]:
         return self.plotter.num_axes()
 
-    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotDict:
-        return self.plotter.make_plotter(name, axs)
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T_PlotDict:
+        return self.plotter.make_plotter(
+            name, axs, plots=plots, figure_name=figure_name
+        )
 
     def update_plotter(
         self,

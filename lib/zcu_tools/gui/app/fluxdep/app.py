@@ -15,7 +15,6 @@ from zcu_tools.gui.runtime import (
     GuiAssembly,
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
-    PlotPolicy,
 )
 
 if TYPE_CHECKING:
@@ -27,7 +26,6 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
     spec = GuiRuntimeSpec(
         app_name="fluxdep",
         app_slug="fluxdep",
-        plot_policy=PlotPolicy.EMBEDDED_BACKEND,
         default_control_port=8766,
     )
 
