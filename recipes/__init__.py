@@ -1,0 +1,47 @@
+"""Explicit, editable recipe registration; no discovery or hot reload."""
+
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from zcu_tools.mcp.measure.recipe_context import RecipeContext
+
+from .lookback import lookback
+
+
+@dataclass(frozen=True)
+class RecipeDefinition:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    run: Callable[[RecipeContext, dict[str, Any]], None]
+
+
+RECIPES = (
+    RecipeDefinition(
+        name="lookback",
+        description=(
+            "Run lookback once, save raw data, analyze and save figures. "
+            "Wait up to 300 seconds; unfinished work continues by execution ID."
+        ),
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                **{
+                    name: {"type": ["string", "null"], "minLength": 1}
+                    for name in (
+                        "reuse_tab_id", "readout_ref", "use_reset", "init_pulse_ref"
+                    )
+                },
+                **{
+                    name: {"type": ["number", "null"]}
+                    for name in (
+                        "frequency_mhz", "readout_length_us", "trigger_offset_us"
+                    )
+                },
+                "rounds": {"type": ["integer", "null"]},
+            },
+        },
+        run=lookback,
+    ),
+)
