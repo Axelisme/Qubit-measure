@@ -100,7 +100,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Start non-cancellable data saving without a hardware lease. Explicit "
             "data_path/comment update the GUI draft; omitted values keep it. "
             "Returns an operation handle and reserved path, not proof of success. "
-            "Wait for completion and read artifacts for the last successful path.",
+            "Wait for completion and read artifacts for the last successful path. "
+            "Optional run_operation_id requires that Run result before any draft "
+            "edit or save; a replaced result returns result_superseded. "
+            "This token does not replace the connection observation guards.",
             (
                 required_string("tab_id"),
                 optional_string("data_path", "Override data path"),

@@ -119,7 +119,8 @@ from __future__ import annotations
 # v76: waveform saving returns only success/status; preview is a separate read.
 # v78: operation-bound result inputs, figure reads and named image saves.
 # v79: optional figure-free interactive command receipts.
-WIRE_VERSION = 79
+# v80: Run source tokens in snapshots and optional save/analyze admission binding.
+WIRE_VERSION = 80
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -174,4 +175,5 @@ WIRE_VERSION = 79
 # v107: Run admits a valid cfg ref across connections, retaining non-cfg guards.
 # v110: commit provenance and captured inputs with named plots; reject replaced saves.
 # v111: preserve interactive validation and operation receipt without PNG rendering.
-GUI_VERSION = 111
+# v112: commit Run provenance and reject superseded raw save or primary analysis.
+GUI_VERSION = 112

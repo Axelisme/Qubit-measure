@@ -77,7 +77,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "analyze params (read current values with rpc_call on "
             "tab.get_analyze_params). Makes the tab busy while it runs; a "
             "concurrent save/edit returns precondition_failed until it settles. "
-            "Read the fit summary with rpc_call on tab.get_analyze_result.",
+            "Read the fit summary with rpc_call on tab.get_analyze_result. "
+            "Optional run_operation_id requires that Run result before following "
+            "the pane or starting; a replaced result returns result_superseded.",
             (
                 required_string("tab_id"),
                 default_object("updates", "Analyze param updates"),

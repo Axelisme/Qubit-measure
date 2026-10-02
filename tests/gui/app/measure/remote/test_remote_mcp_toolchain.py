@@ -389,9 +389,12 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
             else:
                 original += 1000
             prior = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
-            assert call(
-                sock, "operation.await", {"operation_id": prior, "timeout": 2}
-            )["result"]["status"] == "finished"
+            assert (
+                call(sock, "operation.await", {"operation_id": prior, "timeout": 2})[
+                    "result"
+                ]["status"]
+                == "finished"
+            )
         before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
         params_before = call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"]
         result_before = call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]
@@ -399,18 +402,30 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
         reply = call(
             sock,
             "tab.analyze",
-            {"tab_id": tab, "run_operation_id": original, "updates": {"threshold": 0.7}},
+            {
+                "tab_id": tab,
+                "run_operation_id": original,
+                "updates": {"threshold": 0.7},
+            },
         )
         if reply["ok"]:
-            call(sock, "operation.await", {
-                "operation_id": reply["result"]["operation_id"], "timeout": 2
-            })
+            call(
+                sock,
+                "operation.await",
+                {"operation_id": reply["result"]["operation_id"], "timeout": 2},
+            )
         assert reply["ok"] is False
         assert reply["error"]["code"] == "precondition_failed"
         assert reply["error"]["reason"] == "result_superseded"
         assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
-        assert call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"] == params_before
-        assert call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"] == result_before
+        assert (
+            call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"]
+            == params_before
+        )
+        assert (
+            call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]
+            == result_before
+        )
         fx.view.select_tab_pane.assert_not_called()
         assert call(sock, "operation.active")["result"]["operations"] == []
 
@@ -441,15 +456,24 @@ def test_original_run_can_be_analyzed_and_saved_without_bypassing_seen_guards(
             analyzed = call(
                 sock, "tab.analyze", {"tab_id": tab, "run_operation_id": run}
             )["result"]["operation_id"]
-            assert call(
-                sock, "operation.await", {"operation_id": analyzed, "timeout": 2}
-            )["result"]["status"] == "finished"
-            assert call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"][
-                "summary"
-            ]["peak"] == 3.0
+            assert (
+                call(sock, "operation.await", {"operation_id": analyzed, "timeout": 2})[
+                    "result"
+                ]["status"]
+                == "finished"
+            )
+            assert (
+                call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"][
+                    "summary"
+                ]["peak"]
+                == 3.0
+            )
 
-            args = {"tab_id": tab, "run_operation_id": run,
-                    "data_path": str(tmp_path / "original")}
+            args = {
+                "tab_id": tab,
+                "run_operation_id": run,
+                "data_path": str(tmp_path / "original"),
+            }
             unseen = call(sock, "tab.save_data", args)
             assert unseen["error"]["reason"] == "stale_version"
             assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
@@ -467,16 +491,25 @@ def test_original_run_can_be_analyzed_and_saved_without_bypassing_seen_guards(
             # An owner publication after admission cannot replace the worker's input.
             record = fx.ctrl.get_tab_snapshot(tab).run.result
             fx.state.update_tab_result(
-                tab, replace(record, result=replace(record.result, data=np.array([99.0])))
+                tab,
+                replace(record, result=replace(record.result, data=np.array([99.0]))),
             )
             release.set()
-            assert call(sock, "operation.await", {
-                "operation_id": submitted["operation_id"], "timeout": 2
-            })["result"]["status"] == "finished"
+            assert (
+                call(
+                    sock,
+                    "operation.await",
+                    {"operation_id": submitted["operation_id"], "timeout": 2},
+                )["result"]["status"]
+                == "finished"
+            )
             assert Path(submitted["data_path"]).read_text() == "1.0,3.0"
-            assert call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0][
-                "result_state"
-            ]["source_operation_id"] is None
+            assert (
+                call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0][
+                    "result_state"
+                ]["source_operation_id"]
+                is None
+            )
         finally:
             release.set()
 

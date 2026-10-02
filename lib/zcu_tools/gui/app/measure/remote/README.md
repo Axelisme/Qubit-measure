@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-03, figure-free interactive receipts
+**Last updated:** 2026-10-03, Run provenance and bound admission
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 79`, `GUI_VERSION = 111`, and
-`MCP_VERSION = 102` (defined in `zcu_tools.mcp.measure.server`). WIRE 79 adds
+Current measure-gui values are `WIRE_VERSION = 80`, `GUI_VERSION = 112`, and
+`MCP_VERSION = 102` (defined in `zcu_tools.mcp.measure.server`). WIRE 80 adds Run
+`source_operation_id` to snapshot result state and optional `run_operation_id` to
+`tab.save_data` and `tab.analyze`. GUI 112 commits Run provenance and rejects a
+superseded source before draft edits, pane following, or operation admission.
+WIRE 79 adds
 `tab.interact(include_figure=false)` for a receipt without PNG rendering. GUI 111
 preserves command validation and the original operation in that receipt. MCP 102
 owns session-local analysis executions, ordered named-image autosave, execution
@@ -222,7 +226,12 @@ GUI owns observation and write tracking:
   This is not rollback of business effects or proof of client receipt.
 - `tab.snapshot(tab_id)` reveals existence, result/analysis/post revisions,
   availability and effective paths. It does not serialize raw result arrays or
-  claim cfg/writeback contents. The all-tabs index reveals no per-tab state.
+  claim cfg/writeback contents. Its `result_state.source_operation_id` identifies
+  the Run that published the current raw result; Load and empty results have null.
+  Optional `run_operation_id` on `tab.save_data` and `tab.analyze` rejects another
+  source with `result_superseded`, even after a fresh snapshot. Omission or null
+  keeps current-result semantics. The source token is session-local and does not
+  unlock missing or stale observations. The all-tabs index reveals no per-tab state.
 - Analysis result getters with an explicit `operation_id` verify the pane's
   provenance and return its summary, actual result `params`, and complete
   `operation_state`. Result params are distinct from the next-edit parameter

@@ -141,9 +141,7 @@ def h_tab_analyze(
         if snap.post_analysis.has_writeback_draft:
             invalidated.append("post.writeback")
     follow_tab(adapter, tab_id, "analysis")
-    operation_id = control.analyze(
-        tab_id, updated, run_operation_id=run_operation_id
-    )
+    operation_id = control.analyze(tab_id, updated, run_operation_id=run_operation_id)
     return {
         "operation_id": operation_id,
         "interactive": snap.capabilities.analysis is AnalysisMode.INTERACTIVE,

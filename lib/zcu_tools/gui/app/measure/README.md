@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-03, operation-bound named plots
+**Last updated:** 2026-10-03, operation-bound Run consumption
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -393,6 +393,14 @@ operation-bound result reads return the inputs, while image exports can require
 the same provenance. Replacement clears or updates both with the result.
 Failed or cancelled analysis retains the previous pane and its provenance. Tokens are session-local;
 this metadata is neither a result history nor persisted recovery state.
+
+Run commits its operation token with the result, including usable partial data after
+cancellation. Starting another Run clears both; Load publishes no Run token.
+Raw saving and Primary analysis may require this source token. State owns the
+identity check, and the control facets apply it before capturing inputs or changing
+drafts. Remote analysis also checks before following the pane. Superseded sources
+fail instead of consuming the latest result. Ordinary Qt operations still use the
+current result, and remote observation guards remain independent.
 
 State and `TabSnapshot` expose only the explicit Run, Analysis, Post-Analysis, Save
 and path carriers; there are no flat tab result/writeback/path projections. Callers
