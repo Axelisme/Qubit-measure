@@ -502,7 +502,8 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
             analyzing.set()
             return (
                 {"reason": "completed", "status": "cancelled"}
-                if stopped.is_set() else {"reason": "timeout"}
+                if stopped.is_set()
+                else {"reason": "timeout"}
             )
         if method == "operation.cancel":
             assert params == {"operation_id": 93}

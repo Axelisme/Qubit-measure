@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
-from zcu_tools.mcp.measure.analysis_execution import CancelError, GuiCancel
+from zcu_tools.mcp.measure.analysis_execution import (
+    AnalysisExecution,
+    CancelError,
+    GuiCancel,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 if TYPE_CHECKING:
@@ -88,6 +92,7 @@ class RecipeContext:
         self._condition = Condition()
         self._thread: Thread | None = None
         self._run_cancel: GuiCancel | None = None
+        self._analysis_execution: AnalysisExecution | None = None
 
     def snapshot(self) -> dict[str, Any]:
         with self._condition:
@@ -178,6 +183,16 @@ class RecipeContext:
             self._publish(cancel_requested=True, status="running")
             if self.progress.phase == "raw_save":
                 return self._control_reply(GuiCancel("not_cancellable"))
+            analysis = (
+                self._analysis_execution if self.progress.phase == "analysis" else None
+            )
+        if analysis is not None:
+            reply = analysis.cancel()
+            return ToolReply(
+                {**self.snapshot(), "gui_cancel": reply.data["gui_cancel"]},
+                self.images,
+                is_error=reply.is_error,
+            )
         result = self._stop_run()
         return self._control_reply(result)
 
@@ -342,6 +357,7 @@ class RecipeContext:
         execution = self.tools.session.executions.start(
             self.tools.gui, tab, "primary", started
         )
+        self._retain_analysis(execution)
         while True:
             reply = execution.wait(0.25)
             with self._condition:
@@ -381,6 +397,14 @@ class RecipeContext:
             before_send=lambda: self._admit("writeback_read"),
         )
         self._publish(writeback=writeback, status="finished", phase="terminal")
+
+    def _retain_analysis(self, execution: AnalysisExecution) -> None:
+        """Deliver a stop that raced with the admitted analysis start receipt."""
+        with self._condition:
+            self._analysis_execution = execution
+            cancel_requested = self.progress.cancel_requested
+        if cancel_requested:
+            self.cancel()
 
     def _await_operation(self, op: int) -> dict[str, Any]:
         while True:
