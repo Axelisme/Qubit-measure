@@ -525,13 +525,13 @@ def test_controller_interactive_mount_is_visible_from_run_or_data(
 
 @pytest.mark.parametrize("terminal", ["done", "cancel"])
 def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
-    mounted_fx, tmp_path, terminal
+    mounted_fx, tmp_path, terminal, request
 ) -> None:
     fx, window = mounted_fx
     tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
-    bridge, call = mcp_client(fx.service.port, tmp_path)
+    bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
         read = call("tab_interact", {"tab": tab_id})
@@ -559,7 +559,8 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             result = call(
                 "tab_interact", {"tab": tab_id, "payload": {"command": "done"}}
             )
-            assert result["state"] == changed["state"]
+            assert result["interaction"]["state"] == changed["state"]
+            assert result["status"] == "finished", result
             assert Path(result["figure"]).read_bytes().startswith(b"\x89PNG")
             committed = fx.state.get_tab(tab_id).analysis.plots
             assert committed is not None
@@ -650,11 +651,11 @@ def test_interactive_submitted_params_replace_previous_pane_only_on_done(
 
 
 def test_mcp_done_writeback_save_and_close_share_the_gui_result(
-    mounted_fx, tmp_path
+    mounted_fx, tmp_path, request
 ) -> None:
     fx, window = mounted_fx
     tab_id, _, widget = _start_mounted(fx, window, "onetone/flux_dep")
-    bridge, call = mcp_client(fx.service.port, tmp_path)
+    bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
         done = call("tab_interact", {"tab": tab_id, "payload": {"command": "done"}})
@@ -664,10 +665,13 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         call("tab_get", {"tab": tab_id, "include": ["summary"]})
         preview = call("writeback", {"tab": tab_id})
         expected = {
-            "flx_half": done["state"]["flux_half"],
-            "flx_int": done["state"]["flux_int"],
+            "flx_half": done["interaction"]["state"]["flux_half"],
+            "flx_int": done["interaction"]["state"]["flux_int"],
             "flx_period": 2
-            * abs(done["state"]["flux_int"] - done["state"]["flux_half"]),
+            * abs(
+                done["interaction"]["state"]["flux_int"]
+                - done["interaction"]["state"]["flux_half"]
+            ),
         }
         assert {
             item["target"]: item["proposed"] for item in preview["items"]

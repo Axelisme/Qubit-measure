@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import pytest
 from PIL import Image
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
@@ -412,7 +413,7 @@ def call_mcp_with_qt(
 
 
 def mcp_client(
-    port: int, tmp_path: Path
+    port: int, tmp_path: Path, *, request: pytest.FixtureRequest | None = None
 ) -> tuple[McpBridge, Callable[[str, dict[str, Any]], dict[str, Any]]]:
     config = MCPBridgeConfig(
         tool_prefix="",
@@ -435,6 +436,8 @@ def mcp_client(
     )
     bridge = McpBridge(config)
     session.attach_bridge(bridge)
+    if request is not None:
+        request.addfinalizer(session.close)
     tools = build_measure_tools(
         MeasureToolContext(config, session, resolve_connect_port=resolver)
     )
