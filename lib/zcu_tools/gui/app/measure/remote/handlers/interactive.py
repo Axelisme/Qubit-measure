@@ -61,9 +61,10 @@ def _project(
     figure: Figure | None,
     *,
     preview_active: bool,
+    include_figure: bool,
 ) -> dict[str, object]:
     image = None
-    if figure is not None:
+    if include_figure and figure is not None:
         png = render_figure_png(figure)
         image = {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
     commands = [
@@ -86,6 +87,7 @@ def h_tab_interact(
 ) -> Mapping[str, object]:
     """Dispatch on the owner loop with best-effort, last-commit-wins semantics."""
     tab_id = cast(str, params["tab_id"])
+    include_figure = cast(bool, params.get("include_figure", True))
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -118,7 +120,10 @@ def h_tab_interact(
             # The disposable interactive preview is never an output artifact.
             figure = next(iter(figures.values()), None) if figures else None
             return {
-                **_project(plugin, state, figure, preview_active=False),
+                **_project(
+                    plugin, state, figure,
+                    preview_active=False, include_figure=include_figure,
+                ),
                 "operation_id": operation_id,
             }
         plugin.execute_command(session, name, args)
@@ -130,6 +135,9 @@ def h_tab_interact(
     )
     figure, preview_active = presentation if presentation is not None else (None, False)
     return {
-        **_project(plugin, state, figure, preview_active=preview_active),
+        **_project(
+            plugin, state, figure,
+            preview_active=preview_active, include_figure=include_figure,
+        ),
         "operation_id": operation_id,
     }
