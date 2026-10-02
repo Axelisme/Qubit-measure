@@ -437,12 +437,16 @@ class State(SessionState):
         logger.debug("clear_tab_results: tab_id=%r", tab_id)
         return self._replace_run_pane(tab_id, RunPaneState())
 
-    def update_tab_result(self, tab_id: str, result: object) -> RetiredPaneResources:
+    def update_tab_result(
+        self, tab_id: str, result: object, *, source_operation_id: int | None = None
+    ) -> RetiredPaneResources:
         self._assert_owner()
         logger.debug(
             "update_tab_result: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
-        return self._replace_run_pane(tab_id, RunPaneState(result=result))
+        return self._replace_run_pane(
+            tab_id, RunPaneState(result=result, source_operation_id=source_operation_id)
+        )
 
     def update_tab_loaded_result(
         self, tab_id: str, result: object, source_path: str
