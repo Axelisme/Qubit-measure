@@ -653,9 +653,7 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     previous_plots = _plots()
     previous_plots.adopt("fit", Figure())
     previous_plots.finish()
-    state.update_tab_analyze(
-        "tab1", previous, previous_plots, source_operation_id=900
-    )
+    state.update_tab_analyze("tab1", previous, previous_plots, source_operation_id=900)
     handles = OperationHandles()
     bus = EventBus()
     svc, _ = _make_service(state, bus, handles=handles)

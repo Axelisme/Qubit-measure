@@ -31,9 +31,7 @@ def _install_result(fx, tab: str, stage: str, value: float, operation: int) -> N
     plots.adopt("fit", Figure())
     plots.finish()
     if stage == "analysis":
-        fx.state.update_tab_analyze(
-            tab, result, plots, source_operation_id=operation
-        )
+        fx.state.update_tab_analyze(tab, result, plots, source_operation_id=operation)
     else:
         adapter = fx.state.get_tab(tab).adapter
         adapter.capabilities = replace(adapter.capabilities, post_analysis=True)
@@ -276,9 +274,7 @@ def test_operation_bound_run_figure_is_rejected(fx):
 def test_result_without_figure_does_not_report_a_saved_image(fx, tmp_path):
     tab = fx.ctrl.new_tab("fake")
     fx.state.update_tab_result(tab, object())
-    fx.state.update_tab_analyze(
-        tab, ScalarResult(3.0), None, source_operation_id=101
-    )
+    fx.state.update_tab_analyze(tab, ScalarResult(3.0), None, source_operation_id=101)
     fx.service.render_view = None
     destination = tmp_path / "no-figure.png"
     with open_client(fx.service.port) as sock:
