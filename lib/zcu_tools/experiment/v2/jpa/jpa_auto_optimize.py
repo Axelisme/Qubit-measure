@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import colormaps
 from matplotlib.colors import Normalize
-from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from pydantic import Field
@@ -18,7 +18,6 @@ from zcu_tools.datafile import LabberPayload
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
-    AbsExperiment,
     GroupedAxesSpec,
     GroupedLoadData,
     RoleAxisSpec,
@@ -26,18 +25,19 @@ from zcu_tools.experiment import (
     RoleZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import (
-    make_comment,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
     setup_devices,
 )
+from zcu_tools.experiment.v2.jpa.jpa_optimizer import JPAOptimizer
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.plotting.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
-from zcu_tools.plotting.liveplot.backend import close_figure
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -50,15 +50,19 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 
-from .jpa_optimizer import JPAOptimizer
-
 
 @dataclass(frozen=True)
 class JPAOptimizeResult:
     params: NDArray[np.float64]
     phases: NDArray[np.int32]
     signals: NDArray[np.float64]
-    cfg_snapshot: JPAOptCfg | None = None
+
+
+@dataclass(frozen=True)
+class JPAOptimizeAnalysis:
+    best_flux: float
+    best_freq: float
+    best_power: float
 
 
 class JPAOptModuleCfg(ConfigBase):
@@ -79,6 +83,7 @@ class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
     # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
     dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
     sweep: JPAOptSweepCfg
+    num_points: int = Field(ge=4, strict=True)
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
@@ -117,8 +122,10 @@ def save_jpa_auto_grouped_result(
     )
 
 
-def load_jpa_auto_grouped_result(filepath: str) -> JPAOptimizeResult:
-    return JPA_AUTO_GROUPED_AXES_SPEC.load_result(filepath)
+def load_jpa_auto_grouped_result(
+    source: Path,
+) -> RunRecord[JPAOptCfg, JPAOptimizeResult]:
+    return JPA_AUTO_GROUPED_AXES_SPEC.load(source)
 
 
 def _validate_jpa_auto_arrays(
@@ -175,7 +182,6 @@ def _build_jpa_auto_result(
         params=params,
         phases=phases,
         signals=signals,
-        cfg_snapshot=data.cfg_snapshot,
     )
 
 
@@ -254,154 +260,106 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
-    # Auto-optimize needs at least 4 iterations to produce valid samples: reject
-    # smaller budgets before any sampling (JPAOptimizer construction) or device
-    # setup (setup_devices inside the scan loop) begins.
-    MIN_NUM_POINTS = 4
-
-    def run(self, soc, soccfg, cfg: JPAOptCfg, num_points: int) -> JPAOptimizeResult:
-        if num_points < self.MIN_NUM_POINTS:
-            raise ValueError(
-                "JPA auto-optimize requires num_points >= "
-                f"{self.MIN_NUM_POINTS} to produce valid samples, got {num_points}"
-            )
-        orig_cfg = deepcopy(cfg)
+class AutoOptimizeExp:
+    def run(self, cfg: JPAOptCfg, *, context: RunContext) -> JPAOptimizeResult:
+        cfg = deepcopy(cfg)
+        soc, soccfg = context.soc, context.soccfg
+        num_points = cfg.num_points
         flux_sweep = cfg.sweep.jpa_flux
         freq_sweep = cfg.sweep.jpa_freq
         gain_sweep = cfg.sweep.jpa_power
 
         optimizer = JPAOptimizer(flux_sweep, freq_sweep, gain_sweep, num_points)
-
-        # (num_points, [flux, freq, power])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
-
-        # initialize figure and axes
-        figsize = (8, 5)
-        fig = plt.figure(figsize=figsize)
-        gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
-
-        fig.suptitle("JPA Auto Optimization")
-
-        ax_iter = fig.add_subplot(gs[:, 0])
-        ax_flux = fig.add_subplot(gs[0, 1])
-        ax_freq = fig.add_subplot(gs[1, 1])
-        ax_power = fig.add_subplot(gs[2, 1])
-
-        instant_plot(fig)  # show the figure immediately
         point_indices = np.arange(num_points, dtype=np.float64)
-
-        with MultiLivePlot(
-            fig,
-            plotters=dict(
-                iter_scatter=LivePlotScatter(
-                    "Iteration", "SNR (a.u.)", existed_axes=[[ax_iter]]
-                ),
-                flux_scatter=LivePlotScatter(
-                    "JPA Flux value (a.u.)", "SNR (a.u.)", existed_axes=[[ax_flux]]
-                ),
-                freq_scatter=LivePlotScatter(
-                    "JPA Frequency (MHz)", "SNR (a.u.)", existed_axes=[[ax_freq]]
-                ),
-                power_scatter=LivePlotScatter(
-                    "JPA Power (dBm)", "SNR (a.u.)", existed_axes=[[ax_power]]
-                ),
-            ),
-        ) as viewer:
-            current_index = 0
-
-            def plot_fn(data: NDArray[np.float64]) -> None:
-                idx = current_index
-                snrs = np.abs(data)  # (num_points, )
-
-                cur_flux, cur_freq, cur_gain = params[idx, :]
-
-                fig.suptitle(
-                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {cur_flux:.2g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
-                )
-
-                colors = phases.astype(np.float64)
-
-                viewer.get_plotter("iter_scatter").update(
-                    point_indices, snrs, colors=colors, refresh=False
-                )
-                viewer.get_plotter("flux_scatter").update(
-                    params[:, 0], snrs, colors=colors, refresh=False
-                )
-                viewer.get_plotter("freq_scatter").update(
-                    params[:, 1], snrs, colors=colors, refresh=False
-                )
-                viewer.get_plotter("power_scatter").update(
-                    params[:, 2], snrs, colors=colors, refresh=False
-                )
-                viewer.refresh()
-
-            signals_buffer = SignalBuffer(
-                (num_points,),
-                dtype=np.float64,
-                on_update=plot_fn,
+        viewers = [
+            context.plots.liveplot_scatter(f"measurement.{name}", label, "SNR (a.u.)")
+            for name, label in (
+                ("iteration", "Iteration"),
+                ("flux", "JPA Flux value (a.u.)"),
+                ("freq", "JPA Frequency (MHz)"),
+                ("power", "JPA Power (dBm)"),
             )
-            with Schedule(cfg, signals_buffer) as sched:
-                for idx, step in sched.scan("Iteration", range(num_points)):
-                    current_index = idx
+        ]
+        current_index = 0
 
-                    last_snr = None
-                    if idx > 0:
-                        last_snr = np.abs(signals_buffer.array[idx - 1])
-                    cur_params = optimizer.next_params(idx, last_snr)
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            idx = current_index
+            snrs = np.abs(data)
+            cur_flux, cur_freq, cur_gain = params[idx, :]
+            title = (
+                f"Iteration {idx}, Phase {phases[idx]}, Flux: {cur_flux:.2g} (a.u.), "
+                f"Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
+            )
+            colors = phases.astype(np.float64)
+            for viewer, xs in zip(
+                viewers,
+                (point_indices, params[:, 0], params[:, 1], params[:, 2]),
+                strict=True,
+            ):
+                viewer.update(xs, snrs, colors=colors, title=title)
 
-                    if cur_params is None:
-                        raise RuntimeError(
-                            "JPA optimizer exhausted before consuming its budget: "
-                            f"iteration={idx}, num_points={num_points}, "
-                            f"phase={optimizer.phase}"
-                        )
-
-                    params[idx, :] = cur_params
-                    phases[idx] = optimizer.phase
-
-                    dev = step.cfg.dev
-                    assert dev is not None, "JPA auto optimize requires cfg.dev"
-                    set_flux_in_dev_cfg(dev, params[idx, 0], label="jpa_flux_dev")
-                    set_freq_in_dev_cfg(dev, 1e6 * params[idx, 1], label="jpa_rf_dev")
-                    set_power_in_dev_cfg(dev, params[idx, 2], label="jpa_rf_dev")
-                    setup_devices(step.cfg, progress=False)
-                    modules = step.cfg.modules
-                    tracker = MomentTracker()
-                    _ = (
-                        step.prog_builder(soc, soccfg)
-                        .add(
-                            Reset("reset", modules.reset),
-                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                            Readout("readout", modules.readout),
-                        )
-                        .declare_sweep("ge", 2)
-                        .build_and_acquire(
-                            raw2signal_fn=lambda raw: snr_as_signal(
-                                [tracker],
-                                ge_axis=1,
-                                skew_penalty=sched.cfg.skew_penalty,
-                            ),
-                            trackers=[tracker],
-                        )
+        signals_buffer = SignalBuffer(
+            (num_points,), dtype=np.float64, on_update=plot_fn
+        )
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for idx, step in sched.scan("Iteration", range(num_points)):
+                current_index = idx
+                last_snr = None
+                if idx > 0:
+                    last_snr = np.abs(signals_buffer.array[idx - 1])
+                cur_params = optimizer.next_params(idx, last_snr)
+                if cur_params is None:
+                    raise RuntimeError(
+                        "JPA optimizer exhausted before consuming its budget: "
+                        f"iteration={idx}, num_points={num_points}, "
+                        f"phase={optimizer.phase}"
                     )
-                signals = signals_buffer.array
 
-        close_figure(fig)
-
-        self.last_result = JPAOptimizeResult(
-            params=params, phases=phases, signals=signals, cfg_snapshot=orig_cfg
+                params[idx, :] = cur_params
+                phases[idx] = optimizer.phase
+                dev = step.cfg.dev
+                set_flux_in_dev_cfg(dev, params[idx, 0], label="jpa_flux_dev")
+                set_freq_in_dev_cfg(dev, 1e6 * params[idx, 1], label="jpa_rf_dev")
+                set_power_in_dev_cfg(dev, params[idx, 2], label="jpa_rf_dev")
+                setup_devices(
+                    step.cfg,
+                    context.devices,
+                    cancel_signal=context.cancel_signal.event,
+                    progress=False,
+                )
+                modules = step.cfg.modules
+                tracker = MomentTracker()
+                _ = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Readout("readout", modules.readout),
+                    )
+                    .declare_sweep("ge", 2)
+                    .build_and_acquire(
+                        raw2signal_fn=lambda raw, tracker=tracker: snr_as_signal(
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=sched.cfg.skew_penalty,
+                        ),
+                        trackers=[tracker],
+                    )
+                )
+        return JPAOptimizeResult(
+            params=params, phases=phases, signals=signals_buffer.array
         )
 
-        return self.last_result
-
     def analyze(
-        self, result: JPAOptimizeResult | None = None
-    ) -> tuple[float, float, float, Figure]:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+        self,
+        source: RunRecord[JPAOptCfg, JPAOptimizeResult],
+        options: None,  # noqa: ARG002 - uniform synchronous analysis interface
+        *,
+        plots: Plots,
+    ) -> JPAOptimizeAnalysis:
+        result = source.result
 
         params = result.params
         phases = result.phases
@@ -415,7 +373,8 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         colors = phases
 
         figsize = (8, 5)
-        fig = plt.figure(figsize=figsize)
+        fig, initial_ax = plots.subplots("fit", figsize=figsize)
+        initial_ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 
         fig.suptitle("JPA Auto Optimization")
@@ -447,12 +406,14 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         plot_ax(ax_freq, 1, "JPA Frequency (MHz)")
         plot_ax(ax_power, 2, "JPA Power (dBm)")
 
-        return float(best_params[0]), float(best_params[1]), float(best_params[2]), fig
+        return JPAOptimizeAnalysis(
+            float(best_params[0]), float(best_params[1]), float(best_params[2])
+        )
 
-    def plot_sample_params(self, result: JPAOptimizeResult | None = None) -> Figure:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+    def plot_sample_params(
+        self, source: RunRecord[JPAOptCfg, JPAOptimizeResult], *, plots: Plots
+    ) -> None:
+        result = source.result
 
         params = result.params
         phases = result.phases
@@ -462,44 +423,30 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         max_snr = np.nanmax(snrs)
         alphas = snrs / max(max_snr, 1e-12)
 
-        fig = plt.figure()
-        ax = fig.add_subplot(projection="3d")
+        _, ax = plots.subplots("sample_params", subplot_kw={"projection": "3d"})
         assert isinstance(ax, Axes3D)
 
-        cmap = plt.get_cmap("viridis")
+        cmap = colormaps["viridis"]
         norm = Normalize(vmin=float(np.nanmin(phases)), vmax=float(np.nanmax(phases)))
         colors = cmap(norm(phases))
         colors[:, 3] = alphas
 
-        ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=colors, s=0.1)  # type: ignore
+        # Matplotlib's 3D stub narrows zs/s to int, unlike the runtime API.
+        ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=colors, s=0.1)  # pyright: ignore[reportArgumentType]
 
         ax.set_xlabel("Flux value")
         ax.set_ylabel("Freq (MHz)")
         ax.set_zlabel("Power (dBm)")
 
-        return fig
-
     def save(
         self,
-        filepath: str,
-        result: JPAOptimizeResult | None = None,
+        source: RunRecord[JPAOptCfg, JPAOptimizeResult],
+        destination: Path,
+        *,
         comment: str | None = None,
         tag: str = "jpa/auto_optimize",
     ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
+        JPA_AUTO_GROUPED_AXES_SPEC.save(source, destination, comment=comment, tag=tag)
 
-        if result.cfg_snapshot is None:
-            raise ValueError("cfg_snapshot is None")
-        JPA_AUTO_GROUPED_AXES_SPEC.save_experiment_result(
-            filepath,
-            result,
-            comment=comment,
-            tag=tag,
-            make_comment_fn=make_comment,
-        )
-
-    def load(self, filepath: str) -> JPAOptimizeResult:
-        self.last_result = load_jpa_auto_grouped_result(filepath)
-        return self.last_result
+    def load(self, source: Path) -> RunRecord[JPAOptCfg, JPAOptimizeResult]:
+        return load_jpa_auto_grouped_result(source)

@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from .figures import FigureCollection, NamedFigures
 from .liveplot.segments.plot1d import Plot1DSegment
 from .liveplot.segments.plot2d import Plot2DSegment, PlotNonUniform2DSegment
+from .liveplot.segments.scatter import ScatterSegment
 
 _T = TypeVar("_T")
 
@@ -96,6 +97,58 @@ class LinePlot:
     def refresh(self) -> None:
         self._ensure_active()
         self._host.call(lambda: self._host.refresh(self._figure))
+
+
+class ScatterPlot:
+    """Owner-updated points with one real-valued color coordinate per sample."""
+
+    def __init__(
+        self,
+        host: PlotHost,
+        figure: Figure,
+        axes: Axes,
+        segment: ScatterSegment,
+        ensure_active: Callable[[], None],
+    ) -> None:
+        self._host = host
+        self._figure = figure
+        self._axes = axes
+        self._segment = segment
+        self._ensure_active = ensure_active
+
+    def update(
+        self,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        *,
+        colors: NDArray[np.float64],
+        title: str | None = None,
+        refresh: bool = True,
+    ) -> None:
+        """Copy equally sized, nonempty real vectors before owner dispatch."""
+        self._ensure_active()
+        if any(np.iscomplexobj(data) for data in (xs, ys, colors)):
+            raise ValueError("Scatter updates require real-valued data")
+        x_data, y_data, color_data = (
+            np.array(data, dtype=np.float64, copy=True) for data in (xs, ys, colors)
+        )
+        if (
+            x_data.ndim != 1
+            or x_data.size == 0
+            or y_data.shape != x_data.shape
+            or color_data.shape != x_data.shape
+        ):
+            raise ValueError("Scatter data must be nonempty vectors of equal length")
+
+        def apply() -> None:
+            self._ensure_active()
+            self._segment.update(
+                self._axes, x_data, y_data, colors=color_data, title=title
+            )
+            if refresh:
+                self._host.refresh(self._figure)
+
+        self._host.call(apply)
 
 
 def _heatmap_data(
@@ -262,6 +315,29 @@ class Plots(FigureCollection):
             if configure_axes is not None:
                 configure_axes(axes)
             viewer = LinePlot(self._host, figure, axes, segment, self._ensure_active)
+            self._host.present(figure)
+            self._live.append(figure)
+            return viewer
+
+        return self._host.call(create)
+
+    def liveplot_scatter(
+        self,
+        name: str,
+        xlabel: str,
+        ylabel: str,
+        *,
+        title: str | None = None,
+    ) -> ScatterPlot:
+        """Present scalar-colored points, with artist updates on the host owner."""
+        self._ensure_active()
+
+        def create() -> ScatterPlot:
+            self._ensure_active()
+            figure, axes = self.subplots(name)
+            segment = ScatterSegment(xlabel, ylabel, title=title)
+            segment.init_ax(axes)
+            viewer = ScatterPlot(self._host, figure, axes, segment, self._ensure_active)
             self._host.present(figure)
             self._live.append(figure)
             return viewer

@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 繪圖能力家族
 
-**Last updated:** 2026-10-02 — Live axes 初始化在 host owner 執行
+**Last updated:** 2026-10-02 — Typed scatter 與 host owner
 
 本目錄收納具獨立定位或真實跨入口需求的共用繪圖能力。`liveplot/` 提供即時更新的 plotter、segment 與 frontend-neutral backend 契約，供 experiment runtime 與 GUI caller 使用；詳見 [liveplot/README.md](liveplot/README.md)。
 
@@ -14,7 +14,7 @@ canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換�
 一般圖可先繪製與保存，adapter 於操作完成後才接上呈現。此接口不處理 frontend
 呈現、保存政策或 Matplotlib thread safety。
 `plots.Plots` 在此集合上提供明確 `PlotHost`、typed 1D liveplot、單熱圖
-`liveplot_2d` 與含最近掃描線的 `liveplot_2d_with_line`。兩種 2D handle 共用
+`liveplot_2d` 與含最近掃描線的 `liveplot_2d_with_line`。`liveplot_scatter` 接同長、非空一維實數 xs／ys／colors，保留 scalar color coordinate 與自動色階；更新前複製三組資料，artist mutation 仍由 host owner 執行。兩種 2D handle 共用
 `(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。單熱圖可指定 `clim=(min, max)`，固定色階跨 update 保留，未指定時沿資料自動縮放。
 `liveplot_1d` 的 `configure_axes` callback 在 host owner 初始化 artists 後、呈現前執行一次，供實驗設定原生 ticks／style。Callback 不得保留 active axes 供 worker 後續修改；設定失敗直接傳遞例外，不呈現未完成圖。
 一般圖在 `finish()` 時呈現，liveplot 立即呈現；update 先驗證與複製資料，
@@ -26,7 +26,7 @@ canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換�
 Plots handle 而失去所有權。Presentation owner 另持有 Plots，以 release
 釋放呈現，不銷毀 NamedFigures 中的原 Figure。失敗時可
 finish(present=False) 保留普通診斷圖而不呈現。GUI host 在 gui/plotting，
-shared plotting 不依賴 Qt。舊 2D／scatter 與其他 experiment/application callers
+shared plotting 不依賴 Qt。其餘尚未遷移的 experiment/application callers
 仍待遷移；本 factory 不替他們改接呼叫。
 只有需要共用的繪圖能力才納入此家族。Notebook 專用圖、實驗特化圖與 app 專用 renderer 保留在各自 owner；此處不建立通用 PlotManager、統一 Figure schema 或新 plugin framework。根 package 的 `__init__.py` 不載入子 package，避免只匯入家族名稱就載入個別 frontend 或 backend。
 

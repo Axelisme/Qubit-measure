@@ -47,6 +47,72 @@ def collect_plot_cycles():
     gc.collect()
 
 
+def test_scatter_copies_phase_colors_and_retains_native_figures_after_release() -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+    viewer = plots.liveplot_scatter("samples", "Flux", "SNR")
+    figure = plots["samples"]
+    assert host.presented == [figure]
+    xs = np.array([1.0, 2.0, 3.0])
+    ys = np.array([4.0, 5.0, np.nan])
+    colors = np.array([1.0, 2.0, 3.0])
+
+    def mutate_source() -> None:
+        assert np.asarray(figure.axes[0].collections[0].get_offsets()).size == 0
+        xs[:] = 10
+        ys[:] = 20
+        colors[:] = 30
+
+    host.before_call = mutate_source
+    viewer.update(xs, ys, colors=colors, title="phases", refresh=False)
+    host.before_call = None
+    scatter = figure.axes[0].collections[0]
+    np.testing.assert_allclose(
+        np.asarray(scatter.get_offsets()), [[1, 4], [2, 5], [3, np.nan]]
+    )
+    np.testing.assert_array_equal(scatter.get_array(), [1, 2, 3])
+    assert scatter.get_clim() == (1, 3)
+    assert figure.axes[0].get_title() == "phases"
+    assert host.refreshed == []
+    figures = plots.finish()
+    assert host.refreshed == [(figure, True)]
+    plots.release()
+    assert host.released == [figure]
+    assert figures["samples"] is figure
+    output = BytesIO()
+    figure.savefig(output, format="png")
+    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+    with pytest.raises(RuntimeError, match="finished"):
+        viewer.update(xs, ys, colors=colors)
+
+
+@pytest.mark.parametrize(
+    ("xs", "ys", "colors"),
+    [
+        ([], [], []),
+        ([[1.0]], [2.0], [0.0]),
+        ([1.0], [2.0, 3.0], [0.0]),
+        ([1.0], [2.0], [0.0, 1.0]),
+        ([1j], [2.0], [0.0]),
+        ([1.0], [2j], [0.0]),
+        ([1.0], [2.0], [1j]),
+    ],
+)
+def test_invalid_scatter_update_preserves_points_and_colors(xs, ys, colors) -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+    viewer = plots.liveplot_scatter("samples", "x", "y")
+    viewer.update(np.array([1.0]), np.array([2.0]), colors=np.array([3.0]))
+    scatter = plots["samples"].axes[0].collections[0]
+    with pytest.raises(ValueError, match="Scatter"):
+        viewer.update(np.asarray(xs), np.asarray(ys), colors=np.asarray(colors))
+    np.testing.assert_array_equal(scatter.get_offsets(), [[1, 2]])
+    np.testing.assert_array_equal(scatter.get_array(), [3])
+    assert len(host.refreshed) == 1
+    plots.finish()
+    plots.release()
+
+
 def test_live_updates_and_native_save_work_without_presentation() -> None:
     plots = Plots(NonPresentingHost())
     viewer = plots.liveplot_1d("measurement", "Time", "Signal", title="T1")

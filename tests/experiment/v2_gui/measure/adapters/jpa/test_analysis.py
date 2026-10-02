@@ -5,10 +5,12 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import JPAOptimizeResult
 from zcu_tools.experiment.v2.jpa.jpa_check import CheckResult
 from zcu_tools.experiment.v2.jpa.jpa_flux import FluxResult
 from zcu_tools.experiment.v2.jpa.jpa_freq import FreqResult
 from zcu_tools.experiment.v2.jpa.jpa_power import PowerResult
+from zcu_tools.experiment.v2_gui.measure.adapters.jpa.auto import JpaAutoOptimizeAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.jpa.check import JpaCheckAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.jpa.flux import JpaFluxAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.jpa.freq import JpaFreqAdapter
@@ -69,6 +71,62 @@ def raw_cfg():
         "rounds": 1,
         "relax_delay": 5.0,
     }
+
+
+@pytest.mark.parametrize("with_cfg", [False, True])
+def test_auto_optimizer_analysis_preserves_selected_phase_colors_and_writeback(
+    raw_cfg, plot_factory, with_cfg
+):
+    adapter = JpaAutoOptimizeAdapter()
+    raw_cfg["sweep"] = {
+        "jpa_flux": make_sweep_range(-0.02, 0.02, expts=5),
+        "jpa_freq": make_sweep_range(12000.0, 12004.0, expts=5),
+        "jpa_power": make_sweep_range(-20.0, -16.0, expts=5),
+    }
+    raw_cfg["num_points"] = 5
+    cfg = adapter.ExpCfg_cls.model_validate(raw_cfg)
+    data = JPAOptimizeResult(
+        params=np.column_stack(
+            (
+                np.linspace(-0.02, 0.02, 5),
+                np.linspace(12000.0, 12004.0, 5),
+                np.linspace(-20.0, -16.0, 5),
+            )
+        ),
+        phases=np.array([1, 1, 2, 2, 3], dtype=np.int32),
+        signals=np.array([1.0, 1.0, 9.0, 1.0, 1.0]),
+    )
+    source = RunRecord(cfg if with_cfg else None, data)
+    other = RunRecord(None, replace(data, signals=np.roll(data.signals, 2)))
+    ctx = SessionEnv(MetaDict(), ModuleLibrary(), None, None)
+    params = NoAnalyzeParams()
+    other_plots = plot_factory()
+    other_answer = adapter.analyze(
+        AnalyzeRequest(other, params, ctx.md, ctx.ml, None), plots=other_plots
+    )
+    plots = plot_factory()
+    answer = adapter.analyze(
+        AnalyzeRequest(source, params, ctx.md, ctx.ml, None), plots=plots
+    )
+    expected = {"best_flux": 0.0, "best_freq": 12002.0, "best_power": -18.0}
+    assert answer.to_summary_dict() == expected
+    assert other_answer.to_summary_dict() != expected
+    assert tuple(plots) == ("fit",)
+    assert plots["fit"] is not other_plots["fit"]
+    axes = plots["fit"].axes
+    assert len(axes) == 4
+    for ax in axes:
+        np.testing.assert_array_equal(ax.collections[0].get_array(), data.phases)
+    for ax, value in zip(axes[1:], expected.values(), strict=True):
+        np.testing.assert_allclose(ax.lines[0].get_xdata(), value)
+    assert axes[1].get_xlabel() == "JPA flux device value"
+    items = adapter.get_writeback_items(WritebackRequest(source, answer, ctx))
+    assert all(isinstance(item, MetaDictWriteback) for item in items)
+    assert {
+        item.target_name: item.proposed_value
+        for item in items
+        if isinstance(item, MetaDictWriteback)
+    } == {key.replace("best_", "best_jpa_"): value for key, value in expected.items()}
 
 
 @pytest.fixture(params=["freq", "flux", "power"])
