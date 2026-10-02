@@ -2,10 +2,12 @@
 
 import base64
 from copy import deepcopy
+from threading import Event, Thread
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure import tools_recipes
 
 from ._support import make_client
 
@@ -186,6 +188,61 @@ class LookbackGui:
                 "destination_context": {"active_label": "sample"},
             }
         raise AssertionError(method)
+
+
+def test_lookback_initial_wait_returns_while_the_same_execution_continues(
+    tmp_path, monkeypatch
+):
+    gui = LookbackGui()
+    run_waiting = Event()
+    release_run = Event()
+    returned = Event()
+    replies: list[ToolReply] = []
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == 71:
+            run_waiting.set()
+            if not release_run.wait(0.02):
+                return {"reason": "timeout"}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+
+    def call_recipe():
+        replies.append(client.call("lookback", {"frequency_mhz": 6020.0}))
+        returned.set()
+
+    caller = Thread(target=call_recipe)
+    caller.start()
+    try:
+        assert run_waiting.wait(1)
+        assert returned.wait(1), "Initial wait must not wait for Run completion"
+        initial = replies[0].data
+        assert initial["status"] == "running"
+        execution = initial["execution"]
+        initial["actual"]["fields"].clear()
+        before = len(client.transport.sent)
+        status = client.call("status", {"execution": execution})
+        waiting = client.call("wait", {"execution": execution, "timeout": 0})
+        assert status["actual"]["fields"]
+        assert waiting.data["execution"] == execution
+        assert waiting.data["status"] == "running"
+        assert len(client.transport.sent) == before
+        release_run.set()
+        completed = client.call("wait", {"execution": execution, "timeout": 2})
+        assert completed.data["status"] == "finished", completed.data
+        assert completed.data["run_op"] == initial["run_op"]
+        assert completed.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert completed.images[0].data == _PNG
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.analyze") == 1
+    finally:
+        release_run.set()
+        caller.join(2)
+        client.context.session.close()
+    assert not caller.is_alive()
 
 
 @pytest.mark.parametrize("reuse", [False, True])

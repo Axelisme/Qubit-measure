@@ -13,6 +13,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 logger = logging.getLogger(__name__)
 
+INITIAL_WAIT_SECONDS = 300.0
+
 
 def run_recipe(
     tools: MeasureToolContext, definition: RecipeDefinition, arguments: dict[str, Any]
