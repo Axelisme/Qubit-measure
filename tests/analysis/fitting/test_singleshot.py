@@ -63,8 +63,9 @@ def test_fit_singleshot_no_raise_when_s_exceeds_xs_range():
     fitparams = [float(sg), float(se), s_init, 0.5, 0.5, 0.1, 0.01]
 
     # Should not raise; returned params must be finite (fit may not converge perfectly).
-    pOpt, pCov = fit_singleshot(xs, g_pdf, e_pdf, fitparams=fitparams)
+    pOpt, covariance = fit_singleshot(xs, g_pdf, e_pdf, fitparams=fitparams)
     assert all(np.isfinite(p) for p in pOpt), f"Non-finite params: {pOpt}"
+    assert np.isfinite(covariance).all()
 
 
 def test_fit_singleshot_no_raise_when_sg_outside_se_bound():
@@ -77,8 +78,9 @@ def test_fit_singleshot_no_raise_when_sg_outside_se_bound():
     # sg_init = -2.0 < lower bound -0.4 — triggers the pre-fix crash
     fitparams = [-2.0, float(se), 0.15, 0.5, 0.5, 0.1, 0.01]
 
-    pOpt, pCov = fit_singleshot(xs, g_pdf, e_pdf, fitparams=fitparams)
+    pOpt, covariance = fit_singleshot(xs, g_pdf, e_pdf, fitparams=fitparams)
     assert all(np.isfinite(p) for p in pOpt), f"Non-finite params: {pOpt}"
+    assert np.isfinite(covariance).all()
 
 
 @pytest.mark.parametrize("p_avg", [0.15, 0.85])
@@ -107,9 +109,30 @@ def test_joint_ge_respects_fixed_populations_and_simplex(fixed_populations):
     g = calc_population_pdf(xs, *truth)
     e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
     fixed = [-1.0, 1.0, 0.3, *fixed_populations, 0.8, 0.7]
-    fitted, _ = fit_singleshot(xs, g, e, fixedparams=fixed)
+    fitted, covariance = fit_singleshot(xs, g, e, fixedparams=fixed)
     np.testing.assert_allclose(fitted[3:5], truth[3:5], atol=1e-5)
     assert sum(fitted[3:5]) <= 1
+    for index, value in enumerate(fixed):
+        if value is not None:
+            np.testing.assert_array_equal(covariance[index], 0.0)
+            np.testing.assert_array_equal(covariance[:, index], 0.0)
+
+
+@pytest.mark.parametrize("occupied_population", [0, 1])
+def test_ge_fixed_population_can_use_all_probability_mass(occupied_population):
+    xs = np.linspace(-4, 4, 301)
+    populations = [0.0, 0.0]
+    populations[occupied_population] = 1.0
+    truth = (-1.0, 1.0, 0.3, populations[0], populations[1], 0.8, 0.7)
+    g = calc_population_pdf(xs, *truth)
+    e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
+    fixed = [-1.0, 1.0, 0.3, None, None, 0.8, 0.7]
+    fixed[3 + occupied_population] = 1.0
+
+    fitted, covariance = fit_singleshot(xs, g, e, fixedparams=fixed)
+
+    np.testing.assert_allclose(fitted, truth, atol=1e-12)
+    np.testing.assert_array_equal(covariance, np.zeros((7, 7)))
 
 
 @pytest.mark.parametrize("fit_length_ratio", [False, True])
