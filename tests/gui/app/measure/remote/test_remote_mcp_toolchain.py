@@ -327,6 +327,46 @@ def test_loaded_result_does_not_inherit_the_previous_run_operation(fx, monkeypat
         assert snapshot["result_state"]["source_operation_id"] is None
 
 
+@pytest.mark.parametrize("replacement", ["run", "load", "unknown"])
+def test_save_data_rejects_a_superseded_run_without_changing_the_draft(
+    fx, monkeypatch, tmp_path, replacement
+):
+    monkeypatch.setattr(
+        FakeAdapter, "capabilities", replace(FakeAdapter.capabilities, load_data=True)
+    )
+    tab = fx.ctrl.new_tab("fake")
+    with open_client(fx.service.port) as sock:
+        original = _completed_run(fx, sock, tab)
+        if replacement == "run":
+            _completed_run(fx, sock, tab)
+        elif replacement == "load":
+            record = fx.ctrl.get_tab_snapshot(tab).run.result
+            monkeypatch.setattr(FakeAdapter, "load", lambda self, request: record)
+            fx.ctrl.load_tab_result(tab, "loaded.hdf5")
+        else:
+            original += 1000
+        # The stale token must fail even after the current result is observed.
+        before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
+        draft = fx.ctrl.get_tab_snapshot(tab).save
+        reply = call(
+            sock,
+            "tab.save_data",
+            {
+                "tab_id": tab,
+                "run_operation_id": original,
+                "data_path": str(tmp_path / "rejected"),
+                "comment": "must not replace the draft",
+            },
+        )
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "precondition_failed"
+        assert reply["error"]["reason"] == "result_superseded"
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
+        assert fx.ctrl.get_tab_snapshot(tab).save == draft
+        assert call(sock, "operation.active")["result"]["operations"] == []
+        assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize("keep_partial", [True, False])
 def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
     fx, monkeypatch: pytest.MonkeyPatch, keep_partial: bool

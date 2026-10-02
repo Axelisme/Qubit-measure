@@ -88,6 +88,7 @@ def h_tab_save_data(
         tab_id,
         str(data_path) if data_path is not None else None,
         comment=str(comment) if comment is not None else None,
+        run_operation_id=cast(int | None, params["run_operation_id"]),
     )
     return {"data_path": written.data_path, "operation_id": written.operation_id}
 

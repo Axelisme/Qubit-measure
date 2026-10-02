@@ -34,7 +34,12 @@ class SaveControlPort(Protocol):
     def set_comment(self, tab_id: str, comment: str) -> None: ...
 
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str | None = None
+        self,
+        tab_id: str,
+        data_path: str | None = None,
+        comment: str | None = None,
+        *,
+        run_operation_id: int | None = None,
     ) -> SaveDataSubmission: ...
 
     def save_artifacts(
@@ -85,7 +90,12 @@ class SaveControlFacet:
         self._state.update_tab_comment(tab_id, comment)
 
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str | None = None
+        self,
+        tab_id: str,
+        data_path: str | None = None,
+        comment: str | None = None,
+        *,
+        run_operation_id: int | None = None,
     ) -> SaveDataSubmission:
         if data_path is not None and not data_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")

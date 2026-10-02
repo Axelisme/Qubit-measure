@@ -105,6 +105,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("tab_id"),
                 optional_string("data_path", "Override data path"),
                 save_comment(),
+                optional_integer("run_operation_id"),
             ),
         ),
         agent=AgentMethodPolicy(
