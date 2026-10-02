@@ -125,8 +125,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 80`, `GUI_VERSION = 112`, and
-`MCP_VERSION = 102` (defined in `zcu_tools.mcp.measure.server`). WIRE 80 adds Run
+Current measure-gui values are `WIRE_VERSION = 81`, `GUI_VERSION = 113`, and
+`MCP_VERSION = 102` (defined in `zcu_tools.mcp.measure.server`). WIRE 81 adds optional
+`operation_id` to `tab.writeback_preview`. GUI 113 rejects a replaced analysis
+before reading its writeback draft; omission still reads the current pane.
+WIRE 80 adds Run
 `source_operation_id` to snapshot result state and optional `run_operation_id` to
 `tab.save_data` and `tab.analyze`. GUI 112 commits Run provenance and rejects a
 superseded source before draft edits, pane following, or operation admission.
@@ -278,7 +281,7 @@ The wire surface is grouped by ownership:
 - `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_image`要求`tab_id`、`subtab_id=analysis|post_analysis`與`figure_name`；`tab.save_artifacts`接受`data`、`analysis:<name>`及`post:<name>`完整key，不接受無名稱的analysis/post舊格式。`tab.snapshot`逐圖列出`figure_names`、`analysis_images`／`post_analysis_images`路徑與artifact status；explicit destinations修改相同key的GUI草稿。Run screenshot讀live FigureContainer；analysis/post screenshot讀目前選中的具名圖。`tab.save_artifacts`回傳保留路徑與operation id，保留不代表成功，完成後以terminal及artifact snapshot判讀。
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
 - `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
-- `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time).
+- `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time). Preview accepts an optional `operation_id` to require the original analysis result rather than another run's draft.
 - `editor.*`：headless cfg-editor session lifecycle.
 - `operation.*` / `notify.*`：live operation indexing, bounded wait, domain-owned cancellation, progress and prompt replies.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.

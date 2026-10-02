@@ -178,6 +178,11 @@ class RecipeContext:
             self.images = reply.images
             if reply.data["status"] != "running":
                 break
+        if reply.data["status"] == "failed":
+            error = reply.data["error"]
+            raise GuiRpcError(
+                error["message"], reason=error["reason"], code=error["code"]
+            )
         if reply.data["status"] != "finished":
             self.progress.status = reply.data["status"]
             self.progress.phase = (

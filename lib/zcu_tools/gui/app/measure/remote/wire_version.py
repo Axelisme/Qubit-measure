@@ -120,7 +120,8 @@ from __future__ import annotations
 # v78: operation-bound result inputs, figure reads and named image saves.
 # v79: optional figure-free interactive command receipts.
 # v80: Run source tokens in snapshots and optional save/analyze admission binding.
-WIRE_VERSION = 80
+# v81: optional analysis-operation binding for writeback previews.
+WIRE_VERSION = 81
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -176,4 +177,5 @@ WIRE_VERSION = 80
 # v110: commit provenance and captured inputs with named plots; reject replaced saves.
 # v111: preserve interactive validation and operation receipt without PNG rendering.
 # v112: commit Run provenance and reject superseded raw save or primary analysis.
-GUI_VERSION = 112
+# v113: reject superseded writeback preview sources before reading the draft.
+GUI_VERSION = 113
