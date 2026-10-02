@@ -290,25 +290,48 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         sock.close()
 
 
+def _completed_run(fx, sock, tab_id):
+    operation_id = fx.ctrl.start_run(
+        tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+    )
+    terminal = call(
+        sock, "operation.await", {"operation_id": operation_id, "timeout": 2}
+    )["result"]
+    assert terminal["status"] == "finished"
+    return operation_id
+
+
 def test_run_snapshot_identifies_the_operation_that_published_its_result(fx):
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
-        run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
-        terminal = call(
-            sock, "operation.await", {"operation_id": run, "timeout": 2}
-        )["result"]
-        assert terminal["status"] == "finished"
+        for _ in range(2):
+            run = _completed_run(fx, sock, tab)
+            snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
+            assert snapshot["result_state"]["available"] is True
+            assert snapshot["result_state"]["source_operation_id"] == run
+
+
+def test_loaded_result_does_not_inherit_the_previous_run_operation(fx, monkeypatch):
+    tab = fx.ctrl.new_tab("fake")
+    with open_client(fx.service.port) as sock:
+        _completed_run(fx, sock, tab)
+        record = fx.ctrl.get_tab_snapshot(tab).run.result
+        monkeypatch.setattr(FakeAdapter, "load", lambda self, request: record)
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+        assert call(sock, "context.snapshot")["ok"]
+        assert call(
+            sock, "tab.load_data", {"tab_id": tab, "data_path": "loaded.hdf5"}
+        )["ok"]
         snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
         assert snapshot["result_state"]["available"] is True
-        assert snapshot["result_state"]["source_operation_id"] == run
+        assert snapshot["result_state"]["source_path"] == "loaded.hdf5"
+        assert snapshot["result_state"]["source_operation_id"] is None
 
 
+@pytest.mark.parametrize("keep_partial", [True, False])
 def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
-    fx, monkeypatch: pytest.MonkeyPatch
+    fx, monkeypatch: pytest.MonkeyPatch, keep_partial: bool
 ) -> None:
-    import threading
-
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
@@ -320,14 +343,20 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
         entered.set()
         if not release.wait(4):
             raise TimeoutError("fake run release was not signalled")
+        if not keep_partial:
+            raise InterruptedError("stopped before any acquisition")
         return original_run(self, request, schema, context=context)
 
     try:
+        _completed_run(fx, sock, tab_id)
         monkeypatch.setattr(FakeAdapter, "run", held_run)
         run_id = fx.ctrl.start_run(
             tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
         )
         assert entered.wait(1)
+        running = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert running["result_state"]["available"] is False
+        assert running["result_state"]["source_operation_id"] is None
         assert fx.ctrl.send_feedback("please stop", stop=True) == "run"
         release.set()
         reply = call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})
@@ -336,6 +365,11 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
             "status": "cancelled",
             "feedback": "please stop",
         }
+        snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert snapshot["result_state"]["available"] is keep_partial
+        assert snapshot["result_state"]["source_operation_id"] == (
+            run_id if keep_partial else None
+        )
     finally:
         release.set()
         sock.close()
