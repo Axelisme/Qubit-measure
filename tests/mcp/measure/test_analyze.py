@@ -620,10 +620,14 @@ def test_cancel_latches_intent_and_retains_original_terminal(
 
     client = _client(tmp_path, clients, respond)
     started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
-    if gui_cancel == "failed":
+    if gui_cancel in ("failed", "not_cancellable"):
         client.transport.replies["operation.cancel"] = {
             "ok": False,
-            "error": {"code": "precondition_failed", "message": "cannot send cancel"},
+            "error": {
+                "code": "precondition_failed",
+                "reason": gui_cancel,
+                "message": "cannot send cancel",
+            },
         }
     args = {selector: started[selector]}
     cancelled = _call_stdio(monkeypatch, client, "cancel", args)
