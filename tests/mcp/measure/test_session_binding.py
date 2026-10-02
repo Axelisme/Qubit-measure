@@ -89,6 +89,37 @@ def test_delivered_reply_remains_known_when_its_socket_then_closes(
     assert not second.sent
 
 
+def test_pending_eof_reports_connection_lost_without_replaying_rpc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, second = make_restartable_client(tmp_path, monkeypatch)
+    binding = client.context.session.bind()
+    sent = Event()
+    client.transport.sent.clear()
+
+    def send(payload: dict[str, Any]) -> None:
+        client.transport.sent.append((payload["method"], payload["params"]))
+        sent.set()
+
+    monkeypatch.setattr(client.transport, "send_line", send)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(binding.send_gui_rpc, "context.labels", {}, timeout=1.0)
+        try:
+            assert sent.wait(1)
+            client.transport.close()
+            assert client.transport.on_closed is not None
+            client.transport.on_closed(None)
+            with pytest.raises(GuiRpcError) as error:
+                pending.result(timeout=1)
+            assert error.value.reason == "connection_lost"
+            assert isinstance(error.value.__context__, ConnectionError)
+        finally:
+            client.context.bridge.disconnect()
+
+    assert client.transport.sent == [("context.labels", {})]
+    assert not second.sent
+
+
 def test_catalog_and_operation_snapshots_cannot_modify_session_state(
     tmp_path: Path,
 ) -> None:
