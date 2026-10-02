@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import base64
 from functools import partial
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+
+from PIL import Image
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -22,6 +25,21 @@ def tab_run(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, int
         "tab.run_start", {"tab_id": tab, "expected": arguments["expected"]}
     )
     return {"op": reply["handle"]}
+
+
+def _png_image(png: bytes) -> PngImage:
+    # Decoders can accept a truncated trailer; require the complete PNG end chunk.
+    if not png.endswith(b"\x00\x00\x00\x00IEND\xaeB\x60\x82"):
+        raise ValueError("Invalid PNG image: missing or truncated IEND chunk")
+    try:
+        with Image.open(BytesIO(png), formats=["PNG"]) as image:
+            image.verify()
+        # verify checks chunks and checksums, not whether the pixels can decode.
+        with Image.open(BytesIO(png), formats=["PNG"]) as image:
+            image.load()
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise ValueError("Invalid PNG image") from exc
+    return PngImage(png)
 
 
 def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
@@ -58,7 +76,7 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
     if "summary" not in result:
         raise RuntimeError("finished analysis has no result")
     figure = result["figure"]
-    images = () if figure is None else (PngImage(Path(figure).read_bytes()),)
+    images = () if figure is None else (_png_image(Path(figure).read_bytes()),)
     return ToolReply(
         {
             "status": "finished",
@@ -86,11 +104,11 @@ def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
     figure = reply["figure"]
     images: tuple[PngImage, ...] = ()
     if figure is not None:
-        png = base64.b64decode(figure["png_b64"], validate=True)
+        image = _png_image(base64.b64decode(figure["png_b64"], validate=True))
         path = ctx.session.new_png_path()
-        path.write_bytes(png)
+        path.write_bytes(image.data)
         reply["figure"] = str(path)
-        images = (PngImage(png),)
+        images = (image,)
     return ToolReply(reply, images)
 
 

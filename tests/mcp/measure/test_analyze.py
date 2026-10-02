@@ -17,6 +17,15 @@ _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
     "+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
+_INVALID_PNGS = [
+    pytest.param(b"hello", id="non-png"),
+    pytest.param(b"hello" + _PNG[-12:], id="non-png-with-iend"),
+    pytest.param(_PNG[:8], id="signature-only"),
+    pytest.param(_PNG[:46], id="truncated-pixels"),
+    pytest.param(_PNG[:-12], id="missing-iend"),
+    pytest.param(_PNG[:-1], id="truncated-iend-crc"),
+    pytest.param(_PNG[:55] + bytes([_PNG[55] ^ 1]) + _PNG[56:], id="bad-idat-crc"),
+]
 
 
 @pytest.fixture
@@ -317,3 +326,64 @@ def test_malformed_interactive_image_is_a_tool_error_not_a_success(
         ["tab.analyze", "tab.interact"] if tool == "tab_analyze" else ["tab.interact"]
     )
     assert _methods(client) == expected
+
+
+@pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])
+@pytest.mark.parametrize("png", _INVALID_PNGS)
+def test_invalid_interactive_png_is_a_tool_error_without_retry(
+    tmp_path, clients, monkeypatch, tool, png
+):
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {"operation_id": 71, "interactive": True, "params": {}}
+        assert method == "tab.interact"
+        return {"figure": {"png_b64": base64.b64encode(png).decode()}, "state": {}}
+
+    client = _client(tmp_path, clients, respond)
+    reply = _call_stdio(monkeypatch, client, tool, {"tab": "t"})
+    assert reply["isError"] is True
+    assert len(reply["content"]) == 1
+    assert reply["content"][0]["type"] == "text"
+    assert "Invalid PNG image" in reply["content"][0]["text"]
+    expected = (
+        ["tab.analyze", "tab.interact"] if tool == "tab_analyze" else ["tab.interact"]
+    )
+    assert _methods(client) == expected
+
+
+@pytest.mark.parametrize(
+    "stage, method, result_method",
+    [
+        ("primary", "tab.analyze", "tab.get_analyze_result"),
+        ("post", "tab.post_analyze", "tab.get_post_analyze_result"),
+    ],
+)
+@pytest.mark.parametrize("png", _INVALID_PNGS)
+def test_invalid_finished_png_is_a_tool_error_without_retry(
+    tmp_path, clients, monkeypatch, stage, method, result_method, png
+):
+    def respond(name, params):
+        if name == method:
+            return {"operation_id": 71, "interactive": False, "params": {}}
+        if name == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if name == result_method:
+            return {"summary": {"frequency": 5.0}}
+        assert name == "tab.get_figure"
+        Path(params["out_path"]).write_bytes(png)
+        return {"saved_to": params["out_path"]}
+
+    client = _client(tmp_path, clients, respond)
+    reply = _call_stdio(
+        monkeypatch, client, "tab_analyze", {"tab": "t", "stage": stage}
+    )
+    assert reply["isError"] is True
+    assert len(reply["content"]) == 1
+    assert reply["content"][0]["type"] == "text"
+    assert "Invalid PNG image" in reply["content"][0]["text"]
+    assert _methods(client) == [
+        method,
+        "operation.await",
+        result_method,
+        "tab.get_figure",
+    ]
