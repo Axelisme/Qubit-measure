@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from threading import RLock
+from threading import Event, Lock, RLock
 from types import MappingProxyType
 from typing import Any, Literal, TypedDict
 
@@ -178,6 +178,9 @@ class MeasureMcpSession:
     ) -> None:
         self._config = config
         self._rpc_lock = RLock()
+        self._resource_lock = RLock()
+        self._close_lock = Lock()
+        self._closed = Event()
         self._generation = 0
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
@@ -196,7 +199,8 @@ class MeasureMcpSession:
 
     def new_png_path(self) -> Path:
         """Reserve a fresh session-owned path; the GUI writes the image."""
-        with self._rpc_lock:
+        with self._resource_lock:
+            self._require_open()
             if self._png_directory is None:
                 self._png_directory = tempfile.TemporaryDirectory(
                     prefix="measure-mcp-png-"
@@ -205,15 +209,31 @@ class MeasureMcpSession:
 
     def write_png(self, png: bytes) -> Path:
         """Write one validated image under session ownership; reject after close."""
-        path = self.new_png_path()
-        path.write_bytes(png)
-        return path
+        with self._resource_lock:
+            path = self.new_png_path()
+            path.write_bytes(png)
+            return path
 
     def close(self) -> None:
         """Permanently stop admission, disconnect, drain work, then remove PNGs."""
+        self._closed.set()
+        with self._close_lock:
+            if self._bridge is not None:
+                self._bridge.disconnect()
+            # Disconnect must wake the holder before waiting for this lock.
+            # A connect already in flight may still attach; drain it, then detach.
+            with self._rpc_lock:
+                pass
+            if self._bridge is not None:
+                self._bridge.disconnect()
+            self.cleanup_pngs()
+
+    def _require_open(self) -> None:
+        if self._closed.is_set():
+            raise GuiRpcError("MCP session is closed", reason="session_closed")
 
     def cleanup_pngs(self) -> None:
-        with self._rpc_lock:
+        with self._resource_lock:
             if self._png_directory is not None:
                 self._png_directory.cleanup()
                 self._png_directory = None
@@ -237,6 +257,7 @@ class MeasureMcpSession:
 
     def attach_bridge(self, bridge: McpBridge) -> None:
         with self._rpc_lock:
+            self._require_open()
             if self._bridge is not None and self._bridge is not bridge:
                 raise RuntimeError("MeasureMcpSession bridge is already attached")
             self._bridge = bridge
@@ -254,6 +275,7 @@ class MeasureMcpSession:
             )
 
     def _require_connection(self, generation: int) -> None:
+        self._require_open()
         self._require_generation(generation)
         if not self._catalog or not self.bridge.is_connected:
             raise GuiRpcError(
@@ -328,6 +350,7 @@ class MeasureMcpSession:
     ) -> dict[str, Any]:
         """Serialize attach and handshake with all calls on the current GUI."""
         with self._rpc_lock:
+            self._require_open()
             return self._connect_to_gui(
                 port=port, launch=launch, clean=clean, token=token
             )
@@ -409,6 +432,7 @@ class MeasureMcpSession:
             self._ensure_connected()
 
     def _ensure_connected(self) -> None:
+        self._require_open()
         if self.bridge.is_connected and self._catalog:
             return
         if self.bridge.is_connected:
