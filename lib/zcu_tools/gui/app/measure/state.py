@@ -303,6 +303,16 @@ class State(SessionState):
     def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]:
         return self.tabs[tab_id]
 
+    def require_run_operation(self, tab_id: str, operation_id: int) -> None:
+        """Reject a Run result replaced since the caller's operation."""
+        self._assert_owner()
+        pane = self.tabs[tab_id].run
+        if pane.result is None or pane.source_operation_id != operation_id:
+            raise FailedPreconditionError(
+                f"Run no longer contains operation {operation_id}'s result",
+                reason_code="result_superseded",
+            )
+
     def require_analysis_operation(
         self,
         tab_id: str,

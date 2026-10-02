@@ -97,6 +97,8 @@ class SaveControlFacet:
         *,
         run_operation_id: int | None = None,
     ) -> SaveDataSubmission:
+        if run_operation_id is not None:
+            self._state.require_run_operation(tab_id, run_operation_id)
         if data_path is not None and not data_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")
         permit = self._guard.acquire_save_permit(tab_id)

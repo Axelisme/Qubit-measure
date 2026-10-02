@@ -1159,13 +1159,13 @@ def test_save_data_delegates_to_save_control(fx):
             "operation_id": 7,
         }
         fx.service.save_control.save_data.assert_called_once_with(
-            tab_id, "/tmp/data.h5", comment="note"
+            tab_id, "/tmp/data.h5", comment="note", run_operation_id=None
         )
         fx.service.save_control.save_data.reset_mock()
         omitted = call(sock, "tab.save_data", {"tab_id": tab_id}, rid="2")
         assert omitted["ok"] is True
         fx.service.save_control.save_data.assert_called_once_with(
-            tab_id, None, comment=None
+            tab_id, None, comment=None, run_operation_id=None
         )
         fx.ctrl.save_data.assert_not_called()
     finally:
