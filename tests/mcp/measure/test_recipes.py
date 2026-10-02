@@ -253,9 +253,12 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path
     def respond(method, params):
         if method == "tab.analyze":
             return {**gui(method, params), "interactive": True}
-        if method == "operation.await" and params["operation_id"] == 93:
-            if not done.is_set():
-                return {"reason": "user_feedback"}
+        if (
+            method == "operation.await"
+            and params["operation_id"] == 93
+            and not done.is_set()
+        ):
+            return {"reason": "user_feedback"}
         if method == "tab.interact":
             assert params["tab_id"] == "t"
             if params.get("payload", {}).get("command") == "done":
