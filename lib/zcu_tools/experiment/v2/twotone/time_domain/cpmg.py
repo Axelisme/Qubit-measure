@@ -87,6 +87,15 @@ class CPMGAnalyzeOptions:
     t1: float | None = None
 
 
+@dataclass(frozen=True)
+class CPMGAnalysis:
+    """T2 values and errors in microseconds, indexed by pulse count."""
+
+    ns: NDArray[np.int64]
+    t2s: NDArray[np.float64]
+    t2errs: NDArray[np.float64]
+
+
 CPMG_LENGTHS_ROLE = "lengths"
 CPMG_SIGNALS_ROLE = "signals"
 CPMG_GROUPED_ROLES = (CPMG_LENGTHS_ROLE, CPMG_SIGNALS_ROLE)
@@ -360,7 +369,7 @@ class CPMG_Exp:
         options: CPMGAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> None:
+    ) -> CPMGAnalysis:
         result = source.result
         fit_fringe, t2r, t1 = options.fit_fringe, options.t2r, options.t1
 
@@ -420,6 +429,7 @@ class CPMG_Exp:
         ax2.set_xlabel("Number of Pi")
 
         fig.tight_layout()
+        return CPMGAnalysis(ns=times, t2s=t2s, t2errs=t2errs)
 
     def save(
         self,

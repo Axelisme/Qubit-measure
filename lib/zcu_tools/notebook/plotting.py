@@ -9,6 +9,8 @@ from matplotlib.figure import Figure
 if TYPE_CHECKING:
     from ipympl.backend_nbagg import Canvas, FigureManager
 
+    from zcu_tools.plotting.plots import Plots
+
 _T = TypeVar("_T")
 
 
@@ -70,6 +72,21 @@ class NotebookPlotHost:
             _release_canvas(cast("Canvas", manager.canvas))
         finally:
             del self._managers[figure]
+
+
+def finish_failed_plots(
+    plots: "Plots", error: BaseException, *, operation: str
+) -> None:
+    """Release this failed operation's plots without losing its original error."""
+    try:
+        try:
+            plots.finish(present=False)
+        finally:
+            plots.release()
+    except BaseException as cleanup_error:  # noqa: BLE001 - preserve producer and cleanup failures
+        raise BaseExceptionGroup(
+            f"{operation} and plot cleanup failed", [error, cleanup_error]
+        ) from None
 
 
 def _initialize_canvas(canvas: "Canvas") -> None:

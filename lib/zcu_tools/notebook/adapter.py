@@ -14,7 +14,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.interfaces import RecordExperiment, SynchronousExperiment
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.notebook.plotting import NotebookPlotHost
+from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.plotting.plots import PlotHost, Plots
 
 CoreT = TypeVar("CoreT", bound=RecordExperiment[Any, Any], covariant=True)
@@ -91,15 +91,7 @@ class NotebookAdapter(Generic[CoreT]):
             plots.finish()
             record = RunRecord(cfg=retained_cfg, result=result)
         except BaseException as error:
-            try:
-                try:
-                    plots.finish(present=False)
-                finally:
-                    plots.release()
-            except BaseException as cleanup_error:  # noqa: BLE001 - preserve producer and cleanup failures
-                raise BaseExceptionGroup(
-                    "Run and plot cleanup failed", [error, cleanup_error]
-                ) from None
+            finish_failed_plots(plots, error, operation="Run")
             raise
         self._last_run = record
         self._analysis = None
@@ -135,15 +127,7 @@ class NotebookAdapter(Generic[CoreT]):
                 figures=figures,
             )
         except BaseException as error:
-            try:
-                try:
-                    plots.finish(present=False)
-                finally:
-                    plots.release()
-            except BaseException as cleanup_error:  # noqa: BLE001 - preserve producer and cleanup failures
-                raise BaseExceptionGroup(
-                    "Analysis and plot cleanup failed", [error, cleanup_error]
-                ) from None
+            finish_failed_plots(plots, error, operation="Analysis")
             raise
         self._analysis = record
         self.analysis_presentation = plots

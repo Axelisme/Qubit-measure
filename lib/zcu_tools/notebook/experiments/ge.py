@@ -14,7 +14,7 @@ from zcu_tools.experiment.v2.singleshot.ge import (
     GEPostAnalysis,
     GEPostAnalyzeOptions,
 )
-from zcu_tools.notebook.plotting import NotebookPlotHost
+from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.plotting.plots import PlotHost, Plots
 
 GEPrimaryRecord: TypeAlias = AnalysisRecord[
@@ -71,15 +71,7 @@ class GEPostAnalyzer:
                 figures=figures,
             )
         except BaseException as error:
-            try:
-                try:
-                    plots.finish(present=False)
-                finally:
-                    plots.release()
-            except BaseException as cleanup_error:  # noqa: BLE001 - retain both operation failures
-                raise BaseExceptionGroup(
-                    "Post analysis and plot cleanup failed", [error, cleanup_error]
-                ) from None
+            finish_failed_plots(plots, error, operation="Post analysis")
             raise
         self.analysis = record
         self.analysis_plots = plots

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02 (Stateless core contract)
+**Last updated:** 2026-10-02 (完成 caller 遷移與 CPMG typed analysis)
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -20,7 +20,7 @@
 
 `fake.FakeExp` 使用 explicit context 產生純 freqs／signals。Acquisition controls 在 typed FakeCfg，measurement 與 abs fit 圖歸本次 Plots。Analyze 接 None options、回傳 None，接受 cfg=None。Save／load 使用 Frequency／Hz 與 complex data 的 canonical record，不再於 load 偽造資料。
 
-一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。其他實驗與 GUI callers 仍在遷移，下面的舊 run 範本不適用上述 explicit context 入口。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
+一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 `zcu_tools.notebook.NotebookAdapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具與 FluxDep 的獨立選線工具在 `zcu_tools.notebook.experiments`。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
 
 T2Echo／T2Ramsey 的 detune 放入 typed cfg，run 回傳純 Result，analyze 使用 explicit source 與 typed options，向 Plots 發布 fit 圖。硬體 rounding 後的 true_activate_detune 是 run-only metadata；canonical axes／complex data 不包含它，load 後值為 None，不推測實際 detune。兩者分析均允許 cfg=None。
 
@@ -31,23 +31,22 @@ FastFlux 六個核心使用 `run(config, *, context) -> Result`，不保存跨�
 具名數值欄位，MIST 的 `MistAnalyzeOptions` 保留 `ac_coeff`，其餘無可調選項時傳入
 `None`。三個 distortion 需要來源 cfg 來取得 pulse 時間，缺少時明確拒絕。共用
 NotebookAdapter 建立 records；核心保留既有 canonical axes、單位與分析公式。
-下面的舊 run 範本亦不適用 FastFlux。
 
 ## TwoTone spectroscopy records
 
 `twotone` 的 Freq、FreqFlux、Power 與 Dispersive 使用 explicit RunContext，run 回傳純 Result。
 Freq 與 Dispersive 同步 analyze 接 RunRecord 與各自 typed options，回傳數值 Analysis，
 向本次 Plots 發布 `fit` 圖。FreqFlux 與 Power 只提供量測及保存／載入，不提供 core analyze。
-FreqFlux 的 `fail_retry` 是 typed cfg 欄位；GUI 選線由 plugin 擁有。Notebook 的互動 caller
-仍待遷移，不由核心轉接。下面的舊 run 範本不適用這四個核心。
+FreqFlux 的 `fail_retry` 是 typed cfg 欄位；GUI 選線由 plugin 擁有。Notebook 使用
+NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，不由核心轉接。
 
 ## TwoTone Rabi records
 
-`twotone.rabi` 的 AmpRabi／LenRabi 核心以 RunContext 執行量測，回傳純 Result。同步 analyze 接 explicit RunRecord 與各自的 typed AnalyzeOptions，回傳數值 Analysis，接受 cfg=None。量測與分析分別發布 `measurement`／`fit` 具名圖；caller 負責 finish／release。LenRabi 保留 const／flat_top 的板端 sweep 與 arb waveform 的 host scan、跨 rounds 平均及部分成果。Notebook callers 仍待遷移。
+`twotone.rabi` 的 AmpRabi／LenRabi 核心以 RunContext 執行量測，回傳純 Result。同步 analyze 接 explicit RunRecord 與各自的 typed AnalyzeOptions，回傳數值 Analysis，接受 cfg=None。量測與分析分別發布 `measurement`／`fit` 具名圖；caller 負責 finish／release。LenRabi 保留 const／flat_top 的板端 sweep 與 arb waveform 的 host scan、跨 rounds 平均及部分成果。Notebook callers 透過 NotebookAdapter 保存 run 與 analysis records。
 
 ## TwoTone pulse calibration records
 
-`AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 分別發布 measurement_ground／measurement_excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，Notebook callers 尚待遷移。
+`AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 分別發布 measurement_ground／measurement_excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，NotebookAdapter 管理 Notebook 的 records 與呈現。
 
 ## Twotone sequence records
 
@@ -55,7 +54,7 @@ AllXY／RB／ZigZag／ZigZagScan 使用 explicit RunContext、純 Result 與具�
 
 ## MIST records
 
-`mist` 的 FluxDep／DriveFreq／PowerDep 核心使用 explicit RunContext，回傳純 Result。Analyze 接 explicit RunRecord，接受 cfg=None，只發布具名 fit 圖並回傳 None。FluxDepAnalyzeOptions 保留通量換算、photon 軸及第二座標刻度；PowerDepAnalyzeOptions 保留 g0／e0／ac_coeff，DriveFreq 使用 None options。FluxDep 的熱圖為原生 Matplotlib 圖，不再接收 Plotly fig／fig_kwargs；caller 從具名圖集合取得 Figure 進行原生操作。Notebook callers 留後續遷移。
+`mist` 的 FluxDep／DriveFreq／PowerDep 核心使用 explicit RunContext，回傳純 Result。Analyze 接 explicit RunRecord，接受 cfg=None，只發布具名 fit 圖並回傳 None。FluxDepAnalyzeOptions 保留通量換算、photon 軸及第二座標刻度；PowerDepAnalyzeOptions 保留 g0／e0／ac_coeff，DriveFreq 使用 None options。FluxDep 的熱圖為原生 Matplotlib 圖，不再接收 Plotly fig／fig_kwargs；caller 從具名圖集合取得 Figure 進行原生操作。Notebook callers 使用 NotebookAdapter 與核心 typed cfg／options。
 
 ## Bath reset records
 
@@ -67,7 +66,7 @@ Single-tone 的 Freq／Length 與 dual-tone 的 Freq／Length／Power 使用 exp
 
 ## Readout optimization records
 
-`twotone/ro_optimize` 的 Freq／FreqGain／Length／Power 核心使用 explicit RunContext，回傳純 SNR Result。Run 保留既有 acquire kwargs forwarding 與 MomentTracker／g-e branch；Length 用 host scan，其餘用硬體 sweep。同步分析接 RunRecord、typed AnalyzeOptions 與 Plots，允許 cfg=None，回傳純最佳 frequency／gain／length，另發布 fit 圖。Smoothing、length duration normalization、power penalty 與 canonical axes 不變。Auto optimizer 的 grouped record 另行遷移。
+`twotone/ro_optimize` 的 Freq／FreqGain／Length／Power 核心使用 explicit RunContext，回傳純 SNR Result。Run 保留既有 acquire kwargs forwarding 與 MomentTracker／g-e branch；Length 用 host scan，其餘用硬體 sweep。同步分析接 RunRecord、typed AnalyzeOptions 與 Plots，允許 cfg=None，回傳純最佳 frequency／gain／length，另發布 fit 圖。Smoothing、length duration normalization、power penalty 與 canonical axes 不變。Auto optimizer 使用下述 grouped record 契約。
 
 ## JPA records
 
@@ -77,7 +76,7 @@ Readout AutoOpt 同樣使用 records 與 grouped persistence，num_points 屬於
 
 ## CPMG grouped records
 
-CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。detune_ratio 與 earlystop_snr 屬於 run cfg，分析選项屬於 CPMGAnalyzeOptions。共用 GroupedAxesSpec 保存與載入 record；lengths role 保留每列時間座標，signals role 與既有 grouped v2 schema 不變。
+CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。detune_ratio 與 earlystop_snr 屬於 run cfg，分析選項屬於 CPMGAnalyzeOptions，回傳 CPMGAnalysis 的 ns／t2s／t2errs；T2 與誤差使用 us，fit 圖另交 Plots。共用 GroupedAxesSpec 保存與載入 record；lengths role 保留每列時間座標，signals role 與既有 grouped v2 schema 不變。
 
 ## 目錄佈局
 
@@ -279,7 +278,7 @@ executor leaf contract 由 `runtime/task.py` 擁有：`Acquirer`、`TaskPlotter`
 
 ## 外部中斷支援（cancel_flag）
 
-新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。executor leaf 使用傳入的 `ScheduleStep`，因此 external stop 與 outer loop 共用同一個 `StopSignal`；executor retry 耗盡或中斷時回傳目前累積的 partial result，並寫入 `last_run_outcome`。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但 ambient `StopSignal` 會攜帶第一個非取消錯誤 cause，讓 GUI operation policy 可在 experiment adapter 回傳後轉成 failed outcome；retry 成功會清除 transient failure cause。
+新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。executor leaf 使用傳入的 `ScheduleStep`，因此 external stop 與 outer loop 共用同一個 `StopSignal`；executor retry 耗盡或中斷時回傳目前累積的 partial result，並寫入 `last_run_outcome`。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.cancel_signal` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
 
 - 若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(stop_condition=...)`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
 - `singleshot/ge.py`、`singleshot/check.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。

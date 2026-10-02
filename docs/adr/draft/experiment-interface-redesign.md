@@ -1,6 +1,6 @@
 # 實驗核心、前端包裝與具名圖形產物
 
-**狀態：** 69 個核心、相關 caller 與共用依賴已在 integration 完成實作，舊自訂 pyplot routing backend 已退場。整體雙軸報告已交付；正式接受與 landing 仍由任務紀錄及使用者授權決定。本文仍是 ADR 草案，不代表持久分支已採用，也不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。
+**狀態：** 69 個核心、相關 caller 與共用依賴已在 integration 完成實作，舊自訂 pyplot routing backend 已退場。整體雙軸審查發現的接縫缺口正在修正，正式接受尚未完成，landing 另需使用者授權。本文仍是 ADR 草案，不代表持久分支已採用，也不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。
 
 ## 問題
 
@@ -83,7 +83,7 @@ Notebook run／load 正常返回後更新目前 RunRecord，清空目前分析�
 
 RunRecord.cfg 允許 None。正常 run 保有有效快照，load 對缺少或無法驗證的 cfg 保留有效資料與既有診斷，不用目前設定補成來源。需要 cfg 的分析或操作在其 owner 入口拒絕；無需 cfg 的分析仍可使用，不由 NotebookAdapter 一律阻擋。預設 canonical saver 保留缺 cfg 時拒絕，GUI 回填／寫回保留 skip。Shape、units、roles、dtype 的資料完整性驗證不放寬。
 
-一般實驗使用預設 save／load，作者可用相同 RunRecord 介面明確 override，不要求額外 experiment_codec，也不聲稱支援任意 Python 物件。Workflow streaming／grouped artifacts 保留自己的契約，不改成 one-shot record 格式。HTTP upload 成功後才可移除 local file。
+一般實驗使用預設 save／load，作者可用相同 RunRecord 介面明確 override，不要求額外 experiment_codec，也不聲稱支援任意 Python 物件。Workflow streaming／grouped artifacts 保留自己的契約，不改成 one-shot record 格式。PersistableExperiment、RecordExperiment 與 NotebookAdapter 的 save／load 只接本機路徑，不公開 server_ip／port；獨立 datafile／workflow transport 保留自己的契約。
 
 Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 exact saver。Path helper 不建立檔案或鎖，不宣稱原子 reservation。AnalysisRecord 保留記憶體內來源與 options，分析圖另外保存；不新增完整 analysis session 磁碟格式，也不撤銷實驗既有保存義務。
 
@@ -176,7 +176,7 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - Measure 的 ArtifactKey 以 stage 與圖名識別成果。ArtifactTracker 記錄每張圖是否曾成功保存，SaveService 捕捉本次保存來源與目的地。Save All 選尚未保存的成果，個別失敗不撤銷先前成功項。
 - [Session](../../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
 
-三個參考實驗已有各自的軟體接受紀錄。其餘核心與 callers 已整合。全 task 的 Standards／Spec 唯讀報告未列硬性標準違規或規格缺口，Standards 另保留三項設計觀察。這些報告不等於正式接受或 landing 授權。集中行為測試兩次得到 7431 passed、7 skipped；7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
+三個參考實驗已有各自的軟體接受紀錄。其餘核心與 callers 已整合。全 task 的專門 Standards／Spec 審查指出 Notebook 失敗提交、grouped persistence 接線及 typed analysis 等缺口；修正候選仍須驗證與重新審查。報告不等於正式接受或 landing 授權。修正前集中行為測試兩次得到 7431 passed、7 skipped；7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
 
 本次未操作硬體，也未重跑所有 Notebook cells 或 FFmpeg。既有 VSCode 60-frame 人工觀察只覆蓋當時的探針與版本。Standalone [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於新的 Plots host。
 
