@@ -115,6 +115,27 @@ def test_tree_branch_segments_follow_item_and_sibling_state(
         qapp.processEvents()
 
 
+@pytest.mark.parametrize(("scroll_offset", "depth"), [(0, 0), (10, 0), (20, 1)])
+def test_clipped_tree_guide_uses_normalized_logical_depth(
+    qapp: QApplication, scroll_offset: int, depth: int
+) -> None:
+    tree, _style = make_dense_cfg_tree()
+    try:
+        scroll = tree.horizontalScrollBar()
+        assert scroll is not None
+        scroll.setRange(0, 100)
+        scroll.setValue(scroll_offset)
+        assert scroll.value() == scroll_offset
+        image, rect = _paint_branch(tree, -5, QStyle.StateFlag.State_Item)
+        assert rect.center().x() < 0
+        assert image.pixelColor(rect.right(), rect.center().y()) == QColor(
+            TREE_DEPTH_COLORS[depth]
+        )
+    finally:
+        tree.deleteLater()
+        qapp.processEvents()
+
+
 def test_nested_tree_keeps_row_backgrounds_and_root_alignment(
     qapp: QApplication, ctrl: MagicMock
 ) -> None:
