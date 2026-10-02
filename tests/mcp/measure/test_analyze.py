@@ -456,6 +456,37 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
     ]
 
 
+def _inject_analysis_rejection(
+    client: MeasureClient,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rejection = {
+        "ok": False,
+        "error": {
+            "code": "precondition_failed",
+            "reason": "superseded_result",
+            "message": "original analysis was replaced",
+        },
+    }
+    if failure == "result_rejected":
+        client.transport.replies["tab.get_analyze_result"] = rejection
+    elif failure == "save_rejected":
+        client.transport.replies["tab.save_image"] = lambda params: (
+            rejection
+            if params["figure_name"] == "residual"
+            else {"ok": True, "result": {"image_path": "/actual/fit.png"}}
+        )
+    elif failure == "preview_rejected":
+        client.transport.replies["tab.get_figure"] = rejection
+    elif failure == "local_write":
+
+        def reject_write(path, data):
+            raise OSError("preview filesystem is full")
+
+        monkeypatch.setattr(Path, "write_bytes", reject_write)
+
+
 @pytest.mark.parametrize(
     "failure,phase,save_status,confirmed,unconfirmed",
     [
@@ -507,30 +538,7 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
         return {"png_b64": base64.b64encode(_PNG).decode()}
 
     client = _client(tmp_path, clients, respond)
-    rejection = {
-        "ok": False,
-        "error": {
-            "code": "precondition_failed",
-            "reason": "superseded_result",
-            "message": "original analysis was replaced",
-        },
-    }
-    if failure == "result_rejected":
-        client.transport.replies["tab.get_analyze_result"] = rejection
-    elif failure == "save_rejected":
-        client.transport.replies["tab.save_image"] = lambda params: (
-            rejection
-            if params["figure_name"] == "residual"
-            else {"ok": True, "result": {"image_path": "/actual/fit.png"}}
-        )
-    elif failure == "preview_rejected":
-        client.transport.replies["tab.get_figure"] = rejection
-    elif failure == "local_write":
-
-        def reject_write(path, data):
-            raise OSError("preview filesystem is full")
-
-        monkeypatch.setattr(Path, "write_bytes", reject_write)
+    _inject_analysis_rejection(client, failure, monkeypatch)
 
     reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
     assert reply["isError"] is True
