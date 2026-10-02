@@ -27,9 +27,12 @@ import json
 import os
 import sys
 from collections.abc import Callable, Collection
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
+
+from zcu_tools.mcp.core.reply import ToolReply
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -81,10 +84,8 @@ def _purge_old_call_logs(log_dir: Path, retain: int) -> None:
         return
     files = sorted(log_dir.glob("*-calls.jsonl"))
     for stale in files[:-retain]:
-        try:
+        with suppress(OSError):  # Best-effort; skip locked files on Windows
             stale.unlink(missing_ok=True)
-        except OSError:
-            pass  # Best-effort; skip locked files on Windows
 
 
 def _get_log_file():  # type: ignore[return]
@@ -105,7 +106,7 @@ def _get_log_file():  # type: ignore[return]
         path = _log_path()
         _purge_old_call_logs(path.parent, _DEFAULT_RETAIN)
         _log_file = open(path, "w", encoding="utf-8")  # noqa: SIM115
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - log setup must not break tools
         if not _internal_error_reported:
             _internal_error_reported = True
             print(
@@ -126,10 +127,10 @@ def _safe_dumps(obj: Any) -> str:
     """Serialize ``obj`` to a JSON string, falling back to repr on failure."""
     try:
         return json.dumps(obj, default=str)
-    except Exception:
+    except Exception:  # noqa: BLE001 - arbitrary __str__ can fail during logging
         try:
             return repr(obj)
-        except Exception:
+        except Exception:  # noqa: BLE001 - arbitrary __repr__ can fail too
             return "<unrepresentable>"
 
 
@@ -159,7 +160,7 @@ def _serialize_field(obj: Any) -> Any:
     truncated = _truncate_if_needed(raw)
     try:
         return json.loads(truncated)
-    except Exception:
+    except json.JSONDecodeError:
         # truncated string may not be valid JSON after mid-character cut —
         # store it as a plain string rather than crashing.
         return truncated
@@ -180,7 +181,7 @@ def _write_entry(entry: dict[str, Any]) -> None:
         line = json.dumps(entry, default=str) + "\n"
         fh.write(line)
         fh.flush()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - all log failures are isolated
         if not _internal_error_reported:
             _internal_error_reported = True
             print(f"[call_log] Write failed: {exc}", file=sys.stderr)
@@ -226,7 +227,8 @@ def wrap_handler(
             reason = getattr(exc, "reason", None)
             if reason:
                 error_text = f"{error_text} [reason={reason}]"
-            try:
+            # Logging must not replace the handler's exception.
+            with suppress(Exception):
                 _write_entry(
                     {
                         "ts": ts,
@@ -238,24 +240,22 @@ def wrap_handler(
                         "duration_ms": duration_ms,
                     }
                 )
-            except Exception:
-                pass  # log failure must never suppress the handler's exception
             raise  # re-raise original exception unchanged
 
         duration_ms = round((datetime.now().timestamp() - t_start) * 1000, 3)
-        try:
+        with suppress(Exception):  # Logging must not replace the handler's result
             _write_entry(
                 {
                     "ts": ts,
                     "tool": name,
                     "input": _serialize_field(logged_input),
-                    "output": _serialize_field(result),
+                    "output": _serialize_field(
+                        result.data if isinstance(result, ToolReply) else result
+                    ),
                     "status": "success",
                     "duration_ms": duration_ms,
                 }
             )
-        except Exception:
-            pass  # log failure must never suppress the handler's result
         return result
 
     return _wrapped

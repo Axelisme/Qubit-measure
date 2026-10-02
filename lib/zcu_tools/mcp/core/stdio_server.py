@@ -15,6 +15,7 @@ surface, independent of any GUI connection:
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import sys
@@ -24,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any, TextIO
 
 from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
+from zcu_tools.mcp.core.reply import ToolReply
 
 _GENERATED_RPC_TRANSPORT_SLACK_SECONDS = 1.0
 
@@ -294,8 +296,20 @@ def _call_tool(
         # Compact separators (no indent, no spaces) keep the tool reply
         # token-light. ensure_ascii stays default (True): the outer JSON-RPC
         # envelope re-escapes non-ASCII anyway, so turning it off buys nothing.
-        text = res if isinstance(res, str) else json.dumps(res, separators=(",", ":"))
+        data = res.data if isinstance(res, ToolReply) else res
+        text = (
+            data if isinstance(data, str) else json.dumps(data, separators=(",", ":"))
+        )
         content = [{"type": "text", "text": text}]
+        if isinstance(res, ToolReply):
+            content.extend(
+                {
+                    "type": "image",
+                    "mimeType": "image/png",
+                    "data": base64.b64encode(image.data).decode("ascii"),
+                }
+                for image in res.images
+            )
         if hooks.on_each_reply is not None:
             content.extend(hooks.on_each_reply())
     except Exception as e:  # noqa: BLE001 — tool isolation returns an isError reply

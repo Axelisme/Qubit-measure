@@ -6,6 +6,7 @@ internal state directly (via monkeypatching) to keep the tests hermetic.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.core.reply import PngImage, ToolReply
 
 # ---------------------------------------------------------------------------
 # Helpers for resetting the lazy-open module state between tests
@@ -65,7 +67,7 @@ def test_success_entry_written(monkeypatch, tmp_path):
     """A successful handler call writes one JSONL entry with expected fields."""
     mod = _reload_call_log(monkeypatch, tmp_path)
 
-    def my_handler(arguments: dict) -> dict:
+    def my_handler(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"value": 42}
 
     wrapped = mod.wrap_handler("gui_foo", my_handler)
@@ -84,6 +86,33 @@ def test_success_entry_written(monkeypatch, tmp_path):
     assert e["output"] == {"value": 42}
     assert isinstance(e["duration_ms"], float | int)
     assert "ts" in e
+
+
+@pytest.mark.parametrize("with_image", [False, True])
+def test_typed_reply_is_preserved_and_logs_structured_data_only(
+    monkeypatch, with_image
+):
+    import zcu_tools.mcp.core.call_log as mod
+
+    state_names = ("_log_file", "_open_attempted", "_internal_error_reported")
+    original = {name: vars(mod)[name] for name in state_names}
+    images = (PngImage(b"binary payload" * 10_000),) if with_image else ()
+    expected = ToolReply(
+        {"summary": {"frequency": 5.0}, "figure": "/session/fit.png"}, images
+    )
+    with io.StringIO() as log, monkeypatch.context() as patch:
+        patch.delenv("ZCU_MCP_CALL_LOG", raising=False)
+        patch.setattr(mod, "_log_file", log)
+        patch.setattr(mod, "_open_attempted", True)
+        result = mod.wrap_handler("tab_analyze", lambda _: expected)({"tab": "t"})
+        assert result is expected
+        entries = [json.loads(line) for line in log.getvalue().splitlines()]
+        assert len(entries) == 1
+        assert entries[0]["output"] == expected.data
+        assert entries[0]["status"] == "success"
+    assert {name: vars(mod)[name] for name in state_names} == original, (
+        "typed reply logging test leaked module state"
+    )
 
 
 def test_redacted_input_is_not_logged_but_reaches_the_handler(monkeypatch, tmp_path):
@@ -117,7 +146,7 @@ def test_error_entry_written_and_reraises(monkeypatch, tmp_path):
     class MyError(RuntimeError):
         pass
 
-    def bad_handler(arguments: dict) -> dict:
+    def bad_handler(arguments: dict[str, Any]) -> dict[str, Any]:
         raise MyError("something went wrong")
 
     wrapped = mod.wrap_handler("gui_bar", bad_handler)
@@ -143,7 +172,7 @@ def test_large_input_truncated(monkeypatch, tmp_path):
 
     big_value = "A" * 20_000  # well over 8 KiB when JSON-serialized
 
-    def handler(arguments: dict) -> dict:
+    def handler(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}
 
     wrapped = mod.wrap_handler("gui_big", handler)
@@ -169,7 +198,7 @@ def test_large_output_truncated(monkeypatch, tmp_path):
 
     big_output = "B" * 20_000
 
-    def handler(arguments: dict) -> str:
+    def handler(arguments: dict[str, Any]) -> str:
         return big_output
 
     wrapped = mod.wrap_handler("gui_bigout", handler)
@@ -192,7 +221,7 @@ def test_unserializable_input_does_not_crash(monkeypatch, tmp_path):
         def __repr__(self):
             return "<Weird object>"
 
-    def handler(arguments: dict) -> dict:
+    def handler(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}
 
     wrapped = mod.wrap_handler("gui_weird", handler)
@@ -210,7 +239,7 @@ def test_kill_switch_no_file_written(monkeypatch, tmp_path):
     """ZCU_MCP_CALL_LOG=0 disables all logging — no file is created."""
     mod = _reload_call_log(monkeypatch, tmp_path, enabled=False)
 
-    def handler(arguments: dict) -> dict:
+    def handler(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}
 
     wrapped = mod.wrap_handler("gui_noop", handler)
@@ -286,7 +315,7 @@ def test_write_failure_does_not_affect_handler(monkeypatch, tmp_path):
 
     monkeypatch.setattr(mod, "_write_entry", _bad_write)
 
-    def handler(arguments: dict) -> dict:
+    def handler(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}
 
     wrapped = mod.wrap_handler("gui_diskfull", handler)
@@ -301,7 +330,7 @@ def test_wrap_handler_transparent(monkeypatch, tmp_path):
 
     expected = {"nested": [1, 2, 3], "flag": True}
 
-    def handler(arguments: dict) -> dict:
+    def handler(arguments: dict[str, Any]) -> dict[str, Any]:
         return {**expected, "echo": arguments.get("key")}
 
     wrapped = mod.wrap_handler("gui_echo", handler)

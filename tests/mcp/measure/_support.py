@@ -75,7 +75,7 @@ class MeasureClient:
     transport: WireTransport
     tools: ToolTable
 
-    def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def call(self, name: str, arguments: dict[str, Any]) -> Any:
         return self.tools[name]["handler"](arguments)
 
 

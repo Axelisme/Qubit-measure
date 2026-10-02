@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02, accept all pane candidates
+**Last updated:** 2026-10-02, analysis image delivery
 
 # `zcu_tools/mcp/measure/`
 
@@ -13,7 +13,7 @@
 - `tab_get` summary/artifacts 與 `tab_live` 保留完整 `operation_state`，含 result/analysis revisions、availability 及有效 paths。cfg-only 讀取不暗中讀 snapshot；原始 result 陣列不是操作狀態的必要內容。
 - `tab_open(from_file)` 只送一次 GUI `tab.open_file`，不隱藏預讀。Agent 必須先讀 context。GUI 負責建立、載入、失敗清理與聚焦；成功另回 cfg_backfill，not_applied 保留結果。新 tab 只建立存在 baseline，後续寫入仍需明確讀取對應資源。
 - 接手既有或重啟後的 GUI 時，明確呼叫 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)` 和 `context.snapshot`，分別重讀 tab 操作狀態、完整 SoC cfg、目前 active label 與所有可序列化 md/ml cfg。`context.snapshot` 可能回傳大型敏感資料，遇無法序列化的值會失敗且不刷新版本；摘要、局部 getter 與裸 `resources.versions` 都不能替代完整讀取。
-- 圖像由 GUI owner 渲染並寫入 MCP session 專屬暫存 PNG；工具只回絕對路徑，連線期間可讀，server 關閉時清理。`tab_live` 的 elapsed_s 來自 GUI operation handle 的單一起時，不取各進度條 elapsed 的最大值。既有無 `out_path` 的 GUI screenshot RPC 仍可回 base64，MCP 特化工具不用 inline 圖片。
+- 圖像由 GUI owner 渲染，MCP session 擁有暫存 PNG，server 關閉時清理。`tab_analyze` 與 `tab_interact` 在同一回覆交付絕對路徑與 MCP image content；其他圖像工具仍只回路徑。這些暫存圖不代表持久 artifact 已保存。Core 的 `ToolReply` 持有本次 structured data 與 PNG bytes，stdio 負責編碼，call log 只記 data；圖片不經全局 buffer。`tab_live` 的 elapsed_s 來自 GUI operation handle 的單一起時，不取各進度條 elapsed 的最大值。
 - `bridge` 只管 socket/GUI subprocess。`connect(token=...)` 使用現有 GUI control-token 認證；session 留住本次憑證供斷線後重新握手，顯式切換 port 不沿用前一 GUI 的 token。未授權與 wire 不相容分別回報；MCP 工具記錄遮蔽 token。`connect(launch=...)` 對已由此 bridge 啟動且仍活著的 GUI 不會在另一個空 port 假裝再次啟動；MCP 清理只斷線，不殺 GUI。所有硬體 gate、取消與 operation 結果都仍歸 GUI owners。
 
 ## 傳輸上限
@@ -56,7 +56,7 @@ Library rename/delete只改library；LINKED參照保留舊鍵並可能失效，M
 
 ## Interactive
 
-`tab_interact` 原樣轉送一次 active plugin command，不解讀實驗專屬命令。省略 payload 時回 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 先驗證 session 與命令，再跟隨 Analysis pane 並執行；done 結束原 analysis operation，取消沿用 cancel(op)。此介面採 best-effort，不加 seen guard，後提交者為準；沒有來源鎖、隱藏預讀或重試。GUI 傳回的 PNG 在 MCP 邊界解碼到 session-owned 暫存檔，工具回絕對路徑而非 inline 圖片。
+`tab_interact` 原樣轉送一次 active plugin command，不解讀實驗專屬命令。省略 payload 時回 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 先驗證 session 與命令，再跟隨 Analysis pane 並執行；done 結束原 analysis operation，取消沿用 cancel(op)。此介面採 best-effort，不加 seen guard，後提交者為準；沒有來源鎖、隱藏預讀或重試。GUI 傳回的 PNG 在 MCP 邊界解碼到 session-owned 暫存檔，同一份 bytes 也作為 MCP image content。沒有 figure 就不附圖片，壞的 wire image 仍報錯。`tab_analyze` 開始互動時立即讀取目前 state、commands 與可用圖片，連同 tab、op 和實際 params 交接；非互動分析只在 finished 後讀 summary 與圖，不以舊結果填入 running、failed 或 cancelled 回覆。
 
 ## Writeback
 
