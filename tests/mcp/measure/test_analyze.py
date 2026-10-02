@@ -100,13 +100,17 @@ def _methods(client: MeasureClient) -> list[str]:
     ]
 
 
-def _result_reply(pane: str, names: list[str], params: dict[str, Any]) -> dict[str, Any]:
+def _result_reply(
+    pane: str, names: list[str], params: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "summary": {"frequency": 5.0},
         "params": params,
         "operation_state": {
             f"{pane}_state": {
-                "figure_names": names, "has_figure": bool(names), "available": True,
+                "figure_names": names,
+                "has_figure": bool(names),
+                "available": True,
             },
         },
     }
@@ -207,7 +211,8 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         if name == result_method:
             assert params == {"tab_id": "t", "operation_id": 71}
             return _result_reply(
-                pane, ["fit", "residual"] if has_figure else [],
+                pane,
+                ["fit", "residual"] if has_figure else [],
                 {"gain": 2, "model": "fit"},
             )
         if name == "tab.save_image":
@@ -417,7 +422,9 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
             return _result_reply(
-                "analysis" if stage == "primary" else "post_analysis", ["fit"], {},
+                "analysis" if stage == "primary" else "post_analysis",
+                ["fit"],
+                {},
             )
         if name == "tab.save_image":
             return {"image_path": "/actual/fit.png"}
@@ -463,12 +470,21 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
     ],
 )
 def test_analysis_failure_retains_confirmed_prefix_without_replay(
-    tmp_path, clients, monkeypatch, failure, phase, save_status, confirmed, unconfirmed,
+    tmp_path,
+    clients,
+    monkeypatch,
+    failure,
+    phase,
+    save_status,
+    confirmed,
+    unconfirmed,
 ):
     def respond(method, params):
         if method == "tab.analyze":
             return {
-                "operation_id": 71, "interactive": False, "params": {"gain": 2},
+                "operation_id": 71,
+                "interactive": False,
+                "params": {"gain": 2},
                 "invalidated_on_success": [],
             }
         if method == "operation.await":
@@ -494,7 +510,8 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
     rejection = {
         "ok": False,
         "error": {
-            "code": "precondition_failed", "reason": "superseded_result",
+            "code": "precondition_failed",
+            "reason": "superseded_result",
             "message": "original analysis was replaced",
         },
     }
@@ -502,12 +519,14 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
         client.transport.replies["tab.get_analyze_result"] = rejection
     elif failure == "save_rejected":
         client.transport.replies["tab.save_image"] = lambda params: (
-            rejection if params["figure_name"] == "residual"
+            rejection
+            if params["figure_name"] == "residual"
             else {"ok": True, "result": {"image_path": "/actual/fit.png"}}
         )
     elif failure == "preview_rejected":
         client.transport.replies["tab.get_figure"] = rejection
     elif failure == "local_write":
+
         def reject_write(path, data):
             raise OSError("preview filesystem is full")
 
@@ -529,12 +548,22 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
         assert data["remaining_images"] is None
     else:
         assert data["result"]["summary"] == {"frequency": 5.0}
-        assert data["remaining_images"] == [name for name in ["fit", "residual"] if name not in confirmed]
+        assert data["remaining_images"] == [
+            name for name in ["fit", "residual"] if name not in confirmed
+        ]
     assert data["figure"] is None
     methods = _methods(client)
     assert methods.count("tab.analyze") == 1
     assert methods.count("tab.get_analyze_result") == 1
-    assert methods.count("tab.get_figure") == (1 if failure in ("preview_rejected", "local_write") else 0)
-    assert [params["figure_name"] for method, params in client.transport.sent if method == "tab.save_image"] == (
-        [] if failure in ("result_rejected", "after_result_eof") else ["fit", "residual"]
+    assert methods.count("tab.get_figure") == (
+        1 if failure in ("preview_rejected", "local_write") else 0
+    )
+    assert [
+        params["figure_name"]
+        for method, params in client.transport.sent
+        if method == "tab.save_image"
+    ] == (
+        []
+        if failure in ("result_rejected", "after_result_eof")
+        else ["fit", "residual"]
     )

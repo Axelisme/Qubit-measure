@@ -90,6 +90,15 @@ def _analysis_result(
     ), list(names)
 
 
+class _RpcFailure(RuntimeError):
+    """Keep the attempted phase distinct from the last admitted phase."""
+
+    def __init__(self, phase: ExecutionPhase, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.phase = phase
+        self.cause = cause
+
+
 class AnalysisExecution:
     """One fixed GUI binding and detached observations of its completion."""
 
@@ -177,21 +186,27 @@ class AnalysisExecution:
         image: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        return self._connection.send_gui_rpc(
-            method,
-            params,
-            timeout_seconds=timeout,
-            operation_handle=self._snapshot.op,
-            before_send=lambda: self._admit(phase, image),
-        )
+        try:
+            return self._connection.send_gui_rpc(
+                method,
+                params,
+                timeout_seconds=timeout,
+                operation_handle=self._snapshot.op,
+                before_send=lambda: self._admit(phase, image),
+            )
+        except Exception as exc:
+            raise _RpcFailure(phase, exc) from exc
 
-    def _fail(self, exc: Exception) -> None:
+    def _fail(self, exc: Exception, phase: ExecutionPhase | None = None) -> None:
         with self._condition:
             snapshot = self._snapshot
+            phase = snapshot.phase if phase is None else phase
             reason = exc.reason if isinstance(exc, GuiRpcError) else None
             code = exc.code if isinstance(exc, GuiRpcError) else None
             save_status = snapshot.save_status
             unconfirmed = snapshot.unconfirmed_image
+            if phase == "image_save" and save_status != "saved":
+                save_status = "incomplete"
             if unconfirmed is not None:
                 known_rejection = code is not None and reason != "gui_transport_timeout"
                 save_status = "incomplete" if known_rejection else "unknown"
@@ -204,7 +219,7 @@ class AnalysisExecution:
                 save_status=save_status,
                 unconfirmed_image=unconfirmed,
                 error=ExecutionError(
-                    snapshot.phase, reason or "execution_failed", str(exc), code
+                    phase, reason or "execution_failed", str(exc), code
                 ),
             )
             self._condition.notify_all()
@@ -215,6 +230,8 @@ class AnalysisExecution:
             if not self._await_operation():
                 return
             self._complete_analysis()
+        except _RpcFailure as failure:
+            self._fail(failure.cause, failure.phase)
         except Exception as exc:  # noqa: BLE001 - worker boundary must publish every failure
             self._fail(exc)
 
