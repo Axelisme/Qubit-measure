@@ -858,11 +858,27 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     assert "tab.get_figure" not in _methods(client)
 
 
+def _hold_wire_reply(client: MeasureClient, monkeypatch: pytest.MonkeyPatch, method: str) -> Event:
+    """Model a GUI request that was dispatched but has not replied."""
+    sent = Event()
+    send_line = client.transport.send_line
+
+    def send(payload):
+        if payload["method"] == method:
+            client.transport.sent.append((payload["method"], payload["params"]))
+            sent.set()
+        else:
+            send_line(payload)
+
+    monkeypatch.setattr(client.transport, "send_line", send)
+    return sent
+
+
 @pytest.mark.parametrize("cancel_first", [False, True])
 def test_close_drains_pending_save_and_cancel_before_png_cleanup(
     tmp_path, clients, monkeypatch, cancel_first
 ):
-    saving, intent = Event(), Event()
+    intent = Event()
     read_internal = GuiConnection.read_internal
 
     def read(connection, method, params, **kwargs):
@@ -883,23 +899,15 @@ def test_close_drains_pending_save_and_cancel_before_png_cleanup(
     })
     session = client.context.session
     image = session.write_png(_PNG)
-    send_line = client.transport.send_line
+    saving = _hold_wire_reply(client, monkeypatch, "tab.save_image")
     cleanup_pngs = session.cleanup_pngs
     cleanup_states = []
-
-    def send(payload):
-        if payload["method"] == "tab.save_image":
-            client.transport.sent.append((payload["method"], payload["params"]))
-            saving.set()
-        else:
-            send_line(payload)
 
     def cleanup():
         cleanup_states.extend(session.executions.snapshots())
         assert image.exists()
         cleanup_pngs()
 
-    monkeypatch.setattr(client.transport, "send_line", send)
     request = None
     with ThreadPoolExecutor(max_workers=2) as pool:
         try:

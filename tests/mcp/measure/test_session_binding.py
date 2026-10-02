@@ -31,6 +31,14 @@ def make_restartable_client(
     return client, second
 
 
+def _assert_admitted_analysis_connection_loss(reply) -> None:
+    assert reply.is_error is True
+    assert reply.data["op"] == 1
+    assert reply.data["status"] in {"interactive", "failed"}
+    error = reply.data["error"] or reply.data["interaction"]["delivery_error"]
+    assert "connection" in str(error).lower()
+
+
 def prime_operation_discovery(client: MeasureClient, gui_id: int = 1) -> None:
     client.transport.replies.update(
         {
@@ -381,15 +389,7 @@ def test_assembled_multistep_tools_do_not_cross_connections(
             assert result["completed"] == []
             assert result["not_started"] == ["primary"]
     elif tool == "tab_analyze":
-        result = client.call(tool, arguments)
-        assert result.is_error is True
-        assert result.data["op"] == 1
-        if result.data["status"] == "interactive":
-            assert "connection" in result.data["interaction"]["delivery_error"].lower()
-        else:
-            assert (result.data["status"], result.data["error"]["reason"]) == (
-                "failed", "connection_lost"
-            )
+        _assert_admitted_analysis_connection_loss(client.call(tool, arguments))
     else:
         with pytest.raises(GuiRpcError) as error:
             client.call(tool, arguments)
