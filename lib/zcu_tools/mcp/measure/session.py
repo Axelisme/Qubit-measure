@@ -183,6 +183,7 @@ class MeasureMcpSession:
         port_is_open: PortIsOpenFn,
     ) -> None:
         from zcu_tools.mcp.measure.analysis_execution import AnalysisExecutions
+        from zcu_tools.mcp.measure.recipe_context import RecipeExecutions
 
         self._config = config
         self._rpc_lock = RLock()
@@ -190,6 +191,7 @@ class MeasureMcpSession:
         self._close_lock = Lock()
         self._closed = Event()
         self.executions = AnalysisExecutions(self, self._closed)
+        self.recipes = RecipeExecutions(self._closed)
         self._generation = 0
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
@@ -226,6 +228,7 @@ class MeasureMcpSession:
     def close(self) -> None:
         """Permanently stop admission, disconnect, drain work, then remove PNGs."""
         self._closed.set()
+        self.recipes.stop_admission()
         self.executions.stop_admission()
         with self._close_lock:
             if self._bridge is not None:
@@ -236,6 +239,7 @@ class MeasureMcpSession:
                 pass
             if self._bridge is not None:
                 self._bridge.disconnect()
+            self.recipes.join()
             self.executions.join()
             self.cleanup_pngs()
 

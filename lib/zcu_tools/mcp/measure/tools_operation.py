@@ -16,8 +16,10 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read a local execution, or GUI orientation and all session executions."""
     if "execution" in arguments:
-        execution = ctx.session.executions.get(_execution_id(arguments))
-        return asdict(execution.snapshot())
+        key = _execution_id(arguments)
+        if key.startswith("recipe-"):
+            return ctx.session.recipes.get(key).snapshot()
+        return asdict(ctx.session.executions.get(key).snapshot())
     session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
@@ -63,7 +65,8 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "predictor": {"loaded": session.read_internal("predictor.info", {})["loaded"]},
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
-        "executions": [asdict(item) for item in ctx.session.executions.snapshots()],
+        "executions": [asdict(item) for item in ctx.session.executions.snapshots()]
+        + ctx.session.recipes.snapshots(),
         "running": [
             {**operation, "op": session.expose_operation(operation["op"])}
             for operation in session.read_internal("operation.active", {})["operations"]
@@ -106,7 +109,12 @@ def _wait_tool(
     if "execution" in arguments:
         timeout = _wait_timeout(arguments)
         start = time.monotonic()
-        execution = ctx.session.executions.get(_execution_id(arguments))
+        key = _execution_id(arguments)
+        execution = (
+            ctx.session.recipes.get(key)
+            if key.startswith("recipe-")
+            else ctx.session.executions.get(key)
+        )
         reply = execution.wait(timeout)
         return ToolReply(
             {**reply.data, "elapsed_s": max(0.0, time.monotonic() - start)},
