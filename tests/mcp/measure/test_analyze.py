@@ -901,6 +901,7 @@ def test_close_drains_pending_save_and_cancel_before_png_cleanup(
         cleanup_pngs()
 
     monkeypatch.setattr(client.transport, "send_line", send)
+    request = None
     with ThreadPoolExecutor(max_workers=2) as pool:
         try:
             started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
@@ -912,6 +913,7 @@ def test_close_drains_pending_save_and_cancel_before_png_cleanup(
                 patch.setattr(session, "cleanup_pngs", cleanup)
                 pool.submit(session.close).result(timeout=2)
             if cancel_first:
+                assert request is not None
                 cancelled = request.result(timeout=2)
                 assert cancelled.is_error is True
                 assert cancelled.data["gui_cancel"]["status"] == "failed"
