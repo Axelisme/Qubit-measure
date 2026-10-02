@@ -405,7 +405,7 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
 
 
 def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctrl):
-    from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.app.measure.ui.cfg_binding import (
         make_value_source_input_enhancer,
     )
@@ -446,7 +446,7 @@ def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctr
 
 
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
-    from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.resources.context import MetaDict
 
@@ -538,7 +538,7 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
 
 
 def test_attach_bad_renderer_return_leaves_draft_callbacks_empty(qapp, ctrl):
-    from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QWidget
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     def bad_factory(
@@ -1108,7 +1108,6 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
 
 
 def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
-    from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = section_schema(
@@ -1258,7 +1257,7 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
             "stable": DirectValue(3.0),
         },
     )
-    from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+    from qtpy.QtCore import Qt
 
     w = CfgFormWidget()
     model = attach_draft(w, schema, ctrl)
@@ -1360,12 +1359,10 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
 
 
 def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl):
-    from qtpy.QtWidgets import QWidget
     from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
         FieldDecorationPatch,
     )
-    from zcu_tools.gui.widgets.cfg.fields import ElidedLabel
 
     class TooltipProvider:
         def decoration_for(
@@ -1530,7 +1527,6 @@ def test_choice_section_unknown_selector_value_fast_fails(qapp, ctrl):
 def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
     """All LiteralSpec fields render no widget — discriminators (type/style) and
     adapter lock_literal'd fields (e.g. a sweep-driven freq) alike."""
-    from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = section_schema(
@@ -1579,12 +1575,11 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
 
 
 def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ctrl):
-    from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
         FieldDecorationPatch,
     )
-    from zcu_tools.gui.widgets.cfg.fields import ElidedLabel
 
     class RevealLiteralProvider:
         def decoration_for(
@@ -1635,7 +1630,6 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
 
 
 def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl):
-    from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
@@ -1687,7 +1681,6 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
 
 
 def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
-    from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 

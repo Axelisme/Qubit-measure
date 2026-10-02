@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError, fields
 from typing import Any, cast
 
 import pytest
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
 from zcu_tools.gui.cfg import ScalarSpec
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
@@ -170,7 +170,7 @@ def test_default_factory_returns_fresh_frozen_complete_registries() -> None:
         first.resolve(SectionField)
 
 
-def test_render_rejects_non_qwidget_result(qapp) -> None:  # noqa: ARG001
+def test_render_rejects_non_qwidget_result(qapp) -> None:
     class ProtocolOnly:
         def __init__(self, field: CfgField) -> None:
             self._field = field
@@ -205,7 +205,7 @@ def test_render_rejects_non_qwidget_result(qapp) -> None:  # noqa: ARG001
         frozen.render(field, FieldRenderContext(registry=frozen))
 
 
-def test_render_rejects_qwidget_without_field_widget_protocol(qapp) -> None:  # noqa: ARG001
+def test_render_rejects_qwidget_without_field_widget_protocol(qapp) -> None:
     def factory(
         field: CfgField,
         context: FieldRenderContext,
@@ -239,7 +239,7 @@ def test_render_rejects_context_from_another_registry() -> None:
         first.render(field, FieldRenderContext(registry=second))
 
 
-def test_forms_build_fresh_default_registry_instances(qapp) -> None:  # noqa: ARG001
+def test_forms_build_fresh_default_registry_instances(qapp) -> None:
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     first = CfgFormWidget()

@@ -75,7 +75,7 @@ def _make_widget(field: ReferenceField) -> ReferenceWidget:
     )
 
 
-def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):  # noqa: ARG001
+def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):
     catalog = _Catalog()
     field = _make_field(catalog)
     widget = _make_widget(field)
@@ -91,7 +91,7 @@ def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):  # noqa: AR
     widget.teardown()
 
 
-def test_module_ref_widget_teardown_disconnects_field_callbacks(qapp):  # noqa: ARG001
+def test_module_ref_widget_teardown_disconnects_field_callbacks(qapp):
     field = _make_field(_Catalog())
     widget = _make_widget(field)
     widget.teardown()
@@ -99,7 +99,7 @@ def test_module_ref_widget_teardown_disconnects_field_callbacks(qapp):  # noqa: 
     assert widget._on_model_changed not in field.on_change._callbacks
 
 
-def test_module_ref_widget_initial_combo_without_catalog_keys(qapp):  # noqa: ARG001
+def test_module_ref_widget_initial_combo_without_catalog_keys(qapp):
     widget = _make_widget(_make_field(_Catalog()))
 
     assert [

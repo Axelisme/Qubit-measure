@@ -6,13 +6,10 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QCheckBox,
-    QComboBox,
+from qtpy.QtWidgets import (
     QLabel,
-    QLineEdit,
     QSizePolicy,
-    QTreeWidgetItem,  # type: ignore[attr-defined]
+    QTreeWidgetItem,
 )
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
@@ -26,7 +23,6 @@ from zcu_tools.gui.cfg import (
     ChoiceSectionSpec,
     DirectValue,
     EvalValue,
-    LiteralSpec,
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
@@ -41,7 +37,6 @@ from zcu_tools.gui.cfg.binding import (
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg import (
     CfgFormWidget,
-    FieldRenderContext,
     TreeCfgWidget,
 )
 from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget, SweepWidget
@@ -87,7 +82,7 @@ def test_default_is_tree_and_no_structure_selector(qapp, ctrl):
     schema = _simple_schema()
     _attach(w, schema, ctrl)
     assert isinstance(w._root_widget, TreeCfgWidget)
-    tree = cast(TreeCfgWidget, w._root_widget)._tree
+    tree = w._root_widget._tree
     assert tree.isHeaderHidden() is True
     assert tree.rootIsDecorated() is False
     assert tree.indentation() == 10
@@ -107,7 +102,7 @@ def test_tree_creates_tree(qapp, ctrl):
     schema = _simple_schema()
     _attach(w, schema, ctrl)
     assert isinstance(w._root_widget, TreeCfgWidget)
-    tree = cast(TreeCfgWidget, w._root_widget)._tree
+    tree = w._root_widget._tree
     assert tree.isHeaderHidden() is True
     assert tree.rootIsDecorated() is False
     assert tree.indentation() == 10
@@ -380,7 +375,7 @@ def test_tree_whole_row_folding_is_view_only(qapp, ctrl):
 
 
 def test_tree_indentation_and_header_and_connectors(qapp, ctrl):
-    from qtpy.QtWidgets import QProxyStyle  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QProxyStyle
 
     w = CfgFormWidget()
     schema = _simple_schema()
@@ -727,7 +722,7 @@ def test_tree_outer_reenable_preserves_nested_reference_and_decoration_parity(
 
     def find_item(path: str):
         # Leaves are not in _path_to_item; search via UserRole data.
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
 
         stack = [tree.invisibleRootItem()]
         while stack:
@@ -874,7 +869,7 @@ def test_tree_outer_reenable_preserves_decoration_disabled_container_parity(qapp
     outer_field = cast(ReferenceField, draft.root.fields["outer"])
 
     def find_item(path: str):
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
 
         stack = [tree.invisibleRootItem()]
         while stack:
