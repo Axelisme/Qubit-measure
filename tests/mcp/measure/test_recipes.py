@@ -66,12 +66,13 @@ class LookbackGui:
         }
         self.ran = False
         self.raw_saved = False
+        self.md: dict[str, Any] = {}
 
     def _observations(self) -> dict[str, dict[str, Any]]:
         return {
             "context.snapshot": {
                 "label": "sample",
-                "md": {},
+                "md": self.md,
                 "ml": {"modules": {}, "waveforms": {}},
             },
             "tab.new": {"tab_id": "t"},
@@ -107,7 +108,12 @@ class LookbackGui:
             if node["kind"] == "reference":
                 node["ref"] = edit["value"].get("__ref") if edit["value"] else None
             else:
-                node.update(_scalar(edit["value"]))
+                value = edit["value"]
+                if isinstance(value, dict) and "__expr" in value:
+                    node.update(_scalar(self.md.get(value["__expr"])))
+                    node["input"].update(mode="expression", raw=value["__expr"])
+                else:
+                    node.update(_scalar(value))
         revision = int(self.publication["cfg_ref"]["revision"]) + 1
         self.publication["cfg_ref"]["revision"] = str(revision)
 
@@ -122,9 +128,11 @@ class LookbackGui:
             if method in expected:
                 assert params == expected[method]
             return deepcopy(observations[method])
-        if method in ("tab.get_cfg", "tab.edit_cfg"):
-            if method == "tab.edit_cfg":
-                self._edit(params)
+        if method in ("tab.get_cfg", "tab.edit_cfg", "tab.reset_cfg"):
+            if method != "tab.get_cfg":
+                self._edit(
+                    params if method == "tab.edit_cfg" else {**params, "edits": []}
+                )
             return deepcopy(self.publication)
         if method == "tab.run_start":
             assert params == {"tab_id": "t", "expected": self.publication["cfg_ref"]}
@@ -180,8 +188,10 @@ class LookbackGui:
         raise AssertionError(method)
 
 
+@pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
+    reuse,
 ):
     gui = LookbackGui()
     client = make_client(tmp_path, gui)
@@ -189,6 +199,7 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         reply = client.call(
             "lookback",
             {
+                "reuse_tab_id": "t" if reuse else None,
                 "frequency_mhz": 6020.0,
                 "readout_length_us": 4.0,
                 "trigger_offset_us": 0.2,
@@ -219,6 +230,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert actual["fields"]["rounds"]["value"] == 7
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.reset_cfg") == int(reuse)
+        assert methods.count("tab.new") == int(not reuse)
         assert methods.count("tab.save_data") == 1
         assert methods.count("tab.analyze") == 1
         assert methods.index("device.snapshot") < methods.index("tab.run_start")
@@ -306,5 +319,185 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         assert "tab.run_start" not in methods
         assert ("tab.new" in methods) is (reuse_tab_id is None)
         assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    "source", ["r_f", "library", "library_error", "library_invalid"]
+)
+def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
+    tmp_path, source
+):
+    gui = LookbackGui()
+    gui.md["r_f"] = 6500.0
+    readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
+    pulse = readout["children"]["pulse_cfg"]["children"]["freq"]
+    adc = readout["children"]["ro_cfg"]["children"]["ro_freq"]
+    pulse["input"]["resolved"] = 6100.0
+    adc["input"]["resolved"] = 6110.0
+    arguments = {} if source == "r_f" else {"readout_ref": "calibrated"}
+    if source == "library_error":
+        pulse["input"]["error"] = "unresolved"
+    if source == "library_invalid":
+        pulse["valid"] = False
+        pulse["input"]["validation_error"] = "outside range"
+    client = make_client(tmp_path, gui)
+    try:
+        reply = client.call("lookback", arguments)
+        assert reply.data["status"] == "finished", reply.data
+        fields = reply.data["actual"]["fields"]
+        expected_pulse = 6100.0 if source == "library" else 6500.0
+        expected_adc = 6500.0 if source == "r_f" else 6110.0
+        assert fields["modules.readout.pulse_cfg.freq"]["value"] == expected_pulse
+        assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == expected_adc
+        assert fields["modules.readout.pulse_cfg.freq"]["source"] == (
+            "library:calibrated" if source == "library" else "r_f"
+        )
+        assert fields["modules.readout.ro_cfg.ro_length"]["value"] == 2.0
+        assert fields["modules.readout.ro_cfg.trig_offset"]["value"] == 0.1
+        assert fields["rounds"]["value"] == 3
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"frequency_mhz": True},
+        {"frequency_mhz": float("nan")},
+        {"readout_length_us": float("inf")},
+        {"trigger_offset_us": "0.1"},
+        {"rounds": True},
+        {"rounds": 2.5},
+        {"reuse_tab_id": ""},
+        {"readout_ref": ""},
+        {"use_reset": False},
+        {"init_pulse_ref": 1},
+    ],
+)
+def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
+    tmp_path, arguments
+):
+    gui = LookbackGui()
+    gui.md["r_f"] = 6500.0
+    client = make_client(tmp_path, gui)
+    try:
+        reply = client.call("lookback", arguments)
+        assert reply.is_error
+        assert reply.data["status"] == "failed"
+        assert reply.data["tab"] is None
+        assert not gui.ran
+        assert not any(method.startswith("tab.") for method, _ in client.transport.sent)
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("failure", ["wrong_experiment", "busy", "missing", "stale"])
+def test_lookback_reuse_errors_do_not_create_replacement_or_retry(tmp_path, failure):
+    gui = LookbackGui()
+    client = make_client(tmp_path, gui)
+    if failure == "stale":
+        client.transport.replies["tab.reset_cfg"] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "stale_cfg",
+                "message": "changed",
+            },
+        }
+    else:
+        snapshot = gui("tab.snapshot", {"tab_id": "t"})
+        if failure == "missing":
+            snapshot["tabs"] = []
+        elif failure == "busy":
+            snapshot["tabs"][0]["interaction"]["is_analyzing"] = True
+        else:
+            snapshot["tabs"][0]["adapter_name"] = "other"
+        client.transport.replies["tab.snapshot"] = {"ok": True, "result": snapshot}
+    try:
+        reply = client.call("lookback", {"reuse_tab_id": "t", "frequency_mhz": 6000.0})
+        assert reply.is_error
+        assert reply.data["tab"] == "t"
+        methods = [method for method, _ in client.transport.sent]
+        assert "tab.new" not in methods
+        assert "tab.run_start" not in methods
+        assert methods.count("tab.reset_cfg") == int(failure == "stale")
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    "failure, phase, raw_status",
+    [
+        ("run", "run", "not_started"),
+        ("raw_start", "raw_save", "failed"),
+        ("raw_finish", "raw_save", "failed"),
+        ("analysis", "analysis", "saved"),
+        ("image", "analysis", "saved"),
+        ("writeback", "writeback_read", "saved"),
+    ],
+)
+def test_lookback_failure_preserves_completed_prefix_without_retry(
+    tmp_path, failure, phase, raw_status
+):
+    gui = LookbackGui()
+
+    def respond(method, params):
+        fail_operation = {"run": 71, "raw_finish": 82, "analysis": 93}.get(failure)
+        if method == "operation.await" and params["operation_id"] == fail_operation:
+            return {
+                "reason": "completed",
+                "status": "failed",
+                "error": "injected failure",
+            }
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    failed_method = {
+        "raw_start": "tab.save_data",
+        "image": "tab.save_image",
+        "writeback": "tab.writeback_preview",
+    }.get(failure)
+    if failed_method:
+        client.transport.replies[failed_method] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "injected",
+                "message": "injected failure",
+            },
+        }
+    try:
+        reply = client.call("lookback", {"frequency_mhz": 6000.0})
+        data = reply.data
+        assert data["status"] == "failed", data
+        assert reply.is_error
+        assert data["error"]["phase"] == phase
+        assert data["raw_save"]["status"] == raw_status
+        assert data["tab"] == "t"
+        assert data["run_op"] is not None
+        if raw_status == "saved":
+            assert data["raw_save"]["path"] == "/actual/raw.h5"
+        if failure == "raw_finish":
+            assert data["raw_save"]["reserved_path"] == "/actual/raw.h5"
+            assert data["raw_save"]["operation_outcome"]["status"] == "failed"
+        if failure in ("image", "writeback"):
+            assert data["analysis"]["result"]["summary"] == {"offset": 0.24}
+        if failure == "writeback":
+            assert data["analysis"]["saved_images"] == [
+                {"figure_name": "trace", "image_path": "/actual/trace.png"}
+            ]
+            assert reply.images[0].data == _PNG
+        methods = [method for method, _ in client.transport.sent]
+        for method in (
+            "tab.run_start",
+            "tab.save_data",
+            "tab.analyze",
+            "tab.writeback_preview",
+        ):
+            assert methods.count(method) <= 1
+        if raw_status != "saved":
+            assert "tab.analyze" not in methods
     finally:
         client.context.session.close()
