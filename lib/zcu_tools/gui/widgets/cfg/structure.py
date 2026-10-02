@@ -167,7 +167,9 @@ class TreeCfgWidget(QWidget):
         self._leaf_path_to_widget: dict[str, FieldWidgetProtocol] = {}
         self._ref_headers: list[FieldWidgetProtocol] = []
         self._ref_connections: list[tuple[ReferenceField, Callable[..., None]]] = []
-        self._ref_enabled_connections: list[tuple[ReferenceField, Callable[..., None]]] = []
+        self._ref_enabled_connections: list[
+            tuple[ReferenceField, Callable[..., None]]
+        ] = []
         self._ref_prev_state: dict[str, tuple[str, int | None, str | None]] = {}
         self._expanded_state: dict[str, bool] = {}
         self._elided_singleton_path_to_parent: dict[str, str] = {}
