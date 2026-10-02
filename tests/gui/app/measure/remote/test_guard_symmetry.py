@@ -81,7 +81,7 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
             run_analyze_control=ctrl,
             render_view=None,
             operation_control=ctrl,
-            save_control=ctrl,
+            save_control=ctrl.save_control,
         ),
     )
     try:
