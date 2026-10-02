@@ -489,6 +489,57 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         client.context.session.close()
 
 
+@pytest.mark.parametrize("selector", ["execution", "run_op", "op"])
+def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
+    tmp_path, monkeypatch, selector
+):
+    gui = LookbackGui()
+    analyzing = Event()
+    stopped = Event()
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == 93:
+            analyzing.set()
+            return (
+                {"reason": "completed", "status": "cancelled"}
+                if stopped.is_set() else {"reason": "timeout"}
+            )
+        if method == "operation.cancel":
+            assert params == {"operation_id": 93}
+            stopped.set()
+            return {"status": "cancelling"}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert analyzing.wait(1)
+        execution = initial.data["execution"]
+        state = client.call("status", {"execution": execution})
+        key = "execution" if selector == "execution" else "op"
+        arguments = {key: state[selector]}
+        early = client.call("finish_early", arguments)
+        assert early.data["status"] == "not_applicable"
+        assert not stopped.is_set()
+        cancelled = client.call("cancel", arguments)
+        assert cancelled.data["cancel_requested"]
+        assert cancelled.data["gui_cancel"]["status"] == "requested"
+        client.call("cancel", {"execution": execution})
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        assert terminal.data["status"] == "cancelled"
+        assert terminal.data["analysis"]["status"] == "cancelled"
+        assert terminal.data["analysis"]["cancel_requested"]
+        assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("operation.cancel") == 1
+        assert methods.count("tab.analyze") == 1
+        assert "tab.writeback_preview" not in methods
+    finally:
+        stopped.set()
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
