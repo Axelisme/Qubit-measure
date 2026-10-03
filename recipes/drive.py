@@ -183,7 +183,82 @@ def _drive_frequency(
 
 def amplitude_rabi(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one gain sweep without requiring a prior pi calibration."""
-    raise NotImplementedError("Amplitude Rabi is not implemented")
+    _validate(arguments)
+    gain_range = arguments.get("gain_range")
+    if gain_range is not None and (
+        not isinstance(gain_range, list)
+        or len(gain_range) != 2
+        or not all(_finite(value) for value in gain_range)
+    ):
+        raise ValueError("gain_range must contain exactly two finite real endpoints")
+    sources = ctx.rpc("context.snapshot", {})
+    publication = ctx.prepare_tab(
+        "twotone/rabi/amp_rabi", arguments.get("reuse_tab_id")
+    )
+    publication = _select_modules(ctx, publication, arguments)
+    edits, origins, missing = _readout_frequency(
+        publication, sources["md"], sources["ml"]["modules"]
+    )
+    drive_edits, drive_origin, drive_missing = _drive_frequency(
+        publication, arguments, sources
+    )
+    edits.extend(drive_edits)
+    origins[("modules", "qub_pulse", "freq")] = drive_origin
+    if missing or drive_missing:
+        ctx.needs_parameters([*drive_missing, *missing])
+        return
+    sweep = {}
+    if gain_range is not None:
+        sweep.update(start=gain_range[0], stop=gain_range[1])
+    if arguments.get("points") is not None:
+        sweep["expts"] = arguments["points"]
+    if sweep:
+        edits.append({"path": ["sweep", "gain"], "value": sweep})
+    for parameter, path in (
+        ("pulse_length_us", ("modules", "qub_pulse", "waveform", "length")),
+        ("reps", ("reps",)),
+        ("rounds", ("rounds",)),
+    ):
+        if arguments.get(parameter) is not None:
+            edits.append({"path": list(path), "value": arguments[parameter]})
+        origins[path] = (
+            parameter if arguments.get(parameter) is not None else "gui_default"
+        )
+    publication = ctx.edit_cfg(publication, edits)
+    if publication["status"] != "Valid":
+        raise GuiRpcError("Amplitude Rabi cfg is not Valid", reason="invalid_cfg")
+    fields = {
+        ".".join(path): {
+            "value": _node(publication, *path)["input"]["resolved"],
+            "input": _node(publication, *path)["input"],
+            "source": origin,
+        }
+        for path, origin in origins.items()
+    }
+    inputs = _node(publication, "sweep", "gain")["inputs"]
+    fields["sweep.gain"] = {
+        "value": {key: inputs[key]["resolved"] for key in ("start", "stop", "expts")},
+        "input": inputs,
+        "source": {
+            "start": "gain_range" if gain_range is not None else "gui_default",
+            "stop": "gain_range" if gain_range is not None else "gui_default",
+            "expts": "points" if arguments.get("points") is not None else "gui_default",
+        },
+    }
+    for slot, parameter in (
+        ("reset", "use_reset"),
+        ("readout", "readout_ref"),
+        ("qub_pulse", "drive_ref"),
+    ):
+        fields[f"modules.{slot}"] = {
+            "value": _node(publication, "modules", slot).get("ref"),
+            "source": "explicit"
+            if arguments.get(parameter) is not None
+            else "disabled"
+            if slot == "reset"
+            else "gui_default",
+        }
+    ctx.run_once(publication, fields)
 
 
 def time_rabi(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
