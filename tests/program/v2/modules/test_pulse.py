@@ -19,12 +19,14 @@ def _make_cfg(length=0.2, pre=0.0, post=0.0):
 
 def test_pulsecfg_validates_nqz():
     with pytest.raises(ValidationError, match="nqz"):
-        PulseCfg(
-            waveform=ConstWaveformCfg(length=0.1),
-            ch=0,
-            nqz=3,  # type: ignore , only 1 or 2 allowed
-            freq=5000.0,
-            gain=0.3,
+        PulseCfg.model_validate(
+            {
+                "waveform": ConstWaveformCfg(length=0.1),
+                "ch": 0,
+                "nqz": 3,
+                "freq": 5000.0,
+                "gain": 0.3,
+            }
         )
 
 
