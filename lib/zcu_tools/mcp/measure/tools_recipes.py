@@ -21,6 +21,15 @@ def _run_normalized_recipe(
         value = arguments.get(name)
         if "number" in schema["type"] and finite_number(value):
             normalized[name] = float(value)
+        elif (
+            "array" in schema["type"]
+            and isinstance(value, list)
+            and "number" in schema["items"]["type"]
+        ):
+            normalized[name] = [
+                float(endpoint) if finite_number(endpoint) else endpoint
+                for endpoint in value
+            ]
     definition.run(context, normalized)
 
 
