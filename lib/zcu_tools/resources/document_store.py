@@ -134,6 +134,7 @@ class DocumentStore[T: BaseModel]:
             source=path,
         )
         self._snapshot = model.model_validate(document)
+        self._document = document
 
     def snapshot(self) -> T:
         return self._snapshot.model_copy(deep=True)
@@ -164,6 +165,7 @@ class DocumentStore[T: BaseModel]:
                 if patches:
                     self._write(document)
                 self._snapshot = snapshot
+                self._document = document
         finally:
             self._editing = False
         if patches:
@@ -206,7 +208,14 @@ class DocumentStore[T: BaseModel]:
                 temporary.unlink(missing_ok=True)
 
     def refresh(self) -> bool:
-        raise NotImplementedError
+        with self.locked():
+            document, snapshot = self._read()
+            paths = tuple(path for path, _ in _changes(self._document, document))
+            self._snapshot = snapshot
+            self._document = document
+        if paths:
+            self._notify(DocumentChange(self._path, paths, "refresh"))
+        return bool(paths)
 
     @contextmanager
     def locked(self) -> Generator[None]:
