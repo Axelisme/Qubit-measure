@@ -164,7 +164,6 @@ def test_scalar_choices_widget_round_trip(qapp):
 
 
 def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
-
     ctrl.arb_waveforms.list_data_keys.return_value = ["asset_a", "asset_b"]
     schema = section_schema(
         {
@@ -200,7 +199,6 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
 
 
 def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
-
     ctrl.arb_waveforms.list_data_keys.return_value = ["asset_a"]
     schema = section_schema(
         {
@@ -498,7 +496,6 @@ def test_read_schema_before_populate_raises(qapp):
 
 
 def test_populate_scalar_fields_round_trip(qapp, ctrl):
-
     schema = section_schema(
         {
             "reps": ScalarSpec(label="Reps", type=int),
@@ -870,7 +867,6 @@ def test_read_schema_returns_cfg_schema(qapp, ctrl):
 
 
 def test_read_values_does_not_mutate_original(qapp, ctrl):
-
     schema = section_schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(100)},
@@ -914,7 +910,6 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
 
 
 def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
-
     schema = section_schema(
         {
             "f": CenteredSweepSpec(
@@ -942,10 +937,9 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
         assert not center_input.isEnabled()
         labels = {label.text(): label for label in sweep_widget.findChildren(QLabel)}
         center_label = labels["center [generated]"]
-        span_label = labels["span"]
         assert center_label.toolTip() == "Generated center"
         center_cell = center_label.parentWidget()
-        span_cell = span_label.parentWidget()
+        span_cell = labels["span"].parentWidget()
         assert center_cell is not None
         assert span_cell is not None
         pair_row = center_cell.parentWidget()
@@ -957,9 +951,7 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
 
         span_input.setText("120.0")
         points_input.setText("121")
-        out = form.read_values()
-
-        sv = out.fields["f"]
+        sv = form.read_values().fields["f"]
         assert isinstance(sv, CenteredSweepValue)
         assert sv.center == pytest.approx(0.0)
         assert sv.span == DirectValue(120.0, raw="120.0")
@@ -1071,7 +1063,6 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
 
 
 def test_populate_nested_section_round_trip(qapp, ctrl):
-
     schema = section_schema(
         {
             "inner": CfgSectionSpec(
@@ -1701,7 +1692,6 @@ def test_custom_reference_renders_header_and_editable_leaf(
 
 
 def test_populate_module_ref_field_round_trip(qapp, ctrl):
-
     allowed_spec = CfgSectionSpec(
         label="Pulse",
         fields={"gain": ScalarSpec(label="Gain", type=float)},
