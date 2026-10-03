@@ -1,9 +1,10 @@
 """Notebook component declarations through the public registry interface."""
 
-from typing import cast
+from typing import Annotated, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from zcu_tools.resources.document_store import UnitSpec
 from zcu_tools.resources.entry import (
     ComponentRegistry,
     ComponentSchema,
@@ -54,6 +55,21 @@ def test_registry_lifecycle_rejects_duplicates_and_allows_explicit_replacement()
         registry.get("notebook/pair")
     registry.register("notebook/pair", NestedPairSchema, references=("links.target",))
     assert registry.get("notebook/pair") is NestedPairSchema
+
+
+@pytest.mark.parametrize("spec", [UnitSpec("Hz", "us"), UnitSpec("Hz", "unknown")])
+def test_registration_rejects_invalid_units_without_reserving_the_kind(
+    spec: UnitSpec,
+) -> None:
+    class UnitModel(ComponentSchema):
+        freq: Annotated[float, spec]
+
+    registry = ComponentRegistry()
+    with pytest.raises(ValueError, match="units"):
+        registry.register("notebook/physical", UnitModel)
+
+    registry.register("notebook/physical", PairSchema, references=("target",))
+    assert registry.get("notebook/physical") is PairSchema
 
 
 @pytest.mark.parametrize(
