@@ -121,7 +121,8 @@ from __future__ import annotations
 # v79: optional figure-free interactive command receipts.
 # v80: Run source tokens in snapshots and optional save/analyze admission binding.
 # v81: optional analysis-operation binding for writeback previews.
-WIRE_VERSION = 81
+# v82: expose device units and bind Run pane previews to their original Run.
+WIRE_VERSION = 82
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -178,4 +179,5 @@ WIRE_VERSION = 81
 # v111: preserve interactive validation and operation receipt without PNG rendering.
 # v112: commit Run provenance and reject superseded raw save or primary analysis.
 # v113: reject superseded writeback preview sources before reading the draft.
-GUI_VERSION = 113
+# v114: guard Run preview provenance and preserve partial frequency calibration.
+GUI_VERSION = 114

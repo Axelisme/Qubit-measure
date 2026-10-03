@@ -155,6 +155,47 @@ def test_spectrum_only_delivers_finite_actual_frequency(
             assert not gui.ran
 
 
+def test_spectrum_rejects_invalid_library_reference_without_fallback(tmp_path):
+    gui = OnetoneGui({"r_f": 6100.0, "rf_w": 4.0})
+
+    def respond(method, params):
+        result = gui(method, params)
+        if method == "tab.edit_cfg":
+            reference = result["tree"]["children"]["modules"]["children"]["readout"]
+            if reference["ref"] == "unknown":
+                reference["error"] = "Unknown library key"
+                result["status"] = "Invalid"
+        return result
+
+    with recipe_client(tmp_path, respond) as client:
+        reply = client.call("onetone_spectrum", {"readout_ref": "unknown"})
+        assert reply.data["status"] == "failed"
+        assert reply.data["error"]["reason"] == "invalid_cfg"
+        assert not gui.ran
+        assert sum(m == "tab.edit_cfg" for m, _ in client.transport.sent) == 1
+
+
+def test_flux_rejects_unknown_explicit_device_without_selecting_default(tmp_path):
+    gui = FluxGui()
+    with recipe_client(tmp_path, gui) as client:
+        client.transport.replies["device.snapshot"] = {
+            "ok": False,
+            "error": {
+                "code": "invalid_params",
+                "reason": "device_not_found",
+                "message": "No device named missing-coil",
+            },
+        }
+        reply = client.call(
+            "onetone_spectrum_over_flux", {"flux_device": "missing-coil"}
+        )
+        assert reply.data["status"] == "failed"
+        assert reply.data["error"]["reason"] == "device_not_found"
+        assert not gui.ran
+        assert ("device.snapshot", {"name": "missing-coil"}) in client.transport.sent
+        assert not any(m == "value.read" for m, _ in client.transport.sent)
+
+
 class OnetoneGui(LookbackGui):
     def __init__(self, md=None, experiment="onetone/freq"):
         super().__init__()

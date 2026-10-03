@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-03, MCP recipe handoff version
+**Last updated:** 2026-10-03, Run preview guard and device units
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,14 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 81`, `GUI_VERSION = 113`, and
-`MCP_VERSION = 104` (defined in `zcu_tools.mcp.measure.server`). MCP 104 delivers
+Current measure-gui values are `WIRE_VERSION = 82`, `GUI_VERSION = 114`, and
+`MCP_VERSION = 105`, defined in `zcu_tools.mcp.measure.server`. WIRE 82 adds
+`unit` to `device.snapshot` and optional `run_operation_id` to `tab.get_figure`.
+The Run token only accepts the Run pane and cannot accompany an analysis
+`operation_id`. GUI 114 rejects a replaced Run before rendering and preserves
+available calibration expressions when only center or linewidth is known.
+MCP 105 adds Onetone spectrum, flux and power recipes, including raw-only power
+completion and a Run-bound temporary preview. MCP 104 delivers
 recipe interaction handoffs and checks post-Run result provenance. MCP 103 adds
 Lookback recipes and execution controls. WIRE 81 adds optional
 `operation_id` to `tab.writeback_preview`. GUI 113 rejects a replaced analysis
@@ -290,7 +296,10 @@ The wire surface is grouped by ownership:
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
 Subtab locator is required and closed (`run|analysis|post_analysis`); save_image
-only accepts `analysis|post_analysis`. `method_entries/` owns the wire method
+only accepts `analysis|post_analysis`. `tab.get_figure` may bind a Run preview to
+`run_operation_id`, or an analysis preview to `operation_id`, never both.
+Omitting both retains the current-pane read. `device.snapshot.unit` comes from
+the registered device owner; `none` does not identify a physical flux unit. `method_entries/` owns the wire method
 name, handler ref, schema, agent exposure and guard/reveal/operation policy.
 Adding a wire method requires one entry; MCP receives the projection through
 `rpc.catalog` after its version handshake. Descriptions direct the caller to

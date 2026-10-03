@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-03, Recipe handoff and result provenance
+**Last updated:** 2026-10-03, Onetone recipes and Run preview
 
 # `zcu_tools/mcp/measure/`
 
@@ -74,10 +74,22 @@ GUI 仍擁有 cfg defaults、validation、資源 guard 與結果。
 頻率來自明確參數、指定 library readout 的有效 leaf 或 `r_f`。
 沒有可用頻率時回 `needs_parameters`，不以 GUI 模板的盲選頻率開始 Run。
 
+`onetone_spectrum`、`onetone_spectrum_over_flux` 與 `onetone_spectrum_over_power`
+使用 GUI 的頻率範圍與平均數設定。中心省略時要求有效的 `r_f`，完整 span 省略時
+要求有效的 `rf_w`，範圍倍率仍由 GUI 決定。缺項一次回 `needs_parameters`，不盲掃。
+明確的 library readout、設備或數值無效時失敗，不改選預設來源。
+Flux 使用已註冊的設備來源與 GUI 提供的物理單位，不把 normalized flux 當實際單位。
+三者沿用與 Lookback 相同的 reuse、單次 Run、raw 保存與控制流程。
+
+Spectrum 與 flux 交給 Primary 分析。Power 是 raw-only，回 `analysis_mode=none`，
+`analysis` 與 `writeback` 為 null。它在 raw 保存後以原 Run token 取得 preview，
+回傳標為 `run_preview` 的 session 暫存 PNG 與同 reply 的 image content。
+Preview 不是已保存的 analysis artifact，失敗保留已保存 raw 並標示 `phase=preview`。
+
 `RecipeContext` 持有固定 GUI binding 與整段進度，只執行一次 Run。
 Run 後只收錄來源對應原 Run 的 result_state。來源已被替代時回報 result_superseded，不交付另一輪快照。
 Raw save 與 Primary analysis 都帶原 Run 來源，GUI 拒絕已被另一輪資料取代的來源。
-Raw 確認成功後才交給既有 AnalysisExecution 分析、逐張存圖與交付 PNG。
+需要 Primary 的 recipe 在 raw 確認成功後才交給既有 AnalysisExecution 分析、逐張存圖與交付 PNG。
 首次互動交接與獨立分析工具共用 interaction delivery，回傳 committed state、commands 與可用 PNG。
 交付失敗保留原 execution 與已保存 raw，後續仍可用 tab_interact 繼續。
 最後讀取同次分析的 writeback 候選，不自動 accept。失敗保留已確認的 raw、圖像路徑與分析結果。
@@ -86,8 +98,9 @@ Raw 確認成功後才交給既有 AnalysisExecution 分析、逐張存圖與交
 `status(execution)` 與 `wait(execution)` 讀取這段流程的本地快照，互動階段立即交接。
 `cancel` 與 `finish_early` 恰好接受 op 或 execution 之一。Recipe 的原 Run op 或目前 op
 都定位同一個控制狀態。Finish early 只在 Run 階段適用，有可用 partial data 才繼續保存與分析。
-Cancel 優先，禁止開始新的保存、分析或 writeback 讀取。已開始的 raw save 不可取消，
-仍等待真成功、失敗或 unknown，不以取消意圖掩蓋保存失敗。
+Cancel 優先，禁止開始新的保存、分析、preview 或 writeback 讀取。
+已開始的 raw save 不可取消，仍等待真成功、失敗或 unknown。
+已開始的 preview 也保留真結果，不以取消意圖掩蓋錯誤。
 
 Recipe 沒有重試、tab 自動清理或持久 recovery。背景工作不重連另一個 GUI，
 session close 停止 admission、解除 pending RPC 並 join workers，不保證硬體已停止。
