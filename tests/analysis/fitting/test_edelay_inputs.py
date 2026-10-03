@@ -73,5 +73,3 @@ def test_find_edelay_branch_recovers_pure_phasor_for_signal_shapes(
     signals = trace if row_count == 1 else np.vstack((trace, np.exp(0.37j) * trace))
 
     assert find_edelay_branch(freqs, signals) == pytest.approx(expected_delay, abs=1e-9)
-
-
