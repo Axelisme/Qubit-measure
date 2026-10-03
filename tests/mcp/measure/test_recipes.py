@@ -611,9 +611,10 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
         if outcome == "failed":
             assert terminal.data["error"]["reason"] == "analysis_failed"
         methods = [method for method, _ in client.transport.sent]
-        assert methods.count("tab.run_start") == 1
-        assert methods.count("tab.analyze") == 1
-        assert methods.count("operation.cancel") == 1
+        assert all(
+            methods.count(method) == 1
+            for method in ("tab.run_start", "tab.analyze", "operation.cancel")
+        )
         assert not {
             "tab.interact", "tab.get_analyze_result", "tab.save_image",
             "tab.get_figure", "tab.writeback_preview",

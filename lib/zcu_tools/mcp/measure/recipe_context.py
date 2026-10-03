@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
@@ -384,13 +385,11 @@ class RecipeContext:
             self.tools.gui, tab, "primary", started
         )
         self._retain_analysis(execution)
-        try:
+        # Skip a cancelled query, but still join the already-accepted analysis.
+        with suppress(_ContinuationCancelled):
             handoff_interaction(
                 self.tools, execution, before_send=lambda: self._admit("analysis")
             )
-        except _ContinuationCancelled:
-            # Skip the new query, but still join the already-accepted analysis.
-            pass
         while True:
             reply = execution.wait(0.25)
             with self._condition:
