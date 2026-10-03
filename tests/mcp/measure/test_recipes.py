@@ -247,12 +247,17 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     assert not caller.is_alive()
 
 
-def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path):
+@pytest.mark.parametrize("handoff_failure", [None, "png", "query", "replaced"])
+def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
+    tmp_path, handoff_failure
+):
     gui = LookbackGui()
     done = Event()
     writeback_read = Event()
+    initial_handoff = True
 
     def respond(method, params):
+        nonlocal initial_handoff
         if method == "tab.analyze":
             return {**gui(method, params), "interactive": True}
         if (
@@ -263,11 +268,17 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path
             return {"reason": "user_feedback"}
         if method == "tab.interact":
             assert params["tab_id"] == "t"
+            failure = handoff_failure if initial_handoff else None
+            initial_handoff = False
+            if failure == "query":
+                raise GuiRpcError("Preview unavailable", reason="render_failed")
             if params.get("payload", {}).get("command") == "done":
                 done.set()
             return {
-                "operation_id": 93,
-                "figure": {"png_b64": base64.b64encode(_PNG).decode()},
+                "operation_id": 94 if failure == "replaced" else 93,
+                "figure": {
+                    "png_b64": "invalid" if failure == "png" else base64.b64encode(_PNG).decode()
+                },
                 "state": {"offset": 0.24},
                 "commands": [{"name": "done"}],
                 "prompt": "Confirm offset",
@@ -284,14 +295,23 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path
         assert handoff.data["analysis"]["op"] == handoff.data["op"]
         interaction = handoff.data["analysis"]["interaction"]
         assert interaction is not None
-        assert interaction["state"] == {"offset": 0.24}
-        assert interaction["commands"] == [{"name": "done"}]
-        assert handoff.images[0].data == _PNG
-        assert Path(interaction["figure"]).read_bytes() == _PNG
+        if handoff_failure:
+            assert handoff.is_error
+            assert interaction["delivery_error"]
+            assert interaction["figure"] is None
+            assert not handoff.images
+        else:
+            assert not handoff.is_error
+            assert handoff.images[0].data == _PNG
+            assert Path(interaction["figure"]).read_bytes() == _PNG
+        if handoff_failure not in ("query", "replaced"):
+            assert interaction["state"] == {"offset": 0.24}
+            assert interaction["commands"] == [{"name": "done"}]
         analysis_execution = handoff.data["analysis"]["execution"]
         execution = handoff.data["execution"]
         read = client.call("tab_interact", {"tab": "t"})
         assert read.data["prompt"] == "Confirm offset"
+        assert read.images[0].data == _PNG
         finished_analysis = client.call(
             "tab_interact", {"tab": "t", "payload": {"command": "done"}}
         )
