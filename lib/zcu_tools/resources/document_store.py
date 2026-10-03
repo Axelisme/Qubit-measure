@@ -83,6 +83,12 @@ class LockTimeoutError(TimeoutError):
         super().__init__(f"{lock_path}: lock acquisition timed out after {timeout}s")
 
 
+def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -> bool:
+    if isinstance(original, bool) != isinstance(current, bool):
+        return False
+    return original == current
+
+
 def _changes(
     base: YamlValue | _Missing, draft: YamlValue | _Missing, path: FieldPath = ()
 ) -> Iterator[tuple[FieldPath, YamlValue | _Missing]]:
@@ -93,7 +99,7 @@ def _changes(
                 draft.get(key, _Missing.VALUE),
                 (*path, key),
             )
-    elif base != draft:
+    elif not _same_value(base, draft):
         yield path, draft
 
 
