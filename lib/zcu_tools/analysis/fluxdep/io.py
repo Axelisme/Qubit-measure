@@ -39,7 +39,7 @@ def dump_spectrums(
 def load_spectrums(path: str) -> dict[str, SpectrumResult]:
     spectrums = dict[str, SpectrumResult]()
     with h5.File(path, "r") as f:
-        for name in f.keys():
+        for name in f:
             grp = f[name]
             assert isinstance(grp, h5.Group)
             spect_grp = grp["spectrum"]
@@ -47,19 +47,19 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
             assert isinstance(spect_grp, h5.Group)
             assert isinstance(points_grp, h5.Group)
             result = SpectrumResult(
-                flux_half=grp["flux_half"][()],  # type: ignore
-                flux_int=grp["flux_int"][()],  # type: ignore
-                flux_period=grp["flux_period"][()],  # type: ignore
+                flux_half=grp["flux_half"][()],
+                flux_int=grp["flux_int"][()],
+                flux_period=grp["flux_period"][()],
                 spectrum={
-                    "dev_values": spect_grp["dev_values"][()],  # type: ignore
-                    "fluxs": spect_grp["fluxs"][()],  # type: ignore
-                    "freqs": spect_grp["freqs"][()],  # type: ignore
-                    "signals": spect_grp["signals"][()],  # type: ignore
+                    "dev_values": spect_grp["dev_values"][()],
+                    "fluxs": spect_grp["fluxs"][()],
+                    "freqs": spect_grp["freqs"][()],
+                    "signals": spect_grp["signals"][()],
                 },
                 points={
-                    "dev_values": points_grp["dev_values"][()],  # type: ignore
-                    "fluxs": points_grp["fluxs"][()],  # type: ignore
-                    "freqs": points_grp["freqs"][()],  # type: ignore
+                    "dev_values": points_grp["dev_values"][()],
+                    "fluxs": points_grp["fluxs"][()],
+                    "freqs": points_grp["freqs"][()],
                 },
             )
             # ``type`` is optional for older spectrum files; current files store it
