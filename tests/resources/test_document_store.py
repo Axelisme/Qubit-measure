@@ -20,6 +20,12 @@ class SyntheticDocument(BaseModel):
     values: dict[str, float]
 
 
+class NullableDocument(BaseModel):
+    format: str
+    format_version: str
+    values: dict[str, float | None]
+
+
 class KnownValues(BaseModel):
     model_config = ConfigDict(extra="forbid")
     left: float = Field(ge=0)
@@ -45,6 +51,10 @@ def document_path(tmp_path: Path) -> Path:
 
 def make_store(path: Path) -> DocumentStore[SyntheticDocument]:
     return DocumentStore(path, SyntheticDocument, format="synthetic")
+
+
+def make_nullable_store(path: Path) -> DocumentStore[NullableDocument]:
+    return DocumentStore(path, NullableDocument, format="synthetic")
 
 
 def test_snapshot_is_an_independent_memory_only_typed_copy(document_path: Path) -> None:
@@ -409,3 +419,34 @@ def test_invalid_draft_headers_and_schema_do_not_reach_disk_or_snapshot(
     with store.edit() as draft:
         draft.values.left = 10.0
     assert store.snapshot().values.left == 10.0
+
+
+@pytest.mark.parametrize("original_null", [False, True])
+def test_conflicts_distinguish_missing_from_null_and_keep_dot_keys_intact(
+    document_path: Path, original_null: bool
+) -> None:
+    if original_null:
+        document_path.write_text(
+            document_path.read_text(encoding="utf-8") + "  Q1.t1: null\n",
+            encoding="utf-8",
+        )
+    first = make_nullable_store(document_path)
+    second = make_nullable_store(document_path)
+    original_snapshot = first.snapshot()
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        if original_null:
+            del draft.values["Q1.t1"]
+        else:
+            draft.values["Q1.t1"] = None
+        with second.edit() as other:
+            other.values["Q1.t1"] = 7.0
+        committed = document_path.read_bytes()
+        with pytest.raises(ConflictError) as caught:
+            stack.close()
+
+    assert caught.value.path == ("values", "Q1.t1")
+    assert (caught.value.original is None) is original_null
+    assert caught.value.current == 7.0
+    assert document_path.read_bytes() == committed
+    assert first.snapshot() == original_snapshot
