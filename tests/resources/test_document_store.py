@@ -95,3 +95,24 @@ def test_replace_failure_preserves_original_and_cleans_temporary_file(
     assert document_path.read_bytes() == before
     assert store.snapshot().values == {"left": 1.0, "right": 2.0}
     assert set(document_path.parent.iterdir()) == siblings
+
+
+def test_roundtrip_preserves_comments_order_and_unchanged_numbers(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "# Document note\nformat: synthetic\nformat_version: '1.0'\n"
+        "values:\n  left: 1.000 # edited\n  right: 2.000 # unchanged\n",
+        encoding="utf-8",
+    )
+    store = make_store(document_path)
+    with store.edit() as draft:
+        draft.values["left"] = 10.0
+
+    text = document_path.read_text(encoding="utf-8")
+    assert "# Document note" in text
+    assert "# edited" in text
+    assert "right: 2.000 # unchanged" in text
+    assert text.index("format:") < text.index("format_version:") < text.index("values:")
+    assert text.index("left:") < text.index("right:")
+    assert make_store(document_path).snapshot().values == {"left": 10.0, "right": 2.0}
