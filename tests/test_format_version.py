@@ -442,3 +442,124 @@ def test_migration_reports_non_mapping_callback_output(output: YamlValue) -> Non
     assert isinstance(caught.value.__cause__, ValidationError)
     assert caught.value.from_version == FormatVersion(1, 0)
     assert caught.value.target_version == FormatVersion(1, 1)
+
+
+def test_registry_keeps_formats_and_instances_independent() -> None:
+    registry = MigrationRegistry()
+    registry.register(
+        "zcu.synthetic",
+        FormatVersion(1, 0),
+        FormatVersion(1, 1),
+        migration_to(FormatVersion(1, 1)),
+    )
+    registry.register(
+        "other.format",
+        FormatVersion(1, 0),
+        FormatVersion(2, 0),
+        migration_to(FormatVersion(2, 0)),
+    )
+
+    for format_name, target in [
+        ("zcu.synthetic", FormatVersion(1, 1)),
+        ("other.format", FormatVersion(2, 0)),
+    ]:
+        result = registry.migrate(
+            {"format": format_name, "format_version": "1.0"},
+            format=format_name,
+            target_version=target,
+            source=Path("entry/setup.yaml"),
+        )
+        assert result["format"] == format_name
+        assert result["format_version"] == f"{target.major}.{target.minor}"
+
+    with pytest.raises(MigrationError):
+        MigrationRegistry().migrate(
+            {"format": "zcu.synthetic", "format_version": "1.0"},
+            format="zcu.synthetic",
+            target_version=FormatVersion(1, 1),
+            source=Path("entry/setup.yaml"),
+        )
+
+
+def test_yaml_migration_writes_complete_chain_to_new_file(tmp_path: Path) -> None:
+    source = tmp_path / "source.yaml"
+    destination = tmp_path / "migrated.yaml"
+    original = (
+        "format: zcu.synthetic\nformat_version: '1.0'\n"
+        "future:\n  nested: [1, retained]\n"
+    )
+    source.write_text(original, encoding="utf-8")
+    registry = MigrationRegistry()
+    registry.register(
+        "zcu.synthetic",
+        FormatVersion(1, 0),
+        FormatVersion(1, 1),
+        migration_to(FormatVersion(1, 1)),
+    )
+    registry.register(
+        "zcu.synthetic",
+        FormatVersion(1, 1),
+        FormatVersion(2, 0),
+        migration_to(FormatVersion(2, 0)),
+    )
+
+    result = registry.migrate_yaml(
+        source,
+        destination,
+        format="zcu.synthetic",
+        target_version=FormatVersion(2, 0),
+    )
+
+    assert result == destination
+    assert source.read_text(encoding="utf-8") == original
+    assert YAML(typ="safe").load(destination) == {
+        "format": "zcu.synthetic",
+        "format_version": "2.0",
+        "future": {"nested": [1, "retained"]},
+    }
+
+
+@pytest.mark.parametrize(
+    "content, expected_error",
+    [
+        ("format: wrong.format\nformat_version: '1.0'\n", FormatError),
+        ("format: zcu.synthetic\nformat_version: '1.0'\n", MigrationError),
+        ("- scalar\n", ValidationError),
+    ],
+    ids=["wrong-format", "missing-chain", "schema"],
+)
+def test_yaml_input_failure_preserves_source_and_does_not_create_destination(
+    tmp_path: Path,
+    content: str,
+    expected_error: type[Exception],
+) -> None:
+    source = tmp_path / "source.yaml"
+    destination = tmp_path / "migrated.yaml"
+    source.write_text(content, encoding="utf-8")
+
+    with pytest.raises(expected_error):
+        MigrationRegistry().migrate_yaml(
+            source,
+            destination,
+            format="zcu.synthetic",
+            target_version=FormatVersion(2, 0),
+        )
+
+    assert source.read_text(encoding="utf-8") == content
+    assert not destination.exists()
+
+
+def test_yaml_missing_source_reports_actual_path(tmp_path: Path) -> None:
+    source = tmp_path / "missing.yaml"
+    destination = tmp_path / "migrated.yaml"
+
+    with pytest.raises(FileNotFoundError) as caught:
+        MigrationRegistry().migrate_yaml(
+            source,
+            destination,
+            format="zcu.synthetic",
+            target_version=FormatVersion(1, 0),
+        )
+
+    assert caught.value.filename == str(source)
+    assert not destination.exists()
