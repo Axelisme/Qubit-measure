@@ -16,6 +16,7 @@ from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
+
 def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
     """The measure tab renders the attached cfg resource as editable rows."""
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
@@ -123,5 +124,3 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
     assert item is not None and item.text(0) == "Reps"
     tab.detach()
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
-
-
