@@ -2,7 +2,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from zcu_tools.resources.document_store import (
     ConflictError,
     DocumentChange,
@@ -15,6 +15,19 @@ class SyntheticDocument(BaseModel):
     format: str
     format_version: str
     values: dict[str, float]
+
+
+class KnownValues(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    left: float
+    right: float
+
+
+class StrictDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    format: str
+    format_version: str
+    values: KnownValues
 
 
 @pytest.fixture
@@ -232,3 +245,30 @@ def test_units_roundtrip_values_and_stderr_without_touching_other_nodes(
     text = document_path.read_text(encoding="utf-8")
     assert "  unchanged: 4.000 # unchanged" in text
     assert "  left: 9e6 # extension" in text
+
+
+def test_newer_minor_keeps_unknown_nested_fields_outside_the_typed_snapshot(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.2'\nvalues:\n"
+        "  left: 1.0\n  right: 2.0\n  future: 7.000 # future nested\n"
+        "future_top: [next, version] # future top\n",
+        encoding="utf-8",
+    )
+    store = DocumentStore(document_path, StrictDocument, format="synthetic")
+    assert store.snapshot().model_dump() == {
+        "format": "synthetic", "format_version": "1.2",
+        "values": {"left": 1.0, "right": 2.0},
+    }
+    with store.edit() as draft:
+        draft.values.left = 10.0
+
+    assert store.snapshot().values.left == 10.0
+    assert store.snapshot().format_version == "1.2"
+    text = document_path.read_text(encoding="utf-8")
+    assert "  future: 7.000 # future nested" in text
+    assert "future_top: [next, version] # future top" in text
+    assert DocumentStore(
+        document_path, StrictDocument, format="synthetic"
+    ).snapshot().values.left == 10.0
