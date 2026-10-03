@@ -6,6 +6,7 @@ from typing import Any
 
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
+from .drive import twotone_spectrum
 from .lookback import lookback
 from .onetone import (
     onetone_spectrum,
@@ -33,6 +34,34 @@ _ONETONE_COMMON_PROPERTIES = {
 
 
 RECIPES = (
+    RecipeDefinition(
+        name="twotone_spectrum",
+        description="Partial two-tone source validation; execution is not yet available.",
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                **{
+                    name: {"type": ["string", "null"], "minLength": 1}
+                    for name in (
+                        "reuse_tab_id",
+                        "readout_ref",
+                        "drive_ref",
+                        "use_reset",
+                    )
+                },
+                **{
+                    name: {"type": ["number", "null"]}
+                    for name in ("center_mhz", "span_mhz", "gain", "pulse_length_us")
+                },
+                **{
+                    name: {"type": ["integer", "null"]}
+                    for name in ("points", "reps", "rounds")
+                },
+            },
+        },
+        run=twotone_spectrum,
+    ),
     RecipeDefinition(
         name="lookback",
         description=(
