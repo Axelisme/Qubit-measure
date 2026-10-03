@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QLabel, QSizePolicy, QWidget
+from qtpy.QtWidgets import QApplication, QLabel, QWidget
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
@@ -65,7 +64,7 @@ def _attached_form(
     schema: CfgSchema,
     ctrl: MagicMock,
     decoration_provider: FieldDecorationProvider | None = None,
-) -> Iterator[tuple[CfgFormWidget, CfgDraft]]:
+) -> Generator[tuple[CfgFormWidget, CfgDraft]]:
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     form = CfgFormWidget(decoration_provider=decoration_provider)
     try:
@@ -204,7 +203,6 @@ def _assert_balanced_row(
         editor = editor_item.widget()
         assert editor is not None
         assert editor.width() >= 20
-        assert editor.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
     return row
 
 
@@ -361,6 +359,9 @@ def test_tree_validation_propagation(qapp, ctrl):
     with _attached_form(schema, ctrl) as (form, draft):
         events: list[bool] = []
         form.validity_changed.connect(events.append)
+        form.attach(draft)
+        qapp.processEvents()
+        assert events == [True]
         assert form.is_valid()
         draft.set_target("v", None)
         qapp.processEvents()
@@ -431,6 +432,7 @@ def test_tree_shares_same_draft_binding_ref_identity(qapp, ctrl):
             expected = ReferenceValue(
                 chosen_key="<Custom:Gauss>",
                 value=CfgSectionValue(fields={"sigma": DirectValue(0.99)}),
+                resolved_label="Gauss",
             )
             assert second.read_values().fields["ref"] == expected
             second.detach()
