@@ -582,14 +582,12 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
 
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
-    monkeypatch.setattr(
-        MeasureMcpSession.GuiConnection, "send_gui_rpc", delay_handoff
-    )
+    monkeypatch.setattr(MeasureMcpSession.GuiConnection, "send_gui_rpc", delay_handoff)
     try:
         initial = client.call("lookback", {"frequency_mhz": 6020.0})
         assert handoff_waiting.wait(1)
         execution = initial.data["execution"]
-        analysis_receipt, = client.context.session.executions.snapshots()
+        (analysis_receipt,) = client.context.session.executions.snapshots()
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["gui_cancel"]["status"] == "requested"
@@ -616,8 +614,11 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
             for method in ("tab.run_start", "tab.analyze", "operation.cancel")
         )
         assert not {
-            "tab.interact", "tab.get_analyze_result", "tab.save_image",
-            "tab.get_figure", "tab.writeback_preview",
+            "tab.interact",
+            "tab.get_analyze_result",
+            "tab.save_image",
+            "tab.get_figure",
+            "tab.writeback_preview",
         }.intersection(methods)
     finally:
         release_handoff.set()
