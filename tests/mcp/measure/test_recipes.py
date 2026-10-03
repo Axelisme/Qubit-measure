@@ -4,12 +4,13 @@ import base64
 from copy import deepcopy
 from pathlib import Path
 from threading import Event, Thread
+from time import sleep
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
-from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
 from ._support import make_client
 
@@ -543,6 +544,82 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         assert "tab.analyze" not in methods
     finally:
         release_save.set()
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("outcome", ["cancelled", "failed"])
+def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
+    tmp_path, monkeypatch, outcome
+):
+    gui = LookbackGui()
+    handoff_waiting = Event()
+    release_handoff = Event()
+    allow_terminal = Event()
+    original_send = MeasureMcpSession.GuiConnection.send_gui_rpc
+
+    def delay_handoff(self, method, params, *args, **kwargs):
+        # Schedule the public connection call before its real admission check.
+        if method == "tab.interact":
+            handoff_waiting.set()
+            assert release_handoff.wait(2)
+        return original_send(self, method, params, *args, **kwargs)
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return {**gui(method, params), "interactive": True}
+        if method == "operation.await" and params["operation_id"] == 93:
+            if allow_terminal.is_set():
+                return {
+                    "reason": "completed",
+                    "status": outcome,
+                    "error": "Analysis failed after cancellation",
+                }
+            return {"reason": "user_feedback"}
+        if method == "operation.cancel":
+            assert params == {"operation_id": 93}
+            return {"status": "cancelling"}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        MeasureMcpSession.GuiConnection, "send_gui_rpc", delay_handoff
+    )
+    try:
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert handoff_waiting.wait(1)
+        execution = initial.data["execution"]
+        analysis_receipt, = client.context.session.executions.snapshots()
+        cancelled = client.call("cancel", {"execution": execution})
+        assert cancelled.data["cancel_requested"]
+        assert cancelled.data["gui_cancel"]["status"] == "requested"
+        release_handoff.set()
+        allow_terminal.set()
+        for _ in range(100):
+            terminal = client.call("wait", {"execution": execution, "timeout": 0.01})
+            if terminal.data["phase"] == "terminal":
+                break
+            sleep(0.01)
+        assert terminal.data["status"] == outcome
+        assert terminal.data["analysis"]["execution"] == analysis_receipt.execution
+        assert terminal.data["analysis"]["op"] == analysis_receipt.op
+        assert terminal.data["analysis"]["status"] == outcome
+        assert terminal.data["analysis"]["cancel_requested"]
+        assert terminal.data["analysis"]["operation_outcome"]["status"] == outcome
+        assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        if outcome == "failed":
+            assert terminal.data["error"]["reason"] == "analysis_failed"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.analyze") == 1
+        assert methods.count("operation.cancel") == 1
+        assert not {
+            "tab.interact", "tab.get_analyze_result", "tab.save_image",
+            "tab.get_figure", "tab.writeback_preview",
+        }.intersection(methods)
+    finally:
+        release_handoff.set()
+        allow_terminal.set()
         client.context.session.close()
 
 
