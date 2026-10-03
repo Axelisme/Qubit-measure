@@ -23,7 +23,7 @@ from .shared import FitTrace, ParameterSpec, fit_shared
 def fit_decay(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
-    fit_params: tuple[float, float, float] | None = None,
+    fit_params: FitParameters | tuple[float, float, float] | None = None,
     fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[
     float,

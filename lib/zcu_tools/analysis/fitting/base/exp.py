@@ -19,7 +19,7 @@ def expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fitexp(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
-    fitparams: Sequence[float | None] | None = None,
+    fitparams: Sequence[float | None] | NDArray[np.float64] | None = None,
     fixedparams: Sequence[float | None] | None = None,
 ) -> FitResult:
     """return (y0, yscale, decay_time), (pOpt, pCov)"""
