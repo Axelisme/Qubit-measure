@@ -48,7 +48,12 @@ def test_full_query_keeps_the_publication_used_before_run(tmp_path):
         before = len(client.transport.sent)
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert full["actual"]["publication"] == captured
-        assert full["actual"]["publication"]["cfg_ref"]["revision"] == "3"
+        assert (
+            full["actual"]["publication"]["tree"]["children"]["rounds"]["input"][
+                "resolved"
+            ]
+            == 7
+        )
         full["actual"]["publication"]["tree"]["children"].clear()
         repeated = client.call("status", {"execution": execution, "detail": "full"})
         assert repeated["actual"]["publication"] == captured
