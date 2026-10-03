@@ -15,7 +15,10 @@ from matplotlib.figure import Figure
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import (
+    FakeAdapter,
+    FakeAnalyzeParams,
+)
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactKey,
     ArtifactKind,
@@ -1431,6 +1434,59 @@ def test_save_set_paths_delegates_to_save_control(fx):
     from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 
     assert "tab.save_set_paths" not in METHOD_SPECS
+
+
+@pytest.mark.parametrize("source", ["primary", "run", "matching", "omitted"])
+def test_post_analysis_uses_requested_sources_before_following_the_pane(
+    fx, monkeypatch, source
+):
+    tab = fx.ctrl.new_tab("fake")
+    with open_client(fx.service.port) as sock:
+        run = _completed_run(fx, sock, tab)
+        primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
+        assert (
+            call(sock, "operation.await", {"operation_id": primary, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        monkeypatch.setattr(
+            FakeAdapter,
+            "capabilities",
+            replace(FakeAdapter.capabilities, post_analysis=True),
+        )
+        monkeypatch.setattr(
+            FakeAdapter, "post_analyze", lambda self, req, *, plots: req.analyze_result
+        )
+        fx.state.update_tab_post_analyze_param_instance(tab, FakeAnalyzeParams())
+        before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
+        fx.view.select_tab_pane.reset_mock()
+        params = {"tab_id": tab}
+        if source != "omitted":
+            params.update(
+                operation_id=primary + 1000 if source == "primary" else primary,
+                run_operation_id=run + 1000 if source == "run" else run,
+            )
+        reply = call(sock, "tab.post_analyze", params)
+        if reply["ok"]:
+            terminal = call(
+                sock,
+                "operation.await",
+                {"operation_id": reply["result"]["operation_id"], "timeout": 2},
+            )
+        if source in ("primary", "run"):
+            assert reply["ok"] is False, reply
+            assert reply["error"]["reason"] == "result_superseded"
+            assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
+            fx.view.select_tab_pane.assert_not_called()
+        else:
+            assert reply["ok"] is True, reply
+            assert terminal["result"]["status"] == "finished", terminal
+            result = call(sock, "tab.get_post_analyze_result", {"tab_id": tab})[
+                "result"
+            ]
+            assert result["summary"]["peak"] > 0
+            fx.view.select_tab_pane.assert_called_with(tab, "post_analysis")
 
 
 def _add_fake_tab(fx, tab_id: str) -> None:
