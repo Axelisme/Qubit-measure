@@ -127,6 +127,10 @@ def make_defaulted_store(path: Path) -> DocumentStore[DefaultedDocument]:
     return DocumentStore(path, DefaultedDocument, format="synthetic")
 
 
+def make_strict_sequence_store(path: Path) -> DocumentStore[StrictSequenceDocument]:
+    return DocumentStore(path, StrictSequenceDocument, format="synthetic")
+
+
 def test_snapshot_is_an_independent_memory_only_typed_copy(document_path: Path) -> None:
     store = make_store(document_path)
     document_path.unlink()
@@ -649,9 +653,7 @@ def test_nested_default_model_tracks_explicit_null_and_in_place_container_change
         draft.general.ext["calibration"] = 7.0
 
     persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
-    assert persisted["general"] == {
-        "description": None, "ext": {"calibration": 7.0}
-    }
+    assert persisted["general"] == {"description": None, "ext": {"calibration": 7.0}}
     reopened = make_defaulted_store(document_path)
     assert reopened.snapshot().general.ext == {"calibration": 7.0}
     assert "description" in reopened.snapshot().general.model_fields_set
@@ -703,7 +705,9 @@ def test_nested_optional_presence_conflicts_without_materializing_untouched_defa
         with pytest.raises(ConflictError):
             stack.close()
     assert document_path.read_bytes() == committed
-    assert make_defaulted_store(document_path).snapshot().general.description == "winner"
+    assert (
+        make_defaulted_store(document_path).snapshot().general.description == "winner"
+    )
 
 
 def test_added_null_and_deleted_fields_roundtrip_as_distinct_changes(
@@ -873,7 +877,7 @@ def test_known_sequence_edit_preserves_future_fields_comments_and_untouched_node
         "  - left: 3.000 # untouched element\n    right: 4.000\n",
         encoding="utf-8",
     )
-    store = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    store = make_strict_sequence_store(document_path)
     with store.edit() as draft:
         draft.values[0].left = 10.0
 
@@ -886,7 +890,7 @@ def test_known_sequence_edit_preserves_future_fields_comments_and_untouched_node
     assert "right: 2.000 # unchanged" in lines
     assert "future: 7.000 # future nested" in lines
     assert any("left: 3.000 # untouched element" in line for line in lines)
-    reopened = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    reopened = make_strict_sequence_store(document_path)
     assert reopened.snapshot() == store.snapshot()
     persisted = YAML(typ="safe").load(text)
     assert persisted["values"][0]["future"] == 7.0
@@ -902,7 +906,7 @@ def test_appending_to_typed_sequence_keeps_existing_future_nodes(
         "    future: 7.000 # future nested\n",
         encoding="utf-8",
     )
-    store = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    store = make_strict_sequence_store(document_path)
     with store.edit() as draft:
         draft.values.append(KnownValues(left=3.0, right=4.0))
 
@@ -925,8 +929,8 @@ def test_sequence_edits_conflict_as_a_whole_without_losing_future_nodes(
         "  - left: 1.000\n    right: 2.000\n    future: 7.000 # future\n",
         encoding="utf-8",
     )
-    first = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
-    second = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    first = make_strict_sequence_store(document_path)
+    second = make_strict_sequence_store(document_path)
     with ExitStack() as stack:
         draft = stack.enter_context(first.edit())
         draft.values[0].left = 10.0

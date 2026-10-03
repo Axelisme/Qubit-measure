@@ -133,9 +133,17 @@ def _yaml_value(value: object) -> YamlValue:
 
 
 def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
-    if isinstance(base, BaseModel) and isinstance(draft, BaseModel) and type(base) is type(draft):
-        original = TypeAdapter(YamlMap).validate_python(base.model_dump(exclude_unset=True))
-        candidate = TypeAdapter(YamlMap).validate_python(draft.model_dump(exclude_unset=True))
+    if (
+        isinstance(base, BaseModel)
+        and isinstance(draft, BaseModel)
+        and type(base) is type(draft)
+    ):
+        original = TypeAdapter(YamlMap).validate_python(
+            base.model_dump(exclude_unset=True)
+        )
+        candidate = TypeAdapter(YamlMap).validate_python(
+            draft.model_dump(exclude_unset=True)
+        )
         for name in type(draft).model_fields:
             before, after = _edit_values(getattr(base, name), getattr(draft, name))
             if name in original:
@@ -149,14 +157,22 @@ def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
         draft_map = cast(dict[str, object], draft)
         return (
             {key: _yaml_value(child) for key, child in original_map.items()},
-            {key: _edit_values(original_map.get(key, child), child)[1] for key, child in draft_map.items()},
+            {
+                key: _edit_values(original_map.get(key, child), child)[1]
+                for key, child in draft_map.items()
+            },
         )
     if isinstance(base, list) and isinstance(draft, list):
         original_list = cast(list[object], base)
         draft_list = cast(list[object], draft)
         return (
             [_yaml_value(child) for child in original_list],
-            [_edit_values(original_list[index] if index < len(original_list) else child, child)[1] for index, child in enumerate(draft_list)],
+            [
+                _edit_values(
+                    original_list[index] if index < len(original_list) else child, child
+                )[1]
+                for index, child in enumerate(draft_list)
+            ],
         )
     return _yaml_value(base), _yaml_value(draft)
 
@@ -183,7 +199,9 @@ def _patch_node(
     if isinstance(raw, dict) and isinstance(base, dict) and isinstance(draft, dict):
         for key in dict.fromkeys((*base, *draft)):
             value = _patch_node(
-                raw.get(key, _Missing.VALUE), base.get(key, _Missing.VALUE), draft.get(key, _Missing.VALUE)
+                raw.get(key, _Missing.VALUE),
+                base.get(key, _Missing.VALUE),
+                draft.get(key, _Missing.VALUE),
             )
             if isinstance(value, _Missing):
                 raw.pop(key, None)
@@ -199,7 +217,7 @@ def _patch_node(
                     raw[index] = merged
             else:
                 raw.append(value)
-        del raw[len(draft):]
+        del raw[len(draft) :]
         return raw
     return draft
 
@@ -278,7 +296,9 @@ class DocumentStore[T: BaseModel]:
                 for path, _ in patches:
                     self._check_conflict(base_document, document, path)
                 for path, value in patches:
-                    merged = _patch_node(_lookup(document, path), _lookup(base_values, path), value)
+                    merged = _patch_node(
+                        _lookup(document, path), _lookup(base_values, path), value
+                    )
                     _apply(document, path, merged)
                 # Resolve after structural edits; changed values are still in working units.
                 for path, spec in self._unit_specs(document).items():
@@ -300,15 +320,17 @@ class DocumentStore[T: BaseModel]:
                 DocumentChange(self._path, tuple(path for path, _ in patches), "commit")
             )
 
-    def _check_conflict(
-        self, base: YamlMap, current: YamlMap, path: FieldPath
-    ) -> None:
+    def _check_conflict(self, base: YamlMap, current: YamlMap, path: FieldPath) -> None:
         for length in range(1, len(path) + 1):
             prefix = path[:length]
             original = _lookup(base, prefix)
             latest = _lookup(current, prefix)
             # Sibling edits may coexist; ancestors must remain mappings.
-            if length < len(path) and isinstance(original, dict) and isinstance(latest, dict):
+            if (
+                length < len(path)
+                and isinstance(original, dict)
+                and isinstance(latest, dict)
+            ):
                 continue
             if not _same_value(original, latest):
                 raise ConflictError(self._path, prefix, original, latest)
