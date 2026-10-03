@@ -124,6 +124,13 @@ def _flux_device(
             and arguments.get("flux_unit") == "native"
         ):
             return device, "native"
+        requested_unit = arguments.get("flux_unit")
+        if requested_unit is not None and (
+            requested_unit != unit or requested_unit == "native"
+        ):
+            raise GuiRpcError(
+                "Flux unit does not match the device coordinate", reason="invalid_device"
+            )
         if not isinstance(unit, str) or not unit.strip() or unit == "none":
             if arguments.get("flux_device") is not None:
                 raise GuiRpcError(
