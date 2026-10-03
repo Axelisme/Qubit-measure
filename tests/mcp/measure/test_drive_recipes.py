@@ -14,6 +14,9 @@ class DriveGui(LookbackGui):
     def __init__(self, md=None):
         super().__init__()
         self.md = md or {}
+        self.publication["tree"]["children"]["modules"]["children"]["readout"][
+            "ref"
+        ] = "<Custom:Pulse Readout>"
         self.publication["tree"]["children"].update(
             reps=scalar(17),
             sweep=section(
@@ -89,6 +92,11 @@ class DriveGui(LookbackGui):
             assert params == {"adapter_name": "twotone/freq"}
             return {"tab_id": "t"}
         result = super().__call__(method, params)
+        if method == "context.snapshot":
+            result["ml"]["modules"] = {
+                "readout": {"type": "readout/pulse"},
+                "direct": {"type": "readout/direct"},
+            }
         if method == "tab.snapshot":
             result = deepcopy(result)
             result["tabs"][0]["adapter_name"] = "twotone/freq"
@@ -174,6 +182,18 @@ def test_twotone_rejects_invalid_explicit_values_before_preparation(
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
+        assert not gui.ran
+    finally:
+        client.context.session.close()
+
+
+def test_twotone_requires_calibrated_readout_instead_of_inline_template(tmp_path):
+    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0})
+    client = make_client(tmp_path, gui)
+    try:
+        reply = client.call("twotone_spectrum", {})
+        assert reply.data["status"] == "needs_parameters", reply.data
+        assert {item["parameter"] for item in reply.data["missing"]} == {"readout_ref"}
         assert not gui.ran
     finally:
         client.context.session.close()
