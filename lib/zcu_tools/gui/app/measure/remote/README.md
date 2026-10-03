@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-03, Run preview guard and device units
+**Last updated:** 2026-10-03, explicit simulation initialization RPC
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -282,7 +282,8 @@ The wire surface is grouped by ownership:
 - `project.*` / `result_scope.*`：project apply/read and result-scope discovery.
 - `context.*`：MetaDict / ModuleLibrary / active context operations through
   `ContextControlPort`; role-catalog create/list stays on the app controller.
-- `soc.*`：mock or remote SoC connection.
+- `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
+- `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc and installs a predictor if absent. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
   `PredictorControlPort`.
@@ -381,7 +382,9 @@ operation outcome; `wait(execution)` also observes MCP-owned result reads, image
 saves and preview delivery. Execution identity and completion policy live in the
 [measure MCP adapter](../../../../mcp/measure/README.md), not the GUI operation table.
 
-`soc.connect` is synchronous and does not enter the operation-handle table.
+`soc.connect` returns its summary synchronously, without exposing an operation id.
+`simulation.initialize` returns a GUI-local `operation_id`; MCP maps it to a handle
+for `wait(op=handle)`. Wait for successful completion before starting measurements.
 
 ## Launch / Shutdown
 

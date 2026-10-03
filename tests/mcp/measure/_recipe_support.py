@@ -101,7 +101,7 @@ class LookbackGui:
             for part in edit["path"]:
                 node = node["children"][part]
             if node["kind"] == "reference":
-                node["ref"] = edit["value"].get("__ref") if edit["value"] else None
+                node["ref"] = edit["value"]["__ref"]
             else:
                 value = edit["value"]
                 if isinstance(value, dict) and "__expr" in value:

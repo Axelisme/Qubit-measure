@@ -70,7 +70,7 @@ def _select_modules(
         [
             {
                 "path": ["modules", name],
-                "value": {"__ref": key} if key is not None else None,
+                "value": {"__ref": key},
             }
             for name, key in references.items()
         ],
@@ -95,7 +95,7 @@ def _frequency_edits(
     for path in _FREQUENCIES:
         explicit = arguments.get("frequency_mhz")
         if explicit is not None:
-            value = explicit
+            value = float(explicit)
             source = "frequency_mhz"
         elif arguments.get("readout_ref") is not None and _usable_frequency(
             _node(publication, path)
@@ -134,7 +134,10 @@ def lookback(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
         return
     for parameter, path in _OPTIONAL_FIELDS.items():
         if arguments.get(parameter) is not None:
-            edits.append({"path": list(path), "value": arguments[parameter]})
+            value = arguments[parameter]
+            if parameter != "rounds":
+                value = float(value)
+            edits.append({"path": list(path), "value": value})
             origins[path] = parameter
         else:
             origins[path] = "gui_default"

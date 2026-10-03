@@ -6,8 +6,8 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     default_boolean,
-    optional_integer,
     optional_string,
+    required_integer,
     required_object,
     required_string,
 )
@@ -19,22 +19,35 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:h_soc_connect",
         MethodSpec(
             # Synchronous connect (runs on the main thread; the IO worker blocks on it).
-            # Bounded by make_soc_proxy's 1s COMMTIMEOUT for a remote board (mock is
-            # instant); a small margin above that keeps the timeout from firing before
-            # make_soc_proxy's own clean error does.
+            # A margin above make_soc_proxy's 1s COMMTIMEOUT lets its error return.
             3.0,
-            "Connect the SoC SYNCHRONOUSLY and return its summary. kind='mock' for an "
-            "offline mock board, or kind='remote' with ip + port for a real board "
-            "(ip/port required only when kind='remote'). Returns {soc: {description, "
-            "is_mock}} once connected (the structured cfg is read on demand via "
-            "soc.info). A remote connect fails fast (~1s) if the board is unreachable.",
+            "Connect a real SoC SYNCHRONOUSLY with kind='remote', ip and port. "
+            "Mock connections are rejected; use simulation.initialize for an offline "
+            "environment. Returns {soc: {description, is_mock}} once connected; "
+            "read soc.info for structured cfg. Unreachable boards fail fast (~1s).",
             (
-                required_string("kind", "'mock' or 'remote'"),
-                optional_string("ip", "Board IP (required when kind='remote')"),
-                optional_integer("port", "Board port (required when kind='remote')"),
+                required_string("kind", "Must be 'remote'"),
+                required_string("ip", "Real board IP"),
+                required_integer("port", "Real board port"),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
+        "simulation.initialize",
+        "connection_device:h_simulation_initialize",
+        MethodSpec(
+            5.0,
+            "Initialize the simulated environment using the same coordinator as the "
+            "GUI Use Simulate Env action. Disconnects real devices, prepares fake_flux, "
+            "binds its live value to MockSoc, and installs a predictor if absent. "
+            "Reuses an already valid simulation without resetting its values. "
+            "Returns operation_id asynchronously; rpc_call maps it to a handle. "
+            "Use wait(op=handle) for terminal status before running measurements. "
+            "Failure may leave partial changes; inspect state before retrying.",
+            (),
+        ),
+        agent=AgentMethodPolicy(operation_key="simulation", refresh_after_write=True),
     ),
     method_entry(
         "project.apply",

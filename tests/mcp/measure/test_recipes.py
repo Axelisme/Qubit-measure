@@ -820,8 +820,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             for edit in params["edits"]
         ]
         by_path = {tuple(edit["path"]): edit["value"] for edit in edits}
-        assert by_path["modules", "reset"] is None
-        assert by_path["modules", "init_pulse"] is None
+        assert by_path["modules", "reset"] == {"__ref": None}
+        assert by_path["modules", "init_pulse"] == {"__ref": None}
     finally:
         client.context.session.close()
 

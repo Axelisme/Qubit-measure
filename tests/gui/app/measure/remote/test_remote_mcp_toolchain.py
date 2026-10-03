@@ -1636,27 +1636,29 @@ def test_soc_connect_remote_missing_ip_rejected(fx):
         sock.close()
 
 
-def test_soc_connect_mock_returns_summary_directly(fx):
+def test_soc_connect_remote_returns_summary_directly(fx):
     # soc.connect is synchronous: the handler calls Controller.connect_sync then
     # reads back the SoC summary via get_soc_info — no operation_id / handle.
     fx.ctrl.connect_sync = MagicMock()  # type: ignore[method-assign]
     fx.ctrl.get_soc_info = MagicMock(  # type: ignore[method-assign]
         return_value={
-            "description": "QICK mock board",
+            "description": "QICK remote board",
             "cfg": {},
-            "is_mock": True,
+            "is_mock": False,
         }
     )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "soc.connect", {"kind": "mock"})
+        resp = call(
+            sock, "soc.connect", {"kind": "remote", "ip": "192.0.2.1", "port": 8888}
+        )
         assert resp["ok"] is True
         fx.ctrl.connect_sync.assert_called_once()
         # The reply carries the soc summary directly (description + is_mock), with
         # no operation_id (connect is no longer an async handle).
         assert resp["result"]["soc"] == {
-            "description": "QICK mock board",
-            "is_mock": True,
+            "description": "QICK remote board",
+            "is_mock": False,
         }
         assert "operation_id" not in resp["result"]
     finally:
