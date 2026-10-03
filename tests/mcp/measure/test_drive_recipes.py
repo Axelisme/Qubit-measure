@@ -216,7 +216,7 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
 ):
     gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
     drive = gui.publication["tree"]["children"]["modules"]["children"]["qub_pulse"]
-    arguments = {"reuse_tab_id": "t"}
+    arguments: dict[str, Any] = {"reuse_tab_id": "t"}
     if source in ("explicit", "library", "invalid_library"):
         drive["ref"] = "drive"
         drive["children"]["freq"] = scalar(
