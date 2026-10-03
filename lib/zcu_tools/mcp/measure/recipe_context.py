@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import time
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
     CancelError,
     GuiCancel,
 )
+from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -30,7 +32,7 @@ RecipeStatus = Literal[
     "running", "needs_parameters", "interactive", "finished", "failed", "cancelled"
 ]
 RecipePhase = Literal[
-    "preparing", "run", "raw_save", "analysis", "writeback_read", "terminal"
+    "preparing", "run", "raw_save", "analysis", "writeback_read", "preview", "terminal"
 ]
 
 
@@ -59,6 +61,12 @@ class RawSave:
 
 
 @dataclass(frozen=True)
+class RunPreview:
+    path: str
+    kind: Literal["run_preview"] = "run_preview"
+
+
+@dataclass(frozen=True)
 class RecipeSnapshot:
     execution: str
     recipe: str
@@ -74,6 +82,8 @@ class RecipeSnapshot:
     run_outcome: dict[str, Any] | None = None
     result_state: dict[str, Any] | None = None
     raw_save: RawSave = field(default_factory=RawSave)
+    analysis_mode: Literal["primary", "none"] = "none"
+    preview: RunPreview | None = None
     analysis: dict[str, Any] | None = None
     writeback: dict[str, Any] | None = None
     error: RecipeError | None = None
@@ -314,19 +324,26 @@ class RecipeContext:
             },
         )
 
-    def run_once(self, publication: dict[str, Any], fields: dict[str, Any]) -> None:
-        """Run one observed publication; preserve the original receipts throughout."""
+    def run_once(
+        self,
+        publication: dict[str, Any],
+        fields: dict[str, Any],
+        *,
+        analysis_mode: Literal["primary", "none"] = "primary",
+    ) -> None:
+        """Run once; save raw, then Primary analysis or a noncanonical Run preview."""
         tab = self.progress.tab
         if tab is None:
             raise RuntimeError("Prepare a tab before running")
         self._publish(
+            analysis_mode=analysis_mode,
             actual=deepcopy(
                 {
                     "cfg_ref": publication["cfg_ref"],
                     "fields": fields,
                     "source_basis": publication["source_basis"],
                 }
-            )
+            ),
         )
         self.rpc("tab.snapshot", {"tab_id": tab})
         self.rpc("soc.info", {"include_cfg": True})
@@ -369,7 +386,31 @@ class RecipeContext:
                 "Run did not publish usable data", reason="run_result_unavailable"
             )
         self._save_raw(tab, run_op)
-        self._analyze_run(tab, run_op)
+        if analysis_mode == "primary":
+            self._analyze_run(tab, run_op)
+        else:
+            self._preview_run(tab, run_op)
+
+    def _preview_run(self, tab: str, run_op: int) -> None:
+        self._publish(phase="preview")
+        reply = self.tools.gui.send_gui_rpc(
+            "tab.get_figure",
+            {"tab_id": tab, "subtab_id": "run"},
+            run_operation_handle=run_op,
+            before_send=lambda: self._admit("preview"),
+        )
+        encoded = reply.get("png_b64")
+        if not isinstance(encoded, str):
+            raise GuiRpcError("Invalid Run preview reply", reason="incompatible_wire")
+        image = validated_png(base64.b64decode(encoded, validate=True))
+        path = self.tools.session.write_png(image.data)
+        with self._condition:
+            self.images = (image,)
+            self._publish(
+                preview=RunPreview(str(path)),
+                status="cancelled" if self.progress.cancel_requested else "finished",
+                phase="terminal",
+            )
 
     def _analyze_run(self, tab: str, run_op: int) -> None:
         """Join analysis delivery and writeback for the already-saved Run."""

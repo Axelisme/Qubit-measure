@@ -201,10 +201,17 @@ class PowerGui(OnetoneGui):
     def __init__(self):
         super().__init__({"r_f": 6100.0, "rf_w": 4.0}, "onetone/power_dep")
         self.publication["tree"]["children"]["sweep"]["children"]["gain"] = {
-            "kind": "sweep", "valid": True,
-            "inputs": {key: self.input(value) for key, value in {
-                "start": 0.03, "stop": 0.27, "expts": 13, "step": 0.02,
-            }.items()},
+            "kind": "sweep",
+            "valid": True,
+            "inputs": {
+                key: self.input(value)
+                for key, value in {
+                    "start": 0.03,
+                    "stop": 0.27,
+                    "expts": 13,
+                    "step": 0.02,
+                }.items()
+            },
         }
 
     def __call__(self, method, params):
@@ -215,12 +222,24 @@ class PowerGui(OnetoneGui):
         return super().__call__(method, params)
 
 
-@pytest.mark.parametrize("arguments, expected_gain", [
-    ({}, {"start": 0.03, "stop": 0.27, "expts": 13}),
-    ({"reuse_tab_id": "t", "gain_range": [0.1, 0.7], "gain_points": 7, "freq_points": 23},
-     {"start": 0.1, "stop": 0.7, "expts": 7}),
-])
-def test_power_saves_raw_and_delivers_only_a_run_preview(tmp_path, arguments, expected_gain):
+@pytest.mark.parametrize(
+    "arguments, expected_gain",
+    [
+        ({}, {"start": 0.03, "stop": 0.27, "expts": 13}),
+        (
+            {
+                "reuse_tab_id": "t",
+                "gain_range": [0.1, 0.7],
+                "gain_points": 7,
+                "freq_points": 23,
+            },
+            {"start": 0.1, "stop": 0.7, "expts": 7},
+        ),
+    ],
+)
+def test_power_saves_raw_and_delivers_only_a_run_preview(
+    tmp_path, arguments, expected_gain
+):
     gui = PowerGui()
     with recipe_client(tmp_path, gui) as client:
         reply = client.call("onetone_spectrum_over_power", arguments)

@@ -271,7 +271,46 @@ def _actual_fields(
 
 def onetone_spectrum_over_power(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Save one frequency/gain survey and return its Run preview without analysis."""
-    raise NotImplementedError("Power raw-only survey is not implemented")
+    _validate(arguments)
+    sources = ctx.rpc("context.snapshot", {})
+    publication = ctx.prepare_tab("onetone/power_dep", arguments.get("reuse_tab_id"))
+    publication = _select_readout(ctx, publication, arguments)
+    frequency, missing = _frequency(
+        publication,
+        {**arguments, "points": arguments.get("freq_points")},
+        sources["md"],
+    )
+    if missing:
+        ctx.needs_parameters(missing)
+        return
+    inputs = _node(publication, "sweep", "gain")["inputs"]
+    explicit_range = arguments.get("gain_range")
+    gain: dict[str, Any] = (
+        {key: _input_value(inputs[key]) for key in ("start", "stop")}
+        if explicit_range is None
+        else dict(zip(("start", "stop"), explicit_range, strict=True))
+    )
+    gain["expts"] = (
+        arguments["gain_points"]
+        if arguments.get("gain_points") is not None
+        else _input_value(inputs["expts"])
+    )
+    publication = ctx.edit_cfg(
+        publication,
+        [
+            {"path": ["sweep", "freq"], "value": frequency},
+            {"path": ["sweep", "gain"], "value": gain},
+            *_scalar_edits(arguments),
+        ],
+    )
+    fields = _actual_fields(publication, arguments)
+    inputs = _node(publication, "sweep", "gain")["inputs"]
+    fields["sweep.gain"] = {
+        "value": {key: inputs[key]["resolved"] for key in ("start", "stop", "expts")},
+        "input": inputs,
+        "source": "explicit" if explicit_range is not None else "gui_default",
+    }
+    ctx.run_once(publication, fields, analysis_mode="none")
 
 
 def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
