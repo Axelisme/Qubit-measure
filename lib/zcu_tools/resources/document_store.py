@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Literal
+from typing import Literal, cast
 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, TypeAdapter
@@ -168,8 +168,12 @@ class DocumentStore[T: BaseModel]:
 
     def _read(self) -> tuple[YamlMap, T]:
         yaml = YAML(typ="rt")
+        yaml.preserve_quotes = True
         with self._path.open(encoding="utf-8") as stream:
-            document = TypeAdapter(YamlMap).validate_python(yaml.load(stream))
+            raw = yaml.load(stream)
+        # Validate the recursive shape without discarding ruamel's round-trip nodes.
+        TypeAdapter(YamlMap).validate_python(raw, strict=True)
+        document = cast(YamlMap, raw)
         validate_header(
             document,
             expected_format=self._format,
