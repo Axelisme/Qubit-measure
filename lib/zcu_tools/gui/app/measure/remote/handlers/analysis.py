@@ -79,7 +79,7 @@ def h_tab_get_analyze_result(
         control.require_analysis_operation(tab_id, "analysis", operation_id)
     result = control.get_tab_analyze_result(tab_id)
     if result is None:
-        return {"summary": None}
+        return {"summary": None, "invalid": []}
     to_summary = getattr(result, "to_summary_dict", None)
     if not callable(to_summary):
         raise RemoteError(
@@ -188,7 +188,7 @@ def h_tab_get_post_analyze_result(
         control.require_analysis_operation(tab_id, "post_analysis", operation_id)
     result = control.get_post_analyze_result(tab_id)
     if result is None:
-        return {"summary": None}
+        return {"summary": None, "invalid": []}
     to_summary = getattr(result, "to_summary_dict", None)
     if not callable(to_summary):
         raise RemoteError(
