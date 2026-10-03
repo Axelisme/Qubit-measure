@@ -178,7 +178,9 @@ def test_tree_renders_and_edits_same_observable_behavior(qapp, ctrl):
         assert nested.fields["choice"] == DirectValue("c")
         assert nested.fields["flag"] == DirectValue(False)
         assert nested.fields["sweep"] == SweepValue(start=0.0, stop=1.0, expts=5)
-        assert nested.fields["csweep"] == CenteredSweepValue(center=0.5, span=2.0, expts=11)
+        assert nested.fields["csweep"] == CenteredSweepValue(
+            center=0.5, span=2.0, expts=11
+        )
         reference = values.fields["ref"]
         assert isinstance(reference, ReferenceValue)
         assert reference.chosen_key == "<Custom:Pulse>"
@@ -270,7 +272,9 @@ def _reference_schema() -> CfgSchema:
         spec=CfgSectionSpec(
             label="Root",
             fields={
-                "ref": ReferenceSpec(kind="waveform", label="Waveform", allowed=[gauss]),
+                "ref": ReferenceSpec(
+                    kind="waveform", label="Waveform", allowed=[gauss]
+                ),
                 "other": ScalarSpec(label="Other", type=int),
             },
         ),
@@ -353,7 +357,9 @@ def test_tree_detach_attach_preserves_draft(qapp, ctrl):
 
 def test_tree_validation_propagation(qapp, ctrl):
     schema = CfgSchema(
-        spec=CfgSectionSpec(fields={"v": ScalarSpec(label="V", type=int, required=True)}),
+        spec=CfgSectionSpec(
+            fields={"v": ScalarSpec(label="V", type=int, required=True)}
+        ),
         value=CfgSectionValue(fields={"v": DirectValue(1)}),
     )
     with _attached_form(schema, ctrl) as (form, draft):
@@ -477,7 +483,9 @@ def _optional_outer_schema(shape: CfgSectionSpec, value: CfgSectionValue) -> Cfg
             }
         ),
         value=CfgSectionValue(
-            fields={"outer": ReferenceValue(chosen_key="<Custom:OuterShape>", value=value)}
+            fields={
+                "outer": ReferenceValue(chosen_key="<Custom:OuterShape>", value=value)
+            }
         ),
     )
 
@@ -499,7 +507,9 @@ def test_tree_outer_reenable_preserves_nested_reference_and_decoration(qapp, ctr
     )
     schema = _optional_outer_schema(
         shape,
-        CfgSectionValue(fields={"deco_leaf": DirectValue(10), "normal_leaf": DirectValue(20)}),
+        CfgSectionValue(
+            fields={"deco_leaf": DirectValue(10), "normal_leaf": DirectValue(20)}
+        ),
     )
     enabled = {
         "outer.inner_ref": True,
@@ -507,7 +517,10 @@ def test_tree_outer_reenable_preserves_nested_reference_and_decoration(qapp, ctr
         "outer.deco_leaf": False,
         "outer.normal_leaf": True,
     }
-    with _attached_form(schema, ctrl, _DisabledPaths(("outer.deco_leaf",))) as (form, draft):
+    with _attached_form(schema, ctrl, _DisabledPaths(("outer.deco_leaf",))) as (
+        form,
+        draft,
+    ):
         outer = draft.root.fields["outer"]
         assert isinstance(outer, ReferenceField) and outer.is_enabled
         assert outer.sub_field is not None
@@ -531,13 +544,16 @@ def test_tree_outer_reenable_preserves_decoration_disabled_containers(qapp, ctrl
         label="InnerSection", fields={"sec_leaf": ScalarSpec(label="SecLeaf", type=int)}
     )
     reference_shape = CfgSectionSpec(
-        label="InnerRefShape", fields={"ref_leaf": ScalarSpec(label="RefLeaf", type=int)}
+        label="InnerRefShape",
+        fields={"ref_leaf": ScalarSpec(label="RefLeaf", type=int)},
     )
     shape = CfgSectionSpec(
         label="OuterShape",
         fields={
             "inner_section": section,
-            "inner_ref": ReferenceSpec(kind="module", label="InnerRef", allowed=[reference_shape]),
+            "inner_ref": ReferenceSpec(
+                kind="module", label="InnerRef", allowed=[reference_shape]
+            ),
             "normal_leaf": ScalarSpec(label="Normal", type=int),
         },
     )
