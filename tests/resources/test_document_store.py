@@ -2,11 +2,13 @@ from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
+from filelock import Timeout
 from pydantic import BaseModel, ConfigDict
 from zcu_tools.resources.document_store import (
     ConflictError,
     DocumentChange,
     DocumentStore,
+    LockTimeoutError,
     UnitSpec,
 )
 
@@ -309,3 +311,38 @@ def test_custom_validation_rejects_the_merged_document_before_publication(
     assert first.snapshot().values == {"left": 1.0, "right": 2.0}
     assert second.snapshot().values == {"left": 1.0, "right": 8.0}
     assert events == []
+
+
+def test_real_entry_lock_blocks_an_independent_commit_and_is_reusable(
+    document_path: Path,
+) -> None:
+    lock_path = document_path.parent / ".entry.lock"
+    first = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", lock_path=lock_path
+    )
+    second = DocumentStore(
+        document_path,
+        SyntheticDocument,
+        format="synthetic",
+        lock_path=lock_path,
+        lock_timeout=0.01,
+    )
+    first_stack = ExitStack()
+    second_stack = ExitStack()
+    first_draft = first_stack.enter_context(first.edit())
+    second_draft = second_stack.enter_context(second.edit())
+    first_draft.values["left"] = 10.0
+    second_draft.values["right"] = 20.0
+    original = document_path.read_bytes()
+    with first.locked(), pytest.raises(LockTimeoutError) as raised:
+        second_stack.close()
+
+    assert raised.value.lock_path == lock_path
+    assert raised.value.timeout == 0.01
+    assert isinstance(raised.value.__cause__, Timeout)
+    assert document_path.read_bytes() == original
+    assert second.snapshot().values == {"left": 1.0, "right": 2.0}
+    first_stack.close()
+    with second.edit() as draft:
+        draft.values["right"] = 30.0
+    assert make_store(document_path).snapshot().values == {"left": 10.0, "right": 30.0}
