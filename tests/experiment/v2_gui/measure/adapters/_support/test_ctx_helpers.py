@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -69,10 +70,14 @@ def test_resonator_partial_calibration_keeps_the_existing_source_live(md):
     sweep = proper_res_freq_range(_ctx_with_md(md), 21)
     assert isinstance(sweep.start, EvalValue)
     assert isinstance(sweep.stop, EvalValue)
-    before = [simple_eval(edge.expr, names=md) for edge in (sweep.start, sweep.stop)]
+    before = [
+        cast(float, simple_eval(edge.expr, names=md))
+        for edge in (sweep.start, sweep.stop)
+    ]
     changed = {key: value * 2 for key, value in md.items()}
     after = [
-        simple_eval(edge.expr, names=changed) for edge in (sweep.start, sweep.stop)
+        cast(float, simple_eval(edge.expr, names=changed))
+        for edge in (sweep.start, sweep.stop)
     ]
     if "r_f" in md:
         assert after[0] - before[0] == pytest.approx(5500.0)
