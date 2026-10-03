@@ -14,6 +14,8 @@ from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate
 
 type FieldPath = tuple[str, ...]
 
+_SUPPORTED_VERSION = FormatVersion(1, 0)
+
 
 @dataclass(frozen=True)
 class UnitSpec:
@@ -60,18 +62,26 @@ class LockTimeoutError(TimeoutError):
 
 
 class DocumentStore[T: BaseModel]:
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- The accepted Interface fixes these arguments.
         self,
         path: Path,
         model: type[T],
         *,
         format: str,
-        supported_version: FormatVersion = FormatVersion(1, 0),
+        supported_version: FormatVersion = _SUPPORTED_VERSION,
         units: Mapping[FieldPath, UnitSpec] | UnitResolver | None = None,
         validate: Callable[[T], None] | None = None,
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
     ) -> None:
+        self._path = path
+        self._model = model
+        self._format = format
+        self._supported_version = supported_version
+        self._units = units
+        self._validate = validate
+        self._lock_path = lock_path or Path(f"{path}.lock")
+        self._lock_timeout = lock_timeout
         yaml = YAML(typ="rt")
         with path.open(encoding="utf-8") as stream:
             document = TypeAdapter(YamlMap).validate_python(yaml.load(stream))
