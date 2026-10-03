@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from contextlib import ExitStack
+from math import isnan
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,10 @@ class SyntheticDocument(BaseModel):
     format: str
     format_version: str
     values: dict[str, float]
+
+
+class ExtensionDocument(SyntheticDocument):
+    ext: dict[str, float]
 
 
 class SequenceDocument(BaseModel):
@@ -596,3 +601,23 @@ def test_boolean_numeric_changes_inside_a_sequence_are_not_discarded(
     on_disk = DocumentStore(document_path, SequenceDocument, format="synthetic")
     assert type(on_disk.snapshot().values[0]["enabled"]) is int
     assert on_disk.snapshot().values == [{"enabled": 1}]
+
+
+def test_unchanged_nan_extension_roundtrips_without_a_false_change(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        document_path.read_text(encoding="utf-8")
+        + "ext:\n  calibration: .nan # untyped extension\n",
+        encoding="utf-8",
+    )
+    store = DocumentStore(document_path, ExtensionDocument, format="synthetic")
+    with store.edit() as draft:
+        draft.values["left"] = 10.0
+
+    assert store.snapshot().values["left"] == 10.0
+    assert isnan(store.snapshot().ext["calibration"])
+    assert store.refresh() is False
+    assert "  calibration: .nan # untyped extension" in document_path.read_text(
+        encoding="utf-8"
+    )
