@@ -68,6 +68,15 @@ class OptionalDocument(SyntheticDocument):
     description: str | None = None
 
 
+class OptionalGeneral(BaseModel):
+    description: str | None = None
+    ext: dict[str, float] = Field(default_factory=dict)
+
+
+class DefaultedDocument(SyntheticDocument):
+    general: OptionalGeneral = Field(default_factory=OptionalGeneral)
+
+
 class KnownValues(BaseModel):
     model_config = ConfigDict(extra="forbid")
     left: float = Field(ge=0)
@@ -576,6 +585,23 @@ def test_missing_optional_model_field_can_be_explicitly_committed_as_null(
     assert events == [DocumentChange(document_path, (("description",),), "commit")]
     reopened = DocumentStore(document_path, OptionalDocument, format="synthetic")
     assert "description" in reopened.snapshot().model_fields_set
+
+
+def test_nested_default_model_tracks_explicit_null_and_in_place_container_changes(
+    document_path: Path,
+) -> None:
+    store = DocumentStore(document_path, DefaultedDocument, format="synthetic")
+    with store.edit() as draft:
+        draft.general.description = None
+        draft.general.ext["calibration"] = 7.0
+
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert persisted["general"] == {
+        "description": None, "ext": {"calibration": 7.0}
+    }
+    reopened = DocumentStore(document_path, DefaultedDocument, format="synthetic")
+    assert reopened.snapshot().general.ext == {"calibration": 7.0}
+    assert "description" in reopened.snapshot().general.model_fields_set
 
 
 def test_added_null_and_deleted_fields_roundtrip_as_distinct_changes(
