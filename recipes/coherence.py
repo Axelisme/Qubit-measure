@@ -5,7 +5,8 @@ from typing import Any
 from zcu_tools.mcp.measure.recipe_context import MissingParameter, RecipeContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from .drive import _node, _readout_frequency
+from .cfg_sources import cfg_node as _node
+from .cfg_sources import readout_frequency as _readout_frequency
 
 
 def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
