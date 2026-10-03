@@ -5,7 +5,7 @@ from copy import deepcopy
 from difflib import get_close_matches
 from pathlib import Path
 from types import UnionType
-from typing import Union, get_args, get_origin
+from typing import Any, Union, cast, get_args, get_origin
 
 from pydantic import BaseModel, create_model
 from pydantic.fields import FieldInfo
@@ -50,7 +50,10 @@ def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
             fields[name] = (field.annotation, partial_field)
     if not fields:
         return model
-    return create_model(f"{model.__name__}Partial", __base__=model, **fields)
+    # Pydantic mixes field definitions and reserved options in one kwargs signature.
+    return create_model(
+        f"{model.__name__}Partial", __base__=model, **cast(dict[str, Any], fields)
+    )
 
 
 def _validate_component_model(model: object) -> None:
