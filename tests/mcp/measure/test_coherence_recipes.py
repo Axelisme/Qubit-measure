@@ -151,6 +151,46 @@ def test_t2_reports_every_missing_calibration(tmp_path, recipe, missing):
 
 
 @pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
+@pytest.mark.parametrize(
+    "failure", ["incompatible_reference", "invalid_cfg", "stale_reuse"]
+)
+def test_coherence_gui_rejection_never_runs_or_retries(tmp_path, recipe, failure):
+    gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
+
+    def respond(method, params):
+        result = gui(method, params)
+        if method == "tab.edit_cfg" and failure != "stale_reuse":
+            result["status"] = "Invalid"
+            if failure == "incompatible_reference":
+                result["tree"]["children"]["modules"]["children"]["readout"][
+                    "error"
+                ] = "Incompatible module"
+        return result
+
+    with recipe_client(tmp_path, respond) as client:
+        arguments = {"readout_ref": "readout"}
+        if failure == "stale_reuse":
+            arguments["reuse_tab_id"] = "t"
+            client.transport.replies["tab.reset_cfg"] = {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "stale_cfg",
+                    "message": "Changed",
+                },
+            }
+        data = client.call(recipe, arguments).data
+        assert data["status"] == "failed", data
+        assert data["tab"] == "t"
+        assert not gui.ran
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.new") == (0 if failure == "stale_reuse" else 1)
+        if failure == "stale_reuse":
+            assert methods.count("tab.reset_cfg") == 1
+        assert "tab.run_start" not in methods
+
+
+@pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
 @pytest.mark.parametrize("stage", ["tab.run_start", "tab.analyze", "tab.get_figure"])
 def test_coherence_failure_retains_tab_and_already_saved_paths(tmp_path, recipe, stage):
     gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
