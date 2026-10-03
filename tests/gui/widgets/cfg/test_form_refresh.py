@@ -11,10 +11,10 @@ from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
     CfgNodeSpec,
     CfgSchema,
-    ChoiceBinding,
-    ChoiceSectionSpec,
     CfgSectionSpec,
     CfgSectionValue,
+    ChoiceBinding,
+    ChoiceSectionSpec,
     DirectValue,
     ReferenceSpec,
     ReferenceValue,
@@ -313,7 +313,8 @@ def test_choice_section_rebuilds_only_changed_section(
         stable_item = tree.topLevelItem(1)
         assert search_item is not None and stable_item is not None
         assert search_item.childCount() == 2
-        assert search_item.child(1).text(0) == "Half width"
+        half_item = search_item.child(1)
+        assert half_item is not None and half_item.text(0) == "Half width"
         stable_widget = rendering.widgets["stable"][0]
         stable_input = stable_widget.findChild(QLineEdit)
         mode = rendering.widgets["search.mode"][-1].findChild(QComboBox)
@@ -329,21 +330,22 @@ def test_choice_section_rebuilds_only_changed_section(
         assert rendering.widgets["stable"] == [stable_widget]
         assert float(stable_input.text()) == 3.0
         assert search_item.childCount() == 2
-        assert search_item.child(1).text(0) == "Manual"
+        manual_item = search_item.child(1)
+        assert manual_item is not None and manual_item.text(0) == "Manual"
 
         manual = rendering.widgets["search.manual_value"][-1].findChild(QLineEdit)
         assert manual is not None and manual.isEnabled()
         manual.setText("8.5")
         manual.editingFinished.emit()
-        snapshot = form.snapshot()
-        search_value = snapshot.value.fields["search"]
+        value = form.read_values()
+        search_value = value.fields["search"]
         assert isinstance(search_value, CfgSectionValue)
         assert search_value.fields == {
             "mode": DirectValue("fixed"),
             "half_width": DirectValue(1.0),
             "manual_value": DirectValue(8.5),
         }
-        assert snapshot.value.fields["stable"] == DirectValue(3.0)
+        assert value.fields["stable"] == DirectValue(3.0)
 
 
 def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
@@ -413,7 +415,8 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
         qapp.processEvents()
 
         assert len(emitted) == 1
-        assert emitted[0] == draft.snapshot() == form.snapshot()
+        assert emitted[0] == draft.snapshot()
+        assert emitted[0].value == form.read_values()
         emitted_search = emitted[0].value.fields["search"]
         assert isinstance(emitted_search, CfgSectionValue)
         assert emitted_search.fields == {
@@ -429,7 +432,7 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
         search_value = draft.snapshot().value.fields["search"]
         assert isinstance(search_value, CfgSectionValue)
         assert search_value.fields["manual_value"] == DirectValue(7.5)
-        assert form.snapshot() == draft.snapshot()
+        assert form.read_values() == draft.snapshot().value
     finally:
         form.detach()
         draft.close()
