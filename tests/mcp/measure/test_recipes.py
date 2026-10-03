@@ -958,6 +958,7 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
         {"readout_length_us": float("inf")},
         {"trigger_offset_us": "0.1"},
         {"rounds": True},
+        {"rounds": 1.0},
         {"rounds": 2.5},
         {"reuse_tab_id": ""},
         {"readout_ref": ""},

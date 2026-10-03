@@ -347,6 +347,9 @@ def test_rabi_inline_frequency_does_not_substitute_for_missing_sources(
         ("time_rabi", TimeRabiGui, {"gain": float("nan")}),
         ("time_rabi", TimeRabiGui, {"max_length_us": float("inf")}),
         ("time_rabi", TimeRabiGui, {"points": 2.5}),
+        ("time_rabi", TimeRabiGui, {"points": 1.0}),
+        ("time_rabi", TimeRabiGui, {"reps": 1.0}),
+        ("time_rabi", TimeRabiGui, {"rounds": 1.0}),
         ("amplitude_rabi", AmplitudeRabiGui, {"pulse_length_us": True}),
         ("amplitude_rabi", AmplitudeRabiGui, {"frequency_mhz": float("nan")}),
         ("amplitude_rabi", AmplitudeRabiGui, {"gain_range": [0.1]}),
@@ -368,6 +371,7 @@ def test_rabi_invalid_explicit_values_fail_before_preparing(
     with recipe_client(tmp_path, gui) as client:
         data = client.call(recipe, arguments).data
         assert data["status"] == "failed", data
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )

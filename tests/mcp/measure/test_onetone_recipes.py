@@ -36,6 +36,9 @@ def recipe_client(tmp_path, respond):
         {"gain": False},
         {"gain": "bad"},
         {"points": 2.5},
+        {"points": 1.0},
+        {"reps": 1.0},
+        {"rounds": 1.0},
         {"points": True},
         {"reps": 1.5},
         {"rounds": False},
@@ -50,6 +53,7 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert reply.data["error"]["phase"] == "preparing"
         assert not gui.ran
         assert not any(
@@ -87,6 +91,8 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         {"flux_device": " "},
         {"freq_points": True},
         {"freq_points": 1.5},
+        {"freq_points": 1.0},
+        {"flux_points": 1.0},
         {"flux_points": False},
         {"flux_range": [0, True]},
         {"flux_range": [0, float("inf")]},
@@ -105,6 +111,7 @@ def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
@@ -272,6 +279,8 @@ class OnetoneGui(LookbackGui):
         {"gain_range": [0, 1, 2]},
         {"gain_range": {"start": 0, "stop": 1}},
         {"gain_points": 1.2},
+        {"gain_points": 1.0},
+        {"freq_points": 1.0},
         {"gain_points": True},
     ],
 )
@@ -281,6 +290,7 @@ def test_power_rejects_invalid_gain_inputs_before_preparation(tmp_path, argument
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )

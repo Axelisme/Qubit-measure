@@ -378,6 +378,9 @@ def test_t1_reports_all_missing_calibration_sources(tmp_path, arguments):
         {"max_delay_us": -1},
         {"points": 1},
         {"points": 2.5},
+        {"points": 1.0},
+        {"reps": 1.0},
+        {"rounds": 1.0},
         {"points": True},
         {"reps": False},
         {"rounds": 1.5},
@@ -393,6 +396,7 @@ def test_t1_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
     try:
         data = client.call("t1", arguments).data
         assert data["status"] == "failed", data
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not gui.ran
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent

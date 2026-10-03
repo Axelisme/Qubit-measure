@@ -516,7 +516,7 @@ def test_ge_gui_cfg_rejection_stops_before_run(tmp_path, failure):
 
 @pytest.mark.parametrize(
     "arguments",
-    [{"shots": value} for value in (0, -1, True, 2.5, float("inf"), float("nan"), "10")]
+    [{"shots": value} for value in (0, -1, True, 1.0, 2.5, float("inf"), float("nan"), "10")]
     + [
         {name: value}
         for name in (
@@ -535,6 +535,7 @@ def test_ge_rejects_invalid_arguments_before_preparing(tmp_path, arguments):
     try:
         data = client.call("singleshot_ge", {"pi_ref": "pi", **arguments}).data
         assert data["status"] == "failed", data
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not gui.ran
         assert not any(method == "context.snapshot" for method, _ in gui.calls)
     finally:
