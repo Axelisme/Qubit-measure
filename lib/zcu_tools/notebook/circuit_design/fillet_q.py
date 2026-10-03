@@ -33,8 +33,10 @@
 import warnings
 
 try:
-    from qiskit_metal import Dict, draw  # type: ignore
-    from qiskit_metal.qlibrary.core import BaseQubit  # type: ignore
+    from qiskit_metal import Dict, draw  # type: ignore[reportMissingImports]
+    from qiskit_metal.qlibrary.core import (  # type: ignore[reportMissingImports]
+        BaseQubit,
+    )
 except ImportError:
     print("qiskit_metal is not installed")
     raise
@@ -161,7 +163,6 @@ class Fillet_Qubit(BaseQubit):
         information, such as layer, subtract, etc.
         """
         self.make_pocket()
-        # self.make_connection_pads()
 
     def make_pocket(self):
         """Makes standard transmon in a pocket."""
@@ -171,34 +172,34 @@ class Fillet_Qubit(BaseQubit):
         chip = p.chip
         # main pad
         max_pad_fillet = min(
-            (p.pad_width - 2 * p.arm_width) / 2,  # type: ignore
-            (p.pad_height - p.arm_width) / 2,  # type: ignore
+            (p.pad_width - 2 * p.arm_width) / 2,
+            (p.pad_height - p.arm_width) / 2,
         )
         if p.pad_fillet > max_pad_fillet:
             warnings.warn(
                 f"pad_fillet is larger than the maximum fillet size. Setting it to {max_pad_fillet}"
             )
-            p.pad_fillet = max_pad_fillet  # type: ignore
-        rect1 = draw.rectangle(p.pad_width, p.pad_height - 2 * p.pad_fillet)  # type: ignore
-        rect2 = draw.rectangle(p.pad_width - 2 * p.pad_fillet, p.pad_height)  # type: ignore
-        cir1 = draw.Point(0, 0).buffer(p.pad_fillet)  # type: ignore
+            p.pad_fillet = max_pad_fillet
+        rect1 = draw.rectangle(p.pad_width, p.pad_height - 2 * p.pad_fillet)
+        rect2 = draw.rectangle(p.pad_width - 2 * p.pad_fillet, p.pad_height)
+        cir1 = draw.Point(0, 0).buffer(p.pad_fillet)
         # arm and tapper
         max_arm_fillet = min(
-            (p.pad_width - 2 * p.pad_fillet - p.arm_width) / 2,  # type: ignore
-            p.arm_length,  # type: ignore
+            (p.pad_width - 2 * p.pad_fillet - p.arm_width) / 2,
+            p.arm_length,
         )
         if p.arm_fillet > max_arm_fillet:
             warnings.warn(
                 f"arm_fillet is larger than the maximum fillet size. Setting it to {max_arm_fillet}"
             )
-            p.arm_fillet = max_arm_fillet  # type: ignore
+            p.arm_fillet = max_arm_fillet
         arm_fillet = p.arm_fillet
 
-        rect3 = draw.rectangle(p.arm_width + 2 * arm_fillet, arm_fillet)  # type: ignore
-        cir2 = draw.Point(0, 0).buffer(arm_fillet)  # type: ignore
-        rect4 = draw.rectangle(p.arm_width, p.arm_length - arm_fillet)  # type: ignore
+        rect3 = draw.rectangle(p.arm_width + 2 * arm_fillet, arm_fillet)
+        cir2 = draw.Point(0, 0).buffer(arm_fillet)
+        rect4 = draw.rectangle(p.arm_width, p.arm_length - arm_fillet)
         # Union and create both pads
-        x, y = p.pad_width / 2 - p.pad_fillet, p.pad_height / 2 - p.pad_fillet  # type: ignore
+        x, y = p.pad_width / 2 - p.pad_fillet, p.pad_height / 2 - p.pad_fillet
         main_pad = draw.union(
             rect1,
             rect2,
@@ -207,28 +208,28 @@ class Fillet_Qubit(BaseQubit):
             draw.translate(cir1, -x, y),
             draw.translate(cir1, -x, -y),
         )
-        x, y = (p.arm_width + 2 * arm_fillet) / 2, -arm_fillet / 2  # type: ignore
-        arm_pad_connect = draw.subtract(rect3, draw.translate(cir2, x, y))  # type: ignore
-        arm_pad_connect = draw.subtract(arm_pad_connect, draw.translate(cir2, -x, y))  # type: ignore
+        x, y = (p.arm_width + 2 * arm_fillet) / 2, -arm_fillet / 2
+        arm_pad_connect = draw.subtract(rect3, draw.translate(cir2, x, y))
+        arm_pad_connect = draw.subtract(arm_pad_connect, draw.translate(cir2, -x, y))
         pad_top = draw.union(
-            draw.translate(main_pad, 0, p.arm_length + (p.pad_height + p.pad_gap) / 2),  # type: ignore
+            draw.translate(main_pad, 0, p.arm_length + (p.pad_height + p.pad_gap) / 2),
             draw.translate(
                 arm_pad_connect,
                 0,
-                p.arm_length + (p.pad_gap - arm_fillet) / 2,  # type: ignore
+                p.arm_length + (p.pad_gap - arm_fillet) / 2,
             ),
-            draw.translate(rect4, 0, (p.arm_length - arm_fillet + p.pad_gap) / 2),  # type: ignore
+            draw.translate(rect4, 0, (p.arm_length - arm_fillet + p.pad_gap) / 2),
         )
-        pad_bot = draw.rotate(pad_top, 180, origin=(0, 0))  # type: ignore
+        pad_bot = draw.rotate(pad_top, 180, origin=(0, 0))
         # JJ
-        rect_jj = draw.LineString([(0, -p.pad_gap / 2), (0, +p.pad_gap / 2)])  # type: ignore
+        rect_jj = draw.LineString([(0, -p.pad_gap / 2), (0, +p.pad_gap / 2)])
         # pocket
-        rect4 = draw.rectangle(p.pocket_width, p.pocket_height - 2 * p.pocket_fillet)  # type: ignore
-        rect5 = draw.rectangle(p.pocket_width - 2 * p.pocket_fillet, p.pocket_height)  # type: ignore
-        cir3 = draw.Point(0, 0).buffer(p.pocket_fillet)  # type: ignore
+        rect4 = draw.rectangle(p.pocket_width, p.pocket_height - 2 * p.pocket_fillet)
+        rect5 = draw.rectangle(p.pocket_width - 2 * p.pocket_fillet, p.pocket_height)
+        cir3 = draw.Point(0, 0).buffer(p.pocket_fillet)
         x, y = (
-            p.pocket_width / 2 - p.pocket_fillet,  # type: ignore
-            p.pocket_height / 2 - p.pocket_fillet,  # type: ignore
+            p.pocket_width / 2 - p.pocket_fillet,
+            p.pocket_height / 2 - p.pocket_fillet,
         )
         rect_pk = draw.union(
             rect4,
@@ -240,95 +241,15 @@ class Fillet_Qubit(BaseQubit):
         )
         # Rotate and translate all qgeometry as needed.
         polys = [rect_jj, pad_top, pad_bot, rect_pk]
-        polys = draw.rotate(polys, p.orientation, origin=(0, 0))  # type: ignore
-        polys = draw.translate(polys, p.pos_x, p.pos_y)  # type: ignore
+        polys = draw.rotate(polys, p.orientation, origin=(0, 0))
+        polys = draw.translate(polys, p.pos_x, p.pos_y)
         [rect_jj, pad_top, pad_bot, rect_pk] = polys
         # Use the geometry to create Metal qgeometry
-        self.add_qgeometry("poly", dict(pad_top=pad_top, pad_bot=pad_bot), chip=chip)  # type: ignore
-        self.add_qgeometry("poly", dict(rect_pk=rect_pk), subtract=True, chip=chip)  # type: ignore
+        self.add_qgeometry("poly", dict(pad_top=pad_top, pad_bot=pad_bot), chip=chip)
+        self.add_qgeometry("poly", dict(rect_pk=rect_pk), subtract=True, chip=chip)
         self.add_qgeometry(
             "junction",
             dict(rect_jj=rect_jj),
             width=p.arm_width,
-            chip=chip,  # type: ignore
+            chip=chip,
         )
-
-    # def make_connection_pads(self):
-    #     """Makes standard transmon in a pocket."""
-    #     for name in self.options.connection_pads:
-    #         self.make_connection_pad(name)
-
-    # def make_connection_pad(self, name: str):
-    #     """Makes n individual connector.
-
-    #     Args:
-    #         name (str) : Name of the connector
-    #     """
-
-    #     # self.p allows us to directly access parsed values (string -> numbers) form the user option
-    #     p = self.p
-    #     pc = self.p.connection_pads[name]  # parser on connector options
-
-    #     # extract chip name
-    #     chip = p.chip
-
-    #     # define commonly used variables once
-    #     cpw_width = pc.cpw_width
-    #     cpw_extend = pc.cpw_extend
-    #     pad_width = pc.pad_width
-    #     pad_height = pc.pad_height
-    #     pad_cpw_shift = pc.pad_cpw_shift
-    #     pocket_rise = pc.pocket_rise
-    #     pocket_extent = pc.pocket_extent
-
-    #     # Define the geometry
-    #     # Connector pad
-    #     connector_pad = draw.rectangle(pad_width, pad_height, -pad_width / 2,
-    #                                    pad_height / 2)
-    #     # Connector CPW wire
-    #     connector_wire_path = draw.wkt.loads(f"""LINESTRING (\
-    #         0 {pad_cpw_shift+cpw_width/2}, \
-    #         {pc.pad_cpw_extent}                           {pad_cpw_shift+cpw_width/2}, \
-    #         {(p.pocket_width-p.pad_width)/2-pocket_extent} {pad_cpw_shift+cpw_width/2+pocket_rise}, \
-    #         {(p.pocket_width-p.pad_width)/2+cpw_extend}    {pad_cpw_shift+cpw_width/2+pocket_rise}\
-    #                                     )""")
-    #     # for connector cludge
-    #     connector_wire_CON = draw.buffer(connector_wire_path, cpw_width /
-    #                                      2.)  # helper for the moment
-
-    #     # Position the connector, rot and tranlate
-    #     loc_W, loc_H = float(pc.loc_W), float(pc.loc_H)
-    #     if float(loc_W) not in [-1., +1.] or float(loc_H) not in [-1., +1.]:
-    #         self.logger.info(
-    #             'Warning: Did you mean to define a transmon wubit with loc_W and'
-    #             ' loc_H that are not +1 or -1?? Are you sure you want to do this?'
-    #         )
-    #     objects = [connector_pad, connector_wire_path, connector_wire_CON]
-    #     objects = draw.scale(objects, loc_W, loc_H, origin=(0, 0))
-    #     objects = draw.translate(
-    #         objects,
-    #         loc_W * (p.pad_width) / 2.,
-    #         loc_H * (p.pad_height + p.pad_gap / 2 + pc.pad_gap))
-    #     objects = draw.rotate_position(objects, p.orientation,
-    #                                    [p.pos_x, p.pos_y])
-    #     [connector_pad, connector_wire_path, connector_wire_CON] = objects
-
-    #     self.add_qgeometry('poly', {f'{name}_connector_pad': connector_pad},
-    #                        chip=chip)
-    #     self.add_qgeometry('path', {f'{name}_wire': connector_wire_path},
-    #                        width=cpw_width,
-    #                        chip=chip)
-    #     self.add_qgeometry('path', {f'{name}_wire_sub': connector_wire_path},
-    #                        width=cpw_width + 2 * pc.cpw_gap,
-    #                        subtract=True,
-    #                        chip=chip)
-
-    #     ############################################################
-
-    #     # add pins
-    #     points = np.array(connector_wire_path.coords)
-    #     self.add_pin(name,
-    #                  points=points[-2:],
-    #                  width=cpw_width,
-    #                  input_as_norm=True,
-    #                  chip=chip)

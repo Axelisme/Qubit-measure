@@ -14,8 +14,10 @@
 """Tee-shaped coupler with fillet for Q components."""
 
 try:
-    from qiskit_metal import Dict, draw  # type: ignore
-    from qiskit_metal.qlibrary.core.base import QComponent  # type: ignore
+    from qiskit_metal import Dict, draw  # type: ignore[reportMissingImports]
+    from qiskit_metal.qlibrary.core.base import (  # type: ignore[reportMissingImports]
+        QComponent,
+    )
 except ImportError:
     print("qiskit_metal is not installed")
     raise
@@ -64,22 +66,22 @@ class Round_Tee(QComponent):
         """
         p = self.p
         self.make_round_tee(
-            p.cpw_width + 2 * p.cpw_gap,  # type: ignore
+            p.cpw_width + 2 * p.cpw_gap,
             p.tee_fillet,
-            p.tee_width + 2 * p.cpw_gap,  # type: ignore
+            p.tee_width + 2 * p.cpw_gap,
             subtract=True,
         )
         self.make_round_tee(p.cpw_width, p.tee_fillet, p.tee_width, subtract=False)
 
     def make_round_tee(self, cpw_width, fillet, tee_width, subtract=False):
         p = self.p
-        Q = self.p.ref_qc.options  # type: ignore
-        self.pos_x, self.pos_y = Q.pos_x, Q.pos_y  # type: ignore
+        Q = self.p.ref_qc.options
+        self.pos_x, self.pos_y = Q.pos_x, Q.pos_y
 
         # At 0 orientation, constructing tee from close-to-qubit part
-        rect_1 = draw.rectangle(tee_width, p.tee_length)  # type: ignore closest-to-qubit part
+        rect_1 = draw.rectangle(tee_width, p.tee_length)  # closest-to-qubit part
         rect_2 = draw.rectangle(fillet, cpw_width + 2 * fillet)  # for inner-cut fillet
-        rect_3 = draw.rectangle(p.ext_len, cpw_width)  # type: ignore outer part reaching cpw
+        rect_3 = draw.rectangle(p.ext_len, cpw_width)  # outer part reaching cpw
         cir_1 = draw.Point(0, 0).buffer(tee_width / 2)  # for the tee round edge
         cir_2 = draw.Point(0, 0).buffer(fillet)  # for inner-cut fillet
 
@@ -88,8 +90,8 @@ class Round_Tee(QComponent):
             rect_1,
             draw.translate(rect_2, (tee_width + fillet) / 2, 0),
             draw.translate(rect_3, (tee_width + p.ext_len) / 2, 0),
-            draw.translate(cir_1, 0, p.tee_length / 2),  # type: ignore
-            draw.translate(cir_1, 0, -p.tee_length / 2),  # type: ignore
+            draw.translate(cir_1, 0, p.tee_length / 2),
+            draw.translate(cir_1, 0, -p.tee_length / 2),
         )
         tee = draw.subtract(
             tee,
@@ -100,13 +102,13 @@ class Round_Tee(QComponent):
         )
 
         # Rotate and then translate, relative to ref QComponent
-        tee = draw.rotate(tee, Q.orientation + p.rel_ori, origin=(0, 0))  # type: ignore
-        tee = draw.translate(tee, Q.pos_x + p.shift_x, Q.pos_y + p.shift_y)  # type: ignore
+        tee = draw.rotate(tee, Q.orientation + p.rel_ori, origin=(0, 0))
+        tee = draw.translate(tee, Q.pos_x + p.shift_x, Q.pos_y + p.shift_y)
 
         self.add_qgeometry(
             "poly",
             dict(tee=tee),
-            chip=p.chip,  # type: ignore
-            layer=p.layer,  # type: ignore
+            chip=p.chip,
+            layer=p.layer,
             subtract=subtract,
         )
