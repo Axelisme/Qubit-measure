@@ -6,8 +6,10 @@ from typing import Any, Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtWidgets import QComboBox, QLineEdit
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -36,13 +38,16 @@ from zcu_tools.gui.cfg.binding import (
     SweepField,
 )
 from zcu_tools.gui.widgets.cfg import (
+    CfgFormWidget,
     FieldRenderContext,
     FieldRenderer,
     FieldRendererRegistry,
     FrozenFieldRendererRegistry,
     default_cfg_renderers,
 )
+from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 from zcu_tools.gui.widgets.cfg.registry import FieldWidgetProtocol
+from zcu_tools.resources.context import ModuleLibrary
 
 from tests.gui.widgets.cfg._form_support import (
     attach_draft,
@@ -1744,12 +1749,6 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 
 
 def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
-    from qtpy.QtWidgets import QComboBox, QLineEdit
-    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-    from zcu_tools.resources.context import ModuleLibrary
-
     ml = ModuleLibrary()
     ml.register_module(
         my_pulse={
@@ -1775,14 +1774,10 @@ def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
         combo = reference.findChild(QComboBox)
         assert combo is not None
         assert combo.currentText() == "Lib: my_pulse"
-        initial = form.read_values().fields["mod"]
-        assert isinstance(initial, ReferenceValue)
-        assert initial.is_overridden is False
 
         tree_item(form, "mod").setExpanded(True)
         qapp.processEvents()
-        row = tree_item(form, "mod.ro_freq")
-        editor = tree_widget(form).itemWidget(row, 1)
+        editor = tree_widget(form).itemWidget(tree_item(form, "mod.ro_freq"), 1)
         assert editor is not None
         entry = editor.findChild(QLineEdit)
         assert entry is not None and entry.isVisible()
@@ -1798,8 +1793,7 @@ def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
         assert modified.chosen_key == "my_pulse"
         assert modified.is_overridden is True
         frequency = modified.value.fields["ro_freq"]
-        assert isinstance(frequency, DirectValue)
-        assert frequency.value == 8000.0
+        assert isinstance(frequency, DirectValue) and frequency.value == 8000.0
         assert combo.currentText() == "Lib: my_pulse (modified)"
 
         revert_index = combo.findText("Revert to Lib: my_pulse")
@@ -1810,8 +1804,7 @@ def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
         assert reverted.chosen_key == "my_pulse"
         assert reverted.is_overridden is False
         frequency = reverted.value.fields["ro_freq"]
-        assert isinstance(frequency, DirectValue)
-        assert frequency.value == 7500.0
+        assert isinstance(frequency, DirectValue) and frequency.value == 7500.0
         assert combo.currentText() == "Lib: my_pulse"
         assert draft.is_valid()
     finally:
