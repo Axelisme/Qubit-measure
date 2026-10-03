@@ -345,6 +345,7 @@ class RecipeContext:
                     "cfg_ref": publication["cfg_ref"],
                     "fields": fields,
                     "source_basis": publication["source_basis"],
+                    "publication": publication,
                 }
             ),
         )
