@@ -41,13 +41,18 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
 def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
     fields: dict[str, tuple[object, FieldInfo]] = {}
     for name, field in model.model_fields.items():
-        if name != "kind" and field.is_required():
+        annotation = field.annotation
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            annotation = _partial_model(annotation)
+        defer_required = name != "kind" and field.is_required()
+        if defer_required or annotation is not field.annotation:
             partial_field = deepcopy(field)
-            # Missing values remain outside model_fields_set and serialized patches.
-            # Supplied values still use the original non-nullable annotation.
-            partial_field.default = None
-            partial_field.validate_default = False
-            fields[name] = (field.annotation, partial_field)
+            if defer_required:
+                # Missing values stay outside model_fields_set and serialized patches.
+                # Supplied values retain the original non-nullable annotation.
+                partial_field.default = None
+                partial_field.validate_default = False
+            fields[name] = (annotation, partial_field)
     if not fields:
         return model
     # Pydantic mixes field definitions and reserved options in one kwargs signature.
