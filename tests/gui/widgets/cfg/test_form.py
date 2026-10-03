@@ -1412,19 +1412,21 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 
 
 def test_populate_full_fake_freq_schema(qapp, ctrl):
-    """The adapter's full schema survives form attachment and readback."""
+    """The adapter's bound schema survives form attachment and readback."""
     from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
 
     schema = FakeFreqAdapter().make_default_cfg(_make_ctx())
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     form = CfgFormWidget()
     try:
+        # Binding resolves reference labels and expression errors before rendering.
+        expected = draft.snapshot()
         form.attach(draft)
 
-        assert form.read_values() == schema.value
+        assert form.read_values() == expected.value
         snapshot = form.read_schema()
         assert snapshot.spec is schema.spec
-        assert snapshot.value == schema.value
+        assert snapshot.value == expected.value
     finally:
         form.detach()
         form.close()
