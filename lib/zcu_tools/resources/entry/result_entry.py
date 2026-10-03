@@ -16,7 +16,7 @@ from .schema import SetupDocument
 from .views import SetupView
 
 
-def _entry_path(root: str | Path, name: str) -> Path:
+def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -> Path:
     if (
         not name
         or name in {".", ".."}
@@ -29,6 +29,8 @@ def _entry_path(root: str | Path, name: str) -> Path:
         raise ValueError(f"{name!r}: expected a single path component")
     root_path = Path(root)
     path = root_path / name
+    if new_destination and (path.exists() or path.is_symlink()):
+        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path))
     if path.resolve().parent != root_path.resolve():
         raise ValueError(f"{path}: entry escapes its root")
     return path
@@ -39,14 +41,9 @@ def rename_entry(
 ) -> None:
     result_old = _entry_path(result_root, old)
     database_old = _entry_path(database_root, old)
-    result_new = _entry_path(result_root, new)
-    database_new = _entry_path(database_root, new)
+    result_new = _entry_path(result_root, new, new_destination=True)
+    database_new = _entry_path(database_root, new, new_destination=True)
     ResultEntry.open(old, result_root=result_root, database_root=database_root)
-    for destination in (result_new, database_new):
-        if destination.exists() or destination.is_symlink():
-            raise FileExistsError(
-                errno.EEXIST, os.strerror(errno.EEXIST), str(destination)
-            )
     result_old.rename(result_new)
     try:
         database_old.rename(database_new)
@@ -102,13 +99,8 @@ class ResultEntry:
     def create(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> "ResultEntry":
-        result_path = _entry_path(result_root, name)
-        database_path = _entry_path(database_root, name)
-        for destination in (result_path, database_path):
-            if destination.exists() or destination.is_symlink():
-                raise FileExistsError(
-                    errno.EEXIST, os.strerror(errno.EEXIST), str(destination)
-                )
+        result_path = _entry_path(result_root, name, new_destination=True)
+        database_path = _entry_path(database_root, name, new_destination=True)
         created: list[Path] = []
         try:
             for destination in (result_path, database_path):
