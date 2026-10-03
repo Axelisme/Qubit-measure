@@ -20,6 +20,105 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
+class TimeRabiGui(LookbackGui):
+    def __init__(self, md=None):
+        super().__init__()
+        self.md = md or {}
+        tree = self.publication["tree"]["children"]
+        tree["reps"] = scalar(19)
+        tree["sweep"] = section(
+            length={
+                "kind": "sweep",
+                "valid": True,
+                "inputs": {
+                    key: scalar(value)["input"]
+                    for key, value in {"start": 0.04, "stop": 0.8, "expts": 61}.items()
+                },
+            }
+        )
+        tree["modules"]["children"]["readout"]["ref"] = "<Custom:Pulse Readout>"
+        tree["modules"]["children"]["qub_pulse"] = {
+            "kind": "reference",
+            "valid": True,
+            "ref": "<Custom:Pulse>",
+            "error": None,
+            "children": {
+                "freq": scalar(0.0),
+                "gain": scalar(0.14),
+                "waveform": section(length=scalar(1.0)),
+            },
+        }
+
+    def _edit(self, params):
+        ordinary = []
+        for edit in params["edits"]:
+            if edit["path"] == ["sweep", "length"]:
+                inputs = self.publication["tree"]["children"]["sweep"]["children"][
+                    "length"
+                ]["inputs"]
+                inputs.update(
+                    {
+                        key: scalar(value)["input"]
+                        for key, value in edit["value"].items()
+                    }
+                )
+            else:
+                ordinary.append(edit)
+        super()._edit({**params, "edits": ordinary})
+
+    def __call__(self, method, params):
+        if method == "tab.new":
+            assert params == {"adapter_name": "twotone/rabi/len_rabi"}
+            return {"tab_id": "t"}
+        result = super().__call__(method, params)
+        if method == "tab.snapshot":
+            result["tabs"][0]["adapter_name"] = "twotone/rabi/len_rabi"
+        if method == "context.snapshot":
+            result["ml"]["modules"] = {
+                "drive": {"type": "pulse"},
+                "calibrated": {"type": "readout/pulse"},
+            }
+        return result
+
+
+def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tmp_path):
+    gui = TimeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "time_rabi",
+            {
+                "frequency_mhz": 6150.0,
+                "gain": 0.21,
+                "max_length_us": 1.5,
+                "points": 71,
+                "reps": 13,
+                "rounds": 9,
+            },
+        )
+        data = reply.data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["modules.qub_pulse.freq"]["value"] == 6150.0
+        assert fields["modules.qub_pulse.freq"]["source"] == "frequency_mhz"
+        assert fields["modules.qub_pulse.gain"]["value"] == 0.21
+        assert fields["sweep.length"]["value"] == {
+            "start": 0.04,
+            "stop": 1.5,
+            "expts": 71,
+        }
+        assert fields["reps"]["value"] == 13
+        assert fields["rounds"]["value"] == 9
+        assert fields["modules.reset"]["source"] == "disabled"
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["analysis"]["status"] == "finished"
+        assert data["writeback"]["items"]
+        assert reply.images
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.analyze")
+
+
 class DriveGui(LookbackGui):
     def __init__(self, md=None):
         super().__init__()

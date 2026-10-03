@@ -6,7 +6,7 @@ from typing import Any
 
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
-from .drive import twotone_spectrum
+from .drive import time_rabi, twotone_spectrum
 from .lookback import lookback
 from .onetone import (
     onetone_spectrum,
@@ -34,6 +34,34 @@ _ONETONE_COMMON_PROPERTIES = {
 
 
 RECIPES = (
+    RecipeDefinition(
+        name="time_rabi",
+        description="Run one length Rabi sweep and save raw data and Primary analysis.",
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                **{
+                    name: {"type": ["string", "null"], "minLength": 1}
+                    for name in (
+                        "reuse_tab_id",
+                        "readout_ref",
+                        "drive_ref",
+                        "use_reset",
+                    )
+                },
+                **{
+                    name: {"type": ["number", "null"]}
+                    for name in ("frequency_mhz", "gain", "max_length_us")
+                },
+                **{
+                    name: {"type": ["integer", "null"]}
+                    for name in ("points", "reps", "rounds")
+                },
+            },
+        },
+        run=time_rabi,
+    ),
     RecipeDefinition(
         name="twotone_spectrum",
         description="Run one two-tone spectrum and save raw data and Primary analysis.",

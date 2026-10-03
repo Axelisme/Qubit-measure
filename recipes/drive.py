@@ -145,6 +145,11 @@ def _frequency_sweep(
     return sweep, missing
 
 
+def time_rabi(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Run one length sweep without requiring a prior pi calibration."""
+    raise NotImplementedError("Time Rabi is not implemented")
+
+
 def twotone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one qubit spectrum, save raw, and complete Primary without accepting."""
     _validate(arguments)
