@@ -4,13 +4,51 @@ from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from .registry import component_registry
-from .schema import ComponentSchema, SetupDocument, validate_component_name
+from .schema import (
+    ComponentSchema,
+    SetupDocument,
+    WiringSchema,
+    validate_component_name,
+)
+
+
+class FieldView:
+    _model: Callable[[], BaseModel]
+    _edit: Callable[[], AbstractContextManager[BaseModel]]
+    _path: str
+
+    def __init__(
+        self,
+        model: Callable[[], BaseModel],
+        edit: Callable[[], AbstractContextManager[BaseModel]],
+        path: str,
+    ) -> None:
+        self._model = model
+        self._edit = edit
+        self._path = path
+
+    def __getattr__(self, name: str) -> YamlValue:
+        model = self._model()
+        component_registry.check_fields(type(model), {name: None}, path=self._path)
+        if name not in model.model_fields_set:
+            raise AttributeError(f"{self._path}.{name}: field is not set")
+        return TypeAdapter(YamlValue).validate_python(getattr(model, name))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            with self._edit() as draft:
+                component_registry.check_fields(
+                    type(draft), {name: value}, path=self._path
+                )
+                setattr(draft, name, value)
 
 
 class ComponentView:
@@ -27,6 +65,17 @@ class ComponentView:
         self._model = model
         self._edit = edit
         self._path = path
+
+    @property
+    def wiring(self) -> FieldView:
+        return FieldView(
+            lambda: self._model().wiring, self._edit_wiring, f"{self._path}.wiring"
+        )
+
+    @contextmanager
+    def _edit_wiring(self) -> Generator[WiringSchema]:
+        with self._edit() as draft:
+            yield draft.wiring
 
     @property
     def kind(self) -> str:

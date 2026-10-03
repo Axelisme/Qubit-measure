@@ -66,11 +66,22 @@ class SetupGeneral(BaseModel):
         return value
 
 
+class WiringSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ch: int | None = Field(default=None, ge=0, strict=True)
+    ro_ch: int | None = Field(default=None, ge=0, strict=True)
+    flux_ch: int | None = Field(default=None, ge=0, strict=True)
+    time_of_flight: Annotated[float | None, UnitSpec("s", "us")] = Field(
+        default=None, ge=0
+    )
+
+
 class ComponentSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: str
-    wiring: YamlMap = Field(default_factory=dict)
+    wiring: WiringSchema = Field(default_factory=WiringSchema)
     ext: YamlMap = Field(default_factory=dict)
 
 
