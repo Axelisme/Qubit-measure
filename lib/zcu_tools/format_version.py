@@ -149,12 +149,27 @@ class MigrationRegistry:
             supported_version=version,
             source=source,
         )
+        from_version = version
+        target = (target_version.major, target_version.minor)
+        if (version.major, version.minor) > target:
+            raise MigrationError(
+                format, from_version, target_version, "cannot downgrade"
+            )
         result = deepcopy(dict(document))
         while version != target_version:
             registered = self._steps.get((format, version))
             if registered is None:
-                raise NotImplementedError("Migration chain is incomplete")
+                raise MigrationError(
+                    format, from_version, target_version, f"missing step from {version}"
+                )
             next_version, step = registered
+            if (next_version.major, next_version.minor) > target:
+                raise MigrationError(
+                    format,
+                    from_version,
+                    target_version,
+                    f"step from {version} overshoots target",
+                )
             result = step(result)
             version = next_version
         return result
