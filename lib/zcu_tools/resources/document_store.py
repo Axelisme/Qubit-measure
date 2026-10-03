@@ -179,17 +179,22 @@ class DocumentStore[T: BaseModel]:
         return document, self._model.model_validate(document)
 
     def _write(self, document: YamlMap) -> None:
-        with NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self._path.parent,
-            prefix=f".{self._path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-            YAML(typ="rt").dump(document, stream)
-        temporary.replace(self._path)
+        temporary: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self._path.parent,
+                prefix=f".{self._path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                YAML(typ="rt").dump(document, stream)
+            temporary.replace(self._path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def refresh(self) -> bool:
         raise NotImplementedError
