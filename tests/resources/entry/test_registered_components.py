@@ -67,14 +67,19 @@ def nested_kind(registry_state_guard: None) -> Generator[str]:
         component_registry.unregister(kind)
 
 
+def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
+    results, database = tmp_path / "results", tmp_path / "Database"
+    entry = ResultEntry.create("entry", result_root=results, database_root=database)
+    return entry, results, database
+
+
 @pytest.mark.parametrize("value", [None, "not a frequency"])
 def test_partial_setup_still_validates_supplied_required_values(
     tmp_path: Path,
     required_kind: str,
     value: str | None,
 ) -> None:
-    results, database = tmp_path / "results", tmp_path / "Database"
-    entry = ResultEntry.create("entry", result_root=results, database_root=database)
+    entry, results, _ = create_entry(tmp_path)
     entry.setup.add_component("N1", kind=required_kind)
     setup_file = results / "entry" / "setup.yaml"
     before = setup_file.read_bytes()
@@ -89,8 +94,7 @@ def test_nested_required_fields_are_deferred_and_preserve_nested_unit_metadata(
     tmp_path: Path,
     nested_kind: str,
 ) -> None:
-    results, database = tmp_path / "results", tmp_path / "Database"
-    entry = ResultEntry.create("entry", result_root=results, database_root=database)
+    entry, results, database = create_entry(tmp_path)
     entry.setup.add_component("N1", kind=nested_kind, timing={"label": "prepared"})
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
     assert "width" not in document["components"]["N1"]["timing"]
@@ -106,8 +110,7 @@ def test_required_registered_fields_can_be_filled_incrementally_in_setup(
     tmp_path: Path,
     required_kind: str,
 ) -> None:
-    results, database = tmp_path / "results", tmp_path / "Database"
-    entry = ResultEntry.create("entry", result_root=results, database_root=database)
+    entry, results, database = create_entry(tmp_path)
     entry.setup.add_component("N1", kind=required_kind)
     with pytest.raises(AttributeError, match="not set"):
         _ = entry.setup.N1.freq
