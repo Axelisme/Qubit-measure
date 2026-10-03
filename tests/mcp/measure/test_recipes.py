@@ -26,6 +26,35 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
+def test_full_query_keeps_the_publication_used_before_run(tmp_path):
+    gui = LookbackGui()
+    captured: dict[str, Any] = {}
+
+    def respond(method, params):
+        response = gui(method, params)
+        if method == "tab.run_start":
+            captured.update(deepcopy(gui.publication))
+            gui.publication["cfg_ref"]["revision"] = "99"
+            gui.publication["tree"]["children"]["rounds"] = {
+                "kind": "scalar",
+                "input": {"resolved": 999},
+            }
+        return response
+
+    with recipe_client(tmp_path, respond) as client:
+        completed = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
+        assert completed.data["status"] == "finished", completed.data
+        execution = completed.data["execution"]
+        before = len(client.transport.sent)
+        full = client.call("status", {"execution": execution, "detail": "full"})
+        assert full["actual"]["publication"] == captured
+        assert full["actual"]["publication"]["cfg_ref"]["revision"] == "3"
+        full["actual"]["publication"]["tree"]["children"].clear()
+        repeated = client.call("status", {"execution": execution, "detail": "full"})
+        assert repeated["actual"]["publication"] == captured
+        assert len(client.transport.sent) == before
+
+
 def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     tmp_path, monkeypatch
 ):

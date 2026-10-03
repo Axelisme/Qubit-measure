@@ -9,6 +9,7 @@ from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.execution_reply import project_execution
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -18,8 +19,8 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     if "execution" in arguments:
         key = _execution_id(arguments)
         if key.startswith("recipe-"):
-            return ctx.session.recipes.get(key).snapshot()
-        return asdict(ctx.session.executions.get(key).snapshot())
+            return project_execution(ctx.session.recipes.get(key).snapshot())
+        return project_execution(asdict(ctx.session.executions.get(key).snapshot()))
     session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
@@ -217,7 +218,14 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
             "description": "Read a local execution, or index the live GUI and session executions.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"execution": {"type": "string", "minLength": 1}},
+                "properties": {
+                    "execution": {"type": "string", "minLength": 1},
+                    "detail": {
+                        "type": "string",
+                        "enum": ["summary", "full"],
+                        "default": "summary",
+                    },
+                },
             },
         },
         "wait": {
