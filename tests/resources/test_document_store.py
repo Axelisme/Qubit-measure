@@ -150,3 +150,19 @@ def test_commit_notifies_after_publication_and_unlock_and_can_unsubscribe(
     with store.edit() as draft:
         draft.values["left"] = 30.0
     assert len(events) == 1
+
+
+def test_refresh_publishes_external_changes_once(document_path: Path) -> None:
+    store = make_store(document_path)
+    other = make_store(document_path)
+    events: list[DocumentChange] = []
+    store.subscribe(events.append)
+    with other.edit() as draft:
+        draft.values["left"] = 10.0
+
+    assert store.snapshot().values["left"] == 1.0
+    assert store.refresh() is True
+    assert store.snapshot().values["left"] == 10.0
+    assert events == [DocumentChange(document_path, (("values", "left"),), "refresh")]
+    assert store.refresh() is False
+    assert len(events) == 1
