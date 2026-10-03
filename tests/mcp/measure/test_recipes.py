@@ -2,6 +2,7 @@
 
 import base64
 from copy import deepcopy
+from pathlib import Path
 from threading import Event, Thread
 from typing import Any
 
@@ -264,7 +265,13 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path
             assert params["tab_id"] == "t"
             if params.get("payload", {}).get("command") == "done":
                 done.set()
-            return {"operation_id": 93, "figure": None, "prompt": "Confirm offset"}
+            return {
+                "operation_id": 93,
+                "figure": {"png_b64": base64.b64encode(_PNG).decode()},
+                "state": {"offset": 0.24},
+                "commands": [{"name": "done"}],
+                "prompt": "Confirm offset",
+            }
         if method == "tab.writeback_preview":
             writeback_read.set()
         return gui(method, params)
@@ -275,6 +282,13 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path
         assert handoff.data["status"] == "interactive"
         assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
         assert handoff.data["analysis"]["op"] == handoff.data["op"]
+        interaction = handoff.data["analysis"]["interaction"]
+        assert interaction is not None
+        assert interaction["state"] == {"offset": 0.24}
+        assert interaction["commands"] == [{"name": "done"}]
+        assert handoff.images[0].data == _PNG
+        assert Path(interaction["figure"]).read_bytes() == _PNG
+        analysis_execution = handoff.data["analysis"]["execution"]
         execution = handoff.data["execution"]
         read = client.call("tab_interact", {"tab": "t"})
         assert read.data["prompt"] == "Confirm offset"
@@ -285,7 +299,8 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(tmp_path
         assert writeback_read.wait(2), "Recipe must resume after interactive analysis"
         finished = client.call("wait", {"execution": execution, "timeout": 2})
         assert finished.data["status"] == "finished", finished.data
-        assert finished.data["analysis"]["execution"] == read.data["execution"]
+        assert finished.data["analysis"]["execution"] == analysis_execution
+        assert read.data["execution"] == analysis_execution
         assert finished.data["writeback"]["has_draft"]
         assert finished.images[0].data == _PNG
         methods = [method for method, _ in client.transport.sent]
