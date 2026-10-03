@@ -1,7 +1,9 @@
 """Setup and transaction views over one typed document store."""
 
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
+
+from pydantic import TypeAdapter
 
 from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
@@ -11,12 +13,30 @@ from .schema import ComponentSchema, SetupDocument
 
 
 class ComponentView:
-    def __init__(self, model: Callable[[], ComponentSchema]) -> None:
+    _model: Callable[[], ComponentSchema]
+    _edit: Callable[[], AbstractContextManager[ComponentSchema]]
+
+    def __init__(
+        self,
+        model: Callable[[], ComponentSchema],
+        edit: Callable[[], AbstractContextManager[ComponentSchema]],
+    ) -> None:
         self._model = model
+        self._edit = edit
 
     @property
     def kind(self) -> str:
         return self._model().kind
+
+    def __getattr__(self, name: str) -> YamlValue:
+        return TypeAdapter(YamlValue).validate_python(getattr(self._model(), name))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            with self._edit() as draft:
+                setattr(draft, name, value)
 
 
 class EditView:
@@ -63,4 +83,12 @@ class SetupView:
     def __getattr__(self, name: str) -> ComponentView:
         if name not in self._store.snapshot().components:
             raise AttributeError(f"Unknown component {name!r}")
-        return ComponentView(lambda: self._store.snapshot().components[name])
+        return ComponentView(
+            lambda: self._store.snapshot().components[name],
+            lambda: self._edit_component(name),
+        )
+
+    @contextmanager
+    def _edit_component(self, name: str) -> Generator[ComponentSchema]:
+        with self._store.edit() as draft:
+            yield draft.components[name]

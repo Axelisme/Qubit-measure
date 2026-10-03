@@ -3,15 +3,18 @@
 import errno
 import os
 import shutil
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 
 from ruamel.yaml import YAML
 
-from zcu_tools.resources.document_store import DocumentStore
+from zcu_tools.format_version import YamlValue
+from zcu_tools.resources.document_store import DocumentStore, FieldPath, UnitSpec
 
 from .errors import PartialCommitError
+from .registry import component_registry
 from .schema import SetupDocument
 from .views import SetupView
 
@@ -74,9 +77,24 @@ class ResultEntry:
             result_path / "setup.yaml",
             SetupDocument,
             format="zcu.parameter-container",
+            units=self._setup_units,
             validate=self._validate_setup,
             lock_path=result_path / ".entry.lock",
         )
+
+    def _setup_units(
+        self, document: Mapping[str, YamlValue]
+    ) -> Mapping[FieldPath, UnitSpec]:
+        result: dict[FieldPath, UnitSpec] = {}
+        components = document.get("components")
+        if isinstance(components, dict):
+            for name, fields in components.items():
+                if isinstance(fields, dict) and isinstance(
+                    kind := fields.get("kind"), str
+                ):
+                    for path, spec in component_registry.units(kind).items():
+                        result[("components", name, *path)] = spec
+        return result
 
     def _validate_setup(self, document: SetupDocument) -> None:
         if self._entry_id is None:

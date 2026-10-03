@@ -1,11 +1,13 @@
 """Typed setup document at the persistence boundary."""
 
 from datetime import datetime, timedelta
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from zcu_tools.format_version import YamlMap
+from zcu_tools.resources.document_store import UnitSpec
 
 
 class SetupGeneral(BaseModel):
@@ -36,6 +38,10 @@ class ComponentSchema(BaseModel):
     kind: str
     wiring: YamlMap = Field(default_factory=dict)
     ext: YamlMap = Field(default_factory=dict)
+
+
+class ResonatorSchema(ComponentSchema):
+    freq: Annotated[float, UnitSpec("Hz", "MHz")] = Field(default=None)
 
 
 class SetupDocument(BaseModel):
