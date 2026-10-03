@@ -30,6 +30,7 @@ from zcu_tools.gui.app.measure.services.ports import (
     SaveDataSubmission,
     SaveDestination,
 )
+from zcu_tools.gui.result_scope import ResultScopeError
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
@@ -1434,6 +1435,29 @@ def test_save_set_paths_delegates_to_save_control(fx):
     from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 
     assert "tab.save_set_paths" not in METHOD_SPECS
+
+
+@pytest.mark.parametrize("source", ["primary", "run"])
+def test_post_control_rejects_replaced_source_without_starting(fx, source):
+    tab = fx.ctrl.new_tab("fake")
+    with open_client(fx.service.port) as sock:
+        run = _completed_run(fx, sock, tab)
+        primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
+        assert (
+            call(sock, "operation.await", {"operation_id": primary, "timeout": 2})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
+        with pytest.raises(ResultScopeError, match="superseded"):
+            fx.ctrl.run_analyze_control.start_post_analyze(
+                tab,
+                FakeAnalyzeParams(),
+                operation_id=primary + 1000 if source == "primary" else primary,
+                run_operation_id=run + 1000 if source == "run" else run,
+            )
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
 
 
 @pytest.mark.parametrize("source", ["primary", "run", "matching", "omitted"])
