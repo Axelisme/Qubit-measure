@@ -3,6 +3,23 @@
 from pathlib import Path
 
 
+class UnknownKindError(ValueError):
+    def __init__(
+        self,
+        source: Path | None,
+        component: str | None,
+        kind: str,
+        suggestions: tuple[str, ...],
+    ) -> None:
+        self.source = source
+        self.component = component
+        self.kind = kind
+        self.suggestions = suggestions
+        super().__init__(
+            f"{source}: {component}: unknown kind {kind!r}; suggestions={suggestions}"
+        )
+
+
 class PartialCommitError(OSError):
     def __init__(
         self,

@@ -7,7 +7,12 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 from ruamel.yaml import YAML
-from zcu_tools.resources.entry import PartialCommitError, ResultEntry, rename_entry
+from zcu_tools.resources.entry import (
+    PartialCommitError,
+    ResultEntry,
+    UnknownKindError,
+    rename_entry,
+)
 
 
 @pytest.fixture
@@ -19,6 +24,32 @@ def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
 def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     results, database = entry_roots
     return ResultEntry.create("entry", result_root=results, database_root=database)
+
+
+@pytest.mark.parametrize("operation", ["add", "open"])
+def test_unknown_kinds_report_the_source_component_and_a_close_name(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    if operation == "open":
+        document = YAML(typ="safe").load(setup_path)
+        document["components"] = {"R1": {"kind": "resonatr"}}
+        with setup_path.open("w", encoding="utf-8") as stream:
+            YAML(typ="rt").dump(document, stream)
+    before = setup_path.read_bytes()
+
+    with pytest.raises(UnknownKindError) as failure:
+        if operation == "add":
+            entry.setup.add_component("R1", kind="resonatr")
+        else:
+            ResultEntry.open("entry", result_root=results, database_root=database)
+
+    assert failure.value.source == setup_path
+    assert failure.value.component == "R1"
+    assert failure.value.kind == "resonatr"
+    assert "resonator" in failure.value.suggestions
+    assert setup_path.read_bytes() == before
 
 
 def test_component_frequency_round_trips_between_si_and_working_units(
