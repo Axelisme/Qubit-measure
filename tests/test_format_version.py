@@ -1,7 +1,9 @@
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
+from pydantic import ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.format_version import (
     FormatError,
@@ -415,3 +417,28 @@ def test_yaml_migration_refuses_existing_or_source_destination(
     assert caught.value.filename == str(destination)
     assert source.read_text(encoding="utf-8") == original
     assert destination.read_bytes() == destination_original
+
+
+@pytest.mark.parametrize("output", [None, ["invalid"]])
+def test_migration_reports_non_mapping_callback_output(output: YamlValue) -> None:
+    registry = MigrationRegistry()
+
+    def invalid_step(doc: YamlMap) -> YamlMap:
+        # Simulate an untyped plugin violating the callback return contract.
+        return cast(YamlMap, output)
+
+    registry.register(
+        "zcu.synthetic", FormatVersion(1, 0), FormatVersion(1, 1), invalid_step
+    )
+
+    with pytest.raises(MigrationError) as caught:
+        registry.migrate(
+            {"format": "zcu.synthetic", "format_version": "1.0"},
+            format="zcu.synthetic",
+            target_version=FormatVersion(1, 1),
+            source=Path("entry/setup.yaml"),
+        )
+
+    assert isinstance(caught.value.__cause__, ValidationError)
+    assert caught.value.from_version == FormatVersion(1, 0)
+    assert caught.value.target_version == FormatVersion(1, 1)
