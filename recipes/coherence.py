@@ -9,10 +9,9 @@ from .cfg_sources import cfg_node as _node
 from .cfg_sources import readout_frequency as _readout_frequency
 
 
-def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
-    """Run one calibrated T1 delay sweep, save raw data and Primary analysis."""
-    sources = ctx.rpc("context.snapshot", {})
-    publication = ctx.prepare_tab("twotone/t1", arguments.get("reuse_tab_id"))
+def _select_modules(
+    ctx: RecipeContext, publication: dict[str, Any], arguments: dict[str, Any]
+) -> dict[str, Any]:
     references = {"reset": arguments.get("use_reset")}
     for slot, parameter in (("pi_pulse", "pi_ref"), ("readout", "readout_ref")):
         if arguments.get(parameter) is not None:
@@ -31,6 +30,14 @@ def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
         node = _node(publication, "modules", slot)
         if key is not None and (node.get("error") or node.get("ref") != key):
             raise GuiRpcError(f"Invalid {slot} reference", reason="invalid_cfg")
+    return publication
+
+
+def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Run one calibrated T1 delay sweep, save raw data and Primary analysis."""
+    sources = ctx.rpc("context.snapshot", {})
+    publication = ctx.prepare_tab("twotone/t1", arguments.get("reuse_tab_id"))
+    publication = _select_modules(ctx, publication, arguments)
     edits, origins, missing = _readout_frequency(
         publication, sources["md"], sources["ml"]["modules"]
     )
