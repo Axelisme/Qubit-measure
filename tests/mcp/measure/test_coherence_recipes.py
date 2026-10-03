@@ -1,6 +1,7 @@
 """Coherence behavior through shipped tools and the GUI wire boundary."""
 
 from contextlib import contextmanager
+from copy import deepcopy
 from typing import Any
 
 import pytest
@@ -19,18 +20,23 @@ def recipe_client(tmp_path, gui):
 
 
 class CoherenceGui(LookbackGui):
-    def __init__(self, pi_ref="<Custom:Pulse>", adapter="t1"):
+    def __init__(self, pi_ref="<Custom:Pulse>", adapter="t1", pi2_ref="<Custom:Pulse>"):
         super().__init__()
         self.adapter = adapter
         self.md = {"r_f": 5100.0}
-        self.library = {"pi": {"type": "pulse"}, "pi2": {"type": "pulse"}}
+        self.library = {
+            "pi": {"type": "pulse"},
+            "pi2": {"type": "pulse"},
+            "readout": {"type": "readout/pulse"},
+            "reset": {"type": "reset"},
+        }
         tree = self.publication["tree"]["children"]
         tree["reps"] = scalar(19)
         tree["detune_ratio"] = scalar(0.2)
         tree["modules"]["children"]["pi2_pulse"] = {
             "kind": "reference",
             "valid": True,
-            "ref": "<Custom:Pulse>",
+            "ref": pi2_ref,
             "error": None,
             "children": {"freq": scalar(6100.0)},
         }
@@ -51,6 +57,8 @@ class CoherenceGui(LookbackGui):
             "error": None,
             "children": {"freq": scalar(6100.0)},
         }
+
+        self.defaults = deepcopy(self.publication)
 
     def _edit(self, params):
         ordinary = []
@@ -73,12 +81,114 @@ class CoherenceGui(LookbackGui):
         if method == "tab.new":
             assert params == {"adapter_name": f"twotone/{self.adapter}"}
             return {"tab_id": "t"}
+        if method == "tab.reset_cfg":
+            revision = self.publication["cfg_ref"]
+            self.publication = deepcopy(self.defaults)
+            self.publication["cfg_ref"] = revision
         result = super().__call__(method, params)
         if method == "tab.snapshot":
             result["tabs"][0]["adapter_name"] = f"twotone/{self.adapter}"
         if method == "context.snapshot":
             result["ml"]["modules"] = self.library
         return result
+
+
+@pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
+def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
+    tmp_path, recipe
+):
+    gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
+    inputs = gui.defaults["tree"]["children"]["sweep"]["children"]["length"]["inputs"]
+    inputs["stop"].update(mode="expression", raw="calibrated_decay", resolved=37.0)
+    gui.publication["tree"]["children"]["sweep"]["children"]["length"]["inputs"][
+        "stop"
+    ] = scalar(999)["input"]
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(recipe, {"reuse_tab_id": "t"}).data
+        assert data["status"] == "finished", data
+        sweep = data["actual"]["fields"]["sweep.length"]
+        assert sweep["value"]["stop"] == 37.0
+        assert sweep["input"]["stop"]["raw"] == "calibrated_decay"
+        assert sweep["input"]["stop"]["mode"] == "expression"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.reset_cfg") == 1
+        assert methods.count("tab.run_start") == 1
+        assert "tab.new" not in methods
+
+
+@pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
+def test_coherence_explicit_readout_and_reset_use_library_without_rf(tmp_path, recipe):
+    gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
+    gui.md = {}
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(
+            recipe, {"readout_ref": "readout", "use_reset": "reset"}
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["modules.readout"]["value"] == "readout"
+        assert fields["modules.reset"] == {"value": "reset", "source": "explicit"}
+        assert fields["modules.readout.pulse_cfg.freq"]["source"] == "library:readout"
+        assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
+
+
+@pytest.mark.parametrize(
+    "recipe,missing",
+    [
+        ("t2ramsey", {"pi2_ref", "readout_ref"}),
+        ("t2echo", {"pi_ref", "pi2_ref", "readout_ref"}),
+    ],
+)
+def test_t2_reports_every_missing_calibration(tmp_path, recipe, missing):
+    gui = CoherenceGui(adapter=recipe)
+    gui.md = {}
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(recipe, {}).data
+        assert data["status"] == "needs_parameters", data
+        assert {item["parameter"] for item in data["missing"]} == missing
+        assert data["tab"] == "t"
+        assert not gui.ran
+
+
+@pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
+@pytest.mark.parametrize("stage", ["tab.run_start", "tab.analyze", "tab.get_figure"])
+def test_coherence_failure_retains_tab_and_already_saved_paths(tmp_path, recipe, stage):
+    gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
+    with recipe_client(tmp_path, gui) as client:
+        client.transport.replies[stage] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "result_superseded",
+                "message": "Changed",
+            },
+        }
+        reply = client.call(recipe, {})
+        assert reply.is_error
+        data = reply.data
+        assert data["status"] == "failed"
+        assert data["tab"] == "t"
+        if stage != "tab.run_start":
+            assert data["raw_save"]["path"] == "/actual/raw.h5"
+            assert data["run_outcome"]["status"] == "finished"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert not any("accept" in method for method in methods)
+
+
+@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
+@pytest.mark.parametrize("value", [True, float("nan"), float("inf")])
+def test_t2_rejects_nonfinite_or_boolean_detune_before_preparing(
+    tmp_path, recipe, value
+):
+    gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(recipe, {"detune_ratio": value}).data
+        assert data["status"] == "failed"
+        assert not gui.ran
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
 
 
 @pytest.mark.parametrize(
