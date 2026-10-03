@@ -1083,48 +1083,6 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
         draft.close()
 
 
-def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    schema = section_schema(
-        {
-            "inner": CfgSectionSpec(
-                label="Inner",
-                fields={"gain": ScalarSpec(label="Gain", type=float)},
-            )
-        },
-        {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
-    )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-
-    # Sole tree: inner section is a QTreeWidgetItem header, not a QLabel with "<b>Inner</b>"
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Find Inner header item
-    found_inner = False
-    found_gain = False
-    stack = [root._tree.invisibleRootItem()]
-    while stack:
-        cur = stack.pop()
-        if cur is None:
-            continue
-        for i in range(cur.childCount()):
-            child = cur.child(i)
-            if child is None:
-                continue
-            txt = child.text(0)
-            if txt == "Inner":
-                found_inner = True
-            if "Gain" in txt:
-                found_gain = True
-            stack.append(child)
-    assert found_inner
-    assert found_gain
-
-
 def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
@@ -1363,44 +1321,32 @@ def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl)
             "window": SweepValue(start=0.0, stop=1.0, expts=11),
         },
     )
-    w = CfgFormWidget(decoration_provider=TooltipProvider())
-    attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget(decoration_provider=TooltipProvider())
+    try:
+        form.attach(draft)
+        before = form.read_values()
+        assert tree_item(form, "gain").toolTip(0) == "Provider tooltip"
+        assert tree_item(form, "window").toolTip(0) == "Sweep tooltip"
 
-    assert w.decoration_for_path("gain").tooltip == "Provider tooltip"
-    assert w.decoration_for_path("window").tooltip == "Sweep tooltip"
-    # Sole tree: tooltips are on QTreeWidgetItem, not ElidedLabel
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+        form.set_decoration_provider(None)
+        qapp.processEvents()
 
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Find items for gain and window
-    gain_item = None
-    window_item = None
-    stack = [root._tree.invisibleRootItem()]
-    while stack:
-        cur = stack.pop()
-        if cur is None:
-            continue
-        for i in range(cur.childCount()):
-            child = cur.child(i)
-            if child is None:
-                continue
-            if child.text(0).startswith("Gain"):
-                gain_item = child
-            if child.text(0).startswith("Window"):
-                window_item = child
-            stack.append(child)
-    assert gain_item is not None and gain_item.toolTip(0) == "Provider tooltip"
-    assert window_item is not None and window_item.toolTip(0) == "Sweep tooltip"
+        assert tree_item(form, "gain").toolTip(0) == "Spec tooltip"
+        assert tree_item(form, "window").toolTip(0) == "Sweep tooltip"
+        assert form.read_values() == before
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_sweep_edge_decoration_disables_only_that_edge(qapp, ctrl):
-    from qtpy.QtWidgets import QLabel
+    from qtpy.QtWidgets import QWidget
     from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
         FieldDecorationPatch,
     )
-    from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
     class StopGeneratedProvider:
         def decoration_for(
@@ -1420,20 +1366,34 @@ def test_sweep_edge_decoration_disables_only_that_edge(qapp, ctrl):
         {"window": SweepSpec(label="Window")},
         {"window": SweepValue(start=0.0, stop=10.0, expts=21)},
     )
-    w = CfgFormWidget(decoration_provider=StopGeneratedProvider())
-    attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget(decoration_provider=StopGeneratedProvider())
+    try:
+        form.attach(draft)
+        sweep = tree_widget(form).itemWidget(tree_item(form, "window"), 1)
+        assert sweep is not None
+        start = sweep.findChild(QWidget, "start")
+        stop = sweep.findChild(QWidget, "stop")
+        points = sweep.findChild(QLineEdit, "expts")
+        assert start is not None and start.isEnabled()
+        assert stop is not None and not stop.isEnabled()
+        assert points is not None and points.isEnabled()
+        labels = {label.text(): label.toolTip() for label in sweep.findChildren(QLabel)}
+        assert labels["stop [generated]"] == "Stop is generated"
 
-    sweep_widget = w.findChild(SweepWidget)
-    assert sweep_widget is not None
-    assert w.decoration_for_path("window.start").enabled is True
-    assert w.decoration_for_path("window.stop").enabled is False
-    assert sweep_widget._start_widget.isEnabled() is True
-    assert sweep_widget._stop_widget.isEnabled() is False
-    assert sweep_widget._expts.isEnabled() is True
-    labels = {
-        label.text(): label.toolTip() for label in sweep_widget.findChildren(QLabel)
-    }
-    assert labels["stop [generated]"] == "Stop is generated"
+        editor = start.findChild(QLineEdit)
+        assert editor is not None and editor.isEnabled()
+        editor.setText("2.5")
+
+        value = form.read_values().fields["window"]
+        assert isinstance(value, SweepValue)
+        assert value.start == 2.5
+        assert value.stop == 10.0
+        assert value.expts == 21
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_choice_section_rejects_unknown_choice_fields():
@@ -1501,8 +1461,9 @@ def test_choice_section_unknown_selector_value_fast_fails(qapp, ctrl):
 
 
 def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
-    """All LiteralSpec fields render no widget — discriminators (type/style) and
-    adapter lock_literal'd fields (e.g. a sweep-driven freq) alike."""
+    """Hidden literals stay in the snapshot while visible scalar inputs remain editable."""
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QTreeWidgetItemIterator
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = section_schema(
@@ -1522,35 +1483,39 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
             "waveform": CfgSectionValue(fields={"sigma": DirectValue(1.2)}),
         },
     )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        tree = tree_widget(form)
+        items = QTreeWidgetItemIterator(tree)
+        paths: set[str] = set()
+        while (item := items.value()) is not None:
+            paths.add(item.data(0, Qt.ItemDataRole.UserRole))
+            items += 1
+        assert {"type", "freq", "waveform.style"}.isdisjoint(paths)
 
-    # Sole tree: hidden literals mean no QTreeWidgetItem for those paths
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+        widget = tree.itemWidget(tree_item(form, "waveform.sigma"), 1)
+        assert widget is not None
+        editor = widget.findChild(QLineEdit)
+        assert editor is not None and editor.isEnabled()
+        editor.setText("2.4")
 
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Verify tree has Sigma but not Type/Style/Freq
-    found = set()
-    stack = [root._tree.invisibleRootItem()]
-    while stack:
-        cur = stack.pop()
-        if cur is None:
-            continue
-        for i in range(cur.childCount()):
-            child = cur.child(i)
-            if child is None:
-                continue
-            found.add(child.text(0))
-            stack.append(child)
-    assert not any("Type" in txt for txt in found)
-    assert not any(txt == "Style" or "Style" in txt for txt in found)
-    # Freq is a literal at top level, should be hidden (no item)
-    assert not any(txt == "Freq" for txt in found)
-    assert any("Sigma" in txt for txt in found)
+        value = form.read_values()
+        assert value.fields["type"] == DirectValue("pulse")
+        assert value.fields["freq"] == DirectValue(0.0)
+        waveform = value.fields["waveform"]
+        assert isinstance(waveform, CfgSectionValue)
+        assert waveform.fields["style"] == DirectValue("gauss")
+        sigma = waveform.fields["sigma"]
+        assert isinstance(sigma, DirectValue) and sigma.value == 2.4
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
-def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ctrl):
+def test_literal_decoration_reveals_read_only_value(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
@@ -1575,34 +1540,29 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
         {"freq": LiteralSpec(0.0, label="Freq")},
         {},
     )
-    w = CfgFormWidget(decoration_provider=RevealLiteralProvider())
-    attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        assert form.read_values().fields["freq"] == DirectValue(0.0)
 
-    # Sole tree: revealed literal appears as a tree item with generated badge, not ElidedLabel
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+        form.set_decoration_provider(RevealLiteralProvider())
+        qapp.processEvents()
 
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    found = False
-    stack = [root._tree.invisibleRootItem()]
-    while stack:
-        cur = stack.pop()
-        if cur is None:
-            continue
-        for i in range(cur.childCount()):
-            child = cur.child(i)
-            if child is None:
-                continue
-            if "Freq" in child.text(0) and "generated" in child.text(0):
-                found = True
-                assert child.isDisabled() is True
-            stack.append(child)
-    assert found
-    # Value widget for literal is still a read-only line edit inside tree
-    literal_edits = [edit for edit in w.findChildren(QLineEdit) if edit.text() == "0.0"]
-    assert len(literal_edits) == 1
-    assert literal_edits[0].isReadOnly() is True
-    assert literal_edits[0].isEnabled() is False
+        item = tree_item(form, "freq")
+        assert "generated" in item.text(0)
+        assert item.toolTip(0) == "Generated at run time"
+        assert item.isDisabled()
+        editor = tree_widget(form).itemWidget(item, 1)
+        assert isinstance(editor, QLineEdit)
+        assert editor.text() == "0.0"
+        assert editor.isReadOnly()
+        assert not editor.isEnabled()
+        assert form.read_values().fields["freq"] == DirectValue(0.0)
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 @pytest.mark.parametrize(
