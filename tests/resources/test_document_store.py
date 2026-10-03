@@ -1,10 +1,11 @@
+from collections.abc import Mapping
 from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
 from filelock import Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from zcu_tools.format_version import FormatError, VersionError
+from zcu_tools.format_version import FormatError, VersionError, YamlValue
 from zcu_tools.resources.document_store import (
     ConflictError,
     DocumentChange,
@@ -18,6 +19,13 @@ class SyntheticDocument(BaseModel):
     format: str
     format_version: str
     values: dict[str, float]
+
+
+class DynamicUnitDocument(BaseModel):
+    format: str
+    format_version: str
+    dimension: str
+    value: float
 
 
 class NullableDocument(BaseModel):
@@ -474,3 +482,40 @@ def test_added_null_and_deleted_fields_roundtrip_as_distinct_changes(
     with store.edit() as draft:
         del draft.values["Q1.t1"]
     assert make_nullable_store(document_path).snapshot().values == {"right": 2.0}
+
+
+def test_unit_resolver_uses_the_current_document_on_refresh_and_commit(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\ndimension: frequency\nvalue: 1000000\n",
+        encoding="utf-8",
+    )
+
+    def resolve_units(
+        document: Mapping[str, YamlValue],
+    ) -> dict[tuple[str, ...], UnitSpec]:
+        unit = (
+            UnitSpec("Hz", "MHz")
+            if document["dimension"] == "frequency"
+            else UnitSpec("A", "mA")
+        )
+        return {("value",): unit}
+
+    store = DocumentStore(
+        document_path, DynamicUnitDocument, format="synthetic", units=resolve_units
+    )
+    assert store.snapshot().value == 1.0
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\ndimension: current\nvalue: 0.001\n",
+        encoding="utf-8",
+    )
+    assert store.refresh() is True
+    assert store.snapshot().dimension == "current"
+    assert store.snapshot().value == 1.0
+    with store.edit() as draft:
+        draft.value = 3.0
+    assert store.snapshot().value == 3.0
+    assert DocumentStore(
+        document_path, DynamicUnitDocument, format="synthetic"
+    ).snapshot().value == pytest.approx(0.003)
