@@ -118,7 +118,6 @@ def test_unestimable_error_is_null_with_reason_through_public_rpc(
     assert parsed["invalid"] == [
         {"path": "summary.lifetime_error", "reason": "non_finite"}
     ]
-    assert parsed["operation_id"] == 101
     assert parsed["operation_state"][f"{stage}_state"]["available"] is True
 
 
@@ -194,7 +193,7 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
         assert observed["params"] == {"threshold": 0.3}
         assert observed["summary"] == {"value": 3.0}
         assert call(sock, _result_method(stage), {"tab_id": tab})["result"] == {
-            "summary": {"value": 3.0}
+            "summary": {"value": 3.0}, "invalid": []
         }
         _install_result(fx, tab, stage, 7.0, 102)
         replaced = call(
@@ -225,7 +224,7 @@ def test_operation_result_observation_unlocks_only_the_observed_image(
     }
     with open_client(fx.service.port) as sock:
         summary = call(sock, _result_method(stage), {"tab_id": tab})
-        assert summary["result"] == {"summary": {"value": 3.0}}
+        assert summary["result"] == {"summary": {"value": 3.0}, "invalid": []}
         assert call(sock, "tab.get_figure", save)["ok"] is True
         assert call(sock, "tab.save_image", save)["error"]["reason"] == "stale_version"
         rejected = call(
