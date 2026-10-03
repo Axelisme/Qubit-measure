@@ -8,6 +8,23 @@ from ruamel.yaml import YAML
 from zcu_tools.resources.entry import ResultEntry
 
 
+def test_open_reads_existing_identity_without_rewriting_setup(tmp_path: Path) -> None:
+    results = tmp_path / "results"
+    database = tmp_path / "Database"
+    entry = ResultEntry.create(
+        "plain (label)", result_root=results, database_root=database
+    )
+    setup_path = results / "plain (label)" / "setup.yaml"
+    before = setup_path.read_bytes()
+
+    reopened = ResultEntry.open(
+        "plain (label)", result_root=results, database_root=database
+    )
+
+    assert reopened.entry_id == entry.entry_id
+    assert setup_path.read_bytes() == before
+
+
 def test_create_builds_new_format_entry_with_uuid_and_utc_identity(
     tmp_path: Path,
 ) -> None:
