@@ -30,6 +30,20 @@ class NestedPairSchema(ComponentSchema):
     links: PairLinks
 
 
+@pytest.mark.parametrize("extra", ["allow", "ignore"])
+def test_registration_rejects_models_that_would_silently_accept_unknown_fields(
+    extra: str,
+) -> None:
+    class PermissiveModel(ComponentSchema):
+        model_config = ConfigDict(extra=cast("str", extra))  # type: ignore[typeddict-item]
+
+    registry = ComponentRegistry()
+    with pytest.raises(TypeError, match="extra=forbid"):
+        registry.register("notebook/permissive", PermissiveModel)
+    registry.register("notebook/permissive", PairSchema)
+    assert registry.get("notebook/permissive") is PairSchema
+
+
 def test_registration_rejects_non_component_models_without_reserving_the_kind() -> None:
     registry = ComponentRegistry()
     invalid_model = cast(type[ComponentSchema], UnrelatedSchema)
