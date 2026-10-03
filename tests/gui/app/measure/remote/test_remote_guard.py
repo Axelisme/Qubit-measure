@@ -55,8 +55,11 @@ from ._remote_core_support import (
 def fx(qapp):
     f = _Fixture()
     f.start()
-    yield f
-    f.stop()
+    try:
+        yield f
+    finally:
+        f.stop()
+        f.ctrl._background_svc.quiesce()
 
 
 pytestmark = pytest.mark.uses_wall_clock
@@ -429,15 +432,21 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
         assert started["handle"] > 0
         _await_completed_run(call, started["handle"])
     finally:
-        if with_device:
-            call(
-                "rpc_call",
-                {
-                    "method": "device.disconnect",
-                    "params": {"name": "bias", "forget": True},
-                },
-            )
-        bridge.disconnect()
+        try:
+            if with_device:
+                disconnected = call(
+                    "rpc_call",
+                    {
+                        "method": "device.disconnect",
+                        "params": {"name": "bias", "remember": False},
+                    },
+                )
+                assert (
+                    call("wait", {"op": disconnected["handle"], "timeout": 5})["status"]
+                    == "finished"
+                )
+        finally:
+            bridge.disconnect()
 
 
 def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> None:
