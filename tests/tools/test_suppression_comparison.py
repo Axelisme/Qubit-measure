@@ -154,6 +154,22 @@ def test_identical_statements_in_different_owners_cannot_trade_ignores(
     assert found[0].reason == "new-position"
 
 
+@pytest.mark.parametrize(
+    "directive",
+    ["type: ignoreNotADirective", "pyright: ignore[", "pyright: ignore[notAReport]"],
+)
+def test_an_unproven_previous_directive_cannot_authorize_a_new_ignore(
+    directive: str,
+) -> None:
+    before = f"import missing  # {directive}\n"
+    after = "import missing  # pyright: ignore[reportMissingImports]\n"
+
+    found = compare_ignores(before, after)
+
+    assert len(found) == 1
+    assert found[0].reason == "unproven-position"
+
+
 def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -> None:
     before = "import missing  # type: ignore\nimport missing\n"
     after = "import missing  # pyright: ignore[reportMissingImports]\nimport missing\n"

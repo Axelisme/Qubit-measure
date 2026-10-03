@@ -80,11 +80,13 @@ def _comments(source: str) -> tuple[_Comment, ...]:
                     continue
                 # Pyright treats every type: ignore, even bracketed ones, as
                 # blanket. Only its own ignore directive filters diagnostics.
-                codes, valid = (
-                    _scope(token.string[match.end() :])
-                    if kind == "pyright-ignore"
-                    else (None, True)
-                )
+                tail = token.string[match.end() :]
+                if tail and not (tail[0].isspace() or tail[0] == "["):
+                    codes, valid = None, False
+                else:
+                    codes, valid = (
+                        _scope(tail) if kind == "pyright-ignore" else (None, True)
+                    )
                 found.append(_Comment(*token.start, kind, codes, valid))
     except (tokenize.TokenError, IndentationError, SyntaxError):
         # Preserve already observed comments, but AST provenance below must
