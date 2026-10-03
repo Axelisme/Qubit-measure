@@ -10,6 +10,7 @@ from ruamel.yaml import YAML
 from zcu_tools.resources.entry import (
     PartialCommitError,
     ResultEntry,
+    UnknownFieldError,
     UnknownKindError,
     rename_entry,
 )
@@ -24,6 +25,40 @@ def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
 def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     results, database = entry_roots
     return ResultEntry.create("entry", result_root=results, database_root=database)
+
+
+@pytest.mark.parametrize("operation", ["add", "read", "write", "open"])
+def test_unknown_component_fields_report_the_path_and_a_close_name(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    if operation == "open":
+        document = YAML(typ="safe").load(setup_path)
+        document["components"]["R1"]["frq"] = 6.6e9
+        with setup_path.open("w", encoding="utf-8") as stream:
+            YAML(typ="rt").dump(document, stream)
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        if operation == "add":
+            entry.setup.add_component("R2", kind="resonator", frq=6600.0)
+        elif operation == "read":
+            _ = entry.setup.R1.frq
+        elif operation == "write":
+            entry.setup.R1.frq = 6600.0
+        else:
+            ResultEntry.open("entry", result_root=results, database_root=database)
+
+    with pytest.raises(UnknownFieldError) as failure:
+        perform_operation()
+
+    component = "R2" if operation == "add" else "R1"
+    assert failure.value.path == f"{component}.frq"
+    assert failure.value.field == "frq"
+    assert "freq" in failure.value.suggestions
+    assert setup_path.read_bytes() == before
 
 
 @pytest.mark.parametrize("operation", ["add", "open"])

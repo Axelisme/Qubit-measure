@@ -3,6 +3,14 @@
 from pathlib import Path
 
 
+class UnknownFieldError(AttributeError):
+    def __init__(self, path: str, field: str, suggestions: tuple[str, ...]) -> None:
+        self.path = path
+        self.field = field
+        self.suggestions = suggestions
+        super().__init__(f"{path}: unknown field {field!r}; suggestions={suggestions}")
+
+
 class UnknownKindError(ValueError):
     def __init__(
         self,

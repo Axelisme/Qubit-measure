@@ -1,6 +1,6 @@
 """Explicit-root parameter containers, independent of legacy context services."""
 
-from .errors import PartialCommitError, UnknownKindError
+from .errors import PartialCommitError, UnknownFieldError, UnknownKindError
 from .registry import ComponentRegistry, component_registry
 from .result_entry import ResultEntry, rename_entry
 from .schema import ComponentSchema
