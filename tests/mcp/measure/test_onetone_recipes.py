@@ -36,6 +36,9 @@ def recipe_client(tmp_path, respond):
         {"gain": False},
         {"gain": "bad"},
         {"points": 2.5},
+        {"points": 1.0},
+        {"reps": 1.0},
+        {"rounds": 1.0},
         {"points": True},
         {"reps": 1.5},
         {"rounds": False},
@@ -50,6 +53,7 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert reply.data["error"]["phase"] == "preparing"
         assert not gui.ran
         assert not any(
@@ -87,6 +91,8 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         {"flux_device": " "},
         {"freq_points": True},
         {"freq_points": 1.5},
+        {"freq_points": 1.0},
+        {"flux_points": 1.0},
         {"flux_points": False},
         {"flux_range": [0, True]},
         {"flux_range": [0, float("inf")]},
@@ -105,6 +111,7 @@ def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
@@ -272,6 +279,8 @@ class OnetoneGui(LookbackGui):
         {"gain_range": [0, 1, 2]},
         {"gain_range": {"start": 0, "stop": 1}},
         {"gain_points": 1.2},
+        {"gain_points": 1.0},
+        {"freq_points": 1.0},
         {"gain_points": True},
     ],
 )
@@ -281,6 +290,7 @@ def test_power_rejects_invalid_gain_inputs_before_preparation(tmp_path, argument
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
@@ -426,6 +436,48 @@ class PowerGui(OnetoneGui):
         return super().__call__(method, params)
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_onetone_power_number_ranges_publish_float_endpoints_and_integer_counts(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, PowerGui()) as client:
+        data = client.call(
+            "onetone_spectrum_over_power",
+            {
+                "center_mhz": number,
+                "span_mhz": number,
+                "gain_range": [number - 1, number],
+                "freq_points": 3,
+                "gain_points": 2,
+                "reps": 2,
+                "rounds": 1,
+            },
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["sweep.freq"]["value"] == {"start": 0.5, "stop": 1.5, "expts": 3}
+        assert fields["sweep.gain"]["value"] == {"start": 0.0, "stop": 1.0, "expts": 2}
+        for path in ("sweep.freq", "sweep.gain"):
+            sweep = fields[path]["value"]
+            assert type(sweep["start"]) is float
+            assert type(sweep["stop"]) is float
+            assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            assert fields[name]["value"] == count
+            assert type(fields[name]["value"]) is int
+        gain_edits = [
+            edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "gain"]
+        ]
+        assert len(gain_edits) == 1
+        assert type(gain_edits[0]["start"]) is float
+        assert type(gain_edits[0]["stop"]) is float
+        assert type(gain_edits[0]["expts"]) is int
+
+
 @pytest.mark.parametrize(
     "arguments, expected_gain",
     [
@@ -504,10 +556,19 @@ class FluxGui(OnetoneGui):
         return super().__call__(method, params)
 
 
-@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize(
+    "explicit_range,expected_endpoints",
+    [
+        (None, (0.005, -0.001)),
+        ([-0.003, 0.007], (-0.003, 0.007)),
+        ([0, 1], (0.0, 1.0)),
+        ([0.0, 1.0], (0.0, 1.0)),
+    ],
+)
 def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
-    tmp_path, explicit
+    tmp_path, explicit_range, expected_endpoints
 ):
+    explicit = explicit_range is not None
     gui = FluxGui()
     arguments: dict[str, Any] = {
         "readout_ref": "calibrated",
@@ -520,7 +581,7 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
         arguments.update(
             reuse_tab_id="t",
             flux_device="alternate",
-            flux_range=[-0.003, 0.007],
+            flux_range=explicit_range,
             flux_points=11,
         )
     with recipe_client(tmp_path, gui) as client:
@@ -535,10 +596,13 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             "source": "explicit" if explicit else "device.flux.name",
         }
         assert fields["sweep.flux"]["value"] == {
-            "start": -0.003 if explicit else 0.005,
-            "stop": 0.007 if explicit else -0.001,
+            "start": expected_endpoints[0],
+            "stop": expected_endpoints[1],
             "expts": 11 if explicit else 19,
         }
+        assert type(fields["sweep.flux"]["value"]["start"]) is float
+        assert type(fields["sweep.flux"]["value"]["stop"]) is float
+        assert type(fields["sweep.flux"]["value"]["expts"]) is int
         assert fields["sweep.flux"]["source"] == (
             "explicit" if explicit else "gui_calibration"
         )
@@ -554,6 +618,18 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
         assert methods.count("tab.run_start") == 1
         assert ("tab.reset_cfg" in methods) is explicit
         assert ("value.read" in methods) is not explicit
+        if explicit:
+            flux_edits = [
+                edit["value"]
+                for method, params in client.transport.sent
+                if method == "tab.edit_cfg"
+                for edit in params["edits"]
+                if edit["path"] == ["sweep", "flux"]
+            ]
+            assert len(flux_edits) == 1
+            assert type(flux_edits[0]["start"]) is float
+            assert type(flux_edits[0]["stop"]) is float
+            assert type(flux_edits[0]["expts"]) is int
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "t"])

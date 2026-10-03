@@ -81,6 +81,45 @@ class TimeRabiGui(LookbackGui):
         return result
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, TimeRabiGui({"r_f": 7200.0})) as client:
+        data = client.call(
+            "time_rabi",
+            {
+                "frequency_mhz": number,
+                "gain": number,
+                "max_length_us": number,
+                "points": 3,
+            },
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.gain"):
+            assert fields[path]["value"] == 1.0
+            assert type(fields[path]["value"]) is float
+        sweep = fields["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        by_path = {
+            tuple(edit["path"]): edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+        }
+        for path in (
+            ("modules", "qub_pulse", "freq"),
+            ("modules", "qub_pulse", "gain"),
+        ):
+            assert by_path[path] == 1.0
+            assert type(by_path[path]) is float
+        assert type(by_path["sweep", "length"]["stop"]) is float
+
+
 def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tmp_path):
     gui = TimeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
@@ -159,6 +198,47 @@ class AmplitudeRabiGui(TimeRabiGui):
         if method == "tab.snapshot":
             result["tabs"][0]["adapter_name"] = "twotone/rabi/amp_rabi"
         return result
+
+
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, AmplitudeRabiGui({"r_f": 7200.0})) as client:
+        data = client.call(
+            "amplitude_rabi",
+            {
+                "frequency_mhz": number,
+                "pulse_length_us": number,
+                "gain_range": [number - 1, number],
+                "points": 3,
+                "reps": 2,
+                "rounds": 1,
+            },
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.waveform.length"):
+            assert fields[path]["value"] == 1.0
+            assert type(fields[path]["value"]) is float
+        sweep = fields["sweep.gain"]["value"]
+        assert sweep == {"start": 0.0, "stop": 1.0, "expts": 3}
+        assert type(sweep["start"]) is float
+        assert type(sweep["stop"]) is float
+        assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            assert fields[name]["value"] == count
+            assert type(fields[name]["value"]) is int
+        edits = [
+            edit
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "gain"]
+        ]
+        assert len(edits) == 1
+        assert type(edits[0]["value"]["start"]) is float
+        assert type(edits[0]["value"]["stop"]) is float
 
 
 def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
@@ -279,6 +359,9 @@ def test_rabi_inline_frequency_does_not_substitute_for_missing_sources(
         ("time_rabi", TimeRabiGui, {"gain": float("nan")}),
         ("time_rabi", TimeRabiGui, {"max_length_us": float("inf")}),
         ("time_rabi", TimeRabiGui, {"points": 2.5}),
+        ("time_rabi", TimeRabiGui, {"points": 1.0}),
+        ("time_rabi", TimeRabiGui, {"reps": 1.0}),
+        ("time_rabi", TimeRabiGui, {"rounds": 1.0}),
         ("amplitude_rabi", AmplitudeRabiGui, {"pulse_length_us": True}),
         ("amplitude_rabi", AmplitudeRabiGui, {"frequency_mhz": float("nan")}),
         ("amplitude_rabi", AmplitudeRabiGui, {"gain_range": [0.1]}),
@@ -300,6 +383,7 @@ def test_rabi_invalid_explicit_values_fail_before_preparing(
     with recipe_client(tmp_path, gui) as client:
         data = client.call(recipe, arguments).data
         assert data["status"] == "failed", data
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )

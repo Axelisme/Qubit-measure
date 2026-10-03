@@ -293,6 +293,33 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         ) == 1
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_t2_number_delay_and_detune_publish_floats(tmp_path, number):
+    gui = CoherenceGui(pi_ref="pi", adapter="t2ramsey", pi2_ref="pi2")
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(
+            "t2ramsey", {"max_delay_us": number, "detune_ratio": number, "points": 3}
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["detune_ratio"]["value"] == 1.0
+        assert type(fields["detune_ratio"]["value"]) is float
+        sweep = fields["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        detune_edits = [
+            edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["detune_ratio"]
+        ]
+        assert detune_edits == [1.0]
+        assert type(detune_edits[0]) is float
+
+
 def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
     gui = CoherenceGui()
     client = make_client(tmp_path, gui)
@@ -351,6 +378,9 @@ def test_t1_reports_all_missing_calibration_sources(tmp_path, arguments):
         {"max_delay_us": -1},
         {"points": 1},
         {"points": 2.5},
+        {"points": 1.0},
+        {"reps": 1.0},
+        {"rounds": 1.0},
         {"points": True},
         {"reps": False},
         {"rounds": 1.5},
@@ -366,12 +396,41 @@ def test_t1_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
     try:
         data = client.call("t1", arguments).data
         assert data["status"] == "failed", data
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not gui.ran
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
     finally:
         client.context.session.close()
+
+
+@pytest.mark.parametrize("delay", [1, 1.0])
+def test_t1_number_inputs_publish_floats_and_keep_integer_counts(tmp_path, delay):
+    with recipe_client(tmp_path, CoherenceGui(pi_ref="pi")) as client:
+        data = client.call(
+            "t1", {"max_delay_us": delay, "points": 3, "reps": 2, "rounds": 1}
+        ).data
+        assert data["status"] == "finished", data
+        sweep = data["actual"]["fields"]["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            value = data["actual"]["fields"][name]["value"]
+            assert value == count
+            assert type(value) is int
+        edits = [
+            edit
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "length"]
+        ]
+        assert len(edits) == 1
+        assert edits[0]["value"]["stop"] == 1.0
+        assert type(edits[0]["value"]["stop"]) is float
 
 
 def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
