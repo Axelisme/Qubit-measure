@@ -46,9 +46,7 @@ def _item(form: CfgFormWidget, path: str) -> QTreeWidgetItem:
     raise AssertionError(f"no tree item for path {path!r}")
 
 
-def _click_row(
-    qapp: QApplication, form: CfgFormWidget, item: QTreeWidgetItem
-) -> None:
+def _click_row(qapp: QApplication, form: CfgFormWidget, item: QTreeWidgetItem) -> None:
     form.resize(600, 400)
     form.show()
     qapp.processEvents()
