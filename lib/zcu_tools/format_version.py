@@ -1,5 +1,6 @@
 """Shared artifact headers and explicit migrations; no legacy adapters."""
 
+import errno
 import re
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -214,6 +215,14 @@ class MigrationRegistry:
         format: str,
         target_version: FormatVersion,
     ) -> Path:
+        if (
+            source.resolve() == destination.resolve()
+            or destination.exists()
+            or destination.is_symlink()
+        ):
+            raise FileExistsError(
+                errno.EEXIST, "destination must be a new file", str(destination)
+            )
         yaml = YAML(typ="safe")
         with source.open("r", encoding="utf-8") as stream:
             document = TypeAdapter(YamlMap).validate_python(
@@ -222,6 +231,6 @@ class MigrationRegistry:
         result = self.migrate(
             document, format=format, target_version=target_version, source=source
         )
-        with destination.open("w", encoding="utf-8") as stream:
+        with destination.open("x", encoding="utf-8") as stream:
             yaml.dump(result, stream)
         return destination
