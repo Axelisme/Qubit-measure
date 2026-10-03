@@ -27,6 +27,17 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_absent_optional_physical_fields_are_not_fabricated_or_readable(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, _database = entry_roots
+    entry.setup.add_component("R1", kind="resonator")
+    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    assert "freq" not in document["components"]["R1"]
+    with pytest.raises(AttributeError, match=r"R1\.freq.*not set"):
+        _ = entry.setup.R1.freq
+
+
 @pytest.mark.parametrize("operation", ["add", "read", "write", "open"])
 def test_unknown_component_fields_report_the_path_and_a_close_name(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
