@@ -101,7 +101,7 @@ class HangerModel:
         circle_params = fit_circle_params(rot_signals.real, rot_signals.imag)
         freq, Ql, theta0 = fit_resonant_params(freqs, rot_signals, circle_params)
         a0 = calc_background_signals(circle_params, theta0)
-        _, (norm_xc, norm_yc, norm_r0) = normalize_signal(
+        _, (_, norm_yc, norm_r0) = normalize_signal(
             rot_signals, circle_params, a0
         )
         phi = calc_phi(norm_yc, norm_r0)
@@ -408,7 +408,7 @@ class HangerModel:
         norm_signals, norm_circle_params = normalize_signal(
             corrected, circle_params, a0
         )
-        xc, yc, r0 = circle_params
+        xc, yc, _ = circle_params
         norm_xc, norm_yc, norm_r0 = norm_circle_params
 
         fig = figure

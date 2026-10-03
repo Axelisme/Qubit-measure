@@ -309,7 +309,7 @@ class TransmissionModel:
         bg_phase_curvature = param_dict["bg_phase_curvature"]
         circle_params = param_dict["circle_params"]
 
-        xc, yc, r0 = circle_params
+        xc, yc, _ = circle_params
         fit_signals = cls.calc_signals(
             freqs, freq, Ql, a0, edelay, bg_amp_slope, bg_phase_curvature
         )
