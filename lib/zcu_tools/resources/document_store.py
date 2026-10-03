@@ -211,7 +211,10 @@ class DocumentStore[T: BaseModel]:
         )
         # Ignore future fields only in the typed view; retain them in the YAML tree.
         extra = "ignore" if version.minor > self._supported_version.minor else None
-        return self._model.model_validate(self._working_values(document), extra=extra)
+        snapshot = self._model.model_validate(self._working_values(document), extra=extra)
+        if self._validate is not None:
+            self._validate(snapshot)
+        return snapshot
 
     def _unit_specs(self, document: YamlMap) -> Mapping[FieldPath, UnitSpec]:
         return self._units(document) if callable(self._units) else self._units or {}
