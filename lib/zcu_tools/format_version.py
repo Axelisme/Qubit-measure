@@ -62,7 +62,12 @@ def validate_header(
     major, minor = raw_version.split(".")
     version = FormatVersion(int(major), int(minor))
     if version.major != supported_version.major:
-        raise NotImplementedError((version, supported_version, source))
+        raise VersionError(
+            source,
+            "format_version",
+            raw_version,
+            f"{supported_version.major}.{supported_version.minor}",
+        )
     return version
 
 
