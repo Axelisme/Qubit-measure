@@ -53,7 +53,7 @@ class ResultEntry:
         return cls(result_path, database_path)
 
     @classmethod
-    def open(  # noqa: ARG003 -- Frozen declaration; next contract cycle implements open.
+    def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> "ResultEntry":
         raise NotImplementedError("Opening an existing entry is not implemented")
