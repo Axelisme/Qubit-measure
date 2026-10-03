@@ -112,6 +112,14 @@ def make_nullable_store(path: Path) -> DocumentStore[NullableDocument]:
     return DocumentStore(path, NullableDocument, format="synthetic")
 
 
+def make_optional_store(path: Path) -> DocumentStore[OptionalDocument]:
+    return DocumentStore(path, OptionalDocument, format="synthetic")
+
+
+def make_defaulted_store(path: Path) -> DocumentStore[DefaultedDocument]:
+    return DocumentStore(path, DefaultedDocument, format="synthetic")
+
+
 def test_snapshot_is_an_independent_memory_only_typed_copy(document_path: Path) -> None:
     store = make_store(document_path)
     document_path.unlink()
@@ -572,7 +580,7 @@ def test_added_leaf_conflicts_with_deleted_or_null_parent(
 def test_missing_optional_model_field_can_be_explicitly_committed_as_null(
     document_path: Path,
 ) -> None:
-    store = DocumentStore(document_path, OptionalDocument, format="synthetic")
+    store = make_optional_store(document_path)
     events: list[DocumentChange] = []
     store.subscribe(events.append)
     with store.edit() as draft:
@@ -583,14 +591,14 @@ def test_missing_optional_model_field_can_be_explicitly_committed_as_null(
     assert persisted["description"] is None
     assert store.snapshot().description is None
     assert events == [DocumentChange(document_path, (("description",),), "commit")]
-    reopened = DocumentStore(document_path, OptionalDocument, format="synthetic")
+    reopened = make_optional_store(document_path)
     assert "description" in reopened.snapshot().model_fields_set
 
 
 def test_nested_default_model_tracks_explicit_null_and_in_place_container_changes(
     document_path: Path,
 ) -> None:
-    store = DocumentStore(document_path, DefaultedDocument, format="synthetic")
+    store = make_defaulted_store(document_path)
     with store.edit() as draft:
         draft.general.description = None
         draft.general.ext["calibration"] = 7.0
@@ -599,9 +607,58 @@ def test_nested_default_model_tracks_explicit_null_and_in_place_container_change
     assert persisted["general"] == {
         "description": None, "ext": {"calibration": 7.0}
     }
-    reopened = DocumentStore(document_path, DefaultedDocument, format="synthetic")
+    reopened = make_defaulted_store(document_path)
     assert reopened.snapshot().general.ext == {"calibration": 7.0}
     assert "description" in reopened.snapshot().general.model_fields_set
+
+
+def test_explicit_null_of_missing_typed_field_conflicts_with_concurrent_value(
+    document_path: Path,
+) -> None:
+    first = make_optional_store(document_path)
+    second = make_optional_store(document_path)
+    original = first.snapshot()
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        draft.description = None
+        with second.edit() as other:
+            other.description = "winner"
+        committed = document_path.read_bytes()
+        with pytest.raises(ConflictError) as caught:
+            stack.close()
+
+    assert caught.value.path == ("description",)
+    assert caught.value.original is not None
+    assert caught.value.current == "winner"
+    assert document_path.read_bytes() == committed
+    assert first.snapshot() == original
+
+
+@pytest.mark.parametrize("general_present", [False, True])
+def test_nested_optional_presence_conflicts_without_materializing_untouched_defaults(
+    document_path: Path, general_present: bool
+) -> None:
+    if general_present:
+        document_path.write_text(
+            document_path.read_text(encoding="utf-8") + "general: {}\n",
+            encoding="utf-8",
+        )
+    first = make_defaulted_store(document_path)
+    before = document_path.read_bytes()
+    with first.edit():
+        pass
+    assert document_path.read_bytes() == before
+    second = make_defaulted_store(document_path)
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        draft.general.description = None
+        with second.edit() as other:
+            other.general.description = "winner"
+        committed = document_path.read_bytes()
+        with pytest.raises(ConflictError):
+            stack.close()
+    assert document_path.read_bytes() == committed
+    assert make_defaulted_store(document_path).snapshot().general.description == "winner"
 
 
 def test_added_null_and_deleted_fields_roundtrip_as_distinct_changes(
