@@ -302,9 +302,15 @@ def _completed_run(fx, sock, tab_id):
     return operation_id
 
 
-@pytest.mark.parametrize("replacement", ["run", "load", "wrong", "pane", "tokens", None])
-def test_run_preview_requires_the_original_source_before_rendering(fx, monkeypatch, replacement):
-    monkeypatch.setattr(FakeAdapter, "capabilities", replace(FakeAdapter.capabilities, load_data=True))
+@pytest.mark.parametrize(
+    "replacement", ["run", "load", "wrong", "pane", "tokens", None]
+)
+def test_run_preview_requires_the_original_source_before_rendering(
+    fx, monkeypatch, replacement
+):
+    monkeypatch.setattr(
+        FakeAdapter, "capabilities", replace(FakeAdapter.capabilities, load_data=True)
+    )
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
         original = _completed_run(fx, sock, tab)
@@ -326,11 +332,15 @@ def test_run_preview_requires_the_original_source_before_rendering(fx, monkeypat
         if replacement is None:
             assert reply["ok"]
             assert reply["result"]["png_b64"]
-            fx.view.take_figure_screenshot_for_subtab.assert_called_once_with(tab, "run")
+            fx.view.take_figure_screenshot_for_subtab.assert_called_once_with(
+                tab, "run"
+            )
         else:
             assert not reply["ok"]
             assert reply["error"]["code"] == (
-                "invalid_params" if replacement in ("pane", "tokens") else "precondition_failed"
+                "invalid_params"
+                if replacement in ("pane", "tokens")
+                else "precondition_failed"
             )
             if replacement in ("run", "load", "wrong"):
                 assert reply["error"]["reason"] == "result_superseded"
