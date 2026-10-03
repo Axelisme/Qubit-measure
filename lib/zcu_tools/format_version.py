@@ -175,7 +175,7 @@ class MigrationRegistry:
                     f"step from {version} overshoots target",
                 )
             try:
-                result = step(result)
+                result = TypeAdapter(YamlMap).validate_python(step(result), strict=True)
             except Exception as exc:
                 raise MigrationError(
                     format,
