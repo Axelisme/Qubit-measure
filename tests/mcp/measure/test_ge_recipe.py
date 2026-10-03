@@ -4,7 +4,6 @@ import base64
 from copy import deepcopy
 
 import pytest
-from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import make_client
@@ -161,14 +160,21 @@ def test_ge_gui_cfg_rejection_stops_before_run(tmp_path, failure):
     gui = GeGui()
 
     def responder(method, params):
-        if method == "tab.edit_cfg" and failure == "edit":
-            raise GuiRpcError("Reference is not applicable", reason="invalid_cfg")
         result = gui(method, params)
         if method == "tab.edit_cfg" and failure == "invalid":
             result["status"] = "Invalid"
         return result
 
     client = make_client(tmp_path, responder)
+    if failure == "edit":
+        client.transport.replies["tab.edit_cfg"] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "invalid_cfg",
+                "message": "Reference is not applicable",
+            },
+        }
     try:
         data = client.call("singleshot_ge", {"pi_ref": "pi"}).data
         assert data["status"] == "failed", data
