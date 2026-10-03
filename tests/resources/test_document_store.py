@@ -893,6 +893,56 @@ def test_known_sequence_edit_preserves_future_fields_comments_and_untouched_node
     assert persisted["format_version"] == "1.2"
 
 
+def test_appending_to_typed_sequence_keeps_existing_future_nodes(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.2'\nvalues:\n"
+        "  - left: 1.000 # original\n    right: 2.000\n"
+        "    future: 7.000 # future nested\n",
+        encoding="utf-8",
+    )
+    store = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    with store.edit() as draft:
+        draft.values.append(KnownValues(left=3.0, right=4.0))
+
+    text = document_path.read_text(encoding="utf-8")
+    assert "# original" in text
+    assert "# future nested" in text
+    persisted = YAML(typ="safe").load(text)
+    assert persisted["values"] == [
+        {"left": 1.0, "right": 2.0, "future": 7.0},
+        {"left": 3.0, "right": 4.0},
+    ]
+    assert store.snapshot().format_version == "1.2"
+
+
+def test_sequence_edits_conflict_as_a_whole_without_losing_future_nodes(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.2'\nvalues:\n"
+        "  - left: 1.000\n    right: 2.000\n    future: 7.000 # future\n",
+        encoding="utf-8",
+    )
+    first = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    second = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        draft.values[0].left = 10.0
+        with second.edit() as other:
+            other.values[0].right = 20.0
+        committed = document_path.read_bytes()
+        with pytest.raises(ConflictError) as caught:
+            stack.close()
+
+    assert caught.value.path == ("values",)
+    assert document_path.read_bytes() == committed
+    assert "# future" in document_path.read_text(encoding="utf-8")
+    assert first.snapshot().values[0].left == 1.0
+    assert second.snapshot().values[0].right == 20.0
+
+
 def test_unchanged_nan_extension_roundtrips_without_a_false_change(
     document_path: Path,
 ) -> None:
