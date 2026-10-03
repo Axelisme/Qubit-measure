@@ -2,6 +2,7 @@
 
 import base64
 from copy import deepcopy
+from typing import Any
 
 import pytest
 
@@ -33,7 +34,7 @@ class GeGui(LookbackGui):
         observations["tab.snapshot"]["tabs"][0]["adapter_name"] = "singleshot/ge"
         return observations
 
-    def __call__(self, method, params):
+    def __call__(self, method, params) -> dict[str, Any]:
         self.calls.append((method, deepcopy(params)))
         if method == "tab.post_analyze":
             assert params == {
