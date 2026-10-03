@@ -8,6 +8,7 @@ from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
 from .coherence import t1, t2echo, t2ramsey
 from .drive import amplitude_rabi, time_rabi, twotone_spectrum
+from .ge import singleshot_ge
 from .lookback import lookback
 from .onetone import (
     onetone_spectrum,
@@ -35,6 +36,25 @@ _ONETONE_COMMON_PROPERTIES = {
 
 
 RECIPES = (
+    RecipeDefinition(
+        name="singleshot_ge",
+        description="Run GE single-shot calibration with Primary and Post analysis.",
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                **{
+                    name: {"type": ["string", "null"], "minLength": 1}
+                    for name in (
+                        "reuse_tab_id", "readout_ref", "pi_ref",
+                        "use_reset", "init_pulse_ref",
+                    )
+                },
+                "shots": {"type": ["integer", "null"]},
+            },
+        },
+        run=singleshot_ge,
+    ),
     *(
         RecipeDefinition(
             name=name,
