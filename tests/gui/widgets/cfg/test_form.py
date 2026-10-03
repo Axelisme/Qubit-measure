@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -485,7 +485,6 @@ def test_scalar_widget_context_menu_uses_resolved_direct_value(qapp, ctrl, monke
         ScalarSpec(label="Freq", type=float),
         EvalValue("r_f"),
     )
-
     def choose(menu: QMenu, _position: QPoint):
         return next(
             action for action in menu.actions() if action.text() == "Use direct value"
