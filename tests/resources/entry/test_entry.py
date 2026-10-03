@@ -21,6 +21,18 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_added_component_survives_reopening_with_its_declared_kind(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    entry.setup.add_component("R1", kind="resonator", ext={"note": "readout line"})
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.R1.kind == "resonator"
+    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    assert document["components"]["R1"]["ext"]["note"] == "readout line"
+
+
 def read_entry_files(path: Path) -> dict[Path, bytes]:
     return {
         item.relative_to(path): item.read_bytes()

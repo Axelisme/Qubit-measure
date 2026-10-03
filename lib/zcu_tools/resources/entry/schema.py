@@ -30,11 +30,19 @@ class SetupGeneral(BaseModel):
         return value
 
 
+class ComponentSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    wiring: YamlMap = Field(default_factory=dict)
+    ext: YamlMap = Field(default_factory=dict)
+
+
 class SetupDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: str
     format_version: str
     general: SetupGeneral
-    components: dict[str, YamlMap] = Field(default_factory=dict)
+    components: dict[str, ComponentSchema] = Field(default_factory=dict)
     provenance: dict[str, YamlMap] = Field(default_factory=dict)

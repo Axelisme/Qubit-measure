@@ -3,9 +3,16 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 
+from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from .schema import SetupDocument
+
+
+class ComponentView:
+    @property
+    def kind(self) -> str:
+        raise NotImplementedError("typed component access")
 
 
 class EditView:
@@ -41,3 +48,9 @@ class SetupView:
 
     def refresh(self) -> None:
         self._store.refresh()
+
+    def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
+        raise NotImplementedError("typed component addition")
+
+    def __getattr__(self, name: str) -> ComponentView:
+        raise NotImplementedError("typed component access")

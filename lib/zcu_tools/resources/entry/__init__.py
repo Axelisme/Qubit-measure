@@ -1,5 +1,7 @@
 """Explicit-root parameter containers, independent of legacy context services."""
 
 from .errors import PartialCommitError
+from .registry import ComponentRegistry, component_registry
 from .result_entry import ResultEntry, rename_entry
-from .views import EditView, SetupView
+from .schema import ComponentSchema
+from .views import ComponentView, EditView, SetupView
