@@ -450,3 +450,27 @@ def test_conflicts_distinguish_missing_from_null_and_keep_dot_keys_intact(
     assert caught.value.current == 7.0
     assert document_path.read_bytes() == committed
     assert first.snapshot() == original_snapshot
+
+
+def test_added_null_and_deleted_fields_roundtrip_as_distinct_changes(
+    document_path: Path,
+) -> None:
+    store = make_nullable_store(document_path)
+    events: list[DocumentChange] = []
+    store.subscribe(events.append)
+    with store.edit() as draft:
+        draft.values["Q1.t1"] = None
+        del draft.values["left"]
+
+    assert make_nullable_store(document_path).snapshot().values == {
+        "right": 2.0,
+        "Q1.t1": None,
+    }
+    assert events == [
+        DocumentChange(
+            document_path, (("values", "left"), ("values", "Q1.t1")), "commit"
+        )
+    ]
+    with store.edit() as draft:
+        del draft.values["Q1.t1"]
+    assert make_nullable_store(document_path).snapshot().values == {"right": 2.0}
