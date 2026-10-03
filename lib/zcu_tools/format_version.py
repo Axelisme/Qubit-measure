@@ -105,6 +105,33 @@ class MigrationRegistry:
         to_version: FormatVersion,
         step: Callable[[YamlMap], YamlMap],
     ) -> None:
+        if (format, from_version) in self._steps:
+            raise MigrationError(
+                format, from_version, to_version, "duplicate starting version"
+            )
+        start = (from_version.major, from_version.minor)
+        end = (to_version.major, to_version.minor)
+        if start >= end:
+            raise MigrationError(
+                format, from_version, to_version, "step must advance the version"
+            )
+        for (registered_format, edge_from), (edge_to, _) in self._steps.items():
+            if registered_format != format:
+                continue
+            edge_start = (edge_from.major, edge_from.minor)
+            edge_end = (edge_to.major, edge_to.minor)
+            if (
+                start < edge_start < end
+                or start < edge_end < end
+                or edge_start < start < edge_end
+                or edge_start < end < edge_end
+            ):
+                raise MigrationError(
+                    format,
+                    from_version,
+                    to_version,
+                    "step skips a registered intermediate version",
+                )
         self._steps[format, from_version] = (to_version, step)
 
     def migrate(
