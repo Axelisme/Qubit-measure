@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-01 — 具名圖的wire key與路徑
+**Last updated:** 2026-10-03, Run preview guard and device units
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,31 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 77`, `GUI_VERSION = 109`, and
-`MCP_VERSION = 98` (defined in `zcu_tools.mcp.measure.server`). WIRE 77 adds
+Current measure-gui values are `WIRE_VERSION = 82`, `GUI_VERSION = 114`, and
+`MCP_VERSION = 105`, defined in `zcu_tools.mcp.measure.server`. WIRE 82 adds
+`unit` to `device.snapshot` and optional `run_operation_id` to `tab.get_figure`.
+The Run token only accepts the Run pane and cannot accompany an analysis
+`operation_id`. GUI 114 rejects a replaced Run before rendering and preserves
+available calibration expressions when only center or linewidth is known.
+MCP 105 adds Onetone spectrum, flux and power recipes, including raw-only power
+completion and a Run-bound temporary preview. MCP 104 delivers
+recipe interaction handoffs and checks post-Run result provenance. MCP 103 adds
+Lookback recipes and execution controls. WIRE 81 adds optional
+`operation_id` to `tab.writeback_preview`. GUI 113 rejects a replaced analysis
+before reading its writeback draft; omission still reads the current pane.
+WIRE 80 adds Run
+`source_operation_id` to snapshot result state and optional `run_operation_id` to
+`tab.save_data` and `tab.analyze`. GUI 112 commits Run provenance and rejects a
+superseded source before draft edits, pane following, or operation admission.
+WIRE 79 adds
+`tab.interact(include_figure=false)` for a receipt without PNG rendering. GUI 111
+preserves command validation and the original operation in that receipt. MCP 102
+owns session-local analysis executions, ordered named-image autosave, execution
+queries and cancellation, and worker cleanup before PNG removal. WIRE 78 combines
+operation-bound result inputs and figure reads with named image saving. GUI 110
+commits provenance and captured inputs with named plots; a replaced operation
+cannot change image paths or export. MCP 101 includes public RPC access, whole-draft
+acceptance, PNG delivery and fail-closed session binding. WIRE 77 adds
 `analysis_error` to load outcomes; failed analysis preparation preserves the loaded
 result and the new tab from `tab.open_file`. GUI 109 publishes committed result facts
 independently of analysis preparation and reports its failure separately. WIRE 76
@@ -214,7 +237,19 @@ GUI owns observation and write tracking:
   This is not rollback of business effects or proof of client receipt.
 - `tab.snapshot(tab_id)` reveals existence, result/analysis/post revisions,
   availability and effective paths. It does not serialize raw result arrays or
-  claim cfg/writeback contents. The all-tabs index reveals no per-tab state.
+  claim cfg/writeback contents. Its `result_state.source_operation_id` identifies
+  the Run that published the current raw result; Load and empty results have null.
+  Optional `run_operation_id` on `tab.save_data` and `tab.analyze` rejects another
+  source with `result_superseded`, even after a fresh snapshot. Omission or null
+  keeps current-result semantics. The source token is session-local and does not
+  unlock missing or stale observations. The all-tabs index reveals no per-tab state.
+- Analysis result getters with an explicit `operation_id` verify the pane's
+  provenance and return its summary, actual result `params`, and complete
+  `operation_state`. Result params are distinct from the next-edit parameter
+  draft. Successful bound reads establish the same observations as a single-tab
+  snapshot. Ordinary summary queries and figure previews establish none. Bound figure reads and
+  image saves reject replaced results with `result_superseded`; image saves also
+  retain the existing seen guards. No failed read or stale write triggers a retry.
 - `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot` reveals
   the active label and complete serializable md/ml contents. Encoding failure
   does not establish a baseline. These replies may be large or sensitive.
@@ -253,15 +288,18 @@ The wire surface is grouped by ownership:
   `PredictorControlPort`.
 - `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_image`要求`tab_id`、`subtab_id=analysis|post_analysis`與`figure_name`；`tab.save_artifacts`接受`data`、`analysis:<name>`及`post:<name>`完整key，不接受無名稱的analysis/post舊格式。`tab.snapshot`逐圖列出`figure_names`、`analysis_images`／`post_analysis_images`路徑與artifact status；explicit destinations修改相同key的GUI草稿。Run screenshot讀live FigureContainer；analysis/post screenshot讀目前選中的具名圖。`tab.save_artifacts`回傳保留路徑與operation id，保留不代表成功，完成後以terminal及artifact snapshot判讀。
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
-- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
-- `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time).
+- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
+- `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time). Preview accepts an optional `operation_id` to require the original analysis result rather than another run's draft.
 - `editor.*`：headless cfg-editor session lifecycle.
 - `operation.*` / `notify.*`：live operation indexing, bounded wait, domain-owned cancellation, progress and prompt replies.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
 Subtab locator is required and closed (`run|analysis|post_analysis`); save_image
-only accepts `analysis|post_analysis`. `method_entries/` owns the wire method
+only accepts `analysis|post_analysis`. `tab.get_figure` may bind a Run preview to
+`run_operation_id`, or an analysis preview to `operation_id`, never both.
+Omitting both retains the current-pane read. `device.snapshot.unit` comes from
+the registered device owner; `none` does not identify a physical flux unit. `method_entries/` owns the wire method
 name, handler ref, schema, agent exposure and guard/reveal/operation policy.
 Adding a wire method requires one entry; MCP receives the projection through
 `rpc.catalog` after its version handshake. Descriptions direct the caller to
@@ -283,6 +321,11 @@ Stale errors include expected/actual; input errors can include path/edit_index.
 The adapter does not retry or publish a successful prefix. Plain strings are typed
 strings; __text, __expr, __complex and __ref carry the declared editing intents.
 Source publications advance revision and update all affected cfg before notification.
+
+`tab.reset_cfg` uses the same explicit cfg_ref contract. The tab resource obtains
+current adapter defaults and publishes one new revision, even for unchanged inputs.
+Reset can publish Invalid and returns the complete observation. It preserves results
+and saved files, adds no unsaved guard, and follows the Run pane only after success.
 
 `tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
 not require a second per-connection cfg observation. Tab, SoC, device and
@@ -330,10 +373,13 @@ operations; a GUI restart can reuse a wire id but cannot reuse an exposed MCP
 handle. `operation.await` reads the shared handle channel off-main and rejects
 unknown or evicted GUI ids. `operation.cancel` runs on the owner thread and uses
 the domain cancel hook; a non-cancellable operation fails with `not_cancellable`.
-MCP uses `cancel(op)` alone. The domain-specific wire cancellation methods remain
-available to other socket consumers but are absent from its live catalog.
-MCP `wait` reports status, progress, user feedback, timeout or failure as data;
-figures, summaries and device snapshots come from typed getters after completion.
+MCP routes cancellation through `operation.cancel`. Its `cancel(op)` and
+`cancel(execution)` share the registered analysis execution's cancellation intent.
+The domain-specific wire cancellation methods remain available to other socket
+consumers but are absent from its live catalog. MCP `wait(op)` reports the GUI
+operation outcome; `wait(execution)` also observes MCP-owned result reads, image
+saves and preview delivery. Execution identity and completion policy live in the
+[measure MCP adapter](../../../../mcp/measure/README.md), not the GUI operation table.
 
 `soc.connect` is synchronous and does not enter the operation-handle table.
 

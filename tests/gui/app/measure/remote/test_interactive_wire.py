@@ -189,6 +189,7 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         assert initial["ok"] is True
         result = initial["result"]
         assert result["plugin"] == "flux_pick"
+        assert result["operation_id"] == token
         assert result["figure"] is None
         assert result["preview_active"] is False
         names = [item["name"] for item in result["commands"]]
@@ -221,6 +222,8 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         committed = _interact(sock, tab_id)["result"]["state"]
         done = _interact(sock, tab_id, {"command": "done"})
         assert done["result"]["state"] == committed
+        assert done["result"]["operation_id"] == token
+        assert fx.ctrl.get_tab_snapshot(tab_id).analysis.source_operation_id == token
         assert base64.b64decode(done["result"]["figure"]["png_b64"]).startswith(
             b"\x89PNG"
         )
@@ -229,6 +232,43 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         )
         settled = _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})
         assert settled["result"]["status"] == "finished"
+        assert _interact(sock, tab_id)["error"]["code"] == "precondition_failed"
+
+
+def test_socket_done_receipt_skips_png_and_settles_original_operation(
+    fx, monkeypatch
+) -> None:
+    tab_id, token, _plugin = _start(fx)
+
+    def unavailable_renderer(_figure):
+        raise RuntimeError("PNG renderer unavailable")
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.remote.handlers.interactive.render_figure_png",
+        unavailable_renderer,
+    )
+    with open_client(fx.service.port) as sock:
+        initial = _interact(sock, tab_id, include_figure=False)["result"]
+        rejected = _interact(
+            sock,
+            tab_id,
+            {"command": "done", "args": {"unexpected": 1}},
+            include_figure=False,
+        )
+        assert rejected["error"]["code"] == "invalid_params"
+        assert _interact(sock, tab_id, include_figure=False)["result"] == initial
+
+        done = _interact(sock, tab_id, {"command": "done"}, include_figure=False)
+        assert done["ok"] is True
+        result = done["result"]
+        assert result == {**initial, "figure": None, "preview_active": False}
+        assert result["operation_id"] == token
+        settled = _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})
+        assert settled["result"]["status"] == "finished"
+        summary = _rpc(
+            sock, "tab.get_analyze_result", {"tab_id": tab_id, "operation_id": token}
+        )
+        assert summary["ok"] is True
         assert _interact(sock, tab_id)["error"]["code"] == "precondition_failed"
 
 
@@ -485,13 +525,13 @@ def test_controller_interactive_mount_is_visible_from_run_or_data(
 
 @pytest.mark.parametrize("terminal", ["done", "cancel"])
 def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
-    mounted_fx, tmp_path, terminal
+    mounted_fx, tmp_path, terminal, request
 ) -> None:
     fx, window = mounted_fx
     tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
-    bridge, call = mcp_client(fx.service.port, tmp_path)
+    bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
         read = call("tab_interact", {"tab": tab_id})
@@ -513,11 +553,14 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         running = call("status", {})["running"]
         assert len(running) == 1
         op = running[0]["op"]
+        assert read["handle"] == op
+        assert changed["handle"] == op
         if terminal == "done":
             result = call(
                 "tab_interact", {"tab": tab_id, "payload": {"command": "done"}}
             )
-            assert result["state"] == changed["state"]
+            assert result["interaction"]["state"] == changed["state"]
+            assert result["status"] == "finished", result
             assert Path(result["figure"]).read_bytes().startswith(b"\x89PNG")
             committed = fx.state.get_tab(tab_id).analysis.plots
             assert committed is not None
@@ -608,57 +651,77 @@ def test_interactive_submitted_params_replace_previous_pane_only_on_done(
 
 
 def test_mcp_done_writeback_save_and_close_share_the_gui_result(
-    mounted_fx, tmp_path
+    mounted_fx, tmp_path, request
 ) -> None:
     fx, window = mounted_fx
     tab_id, _, widget = _start_mounted(fx, window, "onetone/flux_dep")
-    bridge, call = mcp_client(fx.service.port, tmp_path)
+    bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
         done = call("tab_interact", {"tab": tab_id, "payload": {"command": "done"}})
         committed = fx.state.get_tab(tab_id).analysis.plots
         assert committed is not None
         assert committed["pick"] is not widget.figure
-        call("tab_get", {"tab": tab_id, "include": ["summary"]})
-        preview = call("writeback", {"tab": tab_id})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
+            "tabs"
+        ][0]
+        preview = call(
+            "rpc_call",
+            {
+                "method": "tab.writeback_preview",
+                "params": {"tab_id": tab_id, "subtab_id": "analysis"},
+            },
+        )
         expected = {
-            "flx_half": done["state"]["flux_half"],
-            "flx_int": done["state"]["flux_int"],
+            "flx_half": done["interaction"]["state"]["flux_half"],
+            "flx_int": done["interaction"]["state"]["flux_int"],
             "flx_period": 2
-            * abs(done["state"]["flux_int"] - done["state"]["flux_half"]),
+            * abs(
+                done["interaction"]["state"]["flux_int"]
+                - done["interaction"]["state"]["flux_half"]
+            ),
         }
         assert {
-            item["target"]: item["proposed"] for item in preview["items"]
+            item["target_name"]: item["proposed"] for item in preview["items"]
         } == expected
         call("rpc_call", {"method": "context.snapshot"})
         written = call(
-            "writeback",
-            {"tab": tab_id, "write": [{"id": item["id"]} for item in preview["items"]]},
+            "rpc_call",
+            {
+                "method": "tab.writeback_write",
+                "params": {
+                    "write": [{"id": item["id"]} for item in preview["items"]],
+                    "tab_id": tab_id,
+                    "subtab_id": "analysis",
+                },
+            },
         )
         assert {
             item["target"]: item["after"] for item in written["written"]
         } == expected
         assert call("rpc_call", {"method": "context.snapshot"})["md"] == expected
-        call("tab_get", {"tab": tab_id, "include": ["summary", "artifacts"]})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
+            "tabs"
+        ][0]
         image = tmp_path / "interactive-result.png"
         saved = call(
-            "tab_save",
+            "rpc_call",
             {
-                "tab": tab_id,
-                "artifacts": ["analysis:pick"],
-                "paths": {"analysis:pick": str(image)},
+                "method": "tab.save_artifacts",
+                "params": {
+                    "artifacts": ["analysis:pick"],
+                    "paths": {"analysis:pick": str(image)},
+                    "tab_id": tab_id,
+                },
             },
         )
-        if "op" in saved:
-            assert (
-                call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
-            )
-        else:
-            assert saved["saved"] == {"analysis:pick": str(image)}
+        assert (
+            call("wait", {"op": saved["handle"], "timeout": 5})["status"] == "finished"
+        )
         assert image.read_bytes().startswith(b"\x89PNG")
-        artifacts = call("tab_get", {"tab": tab_id, "include": ["artifacts"]})[
-            "artifacts"
-        ]
+        artifacts = call(
+            "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}}
+        )["tabs"][0]["artifacts"]
         analysis = next(item for item in artifacts if item["key"] == "analysis:pick")
         assert analysis["status"] == "saved"
         assert analysis["last_saved_path"] == str(image)

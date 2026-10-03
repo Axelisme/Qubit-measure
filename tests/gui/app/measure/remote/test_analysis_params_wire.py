@@ -118,7 +118,12 @@ def test_analysis_parameters_preserve_omitted_values_and_accept_null(handler, me
     assert reply["operation_id"] == "op-1"
     assert reply["params"] == asdict(original)
     operation = getattr(adapter.run_analyze_control, method)
-    operation.assert_called_once_with("t", OneToneFreqAnalyzeParams(model_type="t"))
+    kwargs = {"run_operation_id": None}
+    if method == "start_post_analyze":
+        kwargs["operation_id"] = None
+    operation.assert_called_once_with(
+        "t", OneToneFreqAnalyzeParams(model_type="t"), **kwargs
+    )
 
 
 @pytest.mark.parametrize(

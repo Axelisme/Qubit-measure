@@ -59,6 +59,17 @@ def test_setup_screenshot_uses_visible_gui_dialog_through_mcp(
         expected = [DialogName.SETUP]
         assert app.window.list_open_dialogs() == expected
 
-        path = Path(app.invoke("screenshot", {"target": "setup"})["path"])
+        path = Path(
+            app.invoke(
+                "rpc_call",
+                {
+                    "method": "dialog.screenshot",
+                    "params": {
+                        "name": "setup",
+                        "out_path": str(tmp_path / "setup.png"),
+                    },
+                },
+            )["saved_to"]
+        )
         assert path.is_file() and path.read_bytes().startswith(b"\x89PNG")
         assert app.window.list_open_dialogs() == expected

@@ -6,6 +6,7 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
+    optional_integer,
     optional_string,
     required_string,
 )
@@ -38,14 +39,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Gracefully close an idle GUI. Any active operation returns busy. "
             "All unsaved artifacts require discard_unsaved=true. Persist session "
-            "and clean up through the normal shutdown path after this reply. No OS kill.",
+            "and clean up through the normal shutdown path after this reply. "
+            "Returns shutting_down and pid, not confirmation that the process has exited. "
+            "rpc_call does not wait for process exit or send an OS kill.",
             (
                 ParamSpec(
                     "discard_unsaved", JsonType.BOOLEAN, required=False, default=False
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(exposure="tool", tool_names=("shutdown",)),
     ),
     method_entry(
         "dialog.screenshot",
@@ -95,10 +97,19 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "FigureContainer (view-only, not canonical); analysis/post read their "
             "canonical figures from State. Requires (tab_id, subtab_id) with closed "
             "values run|analysis|post_analysis. The PNG is rendered at a fixed "
-            "small geometry (token-light), independent of the GUI window size.",
+            "small geometry (token-light), independent of the GUI window size. "
+            "Optional operation_id applies only to analysis panes and rejects replaced results. "
+            "Optional run_operation_id binds the run pane to its original Run. "
+            "The two operation tokens are mutually exclusive.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: run|analysis|post_analysis"),
+                optional_integer(
+                    "operation_id", "Require this analysis operation's current result"
+                ),
+                optional_integer(
+                    "run_operation_id", "Require this Run's result for the run pane"
+                ),
                 optional_string(
                     "out_path", "Write PNG here instead of returning base64"
                 ),

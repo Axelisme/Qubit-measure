@@ -20,6 +20,20 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 完成條件是可指出當前階段、近期要回答的問題、已確認預算與限制，以及支持下一步的當前狀態。重要缺口尚未釐清時，只執行不依賴該缺口的工作。
 
+## 選擇 MCP 入口
+
+日常量測先選對應 recipe，讀其現行 schema。分析既有資料先用 `tab_analyze`，互動判讀用 `tab_interact` 取得狀態、圖與可用命令。Client 延後顯示工具時，先搜尋對應 recipe 或共用入口。這是操作指引，不是日常／排查權限模式。
+
+細部設定、保存、writeback 或排查使用 `rpc_list` → `rpc_describe` → `rpc_call`。讀 adapter guide 時查 `adapter.guide` 的 live schema。所有公開 RPC 都可用，不因已有 recipe 或共用工具而禁止直接呼叫。Raw RPC 不代為聚合結果、解碼 PNG 或完成共用分析的保存流程。
+
+Recipe 首次呼叫最多等待 300 秒。Client deadline 必須超過 300 秒並留傳輸餘裕。首次等待期間，同一 stdio 連線的另一請求不保證立即處理。回傳仍執行中的 execution 後，用 `status(execution)` 或 `wait(execution)` 追蹤整個流程。`wait(op)` 只等待單個 GUI operation。逾時只停止等待，不取消量測，也不是重跑依據。
+
+`finish_early` 對 recipe 停止採集，有可用結果就保存 raw 並繼續分析。`cancel` 放棄後續分析與保存，優先於 finish_early；已啟動且不可取消的保存仍回報真實結果。核對操作的 terminal status、錯誤與實際保存路徑，不只看 GUI 是否停止。
+
+寫入前明確讀取相關完整 snapshot。Tab 用 `tab.snapshot`，context 用 `context.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 編輯與 Run 另需 `tab.get_cfg` 回傳的 cfg_ref。摘要與 `status` 不替代這些 guard 觀察。`accept(tab)` 接受 Primary 與既有 Post 的全部候選，包含未勾選項；先核對提案與當前目的地。個別候選的修改或寫入走 RPC。
+
+完成條件是已選定入口、核對其 schema 與適用授權，且 client 等待期限能容納本次呼叫。
+
 ## 每輪實驗推理
 
 ### 整合證據
@@ -48,7 +62,7 @@ Python 分析使用 `uv run --directory <repo> --no-sync -- <command>`，沿用 
 
 按目前工具契約執行明確的讀取與變更。步驟已確定、無需中途判讀時批次操作；下一步取決於新證據時停在判斷點。未確認並行安排前，不讓多個執行者同時修改同一 live resource。
 
-操作逾時、斷線或 stale 時，先讀現況再決定。當前 MCP handle 屬於 session，重連後不能直接拿舊 handle 繼續 wait，也不能因沒有收到完成回覆就重送。無法判斷是否已執行時記錄不確定性並求助。
+操作逾時、斷線或 stale 時，先讀現況再決定。Operation handle 綁定 GUI 連線世代，重連後用 status 重新取得；execution ID 只屬於目前 MCP server session，不是持久恢復 token。沒有完成回覆時不自動重送。無法判斷是否已執行時記錄不確定性並求助。
 
 結果回來後檢查原疑問是否減少、物理圖像如何改變，以及下一階段是否已具備條件。需要保存或 writeback 時，核對目標及實際結果，不把一次成功回覆當成所有產物已保存。
 

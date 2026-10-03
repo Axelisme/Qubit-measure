@@ -86,12 +86,31 @@ class RunAnalyzeControlPort(Protocol):
 
     def cancel_analyze(self, tab_id: str) -> bool: ...
     def get_tab_analyze_result(self, tab_id: str) -> object | None: ...
-    def analyze(self, tab_id: str, analyze_params_instance: object) -> int: ...
+    def analyze(
+        self,
+        tab_id: str,
+        analyze_params_instance: object,
+        *,
+        run_operation_id: int | None = None,
+    ) -> int: ...
     def get_interactive(self, tab_id: str) -> ActiveInteractive | None: ...
+    def get_interactive_operation(self, tab_id: str) -> int | None: ...
+    def require_run_operation(self, tab_id: str, operation_id: int) -> None: ...
+    def require_analysis_operation(
+        self,
+        tab_id: str,
+        subtab_id: Literal["analysis", "post_analysis"],
+        operation_id: int,
+    ) -> None: ...
     def finish_interactive(self, tab_id: str) -> bool: ...
 
     def start_post_analyze(
-        self, tab_id: str, post_analyze_params_instance: object
+        self,
+        tab_id: str,
+        post_analyze_params_instance: object,
+        *,
+        operation_id: int | None = None,
+        run_operation_id: int | None = None,
     ) -> int: ...
     def get_post_analyze_result(self, tab_id: str) -> object | None: ...
 
@@ -209,6 +228,20 @@ class RunAnalyzeControlFacet:
     def get_interactive(self, tab_id: str) -> ActiveInteractive | None:
         return self._analyze.get_interactive(tab_id)
 
+    def get_interactive_operation(self, tab_id: str) -> int | None:
+        return self._analyze.get_interactive_operation(tab_id)
+
+    def require_run_operation(self, tab_id: str, operation_id: int) -> None:
+        self._state.require_run_operation(tab_id, operation_id)
+
+    def require_analysis_operation(
+        self,
+        tab_id: str,
+        subtab_id: Literal["analysis", "post_analysis"],
+        operation_id: int,
+    ) -> None:
+        self._state.require_analysis_operation(tab_id, subtab_id, operation_id)
+
     def finish_interactive(self, tab_id: str) -> bool:
         active = self._analyze.get_interactive(tab_id)
         if active is None:
@@ -227,8 +260,16 @@ class RunAnalyzeControlFacet:
             host.unmount_interactive_analysis(tab_id, restore_result=True)
         return terminal
 
-    def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
+    def analyze(
+        self,
+        tab_id: str,
+        analyze_params_instance: object,
+        *,
+        run_operation_id: int | None = None,
+    ) -> int:
         self._access.require_available()
+        if run_operation_id is not None:
+            self._state.require_run_operation(tab_id, run_operation_id)
         permit = self._guard.acquire_analyze_permit(tab_id)
         self._ensure_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
@@ -313,9 +354,18 @@ class RunAnalyzeControlFacet:
         return token
 
     def start_post_analyze(
-        self, tab_id: str, post_analyze_params_instance: object
+        self,
+        tab_id: str,
+        post_analyze_params_instance: object,
+        *,
+        operation_id: int | None = None,
+        run_operation_id: int | None = None,
     ) -> int:
         self._ensure_tab_idle(tab_id)
+        if operation_id is not None:
+            self._state.require_analysis_operation(tab_id, "analysis", operation_id)
+        if run_operation_id is not None:
+            self._state.require_run_operation(tab_id, run_operation_id)
         host = self._render_host()
         figure_container = (
             host.make_post_analysis_container(tab_id) if host is not None else None

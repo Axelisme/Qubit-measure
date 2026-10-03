@@ -52,9 +52,9 @@ def reference_library(request):
     return kind, library, spec, value, field
 
 
-@pytest.mark.parametrize("tool", ["ml_rename", "ml_delete"])
+@pytest.mark.parametrize("action", ["rename", "del"])
 def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
-    qapp, tmp_path, monkeypatch, reference_library, tool
+    qapp, tmp_path, monkeypatch, reference_library, action
 ):
     kind, library, spec, value, field = reference_library
     schema = CfgSchema(
@@ -87,10 +87,12 @@ def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
         assert before["children"]["linked"]["ref"] == "seed"
         assert before["children"]["modified"]["valid"] is True
         invoke("rpc_call", {"method": "context.snapshot"})
-        arguments = {"name": "seed", "kind": kind}
-        if tool == "ml_rename":
-            arguments["new_name"] = "moved"
-        invoke(tool, arguments)
+        arguments = (
+            {"old": "seed", "new": "moved"} if action == "rename" else {"name": "seed"}
+        )
+        invoke(
+            "rpc_call", {"method": f"context.ml_{action}_{kind}", "params": arguments}
+        )
         after = invoke(
             "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
         )["tree"]

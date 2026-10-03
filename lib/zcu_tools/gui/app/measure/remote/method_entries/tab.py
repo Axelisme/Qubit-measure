@@ -117,12 +117,30 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Return a complete cached resource publication: cfg_ref, status, tree, "
             "source_basis and diagnostics. Reads never refresh or query sources. "
-            "Use cfg_ref as expected for tab.edit_cfg. Paths are arrays of field "
+            "Use cfg_ref as expected for tab.edit_cfg or tab.reset_cfg. Paths are arrays of field "
             "segments; writes use the closed __expr/__text/__complex/__ref codec. "
             "Library editor observations use their own independent interface.",
             (required_string("tab_id"),),
         ),
         agent=AgentMethodPolicy(),
+    ),
+    method_entry(
+        "tab.reset_cfg",
+        "tab:h_tab_reset_cfg",
+        MethodSpec(
+            5.0,
+            "Reset cfg to current adapter defaults at expected cfg_ref. Returns the "
+            "complete new publication, which may be Invalid. Every successful command "
+            "adds a revision, even if inputs are unchanged. Busy, stale and notification-"
+            "reentrant resets are rejected. Does not clear results or save artifacts.",
+            (
+                required_string("tab_id"),
+                required_object(
+                    "expected", "cfg_ref from the complete resource observation"
+                ),
+            ),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "tab.edit_cfg",

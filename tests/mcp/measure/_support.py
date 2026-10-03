@@ -32,6 +32,7 @@ class WireTransport:
     sent: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     deliver_reply: Callable[[dict[str, Any]], None] | None = None
     deliver_event: Callable[[dict[str, Any]], None] | None = None
+    on_closed: Callable[[Exception | None], None] | None = None
     is_open: bool = True
 
     def attach(
@@ -42,6 +43,7 @@ class WireTransport:
     ) -> None:
         self.deliver_reply = deliver_reply
         self.deliver_event = deliver_event
+        self.on_closed = on_closed
 
     def send_line(self, payload: dict[str, Any]) -> None:
         method, params = payload["method"], payload["params"]
@@ -75,7 +77,7 @@ class MeasureClient:
     transport: WireTransport
     tools: ToolTable
 
-    def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def call(self, name: str, arguments: dict[str, Any]) -> Any:
         return self.tools[name]["handler"](arguments)
 
 

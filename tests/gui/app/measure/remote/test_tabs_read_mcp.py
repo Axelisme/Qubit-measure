@@ -12,7 +12,7 @@ pytestmark = pytest.mark.uses_wall_clock
 
 @pytest.fixture
 def live_gui(qapp):
-    fx = Fixture()
+    fx = Fixture(active_label="ctx001")
     fx.start()
     try:
         yield fx
@@ -36,7 +36,9 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
     bridge, invoke = mcp_client(live_gui.service.port, tmp_path)
     try:
         invoke("connect", {"port": live_gui.service.port})
-        tab = invoke("tab_open", {"experiment": "fake"})["tab"]
+        tab = invoke(
+            "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
+        )["tab_id"]
         # The fixture's render-view snapshot is a static stub; State owns focus.
         assert live_gui.state.active_tab_id == tab
         focused = call(sock, "tab.new", {"adapter_name": "fake"})["result"]["tab_id"]
@@ -46,31 +48,36 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
         assert live_gui.state.active_tab_id == focused
 
         with pytest.raises(GuiRpcError):
-            invoke("tab_get", {"tab": "missing", "include": ["summary"]})
-        with pytest.raises(GuiRpcError):
-            invoke("tab_live", {"tab": "missing"})
+            invoke(
+                "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": "missing"}}
+            )["tabs"][0]
         assert live_gui.state.active_tab_id == focused
 
         overview = invoke(
-            "tab_get", {"tab": tab, "include": ["summary", "analyze_params"]}
+            "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}}
+        )["tabs"][0]
+        assert overview["adapter_name"] == "fake"
+        assert overview["interaction"]["has_run_result"] is False
+        params = invoke(
+            "rpc_call", {"method": "tab.get_analyze_params", "params": {"tab_id": tab}}
         )
-        assert overview["summary"]["experiment"] == "fake"
-        assert overview["summary"]["state"]["has_result"] is False
-        assert any(
-            entry["name"] == "threshold"
-            for entry in overview["analyze_params"]["primary"]["definitions"]
-        )
-        live = invoke("tab_live", {"tab": tab})
-        assert live["running"] is False
-        assert live["reason"] == "no_run"
-        assert live["operation_state"]["tab_id"] == tab
-        assert live["operation_state"]["result_state"]["available"] is False
+        assert any(entry["name"] == "threshold" for entry in params["definitions"])
+        assert overview["interaction"]["is_running"] is False
+        assert overview["tab_id"] == tab
+        assert overview["result_state"]["available"] is False
         assert live_gui.state.active_tab_id == focused
 
-        with pytest.raises(GuiRpcError):
+        invoke("rpc_call", {"method": "context.snapshot"})
+        with pytest.raises(GuiRpcError, match="does not support loading data files"):
             invoke(
-                "tab_open",
-                {"experiment": "fake", "from_file": str(tmp_path / "missing.h5")},
+                "rpc_call",
+                {
+                    "method": "tab.open_file",
+                    "params": {
+                        "adapter_name": "fake",
+                        "data_path": str(tmp_path / "missing.h5"),
+                    },
+                },
             )
         after = call(sock, "tab.list_all")["result"]
         assert {entry["tab_id"] for entry in after["tabs"]} == {

@@ -18,18 +18,44 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
-        assert invoke("contexts", {}) == {"active": None, "labels": []}
+        invoke(
+            "rpc_call",
+            {
+                "method": "project.apply",
+                "params": {"chip_name": "chip", "qub_name": "q", "res_name": "res"},
+            },
+        )
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {"active": None, "labels": []}
 
-        assert invoke("context_create", {"label": "base", "clone_from": None}) == {
-            "label": "base"
-        }
+        assert invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {"label": "base", "bind_device": None, "clone_from": None},
+            },
+        ) == {"has_active_context": True, "label": "base"}
         assert call(sock, "context.md_set_attr", {"key": "freq", "value": 5.0})["ok"]
-        assert invoke("context_create", {"label": "copy"}) == {"label": "copy"}
+        assert invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {
+                    "label": "copy",
+                    "bind_device": None,
+                    "clone_from": "current",
+                },
+            },
+        ) == {"label": "copy", "has_active_context": True}
         assert (
             call(sock, "context.md_get_attr", {"key": "freq"})["result"]["value"] == 5.0
         )
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": "copy",
             "labels": ["base", "copy"],
         }
@@ -42,7 +68,10 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         assert failed["ok"] is False
         assert failed["error"]["code"] == "invalid_params"
         assert "base" in failed["error"]["message"]
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": "copy",
             "labels": ["base", "copy"],
         }
@@ -54,13 +83,18 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         )
         assert unsafe["ok"] is False
         assert unsafe["error"]["code"] == "invalid_params"
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": "copy",
             "labels": ["base", "copy"],
         }
         assert not (tmp_path / "result" / "chip" / "q" / "escape").exists()
 
-        assert invoke("context_use", {"label": "base"}) == {"label": "base"}
+        assert invoke(
+            "rpc_call", {"method": "context.use", "params": {"label": "base"}}
+        ) == {"label": "base", "has_active_context": True}
         unknown = call(sock, "context.use", {"label": "ghost"})
         assert unknown["ok"] is False
         assert "base" in unknown["error"]["message"]
@@ -74,7 +108,10 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         assert duplicate["error"]["code"] == "invalid_params"
         assert duplicate["error"]["reason"] == "context_exists"
         assert "different label" in duplicate["error"]["message"]
-        assert invoke("contexts", {})["active"] == "base"
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        }["active"] == "base"
     finally:
         bridge.disconnect()
         sock.close()
@@ -100,10 +137,35 @@ def test_invalid_context_source_and_occupied_directory_preserve_selection(
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
-        invoke("context_create", {"label": "source", "clone_from": None})
-        invoke("context_create", {"label": "active", "clone_from": None})
-        exp_dir = Path(invoke("project", {})["result_dir"]) / "exps"
+        invoke(
+            "rpc_call",
+            {
+                "method": "project.apply",
+                "params": {"chip_name": "chip", "qub_name": "q", "res_name": "res"},
+            },
+        )
+        invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {"label": "source", "bind_device": None, "clone_from": None},
+            },
+        )
+        invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {"label": "active", "bind_device": None, "clone_from": None},
+            },
+        )
+        exp_dir = (
+            Path(
+                invoke("rpc_call", {"method": "project.info", "params": {}})[
+                    "result_dir"
+                ]
+            )
+            / "exps"
+        )
         occupied = exp_dir / "occupied"
         occupied.mkdir()
         user_file = occupied / "user.txt"
@@ -136,18 +198,34 @@ def test_invalid_context_source_and_occupied_directory_preserve_selection(
             source.write_text(invalid_content, encoding="utf-8")
 
         with pytest.raises(GuiRpcError):
-            invoke("context_create", {"label": "failed", "clone_from": "source"})
+            invoke(
+                "rpc_call",
+                {
+                    "method": "context.new",
+                    "params": {
+                        "label": "failed",
+                        "bind_device": None,
+                        "clone_from": "source",
+                    },
+                },
+            )
         assert call(sock, "context.active", {})["result"]["label"] == "active"
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": "active",
             "labels": ["active", "source"],
         }
         assert not (exp_dir / "failed").exists()
 
         with pytest.raises(GuiRpcError):
-            invoke("context_use", {"label": "source"})
+            invoke("rpc_call", {"method": "context.use", "params": {"label": "source"}})
         assert call(sock, "context.active", {})["result"]["label"] == "active"
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": "active",
             "labels": ["active", "source"],
         }
@@ -177,7 +255,13 @@ def test_context_create_bound_device_reads_value_and_rejects_missing_device(
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
+        invoke(
+            "rpc_call",
+            {
+                "method": "project.apply",
+                "params": {"chip_name": "chip", "qub_name": "q", "res_name": "res"},
+            },
+        )
         fx.state.put_device(
             DeviceState(
                 name="flux",
@@ -193,9 +277,18 @@ def test_context_create_bound_device_reads_value_and_rejects_missing_device(
             "get_device_info",
             lambda self, name: FakeDeviceInfo(address="none", value=0.25),
         )
-        bound = invoke("context_create", {"bind_device": "flux", "clone_from": None})
+        bound = invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {"label": None, "bind_device": "flux", "clone_from": None},
+            },
+        )
         assert bound["label"].endswith("_0.250")
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": bound["label"],
             "labels": [bound["label"]],
         }
@@ -217,7 +310,10 @@ def test_context_create_bound_device_reads_value_and_rejects_missing_device(
         assert no_value["ok"] is False
         assert no_value["error"]["code"] == "precondition_failed"
         assert no_value["error"]["reason"] == "missing_device_value"
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": bound["label"],
             "labels": [bound["label"]],
         }
@@ -237,15 +333,38 @@ def test_context_create_default_without_active_is_empty_and_explicit_null_skips_
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
-        assert invoke("context_create", {"label": "base"}) == {"label": "base"}
+        invoke(
+            "rpc_call",
+            {
+                "method": "project.apply",
+                "params": {"chip_name": "chip", "qub_name": "q", "res_name": "res"},
+            },
+        )
+        assert invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {
+                    "label": "base",
+                    "bind_device": None,
+                    "clone_from": "current",
+                },
+            },
+        ) == {"label": "base", "has_active_context": True}
         assert call(sock, "context.md_get", {})["result"] == {"keys": []}
         assert call(sock, "context.md_set_attr", {"key": "freq", "value": 5.0})["ok"]
-        assert invoke("context_create", {"label": "empty", "clone_from": None}) == {
-            "label": "empty"
-        }
+        assert invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {"label": "empty", "bind_device": None, "clone_from": None},
+            },
+        ) == {"has_active_context": True, "label": "empty"}
         assert call(sock, "context.md_get", {})["result"] == {"keys": []}
-        assert invoke("contexts", {}) == {
+        assert {
+            "active": invoke("rpc_call", {"method": "context.snapshot"})["label"],
+            "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
+        } == {
             "active": "empty",
             "labels": ["base", "empty"],
         }

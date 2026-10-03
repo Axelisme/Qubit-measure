@@ -92,7 +92,9 @@ def h_tab_list_all(
     }
 
 
-def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, object]:
+def tab_operation_state(
+    adapter: RemoteControlAdapter, tab_id: str
+) -> dict[str, object]:
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     # Render snapshot always fills the live fields (persist/restore form is the
@@ -139,6 +141,7 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "revision": versions.get(f"tab:{tab_id}:result", 0),
             "available": snap.run.result is not None,
             "source_path": snap.run.source_path,
+            "source_operation_id": snap.run.source_operation_id,
         },
         "analysis_state": {
             "revision": versions.get(f"tab:{tab_id}:analyze", 0),
@@ -170,7 +173,7 @@ def h_tab_snapshot(
         if not adapter.tab_control.has_tab(tab_id):
             raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
         tab_ids = [tab_id]
-    return {"tabs": [_tab_snapshot_wire(adapter, tid) for tid in tab_ids]}
+    return {"tabs": [tab_operation_state(adapter, tid) for tid in tab_ids]}
 
 
 def _save_paths_wire(paths: TabPathsSnapshot | None) -> dict[str, object] | None:
@@ -195,6 +198,25 @@ def h_tab_get_cfg(
     return build_resource_observation(
         adapter.cfg_lookup(str(params["tab_id"])).observe()
     )
+
+
+def h_tab_reset_cfg(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    from ..cfg_observation import build_resource_observation, cfg_error_to_remote
+
+    tab_id = str(params["tab_id"])
+    try:
+        expected = decode_ref(params["expected"])
+        editor = adapter.cfg_lookup(tab_id)
+        actual = editor.observe().ref
+        if expected != actual:
+            raise CfgStaleError(expected, actual)
+        result = editor.reset(expected.revision)
+    except (CfgInputError, CfgPreconditionError) as exc:
+        raise cfg_error_to_remote(exc) from exc
+    follow_tab(adapter, tab_id, "run")
+    return build_resource_observation(result)
 
 
 def h_tab_edit_cfg(

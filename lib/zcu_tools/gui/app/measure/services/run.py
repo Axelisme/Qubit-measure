@@ -137,7 +137,11 @@ class RunService:
     ) -> bool:
         try:
             op.plots.finish()
-            retired = self._state.update_tab_result(op.tab_id, result)
+            if self._active_token is None:
+                raise RuntimeError("Run result has no active operation")
+            retired = self._state.update_tab_result(
+                op.tab_id, result, source_operation_id=self._active_token
+            )
         except Exception as error:  # noqa: BLE001 - settle host/State failures on the owner loop
             self._run_failed(op, error, settle)
             return False

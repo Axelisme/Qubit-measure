@@ -111,6 +111,7 @@ class PathResourceSnapshot:
 class RunPaneSnapshot:
     result: object | None
     source_path: str | None
+    source_operation_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +122,8 @@ class AnalysisPaneSnapshot:
     writeback_items: tuple[WritebackItem, ...]
     image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
+    source_operation_id: int | None = None
+    result_params: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +134,8 @@ class PostAnalysisPaneSnapshot:
     writeback_items: tuple[WritebackItem, ...]
     image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
+    source_operation_id: int | None = None
+    result_params: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,7 +328,7 @@ class TabResultWritePort(Protocol):
     def clear_tab_results(self, tab_id: str) -> RetiredPaneResources: ...
     def set_tab_running(self, tab_id: str, running: bool) -> None: ...
     def update_tab_result(
-        self, tab_id: str, result: object
+        self, tab_id: str, result: object, *, source_operation_id: int | None = None
     ) -> RetiredPaneResources: ...
 
 
@@ -342,6 +347,8 @@ class TabAnalyzeWritePort(Protocol):
         plots: Plots | None,
         writeback_draft: object | None = None,
         analyze_params_instance: object = ...,
+        *,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources: ...
     def update_tab_post_analyze(
         self,
@@ -351,6 +358,7 @@ class TabAnalyzeWritePort(Protocol):
         *,
         post_analyze_params_instance: object = ...,
         writeback_draft: object | None = None,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources: ...
 
 

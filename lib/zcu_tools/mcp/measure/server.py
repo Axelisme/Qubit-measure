@@ -52,39 +52,81 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v95: finalized shared-state workflow guidance and interactive concurrency instructions.
 # v96: the project tool applies through the project.apply GUI method.
 # v98: tab_run requires and forwards the caller's explicit cfg ref once.
-MCP_VERSION = 98
+# v99: generic RPC accepts all public methods, including tool-backed commands.
+# v100: accept writes all current Primary and Post candidates with partial progress.
+# v103: Lookback recipe execution and shared cancel/finish-early control.
+# v104: Recipe interaction delivery and post-Run result provenance checks.
+# v105: Onetone recipes with GUI-owned ranges and source-bound Run preview.
+# v106: Two-tone spectrum and Rabi recipes with explicit frequency source precedence.
+# v107: recipe-first fixed tools, shared analysis/control and complete public RPC.
+MCP_VERSION = 107
 
 _SERVER_INSTRUCTIONS = """\
-Attach to the live qubit-measure GUI with connect (no instrument is connected by
-this action). An existing GUI can be attached, or launch='if_missing'/'new' can
-start one. Pass token to connect if the GUI requires its control token; keep it
-secret. Inspect connect.status and refresh the GUI state before acting; the
-user may also be editing it. When the GUI restarts, the next connection reloads
-the live catalog. Incompatible wire versions fail before an action is forwarded.
+Attach to the live qubit-measure GUI with connect. This does not connect hardware.
+Use launch='if_missing'/'new' only when authorized to start a GUI. Pass token if
+required, keep it secret, and inspect connect.status before acting. The user may
+also edit the GUI. Reconnection reloads its live catalog; incompatible wire
+versions fail before forwarding an action.
 
-Use rpc_list(domain?) to find low-frequency methods, rpc_describe(method) for
-the GUI's live parameter schema and full description, and rpc_call(method,
-params) only for methods with exposure='rpc'. Methods bound to a specialized
-tool report use_tool instead. GUI handlers validate arguments and return stable
-error reasons. Mutations are never automatically retried after disconnect,
-timeout, stale_version or busy; read the current state before choosing to retry.
-For tab/context/SoC guard conflicts, explicitly read tab.snapshot(tab_id),
-context.snapshot, and soc.info(include_cfg=true), respectively. Summaries,
-partial getters, bare versions and status do not re-snapshot those resources.
-A new tab created with tab.new carries an owner-thread existence receipt.
-Use tab_interact without payload to read the active plugin's committed state and
-commands; send one payload={command,args} to act. This method alone has no seen
-guard: GUI and agent commits use owner-loop order, and the later commit wins.
-Reads preserve focus; commands follow the Analysis pane. done settles the original
-analysis operation, and cancel(op) cancels it. preview_active describes local
-preview, not the committed state. Figure paths belong to this MCP session.
-Use status for the current GUI session and all live operations, wait(op) for a
-bounded outcome, and cancel(op) only when the domain operation supports it.
-wait(op) reports a failed operation as data; cancel(op) on a failed operation
-raises operation_failed instead of reporting success. The server drops its
-socket on exit but does not close the GUI. There are no
-subscribed MCP events: read snapshots or wait on operation handles instead.
-Follow the run-measure-gui skill for hardware safety and measurement workflow.
+For routine measurement, prefer the recipe matching the experimental goal.
+Read its tool schema and the adapter guide through rpc_call(adapter.guide).
+For analysis of existing data, use tab_analyze and tab_interact rather than
+starting another measurement. If tools are deferred by the client, discover
+the recipe or shared analysis/control tool first. Routine work and diagnosis
+are guidance, not modes or permissions. For detailed setup, cfg, save,
+writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
+rpc_call(method, params). Every listed public method remains callable even
+when a recipe or shared tool covers it. Raw RPC does not aggregate tool
+results, decode PNG replies, or run the canonical analysis-image save pipeline.
+
+A recipe call waits up to 300 seconds before returning a still-running execution;
+missing parameters, failures and interactive handoffs return earlier. Configure
+the client deadline above 300 seconds with room for transport and reply overhead.
+The stdio server is synchronous: another request on that connection is not
+guaranteed service during the first wait. A client timeout is not cancellation.
+Never automatically rerun a recipe or mutation after timeout, disconnect, busy
+or stale_version. Inspect current state and confirmed files before deciding.
+
+Use status for GUI operations and this MCP session's executions.
+status(execution) reads a local snapshot without reconnecting. wait(op) observes
+only the GUI operation; wait(execution) includes downstream reads, saves and
+preview delivery. Failed outcomes are data. A wait timeout stops waiting,
+not the operation or its continuation. Operation handles belong to one GUI
+connection generation; execution IDs belong to this MCP server session and
+are not durable recovery tokens. After GUI reconnect, discover current handles
+through status and refresh observations; do not reuse an old op.
+
+For a registered recipe, finish_early stops acquisition and continues with
+usable partial results, raw saving and analysis. cancel takes precedence and
+starts no further analysis or save. For registered analysis it also stops
+further result reads. Already admitted non-cancellable saves settle with their
+true outcomes. gui_cancel reports the separate GUI cancellation request.
+Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
+GUI hook and may report operation_failed for an already failed operation.
+
+Read tab.snapshot(tab_id), context.snapshot and soc.info(include_cfg=true)
+explicitly for their guarded resources, and device.snapshot for devices.
+Summaries, partial getters, status and bare versions do not replace these reads.
+Cfg editing and Run require the observed cfg_ref from tab.get_cfg. A new tab
+receipt certifies existence only. accept(tab) writes every current Primary and
+existing Post candidate, including unchecked ones, without refreshing guards.
+It stops on the first error and reports confirmed progress without rollback.
+Inspect proposals and the current destination before accepting.
+
+tab_interact without payload reads committed state and available commands.
+Send payload={command,args} for one action. This method has no seen guard;
+later owner-loop commits win. Reads preserve focus; commands follow Analysis.
+done joins the original analysis execution for result reads and image saving.
+preview_active is a local preview, not committed state. Preview PNG paths belong
+to this MCP session; saved_images names confirmed persistent outputs.
+Recipes do not automatically close tabs. Use tab_close explicitly; busy cannot
+be bypassed with discard_unsaved. app.shutdown via RPC requests graceful exit;
+its reply is not proof that the responding process has exited.
+
+The server disconnects and joins its workers before removing temporary PNGs
+on exit. It does not close the GUI or promise to stop hardware. There are no
+subscribed MCP events: read snapshots or wait instead. Follow run-measure-gui
+for hardware safety, task policy and measurement workflow.
 """
 
 _CONFIG = MCPBridgeConfig(
@@ -129,20 +171,15 @@ def main() -> None:
         resolve_connect_port=resolve_connect_port,
     )
 
-    def cleanup() -> None:
-        try:
-            bridge.disconnect()
-        finally:
-            session.cleanup_pngs()
-
-    run_stdio_loop(
-        _CONFIG,
-        build_measure_tools(context),
-        hooks=StdioLoopHooks(
-            on_start=_setup_logging, on_cleanup=cleanup, on_error=logger.exception
-        ),
-        server_version="1.1.0",
-    )
+    try:
+        run_stdio_loop(
+            _CONFIG,
+            build_measure_tools(context),
+            hooks=StdioLoopHooks(on_start=_setup_logging, on_error=logger.exception),
+            server_version="1.1.0",
+        )
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":

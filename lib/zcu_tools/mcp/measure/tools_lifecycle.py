@@ -1,11 +1,10 @@
-"""Fixed measure MCP connection and graceful shutdown tools."""
+"""Fixed measure MCP connection tool."""
 
 from __future__ import annotations
 
 from functools import partial
 from typing import Any
 
-from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_operation import status
 
@@ -52,35 +51,5 @@ CONNECT_TOOL: dict[str, Any] = {
 }
 
 
-def tool_shutdown(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    try:
-        result = ctx.send_gui_rpc(
-            "app.shutdown", {"discard_unsaved": arguments.get("discard_unsaved", False)}
-        )
-    except GuiRpcError as exc:
-        if exc.code == "timeout":
-            return {"stopped": False}
-        raise
-    pid = result["pid"]
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        raise RuntimeError("GUI shutdown reply contains an invalid process identity")
-    return {"stopped": ctx.bridge.wait_for_gui_exit(pid, timeout=5.0)}
-
-
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    return {
-        "connect": {**CONNECT_TOOL, "handler": partial(tool_connect, ctx)},
-        "shutdown": {
-            "handler": partial(tool_shutdown, ctx),
-            "description": "Close the connected GUI normally. Active operations return busy; "
-            "unsaved artifacts require explicit discard_unsaved=true. Wait up to five "
-            "seconds for the responding GUI process. A timeout returns stopped=false "
-            "without force termination or retry.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "discard_unsaved": {"type": "boolean", "default": False}
-                },
-            },
-        },
-    }
+    return {"connect": {**CONNECT_TOOL, "handler": partial(tool_connect, ctx)}}

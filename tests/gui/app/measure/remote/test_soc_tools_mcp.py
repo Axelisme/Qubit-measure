@@ -25,26 +25,44 @@ def test_soc_tools_observe_gui_connection_without_hardware(
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        assert invoke("soc_info", {}) == {
-            "connected": False,
-            "address": None,
-            "port": None,
-            "description": None,
-            "is_mock": False,
-        }
-        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
-        summary = invoke("soc_connect", {"address": "192.0.2.1", "port": 8888})
-        assert summary == invoke("soc_info", {})
-        assert summary["connected"] is True
+        assert invoke("status", {})["soc"] == {"connected": False, "mock": False}
+        invoke(
+            "rpc_call",
+            {
+                "method": "project.apply",
+                "params": {"chip_name": "chip", "qub_name": "q", "res_name": "res"},
+            },
+        )
+        invoke(
+            "rpc_call",
+            {
+                "method": "soc.connect",
+                "params": {"kind": "remote", "ip": "192.0.2.1", "port": 8888},
+            },
+        )
+        summary = invoke("rpc_call", {"method": "soc.info"})
+        assert invoke("status", {})["soc"]["connected"] is True
         assert summary["is_mock"] is False
         assert summary["address"] == "192.0.2.1" and summary["port"] == 8888
         assert call(sock, "soc.info", {})["result"]["address"] == "192.0.2.1"
         assert "Generators" in summary["description"]
         assert "Readouts" in summary["description"]
         assert "cfg" not in summary
-        full = invoke("soc_info", {"include_cfg": True})
+        full = invoke(
+            "rpc_call", {"method": "soc.info", "params": {"include_cfg": True}}
+        )
         assert full["cfg"]["gens"] and "fs" in full["cfg"]["gens"][0]
-        assert invoke("context_create", {"label": "base"}) == {"label": "base"}
+        assert invoke(
+            "rpc_call",
+            {
+                "method": "context.new",
+                "params": {
+                    "label": "base",
+                    "bind_device": None,
+                    "clone_from": "current",
+                },
+            },
+        ) == {"label": "base", "has_active_context": True}
         assert invoke("status", {})["soc"] == {"connected": True, "mock": False}
     finally:
         bridge.disconnect()

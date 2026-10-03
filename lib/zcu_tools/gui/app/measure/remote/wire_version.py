@@ -117,7 +117,12 @@ from __future__ import annotations
 # v74: tab.run_start requires the caller's explicit cfg ref.
 # v75: explicit cfg refs replace the per-connection cfg seen guard for Run.
 # v76: waveform saving returns only success/status; preview is a separate read.
-WIRE_VERSION = 77
+# v78: operation-bound result inputs, figure reads and named image saves.
+# v79: optional figure-free interactive command receipts.
+# v80: Run source tokens in snapshots and optional save/analyze admission binding.
+# v81: optional analysis-operation binding for writeback previews.
+# v82: expose device units and bind Run pane previews to their original Run.
+WIRE_VERSION = 82
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -170,4 +175,9 @@ WIRE_VERSION = 77
 # v104: one Setup dialog identity; project.apply and general project settings names.
 # v106: run callers submit their observed cfg identity and revision.
 # v107: Run admits a valid cfg ref across connections, retaining non-cfg guards.
-GUI_VERSION = 109
+# v110: commit provenance and captured inputs with named plots; reject replaced saves.
+# v111: preserve interactive validation and operation receipt without PNG rendering.
+# v112: commit Run provenance and reject superseded raw save or primary analysis.
+# v113: reject superseded writeback preview sources before reading the draft.
+# v114: guard Run preview provenance and preserve partial frequency calibration.
+GUI_VERSION = 114
