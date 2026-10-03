@@ -1,5 +1,6 @@
 """Real MCP/socket analysis uses GUI parameters and pane-owned writeback."""
 
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -25,8 +26,19 @@ class ScalarResult:
         return {"value": self.value}
 
 
-def _install_result(fx, tab: str, stage: str, value: float, operation: int) -> None:
-    result = ScalarResult(value)
+@dataclass
+class SummaryResult:
+    summary: dict[str, object]
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return self.summary
+
+
+def _install_result(
+    fx, tab: str, stage: str, value: float, operation: int,
+    *, summary: dict[str, object] | None = None,
+) -> None:
+    result = ScalarResult(value) if summary is None else SummaryResult(summary)
     plots = Plots(NonPresentingHost())
     plots.adopt("fit", Figure())
     plots.finish()
@@ -78,6 +90,36 @@ def test_writeback_preview_accepts_matching_analysis_operation(fx, stage):
         )
         assert result["ok"] is True, result
         assert result["result"]["has_draft"] is False
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_unestimable_error_is_null_with_reason_through_public_rpc(
+    fx, tmp_path, request, stage
+):
+    tab = fx.ctrl.new_tab("fake")
+    _install_result(
+        fx, tab, stage, 10.0, 101,
+        summary={"lifetime": 10.0, "lifetime_error": float("inf"),
+                 "warnings": ["error could not be estimated"]},
+    )
+    _, invoke = mcp_client(fx.service.port, tmp_path, request=request)
+    invoke("connect", {"port": fx.service.port})
+    reply = invoke("rpc_call", {"method": _result_method(stage),
+                               "params": {"tab_id": tab, "operation_id": 101}})
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed["summary"] == {
+        "lifetime": 10.0, "lifetime_error": None,
+        "warnings": ["error could not be estimated"],
+    }
+    assert parsed["invalid"] == [
+        {"path": "summary.lifetime_error", "reason": "non_finite"}
+    ]
+    assert parsed["operation_id"] == 101
+    assert parsed["operation_state"][f"{stage}_state"]["available"] is True
 
 
 def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
