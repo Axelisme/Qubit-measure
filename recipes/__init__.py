@@ -36,7 +36,7 @@ _ONETONE_COMMON_PROPERTIES = {
 RECIPES = (
     RecipeDefinition(
         name="twotone_spectrum",
-        description="Partial two-tone source validation; execution is not yet available.",
+        description="Run one two-tone spectrum and save raw data and Primary analysis.",
         input_schema={
             "type": "object",
             "additionalProperties": False,
