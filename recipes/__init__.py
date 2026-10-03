@@ -7,7 +7,7 @@ from typing import Any
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
 from .lookback import lookback
-from .onetone import onetone_spectrum, onetone_spectrum_over_flux
+from .onetone import onetone_spectrum, onetone_spectrum_over_flux, onetone_spectrum_over_power
 
 
 @dataclass(frozen=True)
@@ -96,5 +96,22 @@ RECIPES = (
             },
         },
         run=onetone_spectrum_over_flux,
+    ),
+    RecipeDefinition(
+        name="onetone_spectrum_over_power",
+        description="Run one frequency/gain survey, save raw and return its Run preview. No analysis or writeback.",
+        input_schema={
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                **_ONETONE_COMMON_PROPERTIES,
+                "freq_points": {"type": ["integer", "null"]},
+                "gain_points": {"type": ["integer", "null"]},
+                "gain_range": {
+                    "type": ["array", "null"], "items": {"type": "number"},
+                    "minItems": 2, "maxItems": 2,
+                },
+            },
+        },
+        run=onetone_spectrum_over_power,
     ),
 )

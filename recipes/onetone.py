@@ -269,6 +269,11 @@ def _actual_fields(
     return fields
 
 
+def onetone_spectrum_over_power(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Save one frequency/gain survey and return its Run preview without analysis."""
+    raise NotImplementedError("Power raw-only survey is not implemented")
+
+
 def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Prepare a calibrated spectrum, run once and save raw and analysis."""
     _validate(arguments)

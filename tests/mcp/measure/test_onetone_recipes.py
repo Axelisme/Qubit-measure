@@ -1,14 +1,16 @@
 """Onetone promises through the shipped recipe tools and recording GUI."""
 
+import base64
 from contextlib import contextmanager
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import pytest
 from simpleeval import NameNotDefined, simple_eval
 from zcu_tools.mcp.core.reply import ToolReply
 
-from ._recipe_support import LookbackGui, scalar, section
+from ._recipe_support import PNG, LookbackGui, scalar, section
 from ._support import make_client
 
 
@@ -193,6 +195,52 @@ class OnetoneGui(LookbackGui):
         if method == "tab.snapshot":
             reply["tabs"][0]["adapter_name"] = self.experiment
         return reply
+
+
+class PowerGui(OnetoneGui):
+    def __init__(self):
+        super().__init__({"r_f": 6100.0, "rf_w": 4.0}, "onetone/power_dep")
+        self.publication["tree"]["children"]["sweep"]["children"]["gain"] = {
+            "kind": "sweep", "valid": True,
+            "inputs": {key: self.input(value) for key, value in {
+                "start": 0.03, "stop": 0.27, "expts": 13, "step": 0.02,
+            }.items()},
+        }
+
+    def __call__(self, method, params):
+        if method == "tab.get_figure":
+            assert self.raw_saved
+            assert params == {"tab_id": "t", "subtab_id": "run", "run_operation_id": 71}
+            return {"png_b64": base64.b64encode(PNG).decode()}
+        return super().__call__(method, params)
+
+
+@pytest.mark.parametrize("arguments, expected_gain", [
+    ({}, {"start": 0.03, "stop": 0.27, "expts": 13}),
+    ({"reuse_tab_id": "t", "gain_range": [0.1, 0.7], "gain_points": 7, "freq_points": 23},
+     {"start": 0.1, "stop": 0.7, "expts": 7}),
+])
+def test_power_saves_raw_and_delivers_only_a_run_preview(tmp_path, arguments, expected_gain):
+    gui = PowerGui()
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("onetone_spectrum_over_power", arguments)
+        assert isinstance(reply, ToolReply)
+        data = reply.data
+        assert data["status"] == "finished", data
+        assert data["analysis_mode"] == "none"
+        assert data["analysis"] is None
+        assert data["writeback"] is None
+        assert data["actual"]["fields"]["sweep.gain"]["value"] == expected_gain
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["preview"]["kind"] == "run_preview"
+        assert Path(data["preview"]["path"]).read_bytes() == PNG
+        assert reply.images[0].data == PNG
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == 1
+        assert "tab.analyze" not in methods
+        assert "tab.writeback_preview" not in methods
+        assert methods.index("tab.save_data") < methods.index("tab.get_figure")
 
 
 class FluxGui(OnetoneGui):
