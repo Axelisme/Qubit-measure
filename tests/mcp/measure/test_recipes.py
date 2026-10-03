@@ -26,6 +26,79 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
+def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
+    gui = LookbackGui()
+
+    def respond(method, params):
+        response = gui(method, params)
+        if method == "tab.writeback_preview":
+            response["items"] = [
+                {
+                    "id": "md-1",
+                    "kind": "metadict",
+                    "target_name": "trigger_offset",
+                    "selected": False,
+                    "proposed": 0.24,
+                    "current": 0.1,
+                }
+            ]
+        return response
+
+    with recipe_client(tmp_path, respond) as client:
+        completed = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
+        assert completed.data["status"] == "finished", completed.data
+        execution = completed.data["execution"]
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": execution})
+        full = client.call("status", {"execution": execution, "detail": "full"})
+        assert summary["execution"] == full["execution"] == execution
+        assert summary["run_id"] is None
+        assert summary["actual"]["cfg_ref"] == full["actual"]["cfg_ref"]
+        assert summary["actual"]["parameters"]["frequency_mhz"] == {
+            "value": 6020.0,
+            "source": "frequency_mhz",
+            "unit": "MHz",
+        }
+        assert summary["actual"]["parameters"]["rounds"] == {
+            "value": 7,
+            "source": "rounds",
+        }
+        assert summary["actual"]["modules"]["reset"] == {
+            "value": None,
+            "source": "disabled",
+        }
+        assert summary["steps"]["run"] == {"status": "finished", "reason": "completed"}
+        assert summary["steps"]["raw_save"]["status"] == "saved"
+        assert summary["steps"]["analysis"]["primary"]["status"] == "finished"
+        assert summary["steps"]["analysis_save"]["primary"]["status"] == "saved"
+        assert summary["analysis"]["primary"]["params"] == {"threshold": 0.5}
+        assert summary["analysis"]["primary"]["details"] == {"offset": 0.24}
+        assert summary["artifacts"]["raw"]["data"] == {
+            "status": "saved",
+            "lifetime": "persistent",
+            "members": {"data": [{"path": "/actual/raw.h5", "status": "saved"}]},
+        }
+        assert summary["artifacts"]["analysis"]["trace"]["members"] == {
+            "image": [{"path": "/actual/trace.png", "status": "saved"}]
+        }
+        candidate = summary["writeback"]["stages"]["primary"][0]
+        assert candidate == {
+            "id": "md-1",
+            "kind": "parameter",
+            "target": "trigger_offset",
+            "resolved_target": None,
+            "proposed": 0.24,
+            "current": 0.1,
+            "selected": False,
+        }
+        assert summary["writeback"]["destination"] == {
+            "context": {"active_label": "sample"}
+        }
+        assert summary["missing"] == summary["invalid"] == []
+        assert summary["error"] is None
+        assert len(client.transport.sent) == before
+
+
 def test_full_query_keeps_the_publication_used_before_run(tmp_path):
     gui = LookbackGui()
     captured: dict[str, Any] = {}
