@@ -751,14 +751,13 @@ def test_appended_typed_child_keeps_default_container_edits_and_explicit_null(
     assert reopened.groups[0].ext == {"calibration": 7.0}
     assert "description" in reopened.groups[0].model_fields_set
     persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
-    assert persisted["groups"] == [
-        {"description": None, "ext": {"calibration": 7.0}}
-    ]
+    assert persisted["groups"] == [{"description": None, "ext": {"calibration": 7.0}}]
 
 
 @pytest.mark.parametrize("null_present", [False, True])
 def test_replacing_missing_or_null_child_keeps_default_container_edits(
-    document_path: Path, null_present: bool,
+    document_path: Path,
+    null_present: bool,
 ) -> None:
     if null_present:
         document_path.write_text(
@@ -771,9 +770,9 @@ def test_replacing_missing_or_null_child_keeps_default_container_edits(
         draft.general.ext["calibration"] = 7.0
 
     assert store.snapshot().general == OptionalGeneral(ext={"calibration": 7.0})
-    assert make_nullable_general_store(document_path).snapshot().general == OptionalGeneral(
-        ext={"calibration": 7.0}
-    )
+    assert make_nullable_general_store(
+        document_path
+    ).snapshot().general == OptionalGeneral(ext={"calibration": 7.0})
     persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
     assert persisted["general"] == {"ext": {"calibration": 7.0}}
 

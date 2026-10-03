@@ -188,7 +188,7 @@ def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
                     original_list[index]
                     if index < len(original_list)
                     else _Missing.VALUE,
-                    child
+                    child,
                 )[1]
                 for index, child in enumerate(draft_list)
             ],
