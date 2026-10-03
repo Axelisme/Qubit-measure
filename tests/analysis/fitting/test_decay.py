@@ -17,6 +17,28 @@ def test_fit_decay_recovers_T1():
     assert abs(t1 - 5.0) / 5.0 < 1e-3
 
 
+@pytest.mark.parametrize("initial_fixed", [None, (0.1, None, None)])
+def test_fit_decay_reuses_parameters_for_followup_fit(initial_fixed):
+    xs = np.linspace(0.0, 20.0, 300)
+    ys = expfunc(xs, 0.1, 1.0, 5.0)
+    *_, (initial_params, _) = fit_decay(xs, ys, fixedparams=initial_fixed)
+    saved_params = np.asarray(initial_params).copy()
+
+    t1, t1_error, fit_signals, (params, covariance) = fit_decay(
+        xs, ys, fit_params=initial_params, fixedparams=(0.1, None, None)
+    )
+
+    assert t1 == pytest.approx(5.0, rel=1e-3)
+    assert np.isfinite(t1_error)
+    assert isinstance(params, list)
+    np.testing.assert_allclose(params, [0.1, 1.0, 5.0], rtol=1e-3)
+    np.testing.assert_allclose(fit_signals, ys, atol=1e-8)
+    np.testing.assert_array_equal(initial_params, saved_params)
+    assert covariance.shape == (3, 3)
+    np.testing.assert_array_equal(covariance[0, :], 0.0)
+    np.testing.assert_array_equal(covariance[:, 0], 0.0)
+
+
 def test_fit_dual_decay_recovers_two_times():
     xs = np.linspace(0, 60, 600)
     true = (0.0, 0.5, 2.0, 0.5, 12.0)
