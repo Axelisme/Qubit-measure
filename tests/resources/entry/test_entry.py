@@ -39,11 +39,14 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
             YAML(typ="rt").dump(document, stream)
     before = setup_path.read_bytes()
 
-    with pytest.raises(UnknownKindError) as failure:
+    def perform_operation() -> None:
         if operation == "add":
             entry.setup.add_component("R1", kind="resonatr")
         else:
             ResultEntry.open("entry", result_root=results, database_root=database)
+
+    with pytest.raises(UnknownKindError) as failure:
+        perform_operation()
 
     assert failure.value.source == setup_path
     assert failure.value.component == "R1"
