@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.resources.entry import PartialCommitError, ResultEntry, rename_entry
 
@@ -26,6 +27,38 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
         for item in path.rglob("*")
         if item.is_file()
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("entry_id", "not-a-uuid"),
+        ("created_at", "yesterday"),
+        ("created_at", "2026-10-04T06:00:00"),
+        ("created_at", "2026-10-04T06:00:00+08:00"),
+    ],
+)
+def test_open_validates_uuid_and_utc_created_at_before_publishing_entry(
+    entry_roots: tuple[Path, Path],
+    entry: ResultEntry,
+    field: str,
+    invalid: str,
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    yaml = YAML(typ="safe")
+    with setup_path.open(encoding="utf-8") as stream:
+        document = yaml.load(stream)
+    document["general"][field] = invalid
+    with setup_path.open("w", encoding="utf-8") as stream:
+        yaml.dump(document, stream)
+    before = setup_path.read_bytes()
+
+    with pytest.raises(ValidationError) as failure:
+        ResultEntry.open("entry", result_root=results, database_root=database)
+
+    assert ("general", field) in [error["loc"] for error in failure.value.errors()]
+    assert setup_path.read_bytes() == before
 
 
 @pytest.mark.parametrize("recovery_reason", ["io-failure", "destination-reappeared"])
@@ -69,7 +102,6 @@ def test_failed_rename_recovery_reports_current_paths_and_both_causes(
     assert read_entry_files(results / "renamed") == before
     assert (database / "entry").is_dir()
     assert not (database / "renamed").exists()
-    assert UUID(entry.entry_id).version == 4
 
 
 def test_rename_recovers_first_root_when_second_rename_fails(
