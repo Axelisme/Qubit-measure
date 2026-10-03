@@ -28,6 +28,40 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
     }
 
 
+@pytest.mark.parametrize("root_index", [0, 1])
+@pytest.mark.parametrize("shape", ["empty-directory", "file", "broken-symlink"])
+def test_rename_refuses_existing_destination_before_moving_either_root(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, root_index: int, shape: str
+) -> None:
+    results, database = entry_roots
+    destination = entry_roots[root_index] / "renamed"
+    if shape == "empty-directory":
+        destination.mkdir()
+    elif shape == "file":
+        destination.write_bytes(b"unrelated data")
+    else:
+        destination.symlink_to("missing-target")
+    before_result = read_entry_files(results / "entry")
+    before_database = read_entry_files(database / "entry")
+
+    with pytest.raises(FileExistsError) as failure:
+        rename_entry("entry", "renamed", result_root=results, database_root=database)
+
+    assert failure.value.filename == str(destination)
+    assert read_entry_files(results / "entry") == before_result
+    assert read_entry_files(database / "entry") == before_database
+    assert (
+        ResultEntry.open("entry", result_root=results, database_root=database).entry_id
+        == entry.entry_id
+    )
+    if shape == "file":
+        assert destination.read_bytes() == b"unrelated data"
+    elif shape == "broken-symlink":
+        assert destination.readlink() == Path("missing-target")
+    else:
+        assert destination.is_dir()
+
+
 def test_rename_moves_both_roots_preserving_identity_and_all_file_bytes(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
