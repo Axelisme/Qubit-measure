@@ -63,6 +63,10 @@ class NullableDocument(BaseModel):
     values: dict[str, float | None]
 
 
+class OptionalDocument(SyntheticDocument):
+    description: str | None = None
+
+
 class KnownValues(BaseModel):
     model_config = ConfigDict(extra="forbid")
     left: float = Field(ge=0)
@@ -553,6 +557,22 @@ def test_added_leaf_conflicts_with_deleted_or_null_parent(
     assert document_path.read_bytes() == committed
     assert first.snapshot() == original
     assert second.snapshot().values["other"] == {"leaf": 2.0}
+
+
+def test_missing_optional_model_field_can_be_explicitly_committed_as_null(
+    document_path: Path,
+) -> None:
+    store = DocumentStore(document_path, OptionalDocument, format="synthetic")
+    events: list[DocumentChange] = []
+    store.subscribe(events.append)
+    with store.edit() as draft:
+        draft.description = None
+
+    assert "description: null" in document_path.read_text(encoding="utf-8")
+    assert store.snapshot().description is None
+    assert events == [DocumentChange(document_path, (("description",),), "commit")]
+    reopened = DocumentStore(document_path, OptionalDocument, format="synthetic")
+    assert "description" in reopened.snapshot().model_fields_set
 
 
 def test_added_null_and_deleted_fields_roundtrip_as_distinct_changes(
