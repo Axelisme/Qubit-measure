@@ -27,19 +27,27 @@ def _validate(arguments: dict[str, Any]) -> None:
             raise ValueError(f"{name} must be a finite real number or null")
     if arguments.get("span_mhz") is not None and arguments["span_mhz"] <= 0:
         raise ValueError("span_mhz must be positive")
-    for name in ("points", "freq_points", "flux_points", "reps", "rounds"):
+    for name in (
+        "points",
+        "freq_points",
+        "flux_points",
+        "gain_points",
+        "reps",
+        "rounds",
+    ):
         value = arguments.get(name)
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int)
         ):
             raise ValueError(f"{name} must be an integer or null")
-    value = arguments.get("flux_range")
-    if value is not None and (
-        not isinstance(value, (list, tuple))
-        or len(value) != 2
-        or not all(_finite(endpoint) for endpoint in value)
-    ):
-        raise ValueError("flux_range must contain two finite real endpoints")
+    for name in ("flux_range", "gain_range"):
+        value = arguments.get(name)
+        if value is not None and (
+            not isinstance(value, (list, tuple))
+            or len(value) != 2
+            or not all(_finite(endpoint) for endpoint in value)
+        ):
+            raise ValueError(f"{name} must contain two finite real endpoints")
 
 
 def _node(publication: dict[str, Any], *path: str) -> dict[str, Any]:

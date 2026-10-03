@@ -199,38 +199,57 @@ class OnetoneGui(LookbackGui):
         return reply
 
 
-@pytest.mark.parametrize("arguments", [
-    {"gain_range": [False, 1]}, {"gain_range": [0, float("nan")]},
-    {"gain_range": [0, 1, 2]}, {"gain_range": {"start": 0, "stop": 1}},
-    {"gain_points": 1.2}, {"gain_points": True},
-])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"gain_range": [False, 1]},
+        {"gain_range": [0, float("nan")]},
+        {"gain_range": [0, 1, 2]},
+        {"gain_range": {"start": 0, "stop": 1}},
+        {"gain_points": 1.2},
+        {"gain_points": True},
+    ],
+)
 def test_power_rejects_invalid_gain_inputs_before_preparation(tmp_path, arguments):
     with recipe_client(tmp_path, PowerGui()) as client:
         reply = client.call("onetone_spectrum_over_power", arguments)
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
-        assert not any(method == "context.snapshot" for method, _ in client.transport.sent)
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
 
 
 @pytest.mark.parametrize("failure", ["source", "base64", "png", "delivery"])
-def test_power_preview_failure_retains_the_saved_raw_and_true_run(tmp_path, monkeypatch, failure):
+def test_power_preview_failure_retains_the_saved_raw_and_true_run(
+    tmp_path, monkeypatch, failure
+):
     gui = PowerGui()
     with recipe_client(tmp_path, gui) as client:
         if failure == "source":
             client.transport.replies["tab.get_figure"] = {
-                "ok": False, "error": {
-                    "code": "precondition_failed", "reason": "result_superseded",
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "result_superseded",
                     "message": "The source was replaced",
                 },
             }
         elif failure in ("base64", "png"):
             client.transport.replies["tab.get_figure"] = {
-                "ok": True, "result": {"png_b64": "invalid!" if failure == "base64" else base64.b64encode(b"not-png").decode()},
+                "ok": True,
+                "result": {
+                    "png_b64": "invalid!"
+                    if failure == "base64"
+                    else base64.b64encode(b"not-png").decode()
+                },
             }
         else:
+
             def fail_write(png):
                 raise OSError("Image destination failed")
+
             monkeypatch.setattr(client.context.session, "write_png", fail_write)
         reply = client.call("onetone_spectrum_over_power", {})
         assert isinstance(reply, ToolReply)
@@ -245,15 +264,21 @@ def test_power_preview_failure_retains_the_saved_raw_and_true_run(tmp_path, monk
         assert not reply.images
 
 
-@pytest.mark.parametrize("phase, fail", [("raw_save", False), ("preview", False), ("preview", True)])
-def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_work(tmp_path, monkeypatch, phase, fail):
+@pytest.mark.parametrize(
+    "phase, fail", [("raw_save", False), ("preview", False), ("preview", True)]
+)
+def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_work(
+    tmp_path, monkeypatch, phase, fail
+):
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     entered, release = Event(), Event()
     gui = PowerGui()
 
     def respond(method, params):
         should_block = (
-            phase == "raw_save" and method == "operation.await" and params["operation_id"] == 82
+            phase == "raw_save"
+            and method == "operation.await"
+            and params["operation_id"] == 82
         ) or (phase == "preview" and method == "tab.get_figure")
         if should_block:
             entered.set()
@@ -284,20 +309,31 @@ def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_w
             release.set()
 
 
-@pytest.mark.parametrize("explicit, unit, expected", [
-    (False, "none", "needs_parameters"), (True, "none", "failed"),
-])
-def test_flux_does_not_treat_unknown_units_as_physical_flux(tmp_path, explicit, unit, expected):
+@pytest.mark.parametrize(
+    "explicit, unit, expected",
+    [
+        (False, "none", "needs_parameters"),
+        (True, "none", "failed"),
+    ],
+)
+def test_flux_does_not_treat_unknown_units_as_physical_flux(
+    tmp_path, explicit, unit, expected
+):
     gui = FluxGui()
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies["device.snapshot"] = {
-            "ok": True, "result": {"snapshot": {"name": "coil", "unit": unit}},
+            "ok": True,
+            "result": {"snapshot": {"name": "coil", "unit": unit}},
         }
-        reply = client.call("onetone_spectrum_over_flux", {"flux_device": "coil"} if explicit else {})
+        reply = client.call(
+            "onetone_spectrum_over_flux", {"flux_device": "coil"} if explicit else {}
+        )
         assert reply.data["status"] == expected
         assert not gui.ran
         if not explicit:
-            assert [item["parameter"] for item in reply.data["missing"]] == ["flux_device"]
+            assert [item["parameter"] for item in reply.data["missing"]] == [
+                "flux_device"
+            ]
 
 
 class PowerGui(OnetoneGui):
