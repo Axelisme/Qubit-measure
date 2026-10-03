@@ -293,6 +293,33 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         ) == 1
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_t2_number_delay_and_detune_publish_floats(tmp_path, number):
+    gui = CoherenceGui(pi_ref="pi", adapter="t2ramsey", pi2_ref="pi2")
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(
+            "t2ramsey", {"max_delay_us": number, "detune_ratio": number, "points": 3}
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["detune_ratio"]["value"] == 1.0
+        assert type(fields["detune_ratio"]["value"]) is float
+        sweep = fields["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        detune_edits = [
+            edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["detune_ratio"]
+        ]
+        assert detune_edits == [1.0]
+        assert type(detune_edits[0]) is float
+
+
 def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
     gui = CoherenceGui()
     client = make_client(tmp_path, gui)
