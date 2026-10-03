@@ -56,7 +56,9 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v100: accept writes all current Primary and Post candidates with partial progress.
 # v103: Lookback recipe execution and shared cancel/finish-early control.
 # v104: Recipe interaction delivery and post-Run result provenance checks.
-MCP_VERSION = 105
+# v105: Onetone recipes with GUI-owned ranges and source-bound Run preview.
+# v106: Two-tone spectrum and Rabi recipes with explicit frequency source precedence.
+MCP_VERSION = 106
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
