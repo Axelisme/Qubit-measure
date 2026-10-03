@@ -49,6 +49,7 @@ from tests.gui.widgets.cfg._form_support import (
     scalar_field,
     section_schema,
 )
+from tests.gui.widgets.cfg._tree_support import tree_widget
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -508,71 +509,117 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
     assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
 
-def test_attach_bad_renderer_return_leaves_draft_callbacks_empty(qapp, ctrl):
+def test_attach_bad_renderer_does_not_observe_failed_draft(qapp, ctrl):
     from qtpy.QtWidgets import QWidget
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    def bad_factory(
-        field: CfgField,
-        context: FieldRenderContext,
-    ) -> FieldWidgetProtocol:
-        del field, context
-        return cast(FieldWidgetProtocol, QWidget())
-
     schema = section_schema(
-        {"value": ScalarSpec(label="Value", type=int)},
+        {"value": ScalarSpec(label="Value", type=int, required=True)},
         {"value": DirectValue(1)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    failed_draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    active_draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    return_invalid_widget = True
+    default_renderer = default_cfg_renderers().resolve(ScalarField)
 
-    # Sole tree: SectionField is structural (QTreeWidgetItems), not via registry;
-    # a bad SectionField factory is ignored. Test a bad leaf factory instead.
-    def bad_leaf_factory(
+    def recovering_factory(
         field: CfgField, context: FieldRenderContext
     ) -> FieldWidgetProtocol:
-        del field, context
-        return cast(FieldWidgetProtocol, QWidget())
+        if return_invalid_widget:
+            # Exercise runtime protocol rejection at the renderer boundary.
+            return cast(FieldWidgetProtocol, QWidget())
+        return default_renderer(field, context)
 
     form = CfgFormWidget(
-        renderers=_registry_with_factories({ScalarField: bad_leaf_factory}),
+        renderers=_registry_with_factories({ScalarField: recovering_factory}),
     )
+    validity: list[bool] = []
+    schemas: list[CfgSchema] = []
+    form.validity_changed.connect(validity.append)
+    form.schema_changed.connect(schemas.append)
+    try:
+        with pytest.raises(TypeError, match="expected FieldWidgetProtocol"):
+            form.attach(failed_draft)
+        with pytest.raises(RuntimeError, match="attach\\(\\) must be called"):
+            form.read_values()
+        assert form.decoration_paths() == ()
+        assert validity == []
 
-    with pytest.raises(TypeError, match="expected FieldWidgetProtocol"):
-        form.attach(draft)
+        return_invalid_widget = False
+        form.attach(active_draft)
+        assert validity == [True]
 
-    assert draft.on_change._callbacks == []
-    assert draft.on_validity_changed._callbacks == []
-    assert form._draft is None
-    assert form._root_widget is None
-    assert form._field_decorations == {}
+        failed_draft.set_target("value", None)
+        qapp.processEvents()
+        assert validity == [True]
+        assert schemas == []
+        assert form.read_values().fields["value"] == DirectValue(1)
+
+        active_draft.set_target("value", None)
+        assert validity == [True, False]
+        qapp.processEvents()
+        assert len(schemas) == 1
+        assert schemas[0].value.fields["value"] == DirectValue(None)
+    finally:
+        form.detach()
+        failed_draft.close()
+        active_draft.close()
 
 
-def test_attach_factory_exception_leaves_draft_callbacks_empty(qapp, ctrl):
+def test_attach_factory_exception_does_not_observe_failed_draft(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    def failing_factory(
+    fail_rendering = True
+    default_renderer = default_cfg_renderers().resolve(ScalarField)
+
+    def recovering_factory(
         field: CfgField,
         context: FieldRenderContext,
     ) -> FieldWidgetProtocol:
-        del field, context
-        raise RuntimeError("factory exploded")
+        if fail_rendering:
+            raise RuntimeError("factory exploded")
+        return default_renderer(field, context)
 
     schema = section_schema(
-        {"value": ScalarSpec(label="Value", type=int)},
+        {"value": ScalarSpec(label="Value", type=int, required=True)},
         {"value": DirectValue(1)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    failed_draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    active_draft = MeasureCfgBindings(ctrl).new_draft(schema)
     form = CfgFormWidget(
-        renderers=_registry_with_factories({ScalarField: failing_factory}),
+        renderers=_registry_with_factories({ScalarField: recovering_factory}),
     )
+    validity: list[bool] = []
+    schemas: list[CfgSchema] = []
+    form.validity_changed.connect(validity.append)
+    form.schema_changed.connect(schemas.append)
+    try:
+        with pytest.raises(RuntimeError, match="factory exploded"):
+            form.attach(failed_draft)
+        with pytest.raises(RuntimeError, match="attach\\(\\) must be called"):
+            form.read_values()
+        assert form.decoration_paths() == ()
+        assert validity == []
 
-    with pytest.raises(RuntimeError, match="factory exploded"):
-        form.attach(draft)
+        fail_rendering = False
+        form.attach(active_draft)
+        assert validity == [True]
 
-    assert draft.on_change._callbacks == []
-    assert draft.on_validity_changed._callbacks == []
-    assert form._draft is None
-    assert form._root_widget is None
+        failed_draft.set_target("value", None)
+        qapp.processEvents()
+        assert validity == [True]
+        assert schemas == []
+        assert form.read_values().fields["value"] == DirectValue(1)
+
+        active_draft.set_target("value", None)
+        assert validity == [True, False]
+        qapp.processEvents()
+        assert len(schemas) == 1
+        assert schemas[0].value.fields["value"] == DirectValue(None)
+    finally:
+        form.detach()
+        failed_draft.close()
+        active_draft.close()
 
 
 def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
@@ -587,26 +634,27 @@ def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
     validity: list[bool] = []
     form.validity_changed.connect(validity.append)
 
-    form.attach(draft)
-    assert draft.on_change._callbacks == [form._on_draft_changed]
-    assert draft.on_validity_changed._callbacks == [form._on_draft_validity_changed]
-    assert validity == [True]
+    try:
+        form.attach(draft)
+        assert validity == [True]
 
-    form.detach()
-    assert draft.on_change._callbacks == []
-    assert draft.on_validity_changed._callbacks == []
+        form.detach()
+        draft.set_target("value", None)
+        draft.set_target("value", 2)
+        assert validity == [True]
 
-    form.attach(draft)
-    assert draft.on_change._callbacks == [form._on_draft_changed]
-    assert draft.on_validity_changed._callbacks == [form._on_draft_validity_changed]
-    assert validity == [True, True]
+        form.attach(draft)
+        assert validity == [True, True]
 
-    value_field = cast(ScalarField, draft.root.fields["value"])
-    value_field.set_value(None)
-    assert validity == [True, True, False]
+        draft.set_target("value", None)
+        assert validity == [True, True, False]
+    finally:
+        form.detach()
+        draft.close()
 
 
 def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
+    from qtpy.QtCore import QEvent
     from qtpy.QtWidgets import QLineEdit, QScrollArea
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
@@ -615,15 +663,16 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         {"reps": DirectValue(100)},
     )
     w = CfgFormWidget()
-    model = attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    w.attach(draft)
     try:
         scroll = w.findChild(QScrollArea)
         assert scroll is not None
         assert w.isEnabled()
         assert scroll.isEnabled()
 
-        assert w._root_widget is not None
-        spin = w._root_widget.findChild(QLineEdit)
+        tree = tree_widget(w)
+        spin = tree.findChild(QLineEdit)
         assert spin is not None
         assert spin.isEnabled()
 
@@ -631,28 +680,28 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
 
         assert w.isEnabled()
         assert scroll.isEnabled()
-        assert w._root_widget is not None and not w._root_widget.isEnabled()
+        assert not tree.isEnabled()
         assert not spin.isEnabled()
 
-        draft = w._draft
-        assert draft is not None
         w.detach()
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         w.attach(draft)
 
         assert w.isEnabled()
         assert scroll.isEnabled()
-        assert w._root_widget is not None and not w._root_widget.isEnabled()
-        reattached_spin = w._root_widget.findChild(QLineEdit)
+        reattached_tree = tree_widget(w)
+        assert not reattached_tree.isEnabled()
+        reattached_spin = reattached_tree.findChild(QLineEdit)
         assert reattached_spin is not None
         assert not reattached_spin.isEnabled()
 
         w.set_editing_enabled(True)
 
-        assert w._root_widget.isEnabled()
+        assert reattached_tree.isEnabled()
         assert reattached_spin.isEnabled()
     finally:
         w.detach()
-        model.teardown()
+        draft.close()
 
 
 def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
@@ -706,12 +755,9 @@ def test_same_tick_edits_materialize_schema_once_at_form_boundary(
 
     monkeypatch.setattr(draft, "snapshot", count_snapshot)
     try:
-        nested = cast(SectionField, draft.root.fields["nested"])
-        reps = cast(ScalarField, nested.fields["reps"])
-
-        reps.set_value(11)
-        reps.set_value(12)
-        reps.set_value(13)
+        draft.set_target("nested.reps", 11)
+        draft.set_target("nested.reps", 12)
+        draft.set_target("nested.reps", 13)
 
         assert snapshot_count == 0
         assert emitted == []
@@ -744,19 +790,17 @@ def test_validity_feedback_stays_synchronous_while_schema_is_coalesced(qapp, ctr
     form.attach(draft)
 
     try:
-        value = cast(ScalarField, draft.root.fields["value"])
-        value.set_value(None)
-        value.set_value(2)
-        value.set_value(None)
+        draft.set_target("value", None)
+        draft.set_target("value", 2)
+        draft.set_target("value", None)
 
         assert validity == [True, False, True, False]
         assert schemas == []
-        assert form._schema_snapshot_timer.isActive()
 
         qapp.processEvents()
 
         assert len(schemas) == 1
-        assert not form._schema_snapshot_timer.isActive()
+        assert schemas[0].value.fields["value"] == DirectValue(None)
     finally:
         form.detach()
         draft.close()
@@ -774,18 +818,16 @@ def test_detach_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
     schemas: list[CfgSchema] = []
     form.schema_changed.connect(schemas.append)
     form.attach(draft)
-    value = cast(ScalarField, draft.root.fields["value"])
 
     try:
-        value.set_value(2)
+        draft.set_target("value", 2)
         form.detach()
         qapp.processEvents()
 
         assert schemas == []
-        assert not form._schema_snapshot_timer.isActive()
 
         form.attach(draft)
-        value.set_value(3)
+        draft.set_target("value", 3)
         qapp.processEvents()
 
         assert len(schemas) == 1
@@ -808,19 +850,16 @@ def test_close_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
     form.schema_changed.connect(schemas.append)
     form.attach(draft)
     form.show()
-    value = cast(ScalarField, draft.root.fields["value"])
 
     try:
-        value.set_value(2)
+        draft.set_target("value", 2)
         form.close()
         qapp.processEvents()
 
         assert schemas == []
-        assert form._draft is None
-        assert not form._schema_snapshot_timer.isActive()
 
         form.attach(draft)
-        value.set_value(3)
+        draft.set_target("value", 3)
         qapp.processEvents()
 
         assert len(schemas) == 1
