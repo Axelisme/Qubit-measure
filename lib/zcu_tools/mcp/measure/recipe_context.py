@@ -51,6 +51,12 @@ class RecipeError:
 
 
 @dataclass(frozen=True)
+class StartReceipt:
+    status: Literal["not_started", "unknown", "running"] = "not_started"
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class RawSave:
     status: Literal["not_started", "saving", "saved", "failed", "unknown"] = (
         "not_started"
@@ -80,6 +86,7 @@ class RecipeSnapshot:
     actual: dict[str, Any] | None = None
     missing: list[MissingParameter] = field(default_factory=list)
     run_outcome: dict[str, Any] | None = None
+    run_start: StartReceipt = field(default_factory=StartReceipt)
     result_state: dict[str, Any] | None = None
     raw_save: RawSave = field(default_factory=RawSave)
     analysis_mode: Literal["primary", "primary_post", "none"] = "none"
@@ -355,15 +362,16 @@ class RecipeContext:
         for device in devices:
             self.rpc("device.snapshot", {"name": device["name"]})
         self._publish(phase="run")
-        started = self.rpc(
+        started = self.tools.gui.send_gui_rpc(
             "tab.run_start",
             {
                 "tab_id": tab,
                 "expected": publication["cfg_ref"],
             },
+            before_send=self._admit_run,
         )
         run_op = started["handle"]
-        self._publish(run_op=run_op, op=run_op)
+        self._publish(run_op=run_op, op=run_op, run_start=StartReceipt("running"))
         self._stop_run()
         outcome = self._await_operation(run_op)
         self._publish(run_outcome=outcome)
@@ -406,6 +414,11 @@ class RecipeContext:
                 status="cancelled" if self.progress.cancel_requested else "finished",
                 phase="terminal",
             )
+
+    def _admit_run(self) -> None:
+        with self._condition:
+            self._admit("run")
+            self._publish(run_start=StartReceipt("unknown"))
 
     def _preview_run(self, tab: str, run_op: int) -> None:
         self._publish(phase="preview")

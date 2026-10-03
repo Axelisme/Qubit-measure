@@ -202,8 +202,8 @@ def project_execution(
         if outcome
         else "running"
         if snapshot["run_op"] is not None
-        else "not_started",
-        outcome,
+        else snapshot["run_start"]["status"],
+        outcome or snapshot.get("run_start"),
     )
     return deepcopy(
         {
