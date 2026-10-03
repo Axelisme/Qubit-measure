@@ -59,6 +59,7 @@ class GeGui(LookbackGui):
             assert params == {"tab_id": "t", "operation_id": 104}
             return {
                 "summary": {"fidelity": 0.98},
+                "invalid": [],
                 "params": {"bins": 64},
                 "operation_state": {"post_analysis_state": {"figure_names": ["cloud"]}},
             }

@@ -7,7 +7,7 @@ import time
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.images import validated_png
@@ -23,11 +23,17 @@ SaveStatus = Literal[
 ]
 
 
+class InvalidAnalysisValue(TypedDict):
+    path: str
+    reason: str
+
+
 @dataclass(frozen=True)
 class AnalysisResult:
     summary: Any
     params: dict[str, Any]
     operation_state: dict[str, Any]
+    invalid: list[InvalidAnalysisValue]
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,21 @@ class ExecutionSnapshot:
     error: ExecutionError | None = None
 
 
+def _invalid_analysis_values(value: object) -> list[InvalidAnalysisValue]:
+    if not isinstance(value, list):
+        raise GuiRpcError("invalid analysis field reasons", reason="incompatible_wire")
+    invalid: list[InvalidAnalysisValue] = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("path"), str)
+            or not isinstance(item.get("reason"), str)
+        ):
+            raise GuiRpcError("invalid analysis field reasons", reason="incompatible_wire")
+        invalid.append({"path": item["path"], "reason": item["reason"]})
+    return invalid
+
+
 def _analysis_result(
     reply: dict[str, Any], stage: AnalysisStage
 ) -> tuple[AnalysisResult, list[str]]:
@@ -86,7 +107,8 @@ def _analysis_result(
     ):
         raise GuiRpcError("invalid analysis figure names", reason="incompatible_wire")
     return AnalysisResult(
-        deepcopy(reply["summary"]), deepcopy(params), deepcopy(state)
+        summary=deepcopy(reply["summary"]), params=deepcopy(params),
+        operation_state=deepcopy(state), invalid=_invalid_analysis_values(reply.get("invalid")),
     ), list(names)
 
 

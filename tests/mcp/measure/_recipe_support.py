@@ -159,6 +159,7 @@ class LookbackGui:
             assert params == {"tab_id": "t", "operation_id": 93}
             return {
                 "summary": {"offset": 0.24},
+                "invalid": [],
                 "params": {"threshold": 0.5},
                 "operation_state": {"analysis_state": {"figure_names": ["trace"]}},
             }

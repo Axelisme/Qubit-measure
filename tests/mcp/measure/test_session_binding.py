@@ -287,6 +287,7 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
         "operation.await": {"reason": "completed", "status": "finished"},
         "tab.get_analyze_result": {
             "summary": {"peak": 5},
+            "invalid": [],
             "params": {},
             "operation_state": {
                 "analysis_state": {"figure_names": ["fit", "residual"]}
