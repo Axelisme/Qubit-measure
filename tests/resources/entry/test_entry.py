@@ -29,6 +29,47 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
     }
 
 
+def test_setup_reads_use_memory_even_when_the_file_is_unavailable(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, _database = entry_roots
+    entry.setup.description = "cached annotation"
+    original_id = entry.entry_id
+    setup_path = results / "entry" / "setup.yaml"
+    setup_path.unlink()
+
+    assert entry.setup.description == "cached annotation"
+    assert entry.entry_id == original_id
+    with pytest.raises(FileNotFoundError) as failure:
+        entry.setup.refresh()
+    assert failure.value.filename == str(setup_path)
+    assert entry.setup.description == "cached annotation"
+    assert entry.entry_id == original_id
+
+
+def test_setup_edit_discards_body_failure_and_allows_the_next_transaction(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, _database = entry_roots
+    entry.setup.description = "committed annotation"
+    setup_path = results / "entry" / "setup.yaml"
+    before = setup_path.read_bytes()
+
+    def abort_transaction() -> None:
+        with entry.setup.edit() as draft:
+            draft.description = "discarded annotation"
+            assert entry.setup.description == "committed annotation"
+            raise RuntimeError("abort sentinel")
+
+    with pytest.raises(RuntimeError, match="abort sentinel"):
+        abort_transaction()
+    assert entry.setup.description == "committed annotation"
+    assert setup_path.read_bytes() == before
+
+    entry.setup.description = "next annotation"
+    assert entry.setup.description == "next annotation"
+
+
 def test_entry_identity_is_read_only_and_refresh_cannot_publish_a_replacement(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
