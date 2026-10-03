@@ -12,7 +12,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
-from ._recipe_support import PNG, LookbackGui, scalar
+from ._recipe_support import PNG, LookbackGui
 from ._support import make_client
 
 
