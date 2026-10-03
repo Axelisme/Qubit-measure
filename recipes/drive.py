@@ -50,7 +50,7 @@ def _select_modules(
         [
             {
                 "path": ["modules", slot],
-                "value": {"__ref": key} if key is not None else None,
+                "value": {"__ref": key},
             }
             for slot, key in references.items()
         ],

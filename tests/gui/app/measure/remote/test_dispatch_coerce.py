@@ -21,11 +21,9 @@ from zcu_tools.gui.remote.errors import RemoteError
 # ---------------------------------------------------------------------------
 
 
-def test_coerce_connect_mock():
-    req = coerce_connect_request({"kind": "mock"})
-    from zcu_tools.gui.session.services.connection import ConnectMockRequest
-
-    assert isinstance(req, ConnectMockRequest)
+def test_coerce_connect_mock_rejected():
+    with pytest.raises(RemoteError, match="simulation.initialize"):
+        coerce_connect_request({"kind": "mock"})
 
 
 def test_coerce_connect_remote():
