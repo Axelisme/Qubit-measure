@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
+from math import isfinite
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
@@ -18,6 +19,16 @@ from .tab import tab_operation_state
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+
+def _summary_to_wire(summary: Mapping[str, object]) -> dict[str, object]:
+    projected = dict(summary)
+    invalid: list[dict[str, str]] = []
+    for key, value in summary.items():
+        if isinstance(value, float) and not isfinite(value):
+            projected[key] = None
+            invalid.append({"path": f"summary.{key}", "reason": "non_finite"})
+    return {"summary": projected, "invalid": invalid}
 
 
 def _params_to_wire(params: object) -> dict[str, object] | None:
@@ -60,7 +71,7 @@ def h_tab_get_analyze_result(
             ErrorCode.INTERNAL,
             "analyze result does not implement to_summary_dict()",
         )
-    reply = {"summary": to_summary()}
+    reply = _summary_to_wire(to_summary())
     if operation_id is not None:
         pane = control.get_tab_snapshot(tab_id).analysis
         reply.update(
@@ -169,7 +180,7 @@ def h_tab_get_post_analyze_result(
             ErrorCode.INTERNAL,
             "post-analysis result does not implement to_summary_dict()",
         )
-    reply = {"summary": to_summary()}
+    reply = _summary_to_wire(to_summary())
     if operation_id is not None:
         pane = control.get_tab_snapshot(tab_id).post_analysis
         reply.update(
