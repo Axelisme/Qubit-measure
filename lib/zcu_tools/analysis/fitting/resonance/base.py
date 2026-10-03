@@ -340,7 +340,7 @@ def fit_circle_params(
 
     # calculate M matrix
     M = calc_M(xs, ys)
-    B = np.array(
+    constraint_matrix = np.array(
         [
             [0, 0, 0, -2],
             [0, 1, 0, 0],
@@ -349,7 +349,7 @@ def fit_circle_params(
         ]
     )
 
-    eigvals, eigvecs = sp.linalg.eig(M, B)
+    eigvals, eigvecs = sp.linalg.eig(M, constraint_matrix)
     eigvals = eigvals.real
 
     # The exact-circle solution is the eigenvalue nearest zero. Floating-point
