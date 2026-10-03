@@ -945,6 +945,7 @@ def _dispatch_with_device_control(
 
 def test_device_handlers_dispatch_only_through_device_control_facet():
     dev = MagicMock()
+    dev.get_device_unit.return_value = "A"
     dev.start_connect_device.return_value = 101
     dev.start_disconnect_device.return_value = 102
     dev.start_reconnect_device.return_value = 103
@@ -1031,6 +1032,7 @@ def test_device_handlers_dispatch_only_through_device_control_facet():
     ]
     assert isinstance(snapshot, dict)
     assert snapshot["info"]["value"] == 1.0
+    assert snapshot["unit"] == "A"
 
 
 # ---------------------------------------------------------------------------
