@@ -96,9 +96,16 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Invalid JSON constant: {value}")
 
 
+@pytest.fixture
+def connected_mcp(fx, tmp_path, request):
+    _, invoke = mcp_client(fx.service.port, tmp_path, request=request)
+    invoke("connect", {"port": fx.service.port})
+    return invoke
+
+
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_unestimable_error_is_null_with_reason_through_public_rpc(
-    fx, tmp_path, request, stage
+    fx, connected_mcp, stage
 ):
     tab = fx.ctrl.new_tab("fake")
     _install_result(
@@ -106,9 +113,7 @@ def test_unestimable_error_is_null_with_reason_through_public_rpc(
         summary={"lifetime": 10.0, "lifetime_error": float("inf"),
                  "warnings": ["error could not be estimated"]},
     )
-    _, invoke = mcp_client(fx.service.port, tmp_path, request=request)
-    invoke("connect", {"port": fx.service.port})
-    reply = invoke("rpc_call", {"method": _result_method(stage),
+    reply = connected_mcp("rpc_call", {"method": _result_method(stage),
                                "params": {"tab_id": tab, "operation_id": 101}})
     parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
     assert parsed["summary"] == {
@@ -124,7 +129,7 @@ def test_unestimable_error_is_null_with_reason_through_public_rpc(
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 @pytest.mark.parametrize("operation_id", [None, 101])
 def test_nested_nonfinite_analysis_values_have_precise_paths(
-    fx, tmp_path, request, stage, operation_id
+    fx, connected_mcp, stage, operation_id
 ):
     tab = fx.ctrl.new_tab("fake")
     _install_result(
@@ -133,12 +138,10 @@ def test_nested_nonfinite_analysis_values_have_precise_paths(
                          "errors": [float("inf"), -float("inf"), None, 0.0, 2.0]},
                  "warnings": ["fit is nonfinite"], "error": "fit unavailable"},
     )
-    _, invoke = mcp_client(fx.service.port, tmp_path, request=request)
-    invoke("connect", {"port": fx.service.port})
     params = {"tab_id": tab}
     if operation_id is not None:
         params["operation_id"] = operation_id
-    reply = invoke("rpc_call", {"method": _result_method(stage), "params": params})
+    reply = connected_mcp("rpc_call", {"method": _result_method(stage), "params": params})
     parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
     assert parsed["summary"] == {
         "fit": {"value": None, "errors": [None, None, None, 0.0, 2.0]},
@@ -149,6 +152,15 @@ def test_nested_nonfinite_analysis_values_have_precise_paths(
         {"path": "summary.fit.errors[0]", "reason": "non_finite"},
         {"path": "summary.fit.errors[1]", "reason": "non_finite"},
     ]
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_empty_analysis_result_has_no_invalid_values(fx, connected_mcp, stage):
+    tab = fx.ctrl.new_tab("fake")
+    reply = connected_mcp("rpc_call", {"method": _result_method(stage),
+                                     "params": {"tab_id": tab}})
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed == {"summary": None, "invalid": []}
 
 
 def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
