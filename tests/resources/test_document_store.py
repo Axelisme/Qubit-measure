@@ -249,6 +249,44 @@ def test_commit_notifies_after_publication_and_unlock_and_can_unsubscribe(
     assert len(events) == 1
 
 
+@pytest.mark.parametrize("reason", ["commit", "refresh"])
+def test_notifications_wait_for_outermost_public_lock_release(
+    document_path: Path, reason: str
+) -> None:
+    store = make_store(document_path)
+    other = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", lock_timeout=0.01
+    )
+    events: list[DocumentChange] = []
+    unlocked: list[bool] = []
+
+    def observe(change: DocumentChange) -> None:
+        events.append(change)
+        assert store.snapshot().values["left"] == 10.0
+        with other.locked():
+            unlocked.append(True)
+
+    store.subscribe(observe)
+    if reason == "refresh":
+        with other.edit() as draft:
+            draft.values["left"] = 10.0
+    with store.locked():
+        with store.locked():
+            if reason == "commit":
+                with store.edit() as draft:
+                    draft.values["left"] = 10.0
+            else:
+                assert store.refresh() is True
+            assert store.snapshot().values["left"] == 10.0
+            assert events == []
+        assert events == []
+
+    assert len(events) == 1
+    assert events[0].reason == reason
+    assert events[0].paths == (("values", "left"),)
+    assert unlocked == [True]
+
+
 def test_refresh_publishes_external_changes_once(document_path: Path) -> None:
     store = make_store(document_path)
     other = make_store(document_path)
