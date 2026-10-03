@@ -2,9 +2,11 @@
 
 import base64
 from copy import deepcopy
+from threading import Event
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.measure import tools_recipes
 
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import make_client
@@ -88,6 +90,120 @@ def ge_client(tmp_path):
         yield gui, client
     finally:
         client.context.session.close()
+
+
+@pytest.fixture()
+def background_ge_client(ge_client, monkeypatch):
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    return ge_client
+
+
+@pytest.mark.parametrize("stage", ["primary", "post"])
+def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
+    background_ge_client, stage
+):
+    gui, client = background_ge_client
+    pending, release = Event(), Event()
+    operation = 93 if stage == "primary" else 104
+
+    def writeback(params):
+        if params["operation_id"] == operation:
+            pending.set()
+            assert release.wait(2)
+        return {"ok": True, "result": gui("tab.writeback_preview", params)}
+
+    client.transport.replies["tab.writeback_preview"] = writeback
+    try:
+        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        assert pending.wait(1)
+        execution = initial.data["execution"]
+        status = client.call("status", {"execution": execution})
+        assert status.data["analysis_stage"] == stage
+        assert client.call("cancel", {"execution": execution}).data["cancel_requested"]
+        release.set()
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        data = terminal.data
+        assert data["status"] == "cancelled", data
+        assert data["writeback"]["items"][0]["id"] == "md-1"
+        assert data["analysis"]["status"] == "finished"
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert len(terminal.images) == (1 if stage == "primary" else 2)
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.post_analyze") == (0 if stage == "primary" else 1)
+        assert "operation.cancel" not in methods
+        if stage == "post":
+            assert data["post_writeback"]["items"][0]["id"] == "classifier"
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize("outcome", ["cancelled", "failed"])
+def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
+    background_ge_client, stage, outcome
+):
+    gui, client = background_ge_client
+    pending, release, stopped = Event(), Event(), Event()
+    start_method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
+    operation = 93 if stage == "primary" else 104
+
+    def start(params):
+        pending.set()
+        assert release.wait(2)
+        return {"ok": True, "result": gui(start_method, params)}
+
+    def cancel(params):
+        assert params == {"operation_id": operation}
+        stopped.set()
+        return {"ok": True, "result": {"status": "cancelling"}}
+
+    def await_operation(params):
+        if params["operation_id"] != operation:
+            return {"ok": True, "result": gui("operation.await", params)}
+        result = (
+            {"reason": "completed", "status": outcome, "error": "failure after cancel"}
+            if stopped.is_set()
+            else {"reason": "timeout"}
+        )
+        return {"ok": True, "result": result}
+
+    client.transport.replies.update(
+        {
+            start_method: start,
+            "operation.cancel": cancel,
+            "operation.await": await_operation,
+        }
+    )
+    try:
+        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        assert pending.wait(1)
+        execution = initial.data["execution"]
+        for _ in range(2):
+            assert client.call("cancel", {"execution": execution}).data[
+                "cancel_requested"
+            ]
+        assert not stopped.is_set()
+        release.set()
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        data = terminal.data
+        assert stopped.is_set()
+        assert data["status"] == outcome, data
+        current = data["analysis" if stage == "primary" else "post_analysis"]
+        assert current["status"] == outcome
+        assert current["cancel_requested"]
+        assert current["operation_outcome"]["status"] == outcome
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert len(terminal.images) == (1 if stage == "post" else 0)
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("operation.cancel") == 1
+        assert methods.count("tab.post_analyze") == (1 if stage == "post" else 0)
+        assert methods.count("tab.get_post_analyze_result") == 0
+        if stage == "post":
+            assert data["analysis"]["status"] == "finished"
+            assert data["writeback"]["items"][0]["id"] == "md-1"
+    finally:
+        release.set()
+        stopped.set()
 
 
 @pytest.mark.parametrize("reuse", [False, True])
