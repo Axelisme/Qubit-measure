@@ -121,7 +121,10 @@ class ComponentView:
                 component_registry.check_fields(
                     draft.kind, {name: value}, path=self._path
                 )
-                setattr(draft, name, value)
+                values = draft.model_dump(exclude_unset=True)
+                values[name] = value
+                validated = type(draft).model_validate(values)
+                setattr(draft, name, getattr(validated, name))
 
 
 class EditView:
