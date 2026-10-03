@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+from simpleeval import simple_eval
+
 from zcu_tools.experiment.v2_gui.measure.adapters._support.ctx_helpers import (
     proper_flux_range,
     proper_qub_freq_range,
@@ -60,6 +63,21 @@ def test_qub_freq_range_uses_qubit_md_keys():
     assert sv.start.expr == "q_f - 2.0 * qf_w"
     assert sv.start.resolved is None
     assert sv.expts == 201
+
+
+@pytest.mark.parametrize("md", [{"r_f": 5500.0}, {"rf_w": 10.0}])
+def test_resonator_partial_calibration_keeps_the_existing_source_live(md):
+    sweep = proper_res_freq_range(_ctx_with_md(md), 21)
+    assert isinstance(sweep.start, EvalValue)
+    assert isinstance(sweep.stop, EvalValue)
+    before = [simple_eval(edge.expr, names=md) for edge in (sweep.start, sweep.stop)]
+    changed = {key: value * 2 for key, value in md.items()}
+    after = [simple_eval(edge.expr, names=changed) for edge in (sweep.start, sweep.stop)]
+    if "r_f" in md:
+        assert after[0] - before[0] == pytest.approx(5500.0)
+        assert after[1] - before[1] == pytest.approx(5500.0)
+    else:
+        assert after[1] - after[0] == pytest.approx(2 * (before[1] - before[0]))
 
 
 # --- proper_flux_range ------------------------------------------------------
