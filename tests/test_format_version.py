@@ -329,3 +329,31 @@ def test_migration_validates_each_step_before_next_step(output: YamlMap) -> None
     assert caught.value.target_version == FormatVersion(2, 0)
     assert caught.value.detail
     assert document == {"format": "zcu.synthetic", "format_version": "1.0"}
+
+
+def test_migration_reports_step_failure_with_original_cause() -> None:
+    registry = MigrationRegistry()
+    document: YamlMap = {"format": "zcu.synthetic", "format_version": "1.0"}
+    cause = ValueError("synthetic conversion failed")
+
+    def broken_step(doc: YamlMap) -> YamlMap:
+        doc["format_version"] = "1.1"
+        raise cause
+
+    registry.register(
+        "zcu.synthetic", FormatVersion(1, 0), FormatVersion(1, 1), broken_step
+    )
+
+    with pytest.raises(MigrationError) as caught:
+        registry.migrate(
+            document,
+            format="zcu.synthetic",
+            target_version=FormatVersion(1, 1),
+            source=Path("entry/setup.yaml"),
+        )
+
+    assert caught.value.__cause__ is cause
+    assert caught.value.from_version == FormatVersion(1, 0)
+    assert caught.value.target_version == FormatVersion(1, 1)
+    assert "synthetic conversion failed" in caught.value.detail
+    assert document["format_version"] == "1.0"
