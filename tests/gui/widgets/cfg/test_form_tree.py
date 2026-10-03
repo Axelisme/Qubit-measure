@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QPoint, Qt
-from qtpy.QtTest import QTest
+from qtpy.QtCore import QEvent, QPoint, QPointF, Qt
+from qtpy.QtGui import QMouseEvent
 from qtpy.QtWidgets import QApplication, QComboBox, QTreeWidget, QTreeWidgetItem
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
@@ -32,7 +32,9 @@ def _tree(form: CfgFormWidget) -> QTreeWidget:
 
 
 def _item(form: CfgFormWidget, path: str) -> QTreeWidgetItem:
-    pending = [_tree(form).invisibleRootItem()]
+    root = _tree(form).invisibleRootItem()
+    assert root is not None
+    pending = [root]
     while pending:
         item = pending.pop()
         if item.data(0, Qt.ItemDataRole.UserRole) == path:
@@ -58,9 +60,20 @@ def _click_row(
     viewport = tree.viewport()
     assert viewport is not None
     position = QPoint(tree.columnWidth(0) // 2, rect.center().y())
-    QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=position)
+    for event_type, buttons in (
+        (QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        event = QMouseEvent(
+            event_type,
+            QPointF(position),
+            QPointF(viewport.mapToGlobal(position)),
+            Qt.MouseButton.LeftButton,
+            buttons,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(viewport, event)
     qapp.processEvents()
-    form.close()
 
 
 def _readout_shape(ctrl: MagicMock) -> tuple[CfgSectionSpec, CfgSectionValue]:
@@ -159,22 +172,25 @@ def test_disabled_optional_reference_collapsed_and_whole_row_click_does_not_expa
     qapp.processEvents()
     assert field.is_enabled is False
     assert item.isExpanded() is False
-    _click_row(qapp, form, item)
-    assert item.isExpanded() is False
-    item.setExpanded(True)
-    qapp.processEvents()
-    assert item.isExpanded() is False
+    try:
+        _click_row(qapp, form, item)
+        assert item.isExpanded() is False
+        item.setExpanded(True)
+        qapp.processEvents()
+        assert item.isExpanded() is False
 
-    custom_index = combo.findText("Inner")
-    assert custom_index >= 0
-    combo.setCurrentIndex(custom_index)
-    qapp.processEvents()
-    assert field.is_enabled is True
-    assert item.isExpanded() is True
-    _click_row(qapp, form, item)
-    assert item.isExpanded() is False
-    _click_row(qapp, form, item)
-    assert item.isExpanded() is True
+        custom_index = combo.findText("Inner")
+        assert custom_index >= 0
+        combo.setCurrentIndex(custom_index)
+        qapp.processEvents()
+        assert field.is_enabled is True
+        assert item.isExpanded() is True
+        _click_row(qapp, form, item)
+        assert item.isExpanded() is False
+        _click_row(qapp, form, item)
+        assert item.isExpanded() is True
+    finally:
+        form.close()
 
 
 def test_optional_reference_initially_disabled_starts_collapsed_and_non_foldable(
@@ -199,8 +215,11 @@ def test_optional_reference_initially_disabled_starts_collapsed_and_non_foldable
     attach_draft(form, schema, ctrl)
     item = _item(form, "ref")
     assert item.isExpanded() is False
-    _click_row(qapp, form, item)
-    assert item.isExpanded() is False
+    try:
+        _click_row(qapp, form, item)
+        assert item.isExpanded() is False
+    finally:
+        form.close()
 
 
 def test_singleton_nested_section_elided_and_multi_child_distinct(qapp, ctrl):
