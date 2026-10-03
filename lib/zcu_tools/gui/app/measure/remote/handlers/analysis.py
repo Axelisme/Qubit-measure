@@ -24,16 +24,26 @@ if TYPE_CHECKING:
 def _summary_to_wire(summary: object) -> dict[str, object]:
     if not isinstance(summary, Mapping):
         raise RemoteError(ErrorCode.INTERNAL, "analysis summary must be an object")
-    projected: dict[str, object] = {}
     invalid: list[dict[str, str]] = []
-    for key, value in summary.items():
-        if not isinstance(key, str):
-            raise RemoteError(ErrorCode.INTERNAL, "analysis summary keys must be strings")
-        projected[key] = value
+
+    def project(value: object, path: str) -> object:
         if isinstance(value, float) and not isfinite(value):
-            projected[key] = None
-            invalid.append({"path": f"summary.{key}", "reason": "non_finite"})
-    return {"summary": projected, "invalid": invalid}
+            invalid.append({"path": path, "reason": "non_finite"})
+            return None
+        if isinstance(value, Mapping):
+            projected: dict[str, object] = {}
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise RemoteError(
+                        ErrorCode.INTERNAL, "analysis summary keys must be strings"
+                    )
+                projected[key] = project(item, f"{path}.{key}")
+            return projected
+        if isinstance(value, (list, tuple)):
+            return [project(item, f"{path}[{index}]") for index, item in enumerate(value)]
+        return value
+
+    return {"summary": project(summary, "summary"), "invalid": invalid}
 
 
 def _params_to_wire(params: object) -> dict[str, object] | None:
