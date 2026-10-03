@@ -81,6 +81,14 @@ class GroupedDocument(SyntheticDocument):
     groups: dict[str, OptionalGeneral]
 
 
+class DefaultedGroup(BaseModel):
+    general: OptionalGeneral = Field(default_factory=OptionalGeneral)
+
+
+class NestedGroupsDocument(SyntheticDocument):
+    groups: dict[str, DefaultedGroup]
+
+
 class SequencedGroupsDocument(SyntheticDocument):
     groups: list[OptionalGeneral]
 
@@ -705,6 +713,24 @@ def test_new_typed_mapping_child_keeps_in_place_default_container_edits(
     assert reopened.values["right"] == 20.0
     persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
     assert persisted["groups"]["Q1"] == {"ext": {"calibration": 7.0}}
+
+
+def test_new_typed_child_keeps_explicit_null_inside_an_unset_default_model(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        document_path.read_text(encoding="utf-8") + "groups: {}\n",
+        encoding="utf-8",
+    )
+    store = DocumentStore(document_path, NestedGroupsDocument, format="synthetic")
+    with store.edit() as draft:
+        draft.groups["Q1"] = DefaultedGroup()
+        draft.groups["Q1"].general.description = None
+
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert persisted["groups"]["Q1"] == {"general": {"description": None}}
+    reopened = DocumentStore(document_path, NestedGroupsDocument, format="synthetic")
+    assert "description" in reopened.snapshot().groups["Q1"].general.model_fields_set
 
 
 def test_appended_typed_child_keeps_default_container_edits_and_explicit_null(
