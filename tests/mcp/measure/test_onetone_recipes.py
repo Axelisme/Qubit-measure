@@ -1,13 +1,24 @@
 """Onetone promises through the shipped recipe tools and recording GUI."""
 
+from contextlib import contextmanager
 from copy import deepcopy
 
 import pytest
-from simpleeval import simple_eval
+from simpleeval import NameNotDefined, simple_eval
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_support import LookbackGui, scalar, section
 from ._support import make_client
+
+
+@contextmanager
+def recipe_client(tmp_path, respond):
+    client = make_client(tmp_path, respond)
+    try:
+        yield client
+    finally:
+        client.context.session.close()
 
 
 @pytest.mark.parametrize(
@@ -30,8 +41,7 @@ from ._support import make_client
 )
 def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, arguments):
     gui = OnetoneGui({"r_f": 6000.0, "rf_w": 4.0})
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("onetone_spectrum", arguments)
         assert isinstance(reply, ToolReply)
         assert reply.is_error
@@ -41,8 +51,6 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
-    finally:
-        client.context.session.close()
 
 
 def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
@@ -53,8 +61,7 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
             return {"values": []}
         return gui(method, params)
 
-    client = make_client(tmp_path, respond)
-    try:
+    with recipe_client(tmp_path, respond) as client:
         reply = client.call("onetone_spectrum_over_flux", {})
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters", reply.data
@@ -66,8 +73,40 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         }
         assert not gui.ran
         assert not reply.is_error
-    finally:
-        client.context.session.close()
+
+
+@pytest.mark.parametrize("arguments", [
+    {"flux_device": ""}, {"flux_device": False}, {"flux_device": " "},
+    {"freq_points": True}, {"freq_points": 1.5}, {"flux_points": False},
+    {"flux_range": [0, True]}, {"flux_range": [0, float("inf")]},
+    {"flux_range": [0]}, {"flux_range": [0, 1, 2]},
+    {"flux_range": {"start": 0, "stop": 1}}, {"flux_range": "0,1"},
+])
+def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(tmp_path, arguments):
+    gui = OnetoneGui(experiment="onetone/flux_dep")
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("onetone_spectrum_over_flux", arguments)
+        assert isinstance(reply, ToolReply)
+        assert reply.is_error
+        assert reply.data["status"] == "failed"
+        assert not any(method == "context.snapshot" for method, _ in client.transport.sent)
+
+
+@pytest.mark.parametrize("stage", ["tab.edit_cfg", "tab.run_start"])
+def test_spectrum_source_change_fails_without_retry_or_blind_scan(tmp_path, stage):
+    gui = OnetoneGui({"r_f": 6100.0, "rf_w": 4.0})
+    def respond(method, params):
+        if method == stage:
+            raise GuiRpcError("Source changed", reason="stale")
+        return gui(method, params)
+
+    with recipe_client(tmp_path, respond) as client:
+        reply = client.call("onetone_spectrum", {})
+        assert isinstance(reply, ToolReply)
+        assert reply.data["status"] == "failed"
+        assert reply.data["error"]["reason"] == "stale"
+        assert not gui.ran
+        assert sum(method == stage for method, _ in client.transport.sent) == 1
 
 
 class OnetoneGui(LookbackGui):
@@ -75,6 +114,8 @@ class OnetoneGui(LookbackGui):
         super().__init__()
         self.experiment = experiment
         self.md = md or {}
+        center = "r_f" if "r_f" in self.md else "5000.0"
+        width = "2.5 * rf_w" if "rf_w" in self.md else "500.0"
         self.publication["tree"]["children"].update(
             reps=scalar(17),
             sweep=section(
@@ -82,8 +123,8 @@ class OnetoneGui(LookbackGui):
                     "kind": "sweep",
                     "valid": True,
                     "inputs": {
-                        "start": self.input("r_f - 2.5 * rf_w" if md else 4500.0),
-                        "stop": self.input("r_f + 2.5 * rf_w" if md else 5500.0),
+                        "start": self.input(f"{center} - {width}" if md else 4500.0),
+                        "stop": self.input(f"{center} + {width}" if md else 5500.0),
                         "expts": self.input(41),
                         "step": self.input(25.0),
                     },
@@ -96,11 +137,16 @@ class OnetoneGui(LookbackGui):
     def input(self, value):
         if not isinstance(value, str):
             return scalar(value)["input"]
+        try:
+            resolved = simple_eval(value, names=self.md)
+            error = None
+        except (TypeError, NameNotDefined) as exc:
+            resolved, error = None, str(exc)
         return {
             "mode": "expression",
             "raw": value,
-            "resolved": simple_eval(value, names=self.md),
-            "error": None,
+            "resolved": resolved,
+            "error": error,
             "validation_error": None,
         }
 
@@ -132,8 +178,7 @@ class OnetoneGui(LookbackGui):
 @pytest.mark.parametrize("reuse_tab_id", [None, "t"])
 def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_id):
     gui = OnetoneGui()
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("onetone_spectrum", {"reuse_tab_id": reuse_tab_id})
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters"
@@ -146,14 +191,15 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
         methods = [method for method, _ in client.transport.sent]
         assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
         assert ("tab.new" in methods) is (reuse_tab_id is None)
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
     "md, arguments, start, stop, center_source, span_source",
     [
         ({"r_f": 6100.0, "rf_w": 4.0}, {}, 6090.0, 6110.0, "r_f", "gui_linewidth"),
+        ({"rf_w": 4.0}, {"center_mhz": 6200.0}, 6190.0, 6210.0, "explicit", "gui_linewidth"),
+        ({"r_f": None, "rf_w": 4.0}, {"center_mhz": 6200.0}, 6190.0, 6210.0, "explicit", "gui_linewidth"),
+        ({"r_f": 6100.0}, {"span_mhz": 8.0}, 6096.0, 6104.0, "r_f", "explicit"),
         (
             {},
             {"center_mhz": 6200.0, "span_mhz": 16.0},
@@ -185,8 +231,7 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
 ):
     gui = OnetoneGui(md)
     before = deepcopy(gui.publication)
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("onetone_spectrum", arguments)
         assert isinstance(reply, ToolReply)
         data = reply.data
@@ -211,5 +256,3 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.save_data") == 1
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
-    finally:
-        client.context.session.close()
