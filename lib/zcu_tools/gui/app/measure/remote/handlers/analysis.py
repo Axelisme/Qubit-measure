@@ -21,10 +21,15 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _summary_to_wire(summary: Mapping[str, object]) -> dict[str, object]:
-    projected = dict(summary)
+def _summary_to_wire(summary: object) -> dict[str, object]:
+    if not isinstance(summary, Mapping):
+        raise RemoteError(ErrorCode.INTERNAL, "analysis summary must be an object")
+    projected: dict[str, object] = {}
     invalid: list[dict[str, str]] = []
     for key, value in summary.items():
+        if not isinstance(key, str):
+            raise RemoteError(ErrorCode.INTERNAL, "analysis summary keys must be strings")
+        projected[key] = value
         if isinstance(value, float) and not isfinite(value):
             projected[key] = None
             invalid.append({"path": f"summary.{key}", "reason": "non_finite"})
