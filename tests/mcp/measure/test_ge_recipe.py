@@ -68,8 +68,8 @@ class GeGui(LookbackGui):
     def _post_result(self, method, params):
         assert params["subtab_id"] == "post_analysis"
         if method == "tab.save_image":
-            assert params["figure_name"] == "cloud"
-            return {"image_path": "/actual/cloud.png"}
+            assert params["figure_name"] in ("cloud", "histogram")
+            return {"image_path": f"/actual/{params['figure_name']}.png"}
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(PNG).decode()}
         if method == "tab.writeback_preview":
@@ -154,6 +154,96 @@ def test_ge_does_not_replace_missing_explicit_library_refs(ge_client, parameter)
     assert data["status"] == "failed", data
     assert data["error"]["reason"] == "invalid_cfg"
     assert not gui.ran
+
+
+@pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize(
+    "failure", ["start", "analysis", "result", "save", "png", "writeback"]
+)
+def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
+    gui, client = ge_client
+    operation = 93 if stage == "primary" else 104
+    result_method = (
+        "tab.get_analyze_result"
+        if stage == "primary"
+        else "tab.get_post_analyze_result"
+    )
+    failing_method = {
+        "start": "tab.analyze" if stage == "primary" else "tab.post_analyze",
+        "analysis": "operation.await",
+        "result": result_method,
+        "save": "tab.save_image",
+        "png": "tab.get_figure",
+        "writeback": "tab.writeback_preview",
+    }[failure]
+
+    def result_reply(params):
+        result = gui(result_method, params)
+        if stage == "post":
+            result["operation_state"]["post_analysis_state"]["figure_names"] = [
+                "cloud",
+                "histogram",
+            ]
+        return {"ok": True, "result": result}
+
+    def failure_reply(params):
+        is_target = failure == "start" or params.get("operation_id") == operation
+        if failure == "save" and stage == "post":
+            is_target = is_target and params["figure_name"] == "histogram"
+        if not is_target:
+            return {"ok": True, "result": gui(failing_method, params)}
+        if failure == "analysis":
+            return {
+                "ok": True,
+                "result": {
+                    "reason": "completed",
+                    "status": "failed",
+                    "error": "analysis failed",
+                },
+            }
+        return {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "result_superseded",
+                "message": "injected failure",
+            },
+        }
+
+    client.transport.replies[result_method] = result_reply
+    client.transport.replies[failing_method] = failure_reply
+    reply = client.call("singleshot_ge", {"pi_ref": "pi"})
+    data = reply.data
+    assert data["status"] == "failed", data
+    assert data["tab"] == "t"
+    assert data["raw_save"]["path"] == "/actual/raw.h5"
+    assert data["analysis_stage"] == stage
+    methods = [method for method, _ in client.transport.sent]
+    assert methods.count("tab.run_start") == 1
+    assert methods.count("tab.post_analyze") == (1 if stage == "post" else 0)
+    assert data["post_writeback"] is None
+    if stage == "post":
+        assert data["analysis"]["status"] == "finished"
+        assert data["analysis"]["saved_images"] == [
+            {"figure_name": "trace", "image_path": "/actual/trace.png"}
+        ]
+        assert data["writeback"]["items"][0]["id"] == "md-1"
+    else:
+        assert data["writeback"] is None
+        assert data["post_analysis"] is None
+    current = data["analysis" if stage == "primary" else "post_analysis"]
+    if failure == "start":
+        assert current is None
+    elif failure == "save" and stage == "post":
+        assert current["saved_images"] == [
+            {"figure_name": "cloud", "image_path": "/actual/cloud.png"}
+        ]
+        assert current["remaining_images"] == ["histogram"]
+    elif failure in ("png", "writeback"):
+        assert len(current["saved_images"]) == (2 if stage == "post" else 1)
+    assert len(reply.images) == (1 if stage == "post" else 0) + (
+        1 if failure == "writeback" else 0
+    )
 
 
 @pytest.mark.parametrize("failure", ["edit", "invalid"])
