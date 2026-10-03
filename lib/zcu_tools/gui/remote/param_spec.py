@@ -1,7 +1,8 @@
 """Single source of truth for a wire method's parameter contract.
 
 A ``ParamSpec`` declares one parameter's name, JSON type, requiredness and
-default. The dispatcher validates incoming params against a method's ParamSpec
+default, and optional string enum. Enum declarations fail fast on empty or
+invalid choices and defaults. The dispatcher validates incoming params against a method's ParamSpec
 tuple *before* calling the handler, so the handler receives already-typed
 values. The same specs generate the MCP ``inputSchema`` (Step 7), so the wire
 type contract and the runtime validation can never drift.

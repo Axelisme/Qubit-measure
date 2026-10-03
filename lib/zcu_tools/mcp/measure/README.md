@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-04, analysis invalid-field retention
+**Last updated:** 2026-10-04, explicit native flux coordinates
 
 # `zcu_tools/mcp/measure/`
 
@@ -15,6 +15,8 @@ Raw RPC 不提供高層工具的結果聚合、PNG 解碼或 canonical analysis-
 ## Recipe 與 execution
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
+
+Flux recipe 的 `flux_unit` 可斷言 GUI 裝置的實體單位，不換算數字。只有已確認的 FakeDevice、unit=`none` 且 caller 明確指定 `native` 才使用 native 座標。回覆保留此單位標記。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 

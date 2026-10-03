@@ -149,7 +149,7 @@ def _flux_device(
 
 
 def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
-    """Run one frequency/physical-flux survey with Primary analysis."""
+    """Run one frequency/physical-or-native-flux survey with Primary analysis."""
     _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
     publication = ctx.prepare_tab("onetone/flux_dep", arguments.get("reuse_tab_id"))

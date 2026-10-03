@@ -260,7 +260,7 @@ RECIPES = (
     ),
     RecipeDefinition(
         name="onetone_spectrum_over_flux",
-        description="Run one frequency/physical-flux survey, save raw and Primary analysis.",
+        description="Run one frequency/flux survey, save raw and Primary analysis. Physical units must match; FakeDevice requires flux_unit=native.",
         input_schema={
             "type": "object",
             "additionalProperties": False,

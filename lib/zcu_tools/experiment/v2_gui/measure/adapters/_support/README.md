@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-01 — shared flux-pick kernel 與終止 renderer
+**Last updated:** 2026-10-04, domain-owned flux-line role choices
 
 # adapters/_support
 
@@ -16,7 +16,7 @@ MetaDict、value source與智能預設值；`defaults/` 是 role catalog與fresh
 single source of truth。這些 module 可以依賴 domain-free `zcu_tools.gui.cfg`，但 generic cfg
 core不得反向 import measure domain。
 
-`flux_pick_plugin.py` 把 onetone/twotone flux picker 的 shared typed actions、ParamSpec commands 與 Auto Align single-flight 放在同一個 plugin instance。GUI frontend 維持本地 preview；remote 從同一個 service-owned session 讀取 committed state，worker 回覆只在 owner loop 提交，Done/cancel 後忽略晚到結果。兩個 concrete adapters 都指定終止 result builder。終止 renderer 重用 Qt-free kernel 與原生圖 builder，產生 GUI-owned FluxPickResult 和 `pick` 圖。OneTone 明確拆開 RunRecord，TwoTone 的 bare factory 入口保持不變。
+`flux_pick_plugin.py` 把 onetone/twotone flux picker 的 shared typed actions、ParamSpec commands 與 Auto Align single-flight 放在同一個 plugin instance。GUI frontend 維持本地 preview；remote 從同一個 service-owned session 讀取 committed state，worker 回覆只在 owner loop 提交，Done/cancel 後忽略晚到結果。move_line 的 role enum 來自 domain FluxLineRole，共用 ParamSpec 負責 schema 與 request 驗證，typed Action 仍保留 domain 驗證。兩個 concrete adapters 都指定終止 result builder。終止 renderer 重用 Qt-free kernel 與原生圖 builder，產生 GUI-owned FluxPickResult 和 `pick` 圖。OneTone 明確拆開 RunRecord，TwoTone 的 bare factory 入口保持不變。
 
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的
 range recipe與 writeback policy不經 facade 轉送；共用 writeback helper只負責依 caller 傳入的
