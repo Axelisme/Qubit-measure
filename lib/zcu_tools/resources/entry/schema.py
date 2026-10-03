@@ -41,7 +41,7 @@ class ComponentSchema(BaseModel):
 
 
 class ResonatorSchema(ComponentSchema):
-    freq: Annotated[float, UnitSpec("Hz", "MHz")] = Field(default=None)
+    freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
 
 
 class SetupDocument(BaseModel):
