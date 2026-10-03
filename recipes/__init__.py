@@ -6,6 +6,7 @@ from typing import Any
 
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
+from .coherence import t1
 from .drive import amplitude_rabi, time_rabi, twotone_spectrum
 from .lookback import lookback
 from .onetone import (
@@ -34,6 +35,26 @@ _ONETONE_COMMON_PROPERTIES = {
 
 
 RECIPES = (
+    RecipeDefinition(
+        name="t1",
+        description="Run one calibrated T1 delay sweep and save raw and Primary analysis.",
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                **{
+                    name: {"type": ["string", "null"], "minLength": 1}
+                    for name in ("reuse_tab_id", "readout_ref", "pi_ref", "use_reset")
+                },
+                "max_delay_us": {"type": ["number", "null"]},
+                **{
+                    name: {"type": ["integer", "null"]}
+                    for name in ("points", "reps", "rounds")
+                },
+            },
+        },
+        run=t1,
+    ),
     RecipeDefinition(
         name="amplitude_rabi",
         description="Run one gain Rabi sweep and save raw data and Primary analysis.",
