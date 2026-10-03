@@ -26,6 +26,50 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
+def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
+    tmp_path, monkeypatch
+):
+    gui = LookbackGui()
+    pending = Event()
+    release = Event()
+
+    def respond(method, params):
+        if method == "tab.run_start":
+            pending.set()
+            assert release.wait(2)
+        return gui(method, params)
+
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    with recipe_client(tmp_path, respond) as client:
+        try:
+            initial = client.call("lookback", {"frequency_mhz": 6020.0})
+            assert pending.wait(1)
+            execution = initial.data["execution"]
+            before = len(client.transport.sent)
+            summary = client.call("status", {"execution": execution})
+            full = client.call("status", {"execution": execution, "detail": "full"})
+            assert summary["steps"]["run"]["status"] == "unknown"
+            assert summary["run_op"] is None
+            assert full["run_start"]["status"] == "unknown"
+            assert len(client.transport.sent) == before
+            release.set()
+            completed = client.call("wait", {"execution": execution, "timeout": 2})
+            assert completed.data["status"] == "finished", completed.data
+            confirmed = client.call("status", {"execution": execution})
+            assert confirmed["steps"]["run"] == {
+                "status": "finished",
+                "reason": "completed",
+            }
+            assert confirmed["artifacts"]["raw"]["data"]["members"]["data"] == [
+                {"path": "/actual/raw.h5", "status": "saved"}
+            ]
+            assert [method for method, _ in client.transport.sent].count(
+                "tab.run_start"
+            ) == 1
+        finally:
+            release.set()
+
+
 def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
     gui = LookbackGui()
 
