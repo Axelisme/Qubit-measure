@@ -89,6 +89,10 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         {"flux_device": ""},
         {"flux_device": False},
         {"flux_device": " "},
+        {"flux_unit": ""},
+        {"flux_unit": " "},
+        {"flux_unit": False},
+        {"flux_unit": 1},
         {"freq_points": True},
         {"freq_points": 1.5},
         {"freq_points": 1.0},
@@ -394,12 +398,8 @@ def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_w
 def test_flux_does_not_treat_unknown_units_as_physical_flux(
     tmp_path, explicit, unit, expected
 ):
-    gui = FluxGui()
+    gui = FluxGui(snapshot={"name": "coil", "unit": unit})
     with recipe_client(tmp_path, gui) as client:
-        client.transport.replies["device.snapshot"] = {
-            "ok": True,
-            "result": {"snapshot": {"name": "coil", "unit": unit}},
-        }
         reply = client.call(
             "onetone_spectrum_over_flux", {"flux_device": "coil"} if explicit else {}
         )
@@ -519,7 +519,8 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
 
 
 class FluxGui(OnetoneGui):
-    def __init__(self):
+    def __init__(self, snapshot=None):
+        self.snapshot = snapshot
         super().__init__(
             {"r_f": 6100.0, "rf_w": 4.0, "flx_half": 0.001, "flx_int": 0.003},
             experiment="onetone/flux_dep",
@@ -548,7 +549,9 @@ class FluxGui(OnetoneGui):
         if method == "device.snapshot":
             assert params["name"] in ("coil", "alternate")
             return {
-                "snapshot": {
+                "snapshot": self.snapshot
+                if self.snapshot is not None
+                else {
                     "name": params["name"],
                     "unit": "A" if params["name"] == "coil" else "V",
                 }
@@ -630,6 +633,107 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             assert type(flux_edits[0]["start"]) is float
             assert type(flux_edits[0]["stop"]) is float
             assert type(flux_edits[0]["expts"]) is int
+
+
+def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path):
+    gui = FluxGui(
+        snapshot={
+            "name": "coil",
+            "type_name": "FakeDevice",
+            "unit": "none",
+            "info": {"type": "FakeDevice", "value": 0.0},
+        }
+    )
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "onetone_spectrum_over_flux",
+            {
+                "flux_device": "coil",
+                "flux_unit": "native",
+                "flux_range": [-0.25, 1.5],
+                "flux_points": 7,
+            },
+        )
+        assert reply.data["status"] == "finished", reply.data
+        assert reply.data["actual"]["fields"]["dev.flux_dev"] == {
+            "value": "coil",
+            "unit": "native",
+            "source": "explicit",
+        }
+        assert reply.data["actual"]["fields"]["sweep.flux"]["value"] == {
+            "start": -0.25,
+            "stop": 1.5,
+            "expts": 7,
+        }
+        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["analysis"]["status"] == "finished"
+        assert gui.ran
+
+
+@pytest.mark.parametrize(
+    "device,requested_unit,expected",
+    [
+        ("coil", "A", "finished"),
+        ("alternate", "V", "finished"),
+        ("coil", "V", "failed"),
+        ("alternate", "A", "failed"),
+        ("coil", "native", "failed"),
+        ("alternate", "native", "failed"),
+    ],
+)
+def test_physical_flux_unit_assertion_is_checked_before_run(
+    tmp_path, device, requested_unit, expected
+):
+    gui = FluxGui()
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "onetone_spectrum_over_flux",
+            {"flux_device": device, "flux_unit": requested_unit},
+        )
+        assert reply.data["status"] == expected, reply.data
+        assert gui.ran is (expected == "finished")
+        if expected == "finished":
+            assert (
+                reply.data["actual"]["fields"]["dev.flux_dev"]["unit"] == requested_unit
+            )
+        else:
+            assert reply.data["error"]["reason"] == "invalid_device"
+
+
+@pytest.mark.parametrize(
+    "type_name,info_type,unit,requested_unit",
+    [
+        ("FakeDevice", "FakeDevice", "none", None),
+        ("FakeDevice", "FakeDevice", "none", "A"),
+        ("FakeDevice", "FakeDevice", "none", "V"),
+        ("UnknownDevice", "UnknownDevice", "none", "native"),
+        ("FakeDevice", "UnknownDevice", "none", "native"),
+        ("UnknownDevice", "FakeDevice", "none", "native"),
+        ("FakeDevice", None, "none", "native"),
+        ("FakeDevice", "FakeDevice", "A", "A"),
+        ("FakeDevice", "FakeDevice", "V", "V"),
+        ("UnknownDevice", "UnknownDevice", "native", None),
+    ],
+)
+def test_native_flux_rejects_unconfirmed_or_physical_coordinates_before_run(
+    tmp_path, type_name, info_type, unit, requested_unit
+):
+    gui = FluxGui(
+        snapshot={
+            "name": "coil",
+            "type_name": type_name,
+            "unit": unit,
+            "info": {"type": info_type} if info_type is not None else None,
+        }
+    )
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "onetone_spectrum_over_flux",
+            {"flux_device": "coil", "flux_unit": requested_unit},
+        )
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["reason"] == "invalid_device"
+        assert not gui.ran
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "t"])

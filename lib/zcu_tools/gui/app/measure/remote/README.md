@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-04, analysis-only nonfinite JSON projection
+**Last updated:** 2026-10-04, shared string enums and native flux coordinates
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 83`, `GUI_VERSION = 115`, and
-`MCP_VERSION = 108`, defined in `zcu_tools.mcp.measure.server`. WIRE 83 adds
+Current measure-gui values are `WIRE_VERSION = 84`, `GUI_VERSION = 116`, and
+`MCP_VERSION = 109`, defined in `zcu_tools.mcp.measure.server`. WIRE 84 declares
+shared string enums in interactive command schemas. GUI 116 obtains flux-line
+roles from the domain type. MCP 109 checks flux units and requires explicit
+native opt-in for FakeDevice. WIRE 83 adds
 analysis-result `invalid` paths and reasons. GUI 115 replaces nonfinite analysis
 summary numbers with null. MCP 108 retains those facts in analysis executions.
 MCP 107 provides recipe-first tools and public RPC; MCP 106 adds Two-tone and

@@ -260,7 +260,7 @@ RECIPES = (
     ),
     RecipeDefinition(
         name="onetone_spectrum_over_flux",
-        description="Run one frequency/physical-flux survey, save raw and Primary analysis.",
+        description="Run one frequency/flux survey, save raw and Primary analysis. Physical units must match; FakeDevice requires flux_unit=native.",
         input_schema={
             "type": "object",
             "additionalProperties": False,
@@ -268,6 +268,11 @@ RECIPES = (
                 **_ONETONE_COMMON_PROPERTIES,
                 "gain": {"type": ["number", "null"]},
                 "flux_device": {"type": ["string", "null"], "minLength": 1},
+                "flux_unit": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "description": "Optional device-unit assertion. FakeDevice requires explicit native coordinates.",
+                },
                 "freq_points": {"type": ["integer", "null"]},
                 "flux_points": {"type": ["integer", "null"]},
                 "flux_range": {

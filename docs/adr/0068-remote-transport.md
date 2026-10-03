@@ -18,6 +18,8 @@ Measure GUI 的 `RemoteMethodEntry` 同時宣告 method schema、agent exposure�
 
 Measure tab cfg 使用明示的 `CfgRef`，不另加 per-connection cfg seen。`tab.get_cfg` 回完整 publication，`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 必須帶 caller 觀察到的 identity／revision。Reset 由既有 cfg resource 取得目前 adapter defaults，不複製預設值或新增 unsaved guard。另一條連線讀到的 ref 也可用，但不能代替 authentication 或請求連線的 tab、SoC、device guards。Stale 回 expected／actual，不換成最新版本。直接 RPC 保留完整 publication，edit／reset／Run 只轉送 supplied ref 一次，不隱藏重讀、refresh 或 retry。Recipe 在其已宣告流程內觀察 cfg，重用 tab 時 reset，再套本次參數與 Run；這不授權 RPC 自動修補 stale。Cfg source publication 與固定 Run acceptance 見 [[0065]]。
 
+共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。MCP flux recipe 的 native 座標只允許已確認的 FakeDevice、unit=none 與 caller 明確 opt-in，不延伸到共用 device 或 cfg 安全規則。
+
 Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數字換成 null，以 `invalid` 記錄原 summary 路徑與 `non_finite` 原因。MCP execution 保存這份已讀投影，不猜測物理原因，不改 operation outcome、保存事實或 accept policy。這項轉換不延伸到 generic context 或 framing。
 
 其他 guarded resources 仍由 GUI owner 在自己的序列中比較每條連線的 seen map。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能代替未曾觀察。成功寫入只推進先前看過且版本相符的資源。建立新 tab 的例外只認證存在性，`tab.new` 與 `tab.open_file` 成功回傳 tab ID，且存在版本由 0 變 1 時，GUI 將該資源記入該連線的 seen。Result 等其他 guarded resources 仍須明確完整讀取。Load、library commit 與 writeback 仍保留各自的 context guard。
