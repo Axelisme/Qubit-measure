@@ -3,8 +3,12 @@
 from typing import cast
 
 import pytest
-from pydantic import BaseModel
-from zcu_tools.resources.entry import ComponentRegistry, ComponentSchema
+from pydantic import BaseModel, ConfigDict
+from zcu_tools.resources.entry import (
+    ComponentRegistry,
+    ComponentSchema,
+    UnknownKindError,
+)
 
 
 class PairSchema(ComponentSchema):
@@ -13,6 +17,15 @@ class PairSchema(ComponentSchema):
 
 class UnrelatedSchema(BaseModel):
     target: str
+
+
+class PairLinks(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: str
+
+
+class NestedPairSchema(ComponentSchema):
+    links: PairLinks
 
 
 def test_registration_rejects_non_component_models_without_reserving_the_kind() -> None:
@@ -24,3 +37,34 @@ def test_registration_rejects_non_component_models_without_reserving_the_kind() 
 
     registry.register("notebook/pair", PairSchema, references=("target",))
     assert registry.get("notebook/pair") is PairSchema
+
+
+def test_registry_lifecycle_rejects_duplicates_and_allows_explicit_replacement() -> (
+    None
+):
+    registry = ComponentRegistry()
+    registry.register("notebook/pair", PairSchema, references=("target",))
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register("notebook/pair", NestedPairSchema)
+    assert registry.get("notebook/pair") is PairSchema
+
+    registry.unregister("notebook/pair")
+    with pytest.raises(UnknownKindError):
+        registry.get("notebook/pair")
+    registry.register("notebook/pair", NestedPairSchema, references=("links.target",))
+    assert registry.get("notebook/pair") is NestedPairSchema
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["links.missing", "links", "ext.target", "wiring.ch", "links..target", ""],
+)
+def test_registration_rejects_invalid_reference_paths_without_reserving_the_kind(
+    reference: str,
+) -> None:
+    registry = ComponentRegistry()
+    with pytest.raises(ValueError, match="reference"):
+        registry.register("notebook/pair", NestedPairSchema, references=(reference,))
+
+    registry.register("notebook/pair", NestedPairSchema, references=("links.target",))
+    assert registry.get("notebook/pair") is NestedPairSchema
