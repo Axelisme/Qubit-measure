@@ -26,6 +26,40 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
+def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_path):
+    gui = LookbackGui()
+    destination = {
+        "active_label": "sample",
+        "has_active_context": True,
+        "chip_name": "chip",
+        "qub_name": "q",
+        "res_name": "r",
+        "database_path": "/resolved/experiment/data",
+        "result_dir": "/resolved/experiment/result",
+    }
+
+    def respond(method, params):
+        response = gui(method, params)
+        if method == "tab.writeback_preview":
+            response["destination_context"] = destination
+        return response
+
+    with recipe_client(tmp_path, respond) as client:
+        completed = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert completed.data["status"] == "finished", completed.data
+        key = completed.data["execution"]
+        summary = client.call("status", {"execution": key})
+        full = client.call("status", {"execution": key, "detail": "full"})
+        assert summary["writeback"]["destination"] == {
+            "context": {"active_label": "sample", "has_active_context": True},
+            "project": {"chip_name": "chip", "qub_name": "q", "res_name": "r"},
+        }
+        assert full["writeback"]["destination_context"] == destination
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+            {"path": "/actual/raw.h5", "status": "saved"}
+        ]
+
+
 def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_path):
     gui = LookbackGui()
     current: dict[str, Any] = {
