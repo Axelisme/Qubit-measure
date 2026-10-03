@@ -1751,11 +1751,16 @@ def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
     from zcu_tools.resources.context import ModuleLibrary
 
     ml = ModuleLibrary()
-    ml.register_module(my_pulse={"type": "readout/direct", "ro_freq": 7000.0})
-    ctrl.get_current_ml.return_value = ml
-    lib_spec, lib_value = module_cfg_to_value(
-        {"type": "readout/direct", "ro_freq": 7000.0}
+    ml.register_module(
+        my_pulse={
+            "type": "readout/direct",
+            "ro_ch": 0,
+            "ro_length": 1.0,
+            "ro_freq": 7000.0,
+        }
     )
+    ctrl.get_current_ml.return_value = ml
+    lib_spec, lib_value = module_cfg_to_value(ml.get_module("my_pulse"))
     schema = section_schema(
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Module")},
         {"mod": ReferenceValue(chosen_key="my_pulse", value=lib_value)},
