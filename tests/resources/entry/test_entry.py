@@ -29,6 +29,19 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
     }
 
 
+@pytest.mark.parametrize("root_index", [0, 1])
+def test_open_rejects_entry_links_that_escape_the_configured_root(
+    entry_roots: tuple[Path, Path], root_index: int
+) -> None:
+    results, database = entry_roots
+    linked_path = entry_roots[root_index] / "entry"
+    linked_path.parent.mkdir()
+    linked_path.symlink_to(results.parent / "external", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="entry escapes its root"):
+        ResultEntry.open("entry", result_root=results, database_root=database)
+
+
 def test_setup_reads_use_memory_even_when_the_file_is_unavailable(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
@@ -219,7 +232,9 @@ def test_rename_recovers_first_root_when_second_rename_fails(
 
 
 @pytest.mark.parametrize("root_index", [0, 1])
-@pytest.mark.parametrize("shape", ["empty-directory", "file", "broken-symlink"])
+@pytest.mark.parametrize(
+    "shape", ["empty-directory", "file", "broken-symlink", "external-symlink"]
+)
 def test_rename_refuses_existing_destination_before_moving_either_root(
     entry_roots: tuple[Path, Path], entry: ResultEntry, root_index: int, shape: str
 ) -> None:
@@ -229,6 +244,11 @@ def test_rename_refuses_existing_destination_before_moving_either_root(
         destination.mkdir()
     elif shape == "file":
         destination.write_bytes(b"unrelated data")
+    elif shape == "external-symlink":
+        target = results.parent / "external"
+        target.mkdir()
+        (target / "external.bin").write_bytes(b"unrelated data")
+        destination.symlink_to(target, target_is_directory=True)
     else:
         destination.symlink_to("missing-target")
     before_result = read_entry_files(results / "entry")
@@ -248,6 +268,11 @@ def test_rename_refuses_existing_destination_before_moving_either_root(
         assert destination.read_bytes() == b"unrelated data"
     elif shape == "broken-symlink":
         assert destination.readlink() == Path("missing-target")
+    elif shape == "external-symlink":
+        assert (
+            results.parent / "external" / "external.bin"
+        ).read_bytes() == b"unrelated data"
+        assert destination.is_symlink()
     else:
         assert destination.is_dir()
 
