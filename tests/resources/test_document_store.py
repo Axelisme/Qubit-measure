@@ -69,3 +69,29 @@ def test_same_field_conflict_rejects_the_whole_transaction(document_path: Path) 
     assert str(document_path) in str(error)
     assert make_store(document_path).snapshot().values == {"left": 20.0, "right": 2.0}
     assert first.snapshot().values == {"left": 1.0, "right": 2.0}
+
+
+def test_replace_failure_preserves_original_and_cleans_temporary_file(
+    document_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = make_store(document_path)
+    with store.locked():
+        pass
+    before = document_path.read_bytes()
+    siblings = set(document_path.parent.iterdir())
+    failure = OSError("replace failed")
+
+    def fail_replace(_source: Path, _target: Path | str) -> Path:
+        raise failure
+
+    with ExitStack() as stack:
+        draft = stack.enter_context(store.edit())
+        draft.values["left"] = 10.0
+        monkeypatch.setattr(Path, "replace", fail_replace)
+        with pytest.raises(OSError, match="replace failed") as caught:
+            stack.close()
+
+    assert caught.value is failure
+    assert document_path.read_bytes() == before
+    assert store.snapshot().values == {"left": 1.0, "right": 2.0}
+    assert set(document_path.parent.iterdir()) == siblings
