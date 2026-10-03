@@ -142,6 +142,43 @@ def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readou
         client.context.session.close()
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"center_mhz": True},
+        {"center_mhz": float("nan")},
+        {"span_mhz": float("inf")},
+        {"span_mhz": 0.0},
+        {"span_mhz": -1.0},
+        {"gain": False},
+        {"pulse_length_us": "bad"},
+        {"points": 2.5},
+        {"points": True},
+        {"reps": 1.5},
+        {"rounds": False},
+        {"readout_ref": ""},
+        {"drive_ref": 1},
+        {"use_reset": True},
+        {"reuse_tab_id": " "},
+    ],
+)
+def test_twotone_rejects_invalid_explicit_values_before_preparation(
+    tmp_path, arguments
+):
+    gui = DriveGui()
+    client = make_client(tmp_path, gui)
+    try:
+        reply = client.call("twotone_spectrum", arguments)
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["phase"] == "preparing"
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
+        assert not gui.ran
+    finally:
+        client.context.session.close()
+
+
 def test_twotone_reports_all_missing_frequency_sources_without_running(tmp_path):
     gui = DriveGui()
     client = make_client(tmp_path, gui)
