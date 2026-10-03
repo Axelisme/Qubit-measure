@@ -928,8 +928,7 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
 
         span_input = sweep_widget.findChild(QLineEdit, "span")
         points_input = sweep_widget.findChild(QLineEdit, "expts")
-        assert span_input is not None
-        assert points_input is not None
+        assert span_input is not None and points_input is not None
         center_input = sweep_widget.findChild(QLineEdit)
         assert center_input is not None
         assert not center_input.isEnabled()
@@ -938,14 +937,16 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
         assert center_label.toolTip() == "Generated center"
         center_cell = center_label.parentWidget()
         span_cell = labels["span"].parentWidget()
-        assert center_cell is not None
-        assert span_cell is not None
+        assert center_cell is not None and span_cell is not None
         pair_row = center_cell.parentWidget()
-        assert pair_row is span_cell.parentWidget()
-        assert pair_row is not None
+        assert pair_row is not None and pair_row is span_cell.parentWidget()
+        form.show()
+        qapp.processEvents()
         pair_row.resize(801, pair_row.sizeHint().height())
         qapp.processEvents()
         assert abs(center_cell.width() - span_cell.width()) <= 1
+        assert center_cell.width() + span_cell.width() + 4 == pair_row.width()
+        assert center_cell.geometry().united(span_cell.geometry()) == pair_row.rect()
 
         span_input.setText("120.0")
         points_input.setText("121")
@@ -961,8 +962,7 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
         sv = form.read_values().fields["f"]
         assert isinstance(sv, CenteredSweepValue)
         assert isinstance(sv.span, DirectValue)
-        assert sv.span.value is None
-        assert sv.span.raw == "0.0"
+        assert (sv.span.value, sv.span.raw) == (None, "0.0")
         assert sv.span.error is not None
         assert span_input.text() == "0.0"
         assert not form.is_valid()
