@@ -2,6 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from ruamel.yaml import YAML
 from zcu_tools.format_version import (
     FormatError,
     FormatVersion,
@@ -357,3 +358,30 @@ def test_migration_reports_step_failure_with_original_cause() -> None:
     assert caught.value.target_version == FormatVersion(1, 1)
     assert "synthetic conversion failed" in caught.value.detail
     assert document["format_version"] == "1.0"
+
+
+def test_yaml_writeback_preserves_newer_minor_unknown_fields_and_source(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.yaml"
+    destination = tmp_path / "copy.yaml"
+    original = (
+        "format: zcu.synthetic\nformat_version: '1.7'\n"
+        "future:\n  nested: [1, retained]\n"
+    )
+    source.write_text(original, encoding="utf-8")
+
+    result = MigrationRegistry().migrate_yaml(
+        source,
+        destination,
+        format="zcu.synthetic",
+        target_version=FormatVersion(1, 7),
+    )
+
+    assert result == destination
+    assert source.read_text(encoding="utf-8") == original
+    assert YAML(typ="safe").load(destination) == {
+        "format": "zcu.synthetic",
+        "format_version": "1.7",
+        "future": {"nested": [1, "retained"]},
+    }
