@@ -39,7 +39,10 @@ class CoherenceGui(LookbackGui):
                     "length"
                 ]["inputs"]
                 inputs.update(
-                    {key: scalar(value)["input"] for key, value in edit["value"].items()}
+                    {
+                        key: scalar(value)["input"]
+                        for key, value in edit["value"].items()
+                    }
                 )
             else:
                 ordinary.append(edit)
@@ -75,7 +78,13 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
     try:
         reply = client.call(
             "t1",
-            {"pi_ref": "pi", "max_delay_us": 80.0, "points": 81, "reps": 13, "rounds": 9},
+            {
+                "pi_ref": "pi",
+                "max_delay_us": 80.0,
+                "points": 81,
+                "reps": 13,
+                "rounds": 9,
+            },
         )
         data = reply.data
         assert data["status"] == "finished", data
@@ -84,7 +93,9 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
         assert fields["modules.reset"]["value"] is None
         assert fields["modules.reset"]["source"] == "disabled"
         assert fields["sweep.length"]["value"] == {
-            "start": 0.04, "stop": 80.0, "expts": 81
+            "start": 0.04,
+            "stop": 80.0,
+            "expts": 81,
         }
         assert fields["reps"]["value"] == 13
         assert fields["rounds"]["value"] == 9
