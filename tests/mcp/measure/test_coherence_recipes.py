@@ -1,11 +1,21 @@
 """Coherence behavior through shipped tools and the GUI wire boundary."""
 
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
 
 from ._recipe_support import LookbackGui, scalar, section
 from ._support import make_client
+
+
+@contextmanager
+def recipe_client(tmp_path, gui):
+    client = make_client(tmp_path, gui)
+    try:
+        yield client
+    finally:
+        client.context.session.close()
 
 
 class CoherenceGui(LookbackGui):
@@ -72,6 +82,42 @@ def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
         assert not gui.ran
     finally:
         client.context.session.close()
+
+
+@pytest.mark.parametrize("reuse_tab_id", [None, "t"])
+def test_t1_selected_library_pulse_preserves_gui_delay_defaults(tmp_path, reuse_tab_id):
+    gui = CoherenceGui(pi_ref="pi")
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call("t1", {"reuse_tab_id": reuse_tab_id}).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["modules.pi_pulse"] == {"value": "pi", "source": "gui_default"}
+        assert fields["sweep.length"]["value"] == {
+            "start": 0.04,
+            "stop": 60.0,
+            "expts": 61,
+        }
+        assert fields["sweep.length"]["source"]["stop"] == "gui_default"
+        assert fields["modules.readout.pulse_cfg.freq"]["input"]["raw"] == "r_f"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.reset_cfg") == (1 if reuse_tab_id else 0)
+        assert methods.count("tab.new") == (0 if reuse_tab_id else 1)
+        assert methods.count("tab.run_start") == 1
+
+
+@pytest.mark.parametrize("arguments", [{}, {"pi_ref": "pi"}])
+def test_t1_reports_all_missing_calibration_sources(tmp_path, arguments):
+    gui = CoherenceGui()
+    gui.md = {}
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call("t1", arguments).data
+        assert data["status"] == "needs_parameters", data
+        missing = {item["parameter"] for item in data["missing"]}
+        assert missing == (
+            {"readout_ref", "pi_ref"} if not arguments else {"readout_ref"}
+        )
+        assert data["tab"] == "t"
+        assert not gui.ran
 
 
 @pytest.mark.parametrize(
