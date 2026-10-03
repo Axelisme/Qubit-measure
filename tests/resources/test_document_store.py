@@ -346,3 +346,30 @@ def test_real_entry_lock_blocks_an_independent_commit_and_is_reusable(
     with second.edit() as draft:
         draft.values["right"] = 30.0
     assert make_store(document_path).snapshot().values == {"left": 10.0, "right": 30.0}
+
+
+@pytest.mark.parametrize("failure", ["body", "nested"])
+def test_aborted_edit_discards_the_draft_and_allows_the_next_transaction(
+    document_path: Path, failure: str
+) -> None:
+    store = make_store(document_path)
+    original = document_path.read_bytes()
+    events: list[DocumentChange] = []
+    store.subscribe(events.append)
+
+    def abort_edit() -> None:
+        with store.edit() as draft:
+            draft.values["left"] = 10.0
+            if failure == "body":
+                raise RuntimeError("body aborted")
+            with store.edit() as nested:
+                nested.values["right"] = 20.0
+
+    with pytest.raises(RuntimeError, match=failure):
+        abort_edit()
+    assert document_path.read_bytes() == original
+    assert store.snapshot().values == {"left": 1.0, "right": 2.0}
+    assert events == []
+    with store.edit() as draft:
+        draft.values["right"] = 30.0
+    assert make_store(document_path).snapshot().values == {"left": 1.0, "right": 30.0}
