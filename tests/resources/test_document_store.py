@@ -166,3 +166,27 @@ def test_refresh_publishes_external_changes_once(document_path: Path) -> None:
     assert events == [DocumentChange(document_path, (("values", "left"),), "refresh")]
     assert store.refresh() is False
     assert len(events) == 1
+
+
+def test_observer_failure_is_reported_separately_from_committed_state(
+    document_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = make_store(document_path)
+    events: list[DocumentChange] = []
+    error = ValueError("observer failed")
+
+    def fail_observer(_change: DocumentChange) -> None:
+        raise error
+
+    store.subscribe(fail_observer)
+    store.subscribe(events.append)
+    with store.edit() as draft:
+        draft.values["left"] = 10.0
+
+    assert store.snapshot().values["left"] == 10.0
+    assert make_store(document_path).snapshot().values["left"] == 10.0
+    assert events == [DocumentChange(document_path, (("values", "left"),), "commit")]
+    assert any(
+        record.levelname == "ERROR" and record.exc_info and record.exc_info[1] is error
+        for record in caplog.records
+    )
