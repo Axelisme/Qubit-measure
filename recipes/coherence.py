@@ -46,11 +46,15 @@ def _select_modules(
     publication: dict[str, Any],
     arguments: dict[str, Any],
     pulse_slots: tuple[tuple[str, str], ...],
+    library: dict[str, Any],
 ) -> dict[str, Any]:
     references = {"reset": arguments.get("use_reset")}
     for slot, parameter in (*pulse_slots, ("readout", "readout_ref")):
         if arguments.get(parameter) is not None:
             references[slot] = arguments[parameter]
+    for slot, key in references.items():
+        if key is not None and key not in library:
+            raise GuiRpcError(f"Invalid {slot} library reference", reason="invalid_cfg")
     publication = ctx.edit_cfg(
         publication,
         [
@@ -84,7 +88,9 @@ def _run(
     publication = ctx.prepare_tab(
         f"twotone/{experiment}", arguments.get("reuse_tab_id")
     )
-    publication = _select_modules(ctx, publication, arguments, pulse_slots)
+    publication = _select_modules(
+        ctx, publication, arguments, pulse_slots, sources["ml"]["modules"]
+    )
     edits, origins, missing = _readout_frequency(
         publication, sources["md"], sources["ml"]["modules"]
     )

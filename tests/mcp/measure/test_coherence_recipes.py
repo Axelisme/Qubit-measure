@@ -83,11 +83,18 @@ class CoherenceGui(LookbackGui):
 
 @pytest.mark.parametrize(
     "recipe,parameter",
-    [("t1", "pi_ref"), ("t2ramsey", "pi2_ref"),
-     ("t2echo", "pi_ref"), ("t2echo", "pi2_ref"),
-     ("t1", "readout_ref"), ("t1", "use_reset")],
+    [
+        ("t1", "pi_ref"),
+        ("t2ramsey", "pi2_ref"),
+        ("t2echo", "pi_ref"),
+        ("t2echo", "pi2_ref"),
+        ("t1", "readout_ref"),
+        ("t1", "use_reset"),
+    ],
 )
-def test_coherence_explicit_reference_must_be_a_library_entry(tmp_path, recipe, parameter):
+def test_coherence_explicit_reference_must_be_a_library_entry(
+    tmp_path, recipe, parameter
+):
     gui = CoherenceGui(pi_ref="pi", adapter=recipe)
     with recipe_client(tmp_path, gui) as client:
         data = client.call(recipe, {parameter: "<Custom:Pulse>"}).data
