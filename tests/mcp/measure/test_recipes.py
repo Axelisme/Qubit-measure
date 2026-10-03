@@ -28,7 +28,7 @@ def recipe_client(tmp_path, respond):
 
 def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_path):
     gui = LookbackGui()
-    current = {
+    current: dict[str, Any] = {
         "type": "pulse",
         "freq": 6100.0,
         "gain": 0.1,
@@ -40,7 +40,7 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         "post_delay": 0.0,
         "cloned_from": "calibrated_drive",
     }
-    proposed = {**deepcopy(current), "gain": 0.15}
+    proposed: dict[str, Any] = {**deepcopy(current), "gain": 0.15}
     proposed["waveform"]["length"] = 0.24
 
     def respond(method, params):

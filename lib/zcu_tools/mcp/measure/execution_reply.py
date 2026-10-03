@@ -126,8 +126,42 @@ def _image_artifacts(execution: dict[str, Any] | None) -> dict[str, Any]:
     return artifacts
 
 
-def _candidate(item: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _module_summary(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("A module proposal must be an object")
+    summary = {
+        key: deepcopy(value[key])
+        for key in ("type", "freq", "gain", "phase", "cloned_from")
+        if key in value
+    }
+    waveform = value.get("waveform")
+    if isinstance(waveform, dict):
+        summary["waveform"] = {
+            key: item
+            for key, item in waveform.items()
+            if not isinstance(item, (dict, list))
+        }
+    return summary
+
+
+def _changed_paths(
+    proposed: dict[str, Any], current: dict[str, Any], prefix: str = ""
+) -> list[str]:
+    paths = []
+    for key in sorted(proposed.keys() | current.keys()):
+        path = f"{prefix}.{key}" if prefix else key
+        before, after = current.get(key), proposed.get(key)
+        if isinstance(before, dict) and isinstance(after, dict):
+            paths.extend(_changed_paths(after, before, path))
+        elif key not in current or key not in proposed or before != after:
+            paths.append(path)
+    return paths
+
+
+def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str, Any]:
+    candidate: dict[str, Any] = {
         "id": item["id"],
         "kind": "parameter" if item.get("kind") == "metadict" else item.get("kind"),
         "target": item.get("target_name"),
@@ -136,11 +170,24 @@ def _candidate(item: dict[str, Any]) -> dict[str, Any]:
         "current": deepcopy(item.get("current")),
         "selected": item.get("selected"),
     }
+    if item.get("kind") == "module":
+        proposed = candidate["proposed"]
+        current = candidate["current"]
+        candidate.update(
+            cfg_ref=deepcopy(cfg_ref),
+            proposed=_module_summary(proposed),
+            current=_module_summary(current),
+            changes=_changed_paths(proposed, current)
+            if current is not None
+            else ["create"],
+        )
+    return candidate
 
 
 def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
     primary = snapshot.get("writeback") or {}
     post = snapshot.get("post_writeback") or {}
+    cfg_ref = (snapshot.get("actual") or {}).get("cfg_ref")
     return {
         "destination": {
             "context": deepcopy(
@@ -150,8 +197,8 @@ def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
         if primary.get("destination_context") or post.get("destination_context")
         else {},
         "stages": {
-            "primary": [_candidate(item) for item in primary.get("items", [])],
-            "post": [_candidate(item) for item in post.get("items", [])],
+            "primary": [_candidate(item, cfg_ref) for item in primary.get("items", [])],
+            "post": [_candidate(item, cfg_ref) for item in post.get("items", [])],
         },
         "requires": primary.get("requires", []) + post.get("requires", []),
     }
