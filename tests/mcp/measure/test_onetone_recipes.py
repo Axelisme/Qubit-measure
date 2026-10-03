@@ -102,7 +102,7 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         reply = client.call("onetone_spectrum", arguments)
         assert isinstance(reply, ToolReply)
         data = reply.data
-        assert data["status"] == "succeeded"
+        assert data["status"] == "finished", data
         assert not reply.is_error
         fields = data["actual"]["fields"]
         assert fields["sweep.freq"]["value"] == {"start": start, "stop": stop, "expts": 41}
@@ -111,7 +111,7 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         assert fields["reps"]["value"] == 17
         assert fields["rounds"]["value"] == 3
         assert data["raw_save"]["path"] == "/actual/raw.h5"
-        assert data["analysis"]["status"] == "succeeded"
+        assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"][0]["proposed"] == 0.24
         assert reply.images
         assert before["cfg_ref"] != data["actual"]["cfg_ref"]
