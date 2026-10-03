@@ -183,10 +183,8 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
 
         combo = form.findChild(QComboBox)
         assert combo is not None
-        assert [combo.itemText(i) for i in range(combo.count())] == [
-            "asset_a",
-            "asset_b",
-        ]
+        choices = [combo.itemText(i) for i in range(combo.count())]
+        assert choices == ["asset_a", "asset_b"]
         assert combo.currentIndex() == -1
         assert not form.is_valid()
 
@@ -504,10 +502,7 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
             "reps": ScalarSpec(label="Reps", type=int),
             "freq": ScalarSpec(label="Freq", type=float),
         },
-        {
-            "reps": DirectValue(100),
-            "freq": DirectValue(6.0),
-        },
+        {"reps": DirectValue(100), "freq": DirectValue(6.0)},
     )
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     form = CfgFormWidget()
