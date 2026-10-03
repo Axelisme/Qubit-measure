@@ -26,6 +26,64 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
+def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_path):
+    gui = LookbackGui()
+    current = {
+        "type": "pulse",
+        "freq": 6100.0,
+        "gain": 0.1,
+        "phase": 0.0,
+        "waveform": {"style": "const", "length": 0.1},
+        "ch": 0,
+        "nqz": 2,
+        "pre_delay": 0.0,
+        "post_delay": 0.0,
+        "cloned_from": "calibrated_drive",
+    }
+    proposed = {**deepcopy(current), "gain": 0.15}
+    proposed["waveform"]["length"] = 0.24
+
+    def respond(method, params):
+        response = gui(method, params)
+        if method == "tab.writeback_preview":
+            response["items"] = [
+                {
+                    "id": "ml-1",
+                    "kind": "module",
+                    "target_name": "pi_len",
+                    "selected": False,
+                    "proposed": proposed,
+                    "current": current,
+                }
+            ]
+        return response
+
+    with recipe_client(tmp_path, respond) as client:
+        completed = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert completed.data["status"] == "finished", completed.data
+        key = completed.data["execution"]
+        summary = client.call("status", {"execution": key})
+        full = client.call("status", {"execution": key, "detail": "full"})
+        candidate = summary["writeback"]["stages"]["primary"][0]
+        assert candidate["kind"] == "module"
+        assert candidate["target"] == "pi_len"
+        assert candidate["resolved_target"] is None
+        assert candidate["selected"] is False
+        assert candidate["cfg_ref"] == summary["actual"]["cfg_ref"]
+        assert candidate["proposed"] == {
+            "type": "pulse",
+            "freq": 6100.0,
+            "gain": 0.15,
+            "phase": 0.0,
+            "waveform": {"style": "const", "length": 0.24},
+            "cloned_from": "calibrated_drive",
+        }
+        assert candidate["current"]["cloned_from"] == "calibrated_drive"
+        assert set(candidate["changes"]) == {"gain", "waveform.length"}
+        assert full["writeback"]["items"][0]["proposed"] == proposed
+        assert full["writeback"]["items"][0]["current"] == current
+
+
 def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
     tmp_path, monkeypatch
 ):
