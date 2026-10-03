@@ -49,6 +49,7 @@ class ParamSpec:
     # omitted from the MCP inputSchema — a wire-only param the mcp layer fills
     # (e.g. ``expected_versions``), never surfaced to the agent.
     mcp_hidden: bool = False
+    enum: tuple[str, ...] | None = None
 
     def _coerce(self, present: bool, value: object) -> object:
         if not present or value is None:

@@ -50,6 +50,14 @@ def test_optional_string_allows_empty_and_missing():
     assert validate_params(_spec(JsonType.STRING, required=False), {}) == {"x": None}
 
 
+def test_string_enum_rejects_non_member_after_type_validation():
+    specs = (ParamSpec("mode", JsonType.STRING, enum=("fast", "careful")),)
+    assert validate_params(specs, {"mode": "fast"}) == {"mode": "fast"}
+    with pytest.raises(RemoteError, match="mode") as error:
+        validate_params(specs, {"mode": "other"})
+    assert error.value.code is ErrorCode.INVALID_PARAMS
+
+
 def test_integer_rejects_bool():
     with pytest.raises(RemoteError, match="must be an integer"):
         validate_params(_spec(JsonType.INTEGER), {"x": True})
