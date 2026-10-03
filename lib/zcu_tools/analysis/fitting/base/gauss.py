@@ -50,7 +50,7 @@ def fit_gauss(
             / (len(xdata) - 1)
             * np.sum(norm_ydata > 0.5 * np.abs(yscale))
         )
-        assign_init_p(fitparams, [y0, yscale, x_c, sigma])  # type: ignore
+        assign_init_p(fitparams, [y0, yscale, x_c, sigma])
     fitparams = cast(list[float], fitparams)
 
     # bounds

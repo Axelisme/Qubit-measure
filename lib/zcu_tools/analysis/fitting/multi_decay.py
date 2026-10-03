@@ -562,9 +562,9 @@ def fit_dual_with_vadality(
 
     r_num = Rs.shape[0]
     for i in range(r_num):
-        ax1.plot(times, fit_pps1[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
-        ax1.plot(times, fit_pps1[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
-        ax1.plot(times, fit_pps1[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+        ax1.plot(times, fit_pps1[i, :, 0], color="blue", alpha=i / r_num)
+        ax1.plot(times, fit_pps1[i, :, 1], color="red", alpha=i / r_num)
+        ax1.plot(times, fit_pps1[i, :, 2], color="green", alpha=i / r_num)
 
     ax1.legend()
     ax1.grid(True)
@@ -577,9 +577,9 @@ def fit_dual_with_vadality(
 
     r_num = Rs.shape[0]
     for i in range(r_num):
-        ax2.plot(times, fit_pps2[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
-        ax2.plot(times, fit_pps2[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
-        ax2.plot(times, fit_pps2[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+        ax2.plot(times, fit_pps2[i, :, 0], color="blue", alpha=i / r_num)
+        ax2.plot(times, fit_pps2[i, :, 1], color="red", alpha=i / r_num)
+        ax2.plot(times, fit_pps2[i, :, 2], color="green", alpha=i / r_num)
 
     ax2.legend()
     ax2.grid(True)

@@ -45,7 +45,7 @@ def fitcos(
         freq = fft_freqs[max_id]
         phase = np.angle(fft[max_id], deg=True) % 360
 
-        assign_init_p(fitparams, [y0, yscale, freq, phase])  # type: ignore
+        assign_init_p(fitparams, [y0, yscale, freq, phase])
     fitparams = cast(list[float], fitparams)
 
     # bounds
@@ -105,7 +105,7 @@ def fitdecaycos(
 
         freq_bound = (np.min(fft_freqs), np.max(fft_freqs))
 
-        assign_init_p(fitparams, [y0, yscale, freq, phase, decay_time])  # type: ignore
+        assign_init_p(fitparams, [y0, yscale, freq, phase, decay_time])
     else:
         freq = fitparams[2]
         assert freq is not None
