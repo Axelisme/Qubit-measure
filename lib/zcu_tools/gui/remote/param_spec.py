@@ -56,11 +56,8 @@ class ParamSpec:
             return
         if self.json_type is not JsonType.STRING:
             raise ValueError("enum requires a STRING parameter")
-        if (
-            not isinstance(self.enum, tuple)
-            or not self.enum
-            or any(not isinstance(value, str) for value in self.enum)
-        ):
+        values: tuple[object, ...] = self.enum
+        if not values or any(not isinstance(value, str) for value in values):
             raise ValueError("enum must be a non-empty tuple of strings")
         if len(set(self.enum)) != len(self.enum):
             raise ValueError("enum must not contain duplicates")
