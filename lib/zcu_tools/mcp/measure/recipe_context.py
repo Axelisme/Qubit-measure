@@ -107,10 +107,15 @@ class RecipeContext:
                 lambda: self.progress.status != "running" or self._closed.is_set(),
                 timeout,
             )
+            interaction = (self.progress.analysis or {}).get("interaction")
             return ToolReply(
                 {**asdict(self.progress), "elapsed_s": time.monotonic() - began},
                 self.images,
-                is_error=self.progress.status == "failed",
+                is_error=self.progress.status == "failed"
+                or (
+                    self.progress.status == "interactive"
+                    and bool(interaction and interaction.get("delivery_error"))
+                ),
             )
 
     def start(
