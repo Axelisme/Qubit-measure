@@ -77,6 +77,10 @@ class DefaultedDocument(SyntheticDocument):
     general: OptionalGeneral = Field(default_factory=OptionalGeneral)
 
 
+class GroupedDocument(SyntheticDocument):
+    groups: dict[str, OptionalGeneral]
+
+
 class KnownValues(BaseModel):
     model_config = ConfigDict(extra="forbid")
     left: float = Field(ge=0)
@@ -125,6 +129,10 @@ def make_optional_store(path: Path) -> DocumentStore[OptionalDocument]:
 
 def make_defaulted_store(path: Path) -> DocumentStore[DefaultedDocument]:
     return DocumentStore(path, DefaultedDocument, format="synthetic")
+
+
+def make_grouped_store(path: Path) -> DocumentStore[GroupedDocument]:
+    return DocumentStore(path, GroupedDocument, format="synthetic")
 
 
 def make_strict_sequence_store(path: Path) -> DocumentStore[StrictSequenceDocument]:
@@ -657,6 +665,30 @@ def test_nested_default_model_tracks_explicit_null_and_in_place_container_change
     reopened = make_defaulted_store(document_path)
     assert reopened.snapshot().general.ext == {"calibration": 7.0}
     assert "description" in reopened.snapshot().general.model_fields_set
+
+
+def test_new_typed_mapping_child_keeps_in_place_default_container_edits(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        document_path.read_text(encoding="utf-8") + "groups: {}\n",
+        encoding="utf-8",
+    )
+    first = make_grouped_store(document_path)
+    second = make_grouped_store(document_path)
+    with first.edit() as draft:
+        draft.groups["Q1"] = OptionalGeneral()
+        draft.groups["Q1"].ext["calibration"] = 7.0
+        with second.edit() as other:
+            other.values["right"] = 20.0
+
+    assert first.snapshot().groups["Q1"].ext == {"calibration": 7.0}
+    assert first.snapshot().values["right"] == 20.0
+    reopened = make_grouped_store(document_path).snapshot()
+    assert reopened.groups["Q1"].ext == {"calibration": 7.0}
+    assert reopened.values["right"] == 20.0
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert persisted["groups"]["Q1"] == {"ext": {"calibration": 7.0}}
 
 
 def test_explicit_null_of_missing_typed_field_conflicts_with_concurrent_value(
