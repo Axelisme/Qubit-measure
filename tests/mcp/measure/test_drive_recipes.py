@@ -198,6 +198,166 @@ def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
 
 
+@pytest.mark.parametrize(
+    "recipe,gui_type,sweep,expected",
+    [
+        ("time_rabi", TimeRabiGui, "length", {"start": 0.04, "stop": 0.8, "expts": 61}),
+        (
+            "amplitude_rabi",
+            AmplitudeRabiGui,
+            "gain",
+            {"start": -0.2, "stop": 0.7, "expts": 43},
+        ),
+    ],
+)
+@pytest.mark.parametrize("source", ["explicit", "library", "q_f", "invalid_library"])
+def test_rabi_frequency_precedence_preserves_gui_defaults(
+    tmp_path, recipe, gui_type, sweep, expected, source
+):
+    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+    drive = gui.publication["tree"]["children"]["modules"]["children"]["qub_pulse"]
+    arguments = {"reuse_tab_id": "t"}
+    if source in ("explicit", "library", "invalid_library"):
+        drive["ref"] = "drive"
+        drive["children"]["freq"] = scalar(
+            6280.0 if source != "invalid_library" else None
+        )
+    if source == "explicit":
+        arguments["frequency_mhz"] = 6150.0
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(recipe, arguments).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        frequency = fields["modules.qub_pulse.freq"]
+        assert frequency["value"] == {"explicit": 6150.0, "library": 6280.0}.get(
+            source, 6300.0
+        )
+        assert frequency["source"] == {
+            "explicit": "frequency_mhz",
+            "library": "library:drive",
+        }.get(source, "q_f")
+        assert fields[f"sweep.{sweep}"]["value"] == expected
+        assert fields["reps"]["value"] == 19
+        assert fields["rounds"]["value"] == 3
+        scalar_path = (
+            "modules.qub_pulse.gain"
+            if recipe == "time_rabi"
+            else "modules.qub_pulse.waveform.length"
+        )
+        assert fields[scalar_path]["value"] == (0.14 if recipe == "time_rabi" else 1.0)
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.reset_cfg") == 1
+        assert "tab.new" not in methods
+
+
+@pytest.mark.parametrize(
+    "recipe,gui_type",
+    [
+        ("time_rabi", TimeRabiGui),
+        ("amplitude_rabi", AmplitudeRabiGui),
+    ],
+)
+@pytest.mark.parametrize("reuse_tab_id", [None, "t"])
+def test_rabi_inline_frequency_does_not_substitute_for_missing_sources(
+    tmp_path, recipe, gui_type, reuse_tab_id
+):
+    gui = gui_type()
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(recipe, {"reuse_tab_id": reuse_tab_id}).data
+        assert data["status"] == "needs_parameters", data
+        assert {item["parameter"] for item in data["missing"]} == {
+            "frequency_mhz",
+            "readout_ref",
+        }
+        assert not gui.ran
+
+
+@pytest.mark.parametrize(
+    "recipe,gui_type,arguments",
+    [
+        ("time_rabi", TimeRabiGui, {"frequency_mhz": True}),
+        ("time_rabi", TimeRabiGui, {"gain": float("nan")}),
+        ("time_rabi", TimeRabiGui, {"max_length_us": float("inf")}),
+        ("time_rabi", TimeRabiGui, {"points": 2.5}),
+        ("amplitude_rabi", AmplitudeRabiGui, {"pulse_length_us": True}),
+        ("amplitude_rabi", AmplitudeRabiGui, {"frequency_mhz": float("nan")}),
+        ("amplitude_rabi", AmplitudeRabiGui, {"gain_range": [0.1]}),
+        ("amplitude_rabi", AmplitudeRabiGui, {"gain_range": [0.1, 0.2, 0.3]}),
+        ("amplitude_rabi", AmplitudeRabiGui, {"gain_range": [True, 0.2]}),
+        ("amplitude_rabi", AmplitudeRabiGui, {"gain_range": [0.1, float("inf")]}),
+        (
+            "amplitude_rabi",
+            AmplitudeRabiGui,
+            {"gain_range": {"start": 0.1, "stop": 0.2}},
+        ),
+        ("amplitude_rabi", AmplitudeRabiGui, {"rounds": False}),
+    ],
+)
+def test_rabi_invalid_explicit_values_fail_before_preparing(
+    tmp_path, recipe, gui_type, arguments
+):
+    gui = gui_type()
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(recipe, arguments).data
+        assert data["status"] == "failed", data
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
+        assert not gui.ran
+
+
+@pytest.mark.parametrize(
+    "recipe,gui_type",
+    [
+        ("time_rabi", TimeRabiGui),
+        ("amplitude_rabi", AmplitudeRabiGui),
+    ],
+)
+def test_rabi_valid_library_sources_work_without_metadata_and_enable_explicit_reset(
+    tmp_path, recipe, gui_type
+):
+    gui = gui_type()
+    drive = gui.publication["tree"]["children"]["modules"]["children"]["qub_pulse"]
+    drive["children"]["freq"] = scalar(6280.0)
+    with recipe_client(tmp_path, gui) as client:
+        data = client.call(
+            recipe,
+            {"drive_ref": "drive", "readout_ref": "calibrated", "use_reset": "reset"},
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["modules.qub_pulse.freq"]["value"] == 6280.0
+        assert fields["modules.qub_pulse.freq"]["source"] == "library:drive"
+        assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
+        assert fields["modules.reset"]["value"] == "reset"
+
+
+@pytest.mark.parametrize(
+    "recipe,gui_type",
+    [
+        ("time_rabi", TimeRabiGui),
+        ("amplitude_rabi", AmplitudeRabiGui),
+    ],
+)
+def test_rabi_stale_edit_stops_without_retry_or_run(tmp_path, recipe, gui_type):
+    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        client.transport.replies["tab.edit_cfg"] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "stale_cfg",
+                "message": "changed",
+            },
+        }
+        data = client.call(recipe, {"reuse_tab_id": "t"}).data
+        assert data["status"] == "failed", data
+        assert not gui.ran
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.edit_cfg") == 1
+        assert "tab.new" not in methods
+
+
 class DriveGui(LookbackGui):
     def __init__(self, md=None):
         super().__init__()
