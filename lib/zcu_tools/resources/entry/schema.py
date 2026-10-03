@@ -76,6 +76,13 @@ class WiringSchema(BaseModel):
         default=None, ge=0
     )
 
+    @field_validator("ch", "ro_ch", "flux_ch", mode="before")
+    @classmethod
+    def reject_null_channels(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("a supplied wiring channel must be a non-negative integer")
+        return value
+
 
 class ComponentSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
