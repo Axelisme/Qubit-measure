@@ -92,6 +92,12 @@ def validate_header(
 
 
 class MigrationRegistry:
+    def __init__(self) -> None:
+        self._steps: dict[
+            tuple[str, FormatVersion],
+            tuple[FormatVersion, Callable[[YamlMap], YamlMap]],
+        ] = {}
+
     def register(
         self,
         format: str,
@@ -99,7 +105,7 @@ class MigrationRegistry:
         to_version: FormatVersion,
         step: Callable[[YamlMap], YamlMap],
     ) -> None:
-        raise NotImplementedError((format, from_version, to_version, step))
+        self._steps[format, from_version] = (to_version, step)
 
     def migrate(
         self,
@@ -109,15 +115,22 @@ class MigrationRegistry:
         target_version: FormatVersion,
         source: Path,
     ) -> YamlMap:
-        version = validate_header(
+        version = _parse_version(document.get("format_version"), source)
+        validate_header(
             document,
             expected_format=format,
-            supported_version=target_version,
+            supported_version=version,
             source=source,
         )
-        if version == target_version:
-            return deepcopy(dict(document))
-        raise NotImplementedError("Migration chain is not implemented")
+        result = deepcopy(dict(document))
+        while version != target_version:
+            registered = self._steps.get((format, version))
+            if registered is None:
+                raise NotImplementedError("Migration chain is incomplete")
+            next_version, step = registered
+            result = step(result)
+            version = next_version
+        return result
 
     def migrate_yaml(
         self,
