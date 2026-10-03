@@ -1,6 +1,6 @@
 """Typed optimistic transactions over an existing round-trip YAML document."""
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -129,7 +129,7 @@ class DocumentStore[T: BaseModel]:
         return self._snapshot.model_copy(deep=True)
 
     @contextmanager
-    def edit(self) -> Iterator[T]:
+    def edit(self) -> Generator[T]:
         if self._editing:
             raise RuntimeError(f"{self._path}: nested edits are not allowed")
         self._editing = True
@@ -181,7 +181,7 @@ class DocumentStore[T: BaseModel]:
         raise NotImplementedError
 
     @contextmanager
-    def locked(self) -> Iterator[None]:
+    def locked(self) -> Generator[None]:
         try:
             self._lock.acquire(timeout=self._lock_timeout)
         except Timeout as exc:
