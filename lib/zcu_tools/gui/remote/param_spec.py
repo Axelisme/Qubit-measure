@@ -38,6 +38,13 @@ class JsonType(str, Enum):
     ARRAY = "array"  # homogeneous string list; emits {"type":"array","items":{"type":"string"}}
 
 
+def _validate_string_enum(values: tuple[object, ...]) -> None:
+    if not values or any(not isinstance(value, str) for value in values):
+        raise ValueError("enum must be a non-empty tuple of strings")
+    if len(set(values)) != len(values):
+        raise ValueError("enum must not contain duplicates")
+
+
 @dataclass(frozen=True)
 class ParamSpec:
     name: str
@@ -56,11 +63,7 @@ class ParamSpec:
             return
         if self.json_type is not JsonType.STRING:
             raise ValueError("enum requires a STRING parameter")
-        values: tuple[object, ...] = self.enum
-        if not values or any(not isinstance(value, str) for value in values):
-            raise ValueError("enum must be a non-empty tuple of strings")
-        if len(set(self.enum)) != len(self.enum):
-            raise ValueError("enum must not contain duplicates")
+        _validate_string_enum(self.enum)
         if self.default is not None and self.default not in self.enum:
             raise ValueError("default must belong to enum")
 
