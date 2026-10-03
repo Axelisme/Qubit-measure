@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from simpleeval import simple_eval
-
 from zcu_tools.experiment.v2_gui.measure.adapters._support.ctx_helpers import (
     proper_flux_range,
     proper_qub_freq_range,
@@ -72,7 +71,9 @@ def test_resonator_partial_calibration_keeps_the_existing_source_live(md):
     assert isinstance(sweep.stop, EvalValue)
     before = [simple_eval(edge.expr, names=md) for edge in (sweep.start, sweep.stop)]
     changed = {key: value * 2 for key, value in md.items()}
-    after = [simple_eval(edge.expr, names=changed) for edge in (sweep.start, sweep.stop)]
+    after = [
+        simple_eval(edge.expr, names=changed) for edge in (sweep.start, sweep.stop)
+    ]
     if "r_f" in md:
         assert after[0] - before[0] == pytest.approx(5500.0)
         assert after[1] - before[1] == pytest.approx(5500.0)
