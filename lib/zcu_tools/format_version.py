@@ -6,6 +6,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import TypeAdapter
+from ruamel.yaml import YAML
+
 type YamlValue = (
     None | bool | int | float | str | list[YamlValue] | dict[str, YamlValue]
 )
@@ -211,4 +214,14 @@ class MigrationRegistry:
         format: str,
         target_version: FormatVersion,
     ) -> Path:
-        raise NotImplementedError((source, destination, format, target_version))
+        yaml = YAML(typ="safe")
+        with source.open("r", encoding="utf-8") as stream:
+            document = TypeAdapter(YamlMap).validate_python(
+                yaml.load(stream), strict=True
+            )
+        result = self.migrate(
+            document, format=format, target_version=target_version, source=source
+        )
+        with destination.open("w", encoding="utf-8") as stream:
+            yaml.dump(result, stream)
+        return destination
