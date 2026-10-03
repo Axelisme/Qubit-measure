@@ -202,8 +202,8 @@ class DocumentStore[T: BaseModel]:
                 base_document, base = self._read()
                 draft = base.model_copy(deep=True)
             yield draft
-            base_values = TypeAdapter(YamlMap).validate_python(base.model_dump())
-            draft_values = TypeAdapter(YamlMap).validate_python(draft.model_dump())
+            base_values = TypeAdapter(YamlMap).validate_python(base.model_dump(exclude_unset=True))
+            draft_values = TypeAdapter(YamlMap).validate_python(draft.model_dump(exclude_unset=True))
             patches = tuple(_changes(base_values, draft_values))
             with self.locked():
                 document, _ = self._read()
