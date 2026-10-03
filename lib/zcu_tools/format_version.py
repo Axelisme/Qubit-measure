@@ -170,7 +170,15 @@ class MigrationRegistry:
                     target_version,
                     f"step from {version} overshoots target",
                 )
-            result = step(result)
+            try:
+                result = step(result)
+            except Exception as exc:
+                raise MigrationError(
+                    format,
+                    from_version,
+                    target_version,
+                    f"step from {version} to {next_version} failed: {exc}",
+                ) from exc
             try:
                 actual_version = validate_header(
                     result,
