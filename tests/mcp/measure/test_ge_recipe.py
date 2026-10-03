@@ -206,6 +206,107 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         stopped.set()
 
 
+@pytest.mark.parametrize("save_failed", [False, True])
+def test_ge_cancel_during_post_save_preserves_real_save_outcome(
+    background_ge_client, save_failed
+):
+    gui, client = background_ge_client
+    pending, release = Event(), Event()
+
+    def save(params):
+        if params["operation_id"] == 104:
+            pending.set()
+            assert release.wait(2)
+            if save_failed:
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": "io_error",
+                        "reason": "save_failed",
+                        "message": "save failed after cancellation",
+                    },
+                }
+        return {"ok": True, "result": gui("tab.save_image", params)}
+
+    client.transport.replies["tab.save_image"] = save
+    try:
+        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        assert pending.wait(1)
+        execution = initial.data["execution"]
+        cancelled = client.call("cancel", {"execution": execution})
+        assert cancelled.data["gui_cancel"]["status"] == "not_cancellable"
+        release.set()
+        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        data = terminal.data
+        assert data["status"] == ("failed" if save_failed else "cancelled"), data
+        assert data["post_analysis"]["save_status"] == (
+            "failed" if save_failed else "saved"
+        )
+        assert data["post_analysis"]["saved_images"] == (
+            []
+            if save_failed
+            else [{"figure_name": "cloud", "image_path": "/actual/cloud.png"}]
+        )
+        assert data["analysis"]["status"] == "finished"
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert len(terminal.images) == 1
+        assert data["post_writeback"] is None
+        assert not any(
+            method in ("tab.get_figure", "tab.writeback_preview", "operation.cancel")
+            and params.get("operation_id") == 104
+            for method, params in client.transport.sent
+        )
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize(
+    "method_pending,operation",
+    [
+        ("tab.writeback_preview", 93),
+        ("tab.post_analyze", None),
+        ("tab.save_image", 104),
+    ],
+)
+def test_ge_close_stops_stage_admission_without_reconnect(
+    background_ge_client, monkeypatch, method_pending, operation
+):
+    gui, client = background_ge_client
+    pending, disconnected = Event(), Event()
+    original_close = client.transport.close
+
+    def respond(params):
+        if operation is None or params.get("operation_id") == operation:
+            pending.set()
+            assert disconnected.wait(2), "Session must disconnect before joining"
+        return {"ok": True, "result": gui(method_pending, params)}
+
+    def disconnect():
+        original_close()
+        disconnected.set()
+
+    client.transport.replies[method_pending] = respond
+    monkeypatch.setattr(client.transport, "close", disconnect)
+    try:
+        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        assert pending.wait(1)
+        before = len(client.transport.sent)
+        client.context.session.close()
+        data = client.call("status", {"execution": initial.data["execution"]})
+        assert data["status"] == "failed", data
+        assert data["phase"] == "terminal"
+        assert data["error"]["reason"] in ("session_closed", "connection_lost")
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["analysis"]["status"] == "finished"
+        assert data["analysis"]["saved_images"] == [
+            {"figure_name": "trace", "image_path": "/actual/trace.png"}
+        ]
+        assert len(client.transport.sent) == before
+        client.context.session.close()
+    finally:
+        disconnected.set()
+
+
 @pytest.mark.parametrize("reuse", [False, True])
 def test_ge_reports_all_missing_calibration_without_running(ge_client, reuse):
     gui, client = ge_client
