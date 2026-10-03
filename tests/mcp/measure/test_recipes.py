@@ -807,10 +807,20 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert actual["cfg_ref"] == gui.publication["cfg_ref"]
         assert actual["fields"]["modules.readout.pulse_cfg.freq"]["value"] == 6020.0
         assert actual["fields"]["modules.readout.ro_cfg.ro_freq"]["value"] == 6020.0
-        assert actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"] == expected[0]
-        assert actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"] == expected[1]
-        assert type(actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"]) is float
-        assert type(actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"]) is float
+        assert (
+            actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"] == expected[0]
+        )
+        assert (
+            actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"]
+            == expected[1]
+        )
+        assert (
+            type(actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"]) is float
+        )
+        assert (
+            type(actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"])
+            is float
+        )
         assert actual["fields"]["rounds"]["value"] == 7
         assert type(actual["fields"]["rounds"]["value"]) is int
         methods = [method for method, _ in client.transport.sent]

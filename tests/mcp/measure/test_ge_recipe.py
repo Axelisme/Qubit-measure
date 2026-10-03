@@ -516,7 +516,10 @@ def test_ge_gui_cfg_rejection_stops_before_run(tmp_path, failure):
 
 @pytest.mark.parametrize(
     "arguments",
-    [{"shots": value} for value in (0, -1, True, 1.0, 2.5, float("inf"), float("nan"), "10")]
+    [
+        {"shots": value}
+        for value in (0, -1, True, 1.0, 2.5, float("inf"), float("nan"), "10")
+    ]
     + [
         {name: value}
         for name in (

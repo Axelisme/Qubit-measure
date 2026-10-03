@@ -82,11 +82,18 @@ class TimeRabiGui(LookbackGui):
 
 
 @pytest.mark.parametrize("number", [1, 1.0])
-def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(tmp_path, number):
+def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
+    tmp_path, number
+):
     with recipe_client(tmp_path, TimeRabiGui({"r_f": 7200.0})) as client:
         data = client.call(
             "time_rabi",
-            {"frequency_mhz": number, "gain": number, "max_length_us": number, "points": 3},
+            {
+                "frequency_mhz": number,
+                "gain": number,
+                "max_length_us": number,
+                "points": 3,
+            },
         ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -104,7 +111,10 @@ def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(tmp_pat
             if method == "tab.edit_cfg"
             for edit in params["edits"]
         }
-        for path in (("modules", "qub_pulse", "freq"), ("modules", "qub_pulse", "gain")):
+        for path in (
+            ("modules", "qub_pulse", "freq"),
+            ("modules", "qub_pulse", "gain"),
+        ):
             assert by_path[path] == 1.0
             assert type(by_path[path]) is float
         assert type(by_path["sweep", "length"]["stop"]) is float
@@ -191,7 +201,9 @@ class AmplitudeRabiGui(TimeRabiGui):
 
 
 @pytest.mark.parametrize("number", [1, 1.0])
-def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(tmp_path, number):
+def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
+    tmp_path, number
+):
     with recipe_client(tmp_path, AmplitudeRabiGui({"r_f": 7200.0})) as client:
         data = client.call(
             "amplitude_rabi",
