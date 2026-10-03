@@ -119,6 +119,85 @@ def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tm
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
 
 
+class AmplitudeRabiGui(TimeRabiGui):
+    def __init__(self, md=None):
+        super().__init__(md)
+        tree = self.publication["tree"]["children"]
+        tree["sweep"] = section(
+            gain={
+                "kind": "sweep",
+                "valid": True,
+                "inputs": {
+                    key: scalar(value)["input"]
+                    for key, value in {"start": -0.2, "stop": 0.7, "expts": 43}.items()
+                },
+            }
+        )
+
+    def _edit(self, params):
+        ordinary = []
+        for edit in params["edits"]:
+            if edit["path"] == ["sweep", "gain"]:
+                inputs = self.publication["tree"]["children"]["sweep"]["children"][
+                    "gain"
+                ]["inputs"]
+                inputs.update(
+                    {
+                        key: scalar(value)["input"]
+                        for key, value in edit["value"].items()
+                    }
+                )
+            else:
+                ordinary.append(edit)
+        super()._edit({**params, "edits": ordinary})
+
+    def __call__(self, method, params):
+        if method == "tab.new":
+            assert params == {"adapter_name": "twotone/rabi/amp_rabi"}
+            return {"tab_id": "t"}
+        result = super().__call__(method, params)
+        if method == "tab.snapshot":
+            result["tabs"][0]["adapter_name"] = "twotone/rabi/amp_rabi"
+        return result
+
+
+def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
+    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "amplitude_rabi",
+            {
+                "frequency_mhz": 6150.0,
+                "pulse_length_us": 0.23,
+                "gain_range": [-0.1, 0.5],
+                "points": 29,
+                "reps": 13,
+                "rounds": 9,
+            },
+        )
+        data = reply.data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["modules.qub_pulse.freq"]["value"] == 6150.0
+        assert fields["modules.qub_pulse.waveform.length"]["value"] == 0.23
+        assert fields["sweep.gain"]["value"] == {
+            "start": -0.1,
+            "stop": 0.5,
+            "expts": 29,
+        }
+        assert fields["reps"]["value"] == 13
+        assert fields["rounds"]["value"] == 9
+        assert fields["modules.reset"]["source"] == "disabled"
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["analysis"]["status"] == "finished"
+        assert data["writeback"]["items"]
+        assert reply.images
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.analyze")
+
+
 class DriveGui(LookbackGui):
     def __init__(self, md=None):
         super().__init__()

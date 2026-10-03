@@ -181,6 +181,11 @@ def _drive_frequency(
     )
 
 
+def amplitude_rabi(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Run one gain sweep without requiring a prior pi calibration."""
+    raise NotImplementedError("Amplitude Rabi is not implemented")
+
+
 def time_rabi(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one length sweep without requiring a prior pi calibration."""
     _validate(arguments)
