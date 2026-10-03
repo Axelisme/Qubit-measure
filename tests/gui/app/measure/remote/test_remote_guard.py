@@ -59,7 +59,8 @@ def fx(qapp):
         yield f
     finally:
         f.stop()
-        f.ctrl._background_svc.quiesce()
+        # tests/README.md requires joining Controller workers before fixture GC.
+        f.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage]
 
 
 pytestmark = pytest.mark.uses_wall_clock
