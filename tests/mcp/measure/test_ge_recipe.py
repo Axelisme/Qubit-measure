@@ -1,12 +1,14 @@
 """GE calibration behavior through shipped tools and the GUI wire boundary."""
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Event
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.measure import tools_recipes
+from zcu_tools.mcp.measure.session import GuiConnection
 
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import make_client
@@ -208,10 +210,18 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
 
 @pytest.mark.parametrize("save_failed", [False, True])
 def test_ge_cancel_during_post_save_preserves_real_save_outcome(
-    background_ge_client, save_failed
+    background_ge_client, monkeypatch, save_failed
 ):
     gui, client = background_ge_client
-    pending, release = Event(), Event()
+    pending, release, intent = Event(), Event(), Event()
+    read_internal = GuiConnection.read_internal
+
+    def read(connection, method, params, **kwargs):
+        if method == "operation.cancel":
+            intent.set()
+        return read_internal(connection, method, params, **kwargs)
+
+    monkeypatch.setattr(GuiConnection, "read_internal", read)
 
     def save(params):
         if params["operation_id"] == 104:
@@ -229,18 +239,30 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
         return {"ok": True, "result": gui("tab.save_image", params)}
 
     client.transport.replies["tab.save_image"] = save
+    client.transport.replies["operation.cancel"] = {
+        "ok": True,
+        "result": {"status": "finished"},
+    }
     try:
         initial = client.call("singleshot_ge", {"pi_ref": "pi"})
         assert pending.wait(1)
         execution = initial.data["execution"]
-        cancelled = client.call("cancel", {"execution": execution})
-        assert cancelled.data["gui_cancel"]["status"] == "not_cancellable"
-        release.set()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            request = pool.submit(client.call, "cancel", {"execution": execution})
+            try:
+                assert intent.wait(1)
+                assert client.call("status", {"execution": execution})[
+                    "cancel_requested"
+                ]
+            finally:
+                release.set()
+            cancelled = request.result(timeout=2)
+        assert cancelled.data["cancel_requested"]
         terminal = client.call("wait", {"execution": execution, "timeout": 2})
         data = terminal.data
         assert data["status"] == ("failed" if save_failed else "cancelled"), data
         assert data["post_analysis"]["save_status"] == (
-            "failed" if save_failed else "saved"
+            "incomplete" if save_failed else "saved"
         )
         assert data["post_analysis"]["saved_images"] == (
             []
@@ -252,7 +274,7 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
         assert len(terminal.images) == 1
         assert data["post_writeback"] is None
         assert not any(
-            method in ("tab.get_figure", "tab.writeback_preview", "operation.cancel")
+            method in ("tab.get_figure", "tab.writeback_preview")
             and params.get("operation_id") == 104
             for method, params in client.transport.sent
         )
