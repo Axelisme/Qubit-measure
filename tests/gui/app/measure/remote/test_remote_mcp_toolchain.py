@@ -30,7 +30,7 @@ from zcu_tools.gui.app.measure.services.ports import (
     SaveDataSubmission,
     SaveDestination,
 )
-from zcu_tools.gui.result_scope import ResultScopeError
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
@@ -1450,13 +1450,14 @@ def test_post_control_rejects_replaced_source_without_starting(fx, source):
             == "finished"
         )
         before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
-        with pytest.raises(ResultScopeError, match="superseded"):
+        with pytest.raises(FailedPreconditionError) as rejected:
             fx.ctrl.run_analyze_control.start_post_analyze(
                 tab,
                 FakeAnalyzeParams(),
                 operation_id=primary + 1000 if source == "primary" else primary,
                 run_operation_id=run + 1000 if source == "run" else run,
             )
+        assert rejected.value.reason_code == "result_superseded"
         assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
 
 
