@@ -1387,7 +1387,7 @@ def test_sweep_edge_decoration_disables_only_that_edge(qapp, ctrl):
 
         value = form.read_values().fields["window"]
         assert isinstance(value, SweepValue)
-        assert value.start == 2.5
+        assert isinstance(value.start, DirectValue) and value.start.value == 2.5
         assert value.stop == 10.0
         assert value.expts == 21
     finally:
