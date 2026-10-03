@@ -81,6 +81,14 @@ class GroupedDocument(SyntheticDocument):
     groups: dict[str, OptionalGeneral]
 
 
+class SequencedGroupsDocument(SyntheticDocument):
+    groups: list[OptionalGeneral]
+
+
+class NullableGeneralDocument(SyntheticDocument):
+    general: OptionalGeneral | None = None
+
+
 class KnownValues(BaseModel):
     model_config = ConfigDict(extra="forbid")
     left: float = Field(ge=0)
@@ -133,6 +141,14 @@ def make_defaulted_store(path: Path) -> DocumentStore[DefaultedDocument]:
 
 def make_grouped_store(path: Path) -> DocumentStore[GroupedDocument]:
     return DocumentStore(path, GroupedDocument, format="synthetic")
+
+
+def make_sequenced_groups_store(path: Path) -> DocumentStore[SequencedGroupsDocument]:
+    return DocumentStore(path, SequencedGroupsDocument, format="synthetic")
+
+
+def make_nullable_general_store(path: Path) -> DocumentStore[NullableGeneralDocument]:
+    return DocumentStore(path, NullableGeneralDocument, format="synthetic")
 
 
 def make_strict_sequence_store(path: Path) -> DocumentStore[StrictSequenceDocument]:
@@ -689,6 +705,70 @@ def test_new_typed_mapping_child_keeps_in_place_default_container_edits(
     assert reopened.values["right"] == 20.0
     persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
     assert persisted["groups"]["Q1"] == {"ext": {"calibration": 7.0}}
+
+
+def test_appended_typed_child_keeps_default_container_edits_and_explicit_null(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        document_path.read_text(encoding="utf-8") + "groups: []\n",
+        encoding="utf-8",
+    )
+    store = make_sequenced_groups_store(document_path)
+    with store.edit() as draft:
+        child = OptionalGeneral(description=None)
+        child.ext["calibration"] = 7.0
+        draft.groups.append(child)
+
+    assert store.snapshot().groups[0].ext == {"calibration": 7.0}
+    reopened = make_sequenced_groups_store(document_path).snapshot()
+    assert reopened.groups[0].ext == {"calibration": 7.0}
+    assert "description" in reopened.groups[0].model_fields_set
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert persisted["groups"] == [
+        {"description": None, "ext": {"calibration": 7.0}}
+    ]
+
+
+@pytest.mark.parametrize("null_present", [False, True])
+def test_replacing_missing_or_null_child_keeps_default_container_edits(
+    document_path: Path, null_present: bool,
+) -> None:
+    if null_present:
+        document_path.write_text(
+            document_path.read_text(encoding="utf-8") + "general: null\n",
+            encoding="utf-8",
+        )
+    store = make_nullable_general_store(document_path)
+    with store.edit() as draft:
+        draft.general = OptionalGeneral()
+        draft.general.ext["calibration"] = 7.0
+
+    assert store.snapshot().general == OptionalGeneral(ext={"calibration": 7.0})
+    assert make_nullable_general_store(document_path).snapshot().general == OptionalGeneral(
+        ext={"calibration": 7.0}
+    )
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert persisted["general"] == {"ext": {"calibration": 7.0}}
+
+
+def test_unchanged_defaults_of_existing_typed_mapping_child_do_not_materialize(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        document_path.read_text(encoding="utf-8") + "groups:\n  Q1: {}\n",
+        encoding="utf-8",
+    )
+    store = make_grouped_store(document_path)
+    before = document_path.read_bytes()
+    with store.edit():
+        pass
+    assert document_path.read_bytes() == before
+    with store.edit() as draft:
+        draft.values["right"] = 20.0
+    assert make_grouped_store(document_path).snapshot().values["right"] == 20.0
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert persisted["groups"]["Q1"] == {}
 
 
 def test_explicit_null_of_missing_typed_field_conflicts_with_concurrent_value(
