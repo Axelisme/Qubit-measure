@@ -1,9 +1,11 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from zcu_tools.format_version import (
     FormatError,
     FormatVersion,
+    MigrationError,
     MigrationRegistry,
     VersionError,
     YamlMap,
@@ -158,3 +160,75 @@ def test_migration_applies_registered_chain_across_major_without_mutating_input(
     assert result["future"] == {"nested": [1, "retained"]}
     assert document["format_version"] == "1.0"
     assert document["visited"] == []
+
+
+def migration_to(version: FormatVersion) -> Callable[[YamlMap], YamlMap]:
+    def step(document: YamlMap) -> YamlMap:
+        document["format_version"] = f"{version.major}.{version.minor}"
+        return document
+
+    return step
+
+
+@pytest.mark.parametrize(
+    "existing, start, end",
+    [
+        (
+            [(FormatVersion(1, 0), FormatVersion(1, 1))],
+            FormatVersion(1, 0),
+            FormatVersion(2, 0),
+        ),
+        ([], FormatVersion(2, 0), FormatVersion(1, 0)),
+        ([], FormatVersion(1, 0), FormatVersion(1, 0)),
+        (
+            [(FormatVersion(1, 1), FormatVersion(2, 0))],
+            FormatVersion(1, 0),
+            FormatVersion(2, 0),
+        ),
+        (
+            [(FormatVersion(1, 0), FormatVersion(2, 0))],
+            FormatVersion(1, 1),
+            FormatVersion(2, 0),
+        ),
+        (
+            [(FormatVersion(1, 0), FormatVersion(2, 0))],
+            FormatVersion(0, 0),
+            FormatVersion(1, 1),
+        ),
+    ],
+    ids=[
+        "duplicate-start",
+        "backward",
+        "same-version",
+        "skip-known",
+        "insert-skipped",
+        "insert-skipped-end",
+    ],
+)
+def test_registry_rejects_invalid_chain_registration(
+    existing: list[tuple[FormatVersion, FormatVersion]],
+    start: FormatVersion,
+    end: FormatVersion,
+) -> None:
+    registry = MigrationRegistry()
+    for edge_start, edge_end in existing:
+        registry.register("zcu.synthetic", edge_start, edge_end, migration_to(edge_end))
+
+    with pytest.raises(MigrationError) as caught:
+        registry.register("zcu.synthetic", start, end, migration_to(end))
+
+    assert caught.value.format == "zcu.synthetic"
+    assert caught.value.from_version == start
+    assert caught.value.target_version == end
+    assert caught.value.detail
+    for edge_start, edge_end in existing:
+        result = registry.migrate(
+            {
+                "format": "zcu.synthetic",
+                "format_version": f"{edge_start.major}.{edge_start.minor}",
+            },
+            format="zcu.synthetic",
+            target_version=edge_end,
+            source=Path("entry/setup.yaml"),
+        )
+        assert result["format_version"] == f"{edge_end.major}.{edge_end.minor}"
