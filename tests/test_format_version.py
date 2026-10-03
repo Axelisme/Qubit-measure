@@ -4,6 +4,7 @@ import pytest
 from zcu_tools.format_version import (
     FormatError,
     FormatVersion,
+    MigrationRegistry,
     VersionError,
     YamlMap,
     YamlValue,
@@ -88,3 +89,26 @@ def test_header_rejects_malformed_version(raw_version: YamlValue) -> None:
 def test_version_components_are_non_negative_integers(major: int, minor: int) -> None:
     with pytest.raises(ValueError, match="non-negative integer"):
         FormatVersion(major, minor)
+
+
+def test_migration_same_version_returns_independent_document() -> None:
+    document: YamlMap = {
+        "format": "zcu.synthetic",
+        "format_version": "1.7",
+        "future": {"nested": [1, "retained"]},
+    }
+
+    result = MigrationRegistry().migrate(
+        document,
+        format="zcu.synthetic",
+        target_version=FormatVersion(1, 7),
+        source=Path("entry/setup.yaml"),
+    )
+
+    assert result == document
+    future = result["future"]
+    if not isinstance(future, dict):
+        pytest.fail("future field must remain a mapping")
+    future["nested"] = ["changed"]
+    assert document["future"] == {"nested": [1, "retained"]}
+    assert result["format_version"] == "1.7"
