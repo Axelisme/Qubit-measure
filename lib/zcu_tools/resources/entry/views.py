@@ -161,7 +161,9 @@ class SetupView:
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         validate_component_name(name, source=self._source)
-        model = component_registry.get(kind, source=self._source, component=name)
+        model = component_registry.partial_model(
+            kind, source=self._source, component=name
+        )
         component_registry.check_fields(kind, fields, path=name)
         with self._store.edit() as draft:
             if name in draft.components:

@@ -116,7 +116,7 @@ class SetupDocument(BaseModel):
         for name, fields in components.items():
             kind = fields.get("kind")
             model = (
-                component_registry.get(kind)
+                component_registry.partial_model(kind)
                 if isinstance(kind, str)
                 else ComponentSchema
             )

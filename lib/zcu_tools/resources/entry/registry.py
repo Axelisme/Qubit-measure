@@ -1,12 +1,14 @@
 """Component model declarations, independent of experiment definitions."""
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from difflib import get_close_matches
 from pathlib import Path
 from types import UnionType
 from typing import Union, get_args, get_origin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
+from pydantic.fields import FieldInfo
 
 from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
@@ -34,6 +36,21 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
             for path, spec in _model_units(annotation).items():
                 result[(name, *path)] = spec
     return result
+
+
+def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
+    fields: dict[str, tuple[object, FieldInfo]] = {}
+    for name, field in model.model_fields.items():
+        if name != "kind" and field.is_required():
+            partial_field = deepcopy(field)
+            # Missing values remain outside model_fields_set and serialized patches.
+            # Supplied values still use the original non-nullable annotation.
+            partial_field.default = None
+            partial_field.validate_default = False
+            fields[name] = (field.annotation, partial_field)
+    if not fields:
+        return model
+    return create_model(f"{model.__name__}Partial", __base__=model, **fields)
 
 
 def _validate_component_model(model: object) -> None:
@@ -69,6 +86,7 @@ class ComponentRegistry:
         self._models: dict[str, type[ComponentSchema]] = {}
         self._references: dict[str, tuple[str, ...]] = {}
         self._units: dict[str, dict[FieldPath, UnitSpec]] = {}
+        self._partial_models: dict[str, type[ComponentSchema]] = {}
 
     def register(
         self, kind: str, model: type[ComponentSchema], *, references: Sequence[str] = ()
@@ -80,14 +98,17 @@ class ComponentRegistry:
         for reference in reference_paths:
             _validate_reference(model, reference)
         units = _model_units(model)
+        partial_model = _partial_model(model)
         self._models[kind] = model
         self._references[kind] = reference_paths
         self._units[kind] = units
+        self._partial_models[kind] = partial_model
 
     def unregister(self, kind: str) -> None:
         del self._models[kind]
         del self._references[kind]
         del self._units[kind]
+        del self._partial_models[kind]
 
     def get(
         self, kind: str, *, source: Path | None = None, component: str | None = None
@@ -98,6 +119,13 @@ class ComponentRegistry:
             raise UnknownKindError(
                 source, component, kind, tuple(get_close_matches(kind, self._models))
             ) from cause
+
+    def partial_model(
+        self, kind: str, *, source: Path | None = None, component: str | None = None
+    ) -> type[ComponentSchema]:
+        """Validate supplied setup values while deferring required-field completeness."""
+        self.get(kind, source=source, component=component)
+        return self._partial_models[kind]
 
     def check_fields(
         self, kind: str | type[BaseModel], fields: Mapping[str, object], *, path: str
