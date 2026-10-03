@@ -385,3 +385,33 @@ def test_yaml_writeback_preserves_newer_minor_unknown_fields_and_source(
         "format_version": "1.7",
         "future": {"nested": [1, "retained"]},
     }
+
+
+@pytest.mark.parametrize("destination_kind", ["existing", "source", "source-alias"])
+def test_yaml_migration_refuses_existing_or_source_destination(
+    tmp_path: Path,
+    destination_kind: str,
+) -> None:
+    source = tmp_path / "source.yaml"
+    original = "format: zcu.synthetic\nformat_version: '1.0'\n"
+    source.write_text(original, encoding="utf-8")
+    destination = tmp_path / "destination.yaml"
+    if destination_kind == "existing":
+        destination.write_text("retained destination\n", encoding="utf-8")
+    elif destination_kind == "source":
+        destination = source
+    else:
+        destination.symlink_to(source)
+    destination_original = destination.read_bytes()
+
+    with pytest.raises(FileExistsError) as caught:
+        MigrationRegistry().migrate_yaml(
+            source,
+            destination,
+            format="zcu.synthetic",
+            target_version=FormatVersion(1, 0),
+        )
+
+    assert caught.value.filename == str(destination)
+    assert source.read_text(encoding="utf-8") == original
+    assert destination.read_bytes() == destination_original
