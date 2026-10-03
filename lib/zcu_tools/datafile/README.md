@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-09-27 — module relocation
+**Last updated:** 2026-10-04
 
 
 `zcu_tools.datafile` 是 Labber-style experiment data file 的 public
@@ -34,18 +34,15 @@ facade。caller 優先從 package root import model 與 function。
   payload；`datafile` 不反向依賴 experiment Result 或 cfg。
 - Save helpers 寫入 caller 傳入的 formatted path；既有目的地 fast-fail，不自動
   suffix 或覆寫。
-- Path helpers（`format_ext`、`reserve_labber_filepath`、datafolder helpers）與
-  HTTP transport helpers 由 facade re-export；`reserve_labber_filepath` 只供 caller
-  / orchestration layer 預先決定 unique final path。
+- Path helpers（`format_ext`、`reserve_labber_filepath`、datafolder helpers）由
+  facade re-export；`reserve_labber_filepath` 只供 caller / orchestration layer
+  預先決定 unique final path。
 - `format_ext` / `remove_ext` 只處理檔名 suffix，不改路徑中段的 `.h5` /
   `.hdf5` 子串；`reserve_labber_filepath` 保留 Labber-style numeric sequence，
   但孤立的數字尾碼可作為 caller 命名的一部分。
-- HTTP transport helper 失敗時 raise，不回傳 bool；caller 要在成功回傳後才移除
-  local file。
 
 `datafile/` 內部 module 是責任拆分，不是額外 public import path。
 
 datafile 只負責資料檔格式、讀寫及 streaming；Result 與 axes mapping 屬於
 `zcu_tools.experiment.axes_spec` 所在的 experiment 層，artifact policy 屬
-workflow，路徑意圖由 caller 決定。`transport.py` 是資料檔傳輸 helper，
-不屬於 GUI RPC。
+workflow，路徑意圖由 caller 決定。
