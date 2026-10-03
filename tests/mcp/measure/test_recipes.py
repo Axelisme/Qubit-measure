@@ -247,10 +247,8 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     assert not caller.is_alive()
 
 
-@pytest.mark.parametrize("handoff_failure", [None, "png", "query", "replaced"])
-def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
-    tmp_path, handoff_failure
-):
+@pytest.fixture
+def interactive_recipe(tmp_path, handoff_failure):
     gui = LookbackGui()
     done = Event()
     writeback_read = Event()
@@ -302,45 +300,53 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
 
         client.transport.replies["tab.interact"] = reject_initial_query
     try:
-        handoff = client.call("lookback", {"frequency_mhz": 6020.0})
-        assert handoff.data["status"] == "interactive"
-        assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
-        assert handoff.data["analysis"]["op"] == handoff.data["op"]
-        interaction = handoff.data["analysis"]["interaction"]
-        assert interaction is not None
-        if handoff_failure:
-            assert handoff.is_error
-            assert interaction["delivery_error"]
-            assert interaction["figure"] is None
-            assert not handoff.images
-        else:
-            assert not handoff.is_error
-            assert handoff.images[0].data == _PNG
-            assert Path(interaction["figure"]).read_bytes() == _PNG
-        if handoff_failure not in ("query", "replaced"):
-            assert interaction["state"] == {"offset": 0.24}
-            assert interaction["commands"] == [{"name": "done"}]
-        analysis_execution = handoff.data["analysis"]["execution"]
-        execution = handoff.data["execution"]
-        read = client.call("tab_interact", {"tab": "t"})
-        assert read.data["prompt"] == "Confirm offset"
-        assert read.images[0].data == _PNG
-        finished_analysis = client.call(
-            "tab_interact", {"tab": "t", "payload": {"command": "done"}}
-        )
-        assert finished_analysis.data["status"] == "finished"
-        assert writeback_read.wait(2), "Recipe must resume after interactive analysis"
-        finished = client.call("wait", {"execution": execution, "timeout": 2})
-        assert finished.data["status"] == "finished", finished.data
-        assert finished.data["analysis"]["execution"] == analysis_execution
-        assert read.data["execution"] == analysis_execution
-        assert finished.data["writeback"]["has_draft"]
-        assert finished.images[0].data == _PNG
-        methods = [method for method, _ in client.transport.sent]
-        assert methods.count("tab.run_start") == methods.count("tab.analyze") == 1
+        yield client, writeback_read
     finally:
         done.set()
         client.context.session.close()
+
+
+@pytest.mark.parametrize("handoff_failure", [None, "png", "query", "replaced"])
+def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
+    interactive_recipe, handoff_failure
+):
+    client, writeback_read = interactive_recipe
+    handoff = client.call("lookback", {"frequency_mhz": 6020.0})
+    assert handoff.data["status"] == "interactive"
+    assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
+    assert handoff.data["analysis"]["op"] == handoff.data["op"]
+    interaction = handoff.data["analysis"]["interaction"]
+    assert interaction is not None
+    if handoff_failure:
+        assert handoff.is_error
+        assert interaction["delivery_error"]
+        assert interaction["figure"] is None
+        assert not handoff.images
+    else:
+        assert not handoff.is_error
+        assert handoff.images[0].data == _PNG
+        assert Path(interaction["figure"]).read_bytes() == _PNG
+    if handoff_failure not in ("query", "replaced"):
+        assert interaction["state"] == {"offset": 0.24}
+        assert interaction["commands"] == [{"name": "done"}]
+    analysis_execution = handoff.data["analysis"]["execution"]
+    execution = handoff.data["execution"]
+    read = client.call("tab_interact", {"tab": "t"})
+    assert read.data["prompt"] == "Confirm offset"
+    assert read.images[0].data == _PNG
+    finished_analysis = client.call(
+        "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+    )
+    assert finished_analysis.data["status"] == "finished"
+    assert writeback_read.wait(2), "Recipe must resume after interactive analysis"
+    finished = client.call("wait", {"execution": execution, "timeout": 2})
+    assert finished.data["status"] == "finished", finished.data
+    assert finished.data["analysis"]["execution"] == analysis_execution
+    assert read.data["execution"] == analysis_execution
+    assert finished.data["writeback"]["has_draft"]
+    assert finished.images[0].data == _PNG
+    methods = [method for method, _ in client.transport.sent]
+    assert methods.count("tab.run_start") == methods.count("tab.analyze") == 1
 
 
 @pytest.mark.parametrize("held_op", [71, 82, 93])
