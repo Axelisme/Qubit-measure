@@ -77,7 +77,7 @@ RECIPES = (
     ),
     RecipeDefinition(
         name="onetone_spectrum_over_flux",
-        description="Diagnose missing flux survey inputs; execution is not implemented yet.",
+        description="Run one frequency/physical-flux survey, save raw and Primary analysis.",
         input_schema={
             "type": "object",
             "additionalProperties": False,

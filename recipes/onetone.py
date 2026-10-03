@@ -91,16 +91,10 @@ def _frequency(
     }, missing
 
 
-def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
-    """Diagnose missing survey inputs; execution is not implemented yet."""
-    _validate(arguments)
-    sources = ctx.rpc("context.snapshot", {})
-    publication = ctx.prepare_tab("onetone/flux_dep", arguments.get("reuse_tab_id"))
-    _, missing = _frequency(
-        publication,
-        {**arguments, "points": arguments.get("freq_points")},
-        sources["md"],
-    )
+def _flux_device(
+    ctx: RecipeContext, arguments: dict[str, Any], missing: list[MissingParameter]
+) -> tuple[str | None, str | None]:
+    unit: str | None = None
     device = arguments.get("flux_device")
     if device is None:
         values = ctx.rpc("value.list", {})["values"]
@@ -121,6 +115,21 @@ def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) ->
             missing.append(
                 MissingParameter("flux_device", "Flux device has no physical unit")
             )
+    return device if isinstance(device, str) else None, unit
+
+
+def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Run one frequency/physical-flux survey with Primary analysis."""
+    _validate(arguments)
+    sources = ctx.rpc("context.snapshot", {})
+    publication = ctx.prepare_tab("onetone/flux_dep", arguments.get("reuse_tab_id"))
+    publication = _select_readout(ctx, publication, arguments)
+    frequency, missing = _frequency(
+        publication,
+        {**arguments, "points": arguments.get("freq_points")},
+        sources["md"],
+    )
+    device, unit = _flux_device(ctx, arguments, missing)
     md = sources["md"]
     if arguments.get("flux_range") is None and (
         not _finite(md.get("flx_half"))
@@ -130,10 +139,64 @@ def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) ->
         missing.append(
             MissingParameter("flux_range", "No distinct calibrated flux endpoints")
         )
+    flux: dict[str, Any] = {}
+    if not any(item.parameter == "flux_range" for item in missing):
+        inputs = _node(publication, "sweep", "flux")["inputs"]
+        explicit_range = arguments.get("flux_range")
+        if explicit_range is None:
+            edges = [inputs[key] for key in ("start", "stop")]
+            if any(
+                edge["mode"] != "expression"
+                or set(re.findall(r"\bflx_(?:half|int)\b", edge["raw"]))
+                != {"flx_half", "flx_int"}
+                for edge in edges
+            ):
+                missing.append(
+                    MissingParameter("flux_range", "No GUI calibration-derived range")
+                )
+            flux = {key: _input_value(inputs[key]) for key in ("start", "stop")}
+        else:
+            flux = dict(zip(("start", "stop"), explicit_range, strict=True))
+        flux["expts"] = (
+            arguments["flux_points"]
+            if arguments.get("flux_points") is not None
+            else _input_value(inputs["expts"])
+        )
     if missing:
         ctx.needs_parameters(missing)
         return
-    raise NotImplementedError("Onetone flux Run preparation is not implemented")
+    publication = ctx.edit_cfg(
+        publication,
+        [
+            {"path": ["sweep", "freq"], "value": frequency},
+            {"path": ["sweep", "flux"], "value": flux},
+            {"path": ["dev", "flux_dev"], "value": device},
+            *_scalar_edits(arguments),
+        ],
+    )
+    fields = _actual_fields(publication, arguments)
+    inputs = _node(publication, "sweep", "flux")["inputs"]
+    values = {key: inputs[key]["resolved"] for key in ("start", "stop", "expts")}
+    if (
+        not all(_finite(values[key]) for key in ("start", "stop"))
+        or values["start"] == values["stop"]
+    ):
+        raise GuiRpcError("Invalid resolved flux range", reason="invalid_cfg")
+    fields["sweep.flux"] = {
+        "value": values,
+        "input": inputs,
+        "source": "explicit"
+        if arguments.get("flux_range") is not None
+        else "gui_calibration",
+    }
+    fields["dev.flux_dev"] = {
+        "value": _node(publication, "dev", "flux_dev")["input"]["resolved"],
+        "unit": unit,
+        "source": "explicit"
+        if arguments.get("flux_device") is not None
+        else "device.flux.name",
+    }
+    ctx.run_once(publication, fields)
 
 
 def _select_readout(

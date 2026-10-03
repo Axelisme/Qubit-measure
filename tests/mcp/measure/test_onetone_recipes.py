@@ -203,7 +203,8 @@ class FluxGui(OnetoneGui):
         root = self.publication["tree"]["children"]
         root["dev"] = section(flux_dev=scalar("flux_yoko"))
         root["sweep"]["children"]["flux"] = {
-            "kind": "sweep", "valid": True,
+            "kind": "sweep",
+            "valid": True,
             "inputs": {
                 "start": self.input("2 * flx_int - flx_half"),
                 "stop": self.input("2 * flx_half - flx_int"),
@@ -222,19 +223,34 @@ class FluxGui(OnetoneGui):
             return {"devices": [{"name": "coil"}, {"name": "alternate"}]}
         if method == "device.snapshot":
             assert params["name"] in ("coil", "alternate")
-            return {"snapshot": {"name": params["name"], "unit": "A" if params["name"] == "coil" else "V"}}
+            return {
+                "snapshot": {
+                    "name": params["name"],
+                    "unit": "A" if params["name"] == "coil" else "V",
+                }
+            }
         return super().__call__(method, params)
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(tmp_path, explicit):
+def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
+    tmp_path, explicit
+):
     gui = FluxGui()
     arguments = {
-        "readout_ref": "calibrated", "freq_points": 31,
-        "reps": 23, "rounds": 7, "gain": 0.13,
+        "readout_ref": "calibrated",
+        "freq_points": 31,
+        "reps": 23,
+        "rounds": 7,
+        "gain": 0.13,
     }
     if explicit:
-        arguments.update(reuse_tab_id="t", flux_device="alternate", flux_range=[-0.003, 0.007], flux_points=11)
+        arguments.update(
+            reuse_tab_id="t",
+            flux_device="alternate",
+            flux_range=[-0.003, 0.007],
+            flux_points=11,
+        )
     with recipe_client(tmp_path, gui) as client:
         reply = client.call("onetone_spectrum_over_flux", arguments)
         assert isinstance(reply, ToolReply)
@@ -251,7 +267,9 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(tmp_pa
             "stop": 0.007 if explicit else -0.001,
             "expts": 11 if explicit else 19,
         }
-        assert fields["sweep.flux"]["source"] == ("explicit" if explicit else "gui_calibration")
+        assert fields["sweep.flux"]["source"] == (
+            "explicit" if explicit else "gui_calibration"
+        )
         assert fields["sweep.freq"]["value"]["expts"] == 31
         assert fields["modules.readout"]["value"] == "calibrated"
         assert fields["modules.readout.pulse_cfg.gain"]["value"] == 0.13
