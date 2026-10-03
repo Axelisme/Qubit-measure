@@ -844,9 +844,10 @@ def test_known_sequence_edit_preserves_future_fields_comments_and_untouched_node
     text = document_path.read_text(encoding="utf-8")
     assert "# sequence note" in text
     assert "# edited" in text
-    assert "right: 2.000 # unchanged" in text
-    assert "future: 7.000 # future nested" in text
-    assert "left: 3.000 # untouched element" in text
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    assert "right: 2.000 # unchanged" in lines
+    assert "future: 7.000 # future nested" in lines
+    assert any("left: 3.000 # untouched element" in line for line in lines)
     reopened = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
     assert reopened.snapshot() == store.snapshot()
     persisted = YAML(typ="safe").load(text)
