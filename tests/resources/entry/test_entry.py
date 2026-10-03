@@ -4,8 +4,34 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
+import pytest
 from ruamel.yaml import YAML
 from zcu_tools.resources.entry import ResultEntry
+
+
+@pytest.fixture
+def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
+    return tmp_path / "results", tmp_path / "Database"
+
+
+@pytest.mark.parametrize("missing", ["database", "setup.yaml", "points", "records"])
+def test_open_rejects_incomplete_entry_with_actual_missing_path(
+    entry_roots: tuple[Path, Path], missing: str
+) -> None:
+    results, database = entry_roots
+    ResultEntry.create("entry", result_root=results, database_root=database)
+    missing_path = (
+        database / "entry" if missing == "database" else results / "entry" / missing
+    )
+    if missing_path.is_dir():
+        missing_path.rmdir()
+    else:
+        missing_path.unlink()
+
+    with pytest.raises(FileNotFoundError) as failure:
+        ResultEntry.open("entry", result_root=results, database_root=database)
+
+    assert failure.value.filename == str(missing_path)
 
 
 def test_open_reads_existing_identity_without_rewriting_setup(tmp_path: Path) -> None:
