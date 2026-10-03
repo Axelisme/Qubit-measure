@@ -163,7 +163,7 @@ class AmplitudeRabiGui(TimeRabiGui):
 
 @pytest.mark.parametrize("number", [1, 1.0])
 def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(tmp_path, number):
-    with recipe_client(tmp_path, AmplitudeRabiGui()) as client:
+    with recipe_client(tmp_path, AmplitudeRabiGui({"r_f": 7200.0})) as client:
         data = client.call(
             "amplitude_rabi",
             {
