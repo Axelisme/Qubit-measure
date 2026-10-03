@@ -36,18 +36,24 @@ class OnetoneGui(LookbackGui):
         if not isinstance(value, str):
             return scalar(value)["input"]
         return {
-            "mode": "expression", "raw": value,
+            "mode": "expression",
+            "raw": value,
             "resolved": simple_eval(value, names=self.md),
-            "error": None, "validation_error": None,
+            "error": None,
+            "validation_error": None,
         }
 
     def _edit(self, params):
         ordinary = []
         for edit in params["edits"]:
             if edit["path"] == ["sweep", "freq"]:
-                inputs = self.publication["tree"]["children"]["sweep"]["children"]["freq"]["inputs"]
+                inputs = self.publication["tree"]["children"]["sweep"]["children"][
+                    "freq"
+                ]["inputs"]
                 for key, value in edit["value"].items():
-                    inputs[key] = self.input(value["__expr"] if isinstance(value, dict) else value)
+                    inputs[key] = self.input(
+                        value["__expr"] if isinstance(value, dict) else value
+                    )
             else:
                 ordinary.append(edit)
         super()._edit({**params, "edits": ordinary})
@@ -87,9 +93,30 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
     "md, arguments, start, stop, center_source, span_source",
     [
         ({"r_f": 6100.0, "rf_w": 4.0}, {}, 6090.0, 6110.0, "r_f", "gui_linewidth"),
-        ({}, {"center_mhz": 6200.0, "span_mhz": 16.0}, 6192.0, 6208.0, "explicit", "explicit"),
-        ({"r_f": 6100.0, "rf_w": 4.0}, {"center_mhz": 6200.0}, 6190.0, 6210.0, "explicit", "gui_linewidth"),
-        ({"r_f": 6100.0, "rf_w": 4.0}, {"span_mhz": 8.0}, 6096.0, 6104.0, "r_f", "explicit"),
+        (
+            {},
+            {"center_mhz": 6200.0, "span_mhz": 16.0},
+            6192.0,
+            6208.0,
+            "explicit",
+            "explicit",
+        ),
+        (
+            {"r_f": 6100.0, "rf_w": 4.0},
+            {"center_mhz": 6200.0},
+            6190.0,
+            6210.0,
+            "explicit",
+            "gui_linewidth",
+        ),
+        (
+            {"r_f": 6100.0, "rf_w": 4.0},
+            {"span_mhz": 8.0},
+            6096.0,
+            6104.0,
+            "r_f",
+            "explicit",
+        ),
     ],
 )
 def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
@@ -105,7 +132,11 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         assert data["status"] == "finished", data
         assert not reply.is_error
         fields = data["actual"]["fields"]
-        assert fields["sweep.freq"]["value"] == {"start": start, "stop": stop, "expts": 41}
+        assert fields["sweep.freq"]["value"] == {
+            "start": start,
+            "stop": stop,
+            "expts": 41,
+        }
         assert fields["center_mhz"]["source"] == center_source
         assert fields["span_mhz"]["source"] == span_source
         assert fields["reps"]["value"] == 17
@@ -121,4 +152,3 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
     finally:
         client.context.session.close()
-
