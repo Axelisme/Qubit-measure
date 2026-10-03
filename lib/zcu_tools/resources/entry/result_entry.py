@@ -40,6 +40,11 @@ def rename_entry(
     result_new = _entry_path(result_root, new)
     database_new = _entry_path(database_root, new)
     ResultEntry.open(old, result_root=result_root, database_root=database_root)
+    for destination in (result_new, database_new):
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(
+                errno.EEXIST, os.strerror(errno.EEXIST), str(destination)
+            )
     result_old.rename(result_new)
     database_old.rename(database_new)
 
