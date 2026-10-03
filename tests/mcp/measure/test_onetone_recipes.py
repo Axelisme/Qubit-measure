@@ -11,7 +11,9 @@ class OnetoneGui(LookbackGui):
     def __init__(self):
         super().__init__()
         self.publication["tree"]["children"]["sweep"] = _section(
-            freq=_section(start=_scalar(4500.0), stop=_scalar(5500.0), expts=_scalar(41))
+            freq=_section(
+                start=_scalar(4500.0), stop=_scalar(5500.0), expts=_scalar(41)
+            )
         )
 
     def __call__(self, method, params):
@@ -33,7 +35,8 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters"
         assert {item["parameter"] for item in reply.data["missing"]} == {
-            "center_mhz", "span_mhz"
+            "center_mhz",
+            "span_mhz",
         }
         assert not reply.is_error
         assert not gui.ran

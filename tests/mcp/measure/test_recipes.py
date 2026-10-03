@@ -12,9 +12,8 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
-from ._support import make_client
-
 from ._recipe_support import _PNG, LookbackGui, _scalar
+from ._support import make_client
 
 
 def test_lookback_initial_wait_returns_while_the_same_execution_continues(
