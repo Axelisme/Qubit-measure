@@ -177,7 +177,7 @@ class DocumentStore[T: BaseModel]:
                 for path, _ in patches:
                     original = _lookup(base_document, path)
                     current = _lookup(document, path)
-                    if original != current:
+                    if not _same_value(original, current):
                         raise ConflictError(self._path, path, original, current)
                 units = self._unit_specs(document)
                 for path, value in patches:
