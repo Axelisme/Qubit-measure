@@ -129,7 +129,13 @@ def validate_params(
     out: dict[str, object] = {}
     for spec in specs:
         present = spec.name in params
-        out[spec.name] = spec._coerce(present, params.get(spec.name))
+        value = spec._coerce(present, params.get(spec.name))
+        if spec.enum is not None and value is not None and value not in spec.enum:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be one of {spec.enum!r}",
+            )
+        out[spec.name] = value
     return out
 
 
