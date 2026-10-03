@@ -824,6 +824,40 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
 
 
 @pytest.mark.parametrize("reuse", [False, True])
+@pytest.mark.parametrize("replacement_source", [99, None])
+@pytest.mark.parametrize("available", [False, True])
+def test_lookback_rejects_a_post_run_snapshot_from_another_source(
+    tmp_path, replacement_source, available
+):
+    gui = LookbackGui()
+
+    def respond(method, params):
+        reply = gui(method, params)
+        if method == "tab.snapshot" and gui.ran:
+            reply["tabs"][0]["result_state"] = {
+                "available": available,
+                "revision": 99,
+                "source_operation_id": replacement_source,
+            }
+        return reply
+
+    client = make_client(tmp_path, respond)
+    try:
+        reply = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert reply.is_error
+        assert reply.data["status"] == "failed"
+        assert reply.data["error"]["reason"] == "result_superseded"
+        assert reply.data["run_outcome"]["status"] == "finished"
+        assert reply.data["result_state"] is None
+        assert reply.data["raw_save"]["status"] == "not_started"
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert "tab.save_data" not in methods
+        assert "tab.analyze" not in methods
+    finally:
+        client.context.session.close()
+
+
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
     reuse,
