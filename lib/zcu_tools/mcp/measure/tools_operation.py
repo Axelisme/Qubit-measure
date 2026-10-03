@@ -8,6 +8,7 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any
 
+from recipes import RECIPES
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.execution_reply import project_execution
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -19,8 +20,16 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     if "execution" in arguments:
         key = _execution_id(arguments)
         if key.startswith("recipe-"):
-            return project_execution(ctx.session.recipes.get(key).snapshot())
-        return project_execution(asdict(ctx.session.executions.get(key).snapshot()))
+            snapshot = ctx.session.recipes.get(key).snapshot()
+            definition = next(
+                item for item in RECIPES if item.name == snapshot["recipe"]
+            )
+            return project_execution(
+                snapshot,
+                definition=definition,
+                detail=arguments.get("detail", "summary"),
+            )
+        return asdict(ctx.session.executions.get(key).snapshot())
     session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])

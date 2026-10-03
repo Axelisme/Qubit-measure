@@ -166,7 +166,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         execution = initial["execution"]
         initial["actual"]["fields"].clear()
         before = len(client.transport.sent)
-        status = client.call("status", {"execution": execution})
+        status = client.call("status", {"execution": execution, "detail": "full"})
         waiting = client.call("wait", {"execution": execution, "timeout": 0})
         assert status["actual"]["fields"]
         assert waiting.data["execution"] == execution
@@ -321,7 +321,9 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
         assert pending.wait(1)
         client.context.session.close()
         before = len(client.transport.sent)
-        result = client.call("status", {"execution": initial.data["execution"]})
+        result = client.call(
+            "status", {"execution": initial.data["execution"], "detail": "full"}
+        )
         assert result["status"] == "failed", result
         assert result["phase"] == "terminal"
         assert result["error"]["reason"] in ("session_closed", "connection_lost")

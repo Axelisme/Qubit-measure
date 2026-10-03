@@ -121,7 +121,7 @@ def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         initial = client.call("singleshot_ge", {"pi_ref": "pi"})
         assert pending.wait(1)
         execution = initial.data["execution"]
-        status = client.call("status", {"execution": execution})
+        status = client.call("status", {"execution": execution, "detail": "full"})
         assert status["analysis_stage"] == stage
         assert client.call("cancel", {"execution": execution}).data["cancel_requested"]
         release.set()
@@ -316,7 +316,9 @@ def test_ge_close_stops_stage_admission_without_reconnect(
         assert pending.wait(1)
         before = len(client.transport.sent)
         client.context.session.close()
-        data = client.call("status", {"execution": initial.data["execution"]})
+        data = client.call(
+            "status", {"execution": initial.data["execution"], "detail": "full"}
+        )
         assert data["status"] == "failed", data
         assert data["phase"] == "terminal"
         assert data["error"]["reason"] in ("session_closed", "connection_lost")
