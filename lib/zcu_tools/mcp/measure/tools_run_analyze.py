@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import base64
 from functools import partial
 from typing import Any
 
-from zcu_tools.mcp.core.reply import PngImage, ToolReply
-from zcu_tools.mcp.measure.images import validated_png
+from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.interaction import interact
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -41,7 +40,7 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
     if started["interactive"]:
         if execution.snapshot().status == "interactive":
             try:
-                tab_interact(ctx, {"tab": tab})
+                interact(ctx, {"tab_id": tab}, expected_op=started["handle"])
             except (GuiRpcError, ValueError, OSError) as exc:
                 # The start receipt already owns an execution. A lost handoff
                 # must not hide it or replace completion observed by its worker.
@@ -65,46 +64,7 @@ def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         params["payload"] = payload
-    done = params.get("payload", {}).get("command") == "done"
-    if done:
-        params["include_figure"] = False
-    ctx = ctx.bound()
-    reply = dict(ctx.send_gui_rpc("tab.interact", params))
-    execution = ctx.session.executions.for_op(reply["handle"])
-    if done:
-        if execution is None:
-            execution = ctx.session.executions.start(
-                ctx.gui,
-                tab,
-                "primary",
-                {
-                    "handle": reply["handle"],
-                    "params": None,
-                    "invalidated_on_success": None,
-                },
-                interaction=reply,
-            )
-        execution.observe_interaction(ToolReply(reply), done=True)
-        return execution.wait(2.0)
-    figure = reply["figure"]
-    images: tuple[PngImage, ...] = ()
-    delivery_error = False
-    try:
-        if figure is not None:
-            image = validated_png(base64.b64decode(figure["png_b64"], validate=True))
-            path = ctx.session.write_png(image.data)
-            reply["figure"] = str(path)
-            images = (image,)
-    except (ValueError, OSError) as exc:
-        if execution is None:
-            raise
-        reply["figure"] = None
-        reply["delivery_error"] = str(exc)
-        delivery_error = True
-    if execution is not None:
-        reply["execution"] = execution.snapshot().execution
-        execution.observe_interaction(ToolReply(reply, images, is_error=delivery_error))
-    return ToolReply(reply, images, is_error=delivery_error)
+    return interact(ctx.bound(), params)
 
 
 def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
