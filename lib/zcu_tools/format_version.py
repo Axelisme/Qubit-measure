@@ -53,8 +53,11 @@ def validate_header(
     supported_version: FormatVersion,
     source: Path,
 ) -> FormatVersion:
+    actual_format = document.get("format")
+    if actual_format != expected_format:
+        raise FormatError(source, "format", actual_format, expected_format)
     raw_version = document.get("format_version")
-    if document.get("format") != expected_format or not isinstance(raw_version, str):
+    if not isinstance(raw_version, str):
         raise NotImplementedError((document, expected_format, source))
     major, minor = raw_version.split(".")
     version = FormatVersion(int(major), int(minor))
