@@ -82,7 +82,9 @@ def _invalid_analysis_values(value: object) -> list[InvalidAnalysisValue]:
             or not isinstance(item.get("path"), str)
             or not isinstance(item.get("reason"), str)
         ):
-            raise GuiRpcError("invalid analysis field reasons", reason="incompatible_wire")
+            raise GuiRpcError(
+                "invalid analysis field reasons", reason="incompatible_wire"
+            )
         invalid.append({"path": item["path"], "reason": item["reason"]})
     return invalid
 
@@ -107,8 +109,10 @@ def _analysis_result(
     ):
         raise GuiRpcError("invalid analysis figure names", reason="incompatible_wire")
     return AnalysisResult(
-        summary=deepcopy(reply["summary"]), params=deepcopy(params),
-        operation_state=deepcopy(state), invalid=_invalid_analysis_values(reply.get("invalid")),
+        summary=deepcopy(reply["summary"]),
+        params=deepcopy(params),
+        operation_state=deepcopy(state),
+        invalid=_invalid_analysis_values(reply.get("invalid")),
     ), list(names)
 
 

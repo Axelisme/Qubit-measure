@@ -562,11 +562,13 @@ def test_ge_requires_calibrated_pi_instead_of_custom_template(tmp_path):
 def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_client):
     gui, client = ge_client
     for method in ("tab.get_analyze_result", "tab.get_post_analyze_result"):
+
         def result(params, result_method=method):
             observed = gui(result_method, params)
             observed["summary"]["stderr"] = None
             observed["invalid"] = [{"path": "summary.stderr", "reason": "non_finite"}]
             return {"ok": True, "result": observed}
+
         client.transport.replies[method] = result
     reply = client.call("singleshot_ge", {"pi_ref": "pi"})
     data = json.loads(json.dumps(reply.data, allow_nan=False))

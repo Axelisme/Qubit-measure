@@ -214,7 +214,15 @@ def test_interact_headless_and_wire_failure_do_not_retry(
 @pytest.mark.parametrize("has_figure", [True, False])
 @pytest.mark.parametrize("has_invalid", [True, False])
 def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
-    tmp_path, clients, monkeypatch, stage, method, result_method, pane, has_figure, has_invalid
+    tmp_path,
+    clients,
+    monkeypatch,
+    stage,
+    method,
+    result_method,
+    pane,
+    has_figure,
+    has_invalid,
 ):
     def respond(name, params):
         if name == method:
@@ -237,7 +245,9 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
                 {"gain": 2, "model": "fit"},
             )
             if has_invalid:
-                observed["summary"].update(frequency_error=None, warnings=["singular error"])
+                observed["summary"].update(
+                    frequency_error=None, warnings=["singular error"]
+                )
                 observed["invalid"] = [
                     {"path": "summary.frequency_error", "reason": "non_finite"}
                 ]
@@ -275,10 +285,13 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
     assert isinstance(result["op"], int)
     assert result["result"]["summary"] == (
         {"frequency": 5.0, "frequency_error": None, "warnings": ["singular error"]}
-        if has_invalid else {"frequency": 5.0}
+        if has_invalid
+        else {"frequency": 5.0}
     )
     assert result["result"]["invalid"] == (
-        [{"path": "summary.frequency_error", "reason": "non_finite"}] if has_invalid else []
+        [{"path": "summary.frequency_error", "reason": "non_finite"}]
+        if has_invalid
+        else []
     )
     for tool, arguments in [
         ("status", {"execution": result["execution"]}),

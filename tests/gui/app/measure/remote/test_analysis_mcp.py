@@ -35,8 +35,13 @@ class SummaryResult:
 
 
 def _install_result(
-    fx, tab: str, stage: str, value: float, operation: int,
-    *, summary: dict[str, object] | None = None,
+    fx,
+    tab: str,
+    stage: str,
+    value: float,
+    operation: int,
+    *,
+    summary: dict[str, object] | None = None,
 ) -> None:
     result = ScalarResult(value) if summary is None else SummaryResult(summary)
     plots = Plots(NonPresentingHost())
@@ -109,15 +114,28 @@ def test_unestimable_error_is_null_with_reason_through_public_rpc(
 ):
     tab = fx.ctrl.new_tab("fake")
     _install_result(
-        fx, tab, stage, 10.0, 101,
-        summary={"lifetime": 10.0, "lifetime_error": float("inf"),
-                 "warnings": ["error could not be estimated"]},
+        fx,
+        tab,
+        stage,
+        10.0,
+        101,
+        summary={
+            "lifetime": 10.0,
+            "lifetime_error": float("inf"),
+            "warnings": ["error could not be estimated"],
+        },
     )
-    reply = connected_mcp("rpc_call", {"method": _result_method(stage),
-                               "params": {"tab_id": tab, "operation_id": 101}})
+    reply = connected_mcp(
+        "rpc_call",
+        {
+            "method": _result_method(stage),
+            "params": {"tab_id": tab, "operation_id": 101},
+        },
+    )
     parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
     assert parsed["summary"] == {
-        "lifetime": 10.0, "lifetime_error": None,
+        "lifetime": 10.0,
+        "lifetime_error": None,
         "warnings": ["error could not be estimated"],
     }
     assert parsed["invalid"] == [
@@ -133,19 +151,31 @@ def test_nested_nonfinite_analysis_values_have_precise_paths(
 ):
     tab = fx.ctrl.new_tab("fake")
     _install_result(
-        fx, tab, stage, 10.0, 101,
-        summary={"fit": {"value": float("nan"),
-                         "errors": [float("inf"), -float("inf"), None, 0.0, 2.0]},
-                 "warnings": ["fit is nonfinite"], "error": "fit unavailable"},
+        fx,
+        tab,
+        stage,
+        10.0,
+        101,
+        summary={
+            "fit": {
+                "value": float("nan"),
+                "errors": [float("inf"), -float("inf"), None, 0.0, 2.0],
+            },
+            "warnings": ["fit is nonfinite"],
+            "error": "fit unavailable",
+        },
     )
     params = {"tab_id": tab}
     if operation_id is not None:
         params["operation_id"] = operation_id
-    reply = connected_mcp("rpc_call", {"method": _result_method(stage), "params": params})
+    reply = connected_mcp(
+        "rpc_call", {"method": _result_method(stage), "params": params}
+    )
     parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
     assert parsed["summary"] == {
         "fit": {"value": None, "errors": [None, None, None, 0.0, 2.0]},
-        "warnings": ["fit is nonfinite"], "error": "fit unavailable",
+        "warnings": ["fit is nonfinite"],
+        "error": "fit unavailable",
     }
     assert parsed["invalid"] == [
         {"path": "summary.fit.value", "reason": "non_finite"},
@@ -157,8 +187,9 @@ def test_nested_nonfinite_analysis_values_have_precise_paths(
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_empty_analysis_result_has_no_invalid_values(fx, connected_mcp, stage):
     tab = fx.ctrl.new_tab("fake")
-    reply = connected_mcp("rpc_call", {"method": _result_method(stage),
-                                     "params": {"tab_id": tab}})
+    reply = connected_mcp(
+        "rpc_call", {"method": _result_method(stage), "params": {"tab_id": tab}}
+    )
     parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
     assert parsed == {"summary": None, "invalid": []}
 
@@ -166,13 +197,26 @@ def test_empty_analysis_result_has_no_invalid_values(fx, connected_mcp, stage):
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_finite_analysis_preserves_zero_and_existing_null(fx, connected_mcp, stage):
     tab = fx.ctrl.new_tab("fake")
-    _install_result(fx, tab, stage, 0.0, 101,
-                    summary={"value": 0.0, "error": None, "other": [2.0, None, False]})
-    reply = connected_mcp("rpc_call", {"method": _result_method(stage),
-                                     "params": {"tab_id": tab, "operation_id": 101}})
+    _install_result(
+        fx,
+        tab,
+        stage,
+        0.0,
+        101,
+        summary={"value": 0.0, "error": None, "other": [2.0, None, False]},
+    )
+    reply = connected_mcp(
+        "rpc_call",
+        {
+            "method": _result_method(stage),
+            "params": {"tab_id": tab, "operation_id": 101},
+        },
+    )
     parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
     assert parsed["summary"] == {
-        "value": 0.0, "error": None, "other": [2.0, None, False]
+        "value": 0.0,
+        "error": None,
+        "other": [2.0, None, False],
     }
     assert parsed["invalid"] == []
 
@@ -249,7 +293,8 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
         assert observed["params"] == {"threshold": 0.3}
         assert observed["summary"] == {"value": 3.0}
         assert call(sock, _result_method(stage), {"tab_id": tab})["result"] == {
-            "summary": {"value": 3.0}, "invalid": []
+            "summary": {"value": 3.0},
+            "invalid": [],
         }
         _install_result(fx, tab, stage, 7.0, 102)
         replaced = call(

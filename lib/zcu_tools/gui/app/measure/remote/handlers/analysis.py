@@ -40,7 +40,9 @@ def _summary_to_wire(summary: object) -> dict[str, object]:
                 projected[key] = project(item, f"{path}.{key}")
             return projected
         if isinstance(value, (list, tuple)):
-            return [project(item, f"{path}[{index}]") for index, item in enumerate(value)]
+            return [
+                project(item, f"{path}[{index}]") for index, item in enumerate(value)
+            ]
         return value
 
     return {"summary": project(summary, "summary"), "invalid": invalid}
