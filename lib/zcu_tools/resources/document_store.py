@@ -77,6 +77,15 @@ def _changes(
         yield path, draft
 
 
+def _lookup(document: YamlMap, path: FieldPath) -> YamlValue | _Missing:
+    value: YamlValue | _Missing = document
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return _Missing.VALUE
+        value = value[key]
+    return value
+
+
 def _apply(document: YamlMap, path: FieldPath, value: YamlValue | _Missing) -> None:
     parent = document
     for key in path[:-1]:
@@ -135,7 +144,7 @@ class DocumentStore[T: BaseModel]:
         self._editing = True
         try:
             with self.locked():
-                _, base = self._read()
+                base_document, base = self._read()
                 draft = base.model_copy(deep=True)
             yield draft
             base_values = TypeAdapter(YamlMap).validate_python(base.model_dump())
@@ -143,6 +152,11 @@ class DocumentStore[T: BaseModel]:
             patches = tuple(_changes(base_values, draft_values))
             with self.locked():
                 document, _ = self._read()
+                for path, _ in patches:
+                    original = _lookup(base_document, path)
+                    current = _lookup(document, path)
+                    if original != current:
+                        raise ConflictError(self._path, path, original, current)
                 for path, value in patches:
                     _apply(document, path, value)
                 snapshot = self._model.model_validate(document)
