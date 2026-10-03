@@ -86,7 +86,47 @@ def _frequency(
 
 def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one frequency/physical-flux survey with Primary analysis."""
-    raise NotImplementedError("Onetone flux preparation is not implemented")
+    _validate(arguments)
+    sources = ctx.rpc("context.snapshot", {})
+    publication = ctx.prepare_tab("onetone/flux_dep", arguments.get("reuse_tab_id"))
+    _, missing = _frequency(
+        publication,
+        {**arguments, "points": arguments.get("freq_points")},
+        sources["md"],
+    )
+    device = arguments.get("flux_device")
+    if device is None:
+        values = ctx.rpc("value.list", {})["values"]
+        if any(value["key"] == "device.flux.name" for value in values):
+            device = ctx.rpc("value.read", {"key": "device.flux.name"})["value"]
+    if not isinstance(device, str) or not device.strip():
+        missing.append(
+            MissingParameter("flux_device", "No registered flux device source")
+        )
+    else:
+        snapshot = ctx.rpc("device.snapshot", {"name": device})["snapshot"]
+        unit = snapshot["unit"]
+        if not isinstance(unit, str) or not unit.strip() or unit == "none":
+            if arguments.get("flux_device") is not None:
+                raise GuiRpcError(
+                    "Flux device has no physical unit", reason="invalid_device"
+                )
+            missing.append(
+                MissingParameter("flux_device", "Flux device has no physical unit")
+            )
+    md = sources["md"]
+    if arguments.get("flux_range") is None and (
+        not _finite(md.get("flx_half"))
+        or not _finite(md.get("flx_int"))
+        or md["flx_half"] == md["flx_int"]
+    ):
+        missing.append(
+            MissingParameter("flux_range", "No distinct calibrated flux endpoints")
+        )
+    if missing:
+        ctx.needs_parameters(missing)
+        return
+    raise NotImplementedError("Onetone flux Run preparation is not implemented")
 
 
 def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:

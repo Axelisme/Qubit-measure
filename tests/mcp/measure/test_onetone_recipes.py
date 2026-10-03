@@ -59,7 +59,10 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {
-            "center_mhz", "span_mhz", "flux_device", "flux_range"
+            "center_mhz",
+            "span_mhz",
+            "flux_device",
+            "flux_range",
         }
         assert not gui.ran
         assert not reply.is_error
