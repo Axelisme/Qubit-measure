@@ -170,9 +170,9 @@ class OnetoneGui(LookbackGui):
     def _edit(self, params):
         ordinary = []
         for edit in params["edits"]:
-            if edit["path"] == ["sweep", "freq"]:
+            if edit["path"][0] == "sweep":
                 inputs = self.publication["tree"]["children"]["sweep"]["children"][
-                    "freq"
+                    edit["path"][1]
                 ]["inputs"]
                 for key, value in edit["value"].items():
                     inputs[key] = self.input(
@@ -192,6 +192,78 @@ class OnetoneGui(LookbackGui):
         if method == "tab.snapshot":
             reply["tabs"][0]["adapter_name"] = self.experiment
         return reply
+
+
+class FluxGui(OnetoneGui):
+    def __init__(self):
+        super().__init__(
+            {"r_f": 6100.0, "rf_w": 4.0, "flx_half": 0.001, "flx_int": 0.003},
+            experiment="onetone/flux_dep",
+        )
+        root = self.publication["tree"]["children"]
+        root["dev"] = section(flux_dev=scalar("flux_yoko"))
+        root["sweep"]["children"]["flux"] = {
+            "kind": "sweep", "valid": True,
+            "inputs": {
+                "start": self.input("2 * flx_int - flx_half"),
+                "stop": self.input("2 * flx_half - flx_int"),
+                "expts": self.input(19),
+                "step": self.input(-0.006 / 18),
+            },
+        }
+
+    def __call__(self, method, params):
+        if method == "value.list":
+            return {"values": [{"key": "device.flux.name"}]}
+        if method == "value.read":
+            assert params == {"key": "device.flux.name"}
+            return {"key": "device.flux.name", "value": "coil"}
+        if method == "device.list":
+            return {"devices": [{"name": "coil"}, {"name": "alternate"}]}
+        if method == "device.snapshot":
+            assert params["name"] in ("coil", "alternate")
+            return {"snapshot": {"name": params["name"], "unit": "A" if params["name"] == "coil" else "V"}}
+        return super().__call__(method, params)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(tmp_path, explicit):
+    gui = FluxGui()
+    arguments = {
+        "readout_ref": "calibrated", "freq_points": 31,
+        "reps": 23, "rounds": 7, "gain": 0.13,
+    }
+    if explicit:
+        arguments.update(reuse_tab_id="t", flux_device="alternate", flux_range=[-0.003, 0.007], flux_points=11)
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("onetone_spectrum_over_flux", arguments)
+        assert isinstance(reply, ToolReply)
+        data = reply.data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["dev.flux_dev"] == {
+            "value": "alternate" if explicit else "coil",
+            "unit": "V" if explicit else "A",
+            "source": "explicit" if explicit else "device.flux.name",
+        }
+        assert fields["sweep.flux"]["value"] == {
+            "start": -0.003 if explicit else 0.005,
+            "stop": 0.007 if explicit else -0.001,
+            "expts": 11 if explicit else 19,
+        }
+        assert fields["sweep.flux"]["source"] == ("explicit" if explicit else "gui_calibration")
+        assert fields["sweep.freq"]["value"]["expts"] == 31
+        assert fields["modules.readout"]["value"] == "calibrated"
+        assert fields["modules.readout.pulse_cfg.gain"]["value"] == 0.13
+        assert fields["reps"]["value"] == 23
+        assert fields["rounds"]["value"] == 7
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["analysis"]["status"] == "finished"
+        assert data["writeback"]["items"]
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert ("tab.reset_cfg" in methods) is explicit
+        assert ("value.read" in methods) is not explicit
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "t"])
