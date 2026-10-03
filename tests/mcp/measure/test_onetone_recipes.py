@@ -671,6 +671,34 @@ def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path
         assert gui.ran
 
 
+@pytest.mark.parametrize(
+    "device,requested_unit,expected",
+    [
+        ("coil", "A", "finished"),
+        ("alternate", "V", "finished"),
+        ("coil", "V", "failed"),
+        ("alternate", "A", "failed"),
+        ("coil", "native", "failed"),
+        ("alternate", "native", "failed"),
+    ],
+)
+def test_physical_flux_unit_assertion_is_checked_before_run(
+    tmp_path, device, requested_unit, expected
+):
+    gui = FluxGui()
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "onetone_spectrum_over_flux",
+            {"flux_device": device, "flux_unit": requested_unit},
+        )
+        assert reply.data["status"] == expected, reply.data
+        assert gui.ran is (expected == "finished")
+        if expected == "finished":
+            assert reply.data["actual"]["fields"]["dev.flux_dev"]["unit"] == requested_unit
+        else:
+            assert reply.data["error"]["reason"] == "invalid_device"
+
+
 @pytest.mark.parametrize("reuse_tab_id", [None, "t"])
 def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_id):
     gui = OnetoneGui()
