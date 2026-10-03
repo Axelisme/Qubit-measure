@@ -90,6 +90,13 @@ class StrictDocument(BaseModel):
     values: KnownValues
 
 
+class StrictSequenceDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    format: str
+    format_version: str
+    values: list[KnownValues]
+
+
 @pytest.fixture
 def document_path(tmp_path: Path) -> Path:
     path = tmp_path / "document.yaml"
@@ -816,6 +823,35 @@ def test_boolean_numeric_changes_inside_a_sequence_are_not_discarded(
     on_disk = DocumentStore(document_path, SequenceDocument, format="synthetic")
     assert type(on_disk.snapshot().values[0]["enabled"]) is int
     assert on_disk.snapshot().values == [{"enabled": 1}]
+
+
+def test_known_sequence_edit_preserves_future_fields_comments_and_untouched_nodes(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.2'\nvalues: # sequence note\n"
+        "  - left: 1.000 # edited\n    right: 2.000 # unchanged\n"
+        "    future: 7.000 # future nested\n"
+        "  - left: 3.000 # untouched element\n    right: 4.000\n",
+        encoding="utf-8",
+    )
+    store = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    with store.edit() as draft:
+        draft.values[0].left = 10.0
+
+    assert store.snapshot().format_version == "1.2"
+    assert store.snapshot().values[0].left == 10.0
+    text = document_path.read_text(encoding="utf-8")
+    assert "# sequence note" in text
+    assert "# edited" in text
+    assert "right: 2.000 # unchanged" in text
+    assert "future: 7.000 # future nested" in text
+    assert "left: 3.000 # untouched element" in text
+    reopened = DocumentStore(document_path, StrictSequenceDocument, format="synthetic")
+    assert reopened.snapshot() == store.snapshot()
+    persisted = YAML(typ="safe").load(text)
+    assert persisted["values"][0]["future"] == 7.0
+    assert persisted["format_version"] == "1.2"
 
 
 def test_unchanged_nan_extension_roundtrips_without_a_false_change(
