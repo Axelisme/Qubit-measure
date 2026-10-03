@@ -1,6 +1,6 @@
 """Notebook component declarations through the public registry interface."""
 
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -32,10 +32,10 @@ class NestedPairSchema(ComponentSchema):
 
 @pytest.mark.parametrize("extra", ["allow", "ignore"])
 def test_registration_rejects_models_that_would_silently_accept_unknown_fields(
-    extra: str,
+    extra: Literal["allow", "ignore"],
 ) -> None:
     class PermissiveModel(ComponentSchema):
-        model_config = ConfigDict(extra=cast("str", extra))  # type: ignore[typeddict-item]
+        model_config = ConfigDict(extra=extra)
 
     registry = ComponentRegistry()
     with pytest.raises(TypeError, match="extra=forbid"):

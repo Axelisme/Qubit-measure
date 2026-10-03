@@ -64,6 +64,8 @@ def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
 def _validate_component_model(model: object) -> None:
     if not isinstance(model, type) or not issubclass(model, ComponentSchema):
         raise TypeError("Registered models must derive from ComponentSchema")
+    if model.model_config.get("extra") != "forbid":
+        raise TypeError("Registered component models must use extra=forbid")
 
 
 def _validate_reference(model: type[BaseModel], reference: str) -> None:
