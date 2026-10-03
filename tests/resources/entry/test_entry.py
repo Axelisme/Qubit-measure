@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 from ruamel.yaml import YAML
-from zcu_tools.resources.entry import ResultEntry, rename_entry
+from zcu_tools.resources.entry import PartialCommitError, ResultEntry, rename_entry
 
 
 @pytest.fixture
@@ -26,6 +26,50 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
         for item in path.rglob("*")
         if item.is_file()
     }
+
+
+@pytest.mark.parametrize("recovery_reason", ["io-failure", "destination-reappeared"])
+def test_failed_rename_recovery_reports_current_paths_and_both_causes(
+    entry_roots: tuple[Path, Path],
+    entry: ResultEntry,
+    monkeypatch: pytest.MonkeyPatch,
+    recovery_reason: str,
+) -> None:
+    results, database = entry_roots
+    before = read_entry_files(results / "entry")
+    original_rename = Path.rename
+    cause = OSError("second rename failure")
+    recovery_cause = OSError("rename recovery failure")
+
+    def fail_second_and_recovery(source: Path, target: str | Path) -> Path:
+        if source == database / "entry":
+            if recovery_reason == "destination-reappeared":
+                (results / "entry").mkdir()
+                (results / "entry" / "external.bin").write_bytes(b"unrelated data")
+            raise cause
+        if source == results / "renamed" and recovery_reason == "io-failure":
+            raise recovery_cause
+        return original_rename(source, target)
+
+    monkeypatch.setattr(Path, "rename", fail_second_and_recovery)
+    with pytest.raises(PartialCommitError, match="Partial commit") as failure:
+        rename_entry("entry", "renamed", result_root=results, database_root=database)
+
+    error = failure.value
+    assert error.completed == (results / "renamed",)
+    assert error.pending == (database / "renamed",)
+    assert error.recovery_failed == (results / "entry",)
+    assert error.cause is cause
+    assert error.__cause__ is cause
+    if recovery_reason == "io-failure":
+        assert error.recovery_cause is recovery_cause
+    else:
+        assert error.recovery_cause.filename == str(results / "entry")
+        assert (results / "entry" / "external.bin").read_bytes() == b"unrelated data"
+    assert read_entry_files(results / "renamed") == before
+    assert (database / "entry").is_dir()
+    assert not (database / "renamed").exists()
+    assert UUID(entry.entry_id).version == 4
 
 
 def test_rename_recovers_first_root_when_second_rename_fails(
