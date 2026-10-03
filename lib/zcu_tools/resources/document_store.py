@@ -29,6 +29,25 @@ class UnitSpec:
 type UnitResolver = Callable[[Mapping[str, YamlValue]], Mapping[FieldPath, UnitSpec]]
 
 
+def _unit_factor(spec: UnitSpec) -> float:
+    scales = {
+        "Hz": ("Hz", 1.0),
+        "MHz": ("Hz", 1e6),
+        "GHz": ("Hz", 1e9),
+        "s": ("s", 1.0),
+        "us": ("s", 1e-6),
+        "µs": ("s", 1e-6),
+        "A": ("A", 1.0),
+        "mA": ("A", 1e-3),
+        "1": ("1", 1.0),
+    }
+    si = scales.get(spec.si_unit)
+    working = scales.get(spec.working_unit)
+    if si is None or working is None or si[0] != working[0]:
+        raise ValueError(f"Incompatible or unsupported units: {spec!r}")
+    return working[1] / si[1]
+
+
 @dataclass(frozen=True)
 class DocumentChange:
     source: Path
@@ -134,7 +153,7 @@ class DocumentStore[T: BaseModel]:
             supported_version=supported_version,
             source=path,
         )
-        self._snapshot = model.model_validate(document)
+        self._snapshot = model.model_validate(self._working_values(document))
         self._document = document
 
     def snapshot(self) -> T:
@@ -160,9 +179,14 @@ class DocumentStore[T: BaseModel]:
                     current = _lookup(document, path)
                     if original != current:
                         raise ConflictError(self._path, path, original, current)
+                units = self._unit_specs(document)
                 for path, value in patches:
+                    if path in units:
+                        value = self._scale_value(
+                            value, _unit_factor(units[path]), path
+                        )
                     _apply(document, path, value)
-                snapshot = self._model.model_validate(document)
+                snapshot = self._model.model_validate(self._working_values(document))
                 if patches:
                     self._write(document)
                 self._snapshot = snapshot
@@ -188,7 +212,29 @@ class DocumentStore[T: BaseModel]:
             supported_version=self._supported_version,
             source=self._path,
         )
-        return document, self._model.model_validate(document)
+        return document, self._model.model_validate(self._working_values(document))
+
+    def _unit_specs(self, document: YamlMap) -> Mapping[FieldPath, UnitSpec]:
+        return self._units(document) if callable(self._units) else self._units or {}
+
+    def _working_values(self, document: YamlMap) -> YamlMap:
+        values = TypeAdapter(YamlMap).validate_python(document)
+        for path, spec in self._unit_specs(document).items():
+            value = self._scale_value(
+                _lookup(values, path), 1 / _unit_factor(spec), path
+            )
+            if not isinstance(value, _Missing):
+                _apply(values, path, value)
+        return values
+
+    def _scale_value(
+        self, value: YamlValue | _Missing, factor: float, path: FieldPath
+    ) -> YamlValue | _Missing:
+        if value is None or isinstance(value, _Missing):
+            return value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{self._path}: {path!r} must be a numeric physical value")
+        return value * factor
 
     def _write(self, document: YamlMap) -> None:
         temporary: Path | None = None
@@ -247,5 +293,7 @@ class DocumentStore[T: BaseModel]:
             except Exception:
                 # Notification failure cannot roll back a published transaction.
                 logging.getLogger(__name__).exception(
-                    "%s: observer failed after %s publication", self._path, change.reason
+                    "%s: observer failed after %s publication",
+                    self._path,
+                    change.reason,
                 )
