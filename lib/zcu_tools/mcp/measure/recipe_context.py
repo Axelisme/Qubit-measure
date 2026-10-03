@@ -82,10 +82,13 @@ class RecipeSnapshot:
     run_outcome: dict[str, Any] | None = None
     result_state: dict[str, Any] | None = None
     raw_save: RawSave = field(default_factory=RawSave)
-    analysis_mode: Literal["primary", "none"] = "none"
+    analysis_mode: Literal["primary", "primary_post", "none"] = "none"
     preview: RunPreview | None = None
     analysis: dict[str, Any] | None = None
     writeback: dict[str, Any] | None = None
+    post_analysis: dict[str, Any] | None = None
+    post_writeback: dict[str, Any] | None = None
+    analysis_stage: Literal["primary", "post"] | None = None
     error: RecipeError | None = None
 
 
@@ -329,7 +332,7 @@ class RecipeContext:
         publication: dict[str, Any],
         fields: dict[str, Any],
         *,
-        analysis_mode: Literal["primary", "none"] = "primary",
+        analysis_mode: Literal["primary", "primary_post", "none"] = "primary",
     ) -> None:
         """Run once; save raw, then Primary analysis or a noncanonical Run preview."""
         tab = self.progress.tab
@@ -386,10 +389,19 @@ class RecipeContext:
                 "Run did not publish usable data", reason="run_result_unavailable"
             )
         self._save_raw(tab, run_op)
-        if analysis_mode == "primary":
-            self._analyze_run(tab, run_op)
-        else:
+        if analysis_mode == "none":
             self._preview_run(tab, run_op)
+            return
+        primary_op = self._analyze_run(tab, run_op, "primary")
+        if primary_op is None:
+            return
+        if analysis_mode == "primary_post":
+            if self._analyze_run(tab, run_op, "post", primary_op) is None:
+                return
+        self._publish(
+            status="cancelled" if self.progress.cancel_requested else "finished",
+            phase="terminal",
+        )
 
     def _preview_run(self, tab: str, run_op: int) -> None:
         self._publish(phase="preview")
@@ -412,18 +424,32 @@ class RecipeContext:
                 phase="terminal",
             )
 
-    def _analyze_run(self, tab: str, run_op: int) -> None:
-        """Join analysis delivery and writeback for the already-saved Run."""
-        self._publish(phase="analysis")
+    def _analyze_run(
+        self,
+        tab: str,
+        run_op: int,
+        stage: Literal["primary", "post"],
+        primary_op: int | None = None,
+    ) -> int | None:
+        """Join one ordered analysis stage without discarding an earlier result."""
+        with self._condition:
+            self._analysis_execution = None
+            self._admit("analysis")
+            self._publish(analysis_stage=stage)
+            prior_images = self.images
+        result_field = "analysis" if stage == "primary" else "post_analysis"
+        writeback_field = "writeback" if stage == "primary" else "post_writeback"
+        pane = "analysis" if stage == "primary" else "post_analysis"
         started = self.tools.gui.send_gui_rpc(
-            "tab.analyze",
+            "tab.analyze" if stage == "primary" else "tab.post_analyze",
             {"tab_id": tab, "updates": {}},
+            operation_handle=primary_op,
             run_operation_handle=run_op,
             before_send=lambda: self._admit("analysis"),
         )
         self._publish(op=started["handle"])
         execution = self.tools.session.executions.start(
-            self.tools.gui, tab, "primary", started
+            self.tools.gui, tab, stage, started
         )
         self._retain_analysis(execution)
         # Skip a cancelled query, but still join the already-accepted analysis.
@@ -434,9 +460,9 @@ class RecipeContext:
         while True:
             reply = execution.wait(0.25)
             with self._condition:
-                self.images = reply.images
+                self.images = (*prior_images, *reply.images)
                 self._publish(
-                    analysis=reply.data,
+                    **{result_field: reply.data},
                     status="interactive"
                     if reply.data["status"] == "interactive"
                     else "running",
@@ -465,16 +491,12 @@ class RecipeContext:
         self._publish(phase="writeback_read")
         writeback = self.tools.gui.send_gui_rpc(
             "tab.writeback_preview",
-            {"tab_id": tab, "subtab_id": "analysis"},
+            {"tab_id": tab, "subtab_id": pane},
             operation_handle=started["handle"],
             before_send=lambda: self._admit("writeback_read"),
         )
-        with self._condition:
-            self._publish(
-                writeback=writeback,
-                status="cancelled" if self.progress.cancel_requested else "finished",
-                phase="terminal",
-            )
+        self._publish(**{writeback_field: writeback})
+        return started["handle"]
 
     def _retain_analysis(self, execution: AnalysisExecution) -> None:
         """Deliver a stop that raced with the admitted analysis start receipt."""

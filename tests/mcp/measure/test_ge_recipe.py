@@ -36,7 +36,12 @@ class GeGui(LookbackGui):
                 "operation_id": 93,
                 "run_operation_id": 71,
             }
-            return {"operation_id": 104, "interactive": False, "params": {"bins": 64}}
+            return {
+                "operation_id": 104,
+                "interactive": False,
+                "params": {"bins": 64},
+                "invalidated_on_success": [],
+            }
         if method == "operation.await" and params["operation_id"] == 104:
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_post_analyze_result":
