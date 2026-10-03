@@ -426,6 +426,48 @@ class PowerGui(OnetoneGui):
         return super().__call__(method, params)
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_onetone_power_number_ranges_publish_float_endpoints_and_integer_counts(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, PowerGui()) as client:
+        data = client.call(
+            "onetone_spectrum_over_power",
+            {
+                "center_mhz": number,
+                "span_mhz": number,
+                "gain_range": [number - 1, number],
+                "freq_points": 3,
+                "gain_points": 2,
+                "reps": 2,
+                "rounds": 1,
+            },
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["sweep.freq"]["value"] == {"start": 0.5, "stop": 1.5, "expts": 3}
+        assert fields["sweep.gain"]["value"] == {"start": 0.0, "stop": 1.0, "expts": 2}
+        for path in ("sweep.freq", "sweep.gain"):
+            sweep = fields[path]["value"]
+            assert type(sweep["start"]) is float
+            assert type(sweep["stop"]) is float
+            assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            assert fields[name]["value"] == count
+            assert type(fields[name]["value"]) is int
+        gain_edits = [
+            edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "gain"]
+        ]
+        assert len(gain_edits) == 1
+        assert type(gain_edits[0]["start"]) is float
+        assert type(gain_edits[0]["stop"]) is float
+        assert type(gain_edits[0]["expts"]) is int
+
+
 @pytest.mark.parametrize(
     "arguments, expected_gain",
     [
