@@ -51,6 +51,22 @@ class ParamSpec:
     mcp_hidden: bool = False
     enum: tuple[str, ...] | None = None
 
+    def __post_init__(self) -> None:
+        if self.enum is None:
+            return
+        if self.json_type is not JsonType.STRING:
+            raise ValueError("enum requires a STRING parameter")
+        if (
+            not isinstance(self.enum, tuple)
+            or not self.enum
+            or any(not isinstance(value, str) for value in self.enum)
+        ):
+            raise ValueError("enum must be a non-empty tuple of strings")
+        if len(set(self.enum)) != len(self.enum):
+            raise ValueError("enum must not contain duplicates")
+        if self.default is not None and self.default not in self.enum:
+            raise ValueError("default must belong to enum")
+
     def _coerce(self, present: bool, value: object) -> object:
         if not present or value is None:
             if self.required:
