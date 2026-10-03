@@ -91,10 +91,10 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         assert data["analysis"]["result"]["summary"] == {"offset": 0.24}
         assert data["post_analysis"]["result"]["summary"] == {"fidelity": 0.98}
         assert data["analysis"]["saved_images"] == [
-            {"figure_name": "trace", "path": "/actual/trace.png"}
+            {"figure_name": "trace", "image_path": "/actual/trace.png"}
         ]
         assert data["post_analysis"]["saved_images"] == [
-            {"figure_name": "cloud", "path": "/actual/cloud.png"}
+            {"figure_name": "cloud", "image_path": "/actual/cloud.png"}
         ]
         assert data["writeback"]["items"][0]["id"] == "md-1"
         assert data["post_writeback"]["items"][0]["id"] == "classifier"
