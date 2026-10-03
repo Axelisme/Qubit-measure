@@ -3,6 +3,8 @@
 import base64
 from copy import deepcopy
 
+import pytest
+
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import make_client
 
@@ -74,6 +76,33 @@ class GeGui(LookbackGui):
                 "items": [{"id": "classifier", "proposed": 0.98}],
             }
         raise AssertionError(method)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [{"shots": value} for value in (0, -1, True, 2.5, float("inf"), float("nan"), "10")]
+    + [
+        {name: value}
+        for name in (
+            "reuse_tab_id",
+            "readout_ref",
+            "pi_ref",
+            "use_reset",
+            "init_pulse_ref",
+        )
+        for value in ("", " ", [], False)
+    ],
+)
+def test_ge_rejects_invalid_arguments_before_preparing(tmp_path, arguments):
+    gui = GeGui()
+    client = make_client(tmp_path, gui)
+    try:
+        data = client.call("singleshot_ge", {"pi_ref": "pi", **arguments}).data
+        assert data["status"] == "failed", data
+        assert not gui.ran
+        assert not any(method == "context.snapshot" for method, _ in gui.calls)
+    finally:
+        client.context.session.close()
 
 
 def test_ge_requires_calibrated_pi_instead_of_custom_template(tmp_path):
