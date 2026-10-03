@@ -181,7 +181,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
 
 
 @pytest.mark.parametrize(
-    ("before", "after", "line"),
+    ("before", "after", "line", "reason"),
     [
         (
             "if flag:\n    import missing  # type: ignore\n"
@@ -189,6 +189,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "if flag:\n    pass\nflag = not flag\n"
             "if flag:\n    import missing  # {directive}\n",
             5,
+            "unproven-position",
         ),
         (
             "try:\n    import missing  # type: ignore\n"
@@ -198,6 +199,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "try:\n    import missing  # {directive}\n"
             "except ImportError:\n    pass\n",
             6,
+            "unproven-position",
         ),
         (
             "try:\n    run()\nexcept ValueError:\n"
@@ -205,16 +207,19 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "try:\n    run()\nexcept ValueError:\n    pass\n"
             "except ValueError:\n    import missing  # {directive}\n",
             6,
+            "unproven-position",
         ),
         (
             "if flag:\n    import missing  # type: ignore\nif flag:\n    pass\n",
             "if flag:\n    import missing  # {directive}\n",
             2,
+            "new-position",
         ),
         (
             "if flag:\n    import missing  # type: ignore\n",
             "if flag:\n    pass\nif flag:\n    import missing  # {directive}\n",
             4,
+            "unproven-position",
         ),
         (
             "if flag:\n    if nested:\n        import missing  # type: ignore\n"
@@ -222,6 +227,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "if flag:\n    pass\nif flag:\n    if nested:\n"
             "        import missing  # {directive}\n",
             5,
+            "unproven-position",
         ),
     ],
     ids=["if-owners", "try-owners", "handlers", "before-only", "after-only", "deep"],
@@ -230,13 +236,13 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
     "directive", ["pyright: ignore[reportMissingImports]", "type: ignore"]
 )
 def test_ambiguous_ancestry_cannot_authorize_an_escape_site(
-    before: str, after: str, line: int, directive: str
+    before: str, after: str, line: int, reason: str, directive: str
 ) -> None:
     found = compare_ignores(before, after.format(directive=directive))
 
     assert len(found) == 1
     assert found[0].line == line
-    assert found[0].reason == "unproven-position"
+    assert found[0].reason == reason
 
 
 def test_exact_unchanged_input_preserves_ambiguous_existing_debt() -> None:

@@ -47,6 +47,7 @@ class _Comment:
 class _Statement:
     node: ast.stmt
     key: tuple[str, ...]
+    unique_path: bool
 
 
 @dataclass(frozen=True)
@@ -117,12 +118,15 @@ def _statements(source: str) -> tuple[_Statement, ...] | None:
         tree = ast.parse(source)
     except SyntaxError:
         return None
-    found: list[_Statement] = []
+    found: list[tuple[ast.stmt, tuple[str, ...]]] = []
+    occurrences: Counter[tuple[str, ...]] = Counter()
 
     def visit(node: ast.AST, owner: tuple[str, ...]) -> None:
         header = _header(node)
+        key = (*owner, header)
+        occurrences[key] += 1
         if isinstance(node, ast.stmt):
-            found.append(_Statement(node, (*owner, header)))
+            found.append((node, key))
         for field, value in ast.iter_fields(node):
             children = value if isinstance(value, list) else [value]
             for child in children:
@@ -130,7 +134,16 @@ def _statements(source: str) -> tuple[_Statement, ...] | None:
                     visit(child, (*owner, header, field))
 
     visit(tree, ())
-    return tuple(found)
+    # Keys alternate node headers and child fields. Every node-prefix must be
+    # unique: a unique leaf can still belong to indistinguishable control owners.
+    return tuple(
+        _Statement(
+            node,
+            key,
+            all(occurrences[key[:end]] == 1 for end in range(1, len(key) + 1, 2)),
+        )
+        for node, key in found
+    )
 
 
 def _line_role(node: ast.stmt, line: int) -> str:
@@ -151,7 +164,6 @@ def _line_role(node: ast.stmt, line: int) -> str:
 def _unique_statement(
     line: int,
     statements: tuple[_Statement, ...],
-    occurrences: Counter[tuple[str, ...]],
 ) -> _Statement | None:
     covering = [
         statement
@@ -174,18 +186,17 @@ def _unique_statement(
     if len(targets) != 1:
         return None
     target = targets[0]
-    return target if occurrences[target.key] == 1 else None
+    return target if target.unique_path else None
 
 
 def _anchor(
     comment: _Comment,
     lines: list[str],
     statements: tuple[_Statement, ...],
-    occurrences: Counter[tuple[str, ...]],
 ) -> tuple[str, ...] | None:
     if not lines[comment.line - 1][: comment.column].strip():
         return None
-    target = _unique_statement(comment.line, statements, occurrences)
+    target = _unique_statement(comment.line, statements)
     if target is None:
         return None
     role = _line_role(target.node, comment.line)
@@ -207,11 +218,9 @@ def _anchor(
 def _sites(source: str) -> _SourceSites:
     parsed = _statements(source)
     statements = () if parsed is None else parsed
-    occurrences = Counter(item.key for item in statements)
     lines = source.split("\n")
     comments = tuple(
-        (comment, _anchor(comment, lines, statements, occurrences))
-        for comment in _comments(source)
+        (comment, _anchor(comment, lines, statements)) for comment in _comments(source)
     )
     return _SourceSites(comments, parsed is not None)
 
