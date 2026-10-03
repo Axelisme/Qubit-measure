@@ -58,6 +58,21 @@ def test_string_enum_rejects_non_member_after_type_validation():
     assert error.value.code is ErrorCode.INVALID_PARAMS
 
 
+@pytest.mark.parametrize(
+    "json_type,enum,default",
+    [
+        (JsonType.NUMBER, ("fast",), None),
+        (JsonType.STRING, (), None),
+        (JsonType.STRING, ("fast", 1), None),
+        (JsonType.STRING, ("fast", "fast"), None),
+        (JsonType.STRING, ("fast", "careful"), "other"),
+    ],
+)
+def test_enum_declaration_rejects_invalid_contract(json_type, enum, default):
+    with pytest.raises(ValueError, match="enum"):
+        ParamSpec("mode", json_type, default=default, enum=enum)
+
+
 def test_integer_rejects_bool():
     with pytest.raises(RemoteError, match="must be an integer"):
         validate_params(_spec(JsonType.INTEGER), {"x": True})
