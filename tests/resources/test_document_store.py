@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 from filelock import Timeout
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from zcu_tools.format_version import FormatError, VersionError
 from zcu_tools.resources.document_store import (
     ConflictError,
     DocumentChange,
@@ -21,7 +22,7 @@ class SyntheticDocument(BaseModel):
 
 class KnownValues(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    left: float
+    left: float = Field(ge=0)
     right: float
 
 
@@ -373,3 +374,38 @@ def test_aborted_edit_discards_the_draft_and_allows_the_next_transaction(
     with store.edit() as draft:
         draft.values["right"] = 30.0
     assert make_store(document_path).snapshot().values == {"left": 1.0, "right": 30.0}
+
+
+@pytest.mark.parametrize(
+    ("failure", "error_type", "message"),
+    [
+        ("format", FormatError, "format"),
+        ("version", VersionError, "format_version"),
+        ("schema", ValidationError, "values.left"),
+    ],
+)
+def test_invalid_draft_headers_and_schema_do_not_reach_disk_or_snapshot(
+    document_path: Path, failure: str, error_type: type[ValueError], message: str
+) -> None:
+    store = DocumentStore(document_path, StrictDocument, format="synthetic")
+    original = document_path.read_bytes()
+    events: list[DocumentChange] = []
+    store.subscribe(events.append)
+
+    def invalid_edit() -> None:
+        with store.edit() as draft:
+            if failure == "format":
+                draft.format = "wrong"
+            elif failure == "version":
+                draft.format_version = "2.0"
+            else:
+                draft.values.left = -1.0
+
+    with pytest.raises(error_type, match=message):
+        invalid_edit()
+    assert document_path.read_bytes() == original
+    assert store.snapshot().values.left == 1.0
+    assert events == []
+    with store.edit() as draft:
+        draft.values.left = 10.0
+    assert store.snapshot().values.left == 10.0
