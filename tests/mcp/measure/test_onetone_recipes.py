@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from copy import deepcopy
+from typing import Any
 
 import pytest
 from simpleeval import NameNotDefined, simple_eval
@@ -237,7 +238,7 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
     tmp_path, explicit
 ):
     gui = FluxGui()
-    arguments = {
+    arguments: dict[str, Any] = {
         "readout_ref": "calibrated",
         "freq_points": 31,
         "reps": 23,
