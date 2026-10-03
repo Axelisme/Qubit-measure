@@ -35,7 +35,13 @@ def _entry_path(root: str | Path, name: str) -> Path:
 def rename_entry(
     old: str, new: str, *, result_root: str | Path, database_root: str | Path
 ) -> None:
-    raise NotImplementedError("Renaming an entry is not implemented")
+    result_old = _entry_path(result_root, old)
+    database_old = _entry_path(database_root, old)
+    result_new = _entry_path(result_root, new)
+    database_new = _entry_path(database_root, new)
+    ResultEntry.open(old, result_root=result_root, database_root=database_root)
+    result_old.rename(result_new)
+    database_old.rename(database_new)
 
 
 class ResultEntry:
