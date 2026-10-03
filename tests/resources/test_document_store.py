@@ -1,3 +1,4 @@
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -51,12 +52,14 @@ def test_interleaved_edits_merge_different_fields(document_path: Path) -> None:
 def test_same_field_conflict_rejects_the_whole_transaction(document_path: Path) -> None:
     first = make_store(document_path)
     second = make_store(document_path)
-    with pytest.raises(ConflictError) as caught:
-        with first.edit() as first_draft:
-            first_draft.values["left"] = 10.0
-            first_draft.values["right"] = 99.0
-            with second.edit() as second_draft:
-                second_draft.values["left"] = 20.0
+    with ExitStack() as stack:
+        first_draft = stack.enter_context(first.edit())
+        first_draft.values["left"] = 10.0
+        first_draft.values["right"] = 99.0
+        with second.edit() as second_draft:
+            second_draft.values["left"] = 20.0
+        with pytest.raises(ConflictError) as caught:
+            stack.close()
 
     error = caught.value
     assert error.source == document_path
