@@ -21,6 +21,23 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_component_frequency_round_trips_between_si_and_working_units(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    resonator = entry.setup.R1
+    assert resonator.freq == pytest.approx(6500.0)
+    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["freq"] == 6.5e9
+
+    resonator.freq = 6550.0
+    assert resonator.freq == pytest.approx(6550.0)
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.R1.freq == pytest.approx(6550.0)
+    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["freq"] == 6.55e9
+
+
 def test_added_component_survives_reopening_with_its_declared_kind(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
