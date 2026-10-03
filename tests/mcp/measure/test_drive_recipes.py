@@ -66,7 +66,7 @@ class TimeRabiGui(LookbackGui):
                 ordinary.append(edit)
         super()._edit({**params, "edits": ordinary})
 
-    def __call__(self, method, params):
+    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.new":
             assert params == {"adapter_name": "twotone/rabi/len_rabi"}
             return {"tab_id": "t"}
@@ -151,7 +151,7 @@ class AmplitudeRabiGui(TimeRabiGui):
                 ordinary.append(edit)
         super()._edit({**params, "edits": ordinary})
 
-    def __call__(self, method, params):
+    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.new":
             assert params == {"adapter_name": "twotone/rabi/amp_rabi"}
             return {"tab_id": "t"}
