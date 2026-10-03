@@ -4,7 +4,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-type YamlValue = None | bool | int | float | str | list[YamlValue] | dict[str, YamlValue]
+type YamlValue = (
+    None | bool | int | float | str | list[YamlValue] | dict[str, YamlValue]
+)
 type YamlMap = dict[str, YamlValue]
 
 
@@ -41,9 +43,7 @@ class MigrationError(ValueError):
         self.from_version = from_version
         self.target_version = target_version
         self.detail = detail
-        super().__init__(
-            f"{format}: {from_version} -> {target_version}: {detail}"
-        )
+        super().__init__(f"{format}: {from_version} -> {target_version}: {detail}")
 
 
 def validate_header(
@@ -53,7 +53,14 @@ def validate_header(
     supported_version: FormatVersion,
     source: Path,
 ) -> FormatVersion:
-    raise NotImplementedError((document, expected_format, supported_version, source))
+    raw_version = document.get("format_version")
+    if document.get("format") != expected_format or not isinstance(raw_version, str):
+        raise NotImplementedError((document, expected_format, source))
+    major, minor = raw_version.split(".")
+    version = FormatVersion(int(major), int(minor))
+    if version.major != supported_version.major:
+        raise NotImplementedError((version, supported_version, source))
+    return version
 
 
 class MigrationRegistry:

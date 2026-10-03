@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
 
 
