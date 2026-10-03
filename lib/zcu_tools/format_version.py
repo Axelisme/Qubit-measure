@@ -16,6 +16,13 @@ class FormatVersion:
     major: int
     minor: int
 
+    def __post_init__(self) -> None:
+        for field, value in (("major", self.major), ("minor", self.minor)):
+            if type(value) is not int or value < 0:
+                raise ValueError(
+                    f"{field} must be a non-negative integer, got {value!r}"
+                )
+
 
 class FormatError(ValueError):
     def __init__(
