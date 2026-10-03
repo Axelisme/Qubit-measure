@@ -27,7 +27,9 @@ def tree_item(form: CfgFormWidget, path: str) -> QTreeWidgetItem:
     raise AssertionError(f"no tree item for path {path!r}")
 
 
-def click_row(qapp: QApplication, form: CfgFormWidget, item: QTreeWidgetItem) -> None:
+def click_row(
+    qapp: QApplication, form: CfgFormWidget, item: QTreeWidgetItem, *, column: int = 0
+) -> None:
     form.resize(600, 400)
     form.show()
     qapp.processEvents()
@@ -38,7 +40,8 @@ def click_row(qapp: QApplication, form: CfgFormWidget, item: QTreeWidgetItem) ->
     assert rect.isValid()
     viewport = tree.viewport()
     assert viewport is not None
-    position = QPoint(tree.columnWidth(0) // 2, rect.center().y())
+    x = tree.columnViewportPosition(column) + tree.columnWidth(column) // 2
+    position = QPoint(x, rect.center().y())
     for event_type, buttons in (
         (QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
         (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
