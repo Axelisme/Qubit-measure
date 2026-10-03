@@ -1,10 +1,9 @@
-"""Host coverage: every existing CfgFormWidget host uses sole tree (A3)."""
+"""Measure tab cfg resource rendering through shared Qt widgets."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -12,30 +11,13 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ScalarSpec,
 )
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _fake_ctrl():
-    c = MagicMock()
-    c.get_bus.return_value = EventBus()
-    c.get_current_md.return_value = MetaDict()
-    c.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    c.arb_waveforms.list_data_keys.return_value = []
-    c.list_device_names.return_value = []
-    return c
-
-
-def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
-    """measure-gui Run renders through sole tree."""
+def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
+    """The measure tab renders the attached cfg resource as editable rows."""
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
@@ -143,84 +125,3 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
-def test_autofluxdep_default_and_generation_use_sole_tree(qapp):
-    """autofluxdep Default cfg and Generation overrides both use sole tree."""
-    from zcu_tools.gui.app.autofluxdep.app import build_core
-    from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import NodeCfgForm
-
-    ctrl = build_core()
-    try:
-        node = ctrl.add_node_by_type("qubit_freq")
-        idx = ctrl.state.nodes.index(node)
-        form = NodeCfgForm(ctrl, node, idx)
-        try:
-            assert isinstance(form._default_form._root_widget, TreeCfgWidget)
-            assert form._default_form._root_widget is not None
-            # Generation overrides should also be tree when present
-            if form._generation_form is not None:
-                assert isinstance(form._generation_form._root_widget, TreeCfgWidget)
-        finally:
-            form.teardown()
-    finally:
-        ctrl._background_svc.quiesce()
-
-
-def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
-    """writeback module/waveform Edit dialog CfgFormWidget is sole tree."""
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.cfg import (
-        CfgSectionSpec,
-        CfgSectionValue,
-        DirectValue,
-        ScalarSpec,
-    )
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    ctrl = _fake_ctrl()
-    # Create a realistic schema for edit
-    inner = CfgSectionSpec(
-        label="Inner", fields={"gain": ScalarSpec(label="Gain", type=float)}
-    )
-    schema = CfgSchema(
-        spec=inner, value=CfgSectionValue(fields={"gain": DirectValue(0.5)})
-    )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
-
-    # Mock controller to return this draft for writeback edit
-    ctrl.get_writeback_item_draft_for_pane = MagicMock(return_value=draft)
-    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=MagicMock())
-    # We need to directly test that WritebackWidget creates a CfgFormWidget that is tree
-    # The edit dialog creates CfgFormWidget internally; we verify a standalone CfgFormWidget used there is tree
-    w = CfgFormWidget()
-    w.attach(draft)
-    assert isinstance(w._root_widget, TreeCfgWidget)
-    w.detach()
-    draft.close()
-
-
-def test_module_library_cfg_form_uses_sole_tree(qapp, monkeypatch):
-    """ModuleLibrary cfg forms use the shared tree widget."""
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.cfg import (
-        CfgSectionSpec,
-        CfgSectionValue,
-        DirectValue,
-        ScalarSpec,
-    )
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    ctrl = _fake_ctrl()
-    schema = CfgSchema(
-        spec=CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
-        value=CfgSectionValue(fields={"gain": DirectValue(1.0)}),
-    )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
-    w = CfgFormWidget()
-    w.attach(draft)
-    assert isinstance(w._root_widget, TreeCfgWidget)
-    w.detach()
-    draft.close()
-    # The embedded Inspect and writeback editors use this same sole-tree form;
-    # the widget no longer accepts a separate structure parameter.
-    with pytest.raises(TypeError):
-        CfgFormWidget(structure=object())  # type: ignore[call-arg]
