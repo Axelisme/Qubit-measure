@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from filelock import Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from ruamel.yaml import YAML
 from zcu_tools.format_version import FormatError, VersionError, YamlValue
 from zcu_tools.resources.document_store import (
     ConflictError,
@@ -568,7 +569,9 @@ def test_missing_optional_model_field_can_be_explicitly_committed_as_null(
     with store.edit() as draft:
         draft.description = None
 
-    assert "description: null" in document_path.read_text(encoding="utf-8")
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert "description" in persisted
+    assert persisted["description"] is None
     assert store.snapshot().description is None
     assert events == [DocumentChange(document_path, (("description",),), "commit")]
     reopened = DocumentStore(document_path, OptionalDocument, format="synthetic")
