@@ -258,7 +258,8 @@ def test_newer_minor_keeps_unknown_nested_fields_outside_the_typed_snapshot(
     )
     store = DocumentStore(document_path, StrictDocument, format="synthetic")
     assert store.snapshot().model_dump() == {
-        "format": "synthetic", "format_version": "1.2",
+        "format": "synthetic",
+        "format_version": "1.2",
         "values": {"left": 1.0, "right": 2.0},
     }
     with store.edit() as draft:
@@ -269,6 +270,9 @@ def test_newer_minor_keeps_unknown_nested_fields_outside_the_typed_snapshot(
     text = document_path.read_text(encoding="utf-8")
     assert "  future: 7.000 # future nested" in text
     assert "future_top: [next, version] # future top" in text
-    assert DocumentStore(
-        document_path, StrictDocument, format="synthetic"
-    ).snapshot().values.left == 10.0
+    assert (
+        DocumentStore(document_path, StrictDocument, format="synthetic")
+        .snapshot()
+        .values.left
+        == 10.0
+    )

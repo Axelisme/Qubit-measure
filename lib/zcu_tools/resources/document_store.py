@@ -147,13 +147,7 @@ class DocumentStore[T: BaseModel]:
         yaml = YAML(typ="rt")
         with path.open(encoding="utf-8") as stream:
             document = TypeAdapter(YamlMap).validate_python(yaml.load(stream))
-        validate_header(
-            document,
-            expected_format=format,
-            supported_version=supported_version,
-            source=path,
-        )
-        self._snapshot = model.model_validate(self._working_values(document))
+        self._snapshot = self._model_snapshot(document)
         self._document = document
 
     def snapshot(self) -> T:
@@ -186,7 +180,7 @@ class DocumentStore[T: BaseModel]:
                             value, _unit_factor(units[path]), path
                         )
                     _apply(document, path, value)
-                snapshot = self._model.model_validate(self._working_values(document))
+                snapshot = self._model_snapshot(document)
                 if patches:
                     self._write(document)
                 self._snapshot = snapshot
@@ -206,13 +200,18 @@ class DocumentStore[T: BaseModel]:
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
         document = cast(YamlMap, raw)
-        validate_header(
+        return document, self._model_snapshot(document)
+
+    def _model_snapshot(self, document: YamlMap) -> T:
+        version = validate_header(
             document,
             expected_format=self._format,
             supported_version=self._supported_version,
             source=self._path,
         )
-        return document, self._model.model_validate(self._working_values(document))
+        # Ignore future fields only in the typed view; retain them in the YAML tree.
+        extra = "ignore" if version.minor > self._supported_version.minor else None
+        return self._model.model_validate(self._working_values(document), extra=extra)
 
     def _unit_specs(self, document: YamlMap) -> Mapping[FieldPath, UnitSpec]:
         return self._units(document) if callable(self._units) else self._units or {}
