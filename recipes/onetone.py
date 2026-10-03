@@ -2,18 +2,37 @@
 
 import re
 from math import isfinite
-from typing import Any
+from typing import Any, TypeGuard
 
 from zcu_tools.mcp.measure.recipe_context import MissingParameter, RecipeContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 
-def _finite(value: object) -> bool:
+def _finite(value: object) -> TypeGuard[int | float]:
     return (
         not isinstance(value, bool)
         and isinstance(value, (int, float))
         and isfinite(value)
     )
+
+
+def _validate(arguments: dict[str, Any]) -> None:
+    for name in ("reuse_tab_id", "readout_ref"):
+        value = arguments.get(name)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{name} must be a non-empty string or null")
+    for name in ("center_mhz", "span_mhz", "gain"):
+        value = arguments.get(name)
+        if value is not None and not _finite(value):
+            raise ValueError(f"{name} must be a finite real number or null")
+    if arguments.get("span_mhz") is not None and arguments["span_mhz"] <= 0:
+        raise ValueError("span_mhz must be positive")
+    for name in ("points", "reps", "rounds"):
+        value = arguments.get(name)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int)
+        ):
+            raise ValueError(f"{name} must be an integer or null")
 
 
 def _node(publication: dict[str, Any], *path: str) -> dict[str, Any]:
@@ -59,12 +78,15 @@ def _frequency(
     return {
         "start": {"__expr": f"({center}) - ({span}) / 2"},
         "stop": {"__expr": f"({center}) + ({span}) / 2"},
-        "expts": arguments.get("points") or _input_value(inputs["expts"]),
+        "expts": arguments["points"]
+        if arguments.get("points") is not None
+        else _input_value(inputs["expts"]),
     }, missing
 
 
 def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Prepare a calibrated spectrum, run once and save raw and analysis."""
+    _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
     publication = ctx.prepare_tab("onetone/freq", arguments.get("reuse_tab_id"))
     if arguments.get("readout_ref") is not None:

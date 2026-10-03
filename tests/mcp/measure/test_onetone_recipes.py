@@ -10,12 +10,24 @@ from ._recipe_support import LookbackGui, scalar, section
 from ._support import make_client
 
 
-@pytest.mark.parametrize("arguments", [
-    {"center_mhz": True}, {"center_mhz": float("nan")},
-    {"span_mhz": 0}, {"span_mhz": -1}, {"span_mhz": float("inf")},
-    {"gain": False}, {"gain": "bad"}, {"points": 2.5}, {"points": True},
-    {"reps": 1.5}, {"rounds": False}, {"reuse_tab_id": ""}, {"readout_ref": 23},
-])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"center_mhz": True},
+        {"center_mhz": float("nan")},
+        {"span_mhz": 0},
+        {"span_mhz": -1},
+        {"span_mhz": float("inf")},
+        {"gain": False},
+        {"gain": "bad"},
+        {"points": 2.5},
+        {"points": True},
+        {"reps": 1.5},
+        {"rounds": False},
+        {"reuse_tab_id": ""},
+        {"readout_ref": 23},
+    ],
+)
 def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, arguments):
     gui = OnetoneGui({"r_f": 6000.0, "rf_w": 4.0})
     client = make_client(tmp_path, gui)
@@ -26,7 +38,9 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["phase"] == "preparing"
         assert not gui.ran
-        assert not any(method == "context.snapshot" for method, _ in client.transport.sent)
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
     finally:
         client.context.session.close()
 
