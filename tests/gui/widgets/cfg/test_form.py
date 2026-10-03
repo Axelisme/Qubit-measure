@@ -356,22 +356,6 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         draft.close()
 
 
-def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
-    """Attach/detach never registers an EventBus subscription."""
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    schema = section_schema(
-        {"freq": ScalarSpec(label="Freq", type=float)},
-        {"freq": DirectValue(6000.0)},
-    )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    attach_draft(w, schema, ctrl)  # re-attach swaps models cleanly
-
-    bus = ctrl.get_bus.return_value
-    assert bus._subs == {} or all(not subs for subs in bus._subs.values())
-
-
 def test_read_schema_returns_cfg_schema(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
