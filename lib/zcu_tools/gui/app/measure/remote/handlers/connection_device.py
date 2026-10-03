@@ -9,9 +9,7 @@ from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
 from zcu_tools.gui.session.services.connection import (
-    ConnectMockRequest,
     ConnectRemoteRequest,
-    ConnectRequest,
 )
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
@@ -23,17 +21,18 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def coerce_connect_request(params: Mapping[str, object]) -> ConnectRequest:
-    """Coerce ``{kind: 'mock'}`` or ``{kind: 'remote', ip, port}``."""
+def coerce_connect_request(params: Mapping[str, object]) -> ConnectRemoteRequest:
+    """Coerce a real-board connection request; simulation has its own entry."""
     kind = require_str(params, "kind")
-    if kind == "mock":
-        return ConnectMockRequest()
     if kind == "remote":
         return ConnectRemoteRequest(
             ip=require_str(params, "ip"),
             port=require_int(params, "port"),
         )
-    raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown connect kind: {kind!r}")
+    raise RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        "soc.connect requires kind='remote'; use simulation.initialize for simulation",
+    )
 
 
 def coerce_connect_device_request(
@@ -59,13 +58,8 @@ def coerce_disconnect_device_request(
 def h_soc_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # Synchronous connect: runs on the Qt main thread (the IO worker blocks on the
-    # _dispatch_on_owner marshal), so the connect work + ALL post-connect side
-    # effects (State write, soc version bump, SocChangedPayload → FLUX-AWARE-MOCK
-    # provisioning) complete before this returns. Connect failures remain
-    # controller errors. The worst-case main-thread block is bounded by make_soc_proxy's
-    # 1s COMMTIMEOUT for a remote board (mock is instant). Connect is no longer an
-    # async operation handle — run / analyze / device keep theirs.
+    # Synchronous real-board connection on the owner thread. make_soc_proxy's
+    # COMMTIMEOUT bounds unreachable-board failures; simulation is a separate operation.
     req = coerce_connect_request(params)
     adapter.ctrl.connect_sync(req)
     # Return the SoC summary directly — the same {description, is_mock} the old
@@ -73,6 +67,13 @@ def h_soc_connect(
     # via soc.info (it is ~2 KB and rarely needed at connect time).
     info = adapter.ctrl.get_soc_info()
     return {"soc": {"description": info["description"], "is_mock": info["is_mock"]}}
+
+
+def h_simulation_initialize(
+    adapter: RemoteControlAdapter, _params: Mapping[str, object]
+) -> Mapping[str, object]:
+    operation_id = adapter.ctrl.setup_control.start_simulated_environment()
+    return {"operation_id": operation_id}
 
 
 def h_project_apply(

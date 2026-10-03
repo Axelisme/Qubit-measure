@@ -323,7 +323,7 @@ def test_soc_connect_runtime_error_escapes_handler_unchanged() -> None:
     _assert_escapes_unchanged(
         lambda: h_soc_connect(
             cast(Any, SimpleNamespace(ctrl=ctrl)),
-            {"kind": "mock"},
+            {"kind": "remote", "ip": "192.0.2.1", "port": 8888},
         ),
         error,
     )
