@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, TypeAdapter
 
-from zcu_tools.format_version import YamlValue
+from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from .registry import component_registry
@@ -17,16 +17,18 @@ from .schema import (
     validate_component_name,
 )
 
+type _FieldNode = BaseModel | YamlMap
+
 
 class FieldView:
-    _model: Callable[[], BaseModel]
-    _edit: Callable[[], AbstractContextManager[BaseModel]]
+    _model: Callable[[], _FieldNode]
+    _edit: Callable[[], AbstractContextManager[_FieldNode]]
     _path: str
 
     def __init__(
         self,
-        model: Callable[[], BaseModel],
-        edit: Callable[[], AbstractContextManager[BaseModel]],
+        model: Callable[[], _FieldNode],
+        edit: Callable[[], AbstractContextManager[_FieldNode]],
         path: str,
     ) -> None:
         self._model = model
@@ -34,21 +36,35 @@ class FieldView:
         self._path = path
 
     def __getattr__(self, name: str) -> YamlValue:
+        try:
+            return self[name]
+        except KeyError as cause:
+            raise AttributeError(f"{self._path}.{name}: field is not set") from cause
+
+    def __getitem__(self, name: str) -> YamlValue:
         model = self._model()
-        component_registry.check_fields(type(model), {name: None}, path=self._path)
-        if name not in model.model_fields_set:
-            raise AttributeError(f"{self._path}.{name}: field is not set")
-        return TypeAdapter(YamlValue).validate_python(getattr(model, name))
+        if isinstance(model, BaseModel):
+            component_registry.check_fields(type(model), {name: None}, path=self._path)
+            if name not in model.model_fields_set:
+                raise AttributeError(f"{self._path}.{name}: field is not set")
+            return TypeAdapter(YamlValue).validate_python(getattr(model, name))
+        return model[name]
 
     def __setattr__(self, name: str, value: object) -> None:
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
-            with self._edit() as draft:
+            self[name] = value
+
+    def __setitem__(self, name: str, value: object) -> None:
+        with self._edit() as draft:
+            if isinstance(draft, BaseModel):
                 component_registry.check_fields(
                     type(draft), {name: value}, path=self._path
                 )
                 setattr(draft, name, value)
+            else:
+                draft[name] = TypeAdapter(YamlValue).validate_python(value)
 
 
 class ComponentView:
@@ -65,6 +81,15 @@ class ComponentView:
         self._model = model
         self._edit = edit
         self._path = path
+
+    @property
+    def ext(self) -> FieldView:
+        return FieldView(lambda: self._model().ext, self._edit_ext, f"{self._path}.ext")
+
+    @contextmanager
+    def _edit_ext(self) -> Generator[YamlMap]:
+        with self._edit() as draft:
+            yield draft.ext
 
     @property
     def wiring(self) -> FieldView:
