@@ -46,7 +46,7 @@ def singleshot_ge(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
         [
             {
                 "path": ["modules", slot],
-                "value": {"__ref": key} if key is not None else None,
+                "value": {"__ref": key},
             }
             for slot, key in references.items()
         ],

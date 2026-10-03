@@ -489,6 +489,90 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
         bridge.disconnect()
 
 
+@pytest.mark.parametrize("reuse", [False, True])
+@pytest.mark.parametrize(
+    ("recipe", "adapter", "disabled_slots"),
+    [
+        ("lookback", "lookback", ("reset", "init_pulse")),
+        ("twotone_spectrum", "twotone/freq", ("reset",)),
+        ("time_rabi", "twotone/rabi/len_rabi", ("reset",)),
+        ("amplitude_rabi", "twotone/rabi/amp_rabi", ("reset",)),
+        ("t1", "twotone/t1", ("reset",)),
+        ("t2ramsey", "twotone/t2ramsey", ("reset",)),
+        ("t2echo", "twotone/t2echo", ("reset",)),
+        ("singleshot_ge", "singleshot/ge", ("reset", "init_pulse")),
+    ],
+)
+def test_recipe_optional_modules_reach_missing_calibration_on_real_gui(
+    fx, tmp_path, request, recipe, adapter, disabled_slots, reuse
+):
+    _prepare_guarded_context(fx)
+    bridge, call = _mcp_client(fx.service.port, tmp_path, request=request)
+    try:
+        call("connect", {"port": fx.service.port})
+        arguments = {}
+        if reuse:
+            arguments["reuse_tab_id"] = call(
+                "rpc_call", {"method": "tab.new", "params": {"adapter_name": adapter}}
+            )["tab_id"]
+        result = call(recipe, arguments)
+        assert result["status"] == "needs_parameters", result
+        assert result["missing"]
+        assert result["run_op"] is None
+        tab = result["tab"]
+        if reuse:
+            assert tab == arguments["reuse_tab_id"]
+        cfg = call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab}})
+        modules = cfg["tree"]["children"]["modules"]["children"]
+        for slot in disabled_slots:
+            assert modules[slot]["ref"] is None
+            assert modules[slot]["valid"]
+        snapshot = call(
+            "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}}
+        )["tabs"][0]
+        assert not snapshot["interaction"]["has_run_result"]
+    finally:
+        bridge.disconnect()
+
+
+@pytest.mark.parametrize(
+    ("frequency", "length", "offset"),
+    [(6000, 2, 0), (6000.25, 2.5, 0.05)],
+)
+def test_lookback_numbers_prepare_real_cfg_without_connected_soc(
+    fx, tmp_path, request, frequency, length, offset
+):
+    _prepare_guarded_context(fx)
+    fx.state.set_context(replace(fx.state.session_env, soc=None))
+    bridge, call = _mcp_client(fx.service.port, tmp_path, request=request)
+    try:
+        call("connect", {"port": fx.service.port})
+        result = call(
+            "lookback",
+            {
+                "frequency_mhz": frequency,
+                "readout_length_us": length,
+                "trigger_offset_us": offset,
+                "rounds": 1,
+            },
+        )
+        fields = result["actual"]["fields"]
+        for path, expected in (
+            ("modules.readout.pulse_cfg.freq", frequency),
+            ("modules.readout.ro_cfg.ro_freq", frequency),
+            ("modules.readout.ro_cfg.ro_length", length),
+            ("modules.readout.ro_cfg.trig_offset", offset),
+        ):
+            assert fields[path]["value"] == expected
+            assert type(fields[path]["value"]) is float
+        assert fields["rounds"]["value"] == 1
+        assert type(fields["rounds"]["value"]) is int
+        assert result["status"] == "failed"
+        assert result["run_op"] is None
+    finally:
+        bridge.disconnect()
+
+
 def test_mcp_run_analyze_writeback_save_close_on_one_connection(
     fx, tmp_path: Path
 ) -> None:
