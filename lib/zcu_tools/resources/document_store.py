@@ -84,6 +84,14 @@ class LockTimeoutError(TimeoutError):
 
 
 def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -> bool:
+    if isinstance(original, dict) and isinstance(current, dict):
+        return original.keys() == current.keys() and all(
+            _same_value(value, current[key]) for key, value in original.items()
+        )
+    if isinstance(original, list) and isinstance(current, list):
+        return len(original) == len(current) and all(
+            _same_value(left, right) for left, right in zip(original, current, strict=True)
+        )
     if isinstance(original, bool) != isinstance(current, bool):
         return False
     return original == current
