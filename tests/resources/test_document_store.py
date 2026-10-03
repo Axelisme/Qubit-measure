@@ -67,6 +67,10 @@ def make_store(path: Path) -> DocumentStore[SyntheticDocument]:
     return DocumentStore(path, SyntheticDocument, format="synthetic")
 
 
+def make_scalar_store(path: Path) -> DocumentStore[TypedScalarDocument]:
+    return DocumentStore(path, TypedScalarDocument, format="synthetic")
+
+
 def make_nullable_store(path: Path) -> DocumentStore[NullableDocument]:
     return DocumentStore(path, NullableDocument, format="synthetic")
 
@@ -533,14 +537,39 @@ def test_boolean_to_equal_number_is_a_structural_change(
     document_path.write_text(
         "format: synthetic\nformat_version: '1.0'\nvalue: true\n", encoding="utf-8"
     )
-    store = DocumentStore(document_path, TypedScalarDocument, format="synthetic")
+    store = make_scalar_store(document_path)
     events: list[DocumentChange] = []
     store.subscribe(events.append)
     with store.edit() as draft:
         draft.value = 1
 
     assert type(store.snapshot().value) is int
-    on_disk = DocumentStore(document_path, TypedScalarDocument, format="synthetic")
+    on_disk = make_scalar_store(document_path)
     assert type(on_disk.snapshot().value) is int
     assert on_disk.snapshot().value == 1
     assert events == [DocumentChange(document_path, (("value",),), "commit")]
+
+
+def test_boolean_to_equal_number_causes_a_concurrent_edit_conflict(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\nvalue: true\n", encoding="utf-8"
+    )
+    first = make_scalar_store(document_path)
+    second = make_scalar_store(document_path)
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        draft.value = 2
+        with second.edit() as other:
+            other.value = 1
+        committed = document_path.read_bytes()
+        with pytest.raises(ConflictError) as raised:
+            stack.close()
+
+    assert raised.value.path == ("value",)
+    assert raised.value.original is True
+    assert type(raised.value.current) is int
+    assert raised.value.current == 1
+    assert document_path.read_bytes() == committed
+    assert first.snapshot().value is True
