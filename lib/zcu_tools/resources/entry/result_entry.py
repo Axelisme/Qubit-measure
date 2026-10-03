@@ -4,7 +4,7 @@ import errno
 import os
 import shutil
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 
 from ruamel.yaml import YAML
@@ -12,6 +12,24 @@ from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import DocumentStore
 
 from .schema import SetupDocument
+
+
+def _entry_path(root: str | Path, name: str) -> Path:
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+        or Path(name).is_absolute()
+        or PureWindowsPath(name).anchor
+    ):
+        raise ValueError(f"{name!r}: expected a single path component")
+    root_path = Path(root)
+    path = root_path / name
+    if path.resolve().parent != root_path.resolve():
+        raise ValueError(f"{path}: entry escapes its root")
+    return path
 
 
 class ResultEntry:
@@ -33,8 +51,8 @@ class ResultEntry:
     def create(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> "ResultEntry":
-        result_path = Path(result_root) / name
-        database_path = Path(database_root) / name
+        result_path = _entry_path(result_root, name)
+        database_path = _entry_path(database_root, name)
         for destination in (result_path, database_path):
             if destination.exists() or destination.is_symlink():
                 raise FileExistsError(
@@ -72,8 +90,8 @@ class ResultEntry:
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> "ResultEntry":
-        result_path = Path(result_root) / name
-        database_path = Path(database_root) / name
+        result_path = _entry_path(result_root, name)
+        database_path = _entry_path(database_root, name)
         for directory in (
             result_path,
             database_path,
