@@ -14,6 +14,19 @@ def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
     return tmp_path / "results", tmp_path / "Database"
 
 
+def test_create_cleans_only_new_entry_when_second_root_cannot_be_created(
+    entry_roots: tuple[Path, Path],
+) -> None:
+    results, database = entry_roots
+    database.write_bytes(b"unrelated preexisting file")
+
+    with pytest.raises(NotADirectoryError):
+        ResultEntry.create("entry", result_root=results, database_root=database)
+
+    assert not (results / "entry").exists()
+    assert database.read_bytes() == b"unrelated preexisting file"
+
+
 @pytest.mark.parametrize("root_index", [0, 1])
 @pytest.mark.parametrize("shape", ["legacy-directory", "file", "broken-symlink"])
 def test_create_rejects_existing_destination_without_touching_either_entry(
