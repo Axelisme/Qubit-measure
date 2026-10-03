@@ -8,6 +8,7 @@ from threading import Event
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiConnection
 
@@ -100,6 +101,68 @@ def ge_client(tmp_path):
 def background_ge_client(ge_client, monkeypatch):
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     return ge_client
+
+
+@pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize("receipt", ["delayed", "lost", "timeout"])
+def test_ge_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
+    background_ge_client, monkeypatch, stage, receipt
+):
+    gui, client = background_ge_client
+    pending, release = Event(), Event()
+    method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
+    send_line = client.transport.send_line
+
+    def send(payload):
+        if payload["method"] != method:
+            return send_line(payload)
+        if receipt == "delayed":
+            pending.set()
+            assert release.wait(2)
+            return send_line(payload)
+        client.transport.sent.append((payload["method"], payload["params"]))
+        gui(method, payload["params"])
+        pending.set()
+        if receipt == "timeout":
+            raise GuiTransportTimeoutError(method, 0.01)
+        return None
+
+    monkeypatch.setattr(client.transport, "send_line", send)
+    try:
+        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        assert pending.wait(1)
+        execution = initial.data["execution"]
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": execution})
+        full = client.call("status", {"execution": execution, "detail": "full"})
+        assert summary["steps"]["analysis"][stage]["status"] == "unknown"
+        assert full["analysis_starts"][stage]["status"] == "unknown"
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+            {"path": "/actual/raw.h5", "status": "saved"}
+        ]
+        if stage == "post":
+            assert summary["artifacts"]["analysis"]["trace"]["status"] == "saved"
+        assert len(client.transport.sent) == before
+        if receipt == "delayed":
+            release.set()
+        elif receipt == "lost":
+            client.transport.close()
+            assert client.transport.on_closed is not None
+            client.transport.on_closed(None)
+        completed = client.call("wait", {"execution": execution, "timeout": 2})
+        confirmed = client.call("status", {"execution": execution})
+        if receipt == "delayed":
+            assert completed.data["status"] == "finished", completed.data
+            assert confirmed["steps"]["analysis"][stage]["status"] == "finished"
+        else:
+            assert completed.data["status"] == "failed", completed.data
+            assert confirmed["steps"]["analysis"][stage]["status"] == "unknown"
+            assert confirmed["error"]["reason"] == (
+                "connection_lost" if receipt == "lost" else "gui_transport_timeout"
+            )
+        assert [name for name, _ in client.transport.sent].count(method) == 1
+    finally:
+        release.set()
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
