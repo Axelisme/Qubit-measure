@@ -118,27 +118,42 @@ def test_fit_func_warns_when_falling_back_to_init_p(
     assert np.all(np.isinf(p_cov))
 
 
-def test_fit_func_all_none_fixedparams_does_not_restore_fixed_params(
-    monkeypatch: pytest.MonkeyPatch,
+def test_fit_func_all_none_fixedparams_matches_unfixed_fit():
+    x = np.linspace(0.0, 2.0, 50)
+    y = 2.0 * x + 1.0 + 0.02 * np.sin(3.0 * x)
+
+    def model(x, slope, intercept):
+        return slope * x + intercept
+
+    expected_opt, expected_cov = fit_func(x, y, model, init_p=[1.0, 0.0])
+    p_opt, p_cov = fit_func(x, y, model, init_p=[1.0, 0.0], fixedparams=[None, None])
+
+    np.testing.assert_allclose(p_opt, expected_opt)
+    np.testing.assert_allclose(p_cov, expected_cov)
+    np.testing.assert_allclose(p_opt, [2.0, 1.0], atol=0.03)
+    assert np.all(np.isfinite(p_cov))
+
+
+@pytest.mark.parametrize(
+    "bounds, expected_slope",
+    [(None, 5.0), (([0.0, -np.inf], [3.0, np.inf]), 3.0)],
+)
+def test_fit_func_fixed_parameter_preserves_bounds_and_covariance(
+    bounds, expected_slope
 ):
-    def fake_curve_fit(*args, **kwargs):
-        return np.array([1.0, 2.0]), np.eye(2)
-
-    def fail_add_fixed_params_back(*args, **kwargs):
-        pytest.fail("all-None fixedparams should not enter add_fixed_params_back")
-
-    monkeypatch.setattr(base_module.sp.optimize, "curve_fit", fake_curve_fit)
-    monkeypatch.setattr(
-        base_module, "add_fixed_params_back", fail_add_fixed_params_back
-    )
-
+    x = np.linspace(0.0, 2.0, 50)
+    y = 5.0 * x + 1.0
     p_opt, p_cov = fit_func(
-        np.array([0.0, 1.0]),
-        np.array([0.0, 1.0]),
-        lambda x, a, b: a * x + b,
-        init_p=[1.0, 2.0],
-        fixedparams=[None, None],
+        x,
+        y,
+        lambda x, slope, intercept: slope * x + intercept,
+        init_p=[2.0, 0.0],
+        bounds=bounds,
+        fixedparams=[None, 1.0],
     )
 
-    np.testing.assert_allclose(p_opt, [1.0, 2.0])
-    np.testing.assert_allclose(p_cov, np.eye(2))
+    np.testing.assert_allclose(p_opt, [expected_slope, 1.0], atol=1e-6)
+    assert p_cov.shape == (2, 2)
+    assert np.all(np.isfinite(p_cov))
+    np.testing.assert_array_equal(p_cov[1, :], [0.0, 0.0])
+    np.testing.assert_array_equal(p_cov[:, 1], [0.0, 0.0])

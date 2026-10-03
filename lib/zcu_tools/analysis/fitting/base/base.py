@@ -26,7 +26,7 @@ def with_fixed_params(
     non_fixed_idxs = np.isnan(fixedparams_array)
 
     @wraps(fitfunc)
-    def wrapped_func(xs: NDArray, *args) -> NDArray:
+    def wrapped_func(xs: NDArray[np.generic], *args: float) -> NDArray[Y_DataType]:
         if len(args) != np.sum(non_fixed_idxs):
             raise ValueError(
                 f"Expected {np.sum(non_fixed_idxs)} arguments, got {len(args)}."
@@ -68,7 +68,7 @@ def add_fixed_params_back(
 
 
 def fit_func(
-    xdata: NDArray,
+    xdata: NDArray[np.generic],
     ydata: NDArray[Y_DataType],
     fitfunc: Callable[..., NDArray[Y_DataType]],
     init_p: Sequence[float | None] | None = None,
@@ -90,12 +90,14 @@ def fit_func(
             fitfunc, init_p, bounds, fixedparams
         )
 
-    if bounds is None:
-        bounds = (-np.inf, np.inf)  # type: ignore
-
     try:
         pOpt, pCov = sp.optimize.curve_fit(
-            fitfunc, xdata, ydata, p0=init_p, bounds=bounds, **kwargs
+            fitfunc,
+            xdata,
+            ydata,
+            p0=init_p,
+            bounds=(-np.inf, np.inf) if bounds is None else bounds,
+            **kwargs,
         )
     except RuntimeError as exc:
         if init_p is None:
