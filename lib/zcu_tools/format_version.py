@@ -171,6 +171,27 @@ class MigrationRegistry:
                     f"step from {version} overshoots target",
                 )
             result = step(result)
+            try:
+                actual_version = validate_header(
+                    result,
+                    expected_format=format,
+                    supported_version=next_version,
+                    source=source,
+                )
+                if actual_version != next_version:
+                    raise VersionError(
+                        source,
+                        "format_version",
+                        result.get("format_version"),
+                        f"{next_version.major}.{next_version.minor}",
+                    )
+            except FormatError as exc:
+                raise MigrationError(
+                    format,
+                    from_version,
+                    target_version,
+                    f"invalid output from {version} to {next_version}: {exc}",
+                ) from exc
             version = next_version
         return result
 
