@@ -25,6 +25,11 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     return result
 
 
+def _validate_component_model(model: object) -> None:
+    if not isinstance(model, type) or not issubclass(model, ComponentSchema):
+        raise TypeError("Registered models must derive from ComponentSchema")
+
+
 class ComponentRegistry:
     def __init__(self) -> None:
         self._models: dict[str, type[ComponentSchema]] = {}
@@ -36,8 +41,7 @@ class ComponentRegistry:
     ) -> None:
         if kind in self._models:
             raise ValueError(f"Kind {kind!r} is already registered")
-        if not isinstance(model, type) or not issubclass(model, ComponentSchema):
-            raise TypeError("Registered models must derive from ComponentSchema")
+        _validate_component_model(model)
         self._models[kind] = model
         self._references[kind] = tuple(references)
         self._units[kind] = _model_units(model)
