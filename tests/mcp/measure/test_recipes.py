@@ -764,9 +764,16 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
 
 
 @pytest.mark.parametrize("reuse", [False, True])
+@pytest.mark.parametrize(
+    "readout_length,offset,expected",
+    [(4.0, 0.2, (4.0, 0.2)), (1, 1, (1.0, 1.0)), (1.0, 1.0, (1.0, 1.0))],
+)
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
     reuse,
+    readout_length,
+    offset,
+    expected,
 ):
     gui = LookbackGui()
     client = make_client(tmp_path, gui)
@@ -776,8 +783,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             {
                 "reuse_tab_id": "t" if reuse else None,
                 "frequency_mhz": 6020.0,
-                "readout_length_us": 4.0,
-                "trigger_offset_us": 0.2,
+                "readout_length_us": readout_length,
+                "trigger_offset_us": offset,
                 "rounds": 7,
             },
         )
@@ -800,9 +807,12 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert actual["cfg_ref"] == gui.publication["cfg_ref"]
         assert actual["fields"]["modules.readout.pulse_cfg.freq"]["value"] == 6020.0
         assert actual["fields"]["modules.readout.ro_cfg.ro_freq"]["value"] == 6020.0
-        assert actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"] == 4.0
-        assert actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"] == 0.2
+        assert actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"] == expected[0]
+        assert actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"] == expected[1]
+        assert type(actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"]) is float
+        assert type(actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"]) is float
         assert actual["fields"]["rounds"]["value"] == 7
+        assert type(actual["fields"]["rounds"]["value"]) is int
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.reset_cfg") == int(reuse)
@@ -822,6 +832,10 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         by_path = {tuple(edit["path"]): edit["value"] for edit in edits}
         assert by_path["modules", "reset"] == {"__ref": None}
         assert by_path["modules", "init_pulse"] == {"__ref": None}
+        assert by_path["modules", "readout", "ro_cfg", "ro_length"] == expected[0]
+        assert by_path["modules", "readout", "ro_cfg", "trig_offset"] == expected[1]
+        assert type(by_path["modules", "readout", "ro_cfg", "ro_length"]) is float
+        assert type(by_path["modules", "readout", "ro_cfg", "trig_offset"]) is float
     finally:
         client.context.session.close()
 
