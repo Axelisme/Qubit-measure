@@ -2,6 +2,7 @@
 
 import errno
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -39,25 +40,33 @@ class ResultEntry:
                 raise FileExistsError(
                     errno.EEXIST, os.strerror(errno.EEXIST), str(destination)
                 )
-        result_path.mkdir(parents=True)
-        database_path.mkdir(parents=True)
-        (result_path / "records").mkdir()
-        (result_path / "points").mkdir()
-        document = {
-            "format": "zcu.parameter-container",
-            "format_version": "1.0",
-            "general": {
-                "entry_id": str(uuid4()),
-                "created_at": datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
-            },
-            "components": {},
-            "provenance": {},
-        }
-        with (result_path / "setup.yaml").open("x", encoding="utf-8") as stream:
-            YAML(typ="rt").dump(document, stream)
-        return cls(result_path, database_path)
+        created: list[Path] = []
+        try:
+            for destination in (result_path, database_path):
+                destination.mkdir(parents=True)
+                created.append(destination)
+            (result_path / "records").mkdir()
+            (result_path / "points").mkdir()
+            document = {
+                "format": "zcu.parameter-container",
+                "format_version": "1.0",
+                "general": {
+                    "entry_id": str(uuid4()),
+                    "created_at": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                },
+                "components": {},
+                "provenance": {},
+            }
+            with (result_path / "setup.yaml").open("x", encoding="utf-8") as stream:
+                YAML(typ="rt").dump(document, stream)
+            return cls(result_path, database_path)
+        except BaseException:
+            # These entry directories belong to this call, not to the caller's roots.
+            for directory in reversed(created):
+                shutil.rmtree(directory)
+            raise
 
     @classmethod
     def open(
