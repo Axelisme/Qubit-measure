@@ -85,7 +85,11 @@ def test_string_enum_is_projected_by_shared_schema():
 @pytest.mark.parametrize("params", [{}, {"mode": None}])
 def test_optional_enum_preserves_omission_and_null_default(default, params):
     spec = ParamSpec(
-        "mode", JsonType.STRING, required=False, default=default, enum=("fast", "careful")
+        "mode",
+        JsonType.STRING,
+        required=False,
+        default=default,
+        enum=("fast", "careful"),
     )
     assert validate_params((spec,), params) == {"mode": default}
 

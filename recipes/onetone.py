@@ -128,14 +128,16 @@ def _flux_device(
             isinstance(info, dict) and info.get("type") == "FakeDevice"
         ):
             raise GuiRpcError(
-                "Fake flux requires confirmed native coordinates", reason="invalid_device"
+                "Fake flux requires confirmed native coordinates",
+                reason="invalid_device",
             )
         requested_unit = arguments.get("flux_unit")
         if requested_unit is not None and (
             requested_unit != unit or requested_unit == "native"
         ):
             raise GuiRpcError(
-                "Flux unit does not match the device coordinate", reason="invalid_device"
+                "Flux unit does not match the device coordinate",
+                reason="invalid_device",
             )
         if not isinstance(unit, str) or not unit.strip() or unit in ("none", "native"):
             if arguments.get("flux_device") is not None:

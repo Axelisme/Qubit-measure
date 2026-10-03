@@ -693,7 +693,9 @@ def test_physical_flux_unit_assertion_is_checked_before_run(
         assert reply.data["status"] == expected, reply.data
         assert gui.ran is (expected == "finished")
         if expected == "finished":
-            assert reply.data["actual"]["fields"]["dev.flux_dev"]["unit"] == requested_unit
+            assert (
+                reply.data["actual"]["fields"]["dev.flux_dev"]["unit"] == requested_unit
+            )
         else:
             assert reply.data["error"]["reason"] == "invalid_device"
 
