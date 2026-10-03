@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from difflib import get_close_matches
 from pathlib import Path
+from typing import get_args
 
 from pydantic import BaseModel
 
@@ -30,6 +31,27 @@ def _validate_component_model(model: object) -> None:
         raise TypeError("Registered models must derive from ComponentSchema")
 
 
+def _validate_reference(model: type[BaseModel], reference: str) -> None:
+    parts = reference.split(".")
+    for index, name in enumerate(parts):
+        field = model.model_fields.get(name)
+        if field is None:
+            break
+        annotation = field.annotation
+        if index == len(parts) - 1:
+            types = tuple(
+                item for item in get_args(annotation) if item is not type(None)
+            )
+            if annotation is str or types == (str,):
+                return
+            break
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            model = annotation
+        else:
+            break
+    raise ValueError(f"Invalid component reference path: {reference!r}")
+
+
 class ComponentRegistry:
     def __init__(self) -> None:
         self._models: dict[str, type[ComponentSchema]] = {}
@@ -42,9 +64,13 @@ class ComponentRegistry:
         if kind in self._models:
             raise ValueError(f"Kind {kind!r} is already registered")
         _validate_component_model(model)
+        reference_paths = tuple(references)
+        for reference in reference_paths:
+            _validate_reference(model, reference)
+        units = _model_units(model)
         self._models[kind] = model
-        self._references[kind] = tuple(references)
-        self._units[kind] = _model_units(model)
+        self._references[kind] = reference_paths
+        self._units[kind] = units
 
     def unregister(self, kind: str) -> None:
         del self._models[kind]
