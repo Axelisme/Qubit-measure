@@ -73,6 +73,23 @@ def test_enum_declaration_rejects_invalid_contract(json_type, enum, default):
         ParamSpec("mode", json_type, default=default, enum=enum)
 
 
+def test_string_enum_is_projected_by_shared_schema():
+    spec = ParamSpec("mode", JsonType.STRING, enum=("fast", "careful"))
+    assert schema_property(spec) == {
+        "type": "string",
+        "enum": ["fast", "careful"],
+    }
+
+
+@pytest.mark.parametrize("default", [None, "fast"])
+@pytest.mark.parametrize("params", [{}, {"mode": None}])
+def test_optional_enum_preserves_omission_and_null_default(default, params):
+    spec = ParamSpec(
+        "mode", JsonType.STRING, required=False, default=default, enum=("fast", "careful")
+    )
+    assert validate_params((spec,), params) == {"mode": default}
+
+
 def test_integer_rejects_bool():
     with pytest.raises(RemoteError, match="must be an integer"):
         validate_params(_spec(JsonType.INTEGER), {"x": True})
