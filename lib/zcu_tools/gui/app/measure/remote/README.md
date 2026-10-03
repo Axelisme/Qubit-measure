@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-03, Run provenance and bound admission
+**Last updated:** 2026-10-03, MCP recipe handoff version
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -126,7 +126,9 @@ The launch/connect note reports three numbers:
   owned here.
 
 Current measure-gui values are `WIRE_VERSION = 81`, `GUI_VERSION = 113`, and
-`MCP_VERSION = 102` (defined in `zcu_tools.mcp.measure.server`). WIRE 81 adds optional
+`MCP_VERSION = 104` (defined in `zcu_tools.mcp.measure.server`). MCP 104 delivers
+recipe interaction handoffs and checks post-Run result provenance. MCP 103 adds
+Lookback recipes and execution controls. WIRE 81 adds optional
 `operation_id` to `tab.writeback_preview`. GUI 113 rejects a replaced analysis
 before reading its writeback draft; omission still reads the current pane.
 WIRE 80 adds Run

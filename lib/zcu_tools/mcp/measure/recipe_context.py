@@ -359,7 +359,8 @@ class RecipeContext:
         source = result_state.get("source_operation_id")
         if source is None or self.tools.gui.expose_operation(source) != run_op:
             raise GuiRpcError(
-                "The tab no longer contains this Run's result", reason="result_superseded"
+                "The tab no longer contains this Run's result",
+                reason="result_superseded",
             )
         self._publish(result_state=deepcopy(result_state))
         if not result_state["available"]:

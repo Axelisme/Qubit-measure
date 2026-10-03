@@ -273,7 +273,9 @@ def interactive_recipe(tmp_path, handoff_failure):
             return {
                 "operation_id": 94 if failure == "replaced" else 93,
                 "figure": {
-                    "png_b64": "invalid" if failure == "png" else base64.b64encode(_PNG).decode()
+                    "png_b64": "invalid"
+                    if failure == "png"
+                    else base64.b64encode(_PNG).decode()
                 },
                 "state": {"offset": 0.24},
                 "commands": [{"name": "done"}],
@@ -285,6 +287,7 @@ def interactive_recipe(tmp_path, handoff_failure):
 
     client = make_client(tmp_path, respond)
     if handoff_failure == "query":
+
         def reject_initial_query(params):
             nonlocal initial_handoff
             initial_handoff = False

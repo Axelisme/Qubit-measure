@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-03, Lookback recipes and execution control
+**Last updated:** 2026-10-03, Recipe handoff and result provenance
 
 # `zcu_tools/mcp/measure/`
 
@@ -75,8 +75,11 @@ GUI 仍擁有 cfg defaults、validation、資源 guard 與結果。
 沒有可用頻率時回 `needs_parameters`，不以 GUI 模板的盲選頻率開始 Run。
 
 `RecipeContext` 持有固定 GUI binding 與整段進度，只執行一次 Run。
+Run 後只收錄來源對應原 Run 的 result_state。來源已被替代時回報 result_superseded，不交付另一輪快照。
 Raw save 與 Primary analysis 都帶原 Run 來源，GUI 拒絕已被另一輪資料取代的來源。
 Raw 確認成功後才交給既有 AnalysisExecution 分析、逐張存圖與交付 PNG。
+首次互動交接與獨立分析工具共用 interaction delivery，回傳 committed state、commands 與可用 PNG。
+交付失敗保留原 execution 與已保存 raw，後續仍可用 tab_interact 繼續。
 最後讀取同次分析的 writeback 候選，不自動 accept。失敗保留已確認的 raw、圖像路徑與分析結果。
 
 首次 recipe 呼叫最多等 300 秒，逾時返回 execution，worker 繼續。

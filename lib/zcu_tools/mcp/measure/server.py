@@ -55,7 +55,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v99: generic RPC accepts all public methods, including tool-backed commands.
 # v100: accept writes all current Primary and Post candidates with partial progress.
 # v103: Lookback recipe execution and shared cancel/finish-early control.
-MCP_VERSION = 103
+# v104: Recipe interaction delivery and post-Run result provenance checks.
+MCP_VERSION = 104
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
