@@ -16,6 +16,25 @@ def _finite(value: object) -> TypeGuard[int | float]:
     )
 
 
+def _validate(arguments: dict[str, Any]) -> None:
+    for name in ("reuse_tab_id", "readout_ref", "drive_ref", "use_reset"):
+        value = arguments.get(name)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{name} must be a non-empty string or null")
+    for name in ("center_mhz", "span_mhz", "gain", "pulse_length_us"):
+        value = arguments.get(name)
+        if value is not None and not _finite(value):
+            raise ValueError(f"{name} must be a finite real number or null")
+    if arguments.get("span_mhz") is not None and arguments["span_mhz"] <= 0:
+        raise ValueError("span_mhz must be positive")
+    for name in ("points", "reps", "rounds"):
+        value = arguments.get(name)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int)
+        ):
+            raise ValueError(f"{name} must be an integer or null")
+
+
 def _node(publication: dict[str, Any], *path: str) -> dict[str, Any]:
     node = publication["tree"]
     for part in path:
@@ -128,6 +147,7 @@ def _frequency_sweep(
 
 def twotone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one qubit spectrum, save raw, and complete Primary without accepting."""
+    _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
     publication = ctx.prepare_tab("twotone/freq", arguments.get("reuse_tab_id"))
     publication = _select_modules(ctx, publication, arguments)
