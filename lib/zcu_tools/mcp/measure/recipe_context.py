@@ -355,8 +355,14 @@ class RecipeContext:
             self._publish(status="cancelled", phase="terminal")
             return
         observed = self.rpc("tab.snapshot", {"tab_id": tab})["tabs"][0]
-        self._publish(result_state=deepcopy(observed["result_state"]))
-        if not observed["result_state"]["available"]:
+        result_state = observed["result_state"]
+        source = result_state.get("source_operation_id")
+        if source is None or self.tools.gui.expose_operation(source) != run_op:
+            raise GuiRpcError(
+                "The tab no longer contains this Run's result", reason="result_superseded"
+            )
+        self._publish(result_state=deepcopy(result_state))
+        if not result_state["available"]:
             raise GuiRpcError(
                 "Run did not publish usable data", reason="run_result_unavailable"
             )
