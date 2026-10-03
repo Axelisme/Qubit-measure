@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
-from zcu_tools.resources.document_store import ConflictError, DocumentStore
+from zcu_tools.resources.document_store import (
+    ConflictError,
+    DocumentChange,
+    DocumentStore,
+)
 
 
 class SyntheticDocument(BaseModel):
@@ -116,3 +120,33 @@ def test_roundtrip_preserves_comments_order_and_unchanged_numbers(
     assert text.index("format:") < text.index("format_version:") < text.index("values:")
     assert text.index("left:") < text.index("right:")
     assert make_store(document_path).snapshot().values == {"left": 10.0, "right": 2.0}
+
+
+def test_commit_notifies_after_publication_and_unlock_and_can_unsubscribe(
+    document_path: Path,
+) -> None:
+    store = make_store(document_path)
+    other = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", lock_timeout=0.01
+    )
+    events: list[DocumentChange] = []
+    snapshots: list[dict[str, float]] = []
+    unlocked: list[bool] = []
+
+    def observe(change: DocumentChange) -> None:
+        events.append(change)
+        snapshots.append(store.snapshot().values)
+        with other.locked():
+            unlocked.append(True)
+
+    unsubscribe = store.subscribe(observe)
+    with store.edit() as draft:
+        draft.values["left"] = 10.0
+
+    assert events == [DocumentChange(document_path, (("values", "left"),), "commit")]
+    assert snapshots == [{"left": 10.0, "right": 2.0}]
+    assert unlocked == [True]
+    unsubscribe()
+    with store.edit() as draft:
+        draft.values["left"] = 30.0
+    assert len(events) == 1
