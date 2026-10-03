@@ -78,7 +78,7 @@ def _select_modules(
 
 
 def _readout_frequency(
-    publication: dict[str, Any], md: dict[str, Any]
+    publication: dict[str, Any], md: dict[str, Any], modules: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], dict[tuple[str, ...], str], list[MissingParameter]]:
     readout = _node(publication, "modules", "readout")
     if "ro_freq" in readout["children"]:
@@ -92,7 +92,7 @@ def _readout_frequency(
     missing = []
     for tail in tails:
         path = ("modules", "readout", *tail)
-        if readout.get("ref") is not None and _usable_frequency(
+        if readout.get("ref") in modules and _usable_frequency(
             _node(publication, *path)
         ):
             origins[path] = f"library:{readout['ref']}"
@@ -152,7 +152,9 @@ def twotone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     publication = ctx.prepare_tab("twotone/freq", arguments.get("reuse_tab_id"))
     publication = _select_modules(ctx, publication, arguments)
     sweep, missing = _frequency_sweep(publication, arguments, sources["md"])
-    edits, origins, readout_missing = _readout_frequency(publication, sources["md"])
+    edits, origins, readout_missing = _readout_frequency(
+        publication, sources["md"], sources["ml"]["modules"]
+    )
     if missing or readout_missing:
         ctx.needs_parameters([*missing, *readout_missing])
         return
