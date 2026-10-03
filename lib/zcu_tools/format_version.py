@@ -1,5 +1,6 @@
 """Shared artifact headers and explicit migrations; no legacy adapters."""
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,20 @@ class MigrationError(ValueError):
         super().__init__(f"{format}: {from_version} -> {target_version}: {detail}")
 
 
+def _parse_version(raw_version: YamlValue, source: Path) -> FormatVersion:
+    expected = "non-negative major.minor"
+    if (
+        not isinstance(raw_version, str)
+        or re.fullmatch(r"[0-9]+\.[0-9]+", raw_version) is None
+    ):
+        raise VersionError(source, "format_version", raw_version, expected)
+    major, minor = raw_version.split(".")
+    try:
+        return FormatVersion(int(major), int(minor))
+    except ValueError as exc:
+        raise VersionError(source, "format_version", raw_version, expected) from exc
+
+
 def validate_header(
     document: Mapping[str, YamlValue],
     *,
@@ -57,10 +72,7 @@ def validate_header(
     if actual_format != expected_format:
         raise FormatError(source, "format", actual_format, expected_format)
     raw_version = document.get("format_version")
-    if not isinstance(raw_version, str):
-        raise NotImplementedError((document, expected_format, source))
-    major, minor = raw_version.split(".")
-    version = FormatVersion(int(major), int(minor))
+    version = _parse_version(raw_version, source)
     if version.major != supported_version.major:
         raise VersionError(
             source,
