@@ -632,6 +632,45 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             assert type(flux_edits[0]["expts"]) is int
 
 
+def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path):
+    gui = FluxGui()
+    with recipe_client(tmp_path, gui) as client:
+        client.transport.replies["device.snapshot"] = {
+            "ok": True,
+            "result": {
+                "snapshot": {
+                    "name": "coil",
+                    "type_name": "FakeDevice",
+                    "unit": "none",
+                    "info": {"type": "FakeDevice", "value": 0.0},
+                }
+            },
+        }
+        reply = client.call(
+            "onetone_spectrum_over_flux",
+            {
+                "flux_device": "coil",
+                "flux_unit": "native",
+                "flux_range": [-0.25, 1.5],
+                "flux_points": 7,
+            },
+        )
+        assert reply.data["status"] == "finished", reply.data
+        assert reply.data["actual"]["fields"]["dev.flux_dev"] == {
+            "value": "coil",
+            "unit": "native",
+            "source": "explicit",
+        }
+        assert reply.data["actual"]["fields"]["sweep.flux"]["value"] == {
+            "start": -0.25,
+            "stop": 1.5,
+            "expts": 7,
+        }
+        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["analysis"]["status"] == "finished"
+        assert gui.ran
+
+
 @pytest.mark.parametrize("reuse_tab_id", [None, "t"])
 def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_id):
     gui = OnetoneGui()

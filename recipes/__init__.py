@@ -268,6 +268,11 @@ RECIPES = (
                 **_ONETONE_COMMON_PROPERTIES,
                 "gain": {"type": ["number", "null"]},
                 "flux_device": {"type": ["string", "null"], "minLength": 1},
+                "flux_unit": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "description": "Optional device-unit assertion. FakeDevice requires explicit native coordinates.",
+                },
                 "freq_points": {"type": ["integer", "null"]},
                 "flux_points": {"type": ["integer", "null"]},
                 "flux_range": {
