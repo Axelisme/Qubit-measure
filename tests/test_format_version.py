@@ -276,3 +276,56 @@ def test_migration_rejects_unreachable_target_without_mutating_input(
     assert caught.value.target_version == target
     assert caught.value.detail
     assert document["format_version"] == raw_version
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"format": "wrong.format", "format_version": "1.1"},
+        {"format": "zcu.synthetic", "format_version": "1.0"},
+        {"format": "zcu.synthetic", "format_version": "1.2"},
+        {"format": "zcu.synthetic", "format_version": "2.0"},
+        {"format": "zcu.synthetic", "format_version": "bad"},
+        {"format": "zcu.synthetic"},
+    ],
+    ids=[
+        "format",
+        "unchanged",
+        "wrong-minor",
+        "wrong-major",
+        "malformed",
+        "missing-version",
+    ],
+)
+def test_migration_validates_each_step_before_next_step(output: YamlMap) -> None:
+    registry = MigrationRegistry()
+    document: YamlMap = {"format": "zcu.synthetic", "format_version": "1.0"}
+
+    def invalid_step(doc: YamlMap) -> YamlMap:
+        doc.clear()
+        doc.update(output)
+        return doc
+
+    def forbidden_followup(doc: YamlMap) -> YamlMap:
+        pytest.fail("invalid output must be rejected before the next step")
+
+    registry.register(
+        "zcu.synthetic", FormatVersion(1, 0), FormatVersion(1, 1), invalid_step
+    )
+    registry.register(
+        "zcu.synthetic", FormatVersion(1, 1), FormatVersion(2, 0), forbidden_followup
+    )
+
+    with pytest.raises(MigrationError) as caught:
+        registry.migrate(
+            document,
+            format="zcu.synthetic",
+            target_version=FormatVersion(2, 0),
+            source=Path("entry/setup.yaml"),
+        )
+
+    assert caught.value.format == "zcu.synthetic"
+    assert caught.value.from_version == FormatVersion(1, 0)
+    assert caught.value.target_version == FormatVersion(2, 0)
+    assert caught.value.detail
+    assert document == {"format": "zcu.synthetic", "format_version": "1.0"}
