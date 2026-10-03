@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-03, operation-bound Run consumption
+**Last updated:** 2026-10-03, operation-bound Run and Post consumption
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -401,6 +401,11 @@ identity check, and the control facets apply it before capturing inputs or chang
 drafts. Remote analysis also checks before following the pane. Superseded sources
 fail instead of consuming the latest result. Ordinary Qt operations still use the
 current result, and remote observation guards remain independent.
+
+Post analysis can require both its Primary analysis source and its Run source.
+The remote handler checks them before following the Post pane. The control facet
+checks them again before creating plots or capturing inputs, in the same owner
+command. Omitting the source tokens retains ordinary current-result behavior.
 
 State and `TabSnapshot` expose only the explicit Run, Analysis, Post-Analysis, Save
 and path carriers; there are no flat tab result/writeback/path projections. Callers

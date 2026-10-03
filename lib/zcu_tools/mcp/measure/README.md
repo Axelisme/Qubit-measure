@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-03, Drive recipes
+**Last updated:** 2026-10-03, GE two-stage recipe
 
 # `zcu_tools/mcp/measure/`
 
@@ -94,6 +94,20 @@ Inline 模板的固定頻率不算校準來源；缺 drive／readout 來源時�
 省略的 scalar、sweep 與平均數保留 GUI defaults 或 calibration expression。
 `use_reset` 省略或 null 明確停用 reset；錯誤的 ref 不改選其他來源。
 三者都只 Run 一次，保存 raw 後完成 Primary，不做 Post、alignment、重新掃描或自動 accept。
+
+`singleshot_ge` 要求已校準的 library `pi_ref`，省略時使用 GUI 已選的 library pulse。
+Custom pulse 不算 π 校準。Readout 沿用已選 library 的有效頻率，缺少時使用 `r_f`。
+缺項一次回 `needs_parameters`，不開始 Run。`shots` 只接受正整數，省略沿 GUI defaults；
+reps／rounds 沿 GUI locked 1，不是 recipe 參數。`use_reset` 與 `init_pulse_ref` 省略或 null 時停用。
+新建與 reuse/reset 採相同規則，explicit ref 無效時不改選其他來源。
+
+GE 使用 `analysis_mode=primary_post`。同一次 Run 保存 raw 後，先完成 Primary 的分析、
+圖像保存、PNG 交付與 writeback preview，再開始 Post 的同一套流程。
+`analysis`／`writeback` 保留 Primary，`post_analysis`／`post_writeback` 保留 Post。
+`analysis_stage` 標示目前或最後到達的階段。兩個 stage 都完成才回 finished。
+Post 帶入原 Primary 與 Run 的 operation handle，來源被替代時失敗，不消費新結果。
+Post 失敗或取消保留 Primary 結果、已保存路徑與已交付圖片，不重跑、不 autoaccept。
+每個 stage 使用既有 `AnalysisExecution`，cancel／close 不允許開始下一個 stage。
 
 `RecipeContext` 持有固定 GUI binding 與整段進度，只執行一次 Run。
 Run 後只收錄來源對應原 Run 的 result_state。來源已被替代時回報 result_superseded，不交付另一輪快照。

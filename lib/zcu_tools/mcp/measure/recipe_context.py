@@ -334,7 +334,7 @@ class RecipeContext:
         *,
         analysis_mode: Literal["primary", "primary_post", "none"] = "primary",
     ) -> None:
-        """Run once; save raw, then Primary analysis or a noncanonical Run preview."""
+        """Run once; save raw, then the requested analysis stages or Run preview."""
         tab = self.progress.tab
         if tab is None:
             raise RuntimeError("Prepare a tab before running")
@@ -400,10 +400,11 @@ class RecipeContext:
             and self._analyze_run(tab, run_op, "post", primary_op) is None
         ):
             return
-        self._publish(
-            status="cancelled" if self.progress.cancel_requested else "finished",
-            phase="terminal",
-        )
+        with self._condition:
+            self._publish(
+                status="cancelled" if self.progress.cancel_requested else "finished",
+                phase="terminal",
+            )
 
     def _preview_run(self, tab: str, run_op: int) -> None:
         self._publish(phase="preview")
