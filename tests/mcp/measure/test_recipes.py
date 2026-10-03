@@ -270,8 +270,6 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
             assert params["tab_id"] == "t"
             failure = handoff_failure if initial_handoff else None
             initial_handoff = False
-            if failure == "query":
-                raise GuiRpcError("Preview unavailable", reason="render_failed")
             if params.get("payload", {}).get("command") == "done":
                 done.set()
             return {
@@ -288,6 +286,21 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
+    if handoff_failure == "query":
+        def reject_initial_query(params):
+            nonlocal initial_handoff
+            initial_handoff = False
+            del client.transport.replies["tab.interact"]
+            return {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "render_failed",
+                    "message": "Preview unavailable",
+                },
+            }
+
+        client.transport.replies["tab.interact"] = reject_initial_query
     try:
         handoff = client.call("lookback", {"frequency_mhz": 6020.0})
         assert handoff.data["status"] == "interactive"
