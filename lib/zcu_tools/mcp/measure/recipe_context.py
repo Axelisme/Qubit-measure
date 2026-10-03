@@ -395,9 +395,11 @@ class RecipeContext:
         primary_op = self._analyze_run(tab, run_op, "primary")
         if primary_op is None:
             return
-        if analysis_mode == "primary_post":
-            if self._analyze_run(tab, run_op, "post", primary_op) is None:
-                return
+        if (
+            analysis_mode == "primary_post"
+            and self._analyze_run(tab, run_op, "post", primary_op) is None
+        ):
+            return
         self._publish(
             status="cancelled" if self.progress.cancel_requested else "finished",
             phase="terminal",
@@ -487,7 +489,7 @@ class RecipeContext:
                 if reply.data["status"] == "interactive"
                 else "terminal",
             )
-            return
+            return None
         self._publish(phase="writeback_read")
         writeback = self.tools.gui.send_gui_rpc(
             "tab.writeback_preview",

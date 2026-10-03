@@ -52,21 +52,25 @@ class GeGui(LookbackGui):
                 "operation_state": {"post_analysis_state": {"figure_names": ["cloud"]}},
             }
         if params.get("operation_id") == 104:
-            assert params["subtab_id"] == "post_analysis"
-            if method == "tab.save_image":
-                assert params["figure_name"] == "cloud"
-                return {"image_path": "/actual/cloud.png"}
-            if method == "tab.get_figure":
-                return {"png_b64": base64.b64encode(PNG).decode()}
-            if method == "tab.writeback_preview":
-                return {
-                    "has_draft": True,
-                    "items": [{"id": "classifier", "proposed": 0.98}],
-                }
+            return self._post_result(method, params)
         if method == "tab.new":
             assert params == {"adapter_name": "singleshot/ge"}
             return {"tab_id": "t"}
         return super().__call__(method, params)
+
+    def _post_result(self, method, params):
+        assert params["subtab_id"] == "post_analysis"
+        if method == "tab.save_image":
+            assert params["figure_name"] == "cloud"
+            return {"image_path": "/actual/cloud.png"}
+        if method == "tab.get_figure":
+            return {"png_b64": base64.b64encode(PNG).decode()}
+        if method == "tab.writeback_preview":
+            return {
+                "has_draft": True,
+                "items": [{"id": "classifier", "proposed": 0.98}],
+            }
+        raise AssertionError(method)
 
 
 def test_ge_requires_calibrated_pi_instead_of_custom_template(tmp_path):
