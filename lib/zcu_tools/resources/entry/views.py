@@ -16,27 +16,35 @@ from .schema import ComponentSchema, SetupDocument
 class ComponentView:
     _model: Callable[[], ComponentSchema]
     _edit: Callable[[], AbstractContextManager[ComponentSchema]]
+    _path: str
 
     def __init__(
         self,
         model: Callable[[], ComponentSchema],
         edit: Callable[[], AbstractContextManager[ComponentSchema]],
+        path: str,
     ) -> None:
         self._model = model
         self._edit = edit
+        self._path = path
 
     @property
     def kind(self) -> str:
         return self._model().kind
 
     def __getattr__(self, name: str) -> YamlValue:
-        return TypeAdapter(YamlValue).validate_python(getattr(self._model(), name))
+        model = self._model()
+        component_registry.check_fields(model.kind, {name: None}, path=self._path)
+        return TypeAdapter(YamlValue).validate_python(getattr(model, name))
 
     def __setattr__(self, name: str, value: object) -> None:
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
             with self._edit() as draft:
+                component_registry.check_fields(
+                    draft.kind, {name: value}, path=self._path
+                )
                 setattr(draft, name, value)
 
 
@@ -77,6 +85,7 @@ class SetupView:
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         model = component_registry.get(kind, source=self._source, component=name)
+        component_registry.check_fields(kind, fields, path=name)
         with self._store.edit() as draft:
             if name in draft.components:
                 raise ValueError(f"Component {name!r} already exists")
@@ -88,6 +97,7 @@ class SetupView:
         return ComponentView(
             lambda: self._store.snapshot().components[name],
             lambda: self._edit_component(name),
+            name,
         )
 
     @contextmanager

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
-from .errors import UnknownKindError
+from .errors import UnknownFieldError, UnknownKindError
 from .schema import ComponentSchema, ResonatorSchema
 
 
@@ -44,6 +44,16 @@ class ComponentRegistry:
             raise UnknownKindError(
                 source, component, kind, tuple(get_close_matches(kind, self._models))
             ) from cause
+
+    def check_fields(
+        self, kind: str, fields: Mapping[str, object], *, path: str
+    ) -> None:
+        known_fields = self.get(kind).model_fields
+        for name in fields:
+            if name not in known_fields:
+                raise UnknownFieldError(
+                    f"{path}.{name}", name, tuple(get_close_matches(name, known_fields))
+                )
 
     def units(
         self, kind: str, *, source: Path | None = None, component: str | None = None
