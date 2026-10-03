@@ -1,18 +1,22 @@
 """Setup and transaction views over one typed document store."""
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
-from .schema import SetupDocument
+from .registry import component_registry
+from .schema import ComponentSchema, SetupDocument
 
 
 class ComponentView:
+    def __init__(self, model: Callable[[], ComponentSchema]) -> None:
+        self._model = model
+
     @property
     def kind(self) -> str:
-        raise NotImplementedError("typed component access")
+        return self._model().kind
 
 
 class EditView:
@@ -50,7 +54,13 @@ class SetupView:
         self._store.refresh()
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
-        raise NotImplementedError("typed component addition")
+        model = component_registry.get(kind)
+        with self._store.edit() as draft:
+            if name in draft.components:
+                raise ValueError(f"Component {name!r} already exists")
+            draft.components[name] = model.model_validate({"kind": kind, **fields})
 
     def __getattr__(self, name: str) -> ComponentView:
-        raise NotImplementedError("typed component access")
+        if name not in self._store.snapshot().components:
+            raise AttributeError(f"Unknown component {name!r}")
+        return ComponentView(lambda: self._store.snapshot().components[name])

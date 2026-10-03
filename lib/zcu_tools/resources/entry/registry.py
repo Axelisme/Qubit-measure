@@ -6,16 +6,22 @@ from .schema import ComponentSchema
 
 
 class ComponentRegistry:
+    def __init__(self) -> None:
+        self._models: dict[str, type[ComponentSchema]] = {}
+
     def register(
         self, kind: str, model: type[ComponentSchema], *, references: Sequence[str] = ()
     ) -> None:
-        raise NotImplementedError("component model registration")
+        if kind in self._models:
+            raise ValueError(f"Kind {kind!r} is already registered")
+        self._models[kind] = model
 
     def unregister(self, kind: str) -> None:
-        raise NotImplementedError("component model lifecycle")
+        del self._models[kind]
 
     def get(self, kind: str) -> type[ComponentSchema]:
-        raise NotImplementedError("component model lookup")
+        return self._models[kind]
 
 
 component_registry = ComponentRegistry()
+component_registry.register("resonator", ComponentSchema)
