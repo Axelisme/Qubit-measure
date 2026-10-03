@@ -576,6 +576,41 @@ def test_unit_resolver_uses_the_current_document_on_refresh_and_commit(
     ).snapshot().value == pytest.approx(0.003)
 
 
+def test_unit_resolver_uses_merged_discriminator_for_changed_physical_values(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\ndimension: frequency\nvalue: 1000000\n",
+        encoding="utf-8",
+    )
+
+    def resolve_units(
+        document: Mapping[str, YamlValue],
+    ) -> dict[tuple[str, ...], UnitSpec]:
+        unit = (
+            UnitSpec("Hz", "MHz")
+            if document["dimension"] == "frequency"
+            else UnitSpec("A", "mA")
+        )
+        return {("value",): unit}
+
+    store = DocumentStore(
+        document_path, DynamicUnitDocument, format="synthetic", units=resolve_units
+    )
+    with store.edit() as draft:
+        draft.dimension = "current"
+        draft.value = 3.0
+
+    assert store.snapshot().dimension == "current"
+    assert store.snapshot().value == pytest.approx(3.0)
+    reopened = DocumentStore(
+        document_path, DynamicUnitDocument, format="synthetic", units=resolve_units
+    )
+    assert reopened.snapshot() == store.snapshot()
+    on_disk = DocumentStore(document_path, DynamicUnitDocument, format="synthetic")
+    assert on_disk.snapshot().value == pytest.approx(0.003)
+
+
 def test_boolean_to_equal_number_is_a_structural_change(
     document_path: Path,
 ) -> None:
