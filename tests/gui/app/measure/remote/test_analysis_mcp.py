@@ -121,6 +121,36 @@ def test_unestimable_error_is_null_with_reason_through_public_rpc(
     assert parsed["operation_state"][f"{stage}_state"]["available"] is True
 
 
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("operation_id", [None, 101])
+def test_nested_nonfinite_analysis_values_have_precise_paths(
+    fx, tmp_path, request, stage, operation_id
+):
+    tab = fx.ctrl.new_tab("fake")
+    _install_result(
+        fx, tab, stage, 10.0, 101,
+        summary={"fit": {"value": float("nan"),
+                         "errors": [float("inf"), -float("inf"), None, 0.0, 2.0]},
+                 "warnings": ["fit is nonfinite"], "error": "fit unavailable"},
+    )
+    _, invoke = mcp_client(fx.service.port, tmp_path, request=request)
+    invoke("connect", {"port": fx.service.port})
+    params = {"tab_id": tab}
+    if operation_id is not None:
+        params["operation_id"] = operation_id
+    reply = invoke("rpc_call", {"method": _result_method(stage), "params": params})
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed["summary"] == {
+        "fit": {"value": None, "errors": [None, None, None, 0.0, 2.0]},
+        "warnings": ["fit is nonfinite"], "error": "fit unavailable",
+    }
+    assert parsed["invalid"] == [
+        {"path": "summary.fit.value", "reason": "non_finite"},
+        {"path": "summary.fit.errors[0]", "reason": "non_finite"},
+        {"path": "summary.fit.errors[1]", "reason": "non_finite"},
+    ]
+
+
 def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
     tab = fx.ctrl.new_tab("fake")
     run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
