@@ -319,7 +319,7 @@ def calc_M(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> NDArray[np.float
     Myz = np.sum(ys * zs)
     Mxy = np.sum(xs * ys)
 
-    M = np.array(
+    return np.array(
         [
             [Mzz, Mxz, Myz, Mz],
             [Mxz, Mxx, Mxy, Mx],
@@ -327,7 +327,6 @@ def calc_M(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> NDArray[np.float
             [Mz, Mx, My, N],
         ]
     )
-    return M
 
 
 def fit_circle_params(
