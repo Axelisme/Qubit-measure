@@ -25,10 +25,13 @@ class GeGui(LookbackGui):
             "children": {"freq": scalar(6100.0)},
         }
 
+    def _observations(self):
+        observations = super()._observations()
+        observations["context.snapshot"]["ml"]["modules"] = self.library
+        return observations
+
     def __call__(self, method, params):
         self.calls.append((method, deepcopy(params)))
-        if method == "context.snapshot":
-            return {"md": self.md, "ml": {"modules": self.library}}
         if method == "tab.post_analyze":
             assert params == {
                 "tab_id": "t",
