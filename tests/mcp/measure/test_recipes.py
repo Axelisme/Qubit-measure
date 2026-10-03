@@ -823,7 +823,6 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("reuse", [False, True])
 @pytest.mark.parametrize("replacement_source", [99, None])
 @pytest.mark.parametrize("available", [False, True])
 def test_lookback_rejects_a_post_run_snapshot_from_another_source(
@@ -858,6 +857,7 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
         client.context.session.close()
 
 
+@pytest.mark.parametrize("reuse", [False, True])
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
     tmp_path,
     reuse,
