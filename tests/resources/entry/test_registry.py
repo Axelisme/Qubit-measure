@@ -22,6 +22,7 @@ class UnrelatedSchema(BaseModel):
 class PairLinks(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target: str
+    targets: list[str]
 
 
 class NestedPairSchema(ComponentSchema):
@@ -57,7 +58,15 @@ def test_registry_lifecycle_rejects_duplicates_and_allows_explicit_replacement()
 
 @pytest.mark.parametrize(
     "reference",
-    ["links.missing", "links", "ext.target", "wiring.ch", "links..target", ""],
+    [
+        "links.missing",
+        "links",
+        "links.targets",
+        "ext.target",
+        "wiring.ch",
+        "links..target",
+        "",
+    ],
 )
 def test_registration_rejects_invalid_reference_paths_without_reserving_the_kind(
     reference: str,
