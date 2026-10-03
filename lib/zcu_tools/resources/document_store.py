@@ -208,10 +208,7 @@ class DocumentStore[T: BaseModel]:
             with self.locked():
                 document, _ = self._read()
                 for path, _ in patches:
-                    original = _lookup(base_document, path)
-                    current = _lookup(document, path)
-                    if not _same_value(original, current):
-                        raise ConflictError(self._path, path, original, current)
+                    self._check_conflict(base_document, document, path)
                 for path, value in patches:
                     _apply(document, path, value)
                 # Resolve after structural edits; changed values are still in working units.
@@ -233,6 +230,19 @@ class DocumentStore[T: BaseModel]:
             self._notify(
                 DocumentChange(self._path, tuple(path for path, _ in patches), "commit")
             )
+
+    def _check_conflict(
+        self, base: YamlMap, current: YamlMap, path: FieldPath
+    ) -> None:
+        for length in range(1, len(path) + 1):
+            prefix = path[:length]
+            original = _lookup(base, prefix)
+            latest = _lookup(current, prefix)
+            # Sibling edits may coexist; ancestors must remain mappings.
+            if length < len(path) and isinstance(original, dict) and isinstance(latest, dict):
+                continue
+            if not _same_value(original, latest):
+                raise ConflictError(self._path, prefix, original, latest)
 
     def _read(self) -> tuple[YamlMap, T]:
         yaml = YAML(typ="rt")
