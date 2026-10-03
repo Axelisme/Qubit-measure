@@ -86,8 +86,9 @@ def discover_operation(client: MeasureClient, gui_id: int) -> int:
     return client.call("status", {})["running"][0]["op"]
 
 
-def test_status_indexes_gui_origin_operations_without_an_agent_start(
-    tmp_path: Path,
+@pytest.mark.parametrize("analysis_count", [0, 2])
+def test_status_indexes_gui_operations_and_session_executions(
+    tmp_path: Path, analysis_count: int
 ) -> None:
     replies: dict[str, dict[str, Any]] = {
         "state.has_project": {"value": True},
@@ -116,6 +117,21 @@ def test_status_indexes_gui_origin_operations_without_an_agent_start(
         },
     }
     client = make_client(tmp_path, lambda method, params: replies[method])
+    executions = []
+    for index in range(analysis_count):
+        replies["tab.analyze"] = {
+            "operation_id": 71 + index,
+            "interactive": False,
+            "params": {},
+            "invalidated_on_success": [],
+        }
+        replies["operation.await"] = {"reason": "completed", "status": "finished"}
+        replies["tab.get_analyze_result"] = {
+            "summary": None,
+            "params": {},
+            "operation_state": {"analysis_state": {"figure_names": []}},
+        }
+        executions.append(client.call("tab_analyze", {"tab": "gui-tab"}).data)
 
     assert client.call("status", {}) == {
         "project": {"chip": "chip", "qubit": "qubit", "resonator": "res"},
@@ -125,12 +141,17 @@ def test_status_indexes_gui_origin_operations_without_an_agent_start(
         "predictor": {"loaded": False},
         "ready": {"can_run": True, "missing": []},
         "tabs": [{"tab": "gui-tab", "experiment": "ramsey", "running": False}],
+        "executions": executions,
         "running": [
-            {"op": 1, "tab": "gui-tab", "kind": "analyze"},
-            {"op": 2, "tab": None, "kind": "device"},
+            {"op": analysis_count + 1, "tab": "gui-tab", "kind": "analyze"},
+            {"op": analysis_count + 2, "tab": None, "kind": "device"},
         ],
     }
     assert ("operation.active", {}) in client.transport.sent
+    changed = client.call("status", {})
+    changed["executions"].clear()
+    assert client.call("status", {})["executions"] == executions
+    client.context.session.close()
 
 
 def test_reconnect_indexes_new_gui_operations_without_reusing_old_handles(
@@ -384,6 +405,56 @@ def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
         client.call("wait", {"op": 999})
     assert getattr(exc_info.value, "reason", None) == "unknown_op"
     assert ("operation.progress", {"operation_id": 999}) not in client.transport.sent
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "message"),
+    [
+        *[
+            (tool, arguments, "exactly one")
+            for tool in ("wait", "cancel", "finish_early")
+            for arguments in (
+                {},
+                {"op": 1, "execution": "analysis-1"},
+                {"op": 1, "execution": None},
+            )
+        ],
+        *[
+            (tool, {"execution": value}, "non-empty string")
+            for tool in ("status", "wait", "cancel", "finish_early")
+            for value in ("", None, True, 1)
+        ],
+        *[
+            ("wait", {"execution": "analysis-1", "timeout": timeout}, "timeout")
+            for timeout in (-1, 301, True, float("nan"), float("inf"), "1")
+        ],
+    ],
+)
+def test_execution_query_rejects_invalid_input_without_gui_access(
+    tmp_path: Path, tool: str, arguments: dict[str, Any], message: str
+) -> None:
+    client = make_client(tmp_path)
+    try:
+        with pytest.raises(ValueError, match=message):
+            client.call(tool, arguments)
+        assert client.transport.sent == []
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("tool", ["status", "wait", "cancel", "finish_early"])
+@pytest.mark.parametrize("execution", ["analysis-missing", "recipe-missing"])
+def test_unknown_execution_is_a_query_failure_without_gui_access(
+    tmp_path: Path, tool: str, execution: str
+) -> None:
+    client = make_client(tmp_path)
+    try:
+        with pytest.raises(RuntimeError) as error:
+            client.call(tool, {"execution": execution})
+        assert getattr(error.value, "reason", None) == "unknown_execution"
+        assert client.transport.sent == []
+    finally:
+        client.context.session.close()
 
 
 def test_cancel_reports_failure_during_its_short_wait(tmp_path: Path) -> None:

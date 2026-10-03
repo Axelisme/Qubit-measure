@@ -23,6 +23,61 @@ def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
     assert client.transport.sent == [("tab.load_data", params)]
 
 
+@pytest.mark.parametrize(
+    ("method", "params", "reply"),
+    [
+        (
+            "context.ml_edit",
+            {"name": "readout", "changes": []},
+            {"applied": [], "failed": None, "skipped": []},
+        ),
+        (
+            "project.info",
+            {},
+            {"chip_name": "chip", "qub_name": "q1", "result_dir": "/results/q1"},
+        ),
+        ("context.labels", {}, {"labels": ["zero", "half"]}),
+    ],
+)
+def test_rpc_forwards_public_queries_and_tool_backed_commands(
+    tmp_path: Path,
+    method: str,
+    params: dict[str, Any],
+    reply: dict[str, Any],
+) -> None:
+    client = make_client(tmp_path, lambda _method, _params: reply)
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+
+    assert client.call("rpc_call", {"method": method, "params": params}) == reply
+    assert client.transport.sent == [(method, params)]
+
+
+def test_rpc_tool_backed_operation_keeps_handle_usable_for_cancel(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+    client.transport.replies["tab.analyze"] = {
+        "ok": True,
+        "result": {"operation_id": 73, "status": "running"},
+    }
+    client.transport.replies["operation.cancel"] = {
+        "ok": True,
+        "result": {"status": "cancelled"},
+    }
+    params = {"tab_id": "tab-1"}
+
+    result = client.call("rpc_call", {"method": "tab.analyze", "params": params})
+    assert result == {"handle": 1, "status": "running"}
+    client.call("cancel", {"op": result["handle"]})
+    assert client.transport.sent == [
+        ("tab.analyze", params),
+        ("operation.cancel", {"operation_id": 73}),
+    ]
+
+
 def test_rpc_stale_requires_explicit_retry_by_caller(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     client.context.session.ensure_connected()

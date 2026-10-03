@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 from zcu_tools.gui.cfg.resource import CfgResource
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
     DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,
 )
@@ -67,6 +69,7 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult")
 class RunPaneState(Generic[T_Result]):
     result: T_Result | None = None
     source_path: str | None = None
+    source_operation_id: int | None = None
 
 
 @dataclass
@@ -76,6 +79,8 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     plots: Plots | None = None
     writeback_draft: object | None = None
     image_path_overrides: dict[str, str] = field(default_factory=dict)
+    source_operation_id: int | None = None
+    result_params: T_AnalyzeParams | None = None
 
 
 @dataclass
@@ -85,6 +90,8 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     plots: Plots | None = None
     writeback_draft: object | None = None
     image_path_overrides: dict[str, str] = field(default_factory=dict)
+    source_operation_id: int | None = None
+    result_params: T_AnalyzeParams | None = None
 
 
 @dataclass
@@ -296,6 +303,32 @@ class State(SessionState):
     def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]:
         return self.tabs[tab_id]
 
+    def require_run_operation(self, tab_id: str, operation_id: int) -> None:
+        """Reject a Run result replaced since the caller's operation."""
+        self._assert_owner()
+        pane = self.tabs[tab_id].run
+        if pane.result is None or pane.source_operation_id != operation_id:
+            raise FailedPreconditionError(
+                f"Run no longer contains operation {operation_id}'s result",
+                reason_code="result_superseded",
+            )
+
+    def require_analysis_operation(
+        self,
+        tab_id: str,
+        subtab_id: Literal["analysis", "post_analysis"],
+        operation_id: int,
+    ) -> None:
+        """Reject a result replaced since the caller's analysis operation."""
+        self._assert_owner()
+        tab = self.tabs[tab_id]
+        pane = tab.analysis if subtab_id == "analysis" else tab.post_analysis
+        if pane.result is None or pane.source_operation_id != operation_id:
+            raise FailedPreconditionError(
+                f"{subtab_id} no longer contains operation {operation_id}'s result",
+                reason_code="result_superseded",
+            )
+
     def has_tab(self, tab_id: str) -> bool:
         """Existence query — callers ask the aggregate, not the raw dict."""
         return tab_id in self.tabs
@@ -414,12 +447,16 @@ class State(SessionState):
         logger.debug("clear_tab_results: tab_id=%r", tab_id)
         return self._replace_run_pane(tab_id, RunPaneState())
 
-    def update_tab_result(self, tab_id: str, result: object) -> RetiredPaneResources:
+    def update_tab_result(
+        self, tab_id: str, result: object, *, source_operation_id: int | None = None
+    ) -> RetiredPaneResources:
         self._assert_owner()
         logger.debug(
             "update_tab_result: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
-        return self._replace_run_pane(tab_id, RunPaneState(result=result))
+        return self._replace_run_pane(
+            tab_id, RunPaneState(result=result, source_operation_id=source_operation_id)
+        )
 
     def update_tab_loaded_result(
         self, tab_id: str, result: object, source_path: str
@@ -498,6 +535,8 @@ class State(SessionState):
         plots: Plots | None,
         writeback_draft: object | None = None,
         analyze_params_instance: object = _UNSET,
+        *,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources:
         self._assert_owner()
         tab = self.tabs[tab_id]
@@ -511,12 +550,16 @@ class State(SessionState):
             tab_id,
             "yes" if plots is not None else "none",
         )
-        return self.replace_analysis_pane(
+        return self.swap_analysis_pane(
             tab_id,
-            result=analyze_result,
-            plots=plots,
-            params=params,
-            writeback_draft=writeback_draft,
+            AnalysisPaneState(
+                result=analyze_result,
+                source_operation_id=source_operation_id,
+                result_params=deepcopy(params),
+                plots=plots,
+                params=params,
+                writeback_draft=writeback_draft,
+            ),
         )
 
     @staticmethod
@@ -589,6 +632,7 @@ class State(SessionState):
         *,
         post_analyze_params_instance: object = _UNSET,
         writeback_draft: object | None = None,
+        source_operation_id: int | None = None,
     ) -> RetiredPaneResources:
         """Record a Post result while retaining the independent Analysis pane."""
         self._assert_owner()
@@ -603,14 +647,17 @@ class State(SessionState):
             tab_id,
             "yes" if plots is not None else "none",
         )
-        retired = self.replace_post_analysis_pane(
+        return self.swap_post_analysis_pane(
             tab_id,
-            result=post_analyze_result,
-            plots=plots,
-            params=params,
-            writeback_draft=writeback_draft,
+            PostAnalysisPaneState(
+                result=post_analyze_result,
+                source_operation_id=source_operation_id,
+                result_params=deepcopy(params),
+                plots=plots,
+                params=params,
+                writeback_draft=writeback_draft,
+            ),
         )
-        return retired
 
     def update_tab_post_analyze_param_instance(
         self, tab_id: str, instance: object

@@ -141,6 +141,7 @@ class TabService:
             run=RunPaneSnapshot(
                 result=tab.run.result,
                 source_path=tab.run.source_path,
+                source_operation_id=tab.run.source_operation_id,
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,
@@ -149,6 +150,8 @@ class TabService:
                 writeback_items=analysis_items,
                 image_paths=analysis_image_paths,
                 has_writeback_draft=tab.analysis.writeback_draft is not None,
+                source_operation_id=tab.analysis.source_operation_id,
+                result_params=tab.analysis.result_params,
             ),
             post_analysis=PostAnalysisPaneSnapshot(
                 params=tab.post_analysis.params,
@@ -157,6 +160,8 @@ class TabService:
                 writeback_items=post_items,
                 image_paths=post_image_paths,
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
+                source_operation_id=tab.post_analysis.source_operation_id,
+                result_params=tab.post_analysis.result_params,
             ),
             save=SavePaneSnapshot(data_path=data_path, comment=tab.save.comment),
             paths=TabPathsSnapshot(

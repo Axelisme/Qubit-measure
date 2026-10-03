@@ -77,7 +77,18 @@ def test_restored_settings_prefill_one_setup_that_survives_screenshot_and_toolba
         before = (QApplication.activeWindow(), QApplication.focusWidget())
         assert before[1] is connect
 
-        shot = Path(app.invoke("screenshot", {"target": "setup"})["path"])
+        shot = Path(
+            app.invoke(
+                "rpc_call",
+                {
+                    "method": "dialog.screenshot",
+                    "params": {
+                        "name": "setup",
+                        "out_path": str(tmp_path / "setup.png"),
+                    },
+                },
+            )["saved_to"]
+        )
         assert shot.read_bytes().startswith(b"\x89PNG")
         assert (QApplication.activeWindow(), QApplication.focusWidget()) == before
         assert visible_setup_dialogs(app.window) == [dialog]
@@ -99,28 +110,46 @@ def test_project_tool_changes_show_in_reopened_setup_and_failures_keep_the_conte
     with launched_measure_app(qapp, tmp_path) as app:
         ctrl = app.controller
 
-        app.invoke("project", {"chip": "chip-a", "qubit": "q1", "resonator": "res"})
+        app.invoke(
+            "rpc_call",
+            {
+                "method": "project.apply",
+                "params": {"chip_name": "chip-a", "qub_name": "q1", "res_name": "res"},
+            },
+        )
         scope_a = ctrl.setup_control.get_setup_preferences().scope_id
         assert {"chip-a", "q1", "res"} <= _field_texts(_reopen_setup(app, qapp))
 
-        label = app.invoke("context_create", {})["label"]
+        label = app.invoke("rpc_call", {"method": "context.new"})["label"]
         assert ctrl.get_active_context_label() == label
 
         # An unchanged project is a no-op: the selected context stays selected.
-        app.invoke("project", {"chip": "chip-a"})
+        app.invoke(
+            "rpc_call", {"method": "project.apply", "params": {"chip_name": "chip-a"}}
+        )
         assert ctrl.get_active_context_label() == label
         assert {"chip-a", "q1", "res"} <= _field_texts(_reopen_setup(app, qapp))
 
         # A rejected update changes neither the project, the context, nor Setup.
         with pytest.raises(GuiRpcError) as failure:
-            app.invoke("project", {"chip": "chip-b", "scope": scope_a})
+            app.invoke(
+                "rpc_call",
+                {
+                    "method": "project.apply",
+                    "params": {"chip_name": "chip-b", "scope_id": scope_a},
+                },
+            )
         assert failure.value.reason == "scope_identity_mismatch"
-        assert app.invoke("project", {})["chip"] == "chip-a"
+        assert (
+            app.invoke("rpc_call", {"method": "project.info"})["chip_name"] == "chip-a"
+        )
         assert ctrl.get_active_context_label() == label
         assert "chip-b" not in _field_texts(_reopen_setup(app, qapp))
 
         # A real change deactivates the context and Setup shows the new project.
-        changed = app.invoke("project", {"chip": "chip-b"})
-        assert changed["chip"] == "chip-b"
+        changed = app.invoke(
+            "rpc_call", {"method": "project.apply", "params": {"chip_name": "chip-b"}}
+        )
+        assert changed["chip_name"] == "chip-b"
         assert ctrl.get_active_context_label() is None
         assert {"chip-b", "q1", "res"} <= _field_texts(_reopen_setup(app, qapp))

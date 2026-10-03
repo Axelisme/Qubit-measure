@@ -305,6 +305,7 @@ def h_device_snapshot(
             "address": snap.address,
             "status": snap.status.value,
             "error": snap.error,
+            "unit": dev.get_device_unit(name),
             "info": snap.info.to_dict() if snap.info is not None else None,
             "fields": _device_fields(snap.info) if snap.info is not None else [],
         }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import asdict, is_dataclass
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
@@ -13,9 +14,18 @@ from zcu_tools.gui.app.measure.adapter.analyze_params import (
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ._common import follow_tab
+from .tab import tab_operation_state
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+
+def _params_to_wire(params: object) -> dict[str, object] | None:
+    if params is None:
+        return None
+    if not is_dataclass(params) or isinstance(params, type):
+        return {}
+    return asdict(params)
 
 
 def h_analyze_cancel(
@@ -38,6 +48,9 @@ def h_tab_get_analyze_result(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    operation_id = cast(int | None, params.get("operation_id"))
+    if operation_id is not None:
+        control.require_analysis_operation(tab_id, "analysis", operation_id)
     result = control.get_tab_analyze_result(tab_id)
     if result is None:
         return {"summary": None}
@@ -47,14 +60,20 @@ def h_tab_get_analyze_result(
             ErrorCode.INTERNAL,
             "analyze result does not implement to_summary_dict()",
         )
-    return {"summary": to_summary()}
+    reply = {"summary": to_summary()}
+    if operation_id is not None:
+        pane = control.get_tab_snapshot(tab_id).analysis
+        reply.update(
+            params=_params_to_wire(None if pane is None else pane.result_params),
+            operation_id=operation_id,
+            operation_state=tab_operation_state(adapter, tab_id),
+        )
+    return reply
 
 
 def h_tab_get_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    import dataclasses
-
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
@@ -64,11 +83,7 @@ def h_tab_get_analyze_params(
         adapter.tab_control.get_tab_adapter_name(tab_id), stage="primary"
     )
     ap = None if snap.analysis is None else snap.analysis.params
-    if ap is None:
-        return {"analyze_params": None, "definitions": definitions}
-    if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
-        return {"analyze_params": {}, "definitions": definitions}
-    return {"analyze_params": dataclasses.asdict(ap), "definitions": definitions}
+    return {"analyze_params": _params_to_wire(ap), "definitions": definitions}
 
 
 def h_tab_analyze(
@@ -80,6 +95,9 @@ def h_tab_analyze(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    run_operation_id = cast(int | None, params.get("run_operation_id"))
+    if run_operation_id is not None:
+        control.require_run_operation(tab_id, run_operation_id)
     snap = control.get_tab_snapshot(tab_id)
     # Order the checks by the true cause: analyze params only exist once a run
     # produced a result (they are built from it). A run-in-flight / failed /
@@ -123,7 +141,7 @@ def h_tab_analyze(
         if snap.post_analysis.has_writeback_draft:
             invalidated.append("post.writeback")
     follow_tab(adapter, tab_id, "analysis")
-    operation_id = control.analyze(tab_id, updated)
+    operation_id = control.analyze(tab_id, updated, run_operation_id=run_operation_id)
     return {
         "operation_id": operation_id,
         "interactive": snap.capabilities.analysis is AnalysisMode.INTERACTIVE,
@@ -139,6 +157,9 @@ def h_tab_get_post_analyze_result(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    operation_id = cast(int | None, params.get("operation_id"))
+    if operation_id is not None:
+        control.require_analysis_operation(tab_id, "post_analysis", operation_id)
     result = control.get_post_analyze_result(tab_id)
     if result is None:
         return {"summary": None}
@@ -148,14 +169,20 @@ def h_tab_get_post_analyze_result(
             ErrorCode.INTERNAL,
             "post-analysis result does not implement to_summary_dict()",
         )
-    return {"summary": to_summary()}
+    reply = {"summary": to_summary()}
+    if operation_id is not None:
+        pane = control.get_tab_snapshot(tab_id).post_analysis
+        reply.update(
+            params=_params_to_wire(None if pane is None else pane.result_params),
+            operation_id=operation_id,
+            operation_state=tab_operation_state(adapter, tab_id),
+        )
+    return reply
 
 
 def h_tab_get_post_analyze_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    import dataclasses
-
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
@@ -165,11 +192,7 @@ def h_tab_get_post_analyze_params(
         adapter.tab_control.get_tab_adapter_name(tab_id), stage="post"
     )
     pp = None if snap.post_analysis is None else snap.post_analysis.params
-    if pp is None:
-        return {"post_analyze_params": None, "definitions": definitions}
-    if not dataclasses.is_dataclass(pp) or isinstance(pp, type):
-        return {"post_analyze_params": {}, "definitions": definitions}
-    return {"post_analyze_params": dataclasses.asdict(pp), "definitions": definitions}
+    return {"post_analyze_params": _params_to_wire(pp), "definitions": definitions}
 
 
 def h_tab_post_analyze(
@@ -181,6 +204,12 @@ def h_tab_post_analyze(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    source_operation_id = cast(int | None, params.get("operation_id"))
+    run_operation_id = cast(int | None, params.get("run_operation_id"))
+    if source_operation_id is not None:
+        control.require_analysis_operation(tab_id, "analysis", source_operation_id)
+    if run_operation_id is not None:
+        control.require_run_operation(tab_id, run_operation_id)
     snap = control.get_tab_snapshot(tab_id)
     # Order the checks by the true cause: post params only exist once a primary
     # analyze produced a result (they are built from it). Report the missing
@@ -220,7 +249,12 @@ def h_tab_post_analyze(
         else []
     )
     follow_tab(adapter, tab_id, "post_analysis")
-    operation_id = control.start_post_analyze(tab_id, updated)
+    operation_id = control.start_post_analyze(
+        tab_id,
+        updated,
+        operation_id=source_operation_id,
+        run_operation_id=run_operation_id,
+    )
     return {
         "operation_id": operation_id,
         "interactive": False,

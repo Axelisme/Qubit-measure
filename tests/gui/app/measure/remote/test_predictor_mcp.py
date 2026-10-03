@@ -19,17 +19,6 @@ _MODEL = {
 }
 
 
-def _prediction_rows(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        pytest.fail("predict must return a list")
-    rows: list[dict[str, object]] = []
-    for row in value:
-        if not isinstance(row, dict) or not all(isinstance(key, str) for key in row):
-            pytest.fail("each prediction must have named fields")
-        rows.append(row)
-    return rows
-
-
 def test_predictor_install_and_multiple_transitions_share_gui_state(
     qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -41,12 +30,14 @@ def test_predictor_install_and_multiple_transitions_share_gui_state(
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        assert invoke("predictor_info", {}) == {"loaded": False}
-        installed = invoke("predictor_load", {"model": _MODEL})
+        assert invoke("rpc_call", {"method": "predictor.info"}) == {"loaded": False}
+        installed = invoke(
+            "rpc_call", {"method": "predictor.set_model_params", "params": _MODEL}
+        )
         gui_info = call(sock, "predictor.info")["result"]
         assert installed == {
             "loaded": True,
-            "source": "model",
+            "path": None,
             "EJ": gui_info["EJ"],
             "EC": gui_info["EC"],
             "EL": gui_info["EL"],
@@ -54,16 +45,15 @@ def test_predictor_install_and_multiple_transitions_share_gui_state(
             "flux_period": gui_info["flux_period"],
             "flux_bias": gui_info["flux_bias"],
         }
-        assert invoke("predictor_info", {}) == installed
-        predicted = _prediction_rows(
-            invoke("predict", {"value": 0.5, "transitions": [[0, 1], [0, 2]]})
-        )
-        assert [row["transition"] for row in predicted] == [[0, 1], [0, 2]]
-        for row in predicted:
-            transition = row["transition"]
-            assert isinstance(transition, list)
-            frm, to = transition
-            assert isinstance(frm, int) and isinstance(to, int)
+        assert invoke("rpc_call", {"method": "predictor.info"}) == installed
+        for frm, to in ((0, 1), (0, 2)):
+            row = invoke(
+                "rpc_call",
+                {
+                    "method": "predictor.predict",
+                    "params": {"device_value": 0.5, "from_level": frm, "to_level": to},
+                },
+            )
             gui = call(
                 sock,
                 "predictor.predict",
@@ -94,15 +84,22 @@ def test_predictor_install_and_multiple_transitions_share_gui_state(
         assert bad_transition["error"]["reason"] == "invalid_transition"
         assert call(sock, "predictor.info")["result"]["flux_bias"] == 0.0
         calibrated = invoke(
-            "predictor_calibrate", {"value": 0.15, "freq_mhz": measured}
+            "rpc_call",
+            {
+                "method": "predictor.calibrate",
+                "params": {"device_value": 0.15, "frequency_mhz": measured},
+            },
         )
         assert calibrated["flux_bias_before"] == pytest.approx(0.0)
         assert calibrated["flux_bias_after"] == pytest.approx(
             call(sock, "predictor.info")["result"]["flux_bias"]
         )
         assert calibrated["flux_bias_after"] != pytest.approx(0.0)
-        at_point = _prediction_rows(invoke("predict", {"value": 0.15}))
-        assert at_point[0]["freq_mhz"] == pytest.approx(measured, rel=1e-5)
+        at_point = invoke(
+            "rpc_call",
+            {"method": "predictor.predict", "params": {"device_value": 0.15}},
+        )
+        assert at_point["freq_mhz"] == pytest.approx(measured, rel=1e-5)
 
         params_path = tmp_path / "params.json"
         params = QubitParams(params_path)
@@ -118,20 +115,24 @@ def test_predictor_install_and_multiple_transitions_share_gui_state(
             )
         )
         from_file = invoke(
-            "predictor_load", {"path": str(params_path), "flux_bias": 0.13}
+            "rpc_call",
+            {
+                "method": "predictor.load",
+                "params": {"path": str(params_path), "flux_bias": 0.13},
+            },
         )
         gui_file = call(sock, "predictor.info")["result"]
-        assert from_file["source"] == str(params_path)
+        assert from_file["path"] == str(params_path)
         assert from_file["EJ"] == gui_file["EJ"] == pytest.approx(4.5)
         assert from_file["flux_bias"] == gui_file["flux_bias"] == pytest.approx(0.13)
-        assert invoke("predictor_info", {}) == from_file
+        assert invoke("rpc_call", {"method": "predictor.info"}) == from_file
     finally:
         bridge.disconnect()
         sock.close()
         fx.stop()
 
 
-def test_predictor_rejects_ambiguous_load_without_replacing_gui_model(
+def test_predictor_missing_model_and_failed_file_load_preserve_gui_state(
     qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fx = Fixture()
@@ -149,12 +150,14 @@ def test_predictor_rejects_ambiguous_load_without_replacing_gui_model(
         assert missing["ok"] is False
         assert missing["error"]["code"] == "precondition_failed"
         assert missing["error"]["reason"] == "predictor_not_loaded"
-        with pytest.raises((GuiRpcError, ValueError), match="exactly one"):
-            invoke("predictor_load", {"path": "unused.json", "model": _MODEL})
-        with pytest.raises((GuiRpcError, ValueError), match="exactly one"):
-            invoke("predictor_load", {})
         with pytest.raises(GuiRpcError, match="Failed to load predictor"):
-            invoke("predictor_load", {"path": str(tmp_path / "missing.json")})
+            invoke(
+                "rpc_call",
+                {
+                    "method": "predictor.load",
+                    "params": {"path": str(tmp_path / "missing.json")},
+                },
+            )
         assert call(sock, "predictor.info")["result"] == {"loaded": False}
     finally:
         bridge.disconnect()

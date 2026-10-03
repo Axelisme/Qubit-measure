@@ -34,7 +34,12 @@ class SaveControlPort(Protocol):
     def set_comment(self, tab_id: str, comment: str) -> None: ...
 
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str | None = None
+        self,
+        tab_id: str,
+        data_path: str | None = None,
+        comment: str | None = None,
+        *,
+        run_operation_id: int | None = None,
     ) -> SaveDataSubmission: ...
 
     def save_artifacts(
@@ -47,7 +52,12 @@ class SaveControlPort(Protocol):
     ) -> SaveArtifactsSubmission: ...
 
     def save_image(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None = None
+        self,
+        tab_id: str,
+        key: ArtifactKey,
+        image_path: str | None = None,
+        *,
+        operation_id: int | None = None,
     ) -> str: ...
 
 
@@ -80,8 +90,15 @@ class SaveControlFacet:
         self._state.update_tab_comment(tab_id, comment)
 
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str | None = None
+        self,
+        tab_id: str,
+        data_path: str | None = None,
+        comment: str | None = None,
+        *,
+        run_operation_id: int | None = None,
     ) -> SaveDataSubmission:
+        if run_operation_id is not None:
+            self._state.require_run_operation(tab_id, run_operation_id)
         if data_path is not None and not data_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")
         permit = self._guard.acquire_save_permit(tab_id)
@@ -158,10 +175,21 @@ class SaveControlFacet:
         )
 
     def save_image(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None = None
+        self,
+        tab_id: str,
+        key: ArtifactKey,
+        image_path: str | None = None,
+        *,
+        operation_id: int | None = None,
     ) -> str:
         if key.kind is ArtifactKind.DATA:
             raise FailedPreconditionError("Data is not an image artifact")
+        if operation_id is not None:
+            self._state.require_analysis_operation(
+                tab_id,
+                "analysis" if key.kind is ArtifactKind.ANALYSIS else "post_analysis",
+                operation_id,
+            )
         if image_path is not None and not image_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty image path")
         permit = self._guard.acquire_save_permit(tab_id)

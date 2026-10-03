@@ -149,7 +149,12 @@ def test_load_and_save_runtime_errors_escape_handlers_unchanged() -> None:
     _assert_escapes_unchanged(
         lambda: h_tab_save_data(
             cast(Any, SimpleNamespace(save_control=save_control)),
-            {"tab_id": "t1", "data_path": None, "comment": ""},
+            {
+                "tab_id": "t1",
+                "data_path": None,
+                "comment": "",
+                "run_operation_id": None,
+            },
         ),
         save_error,
     )

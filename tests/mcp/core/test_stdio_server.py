@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import sys
@@ -10,6 +11,7 @@ from typing import Any
 
 import pytest
 from zcu_tools.gui.remote.param_spec import JsonType
+from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.core.stdio_server import (
     McpServerConfig,
     StdioLoopHooks,
@@ -103,6 +105,98 @@ def test_tool_call_returns_compact_json_text_and_appends_reply_blocks(
                     {"type": "text", "text": "extra"},
                 ]
             },
+        }
+    ]
+
+
+def test_images_belong_to_one_reply_and_precede_hook_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    images = (PngImage(b"first PNG bytes"), PngImage(b"second PNG bytes"))
+
+    def fail(_args: dict[str, Any]) -> Any:
+        raise RuntimeError("failed")
+
+    replies = _run(
+        monkeypatch,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": i,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": {}},
+            }
+            for i, name in enumerate(
+                ["with_images", "failure", "empty_reply", "plain_dict", "plain_text"]
+            )
+        ],
+        {
+            "with_images": _tool(lambda _: ToolReply({"value": 2}, images)),
+            "failure": _tool(fail),
+            "empty_reply": _tool(lambda _: ToolReply({"value": 3})),
+            "plain_dict": _tool(lambda _: {"value": 4}),
+            "plain_text": _tool(lambda _: "unchanged"),
+        },
+        hooks=StdioLoopHooks(on_each_reply=lambda: [{"type": "text", "text": "hook"}]),
+    )
+
+    hook = {"type": "text", "text": "hook"}
+    assert replies[0]["result"]["content"] == [
+        {"type": "text", "text": '{"value":2}'},
+        *[
+            {
+                "type": "image",
+                "mimeType": "image/png",
+                "data": base64.b64encode(item.data).decode("ascii"),
+            }
+            for item in images
+        ],
+        hook,
+    ]
+    error = replies[1]["result"]
+    assert error["isError"] is True
+    assert len(error["content"]) == 1
+    assert "failed" in error["content"][0]["text"]
+    for reply, expected_text in zip(
+        replies[2:], ['{"value":3}', '{"value":4}', "unchanged"], strict=True
+    ):
+        assert reply["result"]["content"] == [
+            {"type": "text", "text": expected_text},
+            hook,
+        ]
+
+
+@pytest.mark.parametrize("is_error", [False, True])
+def test_partial_outcome_preserves_data_and_images_with_explicit_error_flag(
+    monkeypatch: pytest.MonkeyPatch, is_error: bool
+) -> None:
+    data = {
+        "status": "failed",
+        "saved_images": [{"figure_name": "fit", "image_path": "/saved/fit.png"}],
+        "error": {"phase": "image_save", "message": "second export failed"},
+    }
+    image = PngImage(b"confirmed preview bytes")
+    replies = _run(
+        monkeypatch,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "partial", "arguments": {}},
+            }
+        ],
+        {"partial": _tool(lambda _: ToolReply(data, (image,), is_error=is_error))},
+    )
+
+    result = replies[0]["result"]
+    assert result.get("isError", False) is is_error
+    assert json.loads(result["content"][0]["text"]) == data
+    assert result["content"][1:] == [
+        {
+            "type": "image",
+            "mimeType": "image/png",
+            "data": base64.b64encode(image.data).decode("ascii"),
         }
     ]
 

@@ -177,16 +177,22 @@ def test_mcp_tab_open_from_file_loads_and_backfills_gui(
     try:
         invoke("connect", {"port": port})
         invoke("rpc_call", {"method": "context.snapshot"})
-        tab = invoke("tab_open", {"experiment": "demo", "from_file": "result.hdf5"})[
-            "tab"
-        ]
+        tab = invoke(
+            "rpc_call",
+            {
+                "method": "tab.open_file",
+                "params": {"adapter_name": "demo", "data_path": "result.hdf5"},
+            },
+        )["tab_id"]
         assert tab != previous
         assert state.active_tab_id == tab
         assert state.get_tab(tab).cfg.snapshot_inputs().value.fields[
             "knob"
         ] == DirectValue(42)
-        summary = invoke("tab_get", {"tab": tab, "include": ["summary"]})["summary"]
-        assert summary["state"]["has_result"] is True
+        summary = invoke(
+            "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}}
+        )["tabs"][0]
+        assert summary["interaction"]["has_run_result"] is True
         assert state.active_tab_id == tab
     finally:
         bridge.disconnect()
@@ -230,7 +236,13 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
         invoke("connect", {"port": port})
         invoke("rpc_call", {"method": "context.snapshot"})
         with pytest.raises(GuiRpcError, match="bad data"):
-            invoke("tab_open", {"experiment": "demo", "from_file": "bad.hdf5"})
+            invoke(
+                "rpc_call",
+                {
+                    "method": "tab.open_file",
+                    "params": {"adapter_name": "demo", "data_path": "bad.hdf5"},
+                },
+            )
         assert tuple(ctrl.list_tab_ids()) == old_tabs
         assert state.active_tab_id == focused
         with open_client(port) as sock:

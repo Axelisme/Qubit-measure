@@ -30,8 +30,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            exposure="tool",
-            tool_names=("ml_edit",),
             guard_deps=("context",),
             refresh_after_write=True,
         ),
@@ -80,7 +78,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "List context labels",
         ),
-        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "context.active",

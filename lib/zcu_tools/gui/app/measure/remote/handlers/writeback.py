@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
@@ -91,6 +91,11 @@ def h_tab_writeback_preview(
         )
     if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    operation_id = cast(int | None, params.get("operation_id"))
+    if operation_id is not None:
+        adapter.run_analyze_control.require_analysis_operation(
+            tab_id, cast(Literal["analysis", "post_analysis"], subtab_id), operation_id
+        )
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
     if snap.capabilities is None:
         raise RemoteError(ErrorCode.INTERNAL, "snapshot has no capabilities")

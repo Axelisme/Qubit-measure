@@ -9,6 +9,7 @@ dependencies = [
   "numpy>=2.1,<3; python_version >= '3.13'",
   "tqdm",
   "matplotlib",
+  "pillow",
   "sympy",
   "jupytext",
   "pydantic>=2",
@@ -80,8 +81,8 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools]
-package-dir = { "" = "lib" }
-packages = ["zcu_tools"]
+package-dir = { "" = "lib", "recipes" = "recipes" }
+packages = ["zcu_tools", "recipes"]
 
 [tool.ruff.lint]
 # E402 is checked incrementally like other existing debt. Entry points with
@@ -145,9 +146,10 @@ max-args = 6
 "tests/**" = ["PLR0913", "ARG001", "ARG002", "FBT001", "FBT002", "B011"]
 
 [tool.pyright]
-include = ["lib", "tests", "scripts", "tools"]
+include = ["lib", "tests", "scripts", "tools", "recipes"]
 executionEnvironments = [
-  { root = "lib", extraPaths = ["lib"] },
+  { root = "recipes", extraPaths = ["lib", "."] },
+  { root = "lib", extraPaths = ["lib", "."] },
   { root = "tests", extraPaths = ["lib", "tools", "."] },
   { root = "scripts", extraPaths = ["lib"] },
   { root = "tools", extraPaths = ["lib", "tools"] },

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from threading import Event
+
 import pytest
 from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
@@ -76,8 +78,10 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
     try:
         invoke("connect", {"port": fixture.service.port})
         before = call(sock, "tab.list_all")
-        result = invoke("tab_get", {"tab": tab_id, "include": ["cfg"]})
-        children = result["cfg"]["tree"]["children"]
+        result = invoke(
+            "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
+        )
+        children = result["tree"]["children"]
         assert children["axis"]["kind"] == "centered_sweep"
         assert children["axis"]["locked_center"] == 0.0
         assert children["axis"]["center_editable"] is False
@@ -85,7 +89,7 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
         assert children["nqz"]["choices"] == [1, 2]
         assert children["drive"]["kind"] == "reference"
         assert children["drive"]["choices"] == ["Pulse"]
-        assert result["cfg"] == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        assert result == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
         assert (
             call(sock, "tab.list_all")["result"]["active_tab_id"]
             == before["result"]["active_tab_id"]
@@ -100,13 +104,19 @@ def test_tab_edit_mcp_normalizes_sweep_in_one_publication(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
     before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     result = invoke(
-        "tab_edit",
+        "rpc_call",
         {
-            "tab": tab_id,
-            "expected": before["cfg_ref"],
-            "edits": [
-                {"path": ["sweep"], "value": {"start": 2.0, "stop": 8.0, "step": 2.2}},
-            ],
+            "method": "tab.edit_cfg",
+            "params": {
+                "tab_id": tab_id,
+                "expected": before["cfg_ref"],
+                "edits": [
+                    {
+                        "path": ["sweep"],
+                        "value": {"start": 2.0, "stop": 8.0, "step": 2.2},
+                    },
+                ],
+            },
         },
     )
     assert result["status"] == "Valid"
@@ -118,22 +128,128 @@ def test_tab_edit_mcp_normalizes_sweep_in_one_publication(mcp_tab):
     assert result == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
 
 
+def test_reset_mcp_restores_gui_defaults_and_advances_one_revision(mcp_tab):
+    _, tab_id, invoke, sock = mcp_tab
+    defaults = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+    edited = invoke(
+        "rpc_call",
+        {
+            "method": "tab.edit_cfg",
+            "params": {
+                "tab_id": tab_id,
+                "expected": defaults["cfg_ref"],
+                "edits": [{"path": ["gain"], "value": 0.75}],
+            },
+        },
+    )
+
+    reset = invoke(
+        "rpc_call",
+        {
+            "method": "tab.reset_cfg",
+            "params": {"tab_id": tab_id, "expected": edited["cfg_ref"]},
+        },
+    )
+    assert reset["tree"] == defaults["tree"]
+    assert reset["status"] == defaults["status"]
+    assert reset["source_basis"] == defaults["source_basis"]
+    assert reset["diagnostics"] == defaults["diagnostics"]
+    assert reset["cfg_ref"]["cfg_id"] == defaults["cfg_ref"]["cfg_id"]
+    assert int(reset["cfg_ref"]["revision"]) == int(edited["cfg_ref"]["revision"]) + 1
+    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == reset
+
+    unchanged = invoke(
+        "rpc_call",
+        {
+            "method": "tab.reset_cfg",
+            "params": {"tab_id": tab_id, "expected": reset["cfg_ref"]},
+        },
+    )
+    assert unchanged["tree"] == defaults["tree"]
+    assert (
+        int(unchanged["cfg_ref"]["revision"]) == int(reset["cfg_ref"]["revision"]) + 1
+    )
+
+
+def test_reset_stale_revision_preserves_the_edited_publication(mcp_tab):
+    _, tab_id, invoke, sock = mcp_tab
+    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+    edited = invoke(
+        "rpc_call",
+        {
+            "method": "tab.edit_cfg",
+            "params": {
+                "tab_id": tab_id,
+                "expected": before["cfg_ref"],
+                "edits": [{"path": ["gain"], "value": 0.75}],
+            },
+        },
+    )
+
+    with pytest.raises(GuiRpcError) as failure:
+        invoke(
+            "rpc_call",
+            {
+                "method": "tab.reset_cfg",
+                "params": {"tab_id": tab_id, "expected": before["cfg_ref"]},
+            },
+        )
+    assert failure.value.reason == "stale_revision"
+    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == edited
+
+
+def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch):
+    fixture, tab_id = live_tab
+    release = Event()
+    original_run = FakeAdapter.run
+
+    def blocked_run(self, req, raw_cfg, *, context):
+        if not release.wait(timeout=5):
+            raise TimeoutError("test did not release the fake run")
+        return original_run(self, req, raw_cfg, context=context)
+
+    monkeypatch.setattr(FakeAdapter, "run", blocked_run)
+    sock = open_client(fixture.service.port)
+    try:
+        observe_run_inputs(
+            fixture, tab_id, lambda method, params: call(sock, method, params)["result"]
+        )
+        before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        params = {"tab_id": tab_id, "expected": before["cfg_ref"]}
+        assert call(sock, "tab.run_start", params)["ok"]
+        rejected = call(sock, "tab.reset_cfg", params)
+        assert rejected["error"]["reason"] == "mutation_blocked"
+        assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
+    finally:
+        release.set()
+        fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
+        sock.close()
+
+
 def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
     before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     with pytest.raises(GuiRpcError) as raised:
         invoke(
-            "tab_edit",
+            "rpc_call",
             {
-                "tab": tab_id,
-                "expected": before["cfg_ref"],
-                "edits": [
-                    {"path": ["gain"], "value": 0.25},
-                    {
-                        "path": ["sweep"],
-                        "value": {"start": 3.0, "stop": 9.0, "step": 2.0, "expts": 4},
-                    },
-                ],
+                "method": "tab.edit_cfg",
+                "params": {
+                    "tab_id": tab_id,
+                    "expected": before["cfg_ref"],
+                    "edits": [
+                        {"path": ["gain"], "value": 0.25},
+                        {
+                            "path": ["sweep"],
+                            "value": {
+                                "start": 3.0,
+                                "stop": 9.0,
+                                "step": 2.0,
+                                "expts": 4,
+                            },
+                        },
+                    ],
+                },
             },
         )
     assert raised.value.code == "invalid_params"
@@ -145,11 +261,14 @@ def test_stale_reference_returns_expected_actual_and_never_retries(mcp_tab):
     _, tab_id, invoke, sock = mcp_tab
     expected = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["cfg_ref"]
     actual = invoke(
-        "tab_edit",
+        "rpc_call",
         {
-            "tab": tab_id,
-            "expected": expected,
-            "edits": [{"path": ["gain"], "value": 0.25}],
+            "method": "tab.edit_cfg",
+            "params": {
+                "tab_id": tab_id,
+                "expected": expected,
+                "edits": [{"path": ["gain"], "value": 0.25}],
+            },
         },
     )
     rejected = call(
@@ -206,7 +325,7 @@ def test_gui_and_remote_competing_edits_preserve_the_first_publication(
     )
 
 
-@pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.run_start"])
+@pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.reset_cfg", "tab.run_start"])
 def test_recreated_tab_rejects_the_retired_cfg_identity(live_tab, method):
     fixture, tab_id = live_tab
     sock = open_client(fixture.service.port)
@@ -239,7 +358,7 @@ def test_recreated_tab_rejects_the_retired_cfg_identity(live_tab, method):
         sock.close()
 
 
-@pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.run_start"])
+@pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.reset_cfg", "tab.run_start"])
 @pytest.mark.parametrize("missing", ["expected", "revision", "canonical-revision"])
 def test_mutations_require_an_explicit_canonical_cfg_reference(
     live_tab, method, missing
@@ -297,17 +416,23 @@ def test_invalid_publication_is_success_but_cannot_run(mcp_tab):
     fixture, tab_id, invoke, sock = mcp_tab
     before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     invalid = invoke(
-        "tab_edit",
+        "rpc_call",
         {
-            "tab": tab_id,
-            "expected": before["cfg_ref"],
-            "edits": [{"path": ["gain"], "value": {"__text": "-"}}],
+            "method": "tab.edit_cfg",
+            "params": {
+                "tab_id": tab_id,
+                "expected": before["cfg_ref"],
+                "edits": [{"path": ["gain"], "value": {"__text": "-"}}],
+            },
         },
     )
     assert invalid["status"] == "Invalid"
     assert invalid["cfg_ref"] != before["cfg_ref"]
     assert invalid["tree"]["children"]["gain"]["input"]["raw"] == "-"
-    assert invoke("tab_get", {"tab": tab_id, "include": ["cfg"]})["cfg"] == invalid
+    assert (
+        invoke("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
+        == invalid
+    )
     observe_run_inputs(
         fixture, tab_id, lambda name, params: call(sock, name, params)["result"]
     )
@@ -343,7 +468,8 @@ def test_unavailable_publication_is_preserved_by_mcp_read_and_blocks_run(
         )
         assert unavailable["diagnostics"]
         assert (
-            invoke("tab_get", {"tab": tab_id, "include": ["cfg"]})["cfg"] == unavailable
+            invoke("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
+            == unavailable
         )
         rejected = call(
             sock,
@@ -367,11 +493,14 @@ def test_edit_source_fault_does_not_publish_a_successful_prefix(mcp_tab, monkeyp
         patch.setattr(MeasureCfgBindings, "snapshot_from_state", source_fault)
         with pytest.raises(GuiRpcError) as raised:
             invoke(
-                "tab_edit",
+                "rpc_call",
                 {
-                    "tab": tab_id,
-                    "expected": before["cfg_ref"],
-                    "edits": [{"path": ["gain"], "value": 0.25}],
+                    "method": "tab.edit_cfg",
+                    "params": {
+                        "tab_id": tab_id,
+                        "expected": before["cfg_ref"],
+                        "edits": [{"path": ["gain"], "value": 0.25}],
+                    },
                 },
             )
         assert raised.value.code == "controller_error"

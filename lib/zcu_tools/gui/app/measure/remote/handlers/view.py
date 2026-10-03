@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -118,5 +118,25 @@ def h_tab_get_figure(
         )
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    operation_id = cast(int | None, params.get("operation_id"))
+    run_operation_id = cast(int | None, params.get("run_operation_id"))
+    if operation_id is not None and run_operation_id is not None:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "Operation tokens are mutually exclusive"
+        )
+    if run_operation_id is not None:
+        if subtab_id != "run":
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "run_operation_id requires the run pane"
+            )
+        adapter.run_analyze_control.require_run_operation(tab_id, run_operation_id)
+    if operation_id is not None:
+        if subtab_id not in ("analysis", "post_analysis"):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "operation_id requires an analysis pane"
+            )
+        adapter.run_analyze_control.require_analysis_operation(
+            tab_id, subtab_id, operation_id
+        )
     png = render_view(adapter).take_figure_screenshot_for_subtab(tab_id, subtab_id)
     return _png_reply(png, params, description="figure screenshot")

@@ -6,6 +6,7 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
+    optional_integer,
     optional_string,
     required_object,
     required_string,
@@ -99,11 +100,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Start non-cancellable data saving without a hardware lease. Explicit "
             "data_path/comment update the GUI draft; omitted values keep it. "
             "Returns an operation handle and reserved path, not proof of success. "
-            "Wait for completion and read artifacts for the last successful path.",
+            "Wait for completion and read artifacts for the last successful path. "
+            "Optional run_operation_id requires that Run result before any draft "
+            "edit or save; a replaced result returns result_superseded. "
+            "This token does not replace the connection observation guards.",
             (
                 required_string("tab_id"),
                 optional_string("data_path", "Override data path"),
                 save_comment(),
+                optional_integer("run_operation_id"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -124,7 +129,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Keys are data, analysis:<name> and post:<name>; all selects unsaved artifacts. "
             "Explicit paths/comment update the shared drafts. Returns operation_id "
             "and reserved destinations, not proof of completion. Read artifacts "
-            "after terminal failure for partial successes.",
+            "after terminal failure for partial successes. Via rpc_call the operation_id "
+            "becomes a handle: use wait(op=handle), then tab.snapshot for actual paths. "
+            "Explicitly read tab.snapshot before this guarded mutation.",
             (
                 required_string("tab_id"),
                 ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
@@ -139,8 +146,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            exposure="tool",
-            tool_names=("tab_save",),
             guard_deps=(
                 "tab:{tab_id}",
                 "tab:{tab_id}:result",
@@ -162,12 +167,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Save one named canonical image (analysis|post_analysis only; run "
             "has no canonical image). Requires tab_id, subtab_id and figure_name. "
             "The pane is analysis|post_analysis. Explicit image_path updates the GUI "
-            "draft before saving; omission keeps the draft, and an empty path is rejected.",
+            "draft before saving; omission keeps the draft, and an empty path is rejected. "
+            "Optional operation_id rejects a replaced result before changing paths or exporting.",
             (
                 required_string("tab_id"),
-                required_string("subtab_id"),
+                required_string("subtab_id", "Pane: analysis|post_analysis"),
                 required_string("figure_name"),
-                optional_string("image_path"),
+                optional_string("image_path", "Override image path"),
+                optional_integer(
+                    "operation_id", "Require this analysis operation's current result"
+                ),
             ),
         ),
         agent=AgentMethodPolicy(

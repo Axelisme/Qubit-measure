@@ -4,6 +4,7 @@ import json
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -14,11 +15,112 @@ from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     build_agent_catalog,
 )
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
 
 # Real loopback disconnects are observed by the bridge's reader thread.
 pytestmark = pytest.mark.uses_wall_clock
+
+
+def test_session_close_retires_pngs_and_refuses_future_work(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    session = client.context.session
+    session.bind()
+    image = session.write_png(b"validated-image")
+    try:
+        assert image.read_bytes() == b"validated-image"
+        session.close()
+        session.close()
+        assert not image.exists()
+        assert not image.parent.exists()
+        assert not client.transport.is_open
+        for action in (
+            lambda: session.write_png(b"later-image"),
+            session.new_png_path,
+            session.bind,
+            lambda: session.connect_to_gui(port=None, launch="never", clean=False),
+        ):
+            with pytest.raises(GuiRpcError) as error:
+                action()
+            assert error.value.reason == "session_closed"
+        assert not image.parent.exists()
+    finally:
+        client.context.bridge.disconnect()
+        session.cleanup_pngs()
+
+
+def test_close_waits_for_owned_png_write_and_prevents_directory_recreation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_client(tmp_path)
+    session = client.context.session
+    entered, release, disconnected = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    real_write = Path.write_bytes
+    real_close = client.transport.close
+
+    def write(path: Path, data: bytes) -> int:
+        entered.set()
+        assert release.wait(3), "test did not release admitted PNG write"
+        return real_write(path, data)
+
+    def disconnect() -> None:
+        real_close()
+        disconnected.set()
+
+    monkeypatch.setattr(Path, "write_bytes", write)
+    monkeypatch.setattr(client.transport, "close", disconnect)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        writing = pool.submit(session.write_png, b"admitted-image")
+        try:
+            assert entered.wait(1)
+            closing = pool.submit(session.close)
+            assert disconnected.wait(1)
+            later_write = pool.submit(session.write_png, b"too-late-image")
+        finally:
+            release.set()
+        image = writing.result(timeout=1)
+        closing.result(timeout=1)
+        with pytest.raises(GuiRpcError) as error:
+            later_write.result(timeout=1)
+        assert error.value.reason == "session_closed"
+    assert not image.exists()
+    assert not image.parent.exists()
+
+
+def test_session_close_wakes_an_inflight_rpc_without_waiting_for_rpc_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_client(tmp_path)
+    session = client.context.session
+    binding = session.bind()
+    sent = threading.Event()
+    client.transport.sent.clear()
+
+    def send(payload: dict[str, Any]) -> None:
+        client.transport.sent.append((payload["method"], payload["params"]))
+        sent.set()
+
+    monkeypatch.setattr(client.transport, "send_line", send)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = pool.submit(
+            binding.send_gui_rpc, "context.labels", {}, timeout_seconds=10.0
+        )
+        try:
+            assert sent.wait(1)
+            closing = pool.submit(session.close)
+            closing.result(timeout=1)
+            with pytest.raises(GuiRpcError) as error:
+                pending.result(timeout=1)
+            assert error.value.reason == "session_closed"
+            assert not client.transport.is_open
+        finally:
+            client.context.bridge.disconnect()
+    assert client.transport.sent == [("context.labels", {})]
 
 
 class LoopbackGui:
@@ -213,11 +315,6 @@ def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
         "adapters": ["fake"]
     }
     with pytest.raises(RuntimeError) as error:
-        client.call(
-            "rpc_call", {"method": "adapter.guide", "params": {"adapter_name": "fake"}}
-        )
-    assert getattr(error.value, "reason", None) == "use_tool"
-    with pytest.raises(RuntimeError) as error:
         client.call("rpc_describe", {"method": "rpc.catalog"})
     assert getattr(error.value, "reason", None) == "unknown_method"
     assert all(
@@ -239,11 +336,14 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
         gui_a.close_on = "tab.edit_cfg"
         with pytest.raises((ConnectionError, OSError, RuntimeError)):
             client.call(
-                "tab_edit",
+                "rpc_call",
                 {
-                    "tab": "t",
-                    "expected": {"cfg_id": "cfg-t", "revision": "0"},
-                    "edits": [],
+                    "method": "tab.edit_cfg",
+                    "params": {
+                        "tab_id": "t",
+                        "expected": {"cfg_id": "cfg-t", "revision": "0"},
+                        "edits": [],
+                    },
                 },
             )
         gui_a.stop()
@@ -590,7 +690,14 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
     client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
     first = client.transport
-    first.replies["rpc.catalog"] = {"ok": True, "result": {"methods": CATALOG}}
+    first.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {
+            "methods": CATALOG
+            + [{**CATALOG[0], "method": "test.start", "operation_key": "tab:old"}]
+        },
+    }
+    first.replies["test.start"] = {"ok": True, "result": {"operation_id": 43}}
     other = type(first)(overview_rpc)
     other.replies["rpc.catalog"] = {
         "ok": True,
@@ -610,7 +717,8 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
 
     monkeypatch.setattr(client.context.bridge, "connect", connect)
     client.call("connect", {"port": 9911})
-    client.context.session.operation_handles["tab:old"] = 43
+    handle = client.call("rpc_call", {"method": "test.start"})["handle"]
+    assert client.context.session.operation_handles == {"tab:old": handle}
     client.call("connect", {"port": 9912})
     assert ports == [9911, 9912]
     assert not client.context.session.operation_handles
