@@ -8,7 +8,26 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from .cfg_sources import cfg_node, readout_frequency
 
 
+def _validate(arguments: dict[str, Any]) -> None:
+    for name in (
+        "reuse_tab_id",
+        "readout_ref",
+        "pi_ref",
+        "use_reset",
+        "init_pulse_ref",
+    ):
+        value = arguments.get(name)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{name} must be a non-empty string or null")
+    shots = arguments.get("shots")
+    if shots is not None and (
+        isinstance(shots, bool) or not isinstance(shots, int) or shots <= 0
+    ):
+        raise ValueError("shots must be a positive integer or null")
+
+
 def singleshot_ge(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
     library = sources["ml"]["modules"]
     publication = ctx.prepare_tab("singleshot/ge", arguments.get("reuse_tab_id"))
