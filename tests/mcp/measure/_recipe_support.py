@@ -4,13 +4,13 @@ import base64
 from copy import deepcopy
 from typing import Any
 
-_PNG = base64.b64decode(
+PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
     "+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
 
 
-def _scalar(value: object) -> dict[str, Any]:
+def scalar(value: object) -> dict[str, Any]:
     return {
         "kind": "scalar",
         "valid": True,
@@ -24,7 +24,7 @@ def _scalar(value: object) -> dict[str, Any]:
     }
 
 
-def _section(**children: dict[str, Any]) -> dict[str, Any]:
+def section(**children: dict[str, Any]) -> dict[str, Any]:
     return {"kind": "section", "valid": True, "children": children}
 
 
@@ -37,9 +37,9 @@ class LookbackGui:
             "status": "Valid",
             "source_basis": [],
             "diagnostics": [],
-            "tree": _section(
-                rounds=_scalar(3),
-                modules=_section(
+            "tree": section(
+                rounds=scalar(3),
+                modules=section(
                     reset={"kind": "reference", "valid": True, "ref": None},
                     init_pulse={"kind": "reference", "valid": True, "ref": None},
                     readout={
@@ -48,11 +48,11 @@ class LookbackGui:
                         "ref": None,
                         "error": None,
                         "children": {
-                            "pulse_cfg": _section(freq=_scalar(5000.0)),
-                            "ro_cfg": _section(
-                                ro_freq=_scalar(5000.0),
-                                ro_length=_scalar(2.0),
-                                trig_offset=_scalar(0.1),
+                            "pulse_cfg": section(freq=scalar(5000.0)),
+                            "ro_cfg": section(
+                                ro_freq=scalar(5000.0),
+                                ro_length=scalar(2.0),
+                                trig_offset=scalar(0.1),
                             ),
                         },
                     },
@@ -105,10 +105,10 @@ class LookbackGui:
             else:
                 value = edit["value"]
                 if isinstance(value, dict) and "__expr" in value:
-                    node.update(_scalar(self.md.get(value["__expr"])))
+                    node.update(scalar(self.md.get(value["__expr"])))
                     node["input"].update(mode="expression", raw=value["__expr"])
                 else:
-                    node.update(_scalar(value))
+                    node.update(scalar(value))
         revision = int(self.publication["cfg_ref"]["revision"]) + 1
         self.publication["cfg_ref"]["revision"] = str(revision)
 
@@ -168,7 +168,7 @@ class LookbackGui:
             return {"image_path": "/actual/trace.png"}
         if method == "tab.get_figure":
             assert params["operation_id"] == 93
-            return {"png_b64": base64.b64encode(_PNG).decode()}
+            return {"png_b64": base64.b64encode(PNG).decode()}
         if method == "tab.writeback_preview":
             assert params == {
                 "tab_id": "t",

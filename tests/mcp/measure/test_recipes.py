@@ -12,7 +12,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
-from ._recipe_support import _PNG, LookbackGui, _scalar
+from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import make_client
 
 
@@ -60,7 +60,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         assert completed.data["status"] == "finished", completed.data
         assert completed.data["run_op"] == initial["run_op"]
         assert completed.data["raw_save"]["path"] == "/actual/raw.h5"
-        assert completed.images[0].data == _PNG
+        assert completed.images[0].data == PNG
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.analyze") == 1
@@ -99,7 +99,7 @@ def interactive_recipe(tmp_path, handoff_failure):
                 "figure": {
                     "png_b64": "invalid"
                     if failure == "png"
-                    else base64.b64encode(_PNG).decode()
+                    else base64.b64encode(PNG).decode()
                 },
                 "state": {"offset": 0.24},
                 "commands": [{"name": "done"}],
@@ -151,8 +151,8 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
         assert not handoff.images
     else:
         assert not handoff.is_error
-        assert handoff.images[0].data == _PNG
-        assert Path(interaction["figure"]).read_bytes() == _PNG
+        assert handoff.images[0].data == PNG
+        assert Path(interaction["figure"]).read_bytes() == PNG
     if handoff_failure not in ("query", "replaced"):
         assert interaction["state"] == {"offset": 0.24}
         assert interaction["commands"] == [{"name": "done"}]
@@ -160,7 +160,7 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     execution = handoff.data["execution"]
     read = client.call("tab_interact", {"tab": "t"})
     assert read.data["prompt"] == "Confirm offset"
-    assert read.images[0].data == _PNG
+    assert read.images[0].data == PNG
     finished_analysis = client.call(
         "tab_interact", {"tab": "t", "payload": {"command": "done"}}
     )
@@ -171,7 +171,7 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     assert finished.data["analysis"]["execution"] == analysis_execution
     assert read.data["execution"] == analysis_execution
     assert finished.data["writeback"]["has_draft"]
-    assert finished.images[0].data == _PNG
+    assert finished.images[0].data == PNG
     methods = [method for method, _ in client.transport.sent]
     assert methods.count("tab.run_start") == methods.count("tab.analyze") == 1
 
@@ -794,7 +794,7 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             {"figure_name": "trace", "image_path": "/actual/trace.png"}
         ]
         assert data["writeback"]["items"] == [{"id": "md-1", "proposed": 0.24}]
-        assert reply.images[0].data == _PNG
+        assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
         actual = data["actual"]
         assert actual["cfg_ref"] == gui.publication["cfg_ref"]
@@ -1199,7 +1199,7 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
             assert data["analysis"]["saved_images"] == [
                 {"figure_name": "trace", "image_path": "/actual/trace.png"}
             ]
-            assert reply.images[0].data == _PNG
+            assert reply.images[0].data == PNG
         methods = [method for method, _ in client.transport.sent]
         for method in (
             "tab.run_start",

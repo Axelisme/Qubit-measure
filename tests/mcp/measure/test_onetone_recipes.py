@@ -3,17 +3,15 @@
 import pytest
 from zcu_tools.mcp.core.reply import ToolReply
 
-from ._recipe_support import LookbackGui, _scalar, _section
+from ._recipe_support import LookbackGui, scalar, section
 from ._support import make_client
 
 
 class OnetoneGui(LookbackGui):
     def __init__(self):
         super().__init__()
-        self.publication["tree"]["children"]["sweep"] = _section(
-            freq=_section(
-                start=_scalar(4500.0), stop=_scalar(5500.0), expts=_scalar(41)
-            )
+        self.publication["tree"]["children"]["sweep"] = section(
+            freq=section(start=scalar(4500.0), stop=scalar(5500.0), expts=scalar(41))
         )
 
     def __call__(self, method, params):
