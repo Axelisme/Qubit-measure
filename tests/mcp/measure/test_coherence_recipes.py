@@ -2,6 +2,8 @@
 
 from typing import Any
 
+import pytest
+
 from ._recipe_support import LookbackGui, scalar, section
 from ._support import make_client
 
@@ -68,6 +70,39 @@ def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {"pi_ref"}
         assert not gui.ran
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"max_delay_us": True},
+        {"max_delay_us": float("nan")},
+        {"max_delay_us": float("inf")},
+        {"max_delay_us": 0},
+        {"max_delay_us": -1},
+        {"points": 1},
+        {"points": 2.5},
+        {"points": True},
+        {"reps": False},
+        {"rounds": 1.5},
+        {"pi_ref": " "},
+        {"readout_ref": 7},
+        {"use_reset": False},
+        {"reuse_tab_id": ""},
+    ],
+)
+def test_t1_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
+    gui = CoherenceGui(pi_ref="pi")
+    client = make_client(tmp_path, gui)
+    try:
+        data = client.call("t1", arguments).data
+        assert data["status"] == "failed", data
+        assert not gui.ran
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
     finally:
         client.context.session.close()
 
