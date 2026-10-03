@@ -7,7 +7,7 @@ from typing import Any
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
 from .lookback import lookback
-from .onetone import onetone_spectrum
+from .onetone import onetone_spectrum, onetone_spectrum_over_flux
 
 
 @dataclass(frozen=True)
@@ -73,5 +73,23 @@ RECIPES = (
             },
         },
         run=onetone_spectrum,
+    ),
+    RecipeDefinition(
+        name="onetone_spectrum_over_flux",
+        description="Run one frequency/physical-flux survey, save raw and Primary analysis.",
+        input_schema={
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                **{name: {"type": ["string", "null"], "minLength": 1}
+                   for name in ("reuse_tab_id", "readout_ref", "flux_device")},
+                **{name: {"type": ["number", "null"]}
+                   for name in ("center_mhz", "span_mhz", "gain")},
+                **{name: {"type": ["integer", "null"]}
+                   for name in ("freq_points", "flux_points", "reps", "rounds")},
+                "flux_range": {"type": ["array", "null"], "items": {"type": "number"},
+                               "minItems": 2, "maxItems": 2},
+            },
+        },
+        run=onetone_spectrum_over_flux,
     ),
 )

@@ -84,6 +84,11 @@ def _frequency(
     }, missing
 
 
+def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Run one frequency/physical-flux survey with Primary analysis."""
+    raise NotImplementedError("Onetone flux preparation is not implemented")
+
+
 def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Prepare a calibrated spectrum, run once and save raw and analysis."""
     _validate(arguments)

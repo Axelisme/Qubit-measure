@@ -45,9 +45,32 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         client.context.session.close()
 
 
+def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
+    gui = OnetoneGui(experiment="onetone/flux_dep")
+
+    def respond(method, params):
+        if method == "value.list":
+            return {"values": []}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond)
+    try:
+        reply = client.call("onetone_spectrum_over_flux", {})
+        assert isinstance(reply, ToolReply)
+        assert reply.data["status"] == "needs_parameters", reply.data
+        assert {item["parameter"] for item in reply.data["missing"]} == {
+            "center_mhz", "span_mhz", "flux_device", "flux_range"
+        }
+        assert not gui.ran
+        assert not reply.is_error
+    finally:
+        client.context.session.close()
+
+
 class OnetoneGui(LookbackGui):
-    def __init__(self, md=None):
+    def __init__(self, md=None, experiment="onetone/freq"):
         super().__init__()
+        self.experiment = experiment
         self.md = md or {}
         self.publication["tree"]["children"].update(
             reps=scalar(17),
@@ -95,11 +118,11 @@ class OnetoneGui(LookbackGui):
 
     def __call__(self, method, params):
         if method == "tab.new":
-            assert params == {"adapter_name": "onetone/freq"}
+            assert params == {"adapter_name": self.experiment}
             return {"tab_id": "t"}
         reply = super().__call__(method, params)
         if method == "tab.snapshot":
-            reply["tabs"][0]["adapter_name"] = "onetone/freq"
+            reply["tabs"][0]["adapter_name"] = self.experiment
         return reply
 
 
