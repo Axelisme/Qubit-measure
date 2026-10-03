@@ -320,7 +320,9 @@ def test_create_cleans_only_new_entry_when_second_root_cannot_be_created(
 
 
 @pytest.mark.parametrize("root_index", [0, 1])
-@pytest.mark.parametrize("shape", ["legacy-directory", "file", "broken-symlink"])
+@pytest.mark.parametrize(
+    "shape", ["legacy-directory", "file", "broken-symlink", "external-symlink"]
+)
 def test_create_rejects_existing_destination_without_touching_either_entry(
     entry_roots: tuple[Path, Path], root_index: int, shape: str
 ) -> None:
@@ -334,6 +336,12 @@ def test_create_rejects_existing_destination_without_touching_either_entry(
     elif shape == "file":
         existing.write_bytes(b"original measurement")
         marker = existing
+    elif shape == "external-symlink":
+        target = existing.parent.parent / "external"
+        target.mkdir()
+        marker = target / "legacy-data.hdf5"
+        marker.write_bytes(b"original measurement")
+        existing.symlink_to(target, target_is_directory=True)
     else:
         existing.symlink_to("missing-target")
         marker = None
