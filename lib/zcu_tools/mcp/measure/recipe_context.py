@@ -96,6 +96,9 @@ class RecipeSnapshot:
     post_analysis: dict[str, Any] | None = None
     post_writeback: dict[str, Any] | None = None
     analysis_stage: Literal["primary", "post"] | None = None
+    analysis_starts: dict[str, StartReceipt] = field(
+        default_factory=lambda: {"primary": StartReceipt(), "post": StartReceipt()}
+    )
     error: RecipeError | None = None
 
 
@@ -462,9 +465,15 @@ class RecipeContext:
             {"tab_id": tab, "updates": {}},
             operation_handle=primary_op,
             run_operation_handle=run_op,
-            before_send=lambda: self._admit("analysis"),
+            before_send=lambda: self._admit_analysis(stage),
         )
-        self._publish(op=started["handle"])
+        self._publish(
+            op=started["handle"],
+            analysis_starts={
+                **self.progress.analysis_starts,
+                stage: StartReceipt("running"),
+            },
+        )
         execution = self.tools.session.executions.start(
             self.tools.gui, tab, stage, started
         )
@@ -514,6 +523,16 @@ class RecipeContext:
         )
         self._publish(**{writeback_field: writeback})
         return started["handle"]
+
+    def _admit_analysis(self, stage: Literal["primary", "post"]) -> None:
+        with self._condition:
+            self._admit("analysis")
+            self._publish(
+                analysis_starts={
+                    **self.progress.analysis_starts,
+                    stage: StartReceipt("unknown"),
+                }
+            )
 
     def _retain_analysis(self, execution: AnalysisExecution) -> None:
         """Deliver a stop that raced with the admitted analysis start receipt."""

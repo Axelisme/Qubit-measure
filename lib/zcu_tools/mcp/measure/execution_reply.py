@@ -157,9 +157,11 @@ def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _analysis_step(execution: dict[str, Any] | None) -> StepReply:
+def _analysis_step(
+    execution: dict[str, Any] | None, start: dict[str, Any] | None
+) -> StepReply:
     if execution is None:
-        return _step("not_started")
+        return _step(start["status"] if start else "not_started", start)
     outcome = execution.get("operation_outcome")
     return _step(outcome["status"] if outcome else execution["status"], outcome)
 
@@ -221,8 +223,13 @@ def project_execution(
                 "run": run,
                 "raw_save": _step(raw["status"], raw.get("operation_outcome")),
                 "analysis": {
-                    "primary": _analysis_step(primary_execution),
-                    "post": _analysis_step(post_execution),
+                    "primary": _analysis_step(
+                        primary_execution,
+                        snapshot.get("analysis_starts", {}).get("primary"),
+                    ),
+                    "post": _analysis_step(
+                        post_execution, snapshot.get("analysis_starts", {}).get("post")
+                    ),
                 },
                 "analysis_save": {
                     "primary": _analysis_save_step(primary_execution),
