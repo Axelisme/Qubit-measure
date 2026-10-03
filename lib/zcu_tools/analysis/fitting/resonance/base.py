@@ -276,9 +276,7 @@ def find_edelay_branch(
     current_radius = search_radius
     while True:
         try:
-            return _find_edelay_branch(
-                freqs, signal_rows, rough_edelay, current_radius
-            )
+            return _find_edelay_branch(freqs, signal_rows, rough_edelay, current_radius)
         except _EDelaySearchBoundaryError as exc:
             if max_search_radius is None:
                 raise
