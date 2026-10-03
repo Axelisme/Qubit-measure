@@ -17,7 +17,7 @@ def _finite(value: object) -> TypeGuard[int | float]:
 
 
 def _validate(arguments: dict[str, Any]) -> None:
-    for name in ("reuse_tab_id", "readout_ref", "flux_device"):
+    for name in ("reuse_tab_id", "readout_ref", "flux_device", "flux_unit"):
         value = arguments.get(name)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
