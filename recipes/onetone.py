@@ -17,7 +17,7 @@ def _finite(value: object) -> TypeGuard[int | float]:
 
 
 def _validate(arguments: dict[str, Any]) -> None:
-    for name in ("reuse_tab_id", "readout_ref"):
+    for name in ("reuse_tab_id", "readout_ref", "flux_device"):
         value = arguments.get(name)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
@@ -27,12 +27,19 @@ def _validate(arguments: dict[str, Any]) -> None:
             raise ValueError(f"{name} must be a finite real number or null")
     if arguments.get("span_mhz") is not None and arguments["span_mhz"] <= 0:
         raise ValueError("span_mhz must be positive")
-    for name in ("points", "reps", "rounds"):
+    for name in ("points", "freq_points", "flux_points", "reps", "rounds"):
         value = arguments.get(name)
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int)
         ):
             raise ValueError(f"{name} must be an integer or null")
+    value = arguments.get("flux_range")
+    if value is not None and (
+        not isinstance(value, (list, tuple))
+        or len(value) != 2
+        or not all(_finite(endpoint) for endpoint in value)
+    ):
+        raise ValueError("flux_range must contain two finite real endpoints")
 
 
 def _node(publication: dict[str, Any], *path: str) -> dict[str, Any]:
@@ -85,7 +92,7 @@ def _frequency(
 
 
 def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
-    """Run one frequency/physical-flux survey with Primary analysis."""
+    """Diagnose missing survey inputs; execution is not implemented yet."""
     _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
     publication = ctx.prepare_tab("onetone/flux_dep", arguments.get("reuse_tab_id"))

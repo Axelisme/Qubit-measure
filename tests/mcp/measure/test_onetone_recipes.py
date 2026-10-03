@@ -75,26 +75,41 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         assert not reply.is_error
 
 
-@pytest.mark.parametrize("arguments", [
-    {"flux_device": ""}, {"flux_device": False}, {"flux_device": " "},
-    {"freq_points": True}, {"freq_points": 1.5}, {"flux_points": False},
-    {"flux_range": [0, True]}, {"flux_range": [0, float("inf")]},
-    {"flux_range": [0]}, {"flux_range": [0, 1, 2]},
-    {"flux_range": {"start": 0, "stop": 1}}, {"flux_range": "0,1"},
-])
-def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(tmp_path, arguments):
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"flux_device": ""},
+        {"flux_device": False},
+        {"flux_device": " "},
+        {"freq_points": True},
+        {"freq_points": 1.5},
+        {"flux_points": False},
+        {"flux_range": [0, True]},
+        {"flux_range": [0, float("inf")]},
+        {"flux_range": [0]},
+        {"flux_range": [0, 1, 2]},
+        {"flux_range": {"start": 0, "stop": 1}},
+        {"flux_range": "0,1"},
+    ],
+)
+def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(
+    tmp_path, arguments
+):
     gui = OnetoneGui(experiment="onetone/flux_dep")
     with recipe_client(tmp_path, gui) as client:
         reply = client.call("onetone_spectrum_over_flux", arguments)
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
-        assert not any(method == "context.snapshot" for method, _ in client.transport.sent)
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
 
 
 @pytest.mark.parametrize("stage", ["tab.edit_cfg", "tab.run_start"])
 def test_spectrum_source_change_fails_without_retry_or_blind_scan(tmp_path, stage):
     gui = OnetoneGui({"r_f": 6100.0, "rf_w": 4.0})
+
     def respond(method, params):
         if method == stage:
             raise GuiRpcError("Source changed", reason="stale")
@@ -197,8 +212,22 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
     "md, arguments, start, stop, center_source, span_source",
     [
         ({"r_f": 6100.0, "rf_w": 4.0}, {}, 6090.0, 6110.0, "r_f", "gui_linewidth"),
-        ({"rf_w": 4.0}, {"center_mhz": 6200.0}, 6190.0, 6210.0, "explicit", "gui_linewidth"),
-        ({"r_f": None, "rf_w": 4.0}, {"center_mhz": 6200.0}, 6190.0, 6210.0, "explicit", "gui_linewidth"),
+        (
+            {"rf_w": 4.0},
+            {"center_mhz": 6200.0},
+            6190.0,
+            6210.0,
+            "explicit",
+            "gui_linewidth",
+        ),
+        (
+            {"r_f": None, "rf_w": 4.0},
+            {"center_mhz": 6200.0},
+            6190.0,
+            6210.0,
+            "explicit",
+            "gui_linewidth",
+        ),
         ({"r_f": 6100.0}, {"span_mhz": 8.0}, 6096.0, 6104.0, "r_f", "explicit"),
         (
             {},
