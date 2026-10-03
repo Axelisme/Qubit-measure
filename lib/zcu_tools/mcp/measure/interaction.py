@@ -11,7 +11,31 @@ from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 if TYPE_CHECKING:
+    from zcu_tools.mcp.measure.analysis_execution import AnalysisExecution
     from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+
+
+def handoff_interaction(
+    ctx: MeasureToolContext,
+    execution: AnalysisExecution,
+    *,
+    before_send: Callable[[], None] | None = None,
+) -> None:
+    """Read an initial handoff without hiding its accepted analysis receipt."""
+    snapshot = execution.snapshot()
+    if snapshot.status != "interactive":
+        return
+    try:
+        interact(
+            ctx,
+            {"tab_id": snapshot.tab},
+            expected_op=snapshot.op,
+            before_send=before_send,
+        )
+    except (GuiRpcError, ValueError, OSError) as exc:
+        execution.observe_interaction(
+            ToolReply({"figure": None, "delivery_error": str(exc)}, is_error=True)
+        )
 
 
 def interact(

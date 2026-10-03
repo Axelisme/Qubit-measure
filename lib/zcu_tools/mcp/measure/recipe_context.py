@@ -17,7 +17,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
     CancelError,
     GuiCancel,
 )
-from zcu_tools.mcp.measure.interaction import interact
+from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 if TYPE_CHECKING:
@@ -368,20 +368,9 @@ class RecipeContext:
             self.tools.gui, tab, "primary", started
         )
         self._retain_analysis(execution)
-        if started["interactive"] and execution.snapshot().status == "interactive":
-            try:
-                interact(
-                    self.tools,
-                    {"tab_id": tab},
-                    expected_op=started["handle"],
-                    before_send=lambda: self._admit("analysis"),
-                )
-            except (GuiRpcError, ValueError, OSError) as exc:
-                execution.observe_interaction(
-                    ToolReply(
-                        {"figure": None, "delivery_error": str(exc)}, is_error=True
-                    )
-                )
+        handoff_interaction(
+            self.tools, execution, before_send=lambda: self._admit("analysis")
+        )
         while True:
             reply = execution.wait(0.25)
             with self._condition:
