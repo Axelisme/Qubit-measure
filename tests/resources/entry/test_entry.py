@@ -28,6 +28,35 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+@pytest.mark.parametrize("field", ["ch", "ro_ch", "flux_ch"])
+@pytest.mark.parametrize("operation", ["add", "write", "open"])
+def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, field: str, operation: str
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", wiring={field: 2})
+    if operation == "open":
+        write_setup_component(
+            setup_path, "R1", {"kind": "resonator", "wiring": {field: None}}
+        )
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        if operation == "add":
+            entry.setup.add_component("R2", kind="resonator", wiring={field: None})
+        elif operation == "write":
+            setattr(entry.setup.R1.wiring, field, None)
+        else:
+            ResultEntry.open("entry", result_root=results, database_root=database)
+
+    with pytest.raises(ValidationError) as failure:
+        perform_operation()
+    assert field in str(failure.value)
+    assert setup_path.read_bytes() == before
+    assert getattr(entry.setup.R1.wiring, field) == 2
+
+
 def test_wiring_fields_stay_separate_and_use_their_declared_working_units(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
