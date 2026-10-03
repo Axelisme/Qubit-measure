@@ -204,6 +204,12 @@ def h_tab_post_analyze(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    source_operation_id = cast(int | None, params.get("operation_id"))
+    run_operation_id = cast(int | None, params.get("run_operation_id"))
+    if source_operation_id is not None:
+        control.require_analysis_operation(tab_id, "analysis", source_operation_id)
+    if run_operation_id is not None:
+        control.require_run_operation(tab_id, run_operation_id)
     snap = control.get_tab_snapshot(tab_id)
     # Order the checks by the true cause: post params only exist once a primary
     # analyze produced a result (they are built from it). Report the missing
@@ -243,7 +249,12 @@ def h_tab_post_analyze(
         else []
     )
     follow_tab(adapter, tab_id, "post_analysis")
-    operation_id = control.start_post_analyze(tab_id, updated)
+    operation_id = control.start_post_analyze(
+        tab_id,
+        updated,
+        operation_id=source_operation_id,
+        run_operation_id=run_operation_id,
+    )
     return {
         "operation_id": operation_id,
         "interactive": False,

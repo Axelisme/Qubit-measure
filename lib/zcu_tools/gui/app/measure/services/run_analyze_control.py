@@ -105,7 +105,12 @@ class RunAnalyzeControlPort(Protocol):
     def finish_interactive(self, tab_id: str) -> bool: ...
 
     def start_post_analyze(
-        self, tab_id: str, post_analyze_params_instance: object
+        self,
+        tab_id: str,
+        post_analyze_params_instance: object,
+        *,
+        operation_id: int | None = None,
+        run_operation_id: int | None = None,
     ) -> int: ...
     def get_post_analyze_result(self, tab_id: str) -> object | None: ...
 
@@ -349,9 +354,18 @@ class RunAnalyzeControlFacet:
         return token
 
     def start_post_analyze(
-        self, tab_id: str, post_analyze_params_instance: object
+        self,
+        tab_id: str,
+        post_analyze_params_instance: object,
+        *,
+        operation_id: int | None = None,
+        run_operation_id: int | None = None,
     ) -> int:
         self._ensure_tab_idle(tab_id)
+        if operation_id is not None:
+            self._state.require_analysis_operation(tab_id, "analysis", operation_id)
+        if run_operation_id is not None:
+            self._state.require_run_operation(tab_id, run_operation_id)
         host = self._render_host()
         figure_container = (
             host.make_post_analysis_container(tab_id) if host is not None else None
