@@ -32,6 +32,12 @@ def _entry_path(root: str | Path, name: str) -> Path:
     return path
 
 
+def rename_entry(
+    old: str, new: str, *, result_root: str | Path, database_root: str | Path
+) -> None:
+    raise NotImplementedError("Renaming an entry is not implemented")
+
+
 class ResultEntry:
     def __init__(self, result_path: Path, database_path: Path) -> None:
         self._result_path = result_path

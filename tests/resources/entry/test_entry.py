@@ -6,12 +6,53 @@ from uuid import UUID
 
 import pytest
 from ruamel.yaml import YAML
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, rename_entry
 
 
 @pytest.fixture
 def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
     return tmp_path / "results", tmp_path / "Database"
+
+
+@pytest.fixture
+def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
+    results, database = entry_roots
+    return ResultEntry.create("entry", result_root=results, database_root=database)
+
+
+def read_entry_files(path: Path) -> dict[Path, bytes]:
+    return {
+        item.relative_to(path): item.read_bytes()
+        for item in path.rglob("*")
+        if item.is_file()
+    }
+
+
+def test_rename_moves_both_roots_preserving_identity_and_all_file_bytes(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    result_path = results / "entry"
+    database_path = database / "entry"
+    (result_path / "records" / "synthetic.json").write_bytes(b'{"unchanged": true}')
+    (database_path / "data.bin").write_bytes(b"synthetic data")
+    result_before = read_entry_files(result_path)
+    database_before = read_entry_files(database_path)
+
+    rename_entry(
+        "entry", "renamed (no meaning)", result_root=results, database_root=database
+    )
+
+    assert not result_path.exists()
+    assert not database_path.exists()
+    assert read_entry_files(results / "renamed (no meaning)") == result_before
+    assert read_entry_files(database / "renamed (no meaning)") == database_before
+    assert (
+        ResultEntry.open(
+            "renamed (no meaning)", result_root=results, database_root=database
+        ).entry_id
+        == entry.entry_id
+    )
 
 
 @pytest.mark.parametrize("operation", ["create", "open"])
