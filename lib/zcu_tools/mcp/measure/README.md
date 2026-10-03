@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-03, Onetone recipes and Run preview
+**Last updated:** 2026-10-03, Drive recipes
 
 # `zcu_tools/mcp/measure/`
 
@@ -85,6 +85,15 @@ Spectrum 與 flux 交給 Primary 分析。Power 是 raw-only，回 `analysis_mod
 `analysis` 與 `writeback` 為 null。它在 raw 保存後以原 Run token 取得 preview，
 回傳標為 `run_preview` 的 session 暫存 PNG 與同 reply 的 image content。
 Preview 不是已保存的 analysis artifact，失敗保留已保存 raw 並標示 `phase=preview`。
+
+`twotone_spectrum` 的中心來自明確參數或 `q_f`；完整 span 來自明確參數或 GUI 的 `qf_w` 範圍。
+`time_rabi` 掃描 pulse length，`amplitude_rabi` 掃描 gain，兩者不要求已有 π 校準。
+Rabi 頻率依序取明確 `frequency_mhz`、GUI 已選 library drive 的有效 leaf、`q_f`。
+Readout 頻率保留已選 library 的有效 leaf，缺少的 leaf 以 `r_f` 補足。
+Inline 模板的固定頻率不算校準來源；缺 drive／readout 來源時一次回 `needs_parameters`。
+省略的 scalar、sweep 與平均數保留 GUI defaults 或 calibration expression。
+`use_reset` 省略或 null 明確停用 reset；錯誤的 ref 不改選其他來源。
+三者都只 Run 一次，保存 raw 後完成 Primary，不做 Post、alignment、重新掃描或自動 accept。
 
 `RecipeContext` 持有固定 GUI binding 與整段進度，只執行一次 Run。
 Run 後只收錄來源對應原 Run 的 result_state。來源已被替代時回報 result_superseded，不交付另一輪快照。
