@@ -18,6 +18,16 @@ class RecipeDefinition:
     run: Callable[[RecipeContext, dict[str, Any]], None]
 
 
+_ONETONE_COMMON_PROPERTIES = {
+    **{
+        name: {"type": ["string", "null"], "minLength": 1}
+        for name in ("reuse_tab_id", "readout_ref")
+    },
+    **{name: {"type": ["number", "null"]} for name in ("center_mhz", "span_mhz")},
+    **{name: {"type": ["integer", "null"]} for name in ("reps", "rounds")},
+}
+
+
 RECIPES = (
     RecipeDefinition(
         name="lookback",
@@ -58,18 +68,9 @@ RECIPES = (
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                **{
-                    name: {"type": ["string", "null"], "minLength": 1}
-                    for name in ("reuse_tab_id", "readout_ref")
-                },
-                **{
-                    name: {"type": ["number", "null"]}
-                    for name in ("center_mhz", "span_mhz", "gain")
-                },
-                **{
-                    name: {"type": ["integer", "null"]}
-                    for name in ("points", "reps", "rounds")
-                },
+                **_ONETONE_COMMON_PROPERTIES,
+                "gain": {"type": ["number", "null"]},
+                "points": {"type": ["integer", "null"]},
             },
         },
         run=onetone_spectrum,
@@ -81,18 +82,11 @@ RECIPES = (
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                **{
-                    name: {"type": ["string", "null"], "minLength": 1}
-                    for name in ("reuse_tab_id", "readout_ref", "flux_device")
-                },
-                **{
-                    name: {"type": ["number", "null"]}
-                    for name in ("center_mhz", "span_mhz", "gain")
-                },
-                **{
-                    name: {"type": ["integer", "null"]}
-                    for name in ("freq_points", "flux_points", "reps", "rounds")
-                },
+                **_ONETONE_COMMON_PROPERTIES,
+                "gain": {"type": ["number", "null"]},
+                "flux_device": {"type": ["string", "null"], "minLength": 1},
+                "freq_points": {"type": ["integer", "null"]},
+                "flux_points": {"type": ["integer", "null"]},
                 "flux_range": {
                     "type": ["array", "null"],
                     "items": {"type": "number"},

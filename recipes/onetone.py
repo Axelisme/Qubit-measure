@@ -136,11 +136,9 @@ def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) ->
     raise NotImplementedError("Onetone flux Run preparation is not implemented")
 
 
-def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
-    """Prepare a calibrated spectrum, run once and save raw and analysis."""
-    _validate(arguments)
-    sources = ctx.rpc("context.snapshot", {})
-    publication = ctx.prepare_tab("onetone/freq", arguments.get("reuse_tab_id"))
+def _select_readout(
+    ctx: RecipeContext, publication: dict[str, Any], arguments: dict[str, Any]
+) -> dict[str, Any]:
     if arguments.get("readout_ref") is not None:
         key = arguments["readout_ref"]
         publication = ctx.edit_cfg(
@@ -149,20 +147,27 @@ def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
         reference = _node(publication, "modules", "readout")
         if reference.get("error") or reference.get("ref") != key:
             raise GuiRpcError("Invalid readout reference", reason="invalid_cfg")
-    frequency, missing = _frequency(publication, arguments, sources["md"])
-    if missing:
-        ctx.needs_parameters(missing)
-        return
-    edits = [{"path": ["sweep", "freq"], "value": frequency}]
-    paths = {
-        "gain": ("modules", "readout", "pulse_cfg", "gain"),
-        "reps": ("reps",),
-        "rounds": ("rounds",),
-    }
-    for name, path in paths.items():
-        if arguments.get(name) is not None:
-            edits.append({"path": list(path), "value": arguments[name]})
-    publication = ctx.edit_cfg(publication, edits)
+    return publication
+
+
+_SCALAR_PATHS = {
+    "gain": ("modules", "readout", "pulse_cfg", "gain"),
+    "reps": ("reps",),
+    "rounds": ("rounds",),
+}
+
+
+def _scalar_edits(arguments: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"path": list(path), "value": arguments[name]}
+        for name, path in _SCALAR_PATHS.items()
+        if arguments.get(name) is not None
+    ]
+
+
+def _actual_fields(
+    publication: dict[str, Any], arguments: dict[str, Any]
+) -> dict[str, Any]:
     if publication["status"] != "Valid":
         raise GuiRpcError("Onetone cfg is not Valid", reason="invalid_cfg")
     inputs = _node(publication, "sweep", "freq")["inputs"]
@@ -191,11 +196,28 @@ def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
             else "gui_default",
         },
     }
-    for name, path in paths.items():
+    for name, path in _SCALAR_PATHS.items():
         input_state = _node(publication, *path)["input"]
         fields[".".join(path)] = {
             "value": input_state["resolved"],
             "input": input_state,
             "source": "explicit" if arguments.get(name) is not None else "gui_default",
         }
-    ctx.run_once(publication, fields)
+    return fields
+
+
+def onetone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Prepare a calibrated spectrum, run once and save raw and analysis."""
+    _validate(arguments)
+    sources = ctx.rpc("context.snapshot", {})
+    publication = ctx.prepare_tab("onetone/freq", arguments.get("reuse_tab_id"))
+    publication = _select_readout(ctx, publication, arguments)
+    frequency, missing = _frequency(publication, arguments, sources["md"])
+    if missing:
+        ctx.needs_parameters(missing)
+        return
+    publication = ctx.edit_cfg(
+        publication,
+        [{"path": ["sweep", "freq"], "value": frequency}] + _scalar_edits(arguments),
+    )
+    ctx.run_once(publication, _actual_fields(publication, arguments))
