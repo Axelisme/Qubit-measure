@@ -14,6 +14,33 @@ def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
     return tmp_path / "results", tmp_path / "Database"
 
 
+@pytest.mark.parametrize("operation", ["create", "open"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        ".",
+        "..",
+        "../escape",
+        "nested/name",
+        "nested\\\\name",
+        "C:escape",
+        "nul\u0000name",
+        "absolute",
+    ],
+)
+def test_entry_names_are_safe_single_path_components(
+    entry_roots: tuple[Path, Path], name: str, operation: str
+) -> None:
+    results, database = entry_roots
+    if name == "absolute":
+        name = str(results.parent / "absolute-outside-root")
+    action = ResultEntry.create if operation == "create" else ResultEntry.open
+
+    with pytest.raises(ValueError, match="single path component"):
+        action(name, result_root=results, database_root=database)
+
+
 def test_create_cleans_only_new_entry_when_second_root_cannot_be_created(
     entry_roots: tuple[Path, Path],
 ) -> None:
