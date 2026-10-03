@@ -94,7 +94,7 @@ class DriveGui(LookbackGui):
         result = super().__call__(method, params)
         if method == "context.snapshot":
             result["ml"]["modules"] = {
-                "readout": {"type": "readout/pulse"},
+                "calibrated": {"type": "readout/pulse"},
                 "direct": {"type": "readout/direct"},
             }
         if method == "tab.snapshot":
