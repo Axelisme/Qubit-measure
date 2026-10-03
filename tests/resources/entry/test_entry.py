@@ -28,6 +28,33 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
     }
 
 
+def test_rename_recovers_first_root_when_second_rename_fails(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    results, database = entry_roots
+    before = read_entry_files(results / "entry")
+    original_rename = Path.rename
+    cause = OSError("second rename failure")
+
+    def fail_second(source: Path, target: str | Path) -> Path:
+        if source == database / "entry":
+            raise cause
+        return original_rename(source, target)
+
+    monkeypatch.setattr(Path, "rename", fail_second)
+    with pytest.raises(OSError, match="second rename failure") as failure:
+        rename_entry("entry", "renamed", result_root=results, database_root=database)
+
+    assert failure.value is cause
+    assert read_entry_files(results / "entry") == before
+    assert not (results / "renamed").exists()
+    assert not (database / "renamed").exists()
+    assert (
+        ResultEntry.open("entry", result_root=results, database_root=database).entry_id
+        == entry.entry_id
+    )
+
+
 @pytest.mark.parametrize("root_index", [0, 1])
 @pytest.mark.parametrize("shape", ["empty-directory", "file", "broken-symlink"])
 def test_rename_refuses_existing_destination_before_moving_either_root(
