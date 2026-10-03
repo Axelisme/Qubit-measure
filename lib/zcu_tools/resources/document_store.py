@@ -1,5 +1,6 @@
 """Typed optimistic transactions over an existing round-trip YAML document."""
 
+import logging
 from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -241,4 +242,10 @@ class DocumentStore[T: BaseModel]:
 
     def _notify(self, change: DocumentChange) -> None:
         for callback in tuple(self._observers.values()):
-            callback(change)
+            try:
+                callback(change)
+            except Exception:
+                # Notification failure cannot roll back a published transaction.
+                logging.getLogger(__name__).exception(
+                    "%s: observer failed after %s publication", self._path, change.reason
+                )
