@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Literal
 
 import pytest
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
@@ -128,12 +128,22 @@ def test_read_schema_before_populate_raises(qapp):
         w.read_schema()
 
 
-@pytest.mark.parametrize("failure", ["invalid_widget", "exception"])
+@pytest.mark.parametrize("failure", ["non_widget", "exception"])
 def test_attach_failure_does_not_observe_failed_draft(
-    qapp, ctrl, failure: Literal["invalid_widget", "exception"]
+    qapp, ctrl, failure: Literal["non_widget", "exception"]
 ):
-    from qtpy.QtWidgets import QWidget
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    class ProtocolOnly:
+        def __init__(self, field: CfgField) -> None:
+            self.field = field
+
+        def refresh_section(self, path: str) -> bool:
+            del path
+            return False
+
+        def teardown(self) -> None:
+            pass
 
     schema = section_schema(
         {"value": ScalarSpec(label="Value", type=int, required=True)},
@@ -148,16 +158,15 @@ def test_attach_failure_does_not_observe_failed_draft(
         field: CfgField, context: FieldRenderContext
     ) -> FieldWidgetProtocol:
         if fail_rendering:
-            if failure == "invalid_widget":
-                # Exercise runtime protocol rejection at the renderer boundary.
-                return cast(FieldWidgetProtocol, QWidget())
+            if failure == "non_widget":
+                return ProtocolOnly(field)
             raise RuntimeError("factory exploded")
         return default_renderer(field, context)
 
-    error_type = TypeError if failure == "invalid_widget" else RuntimeError
+    error_type = TypeError if failure == "non_widget" else RuntimeError
     message = (
-        "expected FieldWidgetProtocol"
-        if failure == "invalid_widget"
+        "expected QWidget-compatible FieldWidgetProtocol"
+        if failure == "non_widget"
         else "factory exploded"
     )
     form = CfgFormWidget(
