@@ -86,5 +86,5 @@ def test_header_rejects_malformed_version(raw_version: YamlValue) -> None:
 
 @pytest.mark.parametrize("major, minor", [(-1, 0), (0, -1), (True, 0), (0, False)])
 def test_version_components_are_non_negative_integers(major: int, minor: int) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="non-negative integer"):
         FormatVersion(major, minor)
