@@ -1,7 +1,6 @@
 """Accept applies the current GUI-owned candidates without changing observations."""
 
 import pytest
-from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
 
