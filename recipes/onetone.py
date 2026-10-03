@@ -248,14 +248,17 @@ def _actual_fields(
         or values["stop"] <= values["start"]
     ):
         raise GuiRpcError("Invalid resolved frequency range", reason="invalid_cfg")
+    span = values["stop"] - values["start"]
+    if not _finite(span):
+        raise GuiRpcError("Invalid resolved frequency span", reason="invalid_cfg")
     fields = {
         "sweep.freq": {"value": values, "input": inputs},
         "center_mhz": {
-            "value": (values["start"] + values["stop"]) / 2,
+            "value": values["start"] + span / 2,
             "source": "explicit" if arguments.get("center_mhz") is not None else "r_f",
         },
         "span_mhz": {
-            "value": values["stop"] - values["start"],
+            "value": span,
             "source": "explicit"
             if arguments.get("span_mhz") is not None
             else "gui_linewidth",
