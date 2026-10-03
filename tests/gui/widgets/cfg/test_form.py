@@ -1412,33 +1412,23 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 
 
 def test_populate_full_fake_freq_schema(qapp, ctrl):
-    """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
+    """The adapter's full schema survives form attachment and readback."""
     from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.cfg import ReferenceSpec
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    ctx = _make_ctx()
-    schema = FakeFreqAdapter().make_default_cfg(ctx)
+    schema = FakeFreqAdapter().make_default_cfg(_make_ctx())
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
 
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    out = w.read_values()
-
-    for key in ("reps", "rounds", "sweep", "modules"):
-        assert key in out.fields, f"missing key: {key}"
-    # The simulated resonance moved to the adapter __init__ — no 'model' in cfg.
-    assert "model" not in out.fields
-
-    assert isinstance(out.fields["sweep"], CfgSectionValue)
-    assert isinstance(out.fields["sweep"].fields["freq"], SweepValue)
-    # modules is a CfgSectionValue with readout as ReferenceValue
-    modules_val = out.fields["modules"]
-    assert isinstance(modules_val, CfgSectionValue)
-    # Verify spec has ReferenceSpec for readout
-    modules_spec = schema.spec.fields["modules"]
-    assert hasattr(modules_spec, "fields")
-    readout_spec = modules_spec.fields["readout"]  # type: ignore[union-attr]
-    assert isinstance(readout_spec, ReferenceSpec)
+        assert form.read_values() == schema.value
+        snapshot = form.read_schema()
+        assert snapshot.spec is schema.spec
+        assert snapshot.value == schema.value
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
