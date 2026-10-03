@@ -100,7 +100,7 @@ class TestTimeInstruction:
     def test_time_immutable(self):
         inst = TimeInst(c_op="inc_ref")
         with pytest.raises(FrozenInstanceError, match="cannot assign to field 'c_op'"):
-            inst.c_op = "inc_ref"  # type: ignore
+            setattr(inst, "c_op", "inc_ref")
 
 
 class TestTestInstruction:
@@ -138,7 +138,7 @@ class TestTestInstruction:
     def test_test_immutable(self):
         inst = TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Register("r2")))
         with pytest.raises(FrozenInstanceError, match="cannot assign to field 'op'"):
-            inst.op = AluExpr(Register("r1"), AluOp.ADD, Register("r2"))  # type: ignore
+            setattr(inst, "op", AluExpr(Register("r1"), AluOp.ADD, Register("r2")))
 
 
 class TestJumpInstruction:
@@ -260,7 +260,7 @@ class TestJumpInstruction:
     def test_jump_immutable(self):
         inst = JumpInst(label=LabelRef(Label("loop")))
         with pytest.raises(FrozenInstanceError, match="cannot assign to field 'label'"):
-            inst.label = Label("exit")  # type: ignore
+            setattr(inst, "label", Label("exit"))
 
     def test_jump_minimal(self):
         """Empty JUMP should work (no label, no addr)."""
@@ -372,7 +372,7 @@ class TestRegWriteInstruction:
     def test_regwr_immutable(self):
         inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM)
         with pytest.raises(FrozenInstanceError, match="cannot assign to field 'dst'"):
-            inst.dst = "s2"  # type: ignore
+            setattr(inst, "dst", "s2")
 
 
 class TestPortWriteInstruction:
@@ -430,7 +430,7 @@ class TestPortWriteInstruction:
     def test_wport_wr_immutable(self):
         inst = PortWriteInst(dst=ImmValue(0))
         with pytest.raises(FrozenInstanceError, match="cannot assign to field 'dst'"):
-            inst.dst = "1"  # type: ignore
+            setattr(inst, "dst", "1")
 
     def test_wport_wr_reg_read_includes_src_addr_time_and_op_registers(self):
         inst = PortWriteInst(
