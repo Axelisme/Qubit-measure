@@ -301,7 +301,7 @@ def test_custom_validation_rejects_the_merged_document_before_publication(
     with second.edit() as other:
         other.values["right"] = 8.0
     committed = document_path.read_bytes()
-    with pytest.raises(ValueError) as raised:
+    with pytest.raises(ValueError, match="combined budget exceeded") as raised:
         stack.close()
 
     assert raised.value is error
