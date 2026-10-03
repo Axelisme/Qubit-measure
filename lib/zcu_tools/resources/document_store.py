@@ -5,6 +5,7 @@ from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
+from math import isnan
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal, cast
@@ -94,6 +95,9 @@ def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -
         )
     if isinstance(original, bool) != isinstance(current, bool):
         return False
+    if isinstance(original, float) and isinstance(current, float):
+        if isnan(original) and isnan(current):
+            return True
     return original == current
 
 
