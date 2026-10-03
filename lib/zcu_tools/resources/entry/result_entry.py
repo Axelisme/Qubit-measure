@@ -46,7 +46,11 @@ def rename_entry(
                 errno.EEXIST, os.strerror(errno.EEXIST), str(destination)
             )
     result_old.rename(result_new)
-    database_old.rename(database_new)
+    try:
+        database_old.rename(database_new)
+    except OSError:
+        result_new.rename(result_old)
+        raise
 
 
 class ResultEntry:
