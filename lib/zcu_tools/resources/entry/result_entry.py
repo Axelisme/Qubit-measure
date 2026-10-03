@@ -72,12 +72,23 @@ class ResultEntry:
     def __init__(self, result_path: Path, database_path: Path) -> None:
         self._result_path = result_path
         self._database_path = database_path
+        self._entry_id: str | None = None
         self._setup_store = DocumentStore(
             result_path / "setup.yaml",
             SetupDocument,
             format="zcu.parameter-container",
+            validate=self._validate_setup,
             lock_path=result_path / ".entry.lock",
         )
+
+    def _validate_setup(self, document: SetupDocument) -> None:
+        if self._entry_id is None:
+            self._entry_id = document.general.entry_id
+        elif document.general.entry_id != self._entry_id:
+            raise ValueError(
+                f"{self._result_path / 'setup.yaml'}: entry_id is immutable; "
+                f"expected {self._entry_id!r}, got {document.general.entry_id!r}"
+            )
 
     @property
     def setup(self) -> SetupView:
