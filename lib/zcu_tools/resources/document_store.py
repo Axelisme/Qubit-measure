@@ -1,4 +1,20 @@
-"""Typed optimistic transactions over an existing round-trip YAML document."""
+"""Typed optimistic transactions over an existing round-trip YAML document.
+
+Each store owns an independent memory snapshot. ``snapshot`` never reads disk;
+``edit`` reloads under short entry/commit locks and rejects nested transactions.
+All changed fields merge or conflict as one transaction. Schema/custom validation
+and sibling-file replacement precede memory publication. This is single-file
+atomicity, not a crash journal or a multi-file durability guarantee.
+
+Declare structural paths for known physical values and their stderr in ``units``.
+Resolvers receive the current raw document. Only declared paths convert between
+SI on disk and working units in the model; untouched YAML nodes remain intact.
+Forward-minor fields stay outside the typed view without being removed on disk.
+
+Observers run after publication and unlock. Their exceptions are logged at ERROR,
+with traceback, rather than reclassifying a completed commit as failed. External
+changes require ``refresh``; this module does not run a file watcher.
+"""
 
 import logging
 from collections.abc import Callable, Generator, Iterator, Mapping
