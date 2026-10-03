@@ -4,6 +4,7 @@ import base64
 from copy import deepcopy
 
 import pytest
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import make_client
@@ -30,6 +31,7 @@ class GeGui(LookbackGui):
     def _observations(self):
         observations = super()._observations()
         observations["context.snapshot"]["ml"]["modules"] = self.library
+        observations["tab.snapshot"]["tabs"][0]["adapter_name"] = "singleshot/ge"
         return observations
 
     def __call__(self, method, params):
@@ -76,6 +78,104 @@ class GeGui(LookbackGui):
                 "items": [{"id": "classifier", "proposed": 0.98}],
             }
         raise AssertionError(method)
+
+
+@pytest.fixture()
+def ge_client(tmp_path):
+    gui = GeGui()
+    client = make_client(tmp_path, gui)
+    try:
+        yield gui, client
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+def test_ge_reports_all_missing_calibration_without_running(ge_client, reuse):
+    gui, client = ge_client
+    gui.md.clear()
+    data = client.call("singleshot_ge", {"reuse_tab_id": "t"} if reuse else {}).data
+    assert data["status"] == "needs_parameters", data
+    assert {item["parameter"] for item in data["missing"]} == {"pi_ref", "readout_ref"}
+    assert not gui.ran
+    methods = [method for method, _ in gui.calls]
+    assert ("tab.reset_cfg" in methods) == reuse
+    assert ("tab.new" in methods) != reuse
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_ge_preserves_calibrated_library_and_gui_shots_defaults(ge_client, explicit):
+    gui, client = ge_client
+    gui.md.clear()
+    modules = gui.publication["tree"]["children"]["modules"]["children"]
+    if not explicit:
+        modules["probe_pulse"]["ref"] = "pi"
+        modules["readout"]["ref"] = "readout"
+    arguments = {"pi_ref": "pi", "readout_ref": "readout"} if explicit else {}
+    data = client.call("singleshot_ge", arguments).data
+    assert data["status"] == "finished", data
+    fields = data["actual"]["fields"]
+    assert fields["shots"]["value"] == 7000
+    assert fields["shots"]["source"] == "gui_default"
+    assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == 5000.0
+    assert fields["modules.readout.ro_cfg.ro_freq"]["source"] == "library:readout"
+    assert fields["modules.probe_pulse"]["value"] == "pi"
+    assert fields["modules.probe_pulse"]["source"] == (
+        "explicit" if explicit else "gui_default"
+    )
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+def test_ge_optional_refs_are_explicit_and_omission_resets_them(ge_client, reuse):
+    gui, client = ge_client
+    gui.library.update(reset={}, init={})
+    modules = gui.publication["tree"]["children"]["modules"]["children"]
+    modules["reset"]["ref"] = "old_reset"
+    modules["init_pulse"]["ref"] = "old_init"
+    arguments = {
+        "pi_ref": "pi",
+        "reuse_tab_id": "t" if reuse else None,
+        "use_reset": None if reuse else "reset",
+        "init_pulse_ref": None if reuse else "init",
+    }
+    data = client.call("singleshot_ge", arguments).data
+    assert data["status"] == "finished", data
+    assert modules["reset"]["ref"] == (None if reuse else "reset")
+    assert modules["init_pulse"]["ref"] == (None if reuse else "init")
+    assert sum(method == "tab.run_start" for method, _ in gui.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "parameter", ["pi_ref", "readout_ref", "use_reset", "init_pulse_ref"]
+)
+def test_ge_does_not_replace_missing_explicit_library_refs(ge_client, parameter):
+    gui, client = ge_client
+    data = client.call("singleshot_ge", {"pi_ref": "pi", parameter: "missing"}).data
+    assert data["status"] == "failed", data
+    assert data["error"]["reason"] == "invalid_cfg"
+    assert not gui.ran
+
+
+@pytest.mark.parametrize("failure", ["edit", "invalid"])
+def test_ge_gui_cfg_rejection_stops_before_run(tmp_path, failure):
+    gui = GeGui()
+
+    def responder(method, params):
+        if method == "tab.edit_cfg" and failure == "edit":
+            raise GuiRpcError("Reference is not applicable", reason="invalid_cfg")
+        result = gui(method, params)
+        if method == "tab.edit_cfg" and failure == "invalid":
+            result["status"] = "Invalid"
+        return result
+
+    client = make_client(tmp_path, responder)
+    try:
+        data = client.call("singleshot_ge", {"pi_ref": "pi"}).data
+        assert data["status"] == "failed", data
+        assert data["error"]["reason"] == "invalid_cfg"
+        assert not gui.ran
+    finally:
+        client.context.session.close()
 
 
 @pytest.mark.parametrize(
