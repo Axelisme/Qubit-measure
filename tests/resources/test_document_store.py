@@ -21,6 +21,12 @@ class SyntheticDocument(BaseModel):
     values: dict[str, float]
 
 
+class TypedScalarDocument(BaseModel):
+    format: str
+    format_version: str
+    value: bool | int
+
+
 class DynamicUnitDocument(BaseModel):
     format: str
     format_version: str
@@ -519,3 +525,22 @@ def test_unit_resolver_uses_the_current_document_on_refresh_and_commit(
     assert DocumentStore(
         document_path, DynamicUnitDocument, format="synthetic"
     ).snapshot().value == pytest.approx(0.003)
+
+
+def test_boolean_to_equal_number_is_a_structural_change(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\nvalue: true\n", encoding="utf-8"
+    )
+    store = DocumentStore(document_path, TypedScalarDocument, format="synthetic")
+    events: list[DocumentChange] = []
+    store.subscribe(events.append)
+    with store.edit() as draft:
+        draft.value = 1
+
+    assert type(store.snapshot().value) is int
+    on_disk = DocumentStore(document_path, TypedScalarDocument, format="synthetic")
+    assert type(on_disk.snapshot().value) is int
+    assert on_disk.snapshot().value == 1
+    assert events == [DocumentChange(document_path, (("value",),), "commit")]
