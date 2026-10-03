@@ -1468,6 +1468,7 @@ def test_post_analysis_uses_requested_sources_before_following_the_pane(
                 run_operation_id=run + 1000 if source == "run" else run,
             )
         reply = call(sock, "tab.post_analyze", params)
+        terminal = {}
         if reply["ok"]:
             terminal = call(
                 sock,
