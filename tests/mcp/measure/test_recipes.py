@@ -595,6 +595,7 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
         assert cancelled.data["gui_cancel"]["status"] == "requested"
         release_handoff.set()
         allow_terminal.set()
+        terminal = initial
         for _ in range(100):
             terminal = client.call("wait", {"execution": execution, "timeout": 0.01})
             if terminal.data["phase"] == "terminal":
