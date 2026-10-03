@@ -384,9 +384,13 @@ class RecipeContext:
             self.tools.gui, tab, "primary", started
         )
         self._retain_analysis(execution)
-        handoff_interaction(
-            self.tools, execution, before_send=lambda: self._admit("analysis")
-        )
+        try:
+            handoff_interaction(
+                self.tools, execution, before_send=lambda: self._admit("analysis")
+            )
+        except _ContinuationCancelled:
+            # Skip the new query, but still join the already-accepted analysis.
+            pass
         while True:
             reply = execution.wait(0.25)
             with self._condition:
