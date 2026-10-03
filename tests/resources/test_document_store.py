@@ -45,6 +45,12 @@ class DynamicUnitDocument(BaseModel):
     value: float
 
 
+class NestedNumericDocument(BaseModel):
+    format: str
+    format_version: str
+    values: dict[str, dict[str, float]]
+
+
 class NullableDocument(BaseModel):
     format: str
     format_version: str
@@ -287,6 +293,34 @@ def test_units_roundtrip_values_and_stderr_without_touching_other_nodes(
     text = document_path.read_text(encoding="utf-8")
     assert "  unchanged: 4.000 # unchanged" in text
     assert "  left: 9e6 # extension" in text
+
+
+def test_added_subtree_converts_declared_values_and_stderr_to_si(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\nvalues: {}\n",
+        encoding="utf-8",
+    )
+    units = {
+        ("values", "Q1", "freq"): UnitSpec("Hz", "MHz"),
+        ("values", "Q1", "stderr"): UnitSpec("Hz", "MHz"),
+    }
+    store = DocumentStore(
+        document_path, NestedNumericDocument, format="synthetic", units=units
+    )
+    with store.edit() as draft:
+        draft.values["Q1"] = {"freq": 5.0, "stderr": 0.1}
+
+    assert store.snapshot().values["Q1"] == pytest.approx({"freq": 5.0, "stderr": 0.1})
+    reopened = DocumentStore(
+        document_path, NestedNumericDocument, format="synthetic", units=units
+    )
+    assert reopened.snapshot().values == store.snapshot().values
+    on_disk = DocumentStore(document_path, NestedNumericDocument, format="synthetic")
+    assert on_disk.snapshot().values["Q1"] == pytest.approx(
+        {"freq": 5_000_000.0, "stderr": 100_000.0}
+    )
 
 
 def test_newer_minor_keeps_unknown_nested_fields_outside_the_typed_snapshot(
