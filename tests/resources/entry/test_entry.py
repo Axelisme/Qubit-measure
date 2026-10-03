@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 from ruamel.yaml import YAML
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     PartialCommitError,
     ResultEntry,
@@ -25,6 +26,30 @@ def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
 def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     results, database = entry_roots
     return ResultEntry.create("entry", result_root=results, database_root=database)
+
+
+@pytest.mark.parametrize(
+    "name", ["", "Q.1", "1Q", "_private", "for", "edit", "description", "general"]
+)
+@pytest.mark.parametrize("operation", ["add", "open"])
+def test_component_names_must_support_unambiguous_public_attribute_access(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, name: str, operation: str
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    if operation == "open":
+        write_setup_component(setup_path, name, {"kind": "resonator"})
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        if operation == "add":
+            entry.setup.add_component(name, kind="resonator")
+        else:
+            ResultEntry.open("entry", result_root=results, database_root=database)
+
+    with pytest.raises(ValueError, match="component name"):
+        perform_operation()
+    assert setup_path.read_bytes() == before
 
 
 def test_absent_optional_physical_fields_are_not_fabricated_or_readable(
@@ -46,10 +71,9 @@ def test_unknown_component_fields_report_the_path_and_a_close_name(
     setup_path = results / "entry" / "setup.yaml"
     entry.setup.add_component("R1", kind="resonator", freq=6500.0)
     if operation == "open":
-        document = YAML(typ="safe").load(setup_path)
-        document["components"]["R1"]["frq"] = 6.6e9
-        with setup_path.open("w", encoding="utf-8") as stream:
-            YAML(typ="rt").dump(document, stream)
+        write_setup_component(
+            setup_path, "R1", {"kind": "resonator", "freq": 6.5e9, "frq": 6.6e9}
+        )
     before = setup_path.read_bytes()
 
     def perform_operation() -> None:
@@ -79,10 +103,7 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
     if operation == "open":
-        document = YAML(typ="safe").load(setup_path)
-        document["components"] = {"R1": {"kind": "resonatr"}}
-        with setup_path.open("w", encoding="utf-8") as stream:
-            YAML(typ="rt").dump(document, stream)
+        write_setup_component(setup_path, "R1", {"kind": "resonatr"})
     before = setup_path.read_bytes()
 
     def perform_operation() -> None:
@@ -128,6 +149,13 @@ def test_added_component_survives_reopening_with_its_declared_kind(
     assert reopened.setup.R1.kind == "resonator"
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
     assert document["components"]["R1"]["ext"]["note"] == "readout line"
+
+
+def write_setup_component(path: Path, name: str, fields: YamlMap) -> None:
+    document = YAML(typ="safe").load(path)
+    document["components"][name] = fields
+    with path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(document, stream)
 
 
 def read_entry_files(path: Path) -> dict[Path, bytes]:
