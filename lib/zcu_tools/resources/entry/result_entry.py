@@ -56,4 +56,4 @@ class ResultEntry:
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> "ResultEntry":
-        raise NotImplementedError("Opening an existing entry is not implemented")
+        return cls(Path(result_root) / name, Path(database_root) / name)
