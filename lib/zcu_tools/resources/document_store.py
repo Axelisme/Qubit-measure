@@ -204,7 +204,7 @@ def _patch_node(
     return draft
 
 
-def _lookup(document: YamlMap, path: FieldPath) -> YamlValue | _Missing:
+def _lookup(document: YamlValue, path: FieldPath) -> YamlValue | _Missing:
     value: YamlValue | _Missing = document
     for key in path:
         if not isinstance(value, dict) or key not in value:
