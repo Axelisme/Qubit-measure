@@ -7,6 +7,7 @@ from zcu_tools.resources.document_store import (
     ConflictError,
     DocumentChange,
     DocumentStore,
+    UnitSpec,
 )
 
 
@@ -190,3 +191,44 @@ def test_observer_failure_is_reported_separately_from_committed_state(
         record.levelname == "ERROR" and record.exc_info and record.exc_info[1] is error
         for record in caplog.records
     )
+
+
+@pytest.mark.parametrize(
+    ("si_unit", "working_unit", "si_value"),
+    [
+        ("Hz", "MHz", 1_000_000.0),
+        ("Hz", "GHz", 1_000_000_000.0),
+        ("s", "us", 0.000001),
+        ("s", "µs", 0.000001),
+        ("A", "mA", 0.001),
+        ("1", "1", 1.0),
+    ],
+)
+def test_units_roundtrip_values_and_stderr_without_touching_other_nodes(
+    document_path: Path, si_unit: str, working_unit: str, si_value: float
+) -> None:
+    document_path.write_text(
+        f"format: synthetic\nformat_version: '1.0'\nvalues:\n"
+        f"  left: {si_value}\n  stderr: {si_value / 10}\n"
+        "  unchanged: 4.000 # unchanged\next:\n  left: 9e6 # extension\n",
+        encoding="utf-8",
+    )
+    unit = UnitSpec(si_unit, working_unit)
+    store = DocumentStore(
+        document_path,
+        SyntheticDocument,
+        format="synthetic",
+        units={("values", "left"): unit, ("values", "stderr"): unit},
+    )
+    assert store.snapshot().values["left"] == pytest.approx(1.0)
+    assert store.snapshot().values["stderr"] == pytest.approx(0.1)
+    with store.edit() as draft:
+        draft.values["left"] = 2.0
+
+    assert store.snapshot().values["left"] == pytest.approx(2.0)
+    on_disk = make_store(document_path).snapshot()
+    assert on_disk.values["left"] == pytest.approx(2 * si_value)
+    assert on_disk.values["stderr"] == pytest.approx(si_value / 10)
+    text = document_path.read_text(encoding="utf-8")
+    assert "  unchanged: 4.000 # unchanged" in text
+    assert "  left: 9e6 # extension" in text
