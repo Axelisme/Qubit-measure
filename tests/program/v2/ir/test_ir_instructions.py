@@ -65,24 +65,17 @@ from zcu_tools.program.v2.ir.operands import (
 @pytest.mark.parametrize(
     "inst, field, value",
     [
-        pytest.param(TimeInst(c_op="inc_ref"), "c_op", "inc_ref", id="time"),
-        pytest.param(
+        (TimeInst(c_op="inc_ref"), "c_op", "inc_ref"),
+        (
             TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Register("r2"))),
             "op",
             AluExpr(Register("r1"), AluOp.ADD, Register("r2")),
-            id="test",
         ),
-        pytest.param(
-            JumpInst(label=LabelRef(Label("loop"))), "label", Label("exit"), id="jump"
-        ),
-        pytest.param(
-            RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM),
-            "dst",
-            "s2",
-            id="regwr",
-        ),
-        pytest.param(PortWriteInst(dst=ImmValue(0)), "dst", "1", id="wport_wr"),
+        (JumpInst(label=LabelRef(Label("loop"))), "label", Label("exit")),
+        (RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM), "dst", "s2"),
+        (PortWriteInst(dst=ImmValue(0)), "dst", "1"),
     ],
+    ids=["time", "test", "jump", "regwr", "wport_wr"],
 )
 def test_instruction_fields_are_immutable(inst: BaseInst, field: str, value: object):
     with pytest.raises(FrozenInstanceError, match=f"cannot assign to field '{field}'"):
