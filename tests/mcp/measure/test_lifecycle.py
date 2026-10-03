@@ -336,11 +336,14 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
         gui_a.close_on = "tab.edit_cfg"
         with pytest.raises((ConnectionError, OSError, RuntimeError)):
             client.call(
-                "tab_edit",
+                "rpc_call",
                 {
-                    "tab": "t",
-                    "expected": {"cfg_id": "cfg-t", "revision": "0"},
-                    "edits": [],
+                    "method": "tab.edit_cfg",
+                    "params": {
+                        "tab_id": "t",
+                        "expected": {"cfg_id": "cfg-t", "revision": "0"},
+                        "edits": [],
+                    },
                 },
             )
         gui_a.stop()

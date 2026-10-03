@@ -129,7 +129,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Keys are data, analysis:<name> and post:<name>; all selects unsaved artifacts. "
             "Explicit paths/comment update the shared drafts. Returns operation_id "
             "and reserved destinations, not proof of completion. Read artifacts "
-            "after terminal failure for partial successes.",
+            "after terminal failure for partial successes. Via rpc_call the operation_id "
+            "becomes a handle: use wait(op=handle), then tab.snapshot for actual paths. "
+            "Explicitly read tab.snapshot before this guarded mutation.",
             (
                 required_string("tab_id"),
                 ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
@@ -144,8 +146,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            exposure="tool",
-            tool_names=("tab_save",),
             guard_deps=(
                 "tab:{tab_id}",
                 "tab:{tab_id}:result",

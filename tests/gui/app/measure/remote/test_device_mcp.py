@@ -1,13 +1,12 @@
-"""Device tools through MCP, the GUI socket and GUI-owned device state."""
+"""Device RPCs through MCP, the GUI socket and GUI-owned device state."""
 
-import re
 import threading
 from pathlib import Path
 
 import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from ._helpers import Fixture, call, mcp_client, open_client
+from ._helpers import Fixture, mcp_client
 
 pytestmark = pytest.mark.uses_wall_clock
 
@@ -19,141 +18,237 @@ def device_client(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Status is outside this device seam; Fixture has no real SoC.
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
-    sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        yield fx, invoke, sock
+        yield invoke
     finally:
         bridge.disconnect()
-        sock.close()
         # Fixture teardown must drain the Controller-owned runner before GC.
         assert vars(fx.ctrl)["_background_svc"].quiesce()
         fx.stop()
 
 
 def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) -> None:
-    _, invoke, sock = device_client
-    assert invoke("devices", {}) == []
+    invoke = device_client
+    assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
+    started = invoke(
+        "rpc_call",
+        {
+            "method": "device.connect",
+            "params": {
+                "name": "bias",
+                "type_name": "FakeDevice",
+                "address": "none",
+            },
+        },
+    )
+    assert (
+        invoke("wait", {"op": started["handle"], "timeout": 3})["status"] == "finished"
+    )
     try:
         connected = invoke(
-            "device_connect",
-            {"name": "bias", "type": "FakeDevice", "address": "none"},
-        )
+            "rpc_call",
+            {
+                "method": "device.snapshot",
+                "params": {"name": "bias"},
+            },
+        )["snapshot"]
         assert connected["name"] == "bias"
-        assert connected["type"] == "FakeDevice"
-        assert connected["connected"] is True
+        assert connected["type_name"] == "FakeDevice"
+        assert connected["status"] == "connected"
         assert connected["address"] == "none"
-        assert (
-            call(sock, "device.snapshot", {"name": "bias"})["result"]["snapshot"][
-                "status"
-            ]
-            == "connected"
-        )
         fields = {field["name"]: field for field in connected["fields"]}
         assert fields["value"]["current"] == 0.0
         assert fields["address"]["settable"] is False
         assert fields["output"]["choices"] == ["on", "off"]
-        assert invoke("devices", {}) == [
-            {"name": "bias", "type": "FakeDevice", "connected": True}
-        ]
-        with pytest.raises((ValueError, GuiRpcError), match="address"):
-            invoke("device_set", {"name": "bias", "values": {"address": "evil"}})
-        with pytest.raises((ValueError, GuiRpcError), match="output"):
-            invoke("device_set", {"name": "bias", "values": {"output": "unknown"}})
-        assert invoke("devices", {"name": "bias"})["fields"] == connected["fields"]
+        for updates, field in [
+            ({"address": "evil"}, "address"),
+            ({"output": "unknown"}, "output"),
+        ]:
+            with pytest.raises(GuiRpcError, match=field):
+                invoke(
+                    "rpc_call",
+                    {
+                        "method": "device.setup",
+                        "params": {
+                            "name": "bias",
+                            "updates": updates,
+                        },
+                    },
+                )
         applied = invoke(
-            "device_set", {"name": "bias", "values": {"value": 0.02, "output": "on"}}
+            "rpc_call",
+            {
+                "method": "device.setup",
+                "params": {
+                    "name": "bias",
+                    "updates": {"value": 0.02, "output": "on"},
+                },
+            },
         )
-        assert {field["name"]: field["current"] for field in applied["fields"]}[
-            "value"
-        ] == pytest.approx(0.02)
         assert (
-            call(sock, "device.snapshot", {"name": "bias"})["result"]["snapshot"][
-                "info"
-            ]["output"]
-            == "on"
+            invoke("wait", {"op": applied["handle"], "timeout": 3})["status"]
+            == "finished"
         )
-        assert invoke("device_disconnect", {"name": "bias"}) == {
-            "name": "bias",
-            "connected": False,
-            "forgotten": False,
-        }
-        assert invoke("devices", {}) == [
-            {"name": "bias", "type": "FakeDevice", "connected": False}
-        ]
-        assert invoke("devices", {"name": "bias"})["fields"] == []
-        reconnected = invoke("device_connect", {"name": "bias"})
-        assert reconnected["connected"] is True
-        assert invoke("device_disconnect", {"name": "bias", "forget": True}) == {
-            "name": "bias",
-            "connected": False,
-            "forgotten": True,
-        }
-        assert invoke("devices", {}) == []
+        snapshot = invoke(
+            "rpc_call",
+            {
+                "method": "device.snapshot",
+                "params": {"name": "bias"},
+            },
+        )["snapshot"]
+        assert snapshot["info"]["value"] == pytest.approx(0.02)
+        assert snapshot["info"]["output"] == "on"
+        disconnected = invoke(
+            "rpc_call",
+            {
+                "method": "device.disconnect",
+                "params": {"name": "bias"},
+            },
+        )
+        assert (
+            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            == "finished"
+        )
+        remembered = invoke(
+            "rpc_call",
+            {
+                "method": "device.snapshot",
+                "params": {"name": "bias"},
+            },
+        )["snapshot"]
+        assert remembered["status"] == "memory_only"
+        assert remembered["fields"] == []
+        reconnected = invoke(
+            "rpc_call",
+            {
+                "method": "device.reconnect",
+                "params": {"name": "bias"},
+            },
+        )
+        assert (
+            invoke("wait", {"op": reconnected["handle"], "timeout": 3})["status"]
+            == "finished"
+        )
     finally:
-        for device in invoke("devices", {}):
-            if device["connected"]:
-                invoke("device_disconnect", {"name": device["name"], "forget": True})
-            else:
-                call(sock, "device.forget", {"name": device["name"]})
+        disconnected = invoke(
+            "rpc_call",
+            {
+                "method": "device.disconnect",
+                "params": {"name": "bias", "remember": False},
+            },
+        )
+        assert (
+            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            == "finished"
+        )
+    assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
 
 
 def test_failed_connect_never_reports_success_or_registers_device(
     device_client,
 ) -> None:
-    _, invoke, _ = device_client
-    with pytest.raises(GuiRpcError, match="failed") as raised:
-        invoke(
-            "device_connect",
-            {"name": "broken", "type": "UnknownDriver", "address": "none"},
-        )
-    assert raised.value.reason == "operation_failed"
-    assert invoke("devices", {}) == []
+    invoke = device_client
+    started = invoke(
+        "rpc_call",
+        {
+            "method": "device.connect",
+            "params": {
+                "name": "broken",
+                "type_name": "UnknownDriver",
+                "address": "none",
+            },
+        },
+    )
+    outcome = invoke("wait", {"op": started["handle"], "timeout": 3})
+    assert outcome["status"] == "failed"
+    assert outcome["error"]
+    assert invoke("rpc_call", {"method": "device.list"}) == {"devices": []}
 
 
 def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> None:
-    _, invoke, sock = device_client
-    invoke("device_connect", {"name": "ramp", "type": "FakeDevice", "address": "none"})
+    invoke = device_client
+    connected = invoke(
+        "rpc_call",
+        {
+            "method": "device.connect",
+            "params": {
+                "name": "ramp",
+                "type_name": "FakeDevice",
+                "address": "none",
+            },
+        },
+    )
+    assert (
+        invoke("wait", {"op": connected["handle"], "timeout": 3})["status"]
+        == "finished"
+    )
     op = None
     try:
-        before = invoke("devices", {"name": "ramp"})
+        before = invoke(
+            "rpc_call",
+            {
+                "method": "device.snapshot",
+                "params": {"name": "ramp"},
+            },
+        )["snapshot"]
         running = invoke(
-            "device_set",
-            {"name": "ramp", "values": {"value": 0.25, "rampstep": 0.00001}},
+            "rpc_call",
+            {
+                "method": "device.setup",
+                "params": {
+                    "name": "ramp",
+                    "updates": {"value": 0.25, "rampstep": 0.00001},
+                },
+            },
         )
-        assert running["status"] == "running"
-        op = running["op"]
+        op = running["handle"]
         assert isinstance(op, int) and op > 0
         assert invoke("wait", {"op": op, "timeout": 0})["status"] == "running"
-        cached = call(sock, "device.snapshot", {"name": "ramp"})["result"]["snapshot"]
+        cached = invoke(
+            "rpc_call",
+            {
+                "method": "device.snapshot",
+                "params": {"name": "ramp"},
+            },
+        )["snapshot"]
         assert cached["status"] == "setting_up"
         assert cached["info"] is not None
-        assert invoke("devices", {}) == [
-            {"name": "ramp", "type": "FakeDevice", "connected": True}
-        ]
-        detail = invoke("devices", {"name": "ramp"})
-        assert detail["connected"] is True
-        assert detail["fields"] == before["fields"]
         assert cached["fields"] == before["fields"]
         cancelled = invoke("cancel", {"op": op})
         assert cancelled["status"] in ("cancelled", "cancelling")
         assert invoke("wait", {"op": op, "timeout": 3})["status"] == "cancelled"
         assert (
-            call(sock, "device.snapshot", {"name": "ramp"})["result"]["snapshot"][
-                "status"
-            ]
+            invoke(
+                "rpc_call",
+                {
+                    "method": "device.snapshot",
+                    "params": {"name": "ramp"},
+                },
+            )["snapshot"]["status"]
             == "connected"
         )
     finally:
         if op is not None:
             invoke("cancel", {"op": op})
-        invoke("device_disconnect", {"name": "ramp", "forget": True})
+        disconnected = invoke(
+            "rpc_call",
+            {
+                "method": "device.disconnect",
+                "params": {"name": "ramp", "remember": False},
+            },
+        )
+        assert (
+            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            == "finished"
+        )
 
 
-def test_connect_timeout_returns_recoverable_operation(
-    device_client, monkeypatch: pytest.MonkeyPatch
+def test_connect_wait_timeout_does_not_cancel_operation(
+    device_client,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, invoke, sock = device_client
+    invoke = device_client
     entered = threading.Event()
     release = threading.Event()
 
@@ -165,34 +260,53 @@ def test_connect_timeout_returns_recoverable_operation(
     monkeypatch.setattr(
         "zcu_tools.device.fake.FakeDevice._open_session", held_fake_open
     )
-    # Shorten only the test's deadline; the public tool still uses the same wait path.
-    monkeypatch.setattr(
-        "zcu_tools.mcp.measure.tools_device._TERMINAL_WAIT_SECONDS", 0.05
-    )
     try:
-        with pytest.raises(GuiRpcError) as raised:
-            invoke(
-                "device_connect",
-                {"name": "slow", "type": "FakeDevice", "address": "none"},
-            )
+        started = invoke(
+            "rpc_call",
+            {
+                "method": "device.connect",
+                "params": {
+                    "name": "slow",
+                    "type_name": "FakeDevice",
+                    "address": "none",
+                },
+            },
+        )
+        op = started["handle"]
+        assert isinstance(op, int) and op > 0
+        assert invoke("wait", {"op": op, "timeout": 0.05})["status"] == "running"
         assert entered.is_set()
-        assert raised.value.reason == "device_pending"
-        assert raised.value.code == "timeout"
-        match = re.search(r"wait\(op=(\d+)\)", str(raised.value))
-        assert match is not None
-        op = int(match.group(1))
-        assert op > 0
         assert (
-            call(sock, "device.snapshot", {"name": "slow"})["result"]["snapshot"][
-                "status"
-            ]
+            invoke(
+                "rpc_call",
+                {
+                    "method": "device.snapshot",
+                    "params": {"name": "slow"},
+                },
+            )["snapshot"]["status"]
             == "connecting"
         )
     finally:
         release.set()
     assert invoke("wait", {"op": op, "timeout": 3})["status"] == "finished"
-    assert invoke("devices", {"name": "slow"})["connected"] is True
     assert (
-        invoke("device_disconnect", {"name": "slow", "forget": True})["forgotten"]
-        is True
+        invoke(
+            "rpc_call",
+            {
+                "method": "device.snapshot",
+                "params": {"name": "slow"},
+            },
+        )["snapshot"]["status"]
+        == "connected"
+    )
+    disconnected = invoke(
+        "rpc_call",
+        {
+            "method": "device.disconnect",
+            "params": {"name": "slow", "remember": False},
+        },
+    )
+    assert (
+        invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+        == "finished"
     )

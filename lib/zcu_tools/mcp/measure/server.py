@@ -58,48 +58,75 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v104: Recipe interaction delivery and post-Run result provenance checks.
 # v105: Onetone recipes with GUI-owned ranges and source-bound Run preview.
 # v106: Two-tone spectrum and Rabi recipes with explicit frequency source precedence.
-MCP_VERSION = 106
+# v107: recipe-first fixed tools, shared analysis/control and complete public RPC.
+MCP_VERSION = 107
 
 _SERVER_INSTRUCTIONS = """\
-Attach to the live qubit-measure GUI with connect (no instrument is connected by
-this action). An existing GUI can be attached, or launch='if_missing'/'new' can
-start one. Pass token to connect if the GUI requires its control token; keep it
-secret. Inspect connect.status and refresh the GUI state before acting; the
-user may also be editing it. When the GUI restarts, the next connection reloads
-the live catalog. Incompatible wire versions fail before an action is forwarded.
+Attach to the live qubit-measure GUI with connect. This does not connect hardware.
+Use launch='if_missing'/'new' only when authorized to start a GUI. Pass token if
+required, keep it secret, and inspect connect.status before acting. The user may
+also edit the GUI. Reconnection reloads its live catalog; incompatible wire
+versions fail before forwarding an action.
 
-Use rpc_list(domain?) to find low-frequency methods, rpc_describe(method) for
-the GUI's live parameter schema and full description, and rpc_call(method,
-params) for any listed method, including those with specialized tool helpers.
-Tool names are guidance, not a separate mode or permission. GUI handlers validate
-arguments and return stable error reasons. Mutations are never automatically retried after disconnect,
-timeout, stale_version or busy; read the current state before choosing to retry.
-For tab/context/SoC guard conflicts, explicitly read tab.snapshot(tab_id),
-context.snapshot, and soc.info(include_cfg=true), respectively. Summaries,
-partial getters, bare versions and status do not re-snapshot those resources.
-A new tab created with tab.new carries an owner-thread existence receipt.
-Use tab_interact without payload to read the active plugin's committed state and
-commands; send one payload={command,args} to act. This method alone has no seen
-guard: GUI and agent commits use owner-loop order, and the later commit wins.
-Reads preserve focus; commands follow the Analysis pane. done returns the original
-analysis operation receipt, then joins its execution for result reads and image
-saving. preview_active describes local preview, not committed state. Figure paths
-belong to this MCP session; saved_images lists confirmed persistent image paths.
-Use status for the GUI session, live operations and this session's executions.
+For routine measurement, prefer the recipe matching the experimental goal.
+Read its tool schema and the adapter guide through rpc_call(adapter.guide).
+For analysis of existing data, use tab_analyze and tab_interact rather than
+starting another measurement. If tools are deferred by the client, discover
+the recipe or shared analysis/control tool first. Routine work and diagnosis
+are guidance, not modes or permissions. For detailed setup, cfg, save,
+writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
+rpc_call(method, params). Every listed public method remains callable even
+when a recipe or shared tool covers it. Raw RPC does not aggregate tool
+results, decode PNG replies, or run the canonical analysis-image save pipeline.
+
+A recipe call waits up to 300 seconds before returning a still-running execution;
+missing parameters, failures and interactive handoffs return earlier. Configure
+the client deadline above 300 seconds with room for transport and reply overhead.
+The stdio server is synchronous: another request on that connection is not
+guaranteed service during the first wait. A client timeout is not cancellation.
+Never automatically rerun a recipe or mutation after timeout, disconnect, busy
+or stale_version. Inspect current state and confirmed files before deciding.
+
+Use status for GUI operations and this MCP session's executions.
 status(execution) reads a local snapshot without reconnecting. wait(op) observes
-only the GUI operation; wait(execution) also waits for result reads, image saving
-and preview delivery. Both report failed outcomes as data, not query errors.
-Wait timeouts stop waiting, not the operation or its background continuation.
-For a registered analysis op or execution, cancel latches continuation intent even
-when the GUI operation is not cancellable. It starts no further result read or
-save, but retains the true outcome of any admitted save. gui_cancel describes the
-GUI request separately; terminal executions return not_needed without rewriting
-their outcome. Only unregistered cancel(op) retains the direct GUI hook behavior,
-including operation_failed for an already failed operation.
-The server disconnects and joins its workers before removing temporary PNGs on
-exit. It does not close the GUI or promise to stop hardware. There are no
-subscribed MCP events: read snapshots or wait on operation handles instead.
-Follow the run-measure-gui skill for hardware safety and measurement workflow.
+only the GUI operation; wait(execution) includes downstream reads, saves and
+preview delivery. Failed outcomes are data. A wait timeout stops waiting,
+not the operation or its continuation. Operation handles belong to one GUI
+connection generation; execution IDs belong to this MCP server session and
+are not durable recovery tokens. After GUI reconnect, discover current handles
+through status and refresh observations; do not reuse an old op.
+
+For a registered recipe, finish_early stops acquisition and continues with
+usable partial results, raw saving and analysis. cancel takes precedence and
+starts no further analysis or save. For registered analysis it also stops
+further result reads. Already admitted non-cancellable saves settle with their
+true outcomes. gui_cancel reports the separate GUI cancellation request.
+Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
+GUI hook and may report operation_failed for an already failed operation.
+
+Read tab.snapshot(tab_id), context.snapshot and soc.info(include_cfg=true)
+explicitly for their guarded resources, and device.snapshot for devices.
+Summaries, partial getters, status and bare versions do not replace these reads.
+Cfg editing and Run require the observed cfg_ref from tab.get_cfg. A new tab
+receipt certifies existence only. accept(tab) writes every current Primary and
+existing Post candidate, including unchecked ones, without refreshing guards.
+It stops on the first error and reports confirmed progress without rollback.
+Inspect proposals and the current destination before accepting.
+
+tab_interact without payload reads committed state and available commands.
+Send payload={command,args} for one action. This method has no seen guard;
+later owner-loop commits win. Reads preserve focus; commands follow Analysis.
+done joins the original analysis execution for result reads and image saving.
+preview_active is a local preview, not committed state. Preview PNG paths belong
+to this MCP session; saved_images names confirmed persistent outputs.
+Recipes do not automatically close tabs. Use tab_close explicitly; busy cannot
+be bypassed with discard_unsaved. app.shutdown via RPC requests graceful exit;
+its reply is not proof that the responding process has exited.
+
+The server disconnects and joins its workers before removing temporary PNGs
+on exit. It does not close the GUI or promise to stop hardware. There are no
+subscribed MCP events: read snapshots or wait instead. Follow run-measure-gui
+for hardware safety, task policy and measurement workflow.
 """
 
 _CONFIG = MCPBridgeConfig(

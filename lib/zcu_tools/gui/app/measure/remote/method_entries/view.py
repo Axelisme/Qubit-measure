@@ -39,14 +39,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Gracefully close an idle GUI. Any active operation returns busy. "
             "All unsaved artifacts require discard_unsaved=true. Persist session "
-            "and clean up through the normal shutdown path after this reply. No OS kill.",
+            "and clean up through the normal shutdown path after this reply. "
+            "Returns shutting_down and pid, not confirmation that the process has exited. "
+            "rpc_call does not wait for process exit or send an OS kill.",
             (
                 ParamSpec(
                     "discard_unsaved", JsonType.BOOLEAN, required=False, default=False
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(exposure="tool", tool_names=("shutdown",)),
     ),
     method_entry(
         "dialog.screenshot",

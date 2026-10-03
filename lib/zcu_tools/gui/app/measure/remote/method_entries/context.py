@@ -30,8 +30,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            exposure="tool",
-            tool_names=("ml_edit",),
             guard_deps=("context",),
             refresh_after_write=True,
         ),

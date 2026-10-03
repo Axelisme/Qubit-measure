@@ -104,30 +104,6 @@ def test_status_received_discovery_reply_survives_eof(
     ("tool", "arguments", "replies", "cut_after"),
     [
         pytest.param(
-            "experiments",
-            {},
-            {"adapter.list": {"adapters": ["lookback"]}},
-            "adapter.list",
-            id="experiment-guides",
-        ),
-        pytest.param(
-            "tab_open",
-            {"experiment": "lookback"},
-            {
-                "tab.list_all": {"active_tab_id": "previous"},
-                "tab.new": {"tab_id": "created"},
-            },
-            "tab.new",
-            id="tab-activation-and-cleanup",
-        ),
-        pytest.param(
-            "tab_get",
-            {"tab": "t", "include": ["cfg", "analyze_params"]},
-            {"tab.get_cfg": {"cfg": {}}},
-            "tab.get_cfg",
-            id="tab-sections",
-        ),
-        pytest.param(
             "tab_analyze",
             {"tab": "t"},
             {
@@ -156,13 +132,6 @@ def test_status_received_discovery_reply_survives_eof(
             id="analysis-interaction",
         ),
         pytest.param(
-            "tab_save",
-            {"tab": "t"},
-            {"tab.save_artifacts": {"operation_id": 7, "destinations": {}}},
-            "tab.save_artifacts",
-            id="save-wait",
-        ),
-        pytest.param(
             "accept",
             {"tab": "t"},
             {"tab.get_analyze_result": {"summary": {"value": 1}}},
@@ -180,132 +149,6 @@ def test_status_received_discovery_reply_survives_eof(
             },
             "tab.writeback_write",
             id="accept-confirmed-primary",
-        ),
-        pytest.param(
-            "devices",
-            {"name": "bias"},
-            {
-                "device.snapshot": {
-                    "snapshot": {
-                        "name": "bias",
-                        "type_name": "current",
-                        "address": "local",
-                        "status": "connected",
-                        "error": None,
-                    }
-                }
-            },
-            "device.snapshot",
-            id="device-live-fields",
-        ),
-        pytest.param(
-            "device_connect",
-            {"name": "bias", "type": "current", "address": "local"},
-            {"device.connect": {"operation_id": 7}},
-            "device.connect",
-            id="device-connect-wait",
-        ),
-        pytest.param(
-            "device_connect",
-            {"name": "bias"},
-            {"device.reconnect": {"operation_id": 7}},
-            "device.reconnect",
-            id="device-reconnect-wait",
-        ),
-        pytest.param(
-            "device_disconnect",
-            {"name": "bias"},
-            {"device.disconnect": {"operation_id": 7}},
-            "device.disconnect",
-            id="device-disconnect-wait",
-        ),
-        pytest.param(
-            "device_set",
-            {"name": "bias", "values": {"current": 2}},
-            {"device.setup_spec": {"fields": [{"name": "current", "settable": True}]}},
-            "device.setup_spec",
-            id="device-setup",
-        ),
-        pytest.param(
-            "ml_create",
-            {"role_id": "drive"},
-            {
-                "context.ml_list_roles": {
-                    "roles": [
-                        {
-                            "role_id": "drive",
-                            "label": "Drive",
-                            "item_kind": "module",
-                            "default_name": "drive",
-                        }
-                    ]
-                }
-            },
-            "context.ml_list_roles",
-            id="library-create",
-        ),
-        pytest.param(
-            "ml_edit",
-            {"name": "drive", "edits": []},
-            {"context.ml_get": {"modules": [{"name": "drive"}], "waveforms": []}},
-            "context.ml_get",
-            id="library-edit",
-        ),
-        pytest.param(
-            "ml_rename",
-            {"name": "drive", "new_name": "drive_new"},
-            {"context.ml_get": {"modules": [{"name": "drive"}], "waveforms": []}},
-            "context.ml_get",
-            id="library-rename",
-        ),
-        pytest.param(
-            "ml_delete",
-            {"name": "drive"},
-            {"context.ml_get": {"modules": [{"name": "drive"}], "waveforms": []}},
-            "context.ml_get",
-            id="library-delete",
-        ),
-        pytest.param(
-            "contexts",
-            {},
-            {"context.labels": {"labels": ["original"]}},
-            "context.labels",
-            id="context-selection",
-        ),
-        pytest.param(
-            "md_get",
-            {"keys": ["alpha", "beta"]},
-            {"context.md_get_attr": {"value": 1}},
-            "context.md_get_attr",
-            id="metadict-reads",
-        ),
-        pytest.param(
-            "md_set",
-            {"values": {"alpha": 2, "beta": 3}},
-            {"context.md_set_attr": {"before": 1, "after": 2}},
-            "context.md_set_attr",
-            id="metadict-confirmed-prefix",
-        ),
-        pytest.param(
-            "soc_info",
-            {},
-            {"state.has_soc": {"value": True}},
-            "state.has_soc",
-            id="soc-details",
-        ),
-        pytest.param(
-            "soc_connect",
-            {"address": "localhost", "port": 8888},
-            {"soc.connect": {}},
-            "soc.connect",
-            id="soc-connect-details",
-        ),
-        pytest.param(
-            "predict",
-            {"value": 0.2, "transitions": [[0, 1], [1, 2]]},
-            {"predictor.predict": {"freq_mhz": 5000}},
-            "predictor.predict",
-            id="multiple-transitions",
         ),
     ],
 )
@@ -388,21 +231,8 @@ def test_assembled_multistep_tools_do_not_cross_connections(
         else:
             assert result["completed"] == []
             assert result["not_started"] == ["primary"]
-    elif tool == "tab_analyze":
-        _assert_admitted_analysis_connection_loss(client.call(tool, arguments))
     else:
-        with pytest.raises(GuiRpcError) as error:
-            client.call(tool, arguments)
-        assert error.value.reason == (
-            "cleanup_failed" if tool == "tab_open" else "connection_lost"
-        )
-        if tool == "tab_open":
-            assert "tab may remain open" in str(error.value)
-        if tool == "md_set":
-            assert (
-                "failed at 'beta'; confirmed prefix: {'alpha': {'before': 1, 'after': 2}}"
-                in str(error.value)
-            )
+        _assert_admitted_analysis_connection_loss(client.call(tool, arguments))
     client.context.session.close()
     assert changed
     assert second.sent == replacement_at_cut
@@ -646,11 +476,9 @@ def test_catalog_and_operation_snapshots_cannot_modify_session_state(
         ("status", {}),
         ("wait", {"op": 1, "timeout": 0}),
         ("cancel", {"op": 1}),
-        ("tab_live", {"tab": "t"}),
         ("rpc_call", {"method": "adapter.list"}),
         ("rpc_describe", {"method": "adapter.list"}),
         ("rpc_list", {}),
-        ("tab_get", {"tab": "t"}),
     ],
 )
 def test_assembled_tools_keep_an_inherited_binding(
@@ -669,9 +497,8 @@ def test_assembled_tools_keep_an_inherited_binding(
     assert second.sent == sent
 
 
-@pytest.mark.parametrize("tool", ["status", "tab_live"])
 def test_operation_discovery_does_not_expose_an_old_reply_in_a_new_gui(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, second = make_restartable_client(tmp_path, monkeypatch)
     prime_operation_discovery(client)
@@ -689,7 +516,7 @@ def test_operation_discovery_does_not_expose_an_old_reply_in_a_new_gui(
 
     monkeypatch.setattr(client.context.bridge, "send_rpc_raw", reconnect_after_reply)
     with pytest.raises(GuiRpcError) as error:
-        client.call(tool, {"tab": "t"})
+        client.call("status", {})
     assert error.value.reason == "connection_lost"
     assert not any(method == "operation.progress" for method, _ in second.sent)
     assert client.context.session.bind().expose_operation(9) == 1

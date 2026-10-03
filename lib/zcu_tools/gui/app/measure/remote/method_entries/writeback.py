@@ -25,7 +25,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "complete actual destination values. Kinds are md|module|waveform; "
             "cross-kind names may coincide. Empty write is a no-op. Explicit null "
             "value sets an md value to null; omission keeps its proposal. "
-            "Context apply retains existing failure semantics, not cross-file atomicity.",
+            "Context apply retains existing failure semantics, not cross-file atomicity. "
+            "Read tab.snapshot and context.snapshot explicitly before writing; "
+            "writeback_preview shows proposals but does not refresh those guards.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: analysis|post_analysis"),
@@ -33,8 +35,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            exposure="tool",
-            tool_names=("writeback",),
             guard_deps=(
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:{writeback_resource}",

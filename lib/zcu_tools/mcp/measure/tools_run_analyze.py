@@ -1,4 +1,4 @@
-"""Fixed experiment run and analysis tools over GUI-owned operations."""
+"""Fixed analysis tools over GUI-owned operations."""
 
 from __future__ import annotations
 
@@ -8,17 +8,6 @@ from typing import Any
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.interaction import handoff_interaction, interact
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-
-
-def tab_run(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, int]:
-    """Start exactly the supplied cfg ref once; completion belongs to wait()."""
-    tab = arguments.get("tab")
-    if not isinstance(tab, str) or not tab:
-        raise ValueError("tab must be a non-empty string")
-    reply = ctx.send_gui_rpc(
-        "tab.run_start", {"tab_id": tab, "expected": arguments["expected"]}
-    )
-    return {"op": reply["handle"]}
 
 
 def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
@@ -85,18 +74,6 @@ def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]
                     "params": {"type": "object"},
                 },
                 "required": ["tab"],
-            },
-        },
-        "tab_run": {
-            "handler": partial(tab_run, ctx),
-            "description": "Start a run with the explicitly observed cfg ref {cfg_id,revision} and return a waitable operation. revision is a canonical decimal string. Stale or non-Valid cfg is rejected; no hidden reads, refresh or retry.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "tab": {"type": "string"},
-                    "expected": {"type": "object"},
-                },
-                "required": ["tab", "expected"],
             },
         },
     }
