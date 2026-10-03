@@ -356,6 +356,10 @@ class RecipeContext:
                 "Run did not publish usable data", reason="run_result_unavailable"
             )
         self._save_raw(tab, run_op)
+        self._analyze_run(tab, run_op)
+
+    def _analyze_run(self, tab: str, run_op: int) -> None:
+        """Join analysis delivery and writeback for the already-saved Run."""
         self._publish(phase="analysis")
         started = self.tools.gui.send_gui_rpc(
             "tab.analyze",
