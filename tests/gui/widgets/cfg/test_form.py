@@ -49,7 +49,7 @@ from tests.gui.widgets.cfg._form_support import (
     scalar_field,
     section_schema,
 )
-from tests.gui.widgets.cfg._tree_support import tree_widget
+from tests.gui.widgets.cfg._tree_support import tree_item, tree_widget
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1678,33 +1678,6 @@ def test_custom_reference_renders_header_and_editable_leaf(
     w.detach()
 
 
-def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
-    # Sole tree: no SectionWidget / QFormLayout row-wrap involved; tree uses QTreeWidget columns.
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-
-    custom_spec = CfgSectionSpec(
-        label="Long Custom Module Name",
-        fields={"gain": ScalarSpec(label="Gain", type=float)},
-    )
-    schema = section_schema(
-        {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[custom_spec])},
-        {
-            "pulse": ReferenceValue(
-                chosen_key="<Custom:Long Custom Module Name>",
-                value=CfgSectionValue(fields={"gain": DirectValue(0.25)}),
-            )
-        },
-    )
-    w = CfgFormWidget()
-    w.resize(520, 480)
-    attach_draft(w, schema, ctrl)
-
-    tree = w._root_widget
-    assert isinstance(tree, TreeCfgWidget)
-    assert tree._tree.columnCount() == 2
-
-
 def test_populate_module_ref_field_round_trip(qapp, ctrl):
     from zcu_tools.gui.cfg import ReferenceSpec, ReferenceValue
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
@@ -1770,98 +1743,76 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     assert isinstance(readout_spec, ReferenceSpec)
 
 
-def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
-    from typing import Any, cast
-
-    from qtpy.QtWidgets import QLineEdit
+def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox, QLineEdit
+    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.resources.context import ModuleLibrary
 
     ml = ModuleLibrary()
-    ml.modules["my_pulse"] = cast(Any, {"type": "readout/direct", "ro_freq": 7000.0})
+    ml.register_module(my_pulse={"type": "readout/direct", "ro_freq": 7000.0})
     ctrl.get_current_ml.return_value = ml
-
-    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-
-    lib_spec, lib_val = module_cfg_to_value(
+    lib_spec, lib_value = module_cfg_to_value(
         {"type": "readout/direct", "ro_freq": 7000.0}
     )
-    schema = CfgSchema(
-        spec=CfgSectionSpec(
-            fields={
-                "mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Module")
-            }
-        ),
-        value=CfgSectionValue(
-            fields={
-                "mod": ReferenceValue(
-                    chosen_key="my_pulse",
-                    value=lib_val,
-                )
-            }
-        ),
+    schema = section_schema(
+        {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Module")},
+        {"mod": ReferenceValue(chosen_key="my_pulse", value=lib_value)},
     )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        form.show()
+        reference = form.findChild(ReferenceWidget)
+        assert reference is not None
+        combo = reference.findChild(QComboBox)
+        assert combo is not None
+        assert combo.currentText() == "Lib: my_pulse"
+        initial = form.read_values().fields["mod"]
+        assert isinstance(initial, ReferenceValue)
+        assert initial.is_overridden is False
 
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    w.show()
+        tree_item(form, "mod").setExpanded(True)
+        qapp.processEvents()
+        row = tree_item(form, "mod.ro_freq")
+        editor = tree_widget(form).itemWidget(row, 1)
+        assert editor is not None
+        entry = editor.findChild(QLineEdit)
+        assert entry is not None and entry.isVisible()
+        assert entry.text() == "7000.0"
+        entry.setText("8000.0")
+        assert combo.currentText() == "Lib: my_pulse (modified)"
 
-    ref_widget = w.findChild(ReferenceWidget)
-    assert ref_widget is not None
-    # Sole tree: ReferenceWidget is header inside tree, no form collapsible expand/sub_container
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+        ml.update_module("my_pulse", {"ro_freq": 7500.0})
+        draft.refresh_references("module")
+        draft.refresh_expressions()
+        modified = form.read_values().fields["mod"]
+        assert isinstance(modified, ReferenceValue)
+        assert modified.chosen_key == "my_pulse"
+        assert modified.is_overridden is True
+        frequency = modified.value.fields["ro_freq"]
+        assert isinstance(frequency, DirectValue)
+        assert frequency.value == 8000.0
+        assert combo.currentText() == "Lib: my_pulse (modified)"
 
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # 1. Initially unmodified
-    assert ref_widget._combo.currentText() == "Lib: my_pulse"
-    assert ref_widget._field.is_modified() is False
-
-    # Edit the displayed library frequency through its text input.
-    entry = next(w for w in w.findChildren(QLineEdit) if w.text() == "7000.0")
-    entry.setText("8000.0")
-
-    # Verify is_modified is True and combobox text has (modified) suffix
-    assert ref_widget._field.is_modified() is True
-    assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
-
-    # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
-    from zcu_tools.gui.session.events import MdChangedPayload
-    from zcu_tools.resources.context import MetaDict
-
-    md = MetaDict()
-    ctrl.get_bus.return_value.emit(MdChangedPayload(md=md))
-
-    # Should stay as user modified (8000.0), not library default (7000.0)
-    mod_val = w.read_values().fields["mod"]
-    assert isinstance(mod_val, ReferenceValue)
-    freq_val = mod_val.value.fields["ro_freq"]
-    assert isinstance(freq_val, DirectValue)
-    assert freq_val.value == 8000.0
-
-    # Verify both modified and clean items are present in combo box
-    items_list = [
-        ref_widget._combo.itemText(i) for i in range(ref_widget._combo.count())
-    ]
-    assert "Lib: my_pulse (modified)" in items_list
-    assert "Revert to Lib: my_pulse" in items_list
-
-    # 4. Select the clean item to revert modifications
-    clean_idx = -1
-    for i in range(ref_widget._combo.count()):
-        if ref_widget._combo.itemText(i) == "Revert to Lib: my_pulse":
-            clean_idx = i
-            break
-    assert clean_idx >= 0
-    ref_widget._combo.setCurrentIndex(clean_idx)
-
-    assert ref_widget._field.is_modified() is False
-    mod_val2 = w.read_values().fields["mod"]
-    assert isinstance(mod_val2, ReferenceValue)
-    freq_val2 = mod_val2.value.fields["ro_freq"]
-    assert isinstance(freq_val2, DirectValue)
-    assert freq_val2.value == 7000.0
+        revert_index = combo.findText("Revert to Lib: my_pulse")
+        assert revert_index >= 0
+        combo.setCurrentIndex(revert_index)
+        reverted = form.read_values().fields["mod"]
+        assert isinstance(reverted, ReferenceValue)
+        assert reverted.chosen_key == "my_pulse"
+        assert reverted.is_overridden is False
+        frequency = reverted.value.fields["ro_freq"]
+        assert isinstance(frequency, DirectValue)
+        assert frequency.value == 7500.0
+        assert combo.currentText() == "Lib: my_pulse"
+        assert draft.is_valid()
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1897,87 +1848,96 @@ def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
     return CfgSchema(spec=outer_spec, value=outer_val)
 
 
-def test_optional_module_ref_renders_none_option(qapp, ctrl):
+def test_optional_module_ref_can_enable_from_none(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox, QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
-    schema = _make_optional_module_ref_schema(enabled=True)
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(
+        _make_optional_module_ref_schema(enabled=False)
+    )
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        form.show()
+        reference = form.findChild(ReferenceWidget)
+        assert reference is not None
+        combo = reference.findChild(QComboBox)
+        assert combo is not None
+        assert combo.currentText() == "None"
+        assert form.read_values().fields["module"] is None
+        assert draft.is_valid()
 
-    module_widgets = w.findChildren(ReferenceWidget)
-    assert len(module_widgets) >= 1
-    mw = module_widgets[0]
-
-    # None option should be at index 0
-    assert mw._combo.itemData(0) == ReferenceWidget._NONE_KEY
+        custom_index = combo.findText("Pulse")
+        assert custom_index >= 0
+        combo.setCurrentIndex(custom_index)
+        qapp.processEvents()
+        row = tree_item(form, "module.ch")
+        assert not row.isDisabled()
+        editor = tree_widget(form).itemWidget(row, 1)
+        assert editor is not None
+        entry = editor.findChild(QLineEdit)
+        assert entry is not None and entry.isEnabled() and entry.isVisible()
+        entry.setText("3")
+        module = form.read_values().fields["module"]
+        assert isinstance(module, ReferenceValue)
+        assert module.chosen_key == "<Custom:Pulse>"
+        channel = module.value.fields["ch"]
+        assert isinstance(channel, DirectValue)
+        assert channel.value == 3
+        assert draft.is_valid()
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox, QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 
-    schema = _make_optional_module_ref_schema(enabled=True)
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(
+        _make_optional_module_ref_schema(enabled=True)
+    )
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        form.show()
+        qapp.processEvents()
+        reference = form.findChild(ReferenceWidget)
+        assert reference is not None
+        combo = reference.findChild(QComboBox)
+        assert combo is not None
+        row = tree_item(form, "module.ch")
+        editor = tree_widget(form).itemWidget(row, 1)
+        assert editor is not None
+        entry = editor.findChild(QLineEdit)
+        assert entry is not None and entry.isEnabled()
+        assert entry.text() == "0"
+        assert not row.isDisabled()
 
-    module_widgets = w.findChildren(ReferenceWidget)
-    mw = module_widgets[0]
-    field = mw._field
-
-    assert field.is_enabled is True
-
-    # Select the None option
-    none_idx = mw._combo.findData(ReferenceWidget._NONE_KEY)
-    assert none_idx == 0
-    mw._combo.setCurrentIndex(none_idx)
-
-    assert field.is_enabled is False
-    # Sole tree: subtree items are disabled via QTreeWidgetItem, not sub_container
-    root = w._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Find a child item under the optional ref and check disabled
-    # The optional ref's item should have children disabled
-    # Find the optional ref item
-    opt_item = None
-    stack = [root._tree.invisibleRootItem()]
-    while stack:
-        cur = stack.pop()
-        if cur is None:
-            continue
-        for i in range(cur.childCount()):
-            child = cur.child(i)
-            if child is None:
-                continue
-            # The optional ref item's text contains its label (e.g., Module)
-            if (
-                child.text(0)
-                and "Module" in child.text(0)
-                or "waveform" in child.text(0).lower()
-            ):
-                # Check its children are disabled
-                if child.childCount() > 0:
-                    opt_item = child
-                    break
-            stack.append(child)
-        if opt_item:
-            break
-    # If we found the optional item, its children should be disabled
-    if opt_item is not None and opt_item.childCount() > 0:
-        _child0 = opt_item.child(0)
-        assert _child0 is not None and _child0.isDisabled() is True
-    else:
-        # Fallback: at least field is disabled
-        assert field.is_enabled is False
+        none_index = combo.findText("None")
+        assert none_index >= 0
+        combo.setCurrentIndex(none_index)
+        assert combo.currentText() == "None"
+        assert form.read_values().fields["module"] is None
+        assert draft.is_valid()
+        disabled_row = tree_item(form, "module.ch")
+        assert disabled_row.isDisabled()
+        disabled_editor = tree_widget(form).itemWidget(disabled_row, 1)
+        assert disabled_editor is not None
+        disabled_entry = disabled_editor.findChild(QLineEdit)
+        assert disabled_entry is not None and not disabled_entry.isEnabled()
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
-def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
-    """A LINKED ref to an absent library key shows the red missing-ref badge and
-    is invalid (recoverable — re-adding the name re-links it)."""
-    from zcu_tools.gui.cfg import LiteralSpec
+def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
+    from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.resources.context import ModuleLibrary
 
     pulse_spec = CfgSectionSpec(
@@ -1999,15 +1959,19 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
         },
     )
     ctrl.get_current_ml.return_value = ModuleLibrary()
-
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    w.show()
-
-    ref_widget = w.findChild(ReferenceWidget)
-    assert ref_widget is not None
-    field = ref_widget._field
-    assert field.has_missing_library_ref() is True
-    assert field.is_valid() is False
-    assert ref_widget._missing_ref_hint.isVisible() is True
-    assert "missing_pulse" in ref_widget._missing_ref_hint.text()
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        form.show()
+        assert not draft.is_valid()
+        missing = form.read_values().fields["pulse"]
+        assert isinstance(missing, ReferenceValue)
+        assert missing.chosen_key == "missing_pulse"
+        hint = form.findChild(QLabel, "missingRefHint")
+        assert hint is not None and hint.isVisible()
+        assert "missing_pulse" in hint.text()
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
