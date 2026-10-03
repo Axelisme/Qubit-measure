@@ -91,13 +91,18 @@ def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -
         )
     if isinstance(original, list) and isinstance(current, list):
         return len(original) == len(current) and all(
-            _same_value(left, right) for left, right in zip(original, current, strict=True)
+            _same_value(left, right)
+            for left, right in zip(original, current, strict=True)
         )
     if isinstance(original, bool) != isinstance(current, bool):
         return False
-    if isinstance(original, float) and isinstance(current, float):
-        if isnan(original) and isnan(current):
-            return True
+    if (
+        isinstance(original, float)
+        and isinstance(current, float)
+        and isnan(original)
+        and isnan(current)
+    ):
+        return True
     return original == current
 
 
@@ -229,7 +234,9 @@ class DocumentStore[T: BaseModel]:
         )
         # Ignore future fields only in the typed view; retain them in the YAML tree.
         extra = "ignore" if version.minor > self._supported_version.minor else None
-        snapshot = self._model.model_validate(self._working_values(document), extra=extra)
+        snapshot = self._model.model_validate(
+            self._working_values(document), extra=extra
+        )
         if self._validate is not None:
             self._validate(snapshot)
         return snapshot
