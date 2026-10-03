@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -509,7 +509,10 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
     assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
 
-def test_attach_bad_renderer_does_not_observe_failed_draft(qapp, ctrl):
+@pytest.mark.parametrize("failure", ["invalid_widget", "exception"])
+def test_attach_failure_does_not_observe_failed_draft(
+    qapp, ctrl, failure: Literal["invalid_widget", "exception"]
+):
     from qtpy.QtWidgets import QWidget
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
@@ -519,73 +522,25 @@ def test_attach_bad_renderer_does_not_observe_failed_draft(qapp, ctrl):
     )
     failed_draft = MeasureCfgBindings(ctrl).new_draft(schema)
     active_draft = MeasureCfgBindings(ctrl).new_draft(schema)
-    return_invalid_widget = True
+    fail_rendering = True
     default_renderer = default_cfg_renderers().resolve(ScalarField)
 
     def recovering_factory(
         field: CfgField, context: FieldRenderContext
     ) -> FieldWidgetProtocol:
-        if return_invalid_widget:
-            # Exercise runtime protocol rejection at the renderer boundary.
-            return cast(FieldWidgetProtocol, QWidget())
-        return default_renderer(field, context)
-
-    form = CfgFormWidget(
-        renderers=_registry_with_factories({ScalarField: recovering_factory}),
-    )
-    validity: list[bool] = []
-    schemas: list[CfgSchema] = []
-    form.validity_changed.connect(validity.append)
-    form.schema_changed.connect(schemas.append)
-    try:
-        with pytest.raises(TypeError, match="expected FieldWidgetProtocol"):
-            form.attach(failed_draft)
-        with pytest.raises(RuntimeError, match="attach\\(\\) must be called"):
-            form.read_values()
-        assert form.decoration_paths() == ()
-        assert validity == []
-
-        return_invalid_widget = False
-        form.attach(active_draft)
-        assert validity == [True]
-
-        failed_draft.set_target("value", None)
-        qapp.processEvents()
-        assert validity == [True]
-        assert schemas == []
-        assert form.read_values().fields["value"] == DirectValue(1)
-
-        active_draft.set_target("value", None)
-        assert validity == [True, False]
-        qapp.processEvents()
-        assert len(schemas) == 1
-        assert schemas[0].value.fields["value"] == DirectValue(None)
-    finally:
-        form.detach()
-        failed_draft.close()
-        active_draft.close()
-
-
-def test_attach_factory_exception_does_not_observe_failed_draft(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    fail_rendering = True
-    default_renderer = default_cfg_renderers().resolve(ScalarField)
-
-    def recovering_factory(
-        field: CfgField,
-        context: FieldRenderContext,
-    ) -> FieldWidgetProtocol:
         if fail_rendering:
+            if failure == "invalid_widget":
+                # Exercise runtime protocol rejection at the renderer boundary.
+                return cast(FieldWidgetProtocol, QWidget())
             raise RuntimeError("factory exploded")
         return default_renderer(field, context)
 
-    schema = section_schema(
-        {"value": ScalarSpec(label="Value", type=int, required=True)},
-        {"value": DirectValue(1)},
+    error_type = TypeError if failure == "invalid_widget" else RuntimeError
+    message = (
+        "expected FieldWidgetProtocol"
+        if failure == "invalid_widget"
+        else "factory exploded"
     )
-    failed_draft = MeasureCfgBindings(ctrl).new_draft(schema)
-    active_draft = MeasureCfgBindings(ctrl).new_draft(schema)
     form = CfgFormWidget(
         renderers=_registry_with_factories({ScalarField: recovering_factory}),
     )
@@ -594,9 +549,9 @@ def test_attach_factory_exception_does_not_observe_failed_draft(qapp, ctrl):
     form.validity_changed.connect(validity.append)
     form.schema_changed.connect(schemas.append)
     try:
-        with pytest.raises(RuntimeError, match="factory exploded"):
+        with pytest.raises(error_type, match=message):
             form.attach(failed_draft)
-        with pytest.raises(RuntimeError, match="attach\\(\\) must be called"):
+        with pytest.raises(RuntimeError, match=r"attach\(\) must be called"):
             form.read_values()
         assert form.decoration_paths() == ()
         assert validity == []
