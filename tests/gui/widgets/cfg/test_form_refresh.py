@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,11 +20,12 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
 )
-from zcu_tools.gui.cfg.binding import ReferenceField, ScalarField, SectionField
+from zcu_tools.gui.cfg.binding import ReferenceField, ScalarField
+from zcu_tools.gui.widgets.cfg import CfgFormWidget
 from zcu_tools.gui.widgets.cfg.registry import FieldRenderContext
 from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 
-from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
+from tests.gui.widgets.cfg._form_support import section_schema
 from tests.gui.widgets.cfg._refresh_support import (
     BadgeProvider,
     RecordingRenderers,
@@ -265,10 +265,9 @@ def test_tree_refresh_routes_root_and_rejects_unsupported_paths(
         draft.close()
 
 
-def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-
+def test_choice_section_rebuilds_only_changed_section(
+    qapp: QApplication, ctrl: MagicMock
+) -> None:
     fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
         "half_width": ScalarSpec(label="Half width", type=float),
@@ -306,49 +305,50 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
             "stable": DirectValue(3.0),
         },
     )
-    from qtpy.QtCore import Qt
+    rendering = RecordingRenderers()
+    with attached_form(schema, ctrl, rendering) as form:
+        tree = form.findChild(QTreeWidget)
+        assert tree is not None
+        search_item = tree.topLevelItem(0)
+        stable_item = tree.topLevelItem(1)
+        assert search_item is not None and stable_item is not None
+        assert search_item.childCount() == 2
+        assert search_item.child(1).text(0) == "Half width"
+        stable_widget = rendering.widgets["stable"][0]
+        stable_input = stable_widget.findChild(QLineEdit)
+        mode = rendering.widgets["search.mode"][-1].findChild(QComboBox)
+        assert stable_input is not None and mode is not None
+        assert float(stable_input.text()) == 3.0
+        mode.setCurrentText("fixed")
 
-    w = CfgFormWidget()
-    model = attach_draft(w, schema, ctrl)
-    root_widget = w._root_widget
-    assert isinstance(root_widget, TreeCfgWidget)
-    # Choice decoration paths should update section-locally and keep widget instance
-    w.decoration_paths()
-    assert "search.half_width" in w.decoration_paths()
-    # Capture unrelated subtree widget identity before change
-    stable_before = root_widget._leaf_path_to_widget["stable"]
-    stable_item_before = root_widget._tree.findItems(  # type: ignore[attr-defined]
-        "Stable",
-        Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive,
-        0,  # type: ignore[attr-defined]
-    )
-    assert stable_item_before
-    search = model.fields["search"]
-    assert isinstance(search, SectionField)
-    # Capture search's half_width widget before (should be replaced)
-    half_before = root_widget._leaf_path_to_widget.get("search.half_width")
-    assert half_before is not None
-    search.fields["mode"].set_value(DirectValue("fixed"))
-    w.decoration_paths()
+        paths = form.decoration_paths()
+        assert "search.half_width" not in paths
+        assert "search.manual_value" in paths
+        assert form.findChild(QTreeWidget) is tree
+        assert tree.topLevelItem(1) is stable_item
+        assert rendering.widgets["stable"] == [stable_widget]
+        assert float(stable_input.text()) == 3.0
+        assert search_item.childCount() == 2
+        assert search_item.child(1).text(0) == "Manual"
 
-    assert w._root_widget is root_widget
-    assert "search.half_width" not in w.decoration_paths()
-    assert "search.manual_value" in w.decoration_paths()
-    # Unrelated leaf "stable" must retain same widget/item (section-local)
-    assert root_widget._leaf_path_to_widget["stable"] is stable_before
-    # Changed section's old leaf should be gone, new leaf should be present and different
-    assert "search.half_width" not in root_widget._leaf_path_to_widget
-    manual_after = root_widget._leaf_path_to_widget.get("search.manual_value")
-    assert manual_after is not None
-    assert manual_after is not half_before
+        manual = rendering.widgets["search.manual_value"][-1].findChild(QLineEdit)
+        assert manual is not None and manual.isEnabled()
+        manual.setText("8.5")
+        manual.editingFinished.emit()
+        snapshot = form.snapshot()
+        search_value = snapshot.value.fields["search"]
+        assert isinstance(search_value, CfgSectionValue)
+        assert search_value.fields == {
+            "mode": DirectValue("fixed"),
+            "half_width": DirectValue(1.0),
+            "manual_value": DirectValue(8.5),
+        }
+        assert snapshot.value.fields["stable"] == DirectValue(3.0)
 
 
 def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
-    qapp, ctrl, monkeypatch: pytest.MonkeyPatch
-):
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-
+    qapp: QApplication, ctrl: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
         "half_width": ScalarSpec(label="Half width", type=float),
@@ -383,25 +383,54 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
             )
         },
     )
-    form = CfgFormWidget()
-    model = attach_draft(form, schema, ctrl)
-    original_root = form._root_widget
-    assert isinstance(original_root, TreeCfgWidget)
-    monkeypatch.setattr(original_root, "refresh_section", lambda _path: False)
-    emitted: list[CfgSchema] = []
-    form.schema_changed.connect(emitted.append)
+    rendering = RecordingRenderers()
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget(renderers=rendering.registry)
+    try:
+        form.attach(draft)
+        original_root = form.findChild(TreeCfgWidget)
+        original_tree = form.findChild(QTreeWidget)
+        assert original_root is not None and original_tree is not None
+        original_mode_field = rendering.fields["search.mode"]
+        monkeypatch.setattr(original_root, "refresh_section", lambda _path: False)
+        emitted: list[CfgSchema] = []
+        form.schema_changed.connect(emitted.append)
 
-    search = cast(SectionField, model.fields["search"])
-    search.fields["mode"].set_value(DirectValue("fixed"))
-    form._flush_pending_section_refresh()
+        mode = rendering.widgets["search.mode"][-1].findChild(QComboBox)
+        assert mode is not None
+        mode.setCurrentText("fixed")
+        assert "search.manual_value" in form.decoration_paths()
+        replacement_trees = [
+            tree for tree in form.findChildren(QTreeWidget) if tree is not original_tree
+        ]
+        assert len(replacement_trees) == 1
+        assert rendering.fields["search.mode"] is original_mode_field
+        manual = rendering.widgets["search.manual_value"][-1].findChild(QLineEdit)
+        assert manual is not None and manual.isEnabled()
+        assert float(manual.text()) == 2.0
+        assert emitted == []
 
-    assert form._root_widget is not original_root
-    assert emitted == []
-    assert form._schema_snapshot_pending is True
+        qapp.processEvents()
 
-    qapp.processEvents()
+        assert len(emitted) == 1
+        assert emitted[0] == draft.snapshot() == form.snapshot()
+        emitted_search = emitted[0].value.fields["search"]
+        assert isinstance(emitted_search, CfgSectionValue)
+        assert emitted_search.fields == {
+            "mode": DirectValue("fixed"),
+            "half_width": DirectValue(1.0),
+            "manual_value": DirectValue(2.0),
+        }
+        qapp.processEvents()
+        assert len(emitted) == 1
 
-    assert len(emitted) == 1
-    emitted_search = emitted[0].value.fields["search"]
-    assert isinstance(emitted_search, CfgSectionValue)
-    assert emitted_search.fields["mode"] == DirectValue("fixed")
+        manual.setText("7.5")
+        manual.editingFinished.emit()
+        search_value = draft.snapshot().value.fields["search"]
+        assert isinstance(search_value, CfgSectionValue)
+        assert search_value.fields["manual_value"] == DirectValue(7.5)
+        assert form.snapshot() == draft.snapshot()
+    finally:
+        form.detach()
+        draft.close()
+        form.deleteLater()
