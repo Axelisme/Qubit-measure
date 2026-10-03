@@ -36,6 +36,8 @@ class ComponentRegistry:
     ) -> None:
         if kind in self._models:
             raise ValueError(f"Kind {kind!r} is already registered")
+        if not isinstance(model, type) or not issubclass(model, ComponentSchema):
+            raise TypeError("Registered models must derive from ComponentSchema")
         self._models[kind] = model
         self._references[kind] = tuple(references)
         self._units[kind] = _model_units(model)
