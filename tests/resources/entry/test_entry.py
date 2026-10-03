@@ -28,6 +28,32 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_wiring_fields_stay_separate_and_use_their_declared_working_units(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component(
+        "R1",
+        kind="resonator",
+        freq=6500.0,
+        wiring={"ch": 2, "time_of_flight": 0.4},
+    )
+    resonator = entry.setup.R1
+    assert resonator.wiring.ch == 2
+    assert resonator.wiring.time_of_flight == pytest.approx(0.4)
+    resonator.wiring.flux_ch = 3
+    resonator.wiring.time_of_flight = 0.5
+
+    document = YAML(typ="safe").load(setup_path)["components"]["R1"]
+    assert document["wiring"]["time_of_flight"] == pytest.approx(0.5e-6)
+    assert document["wiring"]["flux_ch"] == 3
+    assert "ch" not in document and "flux_ch" not in document
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.R1.freq == pytest.approx(6500.0)
+    assert reopened.setup.R1.wiring.time_of_flight == pytest.approx(0.5)
+
+
 @pytest.mark.parametrize(
     "name", ["", "Q.1", "1Q", "_private", "for", "edit", "description", "general"]
 )
