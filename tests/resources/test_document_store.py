@@ -51,6 +51,12 @@ class NestedNumericDocument(BaseModel):
     values: dict[str, dict[str, float]]
 
 
+class BranchDocument(BaseModel):
+    format: str
+    format_version: str
+    values: dict[str, dict[str, float] | None]
+
+
 class NullableDocument(BaseModel):
     format: str
     format_version: str
@@ -513,6 +519,40 @@ def test_conflicts_distinguish_missing_from_null_and_keep_dot_keys_intact(
     assert caught.value.current == 7.0
     assert document_path.read_bytes() == committed
     assert first.snapshot() == original_snapshot
+
+
+@pytest.mark.parametrize("parent_null", [False, True])
+def test_added_leaf_conflicts_with_deleted_or_null_parent(
+    document_path: Path, parent_null: bool
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\n"
+        "values:\n  branch: {}\n  other: {leaf: 2.0}\n",
+        encoding="utf-8",
+    )
+    first = DocumentStore(document_path, BranchDocument, format="synthetic")
+    second = DocumentStore(document_path, BranchDocument, format="synthetic")
+    original = first.snapshot()
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        draft.values["branch"] = {"fresh": 1.0}
+        draft.values["other"] = {"leaf": 99.0}
+        with second.edit() as other:
+            if parent_null:
+                other.values["branch"] = None
+            else:
+                del other.values["branch"]
+        committed = document_path.read_bytes()
+        with pytest.raises(ConflictError) as caught:
+            stack.close()
+
+    assert caught.value.source == document_path
+    assert caught.value.path == ("values", "branch")
+    assert caught.value.original == {}
+    assert (caught.value.current is None) is parent_null
+    assert document_path.read_bytes() == committed
+    assert first.snapshot() == original
+    assert second.snapshot().values["other"] == {"leaf": 2.0}
 
 
 def test_added_null_and_deleted_fields_roundtrip_as_distinct_changes(
