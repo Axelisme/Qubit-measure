@@ -251,6 +251,7 @@ class DocumentStore[T: BaseModel]:
         self._lock = FileLock(str(self._lock_path))
         self._editing = False
         self._observers: dict[object, Callable[[DocumentChange], None]] = {}
+        self._pending_changes: list[DocumentChange] = []
         yaml = YAML(typ="rt")
         with path.open(encoding="utf-8") as stream:
             document = TypeAdapter(YamlMap).validate_python(yaml.load(stream))
@@ -295,7 +296,7 @@ class DocumentStore[T: BaseModel]:
         finally:
             self._editing = False
         if patches:
-            self._notify(
+            self._dispatch_change(
                 DocumentChange(self._path, tuple(path for path, _ in patches), "commit")
             )
 
@@ -385,7 +386,7 @@ class DocumentStore[T: BaseModel]:
             self._snapshot = snapshot
             self._document = document
         if paths:
-            self._notify(DocumentChange(self._path, paths, "refresh"))
+            self._dispatch_change(DocumentChange(self._path, paths, "refresh"))
         return bool(paths)
 
     @contextmanager
@@ -398,6 +399,10 @@ class DocumentStore[T: BaseModel]:
             yield
         finally:
             self._lock.release()
+            if not self._lock.is_locked:
+                pending, self._pending_changes = self._pending_changes, []
+                for change in pending:
+                    self._notify(change)
 
     def subscribe(
         self, callback: Callable[[DocumentChange], None]
@@ -409,6 +414,12 @@ class DocumentStore[T: BaseModel]:
             self._observers.pop(token, None)
 
         return unsubscribe
+
+    def _dispatch_change(self, change: DocumentChange) -> None:
+        if self._lock.is_locked:
+            self._pending_changes.append(change)
+        else:
+            self._notify(change)
 
     def _notify(self, change: DocumentChange) -> None:
         for callback in tuple(self._observers.values()):
