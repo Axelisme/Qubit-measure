@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -108,12 +109,14 @@ class MigrationRegistry:
         target_version: FormatVersion,
         source: Path,
     ) -> YamlMap:
-        validate_header(
+        version = validate_header(
             document,
             expected_format=format,
             supported_version=target_version,
             source=source,
         )
+        if version == target_version:
+            return deepcopy(dict(document))
         raise NotImplementedError("Migration chain is not implemented")
 
     def migrate_yaml(
