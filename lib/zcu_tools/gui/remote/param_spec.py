@@ -180,6 +180,8 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
             JsonType.BOOLEAN: "boolean",
             JsonType.OBJECT: "object",
         }[spec.json_type]
+    if spec.enum is not None:
+        prop["enum"] = list(spec.enum)
     if spec.description:
         prop["description"] = spec.description
     return prop
