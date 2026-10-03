@@ -1,6 +1,7 @@
 """Recipe promises through the shipped tool table and GUI transport seam."""
 
 import base64
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from threading import Event, Thread
@@ -14,6 +15,15 @@ from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
 from ._recipe_support import PNG, LookbackGui
 from ._support import make_client
+
+
+@contextmanager
+def recipe_client(tmp_path, respond):
+    client = make_client(tmp_path, respond)
+    try:
+        yield client
+    finally:
+        client.context.session.close()
 
 
 def test_lookback_initial_wait_returns_while_the_same_execution_continues(
@@ -673,9 +683,8 @@ def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safel
     def fail_start(self):
         raise RuntimeError("no thread resources")
 
-    client = make_client(tmp_path, LookbackGui())
-    monkeypatch.setattr(Thread, "start", fail_start)
-    try:
+    with recipe_client(tmp_path, LookbackGui()) as client:
+        monkeypatch.setattr(Thread, "start", fail_start)
         reply = client.call("lookback", {"frequency_mhz": 6020.0})
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -689,8 +698,6 @@ def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safel
         assert cancelled.data["status"] == "failed"
         assert not cancelled.data["cancel_requested"]
         assert "tab.new" not in [method for method, _ in client.transport.sent]
-    finally:
-        client.context.session.close()
 
 
 def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
@@ -746,8 +753,7 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
             }
         return reply
 
-    client = make_client(tmp_path, respond)
-    try:
+    with recipe_client(tmp_path, respond) as client:
         reply = client.call("lookback", {"frequency_mhz": 6020.0})
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -759,8 +765,6 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
         assert methods.count("tab.run_start") == 1
         assert "tab.save_data" not in methods
         assert "tab.analyze" not in methods
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize("reuse", [False, True])
@@ -769,15 +773,10 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
     [(4.0, 0.2, (4.0, 0.2)), (1, 1, (1.0, 1.0)), (1.0, 1.0, (1.0, 1.0))],
 )
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
-    tmp_path,
-    reuse,
-    readout_length,
-    offset,
-    expected,
+    tmp_path, reuse, readout_length, offset, expected
 ):
     gui = LookbackGui()
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call(
             "lookback",
             {
@@ -805,24 +804,16 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert data["elapsed_s"] >= 0
         actual = data["actual"]
         assert actual["cfg_ref"] == gui.publication["cfg_ref"]
-        assert actual["fields"]["modules.readout.pulse_cfg.freq"]["value"] == 6020.0
-        assert actual["fields"]["modules.readout.ro_cfg.ro_freq"]["value"] == 6020.0
-        assert (
-            actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"] == expected[0]
-        )
-        assert (
-            actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"]
-            == expected[1]
-        )
-        assert (
-            type(actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"]) is float
-        )
-        assert (
-            type(actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"])
-            is float
-        )
-        assert actual["fields"]["rounds"]["value"] == 7
-        assert type(actual["fields"]["rounds"]["value"]) is int
+        fields = actual["fields"]
+        for path, value in {
+            "modules.readout.pulse_cfg.freq": 6020.0,
+            "modules.readout.ro_cfg.ro_freq": 6020.0,
+            "modules.readout.ro_cfg.ro_length": expected[0],
+            "modules.readout.ro_cfg.trig_offset": expected[1],
+            "rounds": 7,
+        }.items():
+            assert fields[path]["value"] == value
+            assert type(fields[path]["value"]) is type(value)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.reset_cfg") == int(reuse)
@@ -842,12 +833,9 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         by_path = {tuple(edit["path"]): edit["value"] for edit in edits}
         assert by_path["modules", "reset"] == {"__ref": None}
         assert by_path["modules", "init_pulse"] == {"__ref": None}
-        assert by_path["modules", "readout", "ro_cfg", "ro_length"] == expected[0]
-        assert by_path["modules", "readout", "ro_cfg", "trig_offset"] == expected[1]
-        assert type(by_path["modules", "readout", "ro_cfg", "ro_length"]) is float
-        assert type(by_path["modules", "readout", "ro_cfg", "trig_offset"]) is float
-    finally:
-        client.context.session.close()
+        for key, value in zip(("ro_length", "trig_offset"), expected, strict=True):
+            assert by_path["modules", "readout", "ro_cfg", key] == value
+            assert type(by_path["modules", "readout", "ro_cfg", key]) is float
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "kept"])
@@ -903,8 +891,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
             return deepcopy(publication)
         raise AssertionError(f"Missing frequency must not start work: {method}")
 
-    client = make_client(tmp_path, respond)
-    try:
+    with recipe_client(tmp_path, respond) as client:
         arguments = {} if reuse_tab_id is None else {"reuse_tab_id": reuse_tab_id}
         reply = client.call("lookback", arguments)
         assert isinstance(reply, ToolReply)
@@ -918,8 +905,6 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         assert "tab.run_start" not in methods
         assert ("tab.new" in methods) is (reuse_tab_id is None)
         assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
@@ -941,8 +926,7 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
     if source == "library_invalid":
         pulse["valid"] = False
         pulse["input"]["validation_error"] = "outside range"
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("lookback", arguments)
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
@@ -956,8 +940,6 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
         assert fields["modules.readout.ro_cfg.ro_length"]["value"] == 2.0
         assert fields["modules.readout.ro_cfg.trig_offset"]["value"] == 0.1
         assert fields["rounds"]["value"] == 3
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
@@ -981,16 +963,13 @@ def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
 ):
     gui = LookbackGui()
     gui.md["r_f"] = 6500.0
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("lookback", arguments)
         assert reply.is_error
         assert reply.data["status"] == "failed"
         assert reply.data["tab"] is None
         assert not gui.ran
         assert not any(method.startswith("tab.") for method, _ in client.transport.sent)
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize("partial_data", [False, True])
@@ -1005,8 +984,7 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
             return {"reason": "completed", "status": "cancelled"}
         return gui(method, params)
 
-    client = make_client(tmp_path, respond)
-    try:
+    with recipe_client(tmp_path, respond) as client:
         reply = client.call("lookback", {"frequency_mhz": 6000.0})
         assert reply.data["status"] == "cancelled"
         assert not reply.data["cancel_requested"]
@@ -1017,8 +995,6 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
         assert "tab.save_data" not in methods
         assert "tab.analyze" not in methods
         assert "operation.cancel" not in methods
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
@@ -1037,8 +1013,7 @@ def test_explicit_invalid_library_reference_is_not_disabled_or_replaced(
     gui.publication["tree"]["children"]["modules"]["children"][module].update(
         valid=False, error="missing library entry"
     )
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("lookback", {argument: "missing"})
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -1054,8 +1029,6 @@ def test_explicit_invalid_library_reference_is_not_disabled_or_replaced(
             "edits"
         ]
         assert "tab.run_start" not in [method for method, _ in client.transport.sent]
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
