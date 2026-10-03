@@ -161,6 +161,45 @@ class AmplitudeRabiGui(TimeRabiGui):
         return result
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(tmp_path, number):
+    with recipe_client(tmp_path, AmplitudeRabiGui()) as client:
+        data = client.call(
+            "amplitude_rabi",
+            {
+                "frequency_mhz": number,
+                "pulse_length_us": number,
+                "gain_range": [number - 1, number],
+                "points": 3,
+                "reps": 2,
+                "rounds": 1,
+            },
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.waveform.length"):
+            assert fields[path]["value"] == 1.0
+            assert type(fields[path]["value"]) is float
+        sweep = fields["sweep.gain"]["value"]
+        assert sweep == {"start": 0.0, "stop": 1.0, "expts": 3}
+        assert type(sweep["start"]) is float
+        assert type(sweep["stop"]) is float
+        assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            assert fields[name]["value"] == count
+            assert type(fields[name]["value"]) is int
+        edits = [
+            edit
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "gain"]
+        ]
+        assert len(edits) == 1
+        assert type(edits[0]["value"]["start"]) is float
+        assert type(edits[0]["value"]["stop"]) is float
+
+
 def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
     gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
