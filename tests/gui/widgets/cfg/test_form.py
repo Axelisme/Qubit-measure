@@ -1025,8 +1025,6 @@ def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
     assert set(out.fields) == {"mode", "half_width", "decay", "manual_value"}
 
 
-
-
 def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,

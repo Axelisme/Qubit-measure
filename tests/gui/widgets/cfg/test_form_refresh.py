@@ -343,7 +343,7 @@ def test_choice_section_rebuilds_only_changed_section(
         assert search_value.fields == {
             "mode": DirectValue("fixed"),
             "half_width": DirectValue(1.0),
-            "manual_value": DirectValue(8.5),
+            "manual_value": DirectValue(8.5, raw="8.5"),
         }
         assert value.fields["stable"] == DirectValue(3.0)
 
@@ -431,7 +431,7 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
         manual.editingFinished.emit()
         search_value = draft.snapshot().value.fields["search"]
         assert isinstance(search_value, CfgSectionValue)
-        assert search_value.fields["manual_value"] == DirectValue(7.5)
+        assert search_value.fields["manual_value"] == DirectValue(7.5, raw="7.5")
         assert form.read_values() == draft.snapshot().value
     finally:
         form.detach()
