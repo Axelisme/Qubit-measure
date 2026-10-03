@@ -7,6 +7,7 @@ from typing import Any
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
 from .lookback import lookback
+from .onetone import onetone_spectrum
 
 
 @dataclass(frozen=True)
@@ -49,5 +50,28 @@ RECIPES = (
             },
         },
         run=lookback,
+    ),
+    RecipeDefinition(
+        name="onetone_spectrum",
+        description="Run one onetone spectrum and save raw data and Primary analysis.",
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                **{
+                    name: {"type": ["string", "null"], "minLength": 1}
+                    for name in ("reuse_tab_id", "readout_ref")
+                },
+                **{
+                    name: {"type": ["number", "null"]}
+                    for name in ("center_mhz", "span_mhz", "gain")
+                },
+                **{
+                    name: {"type": ["integer", "null"]}
+                    for name in ("points", "reps", "rounds")
+                },
+            },
+        },
+        run=onetone_spectrum,
     ),
 )
