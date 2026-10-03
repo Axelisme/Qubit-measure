@@ -1,5 +1,6 @@
 """Drive recipe behavior through shipped tools and the GUI wire boundary."""
 
+from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
 
@@ -8,6 +9,15 @@ from simpleeval import simple_eval
 
 from ._recipe_support import LookbackGui, scalar, section
 from ._support import make_client
+
+
+@contextmanager
+def recipe_client(tmp_path, respond):
+    client = make_client(tmp_path, respond)
+    try:
+        yield client
+    finally:
+        client.context.session.close()
 
 
 class DriveGui(LookbackGui):
@@ -46,14 +56,18 @@ class DriveGui(LookbackGui):
             },
         }
 
-        if "q_f" in self.md and "qf_w" in self.md:
+        if "qf_w" in self.md:
             inputs = self.publication["tree"]["children"]["sweep"]["children"]["freq"][
                 "inputs"
             ]
             for key, sign in (("start", "-"), ("stop", "+")):
                 expression = f"q_f {sign} 2.5 * qf_w"
                 inputs[key] = {
-                    **scalar(simple_eval(expression, names=self.md))["input"],
+                    **scalar(
+                        simple_eval(expression, names=self.md)
+                        if "q_f" in self.md
+                        else None
+                    )["input"],
                     "mode": "expression",
                     "raw": expression,
                 }
@@ -96,6 +110,8 @@ class DriveGui(LookbackGui):
             result["ml"]["modules"] = {
                 "calibrated": {"type": "readout/pulse"},
                 "direct": {"type": "readout/direct"},
+                "drive": {"type": "pulse"},
+                "reset": {"type": "reset/pulse"},
             }
         if method == "tab.snapshot":
             result = deepcopy(result)
@@ -199,11 +215,17 @@ def test_twotone_requires_calibrated_readout_instead_of_inline_template(tmp_path
         client.context.session.close()
 
 
-def test_twotone_reports_all_missing_frequency_sources_without_running(tmp_path):
+@pytest.mark.parametrize("reuse_tab_id", [None, "t"])
+def test_twotone_reports_all_missing_frequency_sources_without_running(
+    tmp_path, reuse_tab_id
+):
     gui = DriveGui()
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call("twotone_spectrum", {})
+        reply = client.call("twotone_spectrum", {"reuse_tab_id": reuse_tab_id})
+        methods = [method for method, _ in client.transport.sent]
+        assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
+        assert ("tab.new" in methods) is (reuse_tab_id is None)
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {
             "center_mhz",
@@ -213,3 +235,104 @@ def test_twotone_reports_all_missing_frequency_sources_without_running(tmp_path)
         assert not gui.ran
     finally:
         client.context.session.close()
+
+
+@pytest.mark.parametrize("span_mhz", [None, 80.0])
+def test_twotone_explicit_center_removes_missing_calibration_dependency(
+    tmp_path, span_mhz
+):
+    gui = DriveGui({"qf_w": 4.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "twotone_spectrum", {"center_mhz": 6300.0, "span_mhz": span_mhz}
+        )
+        assert reply.data["status"] == "finished", reply.data
+        fields = reply.data["actual"]["fields"]
+        assert fields["center_mhz"]["value"] == 6300.0
+        assert fields["span_mhz"]["value"] == (20.0 if span_mhz is None else 80.0)
+
+
+def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
+    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
+    readout["ref"] = "calibrated"
+    readout["children"]["ro_cfg"]["children"]["ro_freq"] = scalar(None)
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("twotone_spectrum", {})
+        assert reply.data["status"] == "finished", reply.data
+        fields = reply.data["actual"]["fields"]
+        assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
+        assert (
+            fields["modules.readout.pulse_cfg.freq"]["source"] == "library:calibrated"
+        )
+        assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == 7200.0
+        assert fields["modules.readout.ro_cfg.ro_freq"]["source"] == "r_f"
+
+
+@pytest.mark.parametrize("parameter", ["readout_ref", "drive_ref", "use_reset"])
+def test_twotone_invalid_reference_stops_without_fallback(tmp_path, parameter):
+    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+
+    def respond(method, params):
+        result = gui(method, params)
+        if method == "tab.edit_cfg":
+            for node in result["tree"]["children"]["modules"]["children"].values():
+                if node.get("ref") == "unknown":
+                    node["error"] = "Unknown library key"
+                    result["status"] = "Invalid"
+        return result
+
+    with recipe_client(tmp_path, respond) as client:
+        reply = client.call("twotone_spectrum", {parameter: "unknown"})
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["reason"] == "invalid_cfg"
+        assert not gui.ran
+        assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == 1
+
+
+def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
+    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(
+            "twotone_spectrum",
+            {"reuse_tab_id": "t", "drive_ref": "drive", "use_reset": "reset"},
+        )
+        assert reply.data["status"] == "finished", reply.data
+        fields = reply.data["actual"]["fields"]
+        assert fields["modules.qub_pulse"] == {"value": "drive", "source": "explicit"}
+        assert fields["modules.reset"] == {"value": "reset", "source": "explicit"}
+        methods = [method for method, _ in client.transport.sent]
+        assert "tab.new" not in methods
+        assert methods.count("tab.reset_cfg") == 1
+        assert methods.count("tab.run_start") == 1
+
+
+@pytest.mark.parametrize("failure", ["stale", "missing", "busy", "wrong_adapter"])
+def test_twotone_reuse_failure_stops_without_retry_or_replacement(tmp_path, failure):
+    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        if failure == "stale":
+            client.transport.replies["tab.reset_cfg"] = {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "stale_cfg",
+                    "message": "changed",
+                },
+            }
+        else:
+            snapshot = gui("tab.snapshot", {"tab_id": "t"})
+            if failure == "missing":
+                snapshot["tabs"] = []
+            elif failure == "busy":
+                snapshot["tabs"][0]["interaction"]["is_analyzing"] = True
+            else:
+                snapshot["tabs"][0]["adapter_name"] = "other"
+            client.transport.replies["tab.snapshot"] = {"ok": True, "result": snapshot}
+        reply = client.call("twotone_spectrum", {"reuse_tab_id": "t"})
+        assert reply.is_error
+        assert reply.data["tab"] == "t"
+        methods = [method for method, _ in client.transport.sent]
+        assert "tab.new" not in methods
+        assert "tab.run_start" not in methods
+        assert methods.count("tab.reset_cfg") == int(failure == "stale")
