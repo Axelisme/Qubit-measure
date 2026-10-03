@@ -34,6 +34,11 @@ class ResultEntry:
     ) -> "ResultEntry":
         result_path = Path(result_root) / name
         database_path = Path(database_root) / name
+        for destination in (result_path, database_path):
+            if destination.exists() or destination.is_symlink():
+                raise FileExistsError(
+                    errno.EEXIST, os.strerror(errno.EEXIST), str(destination)
+                )
         result_path.mkdir(parents=True)
         database_path.mkdir(parents=True)
         (result_path / "records").mkdir()
