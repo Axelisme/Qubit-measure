@@ -34,4 +34,5 @@ def project_execution(
     detail: ReplyDetail = "summary",
 ) -> dict[str, Any]:
     """Project one captured snapshot without refreshing observations or guards."""
+    del definition, detail
     return deepcopy(snapshot)
