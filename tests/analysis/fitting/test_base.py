@@ -113,6 +113,7 @@ def test_fit_func_warns_when_falling_back_to_init_p(
             init_p=[1.0, None],
         )
 
+    assert isinstance(p_opt, list)
     assert p_opt[0] == 1.0
     assert np.isnan(p_opt[1])
     assert np.all(np.isinf(p_cov))
@@ -128,6 +129,8 @@ def test_fit_func_all_none_fixedparams_matches_unfixed_fit():
     expected_opt, expected_cov = fit_func(x, y, model, init_p=[1.0, 0.0])
     p_opt, p_cov = fit_func(x, y, model, init_p=[1.0, 0.0], fixedparams=[None, None])
 
+    assert isinstance(expected_opt, np.ndarray)
+    assert isinstance(p_opt, np.ndarray)
     np.testing.assert_allclose(p_opt, expected_opt)
     np.testing.assert_allclose(p_cov, expected_cov)
     np.testing.assert_allclose(p_opt, [2.0, 1.0], atol=0.03)
@@ -152,6 +155,7 @@ def test_fit_func_fixed_parameter_preserves_bounds_and_covariance(
         fixedparams=[None, 1.0],
     )
 
+    assert isinstance(p_opt, list)
     np.testing.assert_allclose(p_opt, [expected_slope, 1.0], atol=1e-6)
     assert p_cov.shape == (2, 2)
     assert np.all(np.isfinite(p_cov))
