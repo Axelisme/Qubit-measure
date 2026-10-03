@@ -1,5 +1,6 @@
 """Real MCP/socket analysis uses GUI parameters and pane-owned writeback."""
 
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -25,8 +26,24 @@ class ScalarResult:
         return {"value": self.value}
 
 
-def _install_result(fx, tab: str, stage: str, value: float, operation: int) -> None:
-    result = ScalarResult(value)
+@dataclass
+class SummaryResult:
+    summary: dict[str, object]
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return self.summary
+
+
+def _install_result(
+    fx,
+    tab: str,
+    stage: str,
+    value: float,
+    operation: int,
+    *,
+    summary: dict[str, object] | None = None,
+) -> None:
+    result = ScalarResult(value) if summary is None else SummaryResult(summary)
     plots = Plots(NonPresentingHost())
     plots.adopt("fit", Figure())
     plots.finish()
@@ -78,6 +95,130 @@ def test_writeback_preview_accepts_matching_analysis_operation(fx, stage):
         )
         assert result["ok"] is True, result
         assert result["result"]["has_draft"] is False
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+@pytest.fixture
+def connected_mcp(fx, tmp_path, request):
+    _, invoke = mcp_client(fx.service.port, tmp_path, request=request)
+    invoke("connect", {"port": fx.service.port})
+    return invoke
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_unestimable_error_is_null_with_reason_through_public_rpc(
+    fx, connected_mcp, stage
+):
+    tab = fx.ctrl.new_tab("fake")
+    _install_result(
+        fx,
+        tab,
+        stage,
+        10.0,
+        101,
+        summary={
+            "lifetime": 10.0,
+            "lifetime_error": float("inf"),
+            "warnings": ["error could not be estimated"],
+        },
+    )
+    reply = connected_mcp(
+        "rpc_call",
+        {
+            "method": _result_method(stage),
+            "params": {"tab_id": tab, "operation_id": 101},
+        },
+    )
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed["summary"] == {
+        "lifetime": 10.0,
+        "lifetime_error": None,
+        "warnings": ["error could not be estimated"],
+    }
+    assert parsed["invalid"] == [
+        {"path": "summary.lifetime_error", "reason": "non_finite"}
+    ]
+    assert parsed["operation_state"][f"{stage}_state"]["available"] is True
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("operation_id", [None, 101])
+def test_nested_nonfinite_analysis_values_have_precise_paths(
+    fx, connected_mcp, stage, operation_id
+):
+    tab = fx.ctrl.new_tab("fake")
+    _install_result(
+        fx,
+        tab,
+        stage,
+        10.0,
+        101,
+        summary={
+            "fit": {
+                "value": float("nan"),
+                "errors": [float("inf"), -float("inf"), None, 0.0, 2.0],
+            },
+            "warnings": ["fit is nonfinite"],
+            "error": "fit unavailable",
+        },
+    )
+    params = {"tab_id": tab}
+    if operation_id is not None:
+        params["operation_id"] = operation_id
+    reply = connected_mcp(
+        "rpc_call", {"method": _result_method(stage), "params": params}
+    )
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed["summary"] == {
+        "fit": {"value": None, "errors": [None, None, None, 0.0, 2.0]},
+        "warnings": ["fit is nonfinite"],
+        "error": "fit unavailable",
+    }
+    assert parsed["invalid"] == [
+        {"path": "summary.fit.value", "reason": "non_finite"},
+        {"path": "summary.fit.errors[0]", "reason": "non_finite"},
+        {"path": "summary.fit.errors[1]", "reason": "non_finite"},
+    ]
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_empty_analysis_result_has_no_invalid_values(fx, connected_mcp, stage):
+    tab = fx.ctrl.new_tab("fake")
+    reply = connected_mcp(
+        "rpc_call", {"method": _result_method(stage), "params": {"tab_id": tab}}
+    )
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed == {"summary": None, "invalid": []}
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_finite_analysis_preserves_zero_and_existing_null(fx, connected_mcp, stage):
+    tab = fx.ctrl.new_tab("fake")
+    _install_result(
+        fx,
+        tab,
+        stage,
+        0.0,
+        101,
+        summary={"value": 0.0, "error": None, "other": [2.0, None, False]},
+    )
+    reply = connected_mcp(
+        "rpc_call",
+        {
+            "method": _result_method(stage),
+            "params": {"tab_id": tab, "operation_id": 101},
+        },
+    )
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed["summary"] == {
+        "value": 0.0,
+        "error": None,
+        "other": [2.0, None, False],
+    }
+    assert parsed["invalid"] == []
 
 
 def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
@@ -152,7 +293,8 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
         assert observed["params"] == {"threshold": 0.3}
         assert observed["summary"] == {"value": 3.0}
         assert call(sock, _result_method(stage), {"tab_id": tab})["result"] == {
-            "summary": {"value": 3.0}
+            "summary": {"value": 3.0},
+            "invalid": [],
         }
         _install_result(fx, tab, stage, 7.0, 102)
         replaced = call(
@@ -183,7 +325,7 @@ def test_operation_result_observation_unlocks_only_the_observed_image(
     }
     with open_client(fx.service.port) as sock:
         summary = call(sock, _result_method(stage), {"tab_id": tab})
-        assert summary["result"] == {"summary": {"value": 3.0}}
+        assert summary["result"] == {"summary": {"value": 3.0}, "invalid": []}
         assert call(sock, "tab.get_figure", save)["ok"] is True
         assert call(sock, "tab.save_image", save)["error"]["reason"] == "stale_version"
         rejected = call(

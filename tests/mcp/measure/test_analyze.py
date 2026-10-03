@@ -76,12 +76,16 @@ def _call_stdio(
         patch.setattr(sys, "stdin", stdin)
         patch.setattr(sys, "stdout", stdout)
         run_stdio_loop(client.context.config, client.tools)
-    return json.loads(out.getvalue())["result"]
+    return json.loads(out.getvalue(), parse_constant=_reject_json_constant)["result"]
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
 
 
 def _data(reply: dict[str, Any]) -> dict[str, Any]:
     assert not reply.get("isError"), reply
-    return json.loads(reply["content"][0]["text"])
+    return json.loads(reply["content"][0]["text"], parse_constant=_reject_json_constant)
 
 
 def _assert_figure(reply: dict[str, Any], *, present: bool) -> Path | None:
@@ -111,11 +115,23 @@ def _methods(client: MeasureClient) -> list[str]:
     ]
 
 
+def _start_reply(
+    params: dict[str, Any], invalidated: list[str], *, interactive: bool = False
+) -> dict[str, Any]:
+    return {
+        "operation_id": 71,
+        "interactive": interactive,
+        "params": params,
+        "invalidated_on_success": invalidated,
+    }
+
+
 def _result_reply(
     pane: str, names: list[str], params: dict[str, Any]
 ) -> dict[str, Any]:
     return {
         "summary": {"frequency": 5.0},
+        "invalid": [],
         "params": params,
         "operation_state": {
             f"{pane}_state": {
@@ -207,29 +223,41 @@ def test_interact_headless_and_wire_failure_do_not_retry(
     ],
 )
 @pytest.mark.parametrize("has_figure", [True, False])
+@pytest.mark.parametrize("has_invalid", [True, False])
 def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
-    tmp_path, clients, monkeypatch, stage, method, result_method, pane, has_figure
+    tmp_path,
+    clients,
+    monkeypatch,
+    stage,
+    method,
+    result_method,
+    pane,
+    has_figure,
+    has_invalid,
 ):
     def respond(name, params):
         if name == method:
             assert params == {"tab_id": "t", "updates": {"gain": 2}}
-            return {
-                "operation_id": 71,
-                "interactive": False,
-                "params": {"gain": 2, "model": "fit"},
-                "invalidated_on_success": ["post.writeback"],
-            }
+            return _start_reply({"gain": 2, "model": "fit"}, ["post.writeback"])
         if name == "operation.await":
             assert params["operation_id"] == 71
             assert 0 < params["timeout"] <= 0.25
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
             assert params == {"tab_id": "t", "operation_id": 71}
-            return _result_reply(
+            observed = _result_reply(
                 pane,
                 ["fit", "residual"] if has_figure else [],
                 {"gain": 2, "model": "fit"},
             )
+            if has_invalid:
+                observed["summary"].update(
+                    frequency_error=None, warnings=["singular error"]
+                )
+                observed["invalid"] = [
+                    {"path": "summary.frequency_error", "reason": "non_finite"}
+                ]
+            return observed
         if name == "tab.save_image":
             assert params == {
                 "tab_id": "t",
@@ -261,7 +289,23 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
     assert result["stage"] == stage
     assert result["tab"] == "t"
     assert isinstance(result["op"], int)
-    assert result["result"]["summary"] == {"frequency": 5.0}
+    assert result["result"]["summary"] == (
+        {"frequency": 5.0, "frequency_error": None, "warnings": ["singular error"]}
+        if has_invalid
+        else {"frequency": 5.0}
+    )
+    assert result["result"]["invalid"] == (
+        [{"path": "summary.frequency_error", "reason": "non_finite"}]
+        if has_invalid
+        else []
+    )
+    for tool, arguments in [
+        ("status", {"execution": result["execution"]}),
+        ("wait", {"execution": result["execution"], "timeout": 0}),
+    ]:
+        observed = _data(_call_stdio(monkeypatch, client, tool, arguments))
+        assert observed["result"] == result["result"]
+        assert observed["saved_images"] == result["saved_images"]
     assert result["result"]["params"] == {"gain": 2, "model": "fit"}
     assert result["params"] == result["result"]["params"]
     assert result["invalidated"] == ["post.writeback"]
@@ -294,12 +338,7 @@ def test_unfinished_analysis_never_reads_success_payload(
     def respond(method, params):
         if method == "tab.analyze":
             assert params == {"tab_id": "t", "updates": {}}
-            return {
-                "operation_id": 71,
-                "interactive": False,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [])
         if method == "operation.await":
             if status == "running":
                 return {"reason": "timeout"}
@@ -347,12 +386,7 @@ def test_interactive_start_hands_off_current_state_without_waiting(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {"gain": 2},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({"gain": 2}, [], interactive=True)
         if method == "operation.await":
             return {"reason": "user_feedback", "status": "running"}
         assert method == "tab.interact"
@@ -382,12 +416,7 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {"gain": 2},
-                "invalidated_on_success": ["post_analysis"],
-            }
+            return _start_reply({"gain": 2}, ["post_analysis"], interactive=True)
         if method == "tab.interact":
             return {
                 "operation_id": 71,
@@ -448,12 +477,7 @@ def test_done_joins_original_completion_without_duplicate_saves(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {"gain": 2},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({"gain": 2}, [], interactive=True)
         if method == "tab.interact":
             if "payload" in params:
                 assert params["payload"] == {"command": "done"}
@@ -543,12 +567,7 @@ def test_rejected_done_keeps_registered_interaction_editable(
     def respond(method, params):
         nonlocal value
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [], interactive=True)
         if method == "operation.await":
             return {"reason": "user_feedback", "status": "running"}
         if method == "tab.interact":
@@ -611,12 +630,7 @@ def test_cancel_latches_intent_and_retains_original_terminal(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [], interactive=True)
         if method == "tab.interact":
             return {"operation_id": 71, "state": {}, "figure": None}
         if method == "operation.await":
@@ -720,12 +734,7 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": False,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [])
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
@@ -825,12 +834,7 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": False,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [])
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
@@ -983,12 +987,7 @@ def test_close_after_start_receipt_retains_operation_without_new_work(
 
     def respond(method, params):
         assert method == "tab.analyze"
-        return {
-            "operation_id": 71,
-            "interactive": interactive,
-            "params": {},
-            "invalidated_on_success": [],
-        }
+        return _start_reply({}, [], interactive=interactive)
 
     client = _client(tmp_path, clients, respond)
 
@@ -1028,12 +1027,7 @@ def test_worker_start_failure_keeps_the_admitted_operation_receipt(
 
     def respond(method, params):
         assert method == "tab.analyze"
-        return {
-            "operation_id": 71,
-            "interactive": interactive,
-            "params": {},
-            "invalidated_on_success": [],
-        }
+        return _start_reply({}, [], interactive=interactive)
 
     client = _client(tmp_path, clients, respond)
     reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
@@ -1061,12 +1055,7 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [], interactive=True)
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
@@ -1110,12 +1099,7 @@ def test_malformed_interactive_image_is_a_tool_error_not_a_success(
 ):
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [], interactive=True)
         if method == "operation.await":
             return {"reason": "user_feedback", "status": "running"}
         assert method == "tab.interact"
@@ -1147,12 +1131,7 @@ def test_invalid_interactive_png_is_a_tool_error_without_retry(
 ):
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": True,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [], interactive=True)
         if method == "operation.await":
             return {"reason": "user_feedback", "status": "running"}
         assert method == "tab.interact"
@@ -1191,12 +1170,7 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
 ):
     def respond(name, params):
         if name == method:
-            return {
-                "operation_id": 71,
-                "interactive": False,
-                "params": {},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({}, [])
         if name == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
@@ -1244,12 +1218,7 @@ def test_execution_query_observes_background_completion_without_reconnect(
 
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": False,
-                "params": {"model": "fit"},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({"model": "fit"}, [])
         if method == "operation.await":
             awaiting.set()
             assert release.wait(10), "test did not release the GUI operation"
@@ -1390,12 +1359,7 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
 ):
     def respond(method, params):
         if method == "tab.analyze":
-            return {
-                "operation_id": 71,
-                "interactive": False,
-                "params": {"gain": 2},
-                "invalidated_on_success": [],
-            }
+            return _start_reply({"gain": 2}, [])
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":

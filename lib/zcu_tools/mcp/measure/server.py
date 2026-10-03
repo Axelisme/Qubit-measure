@@ -59,7 +59,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v105: Onetone recipes with GUI-owned ranges and source-bound Run preview.
 # v106: Two-tone spectrum and Rabi recipes with explicit frequency source precedence.
 # v107: recipe-first fixed tools, shared analysis/control and complete public RPC.
-MCP_VERSION = 107
+# v108: analysis results retain invalid paths from the GUI's wire projection.
+MCP_VERSION = 108
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.

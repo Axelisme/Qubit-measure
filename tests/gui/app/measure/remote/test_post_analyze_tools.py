@@ -123,7 +123,8 @@ def test_get_result_summarizes():
         "summary": {
             "ge_radius": 0.37,
             "confusion": [[1.0, 0.0], [0.0, 1.0]],
-        }
+        },
+        "invalid": [],
     }
 
 
@@ -131,4 +132,4 @@ def test_get_result_none_when_absent():
     ctrl = _ctrl()
     ctrl.get_post_analyze_result.return_value = None
     res = _dispatch(ctrl, "tab.get_post_analyze_result", {"tab_id": "t"})
-    assert res == {"summary": None}
+    assert res == {"summary": None, "invalid": []}
