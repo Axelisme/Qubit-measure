@@ -46,8 +46,11 @@ RECIPES = (
                 **{
                     name: {"type": ["string", "null"], "minLength": 1}
                     for name in (
-                        "reuse_tab_id", "readout_ref", "pi_ref",
-                        "use_reset", "init_pulse_ref",
+                        "reuse_tab_id",
+                        "readout_ref",
+                        "pi_ref",
+                        "use_reset",
+                        "init_pulse_ref",
                     )
                 },
                 "shots": {"type": ["integer", "null"]},
