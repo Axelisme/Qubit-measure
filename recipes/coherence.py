@@ -6,7 +6,26 @@ from zcu_tools.mcp.measure.recipe_context import MissingParameter, RecipeContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from .cfg_sources import cfg_node as _node
+from .cfg_sources import finite_number as _finite
 from .cfg_sources import readout_frequency as _readout_frequency
+
+
+def _validate(arguments: dict[str, Any]) -> None:
+    for name in ("reuse_tab_id", "readout_ref", "pi_ref", "use_reset"):
+        value = arguments.get(name)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{name} must be a non-empty string or null")
+    delay = arguments.get("max_delay_us")
+    if delay is not None and (not _finite(delay) or delay <= 0):
+        raise ValueError("max_delay_us must be a positive finite real number or null")
+    for name in ("points", "reps", "rounds"):
+        value = arguments.get(name)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int)
+        ):
+            raise ValueError(f"{name} must be an integer or null")
+    if arguments.get("points") is not None and arguments["points"] < 2:
+        raise ValueError("points must be at least two")
 
 
 def _select_modules(
@@ -35,6 +54,7 @@ def _select_modules(
 
 def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one calibrated T1 delay sweep, save raw data and Primary analysis."""
+    _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
     publication = ctx.prepare_tab("twotone/t1", arguments.get("reuse_tab_id"))
     publication = _select_modules(ctx, publication, arguments)
