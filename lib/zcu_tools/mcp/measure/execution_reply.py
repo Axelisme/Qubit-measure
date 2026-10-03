@@ -184,18 +184,28 @@ def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str
     return candidate
 
 
+def _destination(native: dict[str, Any] | None) -> dict[str, Any]:
+    if native is None:
+        return {}
+    destination = {}
+    for section, keys in (
+        ("context", ("active_label", "has_active_context")),
+        ("project", ("chip_name", "qub_name", "res_name")),
+    ):
+        facts = {key: native[key] for key in keys if key in native}
+        if facts:
+            destination[section] = facts
+    return destination
+
+
 def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
     primary = snapshot.get("writeback") or {}
     post = snapshot.get("post_writeback") or {}
     cfg_ref = (snapshot.get("actual") or {}).get("cfg_ref")
     return {
-        "destination": {
-            "context": deepcopy(
-                primary.get("destination_context") or post.get("destination_context")
-            )
-        }
-        if primary.get("destination_context") or post.get("destination_context")
-        else {},
+        "destination": _destination(
+            primary.get("destination_context") or post.get("destination_context")
+        ),
         "stages": {
             "primary": [_candidate(item, cfg_ref) for item in primary.get("items", [])],
             "post": [_candidate(item, cfg_ref) for item in post.get("items", [])],
