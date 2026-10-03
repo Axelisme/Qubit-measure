@@ -92,7 +92,9 @@ class ResultEntry:
                 if isinstance(fields, dict) and isinstance(
                     kind := fields.get("kind"), str
                 ):
-                    for path, spec in component_registry.units(kind).items():
+                    for path, spec in component_registry.units(
+                        kind, source=self._result_path / "setup.yaml", component=name
+                    ).items():
                         result[("components", name, *path)] = spec
         return result
 
@@ -107,7 +109,7 @@ class ResultEntry:
 
     @property
     def setup(self) -> SetupView:
-        return SetupView(self._setup_store)
+        return SetupView(self._setup_store, self._result_path / "setup.yaml")
 
     @property
     def entry_id(self) -> str:

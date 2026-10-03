@@ -1,9 +1,12 @@
 """Component model declarations, independent of experiment definitions."""
 
 from collections.abc import Mapping, Sequence
+from difflib import get_close_matches
+from pathlib import Path
 
 from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
+from .errors import UnknownKindError
 from .schema import ComponentSchema, ResonatorSchema
 
 
@@ -32,10 +35,20 @@ class ComponentRegistry:
         del self._references[kind]
         del self._units[kind]
 
-    def get(self, kind: str) -> type[ComponentSchema]:
-        return self._models[kind]
+    def get(
+        self, kind: str, *, source: Path | None = None, component: str | None = None
+    ) -> type[ComponentSchema]:
+        try:
+            return self._models[kind]
+        except KeyError as cause:
+            raise UnknownKindError(
+                source, component, kind, tuple(get_close_matches(kind, self._models))
+            ) from cause
 
-    def units(self, kind: str) -> Mapping[FieldPath, UnitSpec]:
+    def units(
+        self, kind: str, *, source: Path | None = None, component: str | None = None
+    ) -> Mapping[FieldPath, UnitSpec]:
+        self.get(kind, source=source, component=component)
         return dict(self._units[kind])
 
 

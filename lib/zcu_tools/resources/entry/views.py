@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
+from pathlib import Path
 
 from pydantic import TypeAdapter
 
@@ -53,8 +54,9 @@ class EditView:
 
 
 class SetupView:
-    def __init__(self, store: DocumentStore[SetupDocument]) -> None:
+    def __init__(self, store: DocumentStore[SetupDocument], source: Path) -> None:
         self._store = store
+        self._source = source
 
     @property
     def description(self) -> str | None:
@@ -74,7 +76,7 @@ class SetupView:
         self._store.refresh()
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
-        model = component_registry.get(kind)
+        model = component_registry.get(kind, source=self._source, component=name)
         with self._store.edit() as draft:
             if name in draft.components:
                 raise ValueError(f"Component {name!r} already exists")
