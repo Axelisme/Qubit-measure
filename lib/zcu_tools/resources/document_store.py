@@ -175,6 +175,35 @@ def _changes(
         yield path, draft
 
 
+def _patch_node(
+    raw: YamlValue | _Missing, base: YamlValue | _Missing, draft: YamlValue | _Missing
+) -> YamlValue | _Missing:
+    if _same_value(base, draft):
+        return raw
+    if isinstance(raw, dict) and isinstance(base, dict) and isinstance(draft, dict):
+        for key in dict.fromkeys((*base, *draft)):
+            value = _patch_node(
+                raw.get(key, _Missing.VALUE), base.get(key, _Missing.VALUE), draft.get(key, _Missing.VALUE)
+            )
+            if isinstance(value, _Missing):
+                raw.pop(key, None)
+            else:
+                raw[key] = value
+        return raw
+    if isinstance(raw, list) and isinstance(base, list) and isinstance(draft, list):
+        # A sequence conflicts as one field, but its surviving positions keep raw nodes.
+        for index, value in enumerate(draft):
+            if index < len(base) and index < len(raw):
+                merged = _patch_node(raw[index], base[index], value)
+                if not isinstance(merged, _Missing):
+                    raw[index] = merged
+            else:
+                raw.append(value)
+        del raw[len(draft):]
+        return raw
+    return draft
+
+
 def _lookup(document: YamlMap, path: FieldPath) -> YamlValue | _Missing:
     value: YamlValue | _Missing = document
     for key in path:
@@ -248,7 +277,8 @@ class DocumentStore[T: BaseModel]:
                 for path, _ in patches:
                     self._check_conflict(base_document, document, path)
                 for path, value in patches:
-                    _apply(document, path, value)
+                    merged = _patch_node(_lookup(document, path), _lookup(base_values, path), value)
+                    _apply(document, path, merged)
                 # Resolve after structural edits; changed values are still in working units.
                 for path, spec in self._unit_specs(document).items():
                     if any(path[: len(changed)] == changed for changed, _ in patches):
