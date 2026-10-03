@@ -76,12 +76,16 @@ def _call_stdio(
         patch.setattr(sys, "stdin", stdin)
         patch.setattr(sys, "stdout", stdout)
         run_stdio_loop(client.context.config, client.tools)
-    return json.loads(out.getvalue())["result"]
+    return json.loads(out.getvalue(), parse_constant=_reject_json_constant)["result"]
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
 
 
 def _data(reply: dict[str, Any]) -> dict[str, Any]:
     assert not reply.get("isError"), reply
-    return json.loads(reply["content"][0]["text"])
+    return json.loads(reply["content"][0]["text"], parse_constant=_reject_json_constant)
 
 
 def _assert_figure(reply: dict[str, Any], *, present: bool) -> Path | None:
@@ -116,6 +120,7 @@ def _result_reply(
 ) -> dict[str, Any]:
     return {
         "summary": {"frequency": 5.0},
+        "invalid": [],
         "params": params,
         "operation_state": {
             f"{pane}_state": {
@@ -207,8 +212,9 @@ def test_interact_headless_and_wire_failure_do_not_retry(
     ],
 )
 @pytest.mark.parametrize("has_figure", [True, False])
+@pytest.mark.parametrize("has_invalid", [True, False])
 def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
-    tmp_path, clients, monkeypatch, stage, method, result_method, pane, has_figure
+    tmp_path, clients, monkeypatch, stage, method, result_method, pane, has_figure, has_invalid
 ):
     def respond(name, params):
         if name == method:
@@ -225,11 +231,17 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
             assert params == {"tab_id": "t", "operation_id": 71}
-            return _result_reply(
+            observed = _result_reply(
                 pane,
                 ["fit", "residual"] if has_figure else [],
                 {"gain": 2, "model": "fit"},
             )
+            if has_invalid:
+                observed["summary"].update(frequency_error=None, warnings=["singular error"])
+                observed["invalid"] = [
+                    {"path": "summary.frequency_error", "reason": "non_finite"}
+                ]
+            return observed
         if name == "tab.save_image":
             assert params == {
                 "tab_id": "t",
@@ -261,7 +273,20 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
     assert result["stage"] == stage
     assert result["tab"] == "t"
     assert isinstance(result["op"], int)
-    assert result["result"]["summary"] == {"frequency": 5.0}
+    assert result["result"]["summary"] == (
+        {"frequency": 5.0, "frequency_error": None, "warnings": ["singular error"]}
+        if has_invalid else {"frequency": 5.0}
+    )
+    assert result["result"]["invalid"] == (
+        [{"path": "summary.frequency_error", "reason": "non_finite"}] if has_invalid else []
+    )
+    for tool, arguments in [
+        ("status", {"execution": result["execution"]}),
+        ("wait", {"execution": result["execution"], "timeout": 0}),
+    ]:
+        observed = _data(_call_stdio(monkeypatch, client, tool, arguments))
+        assert observed["result"] == result["result"]
+        assert observed["saved_images"] == result["saved_images"]
     assert result["result"]["params"] == {"gain": 2, "model": "fit"}
     assert result["params"] == result["result"]["params"]
     assert result["invalidated"] == ["post.writeback"]
