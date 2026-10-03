@@ -6,7 +6,6 @@ from copy import deepcopy
 import pytest
 from simpleeval import NameNotDefined, simple_eval
 from zcu_tools.mcp.core.reply import ToolReply
-from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_support import LookbackGui, scalar, section
 from ._support import make_client
@@ -110,12 +109,15 @@ def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(
 def test_spectrum_source_change_fails_without_retry_or_blind_scan(tmp_path, stage):
     gui = OnetoneGui({"r_f": 6100.0, "rf_w": 4.0})
 
-    def respond(method, params):
-        if method == stage:
-            raise GuiRpcError("Source changed", reason="stale")
-        return gui(method, params)
-
-    with recipe_client(tmp_path, respond) as client:
+    with recipe_client(tmp_path, gui) as client:
+        client.transport.replies[stage] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "stale",
+                "message": "Source changed",
+            },
+        }
         reply = client.call("onetone_spectrum", {})
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "failed"
@@ -181,6 +183,8 @@ class OnetoneGui(LookbackGui):
         super()._edit({**params, "edits": ordinary})
 
     def __call__(self, method, params):
+        if method == "value.list":
+            return {"values": []}
         if method == "tab.new":
             assert params == {"adapter_name": self.experiment}
             return {"tab_id": "t"}
