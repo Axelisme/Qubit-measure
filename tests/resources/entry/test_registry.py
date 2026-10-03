@@ -57,6 +57,17 @@ def test_registry_lifecycle_rejects_duplicates_and_allows_explicit_replacement()
     assert registry.get("notebook/pair") is NestedPairSchema
 
 
+def test_registration_rejects_unit_metadata_on_non_numeric_fields() -> None:
+    class TextUnitModel(ComponentSchema):
+        freq: Annotated[str, UnitSpec("Hz", "MHz")]
+
+    registry = ComponentRegistry()
+    with pytest.raises(TypeError, match="numeric"):
+        registry.register("notebook/physical", TextUnitModel)
+    registry.register("notebook/physical", PairSchema)
+    assert registry.get("notebook/physical") is PairSchema
+
+
 @pytest.mark.parametrize("spec", [UnitSpec("Hz", "us"), UnitSpec("Hz", "unknown")])
 def test_registration_rejects_invalid_units_without_reserving_the_kind(
     spec: UnitSpec,
