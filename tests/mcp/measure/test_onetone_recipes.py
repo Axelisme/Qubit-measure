@@ -131,6 +131,30 @@ def test_spectrum_source_change_fails_without_retry_or_blind_scan(tmp_path, stag
         assert sum(method == stage for method, _ in client.transport.sent) == 1
 
 
+@pytest.mark.parametrize(
+    "md, arguments, expected_status",
+    [
+        ({}, {"center_mhz": 1e308, "span_mhz": 2e307}, "finished"),
+        ({"rf_w": 4e307}, {"center_mhz": 0.0}, "failed"),
+    ],
+)
+def test_spectrum_only_delivers_finite_actual_frequency(
+    tmp_path, md, arguments, expected_status
+):
+    gui = OnetoneGui(md)
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("onetone_spectrum", arguments)
+        assert reply.data["status"] == expected_status, reply.data
+        if expected_status == "finished":
+            fields = reply.data["actual"]["fields"]
+            assert fields["center_mhz"]["value"] == pytest.approx(1e308)
+            assert fields["span_mhz"]["value"] == pytest.approx(2e307)
+            assert gui.raw_saved
+        else:
+            assert reply.data["error"]["reason"] == "invalid_cfg"
+            assert not gui.ran
+
+
 class OnetoneGui(LookbackGui):
     def __init__(self, md=None, experiment="onetone/freq"):
         super().__init__()
