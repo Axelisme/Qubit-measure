@@ -29,6 +29,34 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
     }
 
 
+def test_entry_identity_is_read_only_and_refresh_cannot_publish_a_replacement(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, _database = entry_roots
+    original_id = entry.entry_id
+    entry.setup.description = "original annotation"
+    replacement_id = "00000000-0000-0000-0000-000000000001"
+    with pytest.raises(AttributeError, match="entry_id"):
+        entry.entry_id = replacement_id
+
+    setup_path = results / "entry" / "setup.yaml"
+    yaml = YAML(typ="safe")
+    with setup_path.open(encoding="utf-8") as stream:
+        document = yaml.load(stream)
+    document["general"]["entry_id"] = replacement_id
+    document["general"]["description"] = "external annotation"
+    with setup_path.open("w", encoding="utf-8") as stream:
+        yaml.dump(document, stream)
+    before = setup_path.read_bytes()
+
+    with pytest.raises(ValueError, match="entry_id is immutable"):
+        entry.setup.refresh()
+
+    assert entry.entry_id == original_id
+    assert entry.setup.description == "original annotation"
+    assert setup_path.read_bytes() == before
+
+
 def test_setup_description_uses_one_transaction_for_direct_and_edit_writes(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
