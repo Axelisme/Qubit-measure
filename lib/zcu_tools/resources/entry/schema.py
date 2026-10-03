@@ -1,6 +1,8 @@
 """Typed setup document at the persistence boundary."""
 
+import keyword
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
@@ -8,6 +10,38 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import UnitSpec
+
+_VIEW_NAMES = frozenset(
+    {
+        "description",
+        "edit",
+        "refresh",
+        "add_component",
+        "general",
+        "meta",
+        "set",
+        "move",
+        "resolve",
+        "components",
+        "entry_id",
+        "created_at",
+        "kind",
+        "wiring",
+        "ext",
+    }
+)
+
+
+def validate_component_name(name: str, *, source: Path | None = None) -> None:
+    if (
+        not name.isidentifier()
+        or name.startswith("_")
+        or keyword.iskeyword(name)
+        or name in _VIEW_NAMES
+    ):
+        raise ValueError(
+            f"{source}: invalid component name {name!r}; expected a public identifier that does not shadow a view"
+        )
 
 
 class SetupGeneral(BaseModel):

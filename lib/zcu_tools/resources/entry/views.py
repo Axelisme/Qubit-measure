@@ -10,7 +10,7 @@ from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from .registry import component_registry
-from .schema import ComponentSchema, SetupDocument
+from .schema import ComponentSchema, SetupDocument, validate_component_name
 
 
 class ComponentView:
@@ -86,6 +86,7 @@ class SetupView:
         self._store.refresh()
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
+        validate_component_name(name, source=self._source)
         model = component_registry.get(kind, source=self._source, component=name)
         component_registry.check_fields(kind, fields, path=name)
         with self._store.edit() as draft:

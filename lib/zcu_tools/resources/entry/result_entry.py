@@ -15,7 +15,7 @@ from zcu_tools.resources.document_store import DocumentStore, FieldPath, UnitSpe
 
 from .errors import PartialCommitError
 from .registry import component_registry
-from .schema import SetupDocument
+from .schema import SetupDocument, validate_component_name
 from .views import SetupView
 
 
@@ -89,6 +89,7 @@ class ResultEntry:
         components = document.get("components")
         if isinstance(components, dict):
             for name, fields in components.items():
+                validate_component_name(name, source=self._result_path / "setup.yaml")
                 if isinstance(fields, dict) and isinstance(
                     kind := fields.get("kind"), str
                 ):
