@@ -2758,6 +2758,7 @@ name = "zcu-tools"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "filelock" },
     { name = "jupytext" },
     { name = "matplotlib" },
     { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
@@ -2928,6 +2929,7 @@ quality = [
 
 [package.metadata]
 requires-dist = [
+    { name = "filelock", specifier = ">=4,<5" },
     { name = "flask", marker = "extra == 'client'" },
     { name = "google-api-python-client", marker = "extra == 'gdrive'" },
     { name = "google-auth-httplib2", marker = "extra == 'gdrive'" },
