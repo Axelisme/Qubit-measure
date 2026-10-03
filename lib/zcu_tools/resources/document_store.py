@@ -123,6 +123,7 @@ class DocumentStore[T: BaseModel]:
         self._lock_timeout = lock_timeout
         self._lock = FileLock(str(self._lock_path))
         self._editing = False
+        self._observers: dict[object, Callable[[DocumentChange], None]] = {}
         yaml = YAML(typ="rt")
         with path.open(encoding="utf-8") as stream:
             document = TypeAdapter(YamlMap).validate_python(yaml.load(stream))
@@ -165,6 +166,10 @@ class DocumentStore[T: BaseModel]:
                 self._snapshot = snapshot
         finally:
             self._editing = False
+        if patches:
+            self._notify(
+                DocumentChange(self._path, tuple(path for path, _ in patches), "commit")
+            )
 
     def _read(self) -> tuple[YamlMap, T]:
         yaml = YAML(typ="rt")
@@ -217,4 +222,14 @@ class DocumentStore[T: BaseModel]:
     def subscribe(
         self, callback: Callable[[DocumentChange], None]
     ) -> Callable[[], None]:
-        raise NotImplementedError
+        token = object()
+        self._observers[token] = callback
+
+        def unsubscribe() -> None:
+            self._observers.pop(token, None)
+
+        return unsubscribe
+
+    def _notify(self, change: DocumentChange) -> None:
+        for callback in tuple(self._observers.values()):
+            callback(change)
