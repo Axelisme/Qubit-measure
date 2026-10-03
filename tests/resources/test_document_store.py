@@ -21,6 +21,12 @@ class SyntheticDocument(BaseModel):
     values: dict[str, float]
 
 
+class SequenceDocument(BaseModel):
+    format: str
+    format_version: str
+    values: list[dict[str, bool | int]]
+
+
 class TypedScalarDocument(BaseModel):
     format: str
     format_version: str
@@ -573,3 +579,20 @@ def test_boolean_to_equal_number_causes_a_concurrent_edit_conflict(
     assert raised.value.current == 1
     assert document_path.read_bytes() == committed
     assert first.snapshot().value is True
+
+
+def test_boolean_numeric_changes_inside_a_sequence_are_not_discarded(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\nvalues: [{enabled: true}]\n",
+        encoding="utf-8",
+    )
+    store = DocumentStore(document_path, SequenceDocument, format="synthetic")
+    with store.edit() as draft:
+        draft.values[0]["enabled"] = 1
+
+    assert type(store.snapshot().values[0]["enabled"]) is int
+    on_disk = DocumentStore(document_path, SequenceDocument, format="synthetic")
+    assert type(on_disk.snapshot().values[0]["enabled"]) is int
+    assert on_disk.snapshot().values == [{"enabled": 1}]
