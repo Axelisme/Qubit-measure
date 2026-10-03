@@ -52,7 +52,9 @@ def fit_dual_decay(
     float,
     float,
     NDArray[np.float64],
-    tuple[FitParameters | tuple[float, float, float, float, float], NDArray[np.float64]],
+    tuple[
+        FitParameters | tuple[float, float, float, float, float], NDArray[np.float64]
+    ],
 ]:
     """return [t1, t1err, t1b, t1berr, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fit_dualexp(
@@ -87,8 +89,12 @@ def fit_ge_decay(
     fixedparams: Sequence[float | None] | None = None,
     share_t1: bool = True,
 ) -> tuple[
-    tuple[float, float, NDArray[np.float64], FitParameters | tuple[float, float, float]],
-    tuple[float, float, NDArray[np.float64], FitParameters | tuple[float, float, float]],
+    tuple[
+        float, float, NDArray[np.float64], FitParameters | tuple[float, float, float]
+    ],
+    tuple[
+        float, float, NDArray[np.float64], FitParameters | tuple[float, float, float]
+    ],
 ]:
     """return [(g_t1, g_t1err, g_fit_signals, g_params), (e_t1, e_t1err, e_fit_signals, e_params)]"""
     g_params, g_pCov = fitexp(
