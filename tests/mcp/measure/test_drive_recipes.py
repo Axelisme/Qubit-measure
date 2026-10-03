@@ -81,6 +81,35 @@ class TimeRabiGui(LookbackGui):
         return result
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(tmp_path, number):
+    with recipe_client(tmp_path, TimeRabiGui({"r_f": 7200.0})) as client:
+        data = client.call(
+            "time_rabi",
+            {"frequency_mhz": number, "gain": number, "max_length_us": number, "points": 3},
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.gain"):
+            assert fields[path]["value"] == 1.0
+            assert type(fields[path]["value"]) is float
+        sweep = fields["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        by_path = {
+            tuple(edit["path"]): edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+        }
+        for path in (("modules", "qub_pulse", "freq"), ("modules", "qub_pulse", "gain")):
+            assert by_path[path] == 1.0
+            assert type(by_path[path]) is float
+        assert type(by_path["sweep", "length"]["stop"]) is float
+
+
 def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tmp_path):
     gui = TimeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
