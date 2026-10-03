@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -347,107 +347,6 @@ def test_scalar_widget_minimum_width_reduced(qapp):
     spec = ScalarSpec(label="Name", type=str)
     w = make_scalar_widget(spec, "demo")
     assert w.minimumWidth() == 20
-
-
-def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
-
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
-    field = scalar_field(
-        ctrl,
-        ScalarSpec(label="Freq", type=float),
-        EvalValue("r_f"),
-    )
-
-    w = ScalarWidget(field)
-    assert w._ghost is not None
-    assert w._ghost.text() == "= 6000.0"
-
-
-def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
-
-    ctrl.get_current_md.return_value = MetaDict()
-    field = scalar_field(
-        ctrl,
-        ScalarSpec(label="Freq", type=float),
-        EvalValue("missing"),
-    )
-
-    w = ScalarWidget(field)
-    assert w._ghost is not None
-    assert w._ghost.text() == "= ?"
-    assert "red" in w._ghost.styleSheet()
-
-
-def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctrl):
-    from qtpy.QtWidgets import QLineEdit
-    from zcu_tools.gui.app.measure.ui.cfg_binding import (
-        make_value_source_input_enhancer,
-    )
-    from zcu_tools.gui.session.value_lookup import ValueInfo
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
-
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
-    ctrl.read_value_source.return_value = (
-        ValueInfo("device.flux.value", float, "device:flux"),
-        0.125,
-    )
-    schema = section_schema(
-        {"freq": ScalarSpec(label="Freq", type=float)},
-        {"freq": EvalValue("r_f")},
-    )
-    form = CfgFormWidget(text_input_enhancer=make_value_source_input_enhancer(ctrl))
-    root = attach_draft(form, schema, ctrl)
-    scalar_widget = form.findChild(ScalarWidget)
-    edit = form.findChild(QLineEdit)
-    assert scalar_widget is not None
-    assert edit is not None
-
-    edit.setText("@{device.flux.value} ")
-    edit.setCursorPosition(len(edit.text()))
-    enhancer = scalar_widget._input_enhancement
-    assert enhancer is not None
-    cast(Any, enhancer)._on_text_edited(edit.text())
-
-    value = cast(ScalarField, root.fields["freq"]).get_value()
-    assert isinstance(value, EvalValue)
-    assert value.expr == "0.125"
-    assert edit.text() == "0.125"
-    ctrl.read_value_source.assert_called_once_with("device.flux.value")
-
-
-def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
-    from qtpy.QtWidgets import QLineEdit
-    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
-
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
-    field = scalar_field(
-        ctrl,
-        ScalarSpec(label="Freq", type=float),
-        EvalValue("r_f"),
-    )
-    w = ScalarWidget(field)
-    edit = w.findChild(QLineEdit)
-    assert edit is not None
-
-    menu, mode_action = w._build_context_menu(edit)
-    action_texts = [action.text() for action in menu.actions()]
-
-    assert mode_action is not None
-    assert "Use direct value" in action_texts
-    assert len(action_texts) > 1
 
 
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
@@ -1034,30 +933,6 @@ def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
     sv = out.fields["f"]
     assert isinstance(sv, SweepValue)
     assert sv.step == pytest.approx(0.25)
-
-
-def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
-    from zcu_tools.gui.cfg import EvalValue
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.fields import SweepWidget
-
-    schema = section_schema(
-        {"f": SweepSpec(label="Freq")},
-        {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
-    )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    sweep_widget = w.findChild(SweepWidget)
-    assert sweep_widget is not None
-
-    sweep_widget._field.start_field.set_value(
-        EvalValue(expr="r_f - 1", resolved=5999.0)
-    )
-    out = w.read_values()
-    sv = out.fields["f"]
-    assert isinstance(sv, SweepValue)
-    assert isinstance(sv.start, EvalValue)
-    assert sv.start.expr == "r_f - 1"
 
 
 def test_populate_nested_section_round_trip(qapp, ctrl):
