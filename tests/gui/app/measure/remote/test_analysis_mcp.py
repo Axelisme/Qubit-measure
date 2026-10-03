@@ -97,7 +97,7 @@ def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path)
     try:
         invoke("connect", {"port": fx.service.port})
         invoke("rpc_call", {"method": "context.snapshot"})
-        invoke("tab_get", {"tab": tab})
+        invoke("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}})
         with pytest.raises(GuiRpcError, match="threshold") as error:
             invoke("tab_analyze", {"tab": tab, "params": {"threshold": "bad"}})
         assert error.value.code == "invalid_params"

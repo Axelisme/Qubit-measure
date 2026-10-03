@@ -662,8 +662,16 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         committed = fx.state.get_tab(tab_id).analysis.plots
         assert committed is not None
         assert committed["pick"] is not widget.figure
-        call("tab_get", {"tab": tab_id, "include": ["summary"]})
-        preview = call("writeback", {"tab": tab_id})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
+            "tabs"
+        ][0]
+        preview = call(
+            "rpc_call",
+            {
+                "method": "tab.writeback_preview",
+                "params": {"tab_id": tab_id, "subtab_id": "analysis"},
+            },
+        )
         expected = {
             "flx_half": done["interaction"]["state"]["flux_half"],
             "flx_int": done["interaction"]["state"]["flux_int"],
@@ -674,37 +682,46 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             ),
         }
         assert {
-            item["target"]: item["proposed"] for item in preview["items"]
+            item["target_name"]: item["proposed"] for item in preview["items"]
         } == expected
         call("rpc_call", {"method": "context.snapshot"})
         written = call(
-            "writeback",
-            {"tab": tab_id, "write": [{"id": item["id"]} for item in preview["items"]]},
+            "rpc_call",
+            {
+                "method": "tab.writeback_write",
+                "params": {
+                    "write": [{"id": item["id"]} for item in preview["items"]],
+                    "tab_id": tab_id,
+                    "subtab_id": "analysis",
+                },
+            },
         )
         assert {
             item["target"]: item["after"] for item in written["written"]
         } == expected
         assert call("rpc_call", {"method": "context.snapshot"})["md"] == expected
-        call("tab_get", {"tab": tab_id, "include": ["summary", "artifacts"]})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
+            "tabs"
+        ][0]
         image = tmp_path / "interactive-result.png"
         saved = call(
-            "tab_save",
+            "rpc_call",
             {
-                "tab": tab_id,
-                "artifacts": ["analysis:pick"],
-                "paths": {"analysis:pick": str(image)},
+                "method": "tab.save_artifacts",
+                "params": {
+                    "artifacts": ["analysis:pick"],
+                    "paths": {"analysis:pick": str(image)},
+                    "tab_id": tab_id,
+                },
             },
         )
-        if "op" in saved:
-            assert (
-                call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
-            )
-        else:
-            assert saved["saved"] == {"analysis:pick": str(image)}
+        assert (
+            call("wait", {"op": saved["handle"], "timeout": 5})["status"] == "finished"
+        )
         assert image.read_bytes().startswith(b"\x89PNG")
-        artifacts = call("tab_get", {"tab": tab_id, "include": ["artifacts"]})[
-            "artifacts"
-        ]
+        artifacts = call(
+            "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}}
+        )["tabs"][0]["artifacts"]
         analysis = next(item for item in artifacts if item["key"] == "analysis:pick")
         assert analysis["status"] == "saved"
         assert analysis["last_saved_path"] == str(image)

@@ -18,9 +18,13 @@ def test_project_tool_reads_gui_state_and_deactivates_on_identity_change(
     try:
         invoke("connect", {"port": fx.service.port})
         original = invoke(
-            "project", {"chip": "chip-a", "qubit": "q1", "resonator": "res"}
+            "rpc_call",
+            {
+                "method": "project.apply",
+                "params": {"chip_name": "chip-a", "qub_name": "q1", "res_name": "res"},
+            },
         )
-        assert original["chip"] == "chip-a"
+        assert original["chip_name"] == "chip-a"
         created = call(sock, "context.new", {"bind_device": None, "clone_from": None})
         assert created["ok"] is True
         assert (
@@ -28,12 +32,24 @@ def test_project_tool_reads_gui_state_and_deactivates_on_identity_change(
             == created["result"]["label"]
         )
 
-        changed = invoke("project", {"chip": "chip-b"})
-        assert changed["chip"] == "chip-b"
-        assert changed["qubit"] == "q1"
-        assert changed["resonator"] == "res"
+        changed = invoke(
+            "rpc_call", {"method": "project.apply", "params": {"chip_name": "chip-b"}}
+        )
+        assert changed["chip_name"] == "chip-b"
+        assert changed["qub_name"] == "q1"
+        assert changed["res_name"] == "res"
         assert changed["result_dir"] != original["result_dir"]
-        assert invoke("project", {}) == changed
+        observed = invoke("rpc_call", {"method": "project.info"})
+        assert observed == {
+            key: changed[key]
+            for key in (
+                "chip_name",
+                "qub_name",
+                "res_name",
+                "result_dir",
+                "database_path",
+            )
+        }
         assert call(sock, "context.active")["result"]["label"] is None
     finally:
         bridge.disconnect()

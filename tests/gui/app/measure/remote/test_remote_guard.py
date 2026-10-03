@@ -382,9 +382,20 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
     try:
         assert call("connect", {"port": port})["port"] == port
         if with_device:
-            call(
-                "device_connect",
-                {"name": "bias", "type": "FakeDevice", "address": "none"},
+            connected = call(
+                "rpc_call",
+                {
+                    "method": "device.connect",
+                    "params": {
+                        "name": "bias",
+                        "type_name": "FakeDevice",
+                        "address": "none",
+                    },
+                },
+            )
+            assert (
+                call("wait", {"op": connected["handle"], "timeout": 5})["status"]
+                == "finished"
             )
             # A fresh connection must observe the already registered device itself.
             bridge.disconnect()
@@ -419,7 +430,13 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
         _await_completed_run(call, started["handle"])
     finally:
         if with_device:
-            call("device_disconnect", {"name": "bias", "forget": True})
+            call(
+                "rpc_call",
+                {
+                    "method": "device.disconnect",
+                    "params": {"name": "bias", "forget": True},
+                },
+            )
         bridge.disconnect()
 
 
@@ -471,7 +488,9 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
-        tab_id = call("tab_open", {"experiment": "fake"})["tab"]
+        tab_id = call(
+            "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
+        )["tab_id"]
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
         observe_run_inputs(
@@ -482,28 +501,51 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
             ),
         )
         started = call(
-            "tab_run",
+            "rpc_call",
             {
-                "tab": tab_id,
-                "expected": encode_ref(
-                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                ),
+                "method": "tab.run_start",
+                "params": {
+                    "expected": encode_ref(
+                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                    ),
+                    "tab_id": tab_id,
+                },
             },
         )
-        _await_completed_run(call, started["op"])
-        assert call("tab_get", {"tab": tab_id})["summary"]["state"]["has_result"]
+        _await_completed_run(call, started["handle"])
+        assert call(
+            "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}}
+        )["tabs"][0]["interaction"]["has_run_result"]
         analyzed = call("tab_analyze", {"tab": tab_id})
         if "op" in analyzed:
             assert (
                 call("wait", {"op": analyzed["op"], "timeout": 5})["status"]
                 == "finished"
             )
-        call("tab_get", {"tab": tab_id, "include": ["summary", "artifacts"]})
-        preview = call("writeback", {"tab": tab_id})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
+            "tabs"
+        ][0]
+        preview = call(
+            "rpc_call",
+            {
+                "method": "tab.writeback_preview",
+                "params": {"tab_id": tab_id, "subtab_id": "analysis"},
+            },
+        )
         assert len(preview["items"]) == 1
         item = preview["items"][0]
-        assert item["target"] == "fake_peak"
-        written = call("writeback", {"tab": tab_id, "write": [{"id": item["id"]}]})
+        assert item["target_name"] == "fake_peak"
+        written = call(
+            "rpc_call",
+            {
+                "method": "tab.writeback_write",
+                "params": {
+                    "write": [{"id": item["id"]}],
+                    "tab_id": tab_id,
+                    "subtab_id": "analysis",
+                },
+            },
+        )
         assert written["written"][0]["after"] == item["proposed"]
         assert (
             call("rpc_call", {"method": "context.snapshot"})["md"]["fake_peak"]
@@ -511,19 +553,19 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
         )
         image = tmp_path / "fit.png"
         saved = call(
-            "tab_save",
+            "rpc_call",
             {
-                "tab": tab_id,
-                "artifacts": ["analysis:fit"],
-                "paths": {"analysis:fit": str(image)},
+                "method": "tab.save_artifacts",
+                "params": {
+                    "artifacts": ["analysis:fit"],
+                    "paths": {"analysis:fit": str(image)},
+                    "tab_id": tab_id,
+                },
             },
         )
-        if "op" in saved:
-            assert (
-                call("wait", {"op": saved["op"], "timeout": 5})["status"] == "finished"
-            )
-        else:
-            assert saved["saved"] == {"analysis:fit": str(image)}
+        assert (
+            call("wait", {"op": saved["handle"], "timeout": 5})["status"] == "finished"
+        )
         assert image.read_bytes().startswith(b"\x89PNG")
         assert call("tab_close", {"tab": tab_id, "discard_unsaved": True}) == {
             "closed": tab_id
@@ -553,17 +595,20 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
             ),
         )
         started = call(
-            "tab_run",
+            "rpc_call",
             {
-                "tab": tab_id,
-                "expected": encode_ref(
-                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                ),
+                "method": "tab.run_start",
+                "params": {
+                    "expected": encode_ref(
+                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                    ),
+                    "tab_id": tab_id,
+                },
             },
         )
-        assert set(started) == {"op"}
-        assert isinstance(started["op"], int) and started["op"] > 0
-        _await_completed_run(call, started["op"])
+        assert set(started) == {"handle"}
+        assert isinstance(started["handle"], int) and started["handle"] > 0
+        _await_completed_run(call, started["handle"])
         assert fx.state.get_tab(tab_id).run.result is not None
     finally:
         bridge.disconnect()
@@ -591,12 +636,15 @@ def test_tab_run_rejects_missing_active_context_without_starting(
         )
         with pytest.raises(RuntimeError) as exc:
             call(
-                "tab_run",
+                "rpc_call",
                 {
-                    "tab": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
+                    "method": "tab.run_start",
+                    "params": {
+                        "expected": encode_ref(
+                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                        ),
+                        "tab_id": tab_id,
+                    },
                 },
             )
         assert getattr(exc.value, "reason", None) == "no_active_context"
@@ -637,23 +685,29 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             ),
         )
         op = call(
-            "tab_run",
+            "rpc_call",
             {
-                "tab": tab_id,
-                "expected": encode_ref(
-                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                ),
-            },
-        )["op"]
-        assert entered.wait(1)
-        with pytest.raises(RuntimeError, match="busy"):
-            call(
-                "tab_run",
-                {
-                    "tab": tab_id,
+                "method": "tab.run_start",
+                "params": {
                     "expected": encode_ref(
                         fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
                     ),
+                    "tab_id": tab_id,
+                },
+            },
+        )["handle"]
+        assert entered.wait(1)
+        with pytest.raises(RuntimeError, match="busy"):
+            call(
+                "rpc_call",
+                {
+                    "method": "tab.run_start",
+                    "params": {
+                        "expected": encode_ref(
+                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
+                        ),
+                        "tab_id": tab_id,
+                    },
                 },
             )
         editor = fx.ctrl.cfg_resources.lookup(tab_id)

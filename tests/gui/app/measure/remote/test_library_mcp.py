@@ -40,42 +40,37 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
     library_client, kind
 ):
     invoke, library = library_client
-    invoke("ml_create", {"role_id": "none_reset", "name": "seed"})
+    invoke(
+        "rpc_call",
+        {
+            "method": "context.ml_create_from_role",
+            "params": {"role_id": "none_reset", "name": "seed"},
+        },
+    )
     invoke("rpc_call", {"method": "context.snapshot"})
     selected = library.modules if kind == "module" else library.waveforms
     other = library.waveforms if kind == "module" else library.modules
     before = selected["seed"].to_dict()
     other_before = other["seed"].to_dict()
 
-    renamed = invoke("ml_rename", {"name": "seed", "new_name": "moved", "kind": kind})
+    renamed = invoke(
+        "rpc_call",
+        {
+            "method": f"context.ml_rename_{kind}",
+            "params": {"old": "seed", "new": "moved"},
+        },
+    )
     assert renamed["renamed"] == "moved"
     assert "seed" not in selected
     assert selected["moved"].to_dict() == before
     assert other["seed"].to_dict() == other_before
 
-    deleted = invoke("ml_delete", {"name": "moved"})
+    deleted = invoke(
+        "rpc_call", {"method": f"context.ml_del_{kind}", "params": {"name": "moved"}}
+    )
     assert deleted["deleted"] == "moved"
     assert "moved" not in selected
     assert other["seed"].to_dict() == other_before
-
-
-@pytest.mark.parametrize("tool", ["ml_rename", "ml_delete"])
-def test_ml_mutation_rejects_ambiguous_names_without_changing_library(
-    library_client, tool
-):
-    invoke, library = library_client
-    invoke("ml_create", {"role_id": "none_reset", "name": "seed"})
-    invoke("rpc_call", {"method": "context.snapshot"})
-    before = (library.modules["seed"].to_dict(), library.waveforms["seed"].to_dict())
-    arguments = {"name": "seed"}
-    if tool == "ml_rename":
-        arguments["new_name"] = "moved"
-    with pytest.raises(ValueError, match="ambiguous"):
-        invoke(tool, arguments)
-    assert (
-        library.modules["seed"].to_dict(),
-        library.waveforms["seed"].to_dict(),
-    ) == before
 
 
 def test_ml_rename_rejects_collision_without_overwriting(library_client):
@@ -86,41 +81,53 @@ def test_ml_rename_rejects_collision_without_overwriting(library_client):
     invoke("rpc_call", {"method": "context.snapshot"})
     before = {name: cfg.to_dict() for name, cfg in library.waveforms.items()}
     with pytest.raises((ValueError, GuiRpcError), match="exists|collision|already"):
-        invoke("ml_rename", {"name": "seed", "new_name": "occupied"})
+        invoke(
+            "rpc_call",
+            {
+                "method": "context.ml_rename_waveform",
+                "params": {"old": "seed", "new": "occupied"},
+            },
+        )
     assert {name: cfg.to_dict() for name, cfg in library.waveforms.items()} == before
 
 
 def test_ml_get_index_and_named_cfg_are_read_only(library_client):
     invoke, library = library_client
-    listed = invoke("ml_get", {})
+    listed = invoke("rpc_call", {"method": "context.ml_get", "params": {}})
     seed = next(item for item in listed["waveforms"] if item["name"] == "seed")
     assert seed["style"] == "const"
     assert isinstance(seed["description"], str) and seed["description"]
-    named = invoke("ml_get", {"name": "seed"})
+    named = invoke("rpc_call", {"method": "context.ml_get", "params": {"name": "seed"}})
     assert named == {
         "name": "seed",
         "kind": "waveform",
         "cfg": library.waveforms["seed"].to_dict(),
     }
     with pytest.raises(GuiRpcError, match="missing"):
-        invoke("ml_get", {"name": "missing"})
+        invoke("rpc_call", {"method": "context.ml_get", "params": {"name": "missing"}})
     assert sorted(library.waveforms) == ["seed"]
 
 
 def test_ml_roles_and_create_use_gui_role_defaults(library_client):
     invoke, library = library_client
-    roles = invoke("ml_roles", {})
+    roles = invoke("rpc_call", {"method": "context.ml_list_roles", "params": {}})[
+        "roles"
+    ]
     role = next(item for item in roles if item["role_id"] == "none_reset")
-    assert role["kind"] == "module"
+    assert role["item_kind"] == "module"
     assert role["default_name"] == "reset_none"
-    created = invoke("ml_create", {"role_id": "none_reset"})
-    assert created == {
-        "name": "reset_none",
-        "kind": "module",
-        "cfg": library.modules["reset_none"].to_dict(),
-    }
-    with pytest.raises((GuiRpcError, ValueError), match="name"):
-        invoke("ml_create", {"role_id": "const:blank"})
+    created = invoke(
+        "rpc_call",
+        {
+            "method": "context.ml_create_from_role",
+            "params": {"role_id": "none_reset", "name": "reset_none"},
+        },
+    )
+    assert created == {"created": "reset_none"}
+    stored = invoke(
+        "rpc_call", {"method": "context.ml_get", "params": {"name": "reset_none"}}
+    )
+    assert stored["cfg"] == library.modules["reset_none"].to_dict()
 
 
 def test_ml_edit_commits_prefix_and_save_as_preserves_source(library_client):
@@ -128,64 +135,80 @@ def test_ml_edit_commits_prefix_and_save_as_preserves_source(library_client):
     before = library.waveforms["seed"].to_dict()
     invoke("rpc_call", {"method": "context.snapshot"})
     saved = invoke(
-        "ml_edit",
+        "rpc_call",
         {
-            "name": "seed",
-            "edits": [{"path": "length", "value": 0.25}],
-            "save_as": "copy",
+            "method": "context.ml_edit",
+            "params": {
+                "name": "seed",
+                "edits": [{"path": "length", "value": 0.25}],
+                "save_as": "copy",
+                "kind": "waveform",
+            },
         },
     )
-    assert saved == {
-        "name": "copy",
-        "cfg": library.waveforms["copy"].to_dict(),
-        "applied": 1,
-        "failed": None,
-        "skipped": [],
-    }
-    assert saved["cfg"]["length"] == pytest.approx(0.25)
+    assert saved["valid"] is True
+    assert saved["applied"] == 1
+    copy_cfg = invoke(
+        "rpc_call", {"method": "context.ml_get", "params": {"name": "copy"}}
+    )["cfg"]
+    assert copy_cfg["length"] == pytest.approx(0.25)
     assert library.waveforms["seed"].to_dict() == before
     partial = invoke(
-        "ml_edit",
+        "rpc_call",
         {
-            "name": "seed",
-            "edits": [
-                {"path": "length", "value": 0.5},
-                {"path": "missing", "value": 1.0},
-                {"path": "length", "value": 0.9},
-            ],
+            "method": "context.ml_edit",
+            "params": {
+                "name": "seed",
+                "edits": [
+                    {"path": "length", "value": 0.5},
+                    {"path": "missing", "value": 1.0},
+                    {"path": "length", "value": 0.9},
+                ],
+                "kind": "waveform",
+            },
         },
     )
     assert partial["applied"] == 1
-    assert partial["failed"]["index"] == 1
-    assert partial["failed"]["path"] == "missing"
-    assert partial["skipped"] == [2]
-    assert partial["cfg"]["length"] == 0.5
+    assert partial["valid"] is False
+    assert partial["errors"][0]["path"] == "missing"
     assert library.waveforms["seed"].to_dict()["length"] == 0.5
-    assert library.waveforms["copy"].to_dict() == saved["cfg"]
+    assert library.waveforms["copy"].to_dict() == copy_cfg
     continued = invoke(
-        "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.75}]}
+        "rpc_call",
+        {
+            "method": "context.ml_edit",
+            "params": {
+                "name": "seed",
+                "edits": [{"path": "length", "value": 0.75}],
+                "kind": "waveform",
+            },
+        },
     )
-    assert continued["cfg"]["length"] == 0.75
+    assert continued["valid"] is True
+    assert library.waveforms["seed"].to_dict()["length"] == 0.75
 
 
 def test_ml_edit_first_failure_leaves_save_as_uncreated(library_client):
     invoke, library = library_client
     invoke("rpc_call", {"method": "context.snapshot"})
     result = invoke(
-        "ml_edit",
+        "rpc_call",
         {
-            "name": "seed",
-            "save_as": "copy",
-            "edits": [
-                {"path": "missing", "value": 1.0},
-                {"path": "length", "value": 0.9},
-            ],
+            "method": "context.ml_edit",
+            "params": {
+                "name": "seed",
+                "save_as": "copy",
+                "edits": [
+                    {"path": "missing", "value": 1.0},
+                    {"path": "length", "value": 0.9},
+                ],
+                "kind": "waveform",
+            },
         },
     )
     assert result["applied"] == 0
-    assert result["failed"]["index"] == 0
-    assert result["skipped"] == [1]
-    assert result["cfg"] is None
+    assert result["valid"] is False
+    assert result["errors"][0]["path"] == "missing"
     assert "copy" not in library.waveforms
     assert library.waveforms["seed"].to_dict()["length"] == 0.1
 
@@ -207,18 +230,20 @@ def test_ml_edit_module_and_eval_use_shared_lowering(library_client):
     )
     invoke("rpc_call", {"method": "context.snapshot"})
     result = invoke(
-        "ml_edit",
+        "rpc_call",
         {
-            "name": "pulse",
-            "kind": "module",
-            "edits": [
-                {"path": "gain", "value": {"__kind": "eval", "expr": "0.25 + 0.5"}}
-            ],
+            "method": "context.ml_edit",
+            "params": {
+                "name": "pulse",
+                "kind": "module",
+                "edits": [
+                    {"path": "gain", "value": {"__kind": "eval", "expr": "0.25 + 0.5"}}
+                ],
+            },
         },
     )
     assert result["applied"] == 1
-    assert result["failed"] is None
-    assert result["cfg"]["gain"] == 0.75
+    assert result["valid"] is True
     assert library.modules["pulse"].to_dict()["gain"] == 0.75
 
 
@@ -226,14 +251,33 @@ def test_ml_edit_requires_explicit_context_observation(library_client):
     invoke, library = library_client
     before = library.waveforms["seed"].to_dict()
     with pytest.raises(GuiRpcError) as exc:
-        invoke("ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.5}]})
+        invoke(
+            "rpc_call",
+            {
+                "method": "context.ml_edit",
+                "params": {
+                    "name": "seed",
+                    "edits": [{"path": "length", "value": 0.5}],
+                    "kind": "waveform",
+                },
+            },
+        )
     assert exc.value.reason == "stale_version"
     assert library.waveforms["seed"].to_dict() == before
     invoke("rpc_call", {"method": "context.snapshot"})
     saved = invoke(
-        "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.5}]}
+        "rpc_call",
+        {
+            "method": "context.ml_edit",
+            "params": {
+                "name": "seed",
+                "edits": [{"path": "length", "value": 0.5}],
+                "kind": "waveform",
+            },
+        },
     )
-    assert saved["cfg"]["length"] == pytest.approx(0.5)
+    assert saved["valid"] is True
+    assert library.waveforms["seed"].to_dict()["length"] == pytest.approx(0.5)
 
 
 def test_ml_edit_rejects_context_changed_by_another_connection(
@@ -254,11 +298,27 @@ def test_ml_edit_rejects_context_changed_by_another_connection(
             invoke("connect", {"port": fx.service.port})
             invoke("rpc_call", {"method": "context.snapshot"})
         second(
-            "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.25}]}
+            "rpc_call",
+            {
+                "method": "context.ml_edit",
+                "params": {
+                    "name": "seed",
+                    "edits": [{"path": "length", "value": 0.25}],
+                    "kind": "waveform",
+                },
+            },
         )
         with pytest.raises(GuiRpcError) as error:
             first(
-                "ml_edit", {"name": "seed", "edits": [{"path": "length", "value": 0.9}]}
+                "rpc_call",
+                {
+                    "method": "context.ml_edit",
+                    "params": {
+                        "name": "seed",
+                        "edits": [{"path": "length", "value": 0.9}],
+                        "kind": "waveform",
+                    },
+                },
             )
         assert error.value.reason == "stale_version"
         assert library.waveforms["seed"].to_dict()["length"] == 0.25
@@ -279,13 +339,18 @@ def test_ml_edit_save_as_rejects_existing_name_without_overwriting(
     )
     occupied = library.waveforms["occupied"].to_dict()
 
-    with pytest.raises(ValueError, match="already exists"):
+    invoke("rpc_call", {"method": "context.snapshot"})
+    with pytest.raises(GuiRpcError, match="already exists"):
         invoke(
-            "ml_edit",
+            "rpc_call",
             {
-                "name": "seed",
-                "edits": [{"path": "length", "value": 0.5}],
-                "save_as": destination,
+                "method": "context.ml_edit",
+                "params": {
+                    "name": "seed",
+                    "edits": [{"path": "length", "value": 0.5}],
+                    "save_as": destination,
+                    "kind": "waveform",
+                },
             },
         )
 
