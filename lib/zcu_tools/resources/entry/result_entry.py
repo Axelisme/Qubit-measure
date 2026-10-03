@@ -1,5 +1,7 @@
 """Creation and identity of a result entry across two explicit roots."""
 
+import errno
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -56,4 +58,20 @@ class ResultEntry:
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> "ResultEntry":
-        return cls(Path(result_root) / name, Path(database_root) / name)
+        result_path = Path(result_root) / name
+        database_path = Path(database_root) / name
+        for directory in (
+            result_path,
+            database_path,
+            result_path / "points",
+            result_path / "records",
+        ):
+            if not directory.exists():
+                raise FileNotFoundError(
+                    errno.ENOENT, os.strerror(errno.ENOENT), str(directory)
+                )
+            if not directory.is_dir():
+                raise NotADirectoryError(
+                    errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(directory)
+                )
+        return cls(result_path, database_path)
