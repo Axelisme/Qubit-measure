@@ -14,11 +14,11 @@ class EditView:
 
     @property
     def description(self) -> str | None:
-        raise NotImplementedError("Draft description access is not implemented")
+        return self._draft.general.description
 
     @description.setter
     def description(self, value: str | None) -> None:
-        raise NotImplementedError("Draft description writes are not implemented")
+        self._draft.general.description = value
 
 
 class SetupView:
@@ -27,11 +27,12 @@ class SetupView:
 
     @property
     def description(self) -> str | None:
-        raise NotImplementedError("Setup description access is not implemented")
+        return self._store.snapshot().general.description
 
     @description.setter
     def description(self, value: str | None) -> None:
-        raise NotImplementedError("Setup description writes are not implemented")
+        with self.edit() as draft:
+            draft.description = value
 
     @contextmanager
     def edit(self) -> Generator[EditView]:
