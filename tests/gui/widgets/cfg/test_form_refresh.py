@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,6 +10,10 @@ from qtpy.QtCore import QEvent
 from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QTreeWidget
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
+    CfgNodeSpec,
+    CfgSchema,
+    ChoiceBinding,
+    ChoiceSectionSpec,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -16,11 +21,11 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
 )
-from zcu_tools.gui.cfg.binding import ReferenceField, ScalarField
+from zcu_tools.gui.cfg.binding import ReferenceField, ScalarField, SectionField
 from zcu_tools.gui.widgets.cfg.registry import FieldRenderContext
 from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 
-from tests.gui.widgets.cfg._form_support import section_schema
+from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
 from tests.gui.widgets.cfg._refresh_support import (
     BadgeProvider,
     RecordingRenderers,
@@ -258,3 +263,145 @@ def test_tree_refresh_routes_root_and_rejects_unsupported_paths(
         root.teardown()
         root.deleteLater()
         draft.close()
+
+
+def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+
+    fields: dict[str, CfgNodeSpec] = {
+        "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
+        "half_width": ScalarSpec(label="Half width", type=float),
+        "manual_value": ScalarSpec(label="Manual", type=float),
+    }
+    schema = section_schema(
+        {
+            "search": ChoiceSectionSpec(
+                label="Search",
+                fields=fields,
+                bindings=(
+                    ChoiceBinding(
+                        "mode",
+                        {
+                            "auto": CfgSectionSpec(
+                                fields={"half_width": fields["half_width"]}
+                            ),
+                            "fixed": CfgSectionSpec(
+                                fields={"manual_value": fields["manual_value"]}
+                            ),
+                        },
+                    ),
+                ),
+            ),
+            "stable": ScalarSpec(label="Stable", type=float),
+        },
+        {
+            "search": CfgSectionValue(
+                fields={
+                    "mode": DirectValue("auto"),
+                    "half_width": DirectValue(1.0),
+                    "manual_value": DirectValue(2.0),
+                }
+            ),
+            "stable": DirectValue(3.0),
+        },
+    )
+    from qtpy.QtCore import Qt
+
+    w = CfgFormWidget()
+    model = attach_draft(w, schema, ctrl)
+    root_widget = w._root_widget
+    assert isinstance(root_widget, TreeCfgWidget)
+    # Choice decoration paths should update section-locally and keep widget instance
+    w.decoration_paths()
+    assert "search.half_width" in w.decoration_paths()
+    # Capture unrelated subtree widget identity before change
+    stable_before = root_widget._leaf_path_to_widget["stable"]
+    stable_item_before = root_widget._tree.findItems(  # type: ignore[attr-defined]
+        "Stable",
+        Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive,
+        0,  # type: ignore[attr-defined]
+    )
+    assert stable_item_before
+    search = model.fields["search"]
+    assert isinstance(search, SectionField)
+    # Capture search's half_width widget before (should be replaced)
+    half_before = root_widget._leaf_path_to_widget.get("search.half_width")
+    assert half_before is not None
+    search.fields["mode"].set_value(DirectValue("fixed"))
+    w.decoration_paths()
+
+    assert w._root_widget is root_widget
+    assert "search.half_width" not in w.decoration_paths()
+    assert "search.manual_value" in w.decoration_paths()
+    # Unrelated leaf "stable" must retain same widget/item (section-local)
+    assert root_widget._leaf_path_to_widget["stable"] is stable_before
+    # Changed section's old leaf should be gone, new leaf should be present and different
+    assert "search.half_width" not in root_widget._leaf_path_to_widget
+    manual_after = root_widget._leaf_path_to_widget.get("search.manual_value")
+    assert manual_after is not None
+    assert manual_after is not half_before
+
+
+def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
+    qapp, ctrl, monkeypatch: pytest.MonkeyPatch
+):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+
+    fields: dict[str, CfgNodeSpec] = {
+        "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
+        "half_width": ScalarSpec(label="Half width", type=float),
+        "manual_value": ScalarSpec(label="Manual", type=float),
+    }
+    schema = section_schema(
+        {
+            "search": ChoiceSectionSpec(
+                fields=fields,
+                bindings=(
+                    ChoiceBinding(
+                        "mode",
+                        {
+                            "auto": CfgSectionSpec(
+                                fields={"half_width": fields["half_width"]}
+                            ),
+                            "fixed": CfgSectionSpec(
+                                fields={"manual_value": fields["manual_value"]}
+                            ),
+                        },
+                    ),
+                ),
+            )
+        },
+        {
+            "search": CfgSectionValue(
+                fields={
+                    "mode": DirectValue("auto"),
+                    "half_width": DirectValue(1.0),
+                    "manual_value": DirectValue(2.0),
+                }
+            )
+        },
+    )
+    form = CfgFormWidget()
+    model = attach_draft(form, schema, ctrl)
+    original_root = form._root_widget
+    assert isinstance(original_root, TreeCfgWidget)
+    monkeypatch.setattr(original_root, "refresh_section", lambda _path: False)
+    emitted: list[CfgSchema] = []
+    form.schema_changed.connect(emitted.append)
+
+    search = cast(SectionField, model.fields["search"])
+    search.fields["mode"].set_value(DirectValue("fixed"))
+    form._flush_pending_section_refresh()
+
+    assert form._root_widget is not original_root
+    assert emitted == []
+    assert form._schema_snapshot_pending is True
+
+    qapp.processEvents()
+
+    assert len(emitted) == 1
+    emitted_search = emitted[0].value.fields["search"]
+    assert isinstance(emitted_search, CfgSectionValue)
+    assert emitted_search.fields["mode"] == DirectValue("fixed")
