@@ -3,7 +3,6 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-
 from zcu_tools.analysis.fitting.base import quadratic_fit, quadratic_fit_wo_a
 
 type QuadraticFitter = Callable[
