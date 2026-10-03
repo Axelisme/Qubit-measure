@@ -163,6 +163,20 @@ def test_empty_analysis_result_has_no_invalid_values(fx, connected_mcp, stage):
     assert parsed == {"summary": None, "invalid": []}
 
 
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_finite_analysis_preserves_zero_and_existing_null(fx, connected_mcp, stage):
+    tab = fx.ctrl.new_tab("fake")
+    _install_result(fx, tab, stage, 0.0, 101,
+                    summary={"value": 0.0, "error": None, "other": [2.0, None, False]})
+    reply = connected_mcp("rpc_call", {"method": _result_method(stage),
+                                     "params": {"tab_id": tab, "operation_id": 101}})
+    parsed = json.loads(json.dumps(reply), parse_constant=_reject_json_constant)
+    assert parsed["summary"] == {
+        "value": 0.0, "error": None, "other": [2.0, None, False]
+    }
+    assert parsed["invalid"] == []
+
+
 def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
     tab = fx.ctrl.new_tab("fake")
     run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)

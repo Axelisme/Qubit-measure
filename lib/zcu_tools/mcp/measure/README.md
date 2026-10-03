@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-03, recipe-first tools
+**Last updated:** 2026-10-04, analysis invalid-field retention
 
 # `zcu_tools/mcp/measure/`
 
@@ -27,6 +27,11 @@ Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` �
 ## 分析、互動與接受
 
 `tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 負責結果、實際參數、失效內容、canonical 圖像保存與預覽交付。互動分析立即交接 tab、op、狀態、可用命令與圖像。
+
+GUI 的分析投影把非有限 summary 數字換成 null，以 `invalid` 記錄欄位路徑與原因。
+Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(execution)` 不重新推導原因。
+不可估誤差不刪除有限 fit value、warning 或已確認的保存路徑，也不觸發自動 accept。
+這項表示轉換不改 operation 的 failed outcome 或 generic context 的拒絕規則。
 
 `tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 不加 seen guard，較晚的 owner-loop commit 生效。沒有來源鎖或自動重試。
 

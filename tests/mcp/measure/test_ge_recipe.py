@@ -1,6 +1,7 @@
 """GE calibration behavior through shipped tools and the GUI wire boundary."""
 
 import base64
+import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Event
@@ -556,6 +557,33 @@ def test_ge_requires_calibrated_pi_instead_of_custom_template(tmp_path):
         assert not gui.ran
     finally:
         client.context.session.close()
+
+
+def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_client):
+    gui, client = ge_client
+    for method in ("tab.get_analyze_result", "tab.get_post_analyze_result"):
+        def result(params, result_method=method):
+            observed = gui(result_method, params)
+            observed["summary"]["stderr"] = None
+            observed["invalid"] = [{"path": "summary.stderr", "reason": "non_finite"}]
+            return {"ok": True, "result": observed}
+        client.transport.replies[method] = result
+    reply = client.call("singleshot_ge", {"pi_ref": "pi"})
+    data = json.loads(json.dumps(reply.data, allow_nan=False))
+    assert data["status"] == "finished"
+    assert data["raw_save"]["path"] == "/actual/raw.h5"
+    for stage, summary, image in (
+        ("analysis", {"offset": 0.24, "stderr": None}, "trace"),
+        ("post_analysis", {"fidelity": 0.98, "stderr": None}, "cloud"),
+    ):
+        assert data[stage]["result"]["summary"] == summary
+        assert data[stage]["result"]["invalid"] == [
+            {"path": "summary.stderr", "reason": "non_finite"}
+        ]
+        assert data[stage]["saved_images"] == [
+            {"figure_name": image, "image_path": f"/actual/{image}.png"}
+        ]
+    assert "tab.writeback_apply" not in [method for method, _ in client.transport.sent]
 
 
 def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):

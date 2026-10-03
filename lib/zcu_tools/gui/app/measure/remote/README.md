@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-03, explicit simulation initialization RPC
+**Last updated:** 2026-10-04, analysis-only nonfinite JSON projection
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -125,8 +125,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 82`, `GUI_VERSION = 114`, and
-`MCP_VERSION = 105`, defined in `zcu_tools.mcp.measure.server`. WIRE 82 adds
+Current measure-gui values are `WIRE_VERSION = 83`, `GUI_VERSION = 115`, and
+`MCP_VERSION = 108`, defined in `zcu_tools.mcp.measure.server`. WIRE 83 adds
+analysis-result `invalid` paths and reasons. GUI 115 replaces nonfinite analysis
+summary numbers with null. MCP 108 retains those facts in analysis executions.
+MCP 107 provides recipe-first tools and public RPC; MCP 106 adds Two-tone and
+Rabi recipes. WIRE 82 adds
 `unit` to `device.snapshot` and optional `run_operation_id` to `tab.get_figure`.
 The Run token only accepts the Run pane and cannot accompany an analysis
 `operation_id`. GUI 114 rejects a replaced Run before rendering and preserves
@@ -243,6 +247,11 @@ GUI owns observation and write tracking:
   source with `result_superseded`, even after a fresh snapshot. Omission or null
   keeps current-result semantics. The source token is session-local and does not
   unlock missing or stale observations. The all-tabs index reveals no per-tab state.
+- Primary and Post result getters preserve finite summary values and replace
+  NaN or Infinity with null. The `invalid` list records each summary path and
+  `non_finite` reason, including nested dict and array paths. Existing null values
+  add no reason. Warnings and errors remain in the summary. This projection only
+  applies to analysis results; full context reads still reject unsupported values.
 - Analysis result getters with an explicit `operation_id` verify the pane's
   provenance and return its summary, actual result `params`, and complete
   `operation_state`. Result params are distinct from the next-edit parameter
