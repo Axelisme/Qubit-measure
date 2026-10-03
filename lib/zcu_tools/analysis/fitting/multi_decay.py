@@ -436,15 +436,15 @@ def fit_with_vadality(
     fig, (ax, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 12))
 
     plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax.plot(times, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-    ax.plot(times, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-    ax.plot(times, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+    ax.plot(times, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
+    ax.plot(times, populations[:, 1], color="red", label="Excited", **plot_kwargs)
+    ax.plot(times, populations[:, 2], color="green", label="Other", **plot_kwargs)
 
     r_num = Rs.shape[0]
     for i in range(r_num):
-        ax.plot(times, fit_pps[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
-        ax.plot(times, fit_pps[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
-        ax.plot(times, fit_pps[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+        ax.plot(times, fit_pps[i, :, 0], color="blue", alpha=i / r_num)
+        ax.plot(times, fit_pps[i, :, 1], color="red", alpha=i / r_num)
+        ax.plot(times, fit_pps[i, :, 2], color="green", alpha=i / r_num)
 
     ax.legend()
     ax.grid(True)
@@ -556,9 +556,9 @@ def fit_dual_with_vadality(
 
     # ax1
     plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax1.plot(times, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-    ax1.plot(times, populations1[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-    ax1.plot(times, populations1[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+    ax1.plot(times, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)
+    ax1.plot(times, populations1[:, 1], color="red", label="Excited", **plot_kwargs)
+    ax1.plot(times, populations1[:, 2], color="green", label="Other", **plot_kwargs)
 
     r_num = Rs.shape[0]
     for i in range(r_num):
@@ -571,9 +571,9 @@ def fit_dual_with_vadality(
 
     # ax2
     plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax2.plot(times, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-    ax2.plot(times, populations2[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-    ax2.plot(times, populations2[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+    ax2.plot(times, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)
+    ax2.plot(times, populations2[:, 1], color="red", label="Excited", **plot_kwargs)
+    ax2.plot(times, populations2[:, 2], color="green", label="Other", **plot_kwargs)
 
     r_num = Rs.shape[0]
     for i in range(r_num):
