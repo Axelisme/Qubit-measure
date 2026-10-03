@@ -276,3 +276,36 @@ def test_newer_minor_keeps_unknown_nested_fields_outside_the_typed_snapshot(
         .values.left
         == 10.0
     )
+
+
+def test_custom_validation_rejects_the_merged_document_before_publication(
+    document_path: Path,
+) -> None:
+    error = ValueError("combined budget exceeded")
+
+    def bounded_total(document: SyntheticDocument) -> None:
+        if sum(document.values.values()) > 10:
+            raise error
+
+    first = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", validate=bounded_total
+    )
+    second = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", validate=bounded_total
+    )
+    events: list[DocumentChange] = []
+    first.subscribe(events.append)
+    stack = ExitStack()
+    draft = stack.enter_context(first.edit())
+    draft.values["left"] = 8.0
+    with second.edit() as other:
+        other.values["right"] = 8.0
+    committed = document_path.read_bytes()
+    with pytest.raises(ValueError) as raised:
+        stack.close()
+
+    assert raised.value is error
+    assert document_path.read_bytes() == committed
+    assert first.snapshot().values == {"left": 1.0, "right": 2.0}
+    assert second.snapshot().values == {"left": 1.0, "right": 8.0}
+    assert events == []
