@@ -21,7 +21,14 @@ def _validate(arguments: dict[str, Any]) -> None:
         value = arguments.get(name)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
-    for name in ("center_mhz", "span_mhz", "gain", "pulse_length_us"):
+    for name in (
+        "center_mhz",
+        "span_mhz",
+        "gain",
+        "pulse_length_us",
+        "frequency_mhz",
+        "max_length_us",
+    ):
         value = arguments.get(name)
         if value is not None and not _finite(value):
             raise ValueError(f"{name} must be a finite real number or null")
@@ -145,9 +152,108 @@ def _frequency_sweep(
     return sweep, missing
 
 
+def _drive_frequency(
+    publication: dict[str, Any], arguments: dict[str, Any], sources: dict[str, Any]
+) -> tuple[list[dict[str, Any]], str, list[MissingParameter]]:
+    path = ["modules", "qub_pulse", "freq"]
+    if arguments.get("frequency_mhz") is not None:
+        return (
+            [{"path": path, "value": arguments["frequency_mhz"]}],
+            "frequency_mhz",
+            [],
+        )
+    drive = _node(publication, "modules", "qub_pulse")
+    if drive.get("ref") in sources["ml"]["modules"] and _usable_frequency(
+        _node(publication, *path)
+    ):
+        return [], f"library:{drive['ref']}", []
+    if _finite(sources["md"].get("q_f")):
+        return [{"path": path, "value": {"__expr": "q_f"}}], "q_f", []
+    return (
+        [],
+        "missing",
+        [
+            MissingParameter(
+                "frequency_mhz",
+                "Provide frequency_mhz, a valid drive_ref frequency, or calibrated q_f",
+            )
+        ],
+    )
+
+
 def time_rabi(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one length sweep without requiring a prior pi calibration."""
-    raise NotImplementedError("Time Rabi is not implemented")
+    _validate(arguments)
+    sources = ctx.rpc("context.snapshot", {})
+    publication = ctx.prepare_tab(
+        "twotone/rabi/len_rabi", arguments.get("reuse_tab_id")
+    )
+    publication = _select_modules(ctx, publication, arguments)
+    edits, origins, missing = _readout_frequency(
+        publication, sources["md"], sources["ml"]["modules"]
+    )
+    drive_edits, drive_origin, drive_missing = _drive_frequency(
+        publication, arguments, sources
+    )
+    edits.extend(drive_edits)
+    origins[("modules", "qub_pulse", "freq")] = drive_origin
+    if missing or drive_missing:
+        ctx.needs_parameters([*drive_missing, *missing])
+        return
+    sweep = {}
+    if arguments.get("max_length_us") is not None:
+        sweep["stop"] = arguments["max_length_us"]
+    if arguments.get("points") is not None:
+        sweep["expts"] = arguments["points"]
+    if sweep:
+        edits.append({"path": ["sweep", "length"], "value": sweep})
+    for parameter, path in (
+        ("gain", ("modules", "qub_pulse", "gain")),
+        ("reps", ("reps",)),
+        ("rounds", ("rounds",)),
+    ):
+        if arguments.get(parameter) is not None:
+            edits.append({"path": list(path), "value": arguments[parameter]})
+        origins[path] = (
+            parameter if arguments.get(parameter) is not None else "gui_default"
+        )
+    publication = ctx.edit_cfg(publication, edits)
+    if publication["status"] != "Valid":
+        raise GuiRpcError("Time Rabi cfg is not Valid", reason="invalid_cfg")
+    fields = {
+        ".".join(path): {
+            "value": _node(publication, *path)["input"]["resolved"],
+            "input": _node(publication, *path)["input"],
+            "source": origin,
+        }
+        for path, origin in origins.items()
+    }
+    inputs = _node(publication, "sweep", "length")["inputs"]
+    fields["sweep.length"] = {
+        "value": {key: inputs[key]["resolved"] for key in ("start", "stop", "expts")},
+        "input": inputs,
+        "source": {
+            "start": "gui_default",
+            "stop": "max_length_us"
+            if arguments.get("max_length_us") is not None
+            else "gui_default",
+            "expts": "points" if arguments.get("points") is not None else "gui_default",
+        },
+    }
+    for slot, parameter in (
+        ("reset", "use_reset"),
+        ("readout", "readout_ref"),
+        ("qub_pulse", "drive_ref"),
+    ):
+        fields[f"modules.{slot}"] = {
+            "value": _node(publication, "modules", slot).get("ref"),
+            "source": "explicit"
+            if arguments.get(parameter) is not None
+            else "disabled"
+            if slot == "reset"
+            else "gui_default",
+        }
+    ctx.run_once(publication, fields)
 
 
 def twotone_spectrum(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
