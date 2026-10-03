@@ -35,6 +35,8 @@ class ComponentView:
     def __getattr__(self, name: str) -> YamlValue:
         model = self._model()
         component_registry.check_fields(model.kind, {name: None}, path=self._path)
+        if name not in model.model_fields_set:
+            raise AttributeError(f"{self._path}.{name}: field is not set")
         return TypeAdapter(YamlValue).validate_python(getattr(model, name))
 
     def __setattr__(self, name: str, value: object) -> None:
