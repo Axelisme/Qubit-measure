@@ -33,8 +33,8 @@
 import warnings
 
 try:
-    from qiskit_metal import Dict, draw  # type: ignore[reportMissingImports]
-    from qiskit_metal.qlibrary.core import (  # type: ignore[reportMissingImports]
+    from qiskit_metal import Dict, draw  # pyright: ignore[reportMissingImports]
+    from qiskit_metal.qlibrary.core import (  # pyright: ignore[reportMissingImports]
         BaseQubit,
     )
 except ImportError:

@@ -14,8 +14,8 @@
 """Tee-shaped coupler with fillet for Q components."""
 
 try:
-    from qiskit_metal import Dict, draw  # type: ignore[reportMissingImports]
-    from qiskit_metal.qlibrary.core.base import (  # type: ignore[reportMissingImports]
+    from qiskit_metal import Dict, draw  # pyright: ignore[reportMissingImports]
+    from qiskit_metal.qlibrary.core.base import (  # pyright: ignore[reportMissingImports]
         QComponent,
     )
 except ImportError:
