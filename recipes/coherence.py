@@ -12,22 +12,25 @@ from .cfg_sources import readout_frequency as _readout_frequency
 
 def t2ramsey(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one calibrated Ramsey delay sweep."""
-    ctx.needs_parameters([MissingParameter("pi2_ref", "Provide a calibrated pi/2 pulse")])
+    _run(ctx, arguments, "t2ramsey", (("pi2_pulse", "pi2_ref"),))
 
 
 def t2echo(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one calibrated Echo total-delay sweep."""
-    ctx.needs_parameters([MissingParameter("pi2_ref", "Provide calibrated pulses")])
+    _run(ctx, arguments, "t2echo", (("pi_pulse", "pi_ref"), ("pi2_pulse", "pi2_ref")))
 
 
 def _validate(arguments: dict[str, Any]) -> None:
-    for name in ("reuse_tab_id", "readout_ref", "pi_ref", "use_reset"):
+    for name in ("reuse_tab_id", "readout_ref", "pi_ref", "pi2_ref", "use_reset"):
         value = arguments.get(name)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
     delay = arguments.get("max_delay_us")
     if delay is not None and (not _finite(delay) or delay <= 0):
         raise ValueError("max_delay_us must be a positive finite real number or null")
+    detune = arguments.get("detune_ratio")
+    if detune is not None and not _finite(detune):
+        raise ValueError("detune_ratio must be a finite real number or null")
     for name in ("points", "reps", "rounds"):
         value = arguments.get(name)
         if value is not None and (
@@ -39,10 +42,13 @@ def _validate(arguments: dict[str, Any]) -> None:
 
 
 def _select_modules(
-    ctx: RecipeContext, publication: dict[str, Any], arguments: dict[str, Any]
+    ctx: RecipeContext,
+    publication: dict[str, Any],
+    arguments: dict[str, Any],
+    pulse_slots: tuple[tuple[str, str], ...],
 ) -> dict[str, Any]:
     references = {"reset": arguments.get("use_reset")}
-    for slot, parameter in (("pi_pulse", "pi_ref"), ("readout", "readout_ref")):
+    for slot, parameter in (*pulse_slots, ("readout", "readout_ref")):
         if arguments.get(parameter) is not None:
             references[slot] = arguments[parameter]
     publication = ctx.edit_cfg(
@@ -64,18 +70,30 @@ def _select_modules(
 
 def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     """Run one calibrated T1 delay sweep, save raw data and Primary analysis."""
+    _run(ctx, arguments, "t1", (("pi_pulse", "pi_ref"),))
+
+
+def _run(
+    ctx: RecipeContext,
+    arguments: dict[str, Any],
+    experiment: str,
+    pulse_slots: tuple[tuple[str, str], ...],
+) -> None:
     _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
-    publication = ctx.prepare_tab("twotone/t1", arguments.get("reuse_tab_id"))
-    publication = _select_modules(ctx, publication, arguments)
+    publication = ctx.prepare_tab(
+        f"twotone/{experiment}", arguments.get("reuse_tab_id")
+    )
+    publication = _select_modules(ctx, publication, arguments, pulse_slots)
     edits, origins, missing = _readout_frequency(
         publication, sources["md"], sources["ml"]["modules"]
     )
-    pulse = _node(publication, "modules", "pi_pulse")
-    if pulse.get("ref") not in sources["ml"]["modules"]:
-        missing.append(
-            MissingParameter("pi_ref", "Provide a calibrated library pi pulse")
-        )
+    for slot, parameter in pulse_slots:
+        pulse = _node(publication, "modules", slot)
+        if pulse.get("ref") not in sources["ml"]["modules"]:
+            missing.append(
+                MissingParameter(parameter, f"Provide a calibrated library {slot}")
+            )
     if missing:
         ctx.needs_parameters(missing)
         return
@@ -85,7 +103,10 @@ def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
             sweep[key] = arguments[parameter]
     if sweep:
         edits.append({"path": ["sweep", "length"], "value": sweep})
-    for parameter in ("reps", "rounds"):
+    scalars = (
+        ("reps", "rounds") if experiment == "t1" else ("reps", "rounds", "detune_ratio")
+    )
+    for parameter in scalars:
         if arguments.get(parameter) is not None:
             edits.append({"path": [parameter], "value": arguments[parameter]})
         origins[(parameter,)] = (
@@ -93,7 +114,7 @@ def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
         )
     publication = ctx.edit_cfg(publication, edits)
     if publication["status"] != "Valid":
-        raise GuiRpcError("T1 cfg is not Valid", reason="invalid_cfg")
+        raise GuiRpcError(f"{experiment} cfg is not Valid", reason="invalid_cfg")
     fields = {
         ".".join(path): {
             "value": _node(publication, *path)["input"]["resolved"],
@@ -120,7 +141,7 @@ def t1(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
     for slot, parameter in (
         ("reset", "use_reset"),
         ("readout", "readout_ref"),
-        ("pi_pulse", "pi_ref"),
+        *pulse_slots,
     ):
         fields[f"modules.{slot}"] = {
             "value": _node(publication, "modules", slot).get("ref"),

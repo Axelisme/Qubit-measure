@@ -28,8 +28,11 @@ class CoherenceGui(LookbackGui):
         tree["reps"] = scalar(19)
         tree["detune_ratio"] = scalar(0.2)
         tree["modules"]["children"]["pi2_pulse"] = {
-            "kind": "reference", "valid": True, "ref": "<Custom:Pulse>",
-            "error": None, "children": {"freq": scalar(6100.0)},
+            "kind": "reference",
+            "valid": True,
+            "ref": "<Custom:Pulse>",
+            "error": None,
+            "children": {"freq": scalar(6100.0)},
         }
         tree["sweep"] = section(
             length={
@@ -81,8 +84,14 @@ class CoherenceGui(LookbackGui):
 @pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
 def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
     gui = CoherenceGui(adapter=recipe)
-    arguments = {"pi2_ref": "pi2", "max_delay_us": 84.0, "points": 43,
-                 "detune_ratio": 0.37, "reps": 7, "rounds": 5}
+    arguments = {
+        "pi2_ref": "pi2",
+        "max_delay_us": 84.0,
+        "points": 43,
+        "detune_ratio": 0.37,
+        "reps": 7,
+        "rounds": 5,
+    }
     if recipe == "t2echo":
         arguments["pi_ref"] = "pi"
     with recipe_client(tmp_path, gui) as client:
@@ -90,7 +99,11 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         data = reply.data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
-        assert fields["sweep.length"]["value"] == {"start": 0.04, "stop": 84.0, "expts": 43}
+        assert fields["sweep.length"]["value"] == {
+            "start": 0.04,
+            "stop": 84.0,
+            "expts": 43,
+        }
         assert fields["detune_ratio"]["value"] == 0.37
         assert fields["modules.pi2_pulse"]["value"] == "pi2"
         if recipe == "t2echo":
@@ -102,7 +115,9 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         assert data["raw_save"]["path"] == "/actual/raw.h5"
         assert data["analysis"]["status"] == "finished"
         assert reply.images
-        assert [method for method, _ in client.transport.sent].count("tab.run_start") == 1
+        assert [method for method, _ in client.transport.sent].count(
+            "tab.run_start"
+        ) == 1
 
 
 def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):

@@ -45,7 +45,12 @@ RECIPES = (
                 "properties": {
                     **{
                         key: {"type": ["string", "null"], "minLength": 1}
-                        for key in ("reuse_tab_id", "readout_ref", "use_reset", *pulse_refs)
+                        for key in (
+                            "reuse_tab_id",
+                            "readout_ref",
+                            "use_reset",
+                            *pulse_refs,
+                        )
                     },
                     **{
                         key: {"type": ["number", "null"]}
@@ -60,8 +65,18 @@ RECIPES = (
             run=run,
         )
         for name, description, pulse_refs, run in (
-            ("t2ramsey", "Run one calibrated Ramsey delay sweep.", ("pi2_ref",), t2ramsey),
-            ("t2echo", "Run one calibrated Echo total-delay sweep.", ("pi_ref", "pi2_ref"), t2echo),
+            (
+                "t2ramsey",
+                "Run one calibrated Ramsey delay sweep.",
+                ("pi2_ref",),
+                t2ramsey,
+            ),
+            (
+                "t2echo",
+                "Run one calibrated Echo total-delay sweep.",
+                ("pi_ref", "pi2_ref"),
+                t2echo,
+            ),
         )
     ),
     RecipeDefinition(
