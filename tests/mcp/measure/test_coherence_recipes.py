@@ -19,12 +19,18 @@ def recipe_client(tmp_path, gui):
 
 
 class CoherenceGui(LookbackGui):
-    def __init__(self, pi_ref="<Custom:Pulse>"):
+    def __init__(self, pi_ref="<Custom:Pulse>", adapter="t1"):
         super().__init__()
+        self.adapter = adapter
         self.md = {"r_f": 5100.0}
-        self.library = {"pi": {"type": "pulse"}}
+        self.library = {"pi": {"type": "pulse"}, "pi2": {"type": "pulse"}}
         tree = self.publication["tree"]["children"]
         tree["reps"] = scalar(19)
+        tree["detune_ratio"] = scalar(0.2)
+        tree["modules"]["children"]["pi2_pulse"] = {
+            "kind": "reference", "valid": True, "ref": "<Custom:Pulse>",
+            "error": None, "children": {"freq": scalar(6100.0)},
+        }
         tree["sweep"] = section(
             length={
                 "kind": "sweep",
@@ -62,14 +68,41 @@ class CoherenceGui(LookbackGui):
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.new":
-            assert params == {"adapter_name": "twotone/t1"}
+            assert params == {"adapter_name": f"twotone/{self.adapter}"}
             return {"tab_id": "t"}
         result = super().__call__(method, params)
         if method == "tab.snapshot":
-            result["tabs"][0]["adapter_name"] = "twotone/t1"
+            result["tabs"][0]["adapter_name"] = f"twotone/{self.adapter}"
         if method == "context.snapshot":
             result["ml"]["modules"] = self.library
         return result
+
+
+@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
+def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
+    gui = CoherenceGui(adapter=recipe)
+    arguments = {"pi2_ref": "pi2", "max_delay_us": 84.0, "points": 43,
+                 "detune_ratio": 0.37, "reps": 7, "rounds": 5}
+    if recipe == "t2echo":
+        arguments["pi_ref"] = "pi"
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(recipe, arguments)
+        data = reply.data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["sweep.length"]["value"] == {"start": 0.04, "stop": 84.0, "expts": 43}
+        assert fields["detune_ratio"]["value"] == 0.37
+        assert fields["modules.pi2_pulse"]["value"] == "pi2"
+        if recipe == "t2echo":
+            assert fields["modules.pi_pulse"]["value"] == "pi"
+        assert fields["modules.reset"]["value"] is None
+        assert fields["reps"]["value"] == 7
+        assert fields["rounds"]["value"] == 5
+        assert data["tab"] == "t"
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["analysis"]["status"] == "finished"
+        assert reply.images
+        assert [method for method, _ in client.transport.sent].count("tab.run_start") == 1
 
 
 def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):

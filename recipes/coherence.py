@@ -10,6 +10,16 @@ from .cfg_sources import finite_number as _finite
 from .cfg_sources import readout_frequency as _readout_frequency
 
 
+def t2ramsey(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Run one calibrated Ramsey delay sweep."""
+    ctx.needs_parameters([MissingParameter("pi2_ref", "Provide a calibrated pi/2 pulse")])
+
+
+def t2echo(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
+    """Run one calibrated Echo total-delay sweep."""
+    ctx.needs_parameters([MissingParameter("pi2_ref", "Provide calibrated pulses")])
+
+
 def _validate(arguments: dict[str, Any]) -> None:
     for name in ("reuse_tab_id", "readout_ref", "pi_ref", "use_reset"):
         value = arguments.get(name)

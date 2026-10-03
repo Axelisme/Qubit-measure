@@ -6,7 +6,7 @@ from typing import Any
 
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 
-from .coherence import t1
+from .coherence import t1, t2echo, t2ramsey
 from .drive import amplitude_rabi, time_rabi, twotone_spectrum
 from .lookback import lookback
 from .onetone import (
@@ -35,6 +35,35 @@ _ONETONE_COMMON_PROPERTIES = {
 
 
 RECIPES = (
+    *(
+        RecipeDefinition(
+            name=name,
+            description=description,
+            input_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    **{
+                        key: {"type": ["string", "null"], "minLength": 1}
+                        for key in ("reuse_tab_id", "readout_ref", "use_reset", *pulse_refs)
+                    },
+                    **{
+                        key: {"type": ["number", "null"]}
+                        for key in ("max_delay_us", "detune_ratio")
+                    },
+                    **{
+                        key: {"type": ["integer", "null"]}
+                        for key in ("points", "reps", "rounds")
+                    },
+                },
+            },
+            run=run,
+        )
+        for name, description, pulse_refs, run in (
+            ("t2ramsey", "Run one calibrated Ramsey delay sweep.", ("pi2_ref",), t2ramsey),
+            ("t2echo", "Run one calibrated Echo total-delay sweep.", ("pi_ref", "pi2_ref"), t2echo),
+        )
+    ),
     RecipeDefinition(
         name="t1",
         description="Run one calibrated T1 delay sweep and save raw and Primary analysis.",
