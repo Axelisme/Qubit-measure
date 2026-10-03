@@ -7,9 +7,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
+from ruamel.yaml import YAML
 
-from zcu_tools.format_version import FormatVersion, YamlValue
+from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
 
 type FieldPath = tuple[str, ...]
 
@@ -71,10 +72,19 @@ class DocumentStore[T: BaseModel]:
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
     ) -> None:
-        raise NotImplementedError
+        yaml = YAML(typ="rt")
+        with path.open(encoding="utf-8") as stream:
+            document = TypeAdapter(YamlMap).validate_python(yaml.load(stream))
+        validate_header(
+            document,
+            expected_format=format,
+            supported_version=supported_version,
+            source=path,
+        )
+        self._snapshot = model.model_validate(document)
 
     def snapshot(self) -> T:
-        raise NotImplementedError
+        return self._snapshot.model_copy(deep=True)
 
     def edit(self) -> AbstractContextManager[T]:
         raise NotImplementedError
