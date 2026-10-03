@@ -3,7 +3,8 @@
 from collections.abc import Mapping, Sequence
 from difflib import get_close_matches
 from pathlib import Path
-from typing import get_args
+from types import UnionType
+from typing import Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -42,7 +43,9 @@ def _validate_reference(model: type[BaseModel], reference: str) -> None:
             types = tuple(
                 item for item in get_args(annotation) if item is not type(None)
             )
-            if annotation is str or types == (str,):
+            if annotation is str or (
+                get_origin(annotation) in (Union, UnionType) and types == (str,)
+            ):
                 return
             break
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
