@@ -122,6 +122,45 @@ def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -
     return original == current
 
 
+def _yaml_value(value: object) -> YamlValue:
+    if isinstance(value, BaseModel):
+        value = value.model_dump(exclude_unset=True)
+    if isinstance(value, dict):
+        value = {key: _yaml_value(child) for key, child in value.items()}
+    elif isinstance(value, list):
+        value = [_yaml_value(child) for child in value]
+    return TypeAdapter(YamlValue).validate_python(value)
+
+
+def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
+    if isinstance(base, BaseModel) and isinstance(draft, BaseModel) and type(base) is type(draft):
+        original = TypeAdapter(YamlMap).validate_python(base.model_dump(exclude_unset=True))
+        candidate = TypeAdapter(YamlMap).validate_python(draft.model_dump(exclude_unset=True))
+        for name in type(draft).model_fields:
+            before, after = _edit_values(getattr(base, name), getattr(draft, name))
+            if name in original:
+                original[name] = before
+            # An in-place edit does not mark its containing field as explicitly set.
+            if name in candidate or not _same_value(before, after):
+                candidate[name] = after
+        return original, candidate
+    if isinstance(base, dict) and isinstance(draft, dict):
+        original_map = cast(dict[str, object], base)
+        draft_map = cast(dict[str, object], draft)
+        return (
+            {key: _yaml_value(child) for key, child in original_map.items()},
+            {key: _edit_values(original_map.get(key, child), child)[1] for key, child in draft_map.items()},
+        )
+    if isinstance(base, list) and isinstance(draft, list):
+        original_list = cast(list[object], base)
+        draft_list = cast(list[object], draft)
+        return (
+            [_yaml_value(child) for child in original_list],
+            [_edit_values(original_list[index] if index < len(original_list) else child, child)[1] for index, child in enumerate(draft_list)],
+        )
+    return _yaml_value(base), _yaml_value(draft)
+
+
 def _changes(
     base: YamlValue | _Missing, draft: YamlValue | _Missing, path: FieldPath = ()
 ) -> Iterator[tuple[FieldPath, YamlValue | _Missing]]:
@@ -202,8 +241,7 @@ class DocumentStore[T: BaseModel]:
                 base_document, base = self._read()
                 draft = base.model_copy(deep=True)
             yield draft
-            base_values = TypeAdapter(YamlMap).validate_python(base.model_dump(exclude_unset=True))
-            draft_values = TypeAdapter(YamlMap).validate_python(draft.model_dump(exclude_unset=True))
+            base_values, draft_values = _edit_values(base, draft)
             patches = tuple(_changes(base_values, draft_values))
             with self.locked():
                 document, _ = self._read()
