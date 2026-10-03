@@ -232,3 +232,47 @@ def test_registry_rejects_invalid_chain_registration(
             source=Path("entry/setup.yaml"),
         )
         assert result["format_version"] == f"{edge_end.major}.{edge_end.minor}"
+
+
+@pytest.mark.parametrize(
+    "edges, start, target",
+    [
+        ([], FormatVersion(1, 0), FormatVersion(2, 0)),
+        (
+            [(FormatVersion(1, 0), FormatVersion(1, 1))],
+            FormatVersion(1, 0),
+            FormatVersion(2, 0),
+        ),
+        (
+            [(FormatVersion(1, 0), FormatVersion(2, 0))],
+            FormatVersion(1, 0),
+            FormatVersion(1, 1),
+        ),
+        ([], FormatVersion(2, 0), FormatVersion(1, 0)),
+    ],
+    ids=["no-chain", "gap", "overshoot", "downgrade"],
+)
+def test_migration_rejects_unreachable_target_without_mutating_input(
+    edges: list[tuple[FormatVersion, FormatVersion]],
+    start: FormatVersion,
+    target: FormatVersion,
+) -> None:
+    registry = MigrationRegistry()
+    for edge_start, edge_end in edges:
+        registry.register("zcu.synthetic", edge_start, edge_end, migration_to(edge_end))
+    raw_version = f"{start.major}.{start.minor}"
+    document: YamlMap = {"format": "zcu.synthetic", "format_version": raw_version}
+
+    with pytest.raises(MigrationError) as caught:
+        registry.migrate(
+            document,
+            format="zcu.synthetic",
+            target_version=target,
+            source=Path("entry/setup.yaml"),
+        )
+
+    assert caught.value.format == "zcu.synthetic"
+    assert caught.value.from_version == start
+    assert caught.value.target_version == target
+    assert caught.value.detail
+    assert document["format_version"] == raw_version
