@@ -11,7 +11,7 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
 from tqdm.auto import tqdm
 
-from .base import fit_func
+from .base import FitResult, fit_func
 from .shared import FitDiagnostics, FitTrace, ParameterSpec, SharedFitResult, fit_shared
 
 RATE_UPPER_GUESS_MULTIPLIER = 5.0
@@ -170,7 +170,7 @@ def fit_transition_rates(
     tuple[float, float, float, float, float, float],
     tuple[float, float, float, float, float, float],
     NDArray[np.float64],
-    tuple[list[float], NDArray[np.float64]],
+    FitResult,
 ]:
     """
     Returns:

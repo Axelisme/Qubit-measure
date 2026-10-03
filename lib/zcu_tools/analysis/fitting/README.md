@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-09-27 — resonance fitting 契約
+**Last updated:** 2026-10-03 — fitting parameter containers
 
 ## fitting helpers
 
@@ -35,6 +35,9 @@ callers不解包positional per-trace covariance。
 `analysis.fitting.base.fit_func` 保留既有 `curve_fit` 失敗時回退 `init_p` 的
 contract，但會發出 `RuntimeWarning`，讓 caller 不再把 fallback 靜默當成成功擬合。
 固定參數只在至少一個參數非 `None` 時啟用。
+`FitParameters` 描述既有的兩種容器：正常 optimizer 回傳 ndarray，fixed 或 fallback
+回傳 list。`FitResult` 將此 parameter vector 與 covariance 配對。直接透傳的 wrappers
+沿用此契約；wrapper 自己組出的 tuple 保持原樣，不做統一容器轉換。
 
 Lorentzian family fitting 以 median baseline 判斷初始 peak/dip 方向，避免
 qubit-frequency peak 或 dip 靠近掃描邊界時被左右端點平均誤判成反向寬曲線。

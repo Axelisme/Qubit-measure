@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .base import assign_init_p, fit_func
+from .base import FitResult, assign_init_p, fit_func
 
 
 # exponential decay function
@@ -21,7 +21,7 @@ def fitexp(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
+) -> FitResult:
     """return (y0, yscale, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 3
@@ -49,7 +49,7 @@ def fitexp(
         [np.inf, 2 * np.abs(fitparams[1]), np.inf],
     )
 
-    return fit_func(xdata, ydata, expfunc, fitparams, bounds, fixedparams=fixedparams)  # type: ignore
+    return fit_func(xdata, ydata, expfunc, fitparams, bounds, fixedparams=fixedparams)
 
 
 def dual_expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
@@ -63,7 +63,7 @@ def fit_dualexp(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[tuple[float, float, float, float, float], NDArray[np.float64]]:
+) -> FitResult:
     """return (y0, yscale1, decay_time1, yscale2, decay_time2), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5
@@ -110,4 +110,4 @@ def fit_dualexp(
 
     return fit_func(
         xdata, ydata, dual_expfunc, fitparams, bounds, fixedparams=fixedparams
-    )  # type: ignore
+    )

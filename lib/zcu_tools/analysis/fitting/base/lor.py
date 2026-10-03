@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .base import assign_init_p, fit_func
+from .base import FitResult, assign_init_p, fit_func
 
 
 # lorentzian function
@@ -40,7 +40,7 @@ def fitlor(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     if fitparams is None:
         fitparams = [None] * 5
     fitparams = list(fitparams)
@@ -77,7 +77,7 @@ def fit_asym_lor(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     if fitparams is None:
         fitparams = [None] * 6
     fitparams = list(fitparams)

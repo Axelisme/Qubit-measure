@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .base import assign_init_p, fit_func
+from .base import FitResult, assign_init_p, fit_func
 
 
 # sinusoidal function
@@ -21,7 +21,7 @@ def fitcos(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     """fitparams = [y0, yscale, freq (1/x), phase (deg)]"""
     if fitparams is None:
         fitparams = [None] * 4
@@ -78,7 +78,7 @@ def fitdecaycos(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     """return (y0, yscale, freq, phase, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5

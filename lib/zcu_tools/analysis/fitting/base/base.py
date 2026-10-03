@@ -11,6 +11,9 @@ from numpy.typing import NDArray
 
 Y_DataType = TypeVar("Y_DataType", bound=np.generic)
 
+type FitParameters = list[float] | NDArray[np.float64]
+type FitResult = tuple[FitParameters, NDArray[np.float64]]
+
 
 def with_fixed_params(
     fitfunc: Callable[..., NDArray[Y_DataType]],
@@ -50,7 +53,7 @@ def with_fixed_params(
 
 
 def add_fixed_params_back(
-    pOpt: list[float], pCov: NDArray[np.float64], fixedparams: Sequence[float | None]
+    pOpt: FitParameters, pCov: NDArray[np.float64], fixedparams: Sequence[float | None]
 ) -> tuple[list[float], NDArray[np.float64]]:
     _fixedparams = np.asarray(fixedparams, dtype=float)
     non_fixed_idxs = np.isnan(_fixedparams)
@@ -75,7 +78,7 @@ def fit_func(
     bounds: tuple[Sequence[float], Sequence[float]] | None = None,
     fixedparams: Sequence[float | None] | None = None,
     **kwargs,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     has_fixedparams = fixedparams is not None and any(
         p is not None for p in fixedparams
     )
