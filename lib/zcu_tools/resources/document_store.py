@@ -212,10 +212,10 @@ class DocumentStore[T: BaseModel]:
                     current = _lookup(document, path)
                     if not _same_value(original, current):
                         raise ConflictError(self._path, path, original, current)
-                units = self._unit_specs(document)
                 for path, value in patches:
                     _apply(document, path, value)
-                for path, spec in units.items():
+                # Resolve after structural edits; changed values are still in working units.
+                for path, spec in self._unit_specs(document).items():
                     if any(path[: len(changed)] == changed for changed, _ in patches):
                         value = self._scale_value(
                             _lookup(document, path), _unit_factor(spec), path
