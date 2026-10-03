@@ -115,6 +115,15 @@ def _flux_device(
     else:
         snapshot = ctx.rpc("device.snapshot", {"name": device})["snapshot"]
         unit = snapshot["unit"]
+        info = snapshot.get("info")
+        if (
+            unit == "none"
+            and snapshot.get("type_name") == "FakeDevice"
+            and isinstance(info, dict)
+            and info.get("type") == "FakeDevice"
+            and arguments.get("flux_unit") == "native"
+        ):
+            return device, "native"
         if not isinstance(unit, str) or not unit.strip() or unit == "none":
             if arguments.get("flux_device") is not None:
                 raise GuiRpcError(
