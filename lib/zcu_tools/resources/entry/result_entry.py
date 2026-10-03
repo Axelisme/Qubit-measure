@@ -11,6 +11,7 @@ from ruamel.yaml import YAML
 
 from zcu_tools.resources.document_store import DocumentStore
 
+from .errors import PartialCommitError
 from .schema import SetupDocument
 
 
@@ -48,8 +49,21 @@ def rename_entry(
     result_old.rename(result_new)
     try:
         database_old.rename(database_new)
-    except OSError:
-        result_new.rename(result_old)
+    except OSError as cause:
+        try:
+            if result_old.exists() or result_old.is_symlink():
+                raise FileExistsError(
+                    errno.EEXIST, os.strerror(errno.EEXIST), str(result_old)
+                )
+            result_new.rename(result_old)
+        except OSError as recovery_cause:
+            raise PartialCommitError(
+                completed=(result_new,),
+                pending=(database_new,),
+                recovery_failed=(result_old,),
+                cause=cause,
+                recovery_cause=recovery_cause,
+            ) from cause
         raise
 
 
