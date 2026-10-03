@@ -13,6 +13,7 @@ from zcu_tools.resources.document_store import DocumentStore
 
 from .errors import PartialCommitError
 from .schema import SetupDocument
+from .views import SetupView
 
 
 def _entry_path(root: str | Path, name: str) -> Path:
@@ -77,6 +78,10 @@ class ResultEntry:
             format="zcu.parameter-container",
             lock_path=result_path / ".entry.lock",
         )
+
+    @property
+    def setup(self) -> SetupView:
+        return SetupView(self._setup_store)
 
     @property
     def entry_id(self) -> str:

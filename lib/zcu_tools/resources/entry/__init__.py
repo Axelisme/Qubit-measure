@@ -2,3 +2,4 @@
 
 from .errors import PartialCommitError
 from .result_entry import ResultEntry, rename_entry
+from .views import EditView, SetupView

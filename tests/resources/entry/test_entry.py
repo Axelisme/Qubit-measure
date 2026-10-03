@@ -29,6 +29,24 @@ def read_entry_files(path: Path) -> dict[Path, bytes]:
     }
 
 
+def test_setup_description_uses_one_transaction_for_direct_and_edit_writes(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    assert entry.setup.description is None
+
+    entry.setup.description = "chip annotation"
+    with entry.setup.edit() as draft:
+        draft.description = "updated annotation"
+
+    assert entry.setup.description == "updated annotation"
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.description == "updated annotation"
+    with (results / "entry" / "setup.yaml").open(encoding="utf-8") as stream:
+        document = YAML(typ="safe").load(stream)
+    assert document["general"]["description"] == "updated annotation"
+
+
 @pytest.mark.parametrize(
     ("field", "invalid"),
     [
