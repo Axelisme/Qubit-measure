@@ -112,3 +112,49 @@ def test_migration_same_version_returns_independent_document() -> None:
     future["nested"] = ["changed"]
     assert document["future"] == {"nested": [1, "retained"]}
     assert result["format_version"] == "1.7"
+
+
+def test_migration_applies_registered_chain_across_major_without_mutating_input() -> (
+    None
+):
+    registry = MigrationRegistry()
+    document: YamlMap = {
+        "format": "zcu.synthetic",
+        "format_version": "1.0",
+        "visited": [],
+        "future": {"nested": [1, "retained"]},
+    }
+
+    def advance(doc: YamlMap, version: str) -> YamlMap:
+        visited = doc["visited"]
+        if not isinstance(visited, list):
+            raise TypeError("visited must be a list")
+        visited.append(version)
+        doc["format_version"] = version
+        return doc
+
+    registry.register(
+        "zcu.synthetic",
+        FormatVersion(1, 0),
+        FormatVersion(1, 1),
+        lambda doc: advance(doc, "1.1"),
+    )
+    registry.register(
+        "zcu.synthetic",
+        FormatVersion(1, 1),
+        FormatVersion(2, 0),
+        lambda doc: advance(doc, "2.0"),
+    )
+
+    result = registry.migrate(
+        document,
+        format="zcu.synthetic",
+        target_version=FormatVersion(2, 0),
+        source=Path("entry/setup.yaml"),
+    )
+
+    assert result["format_version"] == "2.0"
+    assert result["visited"] == ["1.1", "2.0"]
+    assert result["future"] == {"nested": [1, "retained"]}
+    assert document["format_version"] == "1.0"
+    assert document["visited"] == []
