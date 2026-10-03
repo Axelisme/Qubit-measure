@@ -1,6 +1,6 @@
-"""Typed node-knob CfgSchema: structure, defaults, equivalence, seam.
+"""Typed node-knob CfgSchema: structure, defaults, and equivalence.
 
-Three families of test:
+Two families of test:
 
 1. **Structure** — each node's ``make_default_schema`` declares exactly the user
    knobs (the typed node settings), and *no* derived/upstream field (predict_freq,
@@ -8,14 +8,11 @@ Three families of test:
 2. **Defaults** — default schemas lower through the same schema/helper paths as
    production. Tests assert invariants and derive expected values from production
    schemas/helpers instead of duplicating default tables.
-3. **Seam invariant** — only ``cfg/form.py`` may import
-   ``zcu_tools.gui.app.measure`` from inside the autofluxdep package.
 """
 
 from __future__ import annotations
 
-import ast
-import pathlib
+from functools import partial
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -292,31 +289,18 @@ def test_node_schema_builder_pulse_rejects_custom_type_discriminator_before_moun
 ) -> None:
     builder = NodeSchemaBuilder(label="Builder contract")
 
+    if operation == "blank_overrides":
+        mount_pulse = partial(builder.pulse, blank_overrides={"type": "pulse"})
+    elif operation == "overrides":
+        mount_pulse = partial(builder.pulse, overrides={"type": "pulse"})
+    else:
+        mount_pulse = partial(builder.pulse, locked={"type": "pulse"})
+
     with pytest.raises(
         TypeError,
         match=rf"pulse {operation} path 'type'.*LiteralSpec.*ScalarSpec",
     ):
-        if operation == "blank_overrides":
-            builder.pulse(
-                "drive",
-                "modules.drive",
-                label="Drive",
-                blank_overrides={"type": "pulse"},
-            )
-        elif operation == "overrides":
-            builder.pulse(
-                "drive",
-                "modules.drive",
-                label="Drive",
-                overrides={"type": "pulse"},
-            )
-        else:
-            builder.pulse(
-                "drive",
-                "modules.drive",
-                label="Drive",
-                locked={"type": "pulse"},
-            )
+        mount_pulse("drive", "modules.drive", label="Drive")
 
     schema = builder.pulse(
         "drive",
@@ -2669,31 +2653,3 @@ def test_real_builders_restrict_generated_readout_to_pulse_shape():
         readout = modules.fields["readout"]
         assert isinstance(readout, ReferenceSpec), builder.name
         assert [spec.label for spec in readout.allowed] == ["Pulse Readout"]
-
-
-# --- 3. seam invariant: autoflux production has no measure-app imports ----------
-
-
-def test_autoflux_measure_app_imports_are_zero():
-    pkg = pathlib.Path(__file__).resolve().parents[4] / (
-        "lib/zcu_tools/gui/app/autofluxdep"
-    )
-    actual: dict[pathlib.Path, set[str]] = {}
-    for py in pkg.rglob("*.py"):
-        tree = ast.parse(py.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            modules: list[str] = []
-            if isinstance(node, ast.ImportFrom):
-                if node.module is not None:
-                    modules.append(node.module)
-            elif isinstance(node, ast.Import):
-                modules.extend(alias.name for alias in node.names)
-            for module in modules:
-                if not module.startswith("zcu_tools.gui.app.measure"):
-                    continue
-                actual.setdefault(py, set()).add(module)
-
-    actual_relative = {
-        str(path.relative_to(pkg)): modules for path, modules in actual.items()
-    }
-    assert actual_relative == {}

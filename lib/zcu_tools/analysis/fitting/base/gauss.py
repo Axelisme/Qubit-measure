@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .base import assign_init_p, fit_func
+from .base import FitResult, assign_init_p, fit_func
 
 
 # Gaussian function
@@ -22,7 +22,7 @@ def fit_gauss(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     """params: [y0, yscale, x_c, sigma]"""
     if fixedparams is not None and len(fixedparams) != 4:
         raise ValueError(
@@ -50,7 +50,7 @@ def fit_gauss(
             / (len(xdata) - 1)
             * np.sum(norm_ydata > 0.5 * np.abs(yscale))
         )
-        assign_init_p(fitparams, [y0, yscale, x_c, sigma])  # type: ignore
+        assign_init_p(fitparams, [y0, yscale, x_c, sigma])
     fitparams = cast(list[float], fitparams)
 
     # bounds
@@ -121,7 +121,7 @@ def fit_dual_gauss(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     if fixedparams is not None and len(fixedparams) != 6:
         raise ValueError(
             "Fixed parameters must be a list of six elements: [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]"

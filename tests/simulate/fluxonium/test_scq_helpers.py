@@ -13,10 +13,12 @@ from zcu_tools.simulate.fluxonium.scq_settings import (
 def test_scq_progress_restores_after_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scq_settings, "PROGRESSBAR_DISABLED", False)
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with scq_progress(progress=False):
-            assert scq_settings.PROGRESSBAR_DISABLED is True
-            raise RuntimeError("boom")
+    with scq_progress(progress=False):
+        assert scq_settings.PROGRESSBAR_DISABLED is True
+    assert scq_settings.PROGRESSBAR_DISABLED is False
+
+    with pytest.raises(RuntimeError, match="boom"), scq_progress(progress=False):
+        raise RuntimeError("boom")
 
     assert scq_settings.PROGRESSBAR_DISABLED is False
 
@@ -26,10 +28,15 @@ def test_scq_t1_warning_restores_after_exception(
 ) -> None:
     monkeypatch.setattr(scq_settings, "T1_DEFAULT_WARNING", True)
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with scq_t1_default_warning(enabled=False):
-            assert scq_settings.T1_DEFAULT_WARNING is False
-            raise RuntimeError("boom")
+    with scq_t1_default_warning(enabled=False):
+        assert scq_settings.T1_DEFAULT_WARNING is False
+    assert scq_settings.T1_DEFAULT_WARNING is True
+
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        scq_t1_default_warning(enabled=False),
+    ):
+        raise RuntimeError("boom")
 
     assert scq_settings.T1_DEFAULT_WARNING is True
 

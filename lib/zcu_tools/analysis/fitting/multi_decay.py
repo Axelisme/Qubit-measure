@@ -11,7 +11,7 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
 from tqdm.auto import tqdm
 
-from .base import fit_func
+from .base import FitResult, fit_func
 from .shared import FitDiagnostics, FitTrace, ParameterSpec, SharedFitResult, fit_shared
 
 RATE_UPPER_GUESS_MULTIPLIER = 5.0
@@ -170,7 +170,7 @@ def fit_transition_rates(
     tuple[float, float, float, float, float, float],
     tuple[float, float, float, float, float, float],
     NDArray[np.float64],
-    tuple[list[float], NDArray[np.float64]],
+    FitResult,
 ]:
     """
     Returns:
@@ -436,15 +436,15 @@ def fit_with_vadality(
     fig, (ax, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 12))
 
     plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax.plot(times, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-    ax.plot(times, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-    ax.plot(times, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+    ax.plot(times, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
+    ax.plot(times, populations[:, 1], color="red", label="Excited", **plot_kwargs)
+    ax.plot(times, populations[:, 2], color="green", label="Other", **plot_kwargs)
 
     r_num = Rs.shape[0]
     for i in range(r_num):
-        ax.plot(times, fit_pps[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
-        ax.plot(times, fit_pps[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
-        ax.plot(times, fit_pps[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+        ax.plot(times, fit_pps[i, :, 0], color="blue", alpha=i / r_num)
+        ax.plot(times, fit_pps[i, :, 1], color="red", alpha=i / r_num)
+        ax.plot(times, fit_pps[i, :, 2], color="green", alpha=i / r_num)
 
     ax.legend()
     ax.grid(True)
@@ -556,30 +556,30 @@ def fit_dual_with_vadality(
 
     # ax1
     plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax1.plot(times, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-    ax1.plot(times, populations1[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-    ax1.plot(times, populations1[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+    ax1.plot(times, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)
+    ax1.plot(times, populations1[:, 1], color="red", label="Excited", **plot_kwargs)
+    ax1.plot(times, populations1[:, 2], color="green", label="Other", **plot_kwargs)
 
     r_num = Rs.shape[0]
     for i in range(r_num):
-        ax1.plot(times, fit_pps1[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
-        ax1.plot(times, fit_pps1[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
-        ax1.plot(times, fit_pps1[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+        ax1.plot(times, fit_pps1[i, :, 0], color="blue", alpha=i / r_num)
+        ax1.plot(times, fit_pps1[i, :, 1], color="red", alpha=i / r_num)
+        ax1.plot(times, fit_pps1[i, :, 2], color="green", alpha=i / r_num)
 
     ax1.legend()
     ax1.grid(True)
 
     # ax2
     plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax2.plot(times, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-    ax2.plot(times, populations2[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-    ax2.plot(times, populations2[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+    ax2.plot(times, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)
+    ax2.plot(times, populations2[:, 1], color="red", label="Excited", **plot_kwargs)
+    ax2.plot(times, populations2[:, 2], color="green", label="Other", **plot_kwargs)
 
     r_num = Rs.shape[0]
     for i in range(r_num):
-        ax2.plot(times, fit_pps2[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
-        ax2.plot(times, fit_pps2[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
-        ax2.plot(times, fit_pps2[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+        ax2.plot(times, fit_pps2[i, :, 0], color="blue", alpha=i / r_num)
+        ax2.plot(times, fit_pps2[i, :, 1], color="red", alpha=i / r_num)
+        ax2.plot(times, fit_pps2[i, :, 2], color="green", alpha=i / r_num)
 
     ax2.legend()
     ax2.grid(True)

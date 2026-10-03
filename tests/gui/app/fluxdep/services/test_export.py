@@ -14,10 +14,10 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
 
 
-def test_export_empty_raises():
+def test_export_empty_raises(tmp_path):
     st = FluxDepState()
-    with pytest.raises(ValueError):
-        ExportService(st).export_spectrums(filepath="/tmp/should_not_write.hdf5")
+    with pytest.raises(ValueError, match="no spectra to export"):
+        ExportService(st).export_spectrums(filepath=str(tmp_path / "empty.hdf5"))
 
 
 def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):
@@ -35,9 +35,8 @@ def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):
     loaded = load_spectrums(out)
     assert name in loaded
     result = loaded[name]
-    # NOTE: dump_spectrums/load_spectrums do NOT persist the "type" field (a
-    # NotRequired key in SpectrumResult) — spec_type is lost on round-trip. This
-    # is an existing spectrum export limitation, recorded for v1.
+    # The type field is optional in older collections. Current writers preserve
+    # it as a group attribute when supplied.
     assert result["flux_half"] == 0.0
     assert result["flux_period"] == 2.0
     # points round-trip

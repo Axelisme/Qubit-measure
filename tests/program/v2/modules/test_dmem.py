@@ -153,7 +153,9 @@ def test_load_value_run_compressed_nonzero_offset_calls_inc_reg():
 
 
 def test_scan_with_empty_values_rejected():
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="ScanWith requires a non-empty values sequence"
+    ):
         ScanWith("s", [], val_reg="v")
 
 

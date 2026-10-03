@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 from zcu_tools.program.v2.modules import (
     ModuleCfgFactory,  # ensures leaf subclass registration
 )
@@ -102,7 +102,7 @@ class TestDirectReadoutCfg:
         assert cfg.gen_ch is None
 
     def test_extra_field_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="unknown_field"):
             DirectReadoutCfg.model_validate(_direct_dict(unknown_field=99))
 
     def test_set_param_ro_freq(self):
@@ -117,7 +117,7 @@ class TestDirectReadoutCfg:
 
     def test_set_param_unknown_raises(self):
         cfg = _make_direct_cfg()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown parameter: ro_ch"):
             cfg.set_param("ro_ch", 5)
 
 
@@ -203,7 +203,7 @@ class TestPulseReadoutCfg:
 
     def test_set_param_unknown_raises(self):
         cfg = _make_pulse_ro_cfg()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown parameter: ro_ch"):
             cfg.set_param("ro_ch", 5)
 
 

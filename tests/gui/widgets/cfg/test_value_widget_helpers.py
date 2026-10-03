@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QLineEdit,
@@ -31,7 +31,7 @@ def test_write_and_connect_value_widget(
     factory,
     value,
     type_,
-    expected,  # noqa: ARG001
+    expected,
 ) -> None:
     widget = factory()
     callback = MagicMock()
@@ -43,7 +43,7 @@ def test_write_and_connect_value_widget(
     callback.assert_called_once()
 
 
-def test_write_and_connect_combo_widget(qapp) -> None:  # noqa: ARG001
+def test_write_and_connect_combo_widget(qapp) -> None:
     widget = QComboBox()
     widget.addItems(["a", "b"])
     widget.setCurrentIndex(-1)
@@ -56,7 +56,7 @@ def test_write_and_connect_combo_widget(qapp) -> None:  # noqa: ARG001
     callback.assert_called_once()
 
 
-def test_committed_value_widget_defers_line_edit_callback(qapp) -> None:  # noqa: ARG001
+def test_committed_value_widget_defers_line_edit_callback(qapp) -> None:
     widget = QLineEdit()
     callback = MagicMock()
     connect_committed_value_widget(widget, callback)
@@ -81,7 +81,7 @@ def test_committed_value_widget_defers_line_edit_callback(qapp) -> None:  # noqa
 )
 def test_committed_value_widget_keeps_non_text_changes_immediate(
     qapp, factory, change
-) -> None:  # noqa: ARG001
+) -> None:
     widget = factory()
     callback = MagicMock()
     connect_committed_value_widget(widget, callback)
@@ -91,7 +91,7 @@ def test_committed_value_widget_keeps_non_text_changes_immediate(
     callback.assert_called()
 
 
-def test_value_widget_helpers_reject_unsupported_widget(qapp) -> None:  # noqa: ARG001
+def test_value_widget_helpers_reject_unsupported_widget(qapp) -> None:
     widget = QWidget()
     with pytest.raises(TypeError, match="Unsupported value widget"):
         write_value_widget(widget, 1)

@@ -89,8 +89,8 @@ def test_add_tab_duplicate_raises():
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
+    dup_adapter = _make_adapter()
     with pytest.raises(ValueError, match="already exists"):
-        dup_adapter = _make_adapter()
         _add_tab(state, "t1", dup_adapter)
 
 
@@ -141,20 +141,20 @@ def test_reorder_tabs_changes_order_without_replacing_sessions():
 
 
 @pytest.mark.parametrize(
-    "tab_ids",
+    ("tab_ids", "error"),
     [
-        ["t1", "t1"],
-        ["t1"],
-        ["t1", "ghost"],
+        (["t1", "t1"], "duplicate tab_id in reorder"),
+        (["t1"], "reorder_tabs must contain exactly the current tabs"),
+        (["t1", "ghost"], "reorder_tabs must contain exactly the current tabs"),
     ],
 )
-def test_reorder_tabs_rejects_non_matching_tab_set(tab_ids: list[str]):
+def test_reorder_tabs_rejects_non_matching_tab_set(tab_ids: list[str], error: str):
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
     _add_tab(state, "t2", adapter)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=error):
         state.reorder_tabs(tab_ids)
 
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 
 from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
-from qtpy.QtGui import QBrush, QColor  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtGui import QBrush, QColor
+from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -361,7 +361,7 @@ class ResourceCfgFormWidget(QWidget):
         )
 
     def _remember_expanded(self, item: QTreeWidgetItem, expanded: bool) -> None:  # noqa: FBT001 - Qt signal
-        path = item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        path = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(path, tuple):
             self._expanded[path] = expanded
 
@@ -387,7 +387,7 @@ class ResourceCfgFormWidget(QWidget):
                 item = (
                     QTreeWidgetItem(parent) if parent else QTreeWidgetItem(self._tree)
                 )
-                item.setData(0, Qt.ItemDataRole.UserRole, path)  # type: ignore[attr-defined]
+                item.setData(0, Qt.ItemDataRole.UserRole, path)
                 item.setText(0, getattr(node.spec, "label", "") or path[-1])
                 self._rows[path] = item
                 control = self._make_input(path, node)

@@ -71,5 +71,12 @@ def _direct_readout_cfg() -> DirectReadoutCfg:
 def test_concrete_cfg_set_param_rejects_unknown_name(make_cfg: CfgFactory):
     cfg = make_cfg()
 
-    with pytest.raises(ValueError):
+    if isinstance(cfg, NoneResetCfg):
+        error = "NoneReset does not support set_param"
+    elif isinstance(cfg, ArbWaveformCfg):
+        error = "Arb waveform length is asset-derived"
+    else:
+        error = "Unknown parameter: __unknown_param__"
+
+    with pytest.raises(ValueError, match=error):
         cfg.set_param("__unknown_param__", 1.0)

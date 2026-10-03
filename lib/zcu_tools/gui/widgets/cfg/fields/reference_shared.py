@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
-from qtpy.QtWidgets import QComboBox, QLabel  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QComboBox, QLabel
 
 from zcu_tools.gui.cfg import (
     ReferenceSpec,

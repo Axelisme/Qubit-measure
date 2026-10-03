@@ -88,7 +88,7 @@ def test_branch_rejects_qickparam_duration(mock_prog):
 
 
 def test_repeat_negative_n_rejected():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Repeat n must be greater than or equal to 0"):
         Repeat("lp", n=-1)
 
 

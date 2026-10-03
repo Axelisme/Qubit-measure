@@ -8,11 +8,12 @@ and reference-shape elision are view-only (S2).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import cast, final
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QBrush, QColor, QPainter, QPen  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor, QPainter, QPen
+from qtpy.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QProxyStyle,
@@ -25,15 +26,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceSpec, is_custom_reference_key
-from zcu_tools.gui.cfg.binding import (
-    CenteredSweepField,
-    CfgField,
-    ReferenceField,
-    ScalarField,
-    SectionField,
-    SweepField,
-)
+from zcu_tools.gui.cfg import is_custom_reference_key
+from zcu_tools.gui.cfg.binding import CfgField, ReferenceField, SectionField
 
 from .presentation import (
     apply_tree_item_decoration,
@@ -69,7 +63,7 @@ class _TreeBranchStyle(QProxyStyle):
     longer use depth backgrounds (A1).
     """
 
-    def drawPrimitive(  # type: ignore[override]
+    def drawPrimitive(
         self,
         element: QStyle.PrimitiveElement,
         option: QStyleOption | None,
@@ -77,38 +71,27 @@ class _TreeBranchStyle(QProxyStyle):
         widget: QWidget | None = None,
     ) -> None:
         if option is None or painter is None:
-            super().drawPrimitive(element, option, painter, widget)  # type: ignore[arg-type]
-            return
-        if element != QStyle.PrimitiveElement.PE_IndicatorBranch:  # type: ignore[attr-defined]
             super().drawPrimitive(element, option, painter, widget)
             return
-        state = option.state  # type: ignore[attr-defined]
-        has_sibling = bool(state & QStyle.StateFlag.State_Sibling)  # type: ignore[attr-defined]
-        has_item = bool(state & QStyle.StateFlag.State_Item)  # type: ignore[attr-defined]
+        if element != QStyle.PrimitiveElement.PE_IndicatorBranch:
+            super().drawPrimitive(element, option, painter, widget)
+            return
+        state = option.state
+        has_sibling = bool(state & QStyle.StateFlag.State_Sibling)
+        has_item = bool(state & QStyle.StateFlag.State_Item)
         if not (has_sibling or has_item):
             return
-        rect = option.rect  # type: ignore[attr-defined]
+        rect = option.rect
         x = rect.center().x()
         y = rect.center().y()
-        # A1: depth is per-segment indentation column only, normalized for horizontal viewport offset
-        pen_color = QColor("#b8c1cc")
-        try:
-            if _INDENTATION_PX:
-                logical_x = rect.x()
-                # Normalize for horizontal scroll so same logical guide keeps same color
-                if widget is not None and isinstance(widget, QTreeWidget):
-                    try:
-                        h_bar = widget.horizontalScrollBar()
-                        if h_bar is not None:
-                            logical_x += h_bar.value()
-                    except Exception:
-                        pass
-                depth_guess = (
-                    max(0, int(logical_x // _INDENTATION_PX)) if logical_x >= 0 else 0
-                )
-                pen_color = _branch_color(depth_guess)
-        except Exception:
-            pen_color = QColor("#b8c1cc")
+        # Use the logical indentation column, not the clipped viewport position.
+        logical_x = rect.x()
+        if isinstance(widget, QTreeWidget):
+            h_bar = widget.horizontalScrollBar()
+            if h_bar is not None:
+                logical_x += h_bar.value()
+        depth = max(0, logical_x // _INDENTATION_PX)
+        pen_color = _branch_color(depth)
         painter.save()
         painter.setPen(QPen(pen_color, 1))
         if has_sibling:
@@ -124,16 +107,16 @@ def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
     """Create the shared dense tree viewport and keep its branch style alive."""
     tree = QTreeWidget()
     tree.setObjectName("cfgTree")
-    tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
-    tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-    tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+    tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     tree.setHeaderHidden(True)
     tree.setColumnCount(2)
     tree.setRootIsDecorated(False)
     tree.setIndentation(_INDENTATION_PX)
     tree.setAlternatingRowColors(False)
-    tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)  # type: ignore[attr-defined]
-    tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
+    tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     font = tree.font()
     font.setPixelSize(_TREE_FONT_SIZE_PX)
     tree.setFont(font)
@@ -142,8 +125,8 @@ def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
     tree.setStyle(style)
     header = tree.header()
     assert header is not None
-    header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # type: ignore[attr-defined]
-    header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
     return tree, style
 
 
@@ -173,7 +156,7 @@ class TreeCfgWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         # A2: viewport follows available panel height — tree expands, no fixed threshold
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._tree, self._branch_style = make_dense_cfg_tree()
         layout.addWidget(self._tree, stretch=1)
         self.setFont(self._tree.font())
@@ -183,8 +166,10 @@ class TreeCfgWidget(QWidget):
         self._leaf_widgets: list[FieldWidgetProtocol] = []
         self._leaf_path_to_widget: dict[str, FieldWidgetProtocol] = {}
         self._ref_headers: list[FieldWidgetProtocol] = []
-        self._ref_connections: list[tuple[ReferenceField, object]] = []
-        self._ref_enabled_connections: list[tuple[ReferenceField, object]] = []
+        self._ref_connections: list[tuple[ReferenceField, Callable[..., None]]] = []
+        self._ref_enabled_connections: list[
+            tuple[ReferenceField, Callable[..., None]]
+        ] = []
         self._ref_prev_state: dict[str, tuple[str, int | None, str | None]] = {}
         self._expanded_state: dict[str, bool] = {}
         self._elided_singleton_path_to_parent: dict[str, str] = {}
@@ -197,8 +182,6 @@ class TreeCfgWidget(QWidget):
             lambda item: self._remember_expanded(item, False)
         )
 
-        field.on_validity_changed.connect(self._on_validity_changed)
-
         self._rebuild_tree()
 
     @property
@@ -206,10 +189,6 @@ class TreeCfgWidget(QWidget):
         return self._field
 
     def teardown(self) -> None:
-        try:
-            self._field.on_validity_changed.disconnect(self._on_validity_changed)
-        except Exception:
-            pass
         self._disconnect_refs()
         for header in self._ref_headers:
             try:
@@ -247,104 +226,21 @@ class TreeCfgWidget(QWidget):
         ref_field = self._find_reference_field(path) if sec_field is None else None
         if sec_field is None and ref_field is None:
             return False
-        # Reference-elided subtree: rebuild only descendants of the reference item,
-        # preserving the reference header, ancestors and unrelated branches.
+        self._clear_descendants(item, path)
+        target_depth = self._item_depth.get(id(item), 0)
         if ref_field is not None:
-            # Collect descendants under the reference (excludes the reference itself)
-            descendant_item_paths = [
-                p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
-            ]
-            descendant_leaf_paths = [
-                p
-                for p in list(self._leaf_path_to_widget.keys())
-                if p.startswith(path + ".")
-            ]
-            # Teardown descendant leaf widgets.
-            for leaf_path in descendant_leaf_paths:
-                widget = self._leaf_path_to_widget.pop(leaf_path, None)
-                if widget is not None:
-                    try:
-                        widget.teardown()
-                    except Exception:
-                        pass
-                    try:
-                        self._leaf_widgets.remove(widget)
-                    except ValueError:
-                        pass
-                    try:
-                        cast(QWidget, widget).setParent(None)
-                    except Exception:
-                        pass
-                    try:
-                        cast(QWidget, widget).deleteLater()
-                    except Exception:
-                        pass
-            # Teardown descendant reference headers and disconnect.
-            descendant_ref_paths = [
-                p
-                for p in descendant_item_paths
-                if self._find_reference_field(p) is not None
-            ]
-            for ref_path in descendant_ref_paths:
-                ref_item = self._path_to_item.get(ref_path)
-                if ref_item is not None:
-                    header = self._tree.itemWidget(ref_item, 1)
-                    if header is not None:
-                        try:
-                            cast(FieldWidgetProtocol, header).teardown()
-                        except Exception:
-                            pass
-                        try:
-                            header.setParent(None)
-                        except Exception:
-                            pass
-                        try:
-                            header.deleteLater()
-                        except Exception:
-                            pass
-                        try:
-                            self._ref_headers.remove(cast(FieldWidgetProtocol, header))
-                        except ValueError:
-                            pass
-                rf = self._find_reference_field(ref_path)
-                if rf is not None:
-                    for f, cb in list(self._ref_connections):
-                        if f is rf:
-                            try:
-                                f.on_change.disconnect(cb)  # type: ignore[attr-defined]
-                            except Exception:
-                                pass
-                    for f, cb in list(self._ref_enabled_connections):
-                        if f is rf:
-                            try:
-                                f.on_enabled_changed.disconnect(cb)  # type: ignore[attr-defined]
-                            except Exception:
-                                pass
-                    self._ref_connections = [
-                        (f, cb) for (f, cb) in self._ref_connections if f is not rf
-                    ]
-                    self._ref_enabled_connections = [
-                        (f, cb)
-                        for (f, cb) in self._ref_enabled_connections
-                        if f is not rf
-                    ]
-                    self._ref_prev_state.pop(ref_path, None)
-                self._path_to_item.pop(ref_path, None)
-                if ref_item is not None:
-                    self._item_depth.pop(id(ref_item), None)
-            # Remove remaining descendant section/group items.
-            for item_path in descendant_item_paths:
-                if item_path in descendant_ref_paths:
-                    continue
-                it = self._path_to_item.pop(item_path, None)
-                if it is not None:
-                    self._item_depth.pop(id(it), None)
-                self._ref_prev_state.pop(item_path, None)
-            while item.childCount():
-                item.takeChild(0)
-            target_depth = self._item_depth.get(id(item), 0)
             self._populate_reference_subtree(item, ref_field, path, target_depth)
-            return True
+        else:
+            assert sec_field is not None
+            self._add_section_children(item, sec_field, path, target_depth + 1)
+        return True
+
+    def _clear_descendants(self, item: QTreeWidgetItem, path: str) -> None:
+        """Release descendant editors and callbacks without removing the owner row.
+
+        Both section and reference refresh keep the owner's item, depth and
+        reference header. Decoration cache invalidation belongs to CfgFormWidget.
+        """
         # Collect descendant item paths (sections/references/groups) under target.
         descendant_item_paths = [
             p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
@@ -382,7 +278,6 @@ class TreeCfgWidget(QWidget):
             for p in descendant_item_paths
             if self._find_reference_field(p) is not None
         ]
-        # Also include direct descendant refs that may not be in _path_to_item? They are.
         for ref_path in descendant_ref_paths:
             # Find header widget for this ref item (column 1 widget).
             ref_item = self._path_to_item.get(ref_path)
@@ -411,13 +306,13 @@ class TreeCfgWidget(QWidget):
                 for f, cb in list(self._ref_connections):
                     if f is ref_field:
                         try:
-                            f.on_change.disconnect(cb)  # type: ignore[attr-defined]
+                            f.on_change.disconnect(cb)
                         except Exception:
                             pass
                 for f, cb in list(self._ref_enabled_connections):
                     if f is ref_field:
                         try:
-                            f.on_enabled_changed.disconnect(cb)  # type: ignore[attr-defined]
+                            f.on_enabled_changed.disconnect(cb)
                         except Exception:
                             pass
                 self._ref_connections = [
@@ -431,7 +326,8 @@ class TreeCfgWidget(QWidget):
                 self._ref_prev_state.pop(ref_path, None)
             # Remove from maps
             self._path_to_item.pop(ref_path, None)
-            self._item_depth.pop(id(ref_item), None) if ref_item is not None else None
+            if ref_item is not None:
+                self._item_depth.pop(id(ref_item), None)
         # Remove remaining descendant section/group items (non-reference sections and groups).
         for item_path in descendant_item_paths:
             if item_path in descendant_ref_paths:
@@ -443,12 +339,6 @@ class TreeCfgWidget(QWidget):
         # Remove all child QTreeWidgetItems from target item (clears UI).
         while item.childCount():
             item.takeChild(0)
-        # Drop decorations under target will be handled by CfgFormWidget caller;
-        # here we just rebuild the subtree.
-        target_depth = self._item_depth.get(id(item), 0)
-        assert sec_field is not None
-        self._add_section_children(item, sec_field, path, target_depth + 1)
-        return True
 
     def _find_section_field(self, path: str) -> SectionField | None:
         if path == self._path or path == "":
@@ -486,13 +376,8 @@ class TreeCfgWidget(QWidget):
                 return None
         return cur if isinstance(cur, SectionField) else None
 
-    def _on_validity_changed(self, valid: bool) -> None:
-        del valid
-        # Visual invalid marking handled via draft validity propagation at CfgFormWidget
-        # level; tree does not need additional styling.
-
     def _remember_expanded(self, item: QTreeWidgetItem, expanded: bool) -> None:
-        path = item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        path = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(path, str):
             rf = self._find_reference_field(path)
             if rf is not None and rf.spec.optional and not rf.is_enabled:
@@ -507,7 +392,7 @@ class TreeCfgWidget(QWidget):
 
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         del column
-        path = item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        path = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(path, str):
             rf = self._find_reference_field(path)
             if rf is not None and rf.spec.optional and not rf.is_enabled:
@@ -522,11 +407,6 @@ class TreeCfgWidget(QWidget):
 
     def _level_color(self, depth: int) -> QColor:
         return QColor(TREE_DEPTH_COLORS[depth % len(TREE_DEPTH_COLORS)])
-
-    def _set_depth_background(self, item: QTreeWidgetItem, depth: int) -> None:
-        # A1: rows no longer use depth background colors; guide lines are colored instead.
-        # Kept for compatibility but intentionally no-op.
-        return
 
     def _default_expanded_for_reference(self, field: ReferenceField) -> bool:
         if field.spec.optional and not field.is_enabled:
@@ -569,7 +449,7 @@ class TreeCfgWidget(QWidget):
             # Do not elide a wrapper that carries observable decoration
             if self._context.decoration_for_path is not None:
                 try:
-                    dec = self._context.decoration_for_path(wrapper_path, wrapper_field)  # type: ignore[arg-type]
+                    dec = self._context.decoration_for_path(wrapper_path, wrapper_field)
                 except Exception:
                     dec = None
                 if dec is not None:
@@ -635,13 +515,13 @@ class TreeCfgWidget(QWidget):
     def _disconnect_refs(self) -> None:
         for field, callback in self._ref_connections:
             try:
-                field.on_change.disconnect(callback)  # type: ignore[attr-defined]
+                field.on_change.disconnect(callback)
             except Exception:
                 pass
         self._ref_connections.clear()
         for field, callback in self._ref_enabled_connections:
             try:
-                field.on_enabled_changed.disconnect(callback)  # type: ignore[attr-defined]
+                field.on_enabled_changed.disconnect(callback)
             except Exception:
                 pass
         self._ref_enabled_connections.clear()
@@ -699,7 +579,7 @@ class TreeCfgWidget(QWidget):
         elif self._context.top_level and root_label:
             # Show root as a foldable header at depth 0.
             root_item = QTreeWidgetItem(self._tree, (root_label, ""))
-            root_item.setData(0, Qt.ItemDataRole.UserRole, self._path)  # type: ignore[attr-defined]
+            root_item.setData(0, Qt.ItemDataRole.UserRole, self._path)
             font = root_item.font(0)
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
@@ -833,7 +713,7 @@ class TreeCfgWidget(QWidget):
         cur: CfgField = self._field
         for part in parts:
             if isinstance(cur, SectionField):
-                nxt = cur.fields.get(part)  # type: ignore[attr-defined]
+                nxt = cur.fields.get(part)
                 if nxt is None:
                     return None
                 cur = nxt
@@ -841,7 +721,7 @@ class TreeCfgWidget(QWidget):
                 sub = cur.sub_field
                 if sub is None:
                     return None
-                nxt = sub.fields.get(part)  # type: ignore[attr-defined]
+                nxt = sub.fields.get(part)
                 if nxt is None:
                     return None
                 cur = nxt
@@ -885,9 +765,9 @@ class TreeCfgWidget(QWidget):
 
         # Render grouped entries under a foldable group header per group label.
         for group_label, group_entries in grouped.items():
-            group_item = QTreeWidgetItem(parent_item, (group_label, ""))  # type: ignore[arg-type]
+            group_item = QTreeWidgetItem(parent_item, (group_label, ""))
             group_path = f"{path_prefix}.{group_label}" if path_prefix else group_label
-            group_item.setData(0, Qt.ItemDataRole.UserRole, group_path)  # type: ignore[attr-defined]
+            group_item.setData(0, Qt.ItemDataRole.UserRole, group_path)
             font = group_item.font(0)
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
@@ -920,14 +800,13 @@ class TreeCfgWidget(QWidget):
         dec = None
         if self._context.decoration_for_path is not None:
             try:
-                dec = self._context.decoration_for_path(child_path, child_field)  # type: ignore[arg-type]
+                dec = self._context.decoration_for_path(child_path, child_field)
             except Exception:
                 dec = None
-        # Section
         if isinstance(child_field, SectionField):
             label = decorated_label(child_field, key, child_path, self._context)
-            item = QTreeWidgetItem(parent_item, (label, ""))  # type: ignore[arg-type]
-            item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
+            item = QTreeWidgetItem(parent_item, (label, ""))
+            item.setData(0, Qt.ItemDataRole.UserRole, child_path)
             font = item.font(0)
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
@@ -945,12 +824,10 @@ class TreeCfgWidget(QWidget):
             item.setExpanded(self._expanded_state.get(child_path, True))
             self._add_section_children(item, child_field, child_path, depth + 1)
             return
-        # Reference
         if isinstance(child_field, ReferenceField):
-            spec = child_field.spec  # type: ignore[attr-defined]
             label = decorated_label(child_field, key, child_path, self._context)
-            item = QTreeWidgetItem(parent_item, (label, ""))  # type: ignore[arg-type]
-            item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
+            item = QTreeWidgetItem(parent_item, (label, ""))
+            item.setData(0, Qt.ItemDataRole.UserRole, child_path)
             font = item.font(0)
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
@@ -991,7 +868,7 @@ class TreeCfgWidget(QWidget):
             # must preserve leaf editors/focus.
             prev_key = child_field.get_chosen_key()
             prev_sub_id = id(sub) if sub is not None else None
-            prev_label = sub.spec.label if sub is not None else None  # type: ignore[attr-defined]
+            prev_label = sub.spec.label if sub is not None else None
             self._ref_prev_state[child_path] = (prev_key, prev_sub_id, prev_label)
 
             def _on_ref_change(
@@ -1001,7 +878,7 @@ class TreeCfgWidget(QWidget):
                 cur_key = field.get_chosen_key()
                 cur_sub = field.sub_field
                 cur_id = id(cur_sub) if cur_sub is not None else None
-                cur_label = cur_sub.spec.label if cur_sub is not None else None  # type: ignore[attr-defined]
+                cur_label = cur_sub.spec.label if cur_sub is not None else None
                 cur_state = (cur_key, cur_id, cur_label)
                 if prev == cur_state:
                     # Only value edits inside the shape – keep editors.
@@ -1024,7 +901,7 @@ class TreeCfgWidget(QWidget):
                         pass
                 self._rebuild_reference_children(path)
 
-            child_field.on_change.connect(_on_ref_change)  # type: ignore[attr-defined]
+            child_field.on_change.connect(_on_ref_change)
             self._ref_connections.append((child_field, _on_ref_change))
 
             def _on_ref_enabled_changed(
@@ -1066,7 +943,7 @@ class TreeCfgWidget(QWidget):
                         ch = cur.child(idx)
                         if ch is None:
                             continue
-                        desc_path_obj = ch.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+                        desc_path_obj = ch.data(0, Qt.ItemDataRole.UserRole)
                         desc_path = (
                             desc_path_obj if isinstance(desc_path_obj, str) else ""
                         )
@@ -1084,7 +961,7 @@ class TreeCfgWidget(QWidget):
                                     try:
                                         dec_inner = self._context.decoration_for_path(
                                             desc_path, desc_field
-                                        )  # type: ignore[arg-type]
+                                        )
                                     except Exception:
                                         dec_inner = None
                                 if dec_inner is not None and not dec_inner.enabled:
@@ -1105,7 +982,7 @@ class TreeCfgWidget(QWidget):
                                     try:
                                         anc_dec = self._context.decoration_for_path(
                                             anc, anc_field
-                                        )  # type: ignore[arg-type]
+                                        )
                                     except Exception:
                                         anc_dec = None
                                 if anc_dec is not None and not anc_dec.enabled:
@@ -1126,15 +1003,14 @@ class TreeCfgWidget(QWidget):
                         stack.append(ch)
 
             if child_field.spec.optional:
-                child_field.on_enabled_changed.connect(_on_ref_enabled_changed)  # type: ignore[attr-defined]
+                child_field.on_enabled_changed.connect(_on_ref_enabled_changed)
                 self._ref_enabled_connections.append(
                     (child_field, _on_ref_enabled_changed)
                 )
             return
-        # Sweep / CenteredSweep / Scalar / Literal leaf
         leaf_label = decorated_label(child_field, key, child_path, self._context)
-        item = QTreeWidgetItem(parent_item, (leaf_label, ""))  # type: ignore[arg-type]
-        item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
+        item = QTreeWidgetItem(parent_item, (leaf_label, ""))
+        item.setData(0, Qt.ItemDataRole.UserRole, child_path)
         # Create editor widget via exact registry.
         child_context = self._context.derive(path=child_path, top_level=False)
         widget = self._context.registry.render(child_field, child_context)

@@ -13,6 +13,7 @@ Tests include:
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import FrozenInstanceError
 
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
@@ -43,7 +44,6 @@ from zcu_tools.program.v2.ir.instructions import (
     _parse_cond_code,
     _parse_mem_addr_field,
     _parse_port_dst,
-    _require_alu_expr,
     _require_literal,
     _require_register,
 )
@@ -60,6 +60,26 @@ from zcu_tools.program.v2.ir.operands import (
     SrcKeyword,
     parse_register,
 )
+
+
+@pytest.mark.parametrize(
+    "inst, field, value",
+    [
+        (TimeInst(c_op="inc_ref"), "c_op", "inc_ref"),
+        (
+            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Register("r2"))),
+            "op",
+            AluExpr(Register("r1"), AluOp.ADD, Register("r2")),
+        ),
+        (JumpInst(label=LabelRef(Label("loop"))), "label", Label("exit")),
+        (RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM), "dst", "s2"),
+        (PortWriteInst(dst=ImmValue(0)), "dst", "1"),
+    ],
+    ids=["time", "test", "jump", "regwr", "wport_wr"],
+)
+def test_instruction_fields_are_immutable(inst: BaseInst, field: str, value: object):
+    with pytest.raises(FrozenInstanceError, match=f"cannot assign to field '{field}'"):
+        setattr(inst, field, value)
 
 
 class TestTimeInstruction:
@@ -97,11 +117,6 @@ class TestTimeInstruction:
         with pytest.raises(ValueError, match="TIME.C_OP"):
             BaseInst.from_dict({"CMD": "TIME", "C_OP": "trigger"})
 
-    def test_time_immutable(self):
-        inst = TimeInst(c_op="inc_ref")
-        with pytest.raises(Exception):
-            inst.c_op = "inc_ref"  # type: ignore
-
 
 class TestTestInstruction:
     """Tests for TestInst (TEST opcode)."""
@@ -134,11 +149,6 @@ class TestTestInstruction:
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
-
-    def test_test_immutable(self):
-        inst = TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Register("r2")))
-        with pytest.raises(Exception):
-            inst.op = AluExpr(Register("r1"), AluOp.ADD, Register("r2"))  # type: ignore
 
 
 class TestJumpInstruction:
@@ -257,11 +267,6 @@ class TestJumpInstruction:
         with pytest.raises(ValueError, match="must be 's15'"):
             JumpInst(addr=Register("r0"))
 
-    def test_jump_immutable(self):
-        inst = JumpInst(label=LabelRef(Label("loop")))
-        with pytest.raises(Exception):
-            inst.label = Label("exit")  # type: ignore
-
     def test_jump_minimal(self):
         """Empty JUMP should work (no label, no addr)."""
         d = {"CMD": "JUMP"}
@@ -369,11 +374,6 @@ class TestRegWriteInstruction:
                 {"CMD": "REG_WR", "DST": "r0", "SRC": "imm", "LIT": "#bad"}
             )
 
-    def test_regwr_immutable(self):
-        inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM)
-        with pytest.raises(Exception):
-            inst.dst = "s2"  # type: ignore
-
 
 class TestPortWriteInstruction:
     """Tests for PortWriteInst (WPORT_WR opcode)."""
@@ -426,11 +426,6 @@ class TestPortWriteInstruction:
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
-
-    def test_wport_wr_immutable(self):
-        inst = PortWriteInst(dst=ImmValue(0))
-        with pytest.raises(Exception):
-            inst.dst = "1"  # type: ignore
 
     def test_wport_wr_reg_read_includes_src_addr_time_and_op_registers(self):
         inst = PortWriteInst(
@@ -713,9 +708,9 @@ class TestInstructionHelpers:
         with pytest.raises(ValueError, match="DST"):
             _require_register("garbage", "DST")
 
-    def test_require_alu_expr_rejects_invalid_value(self):
-        with pytest.raises(ValueError):
-            _require_alu_expr("garbage", "OP")
+    def test_dispatch_rejects_invalid_test_alu_expression(self):
+        with pytest.raises(ValueError, match="Cannot parse ALU expression: 'garbage'"):
+            BaseInst.from_dict({"CMD": "TEST", "OP": "garbage"})
 
     def test_parse_port_dst_rejects_invalid_value(self):
         with pytest.raises(ValueError, match="port number"):
@@ -941,11 +936,11 @@ class TestEdgeCases:
     """Edge cases and error handling."""
 
     def test_missing_cmd_raises_error(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown instruction format"):
             BaseInst.from_dict({"FIELD": "value"})
 
     def test_empty_cmd_raises_error(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown instruction format"):
             BaseInst.from_dict({"CMD": ""})
 
     def test_label_dict_without_kind_raises_error(self):

@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .base import assign_init_p, fit_func
+from .base import FitResult, assign_init_p, fit_func
 
 
 # sinc函數模型
@@ -20,7 +20,7 @@ def fitsinc(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
-) -> tuple[list[float], NDArray[np.float64]]:
+) -> FitResult:
     if fitparams is None:
         fitparams = [None] * 5
     fitparams = list(fitparams)

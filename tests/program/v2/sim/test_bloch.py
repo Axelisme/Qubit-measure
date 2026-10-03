@@ -77,7 +77,7 @@ def test_excited_population_mapping() -> None:
 def test_evolve_rejects_wrong_shape() -> None:
     """evolve fast-fails on a non-(3,) initial vector."""
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"v0 must have shape \(3,\)"):
         evolve(np.zeros(4), [])
 
 

@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -19,7 +19,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.cfg import (
-    CfgNodeSpec,
     CfgNodeValue,
     ChoiceSectionSpec,
     DirectValue,
@@ -42,16 +41,17 @@ from .decoration import (
 )
 from .registry import (
     FieldRenderContext,
-    FieldWidgetProtocol,
     FrozenFieldRendererRegistry,
     TextInputEnhancer,
     default_cfg_renderers,
 )
 
 if TYPE_CHECKING:
-    from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+    from qtpy.QtGui import QCloseEvent
 
     from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue
+
+    from .structure import TreeCfgWidget
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class CfgFormWidget(QWidget):
     ) -> None:
         super().__init__(parent)
         self._draft: CfgDraft | None = None
-        self._root_widget: QWidget | None = None
+        self._root_widget: TreeCfgWidget | None = None
         self._field_label_max_width = field_label_max_width
         self._decoration_provider = decoration_provider
         self._text_input_enhancer = text_input_enhancer
@@ -135,9 +135,8 @@ class CfgFormWidget(QWidget):
             self._choice_state = ()
             raise
 
-        root_widget = cast(QWidget, root)
         self._draft = draft
-        self._root_widget = root_widget
+        self._root_widget = root
         self._choice_state = choice_state
         try:
             draft.on_validity_changed.connect(self._on_draft_validity_changed)
@@ -145,31 +144,35 @@ class CfgFormWidget(QWidget):
             self._apply_editing_enabled()
             self._inner_layout.insertWidget(
                 self._inner_layout.count() - 1,
-                root_widget,
+                root,
             )
             # Tree viewport follows available panel height; outer scroll is
             # chrome-free and tree handles its own scrolling only when content
             # exceeds viewport (A4).
-            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-            self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+            self._scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            self._scroll.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
             self._scroll.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-            )  # type: ignore[attr-defined]
+            )
             self._inner.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-            )  # type: ignore[attr-defined]
-            root_widget.setSizePolicy(
+            )
+            root.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-            )  # type: ignore[attr-defined]
-            self._inner_layout.setStretchFactor(root_widget, 1)
+            )
+            self._inner_layout.setStretchFactor(root, 1)
             self._inner_layout.setStretch(self._inner_layout.count() - 1, 0)
         except Exception:
             draft.on_change.disconnect(self._on_draft_changed)
             draft.on_validity_changed.disconnect(self._on_draft_validity_changed)
             self._draft = None
             self._root_widget = None
-            cast(FieldWidgetProtocol, root).teardown()
-            root_widget.deleteLater()
+            root.teardown()
+            root.deleteLater()
             self._field_decorations = {}
             self._choice_state = ()
             raise
@@ -194,13 +197,17 @@ class CfgFormWidget(QWidget):
         root = self._root_widget
         self._root_widget = None
         if root is not None:
-            cast(FieldWidgetProtocol, root).teardown()
+            root.teardown()
             self._inner_layout.removeWidget(root)
             root.deleteLater()
         # Reset for next attach — sole tree keeps outer chrome-free.
         try:
-            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-            self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+            self._scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            self._scroll.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
         except Exception:
             pass
         self._field_decorations = {}
@@ -286,7 +293,7 @@ class CfgFormWidget(QWidget):
         self._schema_snapshot_timer.stop()
         self._schema_snapshot_pending = False
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         self.detach()
         super().closeEvent(a0)
 
@@ -296,7 +303,7 @@ class CfgFormWidget(QWidget):
         return decoration
 
     def _decoration_for_field(self, path: str, field: CfgField) -> FieldDecoration:
-        spec = cast(CfgNodeSpec, field.spec)
+        spec = field.spec
         value = cast(CfgNodeValue | None, field.get_value())
         provider = self._decoration_provider
         patch = None if provider is None else provider.decoration_for(path, spec, value)
@@ -354,10 +361,9 @@ class CfgFormWidget(QWidget):
         root = self._root_widget
         if root is None:
             return
-        root_field_widget = cast(FieldWidgetProtocol, root)
         for path in _minimal_section_paths(section_paths):
             self._drop_decorations_under(path)
-            if not root_field_widget.refresh_section(path):
+            if not root.refresh_section(path):
                 # A stale or unsupported path should not leave the form half-updated.
                 self._reattach_after_section_refresh_failure()
                 return

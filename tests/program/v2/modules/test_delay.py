@@ -25,17 +25,19 @@ def test_delay_untagged_allows_rerun():
 
 
 def test_delay_auto_with_tag_rejects_reg_name():
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="DelayAuto with tag cannot have t as a register name"
+    ):
         DelayAuto("d", t="reg_name", tag="k")
 
 
 def test_join_empty_rejected():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Join must contain at least one module"):
         Join()
 
 
 def test_join_rejects_delay_children():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="modules cannot contain DelayAuto or Delay"):
         Join(Delay("d", 0.1))
 
 

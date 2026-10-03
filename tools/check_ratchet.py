@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import _support
+from suppression_comparison import IGNORE_KINDS, compare_ignores
 
 _DEFAULT_BASE_BRANCH: Final = "main"
 _TOOLS_DIR: Final = Path(__file__).resolve().parent
@@ -317,6 +318,51 @@ def suppression_counts(
     return counts
 
 
+def suppression_regressions(
+    base_root: Path,
+    candidate_root: Path,
+    files: Iterable[str],
+    renames: Mapping[str, str],
+) -> tuple[Regression, ...]:
+    """Compare ignore sites without trading deletions for new escape positions."""
+    names = tuple(files)
+    old_by_new = {new: old for old, new in renames.items()}
+    base_files = tuple(old_by_new.get(name, name) for name in names)
+    before = remap_counts(suppression_counts(base_root, base_files), renames)
+    after = suppression_counts(candidate_root, names)
+    positional_rules = {f"suppression:{kind}" for kind in IGNORE_KINDS}
+    found = list(
+        regressions(
+            {
+                key: count
+                for key, count in before.items()
+                if key[1] not in positional_rules
+            },
+            {
+                key: count
+                for key, count in after.items()
+                if key[1] not in positional_rules
+            },
+        )
+    )
+    for name in names:
+        old_path = base_root / old_by_new.get(name, name)
+        new_path = candidate_root / name
+        old_source = old_path.read_text(encoding="utf-8") if old_path.is_file() else ""
+        new_source = new_path.read_text(encoding="utf-8") if new_path.is_file() else ""
+        for site in compare_ignores(old_source, new_source):
+            # This counts an introduced escape-site finding, not raw usage.
+            found.append(
+                Regression(
+                    path=name,
+                    rule=f"suppression:{site.kind}:{site.reason}@{site.line}",
+                    before=0,
+                    after=1,
+                )
+            )
+    return tuple(sorted(found, key=lambda item: (-item.increase, item.path, item.rule)))
+
+
 _DETECTORS: Final = {
     "capabilities": capability_counts,
     "suppressions": suppression_counts,
@@ -415,6 +461,8 @@ def run(
                         remap_counts(pyright_counts(tree, None), renames),
                         pyright_counts(root, None),
                     )
+                elif name == "suppressions":
+                    found[name] = suppression_regressions(tree, root, files, renames)
                 else:
                     detector = _DETECTORS[name]
                     found[name] = regressions(

@@ -121,7 +121,7 @@ def _align_uniform_edelay_aliases(
 
 def _find_edelay_branch(
     freqs: NDArray[np.float64],
-    signals: NDArray[np.complex128],
+    signal_rows: NDArray[np.complex128],
     rough_edelay: float,
     search_radius: float,
 ) -> float:
@@ -134,17 +134,6 @@ def _find_edelay_branch(
     freq_steps = np.diff(freqs)
     if not (np.all(freq_steps > 0.0) or np.all(freq_steps < 0.0)):
         raise ValueError("resonance fit frequencies must be strictly monotonic")
-    if signals.ndim == 1:
-        signal_rows = signals[None, :]
-    elif signals.ndim == 2:
-        signal_rows = signals
-    else:
-        raise ValueError("electrical-delay branch search expects one or two dimensions")
-    if signal_rows.shape[-1] != len(freqs):
-        raise ValueError(
-            "electrical-delay branch search frequency and signal lengths must match"
-        )
-
     amplitudes = np.abs(signal_rows)
     max_amplitudes = np.max(amplitudes, axis=1, keepdims=True)
     if np.any(max_amplitudes <= 0.0):
@@ -287,7 +276,7 @@ def find_edelay_branch(
     current_radius = search_radius
     while True:
         try:
-            return _find_edelay_branch(freqs, signals, rough_edelay, current_radius)
+            return _find_edelay_branch(freqs, signal_rows, rough_edelay, current_radius)
         except _EDelaySearchBoundaryError as exc:
             if max_search_radius is None:
                 raise
@@ -319,7 +308,7 @@ def calc_M(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> NDArray[np.float
     Myz = np.sum(ys * zs)
     Mxy = np.sum(xs * ys)
 
-    M = np.array(
+    return np.array(
         [
             [Mzz, Mxz, Myz, Mz],
             [Mxz, Mxx, Mxy, Mx],
@@ -327,7 +316,6 @@ def calc_M(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> NDArray[np.float
             [Mz, Mx, My, N],
         ]
     )
-    return M
 
 
 def fit_circle_params(
@@ -340,7 +328,7 @@ def fit_circle_params(
 
     # calculate M matrix
     M = calc_M(xs, ys)
-    B = np.array(
+    constraint_matrix = np.array(
         [
             [0, 0, 0, -2],
             [0, 1, 0, 0],
@@ -349,7 +337,7 @@ def fit_circle_params(
         ]
     )
 
-    eigvals, eigvecs = sp.linalg.eig(M, B)
+    eigvals, eigvecs = sp.linalg.eig(M, constraint_matrix)
     eigvals = eigvals.real
 
     # The exact-circle solution is the eigenvalue nearest zero. Floating-point

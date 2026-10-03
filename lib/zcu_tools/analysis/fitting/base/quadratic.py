@@ -28,7 +28,7 @@ def quadratic_fit(
     ys = ys[mask]
 
     A = np.column_stack([xs**2, xs, ys**2, ys, xs * ys, np.ones_like(xs)])
-    U, S, Vh = np.linalg.svd(A)
+    _, _, Vh = np.linalg.svd(A)
     V = Vh[-1, :]
     a, b, c, d, e, f = V / np.linalg.norm(V)
     return a, b, c, d, e, f
@@ -58,7 +58,7 @@ def quadratic_fit_wo_a(
     ys = ys[mask]
 
     A = np.column_stack([xs, ys**2, ys, xs * ys, np.ones_like(xs)])
-    U, S, Vh = np.linalg.svd(A)
+    _, _, Vh = np.linalg.svd(A)
     V = Vh[-1, :]
     b, c, d, e, f = V / np.linalg.norm(V)
     return b, c, d, e, f

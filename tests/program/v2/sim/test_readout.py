@@ -238,13 +238,17 @@ class TestIntegrationHelpers:
         assert critical_photon_number(8.0, 6.0, 0.1) == pytest.approx(100.0)
 
     @pytest.mark.parametrize(
-        ("f_qubit", "resonator", "g"),
-        [(6.0, 6.0, 0.1), (8.0, 6.0, 0.0), (8.0, 6.0, float("nan"))],
+        ("f_qubit", "resonator", "g", "error"),
+        [
+            (6.0, 6.0, 0.1, "zero qubit-resonator detuning"),
+            (8.0, 6.0, 0.0, "g_ghz must be > 0.0"),
+            (8.0, 6.0, float("nan"), "g_ghz must be finite"),
+        ],
     )
     def test_critical_photon_number_rejects_invalid_inputs(
-        self, f_qubit: float, resonator: float, g: float
+        self, f_qubit: float, resonator: float, g: float, error: str
     ) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=error):
             critical_photon_number(f_qubit, resonator, g)
 
     def test_readout_photon_ratio_defaults_direct_readout_to_zero(self) -> None:
@@ -386,7 +390,8 @@ class TestIntegrationHelpers:
             "decay_exponent": 1.0,
         }
         params = {**base, **kwargs}
-        with pytest.raises(ValueError):
+        invalid_field = next(iter(kwargs))
+        with pytest.raises(ValueError, match=rf"{invalid_field} must be finite"):
             readout_backaction(
                 1.0,
                 1.0,
@@ -435,17 +440,20 @@ class TestIntegrationHelpers:
         assert 0.0 < noise_scale < signal_area
 
     @pytest.mark.parametrize(
-        "sample_times",
+        ("sample_times", "error"),
         [
-            np.zeros((2, 3), dtype=np.float64),
-            np.array([0.0, np.nan], dtype=np.float64),
-            np.array([], dtype=np.float64),
+            (np.zeros((2, 3), dtype=np.float64), "sample_times_us must be a 1-D array"),
+            (
+                np.array([0.0, np.nan], dtype=np.float64),
+                "sample_times_us must contain only finite values",
+            ),
+            (np.array([], dtype=np.float64), "sample_times_us must not be empty"),
         ],
     )
     def test_effective_signal_samples_rejects_bad_sample_axis(
-        self, sample_times: NDArray[np.float64]
+        self, sample_times: NDArray[np.float64], error: str
     ) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=error):
             effective_signal_samples(None, None, sample_times)
 
     @pytest.mark.parametrize("pulse_length", [0.0, -1.0, float("nan")])

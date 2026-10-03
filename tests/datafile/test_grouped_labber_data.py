@@ -127,50 +127,40 @@ def test_grouped_v2_validates_complete_contract_before_file_creation(
 ) -> None:
     axis = np.arange(3, dtype=float)
     base = LabberPayload(("Signal", "a.u.", np.arange(3.0)), [("X", "s", axis)])
-    roles: Mapping[str, LabberPayload]
-    if case == "zero_axis":
-        roles = {"signal": LabberPayload(("Signal", "a.u.", np.arange(3.0)), [])}
-    elif case == "shape":
-        roles = {
+    y = np.arange(2, dtype=float)
+    shape = (2, 3)
+    roles_by_case: dict[str, Mapping[str, LabberPayload]] = {
+        "zero_axis": {"signal": LabberPayload(("Signal", "a.u.", np.arange(3.0)), [])},
+        "shape": {
             "signal": base,
             "reference": LabberPayload(
                 ("Reference", "a.u.", np.arange(4.0)), [("X", "s", axis)]
             ),
-        }
-    elif case == "axis_values":
-        roles = {
+        },
+        "axis_values": {
             "signal": base,
             "reference": LabberPayload(
-                ("Reference", "a.u.", np.arange(3.0)),
-                [("X", "s", axis + 1.0)],
+                ("Reference", "a.u.", np.arange(3.0)), [("X", "s", axis + 1.0)]
             ),
-        }
-    elif case == "axis_label":
-        roles = {
+        },
+        "axis_label": {
             "signal": base,
             "reference": LabberPayload(
-                ("Reference", "a.u.", np.arange(3.0)),
-                [("Other X", "s", axis)],
+                ("Reference", "a.u.", np.arange(3.0)), [("Other X", "s", axis)]
             ),
-        }
-    elif case == "axis_unit":
-        roles = {
+        },
+        "axis_unit": {
             "signal": base,
             "reference": LabberPayload(
-                ("Reference", "a.u.", np.arange(3.0)),
-                [("X", "ms", axis)],
+                ("Reference", "a.u.", np.arange(3.0)), [("X", "ms", axis)]
             ),
-        }
-    elif case == "timestamp_cardinality":
-        roles = {
+        },
+        "timestamp_cardinality": {
             "signal": LabberPayload(
                 base.data, base.axes, timestamps=np.array([1.0, 2.0])
             )
-        }
-    elif case == "timestamp_equality":
-        y = np.arange(2, dtype=float)
-        shape = (2, 3)
-        roles = {
+        },
+        "timestamp_equality": {
             "signal": LabberPayload(
                 ("Signal", "a.u.", np.ones(shape)),
                 [("X", "s", axis), ("Y", "V", y)],
@@ -181,51 +171,86 @@ def test_grouped_v2_validates_complete_contract_before_file_creation(
                 [("X", "s", axis), ("Y", "V", y)],
                 timestamps=np.array([1.0, 3.0]),
             ),
-        }
-    elif case == "timestamp_presence":
-        roles = {
+        },
+        "timestamp_presence": {
             "signal": base,
             "reference": LabberPayload(
                 ("Reference", "a.u.", np.arange(3.0)),
                 base.axes,
                 timestamps=np.array([1.0]),
             ),
-        }
-    elif case == "empty_channel":
-        roles = {"signal": LabberPayload(("", "a.u.", np.arange(3.0)), base.axes)}
-    elif case == "duplicate_channel":
-        roles = {
+        },
+        "empty_channel": {
+            "signal": LabberPayload(("", "a.u.", np.arange(3.0)), base.axes)
+        },
+        "duplicate_channel": {
             "signal": base,
             "reference": LabberPayload(("Signal", "a.u.", np.arange(3.0)), base.axes),
-        }
-    elif case == "axis_channel_collision":
-        roles = {"signal": LabberPayload(("X", "a.u.", np.arange(3.0)), base.axes)}
-    elif case == "ragged":
-        roles = {
+        },
+        "axis_channel_collision": {
+            "signal": LabberPayload(("X", "a.u.", np.arange(3.0)), base.axes)
+        },
+        "ragged": {
             "signal": LabberPayload(
                 ("Signal", "a.u.", [np.array([1.0]), np.array([2.0, 3.0])]),
                 [("X", "s", np.arange(2, dtype=float))],
             )
-        }
-    elif case == "vector":
-        roles = {
+        },
+        "vector": {
             "signal": LabberPayload(
                 ("Signal", "a.u.", np.ones((3, 2))),
                 [("X", "s", np.arange(3, dtype=float))],
             )
-        }
-    else:
-        roles = {
+        },
+        "object": {
             "signal": LabberPayload(
                 ("Signal", "a.u.", np.array([object()], dtype=object)),
                 [("X", "s", np.array([0.0]))],
             )
-        }
+        },
+    }
 
     path = tmp_path / case
     with pytest.raises(ValueError, match=match):
-        save_grouped_labber_data(str(path), roles)
+        save_grouped_labber_data(str(path), roles_by_case[case])
     assert not path.with_suffix(".hdf5").exists()
+
+
+@pytest.mark.parametrize(
+    "case, match",
+    [
+        ("complete-role-first", "timestamps must be a flat array"),
+        ("compare-before-next-role", "must share one common grid"),
+        ("labels-after-all-roles", "data must be numeric"),
+    ],
+)
+def test_grouped_v2_reports_first_error_before_creating_file(tmp_path, case, match):
+    axes = [("X", "s", np.arange(3.0))]
+    base = LabberPayload(("Signal", "V", np.arange(3.0)), axes)
+    nonnumeric = LabberPayload(("Reference", "V", np.array(["a", "b", "c"])), axes)
+    cases = {
+        "complete-role-first": {
+            "signal": LabberPayload(base.data, axes, timestamps=np.array([0.0, 1.0])),
+            "reference": nonnumeric,
+        },
+        "compare-before-next-role": {
+            "signal": base,
+            "reference": LabberPayload(
+                ("Reference", "V", np.arange(3.0)), [("X", "s", np.arange(3.0) + 1)]
+            ),
+            "third": nonnumeric,
+        },
+        "labels-after-all-roles": {
+            "signal": LabberPayload(("X", "V", np.arange(3.0)), axes),
+            "reference": nonnumeric,
+        },
+    }
+    path = tmp_path / "invalid.hdf5"
+
+    with pytest.raises(ValueError, match=match):
+        save_grouped_labber_data(str(path), cases[case])
+
+    assert not path.exists()
 
 
 def test_grouped_v2_accepts_flat_numeric_list_values(tmp_path):
@@ -337,6 +362,71 @@ def test_grouped_v2_loader_rejects_corrupt_step_bookkeeping(tmp_path):
         load_grouped_labber_data(step_list_path)
 
 
+@pytest.mark.parametrize(
+    ("entry", "match"),
+    [
+        ("Log list", "missing Log list"),
+        ("Channels", "missing Channels"),
+        ("Instrument config", "missing Instrument config"),
+        (
+            "Instrument config/Generic - GPIB: , Log channels at localhost",
+            "missing log-channel instrument config",
+        ),
+        ("Data", "file contains no data"),
+        ("Data/Data", "Data group is incomplete"),
+        ("Data/Channel names", "Data group is incomplete"),
+        ("Step list", "step-channel bookkeeping"),
+        ("Step config", "step-channel bookkeeping"),
+    ],
+)
+def test_grouped_loader_rejects_missing_bookkeeping(tmp_path, entry, match):
+    path = save_grouped_labber_data(
+        str(tmp_path / "incomplete"), {"signal": _payload_2d()}
+    )
+    with h5py.File(path, "a") as file:
+        del file[entry]
+
+    with pytest.raises(ValueError, match=match):
+        load_grouped_labber_data(path)
+
+
+@pytest.mark.parametrize("shape", [(2, 3, 2), (2, 4, 3, 2), (2, 1, 3, 1, 2)])
+def test_grouped_roundtrip_preserves_grid_and_common_timestamps(tmp_path, shape):
+    axes = [
+        (f"Axis {index}", f"unit {index}", np.arange(length, dtype=float) + index * 10)
+        for index, length in enumerate(reversed(shape))
+    ]
+    axes[-1][2][-1] = np.nan
+    timestamps = np.arange(np.prod(shape[:-1]), dtype=float)
+    timestamps[2] = np.nan
+    values = np.arange(np.prod(shape), dtype=float).reshape(shape)
+    roles = {
+        "signal": LabberPayload(
+            ("Signal", "a.u.", values + 1j * (values + 1)),
+            axes,
+            timestamps=timestamps,
+        ),
+        "reference": LabberPayload(
+            ("Reference", "V", values + 2), axes, timestamps=timestamps.copy()
+        ),
+    }
+    path = save_grouped_labber_data(str(tmp_path / "grid"), roles)
+
+    loaded = load_grouped_labber_data(path, required_roles=tuple(roles))
+
+    assert [str(role) for role in loaded.roles] == list(roles)
+    for role, expected in roles.items():
+        actual = loaded.roles[DatasetRole(role)]
+        assert actual.data.name == expected.data.name
+        assert actual.data.unit == expected.data.unit
+        np.testing.assert_array_equal(actual.z, expected.z)
+        np.testing.assert_array_equal(actual.timestamps, timestamps)
+        assert len(actual.axes) == len(axes)
+        for actual_axis, expected_axis in zip(actual.axes, axes, strict=True):
+            assert actual_axis[:2] == expected_axis[:2]
+            np.testing.assert_array_equal(actual_axis.values, expected_axis[2])
+
+
 def test_grouped_strict_required_roles_missing_and_unknown_raise(tmp_path):
     path = tmp_path / "strict"
     save_grouped_labber_data(
@@ -419,8 +509,6 @@ def test_grouped_role_value_cannot_be_labber_data(tmp_path):
         axes=[Axis("Frequency", "Hz", np.arange(3, dtype=float))],
     )
 
+    invalid_roles = cast(Mapping[str | DatasetRole, LabberPayload], {"signal": data})
     with pytest.raises(TypeError, match="LabberPayload"):
-        invalid_roles = cast(
-            Mapping[str | DatasetRole, LabberPayload], {"signal": data}
-        )
         save_grouped_labber_data(str(tmp_path / "bad_value"), invalid_roles)

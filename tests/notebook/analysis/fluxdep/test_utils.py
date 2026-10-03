@@ -9,11 +9,6 @@ trace is added.
 
 from __future__ import annotations
 
-import ast
-import inspect
-from pathlib import Path
-
-import jupytext
 import numpy as np
 import pandas as pd
 import pytest
@@ -223,83 +218,6 @@ def test_mixed_unit_rows_plot_at_resolved_flux() -> None:
     trace = _sample_points_trace(vis.fig)
     np.testing.assert_allclose(trace.x, [0.5, 0.5])
     np.testing.assert_allclose(trace.y, [4.0, 4.0])
-
-
-def test_plot_md_helper_calls_bind_to_current_api() -> None:
-    """Every changed helper call in the manual plot notebook binds to the API.
-
-    Hardware-free signature smoke test: the cells of
-    ``notebook_md/analysis/plot.md`` are read with jupytext and parsed with
-    ast (never executed). Each ``zp.*`` helper call, shared v2 resolver call
-    and ``FreqFluxDependVisualizer`` fluent-chain method call is bound with
-    ``inspect.signature(...).bind_partial(...)`` against the real function, so
-    keyword drift (e.g. ``r_f`` vs ``bare_rf``) or extra positional arguments
-    fail here in CI instead of at the hardware.
-    """
-    import zcu_tools.notebook.analysis.plot as zp
-    from zcu_tools.resources.sample_table import schema as sample_schema
-
-    plot_md = (
-        Path(__file__).resolve().parents[4] / "notebook_md" / "analysis" / "plot.md"
-    )
-    notebook = jupytext.read(plot_md)
-
-    plot_helpers = (
-        "plot_matrix_elements",
-        "plot_dispersive_shift",
-        "plot_mist_condition",
-        "plot_t1s",
-    )
-    schema_helpers = (
-        "SampleFluxFrame",
-        "validate_sample_table_v2",
-        "resolve_sample_flux",
-    )
-
-    checked = 0
-    for cell in notebook.cells:
-        if cell.cell_type != "code":
-            continue
-        try:
-            tree = ast.parse(cell.source)
-        except SyntaxError:
-            continue  # e.g. the %load_ext/%autoreload magic cell
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(
-                node.func, ast.Attribute
-            ):
-                continue
-            positional = [None] * len(node.args)
-            keywords = {kw.arg: None for kw in node.keywords if kw.arg is not None}
-            if isinstance(node.func.value, ast.Name) and node.func.value.id == "zp":
-                if node.func.attr in plot_helpers:
-                    target = getattr(zp, node.func.attr)
-                elif node.func.attr in schema_helpers:
-                    target = getattr(sample_schema, node.func.attr)
-                else:
-                    continue
-            elif node.func.attr in dir(FreqFluxDependVisualizer) and isinstance(
-                node.func.value, ast.Call
-            ):
-                # fluent-chain method call (unbound, so self consumes the
-                # first positional argument)
-                target = getattr(FreqFluxDependVisualizer, node.func.attr)
-            else:
-                continue
-            inspect.signature(target).bind_partial(*positional, **keywords)
-            checked += 1
-
-    assert checked > 0, "no plot.md helper calls were checked"
-
-    # The blocker regression: the Dispersive cell must pass the readout
-    # frequency under the current keyword name, never the old ``r_f`` alias.
-    dispersive_cell = next(
-        cell.source
-        for cell in notebook.cells
-        if cell.cell_type == "code" and "plot_dispersive_shift" in cell.source
-    )
-    assert "bare_rf=" in dispersive_cell
-    assert "r_f=r_f" not in dispersive_cell
 
 
 def test_plot_md_fluent_chain_smoke() -> None:

@@ -153,8 +153,22 @@ Radon distribution 版本隨既有 method.distributions 保存；方法或選用
 
 ## ratchet 是判準，不是另一個檢查
 
-`check_ratchet.py` 把七項檢查對照 base 判讀：逐 (檔案, 規則) 比較 base tree 與 candidate，
-**只有計數上升才失敗**。Git 以 20% 相似度確認的搬檔沿用原檔計數；其餘新檔從零比較。
+`check_ratchet.py` 把七項檢查對照 base 判讀。一般診斷及設定抑制逐 (檔案, 規則)
+比較，計數上升才失敗。Git 以 20% 相似度確認的搬檔沿用原檔來源；其餘新檔從零比較。
+
+`type-ignore` 與 `pyright-ignore` 另外按來源位置及 diagnostic scope 比較。
+`tools/suppression_comparison.py` 的 pure `compare_ignores` 以唯一 AST statement、
+owner/branch 與 line role 識別同一位置，保留 comment 增刪與 formatter 拆行後的對應。
+同位置的 blanket type-ignore 改成非空 explicit pyright-ignore code 集合可以通過。
+同 kind 也可以維持或縮小原範圍。新增位置、擴大 code 集合、改回 blanket 都失敗，
+其他位置或種類的刪除不能抵銷。位置有歧義、語法無法證明或 code list 無效時不核准遷移。
+完全相同的 source 保留既有 debt。位置配對不跨 function/class/branch。
+
+這類 regression 的 rule 包含 kind、reason 與 candidate line，before 0 / after 1 表示
+新增一個不允許的 escape-site 變化，不是該檔的 raw marker 總數。
+`check_suppressions.py` 與品質 snapshot 仍提供完整 usage counts，沒有把抑制清零或換 baseline。
+`check_ratchet.suppression_regressions` 擁有 Git path/rename 與 source-pair 的接線，
+其他 escape families 及 configuration 仍分別比較計數。
 
 ```bash
 --base <ref>        判定基準，預設 git merge-base HEAD main

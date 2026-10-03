@@ -1,4 +1,11 @@
-from .base import assign_init_p, fit_func, fit_line, with_fixed_params
+from .base import (
+    FitParameters,
+    FitResult,
+    assign_init_p,
+    fit_func,
+    fit_line,
+    with_fixed_params,
+)
 from .cos import cosfunc, decaycos, fitcos, fitdecaycos
 from .exp import dual_expfunc, expfunc, fit_dualexp, fitexp
 from .gauss import (

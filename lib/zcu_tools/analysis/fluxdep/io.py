@@ -46,20 +46,22 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
             points_grp = grp["points"]
             assert isinstance(spect_grp, h5.Group)
             assert isinstance(points_grp, h5.Group)
+            # h5py group lookup does not distinguish datasets from other objects.
+            # Keep the existing raw reads and their errors, without dtype coercion.
             result = SpectrumResult(
-                flux_half=grp["flux_half"][()],  # type: ignore
-                flux_int=grp["flux_int"][()],  # type: ignore
-                flux_period=grp["flux_period"][()],  # type: ignore
+                flux_half=grp["flux_half"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
+                flux_int=grp["flux_int"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
+                flux_period=grp["flux_period"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
                 spectrum={
-                    "dev_values": spect_grp["dev_values"][()],  # type: ignore
-                    "fluxs": spect_grp["fluxs"][()],  # type: ignore
-                    "freqs": spect_grp["freqs"][()],  # type: ignore
-                    "signals": spect_grp["signals"][()],  # type: ignore
+                    "dev_values": spect_grp["dev_values"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
+                    "fluxs": spect_grp["fluxs"][()],  # pyright: ignore[reportIndexIssue]
+                    "freqs": spect_grp["freqs"][()],  # pyright: ignore[reportIndexIssue]
+                    "signals": spect_grp["signals"][()],  # pyright: ignore[reportIndexIssue]
                 },
                 points={
-                    "dev_values": points_grp["dev_values"][()],  # type: ignore
-                    "fluxs": points_grp["fluxs"][()],  # type: ignore
-                    "freqs": points_grp["freqs"][()],  # type: ignore
+                    "dev_values": points_grp["dev_values"][()],  # pyright: ignore[reportIndexIssue, reportArgumentType]
+                    "fluxs": points_grp["fluxs"][()],  # pyright: ignore[reportIndexIssue]
+                    "freqs": points_grp["freqs"][()],  # pyright: ignore[reportIndexIssue]
                 },
             )
             # ``type`` is optional for older spectrum files; current files store it

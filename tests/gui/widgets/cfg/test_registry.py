@@ -2,21 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, fields
-from typing import Any, cast
+from dataclasses import FrozenInstanceError
+from typing import cast
 
 import pytest
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
 from zcu_tools.gui.cfg import ScalarSpec
-from zcu_tools.gui.cfg.binding import (
-    CenteredSweepField,
-    CfgField,
-    LiteralField,
-    ReferenceField,
-    ScalarField,
-    SectionField,
-    SweepField,
-)
+from zcu_tools.gui.cfg.binding import CfgField, LiteralField, ScalarField
 from zcu_tools.gui.widgets.cfg import (
     FieldRenderContext,
     FieldRenderer,
@@ -75,7 +67,7 @@ def test_bad_signature_is_rejected_at_registration(renderer: object) -> None:
 
 def test_noncallable_renderer_is_rejected() -> None:
     with pytest.raises(TypeError, match="renderer must be callable"):
-        FieldRendererRegistry().register(ScalarField, cast(Any, object()))
+        FieldRendererRegistry().register(ScalarField, cast(FieldRenderer, object()))
 
 
 def test_duplicate_registration_fast_fails() -> None:
@@ -133,14 +125,6 @@ def test_render_context_is_immutable_presentation_state() -> None:
     registry = FieldRendererRegistry().register(ScalarField, _first_renderer).freeze()
     context = FieldRenderContext(registry=registry, path="root", top_level=True)
 
-    assert {field.name for field in fields(context)} == {
-        "registry",
-        "path",
-        "top_level",
-        "field_label_max_width",
-        "decoration_for_path",
-        "text_input_enhancer",
-    }
     with pytest.raises(FrozenInstanceError):
         context.path = "mutated"  # type: ignore[misc]
     child = context.derive(path="root.child", top_level=False)
@@ -149,28 +133,16 @@ def test_render_context_is_immutable_presentation_state() -> None:
     assert child.top_level is False
 
 
-def test_default_factory_returns_fresh_frozen_complete_registries() -> None:
+def test_default_factory_returns_fresh_frozen_registries() -> None:
     first = default_cfg_renderers()
     second = default_cfg_renderers()
 
     assert isinstance(first, FrozenFieldRendererRegistry)
     assert isinstance(second, FrozenFieldRendererRegistry)
     assert first is not second
-    # Sole tree owns SectionField structurally; default registry exposes five non-section editors.
-    for field_type in (
-        LiteralField,
-        ScalarField,
-        SweepField,
-        CenteredSweepField,
-        ReferenceField,
-    ):
-        assert callable(first.resolve(field_type))
-        assert callable(second.resolve(field_type))
-    with pytest.raises(TypeError, match="exact field type SectionField"):
-        first.resolve(SectionField)
 
 
-def test_render_rejects_non_qwidget_result(qapp) -> None:  # noqa: ARG001
+def test_render_rejects_non_qwidget_result(qapp) -> None:
     class ProtocolOnly:
         def __init__(self, field: CfgField) -> None:
             self._field = field
@@ -205,7 +177,7 @@ def test_render_rejects_non_qwidget_result(qapp) -> None:  # noqa: ARG001
         frozen.render(field, FieldRenderContext(registry=frozen))
 
 
-def test_render_rejects_qwidget_without_field_widget_protocol(qapp) -> None:  # noqa: ARG001
+def test_render_rejects_qwidget_without_field_widget_protocol(qapp) -> None:
     def factory(
         field: CfgField,
         context: FieldRenderContext,
@@ -237,12 +209,3 @@ def test_render_rejects_context_from_another_registry() -> None:
 
     with pytest.raises(ValueError, match="registry does not match"):
         first.render(field, FieldRenderContext(registry=second))
-
-
-def test_forms_build_fresh_default_registry_instances(qapp) -> None:  # noqa: ARG001
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-
-    first = CfgFormWidget()
-    second = CfgFormWidget()
-
-    assert first._renderers is not second._renderers

@@ -29,7 +29,7 @@ def test_set_alignment_derives_period_and_remaps_fluxs(spectrum_hdf5):
 
 def test_set_alignment_zero_period_raises(spectrum_hdf5):
     st, name = _loaded(spectrum_hdf5)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="flux_int must differ from flux_half"):
         AlignmentService(st).set_alignment(name, flux_half=1.0, flux_int=1.0)
 
 

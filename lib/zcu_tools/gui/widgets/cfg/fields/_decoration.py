@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from qtpy.QtWidgets import QLabel, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QLabel, QWidget
 
 from ..decoration import FieldDecorationProtocol
 
-_TONE_STYLES = {
+TONE_STYLES = {
     "muted": "color: #6b7280;",
     "info": "color: #2563eb;",
     "warning": "color: #8a5a00;",
@@ -34,7 +34,7 @@ def apply_decoration(
 ) -> None:
     if decoration is None:
         return
-    enabled, tooltip, style = _decoration_widget_state(decoration)
+    enabled, tooltip, style = decoration_widget_state(decoration)
     label_widget.setEnabled(enabled)
     value_widget.setEnabled(enabled)
     if tooltip:
@@ -49,18 +49,18 @@ def apply_widget_decoration(
 ) -> None:
     if decoration is None:
         return
-    enabled, tooltip, _style = _decoration_widget_state(decoration)
+    enabled, tooltip, _style = decoration_widget_state(decoration)
     value_widget.setEnabled(enabled)
     if tooltip:
         value_widget.setToolTip(tooltip)
 
 
-def _decoration_widget_state(
+def decoration_widget_state(
     decoration: FieldDecorationProtocol,
 ) -> tuple[bool, str, str]:
     tone = decoration.tone or "normal"
     return (
         decoration.enabled,
         decoration.tooltip,
-        _TONE_STYLES.get(tone, ""),
+        TONE_STYLES.get(tone, ""),
     )

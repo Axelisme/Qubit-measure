@@ -90,5 +90,7 @@ def test_set_selection_bumps_and_stores():
 def test_set_selection_length_mismatch_raises():
     st = FluxDepState()
     _with_points(st, "a", [0.0, 1.0], [5.0, 5.1])
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="selection mask length 3 != joint point cloud"
+    ):
         SelectionService(st).set_selection(np.array([True, False, True]))  # 3 != 2

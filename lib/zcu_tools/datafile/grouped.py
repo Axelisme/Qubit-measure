@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from numbers import Integral
 from typing import Any
 
@@ -223,100 +224,113 @@ def _load_streaming_grouped_v1(
     )
 
 
+@dataclass(frozen=True)
+class _V2RoleGrid:
+    shape: tuple[int, ...]
+    axes: list[tuple[str, str, np.ndarray]]
+    timestamps: np.ndarray | None
+
+
+def _normalize_v2_role_axes(
+    role: DatasetRole, payload: LabberPayload, shape: tuple[int, ...]
+) -> list[tuple[str, str, np.ndarray]]:
+    normalized_axes: list[tuple[str, str, np.ndarray]] = []
+    for index, axis in enumerate(payload.axes):
+        if not isinstance(axis.name, str) or not axis.name:
+            raise ValueError("grouped v2 physical channel labels must be non-empty")
+        if not isinstance(axis.unit, str):
+            raise ValueError("grouped v2 channel units must be strings")
+        axis_values = np.asarray(axis.values)
+        if (
+            axis_values.ndim != 1
+            or axis_values.dtype == object
+            or not np.issubdtype(axis_values.dtype, np.number)
+        ):
+            raise ValueError(
+                f"grouped v2 axis {axis.name!r} values must be one-dimensional numeric data"
+            )
+        expected_length = shape[-1 - index]
+        if len(axis_values) != expected_length:
+            raise ValueError(
+                f"grouped v2 role {role!r} shape {shape} does not match "
+                f"axis {axis.name!r} length {len(axis_values)}"
+            )
+        normalized_axes.append((axis.name, axis.unit, axis_values))
+    return normalized_axes
+
+
+def _normalize_v2_role_grid(role: DatasetRole, payload: LabberPayload) -> _V2RoleGrid:
+    try:
+        values = np.asarray(payload.data.values)
+    except ValueError as exc:
+        raise ValueError(
+            f"grouped v2 role {role!r} has ragged or vector-valued data"
+        ) from exc
+    if values.dtype == object or not np.issubdtype(values.dtype, np.number):
+        raise ValueError(f"grouped v2 role {role!r} data must be numeric")
+    if values.ndim < 1 or values.size == 0:
+        raise ValueError(
+            f"grouped v2 role {role!r} data must have at least one dimension "
+            "and one value"
+        )
+    if not payload.axes:
+        raise ValueError("grouped v2 requires at least one step axis")
+    if len(payload.axes) != values.ndim:
+        raise ValueError(
+            f"grouped v2 role {role!r} shape {values.shape} requires "
+            f"{values.ndim} axes, got {len(payload.axes)}"
+        )
+    if not isinstance(payload.data.name, str) or not payload.data.name:
+        raise ValueError("grouped v2 physical channel labels must be non-empty")
+    if not isinstance(payload.data.unit, str):
+        raise ValueError("grouped v2 channel units must be strings")
+
+    normalized_axes = _normalize_v2_role_axes(role, payload, values.shape)
+    expected_timestamps = int(np.prod(values.shape[:-1])) if values.ndim > 1 else 1
+    timestamps: np.ndarray | None
+    if payload.timestamps is None:
+        timestamps = None
+    else:
+        timestamps = np.asarray(payload.timestamps, dtype=float)
+        if timestamps.ndim != 1 or len(timestamps) != expected_timestamps:
+            raise ValueError(
+                f"grouped v2 role {role!r} timestamps must be a flat array of "
+                f"length {expected_timestamps}"
+            )
+    return _V2RoleGrid(values.shape, normalized_axes, timestamps)
+
+
+def _validate_v2_common_grid(reference: _V2RoleGrid, actual: _V2RoleGrid) -> None:
+    if actual.shape != reference.shape or len(actual.axes) != len(reference.axes):
+        raise ValueError("grouped v2 roles must share one common grid and shape")
+    for expected_axis, actual_axis in zip(reference.axes, actual.axes, strict=True):
+        if expected_axis[:2] != actual_axis[:2] or not np.array_equal(
+            expected_axis[2], actual_axis[2], equal_nan=True
+        ):
+            raise ValueError("grouped v2 roles must share one common grid")
+    if (reference.timestamps is None) != (actual.timestamps is None) or (
+        reference.timestamps is not None
+        and actual.timestamps is not None
+        and not np.array_equal(reference.timestamps, actual.timestamps, equal_nan=True)
+    ):
+        raise ValueError("grouped v2 roles must have identical timestamps")
+
+
 def _validate_v2_payloads(
     payloads: Mapping[DatasetRole, LabberPayload],
 ) -> None:
-    reference_shape: tuple[int, ...] | None = None
-    reference_axes: list[tuple[str, str, np.ndarray]] | None = None
-    reference_timestamps: np.ndarray | None = None
+    reference_grid: _V2RoleGrid | None = None
     physical_labels: list[str] = []
 
     for role, payload in payloads.items():
-        try:
-            values = np.asarray(payload.data.values)
-        except ValueError as exc:
-            raise ValueError(
-                f"grouped v2 role {role!r} has ragged or vector-valued data"
-            ) from exc
-        if values.dtype == object or not np.issubdtype(values.dtype, np.number):
-            raise ValueError(f"grouped v2 role {role!r} data must be numeric")
-        if values.ndim < 1 or values.size == 0:
-            raise ValueError(
-                f"grouped v2 role {role!r} data must have at least one dimension "
-                "and one value"
-            )
-        if not payload.axes:
-            raise ValueError("grouped v2 requires at least one step axis")
-        if len(payload.axes) != values.ndim:
-            raise ValueError(
-                f"grouped v2 role {role!r} shape {values.shape} requires "
-                f"{values.ndim} axes, got {len(payload.axes)}"
-            )
-        if not isinstance(payload.data.name, str) or not payload.data.name:
-            raise ValueError("grouped v2 physical channel labels must be non-empty")
-        if not isinstance(payload.data.unit, str):
-            raise ValueError("grouped v2 channel units must be strings")
-
-        normalized_axes: list[tuple[str, str, np.ndarray]] = []
-        for index, axis in enumerate(payload.axes):
-            if not isinstance(axis.name, str) or not axis.name:
-                raise ValueError("grouped v2 physical channel labels must be non-empty")
-            if not isinstance(axis.unit, str):
-                raise ValueError("grouped v2 channel units must be strings")
-            axis_values = np.asarray(axis.values)
-            if (
-                axis_values.ndim != 1
-                or axis_values.dtype == object
-                or not np.issubdtype(axis_values.dtype, np.number)
-            ):
-                raise ValueError(
-                    f"grouped v2 axis {axis.name!r} values must be one-dimensional numeric data"
-                )
-            expected_length = values.shape[-1 - index]
-            if len(axis_values) != expected_length:
-                raise ValueError(
-                    f"grouped v2 role {role!r} shape {values.shape} does not match "
-                    f"axis {axis.name!r} length {len(axis_values)}"
-                )
-            normalized_axes.append((axis.name, axis.unit, axis_values))
-
-        expected_timestamps = int(np.prod(values.shape[:-1])) if values.ndim > 1 else 1
-        timestamps: np.ndarray | None
-        if payload.timestamps is None:
-            timestamps = None
-        else:
-            timestamps = np.asarray(payload.timestamps, dtype=float)
-            if timestamps.ndim != 1 or len(timestamps) != expected_timestamps:
-                raise ValueError(
-                    f"grouped v2 role {role!r} timestamps must be a flat array of "
-                    f"length {expected_timestamps}"
-                )
-
-        if reference_shape is None:
-            reference_shape = values.shape
-            reference_axes = normalized_axes
-            reference_timestamps = timestamps
+        # Finish each role before comparing it or moving to the next role, so
+        # malformed payloads retain their first-error ordering.
+        role_grid = _normalize_v2_role_grid(role, payload)
+        if reference_grid is None:
+            reference_grid = role_grid
             physical_labels.extend(axis.name for axis in payload.axes)
         else:
-            assert reference_axes is not None
-            if values.shape != reference_shape or len(normalized_axes) != len(
-                reference_axes
-            ):
-                raise ValueError(
-                    "grouped v2 roles must share one common grid and shape"
-                )
-            for expected, actual in zip(reference_axes, normalized_axes):
-                if expected[:2] != actual[:2] or not np.array_equal(
-                    expected[2], actual[2], equal_nan=True
-                ):
-                    raise ValueError("grouped v2 roles must share one common grid")
-            if (reference_timestamps is None) != (timestamps is None) or (
-                reference_timestamps is not None
-                and timestamps is not None
-                and not np.array_equal(reference_timestamps, timestamps, equal_nan=True)
-            ):
-                raise ValueError("grouped v2 roles must have identical timestamps")
-
+            _validate_v2_common_grid(reference_grid, role_grid)
         physical_labels.append(payload.data.name)
 
     if len(set(physical_labels)) != len(physical_labels):
