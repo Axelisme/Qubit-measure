@@ -124,17 +124,23 @@ def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -
 
 def _yaml_value(value: object) -> YamlValue:
     if isinstance(value, BaseModel):
-        # Newly assigned children have no edit-entry baseline. Preserve explicit
-        # presence and nondefault container contents, including in-place edits.
-        fields = value.model_dump(exclude_defaults=True) | value.model_dump(
-            exclude_unset=True
+        result = TypeAdapter(YamlMap).validate_python(
+            value.model_dump(exclude_unset=True)
         )
-        return {
-            name: _yaml_value(getattr(value, name))
-            if name in type(value).model_fields
-            else _yaml_value(child)
-            for name, child in fields.items()
-        }
+        values = {name: getattr(value, name) for name in type(value).model_fields}
+        for name, field in type(value).model_fields.items():
+            if name in result:
+                result[name] = _yaml_value(values[name])
+            elif not field.is_required():
+                # New children have no edit-entry baseline. Compare declared
+                # defaults recursively, retaining nested presence and mutations.
+                default = field.get_default(
+                    call_default_factory=True, validated_data=values
+                )
+                before, after = _edit_values(default, values[name])
+                if not _same_value(before, after):
+                    result[name] = after
+        return result
     if isinstance(value, dict):
         value = {key: _yaml_value(child) for key, child in value.items()}
     elif isinstance(value, list):
@@ -166,7 +172,7 @@ def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
         original_map = cast(dict[str, object], base)
         draft_map = cast(dict[str, object], draft)
         return (
-            {key: _yaml_value(child) for key, child in original_map.items()},
+            {key: _edit_values(child, child)[0] for key, child in original_map.items()},
             {
                 key: _edit_values(original_map.get(key, _Missing.VALUE), child)[1]
                 for key, child in draft_map.items()
@@ -176,7 +182,7 @@ def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
         original_list = cast(list[object], base)
         draft_list = cast(list[object], draft)
         return (
-            [_yaml_value(child) for child in original_list],
+            [_edit_values(child, child)[0] for child in original_list],
             [
                 _edit_values(
                     original_list[index]
