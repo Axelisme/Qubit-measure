@@ -28,6 +28,30 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conversion(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0, ext={"freq": 12.3})
+    extension = entry.setup.R1.ext
+    assert extension.freq == 12.3
+    extension.note = "unscaled annotation"
+    payload: YamlMap = {"freq": 321.0, "optional": None, "flags": [True, "cold"]}
+    extension["_arbitrary.key"] = payload
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.R1.ext.note == "unscaled annotation"
+    assert reopened.setup.R1.ext["_arbitrary.key"] == payload
+    document = YAML(typ="safe").load(setup_path)["components"]["R1"]
+    assert document["freq"] == 6.5e9
+    assert document["ext"] == {
+        "freq": 12.3,
+        "note": "unscaled annotation",
+        "_arbitrary.key": payload,
+    }
+
+
 @pytest.mark.parametrize("field", ["ch", "ro_ch", "flux_ch"])
 @pytest.mark.parametrize("operation", ["add", "write", "open"])
 def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
