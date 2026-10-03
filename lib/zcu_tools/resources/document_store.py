@@ -124,7 +124,17 @@ def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -
 
 def _yaml_value(value: object) -> YamlValue:
     if isinstance(value, BaseModel):
-        value = value.model_dump(exclude_unset=True)
+        # Newly assigned children have no edit-entry baseline. Preserve explicit
+        # presence and nondefault container contents, including in-place edits.
+        fields = value.model_dump(exclude_defaults=True) | value.model_dump(
+            exclude_unset=True
+        )
+        return {
+            name: _yaml_value(getattr(value, name))
+            if name in type(value).model_fields
+            else _yaml_value(child)
+            for name, child in fields.items()
+        }
     if isinstance(value, dict):
         value = {key: _yaml_value(child) for key, child in value.items()}
     elif isinstance(value, list):
@@ -158,7 +168,7 @@ def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
         return (
             {key: _yaml_value(child) for key, child in original_map.items()},
             {
-                key: _edit_values(original_map.get(key, child), child)[1]
+                key: _edit_values(original_map.get(key, _Missing.VALUE), child)[1]
                 for key, child in draft_map.items()
             },
         )
@@ -169,7 +179,10 @@ def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
             [_yaml_value(child) for child in original_list],
             [
                 _edit_values(
-                    original_list[index] if index < len(original_list) else child, child
+                    original_list[index]
+                    if index < len(original_list)
+                    else _Missing.VALUE,
+                    child
                 )[1]
                 for index, child in enumerate(draft_list)
             ],
