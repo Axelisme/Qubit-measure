@@ -42,6 +42,10 @@ class UnitSpec:
     si_unit: str
     working_unit: str
 
+    def validate(self) -> None:
+        """Reject units unsupported by the DocumentStore conversion boundary."""
+        _unit_factor(self)
+
 
 type UnitResolver = Callable[[Mapping[str, YamlValue]], Mapping[FieldPath, UnitSpec]]
 

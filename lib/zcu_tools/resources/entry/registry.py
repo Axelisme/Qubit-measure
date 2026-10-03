@@ -19,6 +19,7 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     for name, field in model.model_fields.items():
         for metadata in field.metadata:
             if isinstance(metadata, UnitSpec):
+                metadata.validate()
                 result[(name,)] = metadata
         annotation = field.annotation
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
