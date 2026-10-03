@@ -118,7 +118,7 @@ def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         assert pending.wait(1)
         execution = initial.data["execution"]
         status = client.call("status", {"execution": execution})
-        assert status.data["analysis_stage"] == stage
+        assert status["analysis_stage"] == stage
         assert client.call("cancel", {"execution": execution}).data["cancel_requested"]
         release.set()
         terminal = client.call("wait", {"execution": execution, "timeout": 2})
