@@ -214,11 +214,14 @@ class DocumentStore[T: BaseModel]:
                         raise ConflictError(self._path, path, original, current)
                 units = self._unit_specs(document)
                 for path, value in patches:
-                    if path in units:
-                        value = self._scale_value(
-                            value, _unit_factor(units[path]), path
-                        )
                     _apply(document, path, value)
+                for path, spec in units.items():
+                    if any(path[: len(changed)] == changed for changed, _ in patches):
+                        value = self._scale_value(
+                            _lookup(document, path), _unit_factor(spec), path
+                        )
+                        if not isinstance(value, _Missing):
+                            _apply(document, path, value)
                 snapshot = self._model_snapshot(document)
                 if patches:
                     self._write(document)
