@@ -252,7 +252,7 @@ class OnetoneGui(LookbackGui):
                 ordinary.append(edit)
         super()._edit({**params, "edits": ordinary})
 
-    def __call__(self, method, params):
+    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "value.list":
             return {"values": []}
         if method == "tab.new":
