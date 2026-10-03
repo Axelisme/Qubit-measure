@@ -180,6 +180,65 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
     assert found[0].reason == "unproven-position"
 
 
+@pytest.mark.parametrize(
+    ("before", "after", "line"),
+    [
+        (
+            "if flag:\n    import missing  # type: ignore\n"
+            "flag = not flag\nif flag:\n    pass\n",
+            "if flag:\n    pass\nflag = not flag\n"
+            "if flag:\n    import missing  # {directive}\n",
+            5,
+        ),
+        (
+            "try:\n    import missing  # type: ignore\n"
+            "except ImportError:\n    pass\n"
+            "try:\n    pass\nexcept ImportError:\n    pass\n",
+            "try:\n    pass\nexcept ImportError:\n    pass\n"
+            "try:\n    import missing  # {directive}\n"
+            "except ImportError:\n    pass\n",
+            6,
+        ),
+        (
+            "try:\n    run()\nexcept ValueError:\n"
+            "    import missing  # type: ignore\nexcept ValueError:\n    pass\n",
+            "try:\n    run()\nexcept ValueError:\n    pass\n"
+            "except ValueError:\n    import missing  # {directive}\n",
+            6,
+        ),
+        (
+            "if flag:\n    import missing  # type: ignore\nif flag:\n    pass\n",
+            "if flag:\n    import missing  # {directive}\n",
+            2,
+        ),
+        (
+            "if flag:\n    import missing  # type: ignore\n",
+            "if flag:\n    pass\nif flag:\n    import missing  # {directive}\n",
+            4,
+        ),
+        (
+            "if flag:\n    if nested:\n        import missing  # type: ignore\n"
+            "if flag:\n    pass\n",
+            "if flag:\n    pass\nif flag:\n    if nested:\n"
+            "        import missing  # {directive}\n",
+            5,
+        ),
+    ],
+    ids=["if-owners", "try-owners", "handlers", "before-only", "after-only", "deep"],
+)
+@pytest.mark.parametrize(
+    "directive", ["pyright: ignore[reportMissingImports]", "type: ignore"]
+)
+def test_ambiguous_ancestry_cannot_authorize_an_escape_site(
+    before: str, after: str, line: int, directive: str
+) -> None:
+    found = compare_ignores(before, after.format(directive=directive))
+
+    assert len(found) == 1
+    assert found[0].line == line
+    assert found[0].reason == "unproven-position"
+
+
 def test_exact_unchanged_input_preserves_ambiguous_existing_debt() -> None:
     source = "import missing  # type: ignore\nimport missing\n"
 
