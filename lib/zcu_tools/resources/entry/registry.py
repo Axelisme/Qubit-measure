@@ -19,6 +19,14 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     for name, field in model.model_fields.items():
         for metadata in field.metadata:
             if isinstance(metadata, UnitSpec):
+                annotation = field.annotation
+                types = (
+                    get_args(annotation)
+                    if get_origin(annotation) in (Union, UnionType)
+                    else (annotation,)
+                )
+                if not all(item in (float, int, type(None)) for item in types):
+                    raise TypeError(f"Unit metadata requires a numeric field: {name}")
                 metadata.validate()
                 result[(name,)] = metadata
         annotation = field.annotation
