@@ -15,6 +15,7 @@ dependencies = [
   "pydantic>=2",
   "typing-extensions",
   "simpleeval>=1.0,<2",
+  "ruamel-yaml>=0.18,<0.19",
 ]
 
 [project.optional-dependencies]
