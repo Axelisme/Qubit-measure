@@ -5,9 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEvent, QPoint, QPointF, Qt
-from qtpy.QtGui import QMouseEvent
-from qtpy.QtWidgets import QApplication, QComboBox, QTreeWidget, QTreeWidgetItem
+from qtpy.QtWidgets import QComboBox
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
@@ -23,55 +21,9 @@ from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 from zcu_tools.resources.context import ModuleLibrary
 
 from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
-
-
-def _tree(form: CfgFormWidget) -> QTreeWidget:
-    tree = form.findChild(QTreeWidget)
-    assert tree is not None
-    return tree
-
-
-def _item(form: CfgFormWidget, path: str) -> QTreeWidgetItem:
-    root = _tree(form).invisibleRootItem()
-    assert root is not None
-    pending = [root]
-    while pending:
-        item = pending.pop()
-        if item.data(0, Qt.ItemDataRole.UserRole) == path:
-            return item
-        for index in range(item.childCount()):
-            child = item.child(index)
-            if child is not None:
-                pending.append(child)
-    raise AssertionError(f"no tree item for path {path!r}")
-
-
-def _click_row(qapp: QApplication, form: CfgFormWidget, item: QTreeWidgetItem) -> None:
-    form.resize(600, 400)
-    form.show()
-    qapp.processEvents()
-    tree = _tree(form)
-    tree.scrollToItem(item)
-    qapp.processEvents()
-    rect = tree.visualItemRect(item)
-    assert rect.isValid()
-    viewport = tree.viewport()
-    assert viewport is not None
-    position = QPoint(tree.columnWidth(0) // 2, rect.center().y())
-    for event_type, buttons in (
-        (QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
-        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
-    ):
-        event = QMouseEvent(
-            event_type,
-            QPointF(position),
-            QPointF(viewport.mapToGlobal(position)),
-            Qt.MouseButton.LeftButton,
-            buttons,
-            Qt.KeyboardModifier.NoModifier,
-        )
-        QApplication.sendEvent(viewport, event)
-    qapp.processEvents()
+from tests.gui.widgets.cfg._tree_support import click_row as _click_row
+from tests.gui.widgets.cfg._tree_support import tree_item as _item
+from tests.gui.widgets.cfg._tree_support import tree_widget as _tree
 
 
 def _readout_shape(ctrl: MagicMock) -> tuple[CfgSectionSpec, CfgSectionValue]:
