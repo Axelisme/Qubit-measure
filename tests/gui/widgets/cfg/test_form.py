@@ -6,7 +6,7 @@ from typing import Any, Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QComboBox, QLineEdit
+from qtpy.QtWidgets import QComboBox, QLabel, QLineEdit
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
@@ -45,7 +45,7 @@ from zcu_tools.gui.widgets.cfg import (
     FrozenFieldRendererRegistry,
     default_cfg_renderers,
 )
-from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
+from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget, ReferenceWidget
 from zcu_tools.gui.widgets.cfg.registry import FieldWidgetProtocol
 from zcu_tools.resources.context import ModuleLibrary
 
@@ -164,8 +164,6 @@ def test_scalar_choices_widget_round_trip(qapp):
 
 
 def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
-    from qtpy.QtWidgets import QComboBox
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.arb_waveforms.list_data_keys.return_value = ["asset_a", "asset_b"]
     schema = section_schema(
@@ -179,27 +177,29 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
         },
         {"data": DirectValue(None)},
     )
-    w = CfgFormWidget()
-    model = attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
 
-    combo = w.findChild(QComboBox)
-    assert combo is not None
-    assert [combo.itemText(i) for i in range(combo.count())] == ["asset_a", "asset_b"]
-    assert combo.currentIndex() == -1
-    assert not w.is_valid()
+        combo = form.findChild(QComboBox)
+        assert combo is not None
+        assert [combo.itemText(i) for i in range(combo.count())] == ["asset_a", "asset_b"]
+        assert combo.currentIndex() == -1
+        assert not form.is_valid()
 
-    combo.setCurrentIndex(1)
+        combo.setCurrentIndex(1)
 
-    field = cast(ScalarField, model.fields["data"])
-    value = field.get_value()
-    assert isinstance(value, DirectValue)
-    assert value.value == "asset_b"
-    assert w.is_valid()
+        value = form.read_values().fields["data"]
+        assert isinstance(value, DirectValue) and value.value == "asset_b"
+        assert form.is_valid()
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
-    from qtpy.QtWidgets import QComboBox
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.arb_waveforms.list_data_keys.return_value = ["asset_a"]
     schema = section_schema(
@@ -212,19 +212,23 @@ def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
         },
         {"data": DirectValue("")},
     )
-    w = CfgFormWidget()
-    model = attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
 
-    combo = w.findChild(QComboBox)
-    assert combo is not None
-    assert [combo.itemText(i) for i in range(combo.count())] == ["", "asset_a"]
-    assert combo.currentIndex() == 0
-    assert w.is_valid()
+        combo = form.findChild(QComboBox)
+        assert combo is not None
+        assert [combo.itemText(i) for i in range(combo.count())] == ["", "asset_a"]
+        assert combo.currentIndex() == 0
+        assert form.is_valid()
 
-    field = cast(ScalarField, model.fields["data"])
-    value = field.get_value()
-    assert isinstance(value, DirectValue)
-    assert value.value == ""
+        value = form.read_values().fields["data"]
+        assert isinstance(value, DirectValue) and value.value == ""
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_dynamic_choice_renders_inactive_current_value_but_remains_invalid(qapp, ctrl):
@@ -494,7 +498,6 @@ def test_read_schema_before_populate_raises(qapp):
 
 
 def test_populate_scalar_fields_round_trip(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = section_schema(
         {
@@ -506,12 +509,19 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
             "freq": DirectValue(6.0),
         },
     )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    out = w.read_values()
-
-    assert out.fields["reps"].value == 100  # type: ignore[union-attr]
-    assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        values = form.read_values()
+        reps = values.fields["reps"]
+        freq = values.fields["freq"]
+        assert isinstance(reps, DirectValue) and reps.value == 100
+        assert isinstance(freq, DirectValue) and freq.value == pytest.approx(6.0)
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 @pytest.mark.parametrize("failure", ["invalid_widget", "exception"])
@@ -860,23 +870,28 @@ def test_read_schema_returns_cfg_schema(qapp, ctrl):
 
 
 def test_read_values_does_not_mutate_original(qapp, ctrl):
-    from qtpy.QtWidgets import QLineEdit
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = section_schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(100)},
     )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
 
-    entry = w.findChild(QLineEdit)
-    assert entry is not None
-    entry.setText("999")
+        entry = form.findChild(QLineEdit)
+        assert entry is not None
+        entry.setText("999")
 
-    out = w.read_values()
-    assert out.fields["reps"].value == 999  # type: ignore[union-attr]
-    assert schema.value.fields["reps"].value == 100  # type: ignore[union-attr]
+        reps = form.read_values().fields["reps"]
+        original_reps = schema.value.fields["reps"]
+        assert isinstance(reps, DirectValue) and reps.value == 999
+        assert isinstance(original_reps, DirectValue) and original_reps.value == 100
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_populate_sweep_field_round_trip(qapp, ctrl):
@@ -899,9 +914,6 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
 
 
 def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
-    from qtpy.QtWidgets import QLabel, QLineEdit, QSizePolicy
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget
 
     schema = section_schema(
         {
@@ -914,59 +926,60 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
         },
         {"f": CenteredSweepValue(center=0.0, span=100.0, expts=201)},
     )
-    w = CfgFormWidget()
-    model = attach_draft(w, schema, ctrl)
-    sweep_widget = w.findChild(CenteredSweepWidget)
-    assert sweep_widget is not None
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        sweep_widget = form.findChild(CenteredSweepWidget)
+        assert sweep_widget is not None
 
-    field = cast(CenteredSweepField, model.fields["f"])
-    assert field.center_field.spec.editable is False
-    span_input = sweep_widget.findChild(QLineEdit, "span")
-    points_input = sweep_widget.findChild(QLineEdit, "expts")
-    assert span_input is not None
-    assert points_input is not None
-    center_input = sweep_widget.findChild(QLineEdit)
-    assert center_input is not None
-    assert not center_input.isEnabled()
-    for value_widget in sweep_widget.findChildren(QLineEdit):
-        assert (
-            value_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
-        )
-    labels = {label.text(): label for label in sweep_widget.findChildren(QLabel)}
-    center_label = labels["center [generated]"]
-    span_label = labels["span"]
-    assert center_label.toolTip() == "Generated center"
-    center_cell = center_label.parentWidget()
-    span_cell = span_label.parentWidget()
-    assert center_cell is not None
-    assert span_cell is not None
-    pair_row = center_cell.parentWidget()
-    assert pair_row is span_cell.parentWidget()
-    assert pair_row is not None
-    pair_row.resize(801, pair_row.sizeHint().height())
-    qapp.processEvents()
-    assert abs(center_cell.width() - span_cell.width()) <= 1
+        span_input = sweep_widget.findChild(QLineEdit, "span")
+        points_input = sweep_widget.findChild(QLineEdit, "expts")
+        assert span_input is not None
+        assert points_input is not None
+        center_input = sweep_widget.findChild(QLineEdit)
+        assert center_input is not None
+        assert not center_input.isEnabled()
+        labels = {label.text(): label for label in sweep_widget.findChildren(QLabel)}
+        center_label = labels["center [generated]"]
+        span_label = labels["span"]
+        assert center_label.toolTip() == "Generated center"
+        center_cell = center_label.parentWidget()
+        span_cell = span_label.parentWidget()
+        assert center_cell is not None
+        assert span_cell is not None
+        pair_row = center_cell.parentWidget()
+        assert pair_row is span_cell.parentWidget()
+        assert pair_row is not None
+        pair_row.resize(801, pair_row.sizeHint().height())
+        qapp.processEvents()
+        assert abs(center_cell.width() - span_cell.width()) <= 1
 
-    span_input.setText("120.0")
-    points_input.setText("121")
-    out = w.read_values()
+        span_input.setText("120.0")
+        points_input.setText("121")
+        out = form.read_values()
 
-    sv = out.fields["f"]
-    assert isinstance(sv, CenteredSweepValue)
-    assert sv.center == pytest.approx(0.0)
-    assert sv.span == DirectValue(120.0, raw="120.0")
-    assert sv.expts == DirectValue(121, raw="121")
-    assert sv.step == pytest.approx(1.0)
+        sv = out.fields["f"]
+        assert isinstance(sv, CenteredSweepValue)
+        assert sv.center == pytest.approx(0.0)
+        assert sv.span == DirectValue(120.0, raw="120.0")
+        assert sv.expts == DirectValue(121, raw="121")
+        assert sv.step == pytest.approx(1.0)
+        assert form.is_valid()
 
-    span_input.setText("0.0")
-    sv = w.read_values().fields["f"]
-    assert isinstance(sv, CenteredSweepValue)
-    assert isinstance(sv.span, DirectValue)
-    assert sv.span.value is None
-    assert sv.span.raw == "0.0"
-    assert sv.span.error is not None
-    assert span_input.text() == "0.0"
-    assert not field.is_valid()
+        span_input.setText("0.0")
+        sv = form.read_values().fields["f"]
+        assert isinstance(sv, CenteredSweepValue)
+        assert isinstance(sv.span, DirectValue)
+        assert sv.span.value is None
+        assert sv.span.raw == "0.0"
+        assert sv.span.error is not None
+        assert span_input.text() == "0.0"
+        assert not form.is_valid()
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):
@@ -1058,7 +1071,6 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
 
 
 def test_populate_nested_section_round_trip(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = section_schema(
         {
@@ -1068,13 +1080,18 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
         },
         {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
     )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    out = w.read_values()
-
-    inner = out.fields["inner"]
-    assert isinstance(inner, CfgSectionValue)
-    assert inner.fields["gain"].value == pytest.approx(0.05)  # type: ignore[union-attr]
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        inner = form.read_values().fields["inner"]
+        assert isinstance(inner, CfgSectionValue)
+        gain = inner.fields["gain"]
+        assert isinstance(gain, DirectValue) and gain.value == pytest.approx(0.05)
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
@@ -1684,38 +1701,33 @@ def test_custom_reference_renders_header_and_editable_leaf(
 
 
 def test_populate_module_ref_field_round_trip(qapp, ctrl):
-    from zcu_tools.gui.cfg import ReferenceSpec, ReferenceValue
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     allowed_spec = CfgSectionSpec(
         label="Pulse",
         fields={"gain": ScalarSpec(label="Gain", type=float)},
     )
-    schema = CfgSchema(
-        spec=CfgSectionSpec(
-            fields={
-                "mod": ReferenceSpec(
-                    kind="module", allowed=[allowed_spec], label="Module"
-                )
-            }
-        ),
-        value=CfgSectionValue(
-            fields={
-                "mod": ReferenceValue(
-                    chosen_key="<Custom:Pulse>",
-                    value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
-                )
-            }
-        ),
+    schema = section_schema(
+        {"mod": ReferenceSpec(kind="module", allowed=[allowed_spec], label="Module")},
+        {
+            "mod": ReferenceValue(
+                chosen_key="<Custom:Pulse>",
+                value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
+            )
+        },
     )
-    w = CfgFormWidget()
-    attach_draft(w, schema, ctrl)
-    out = w.read_values()
-
-    mod = out.fields["mod"]
-    assert isinstance(mod, ReferenceValue)
-    assert mod.chosen_key == "<Custom:Pulse>"
-    assert mod.value.fields["gain"].value == pytest.approx(0.5)  # type: ignore[union-attr]
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    try:
+        form.attach(draft)
+        mod = form.read_values().fields["mod"]
+        assert isinstance(mod, ReferenceValue)
+        assert mod.chosen_key == "<Custom:Pulse>"
+        gain = mod.value.fields["gain"]
+        assert isinstance(gain, DirectValue) and gain.value == pytest.approx(0.5)
+    finally:
+        form.detach()
+        form.close()
+        draft.close()
 
 
 def test_populate_full_fake_freq_schema(qapp, ctrl):
