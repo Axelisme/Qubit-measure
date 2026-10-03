@@ -183,7 +183,10 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
 
         combo = form.findChild(QComboBox)
         assert combo is not None
-        assert [combo.itemText(i) for i in range(combo.count())] == ["asset_a", "asset_b"]
+        assert [combo.itemText(i) for i in range(combo.count())] == [
+            "asset_a",
+            "asset_b",
+        ]
         assert combo.currentIndex() == -1
         assert not form.is_valid()
 
