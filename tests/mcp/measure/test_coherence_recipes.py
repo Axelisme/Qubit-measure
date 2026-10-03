@@ -374,6 +374,34 @@ def test_t1_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
         client.context.session.close()
 
 
+@pytest.mark.parametrize("delay", [1, 1.0])
+def test_t1_number_inputs_publish_floats_and_keep_integer_counts(tmp_path, delay):
+    with recipe_client(tmp_path, CoherenceGui(pi_ref="pi")) as client:
+        data = client.call(
+            "t1", {"max_delay_us": delay, "points": 3, "reps": 2, "rounds": 1}
+        ).data
+        assert data["status"] == "finished", data
+        sweep = data["actual"]["fields"]["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            value = data["actual"]["fields"][name]["value"]
+            assert value == count
+            assert type(value) is int
+        edits = [
+            edit
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "length"]
+        ]
+        assert len(edits) == 1
+        assert edits[0]["value"]["stop"] == 1.0
+        assert type(edits[0]["value"]["stop"]) is float
+
+
 def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
     gui = CoherenceGui()
     client = make_client(tmp_path, gui)
