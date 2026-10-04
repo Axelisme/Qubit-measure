@@ -172,13 +172,9 @@ class ComponentRegistry:
                 raise UnknownFieldError(
                     f"{path}.{name}", name, tuple(get_close_matches(name, known_fields))
                 )
-            annotation = known_fields[name].annotation
-            if (
-                isinstance(value, dict)
-                and isinstance(annotation, type)
-                and issubclass(annotation, BaseModel)
-            ):
-                self.check_fields(annotation, value, path=f"{path}.{name}")
+            nested_model = _nested_model(known_fields[name].annotation)
+            if isinstance(value, dict) and nested_model is not None:
+                self.check_fields(nested_model, value, path=f"{path}.{name}")
 
     def validate_references(
         self, components: Mapping[str, ComponentSchema], *, source: Path
