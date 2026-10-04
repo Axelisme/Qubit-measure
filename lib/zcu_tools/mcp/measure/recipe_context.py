@@ -21,6 +21,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
 )
 from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.interaction import handoff_interaction
+from zcu_tools.mcp.measure.recipe import MissingParameter, RawSaveReceipt
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 if TYPE_CHECKING:
@@ -37,12 +38,6 @@ RecipePhase = Literal[
 
 
 @dataclass(frozen=True)
-class MissingParameter:
-    parameter: str
-    reason: str
-
-
-@dataclass(frozen=True)
 class RecipeError:
     phase: RecipePhase
     reason: str
@@ -54,16 +49,6 @@ class RecipeError:
 class StartReceipt:
     status: Literal["not_started", "unknown", "running"] = "not_started"
     reason: str | None = None
-
-
-@dataclass(frozen=True)
-class RawSave:
-    status: Literal["not_started", "saving", "saved", "failed", "unknown"] = (
-        "not_started"
-    )
-    reserved_path: str | None = None
-    path: str | None = None
-    operation_outcome: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -88,7 +73,7 @@ class RecipeSnapshot:
     run_outcome: dict[str, Any] | None = None
     run_start: StartReceipt = field(default_factory=StartReceipt)
     result_state: dict[str, Any] | None = None
-    raw_save: RawSave = field(default_factory=RawSave)
+    raw_save: RawSaveReceipt = field(default_factory=RawSaveReceipt)
     analysis_mode: Literal["primary", "primary_post", "none"] = "none"
     preview: RunPreview | None = None
     analysis: dict[str, Any] | None = None
@@ -240,7 +225,7 @@ class RecipeContext:
                 raise _ContinuationCancelled
             self._publish(phase=phase)
             if phase == "raw_save":
-                self._publish(raw_save=RawSave("saving"))
+                self._publish(raw_save=RawSaveReceipt("saving"))
 
     def rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         return self.tools.gui.send_gui_rpc(
@@ -604,7 +589,8 @@ class RecipeContext:
             )
             path = started["data_path"]
             self._publish(
-                op=started["handle"], raw_save=RawSave("saving", reserved_path=path)
+                op=started["handle"],
+                raw_save=RawSaveReceipt("saving", reserved_path=path),
             )
             outcome = self._await_operation(started["handle"])
             if outcome["status"] != "finished":
@@ -619,7 +605,7 @@ class RecipeContext:
                     str(outcome.get("error", "Raw save failed")),
                     reason="raw_save_failed",
                 )
-            self._publish(raw_save=RawSave("saved", path, path, outcome))
+            self._publish(raw_save=RawSaveReceipt("saved", path, path, outcome))
         except _ContinuationCancelled:
             raise
         except Exception as error:
