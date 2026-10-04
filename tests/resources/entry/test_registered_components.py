@@ -121,6 +121,36 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+def test_idempotent_numeric_rounding_survives_si_round_trip_and_publishes_canonical(
+    tmp_path: Path, registry_state_guard: None
+) -> None:
+    class RoundedSchema(ComponentSchema):
+        freq: Annotated[float, UnitSpec("Hz", "MHz")]
+
+        @field_validator("freq")
+        @classmethod
+        def round_frequency(cls, value: float) -> float:
+            return round(value, 2)
+
+    with registered_model("notebook/rounded", RoundedSchema) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, freq=0.143)
+        source = results / "entry" / "setup.yaml"
+        assert YAML(typ="safe").load(source)["components"]["N1"]["freq"] == 140000.0
+        assert entry.setup.N1.freq == 0.14
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        reopened.setup.refresh()
+        assert reopened.setup.N1.freq == 0.14
+        with reopened.setup.edit() as draft:
+            assert draft.N1.freq == 0.14
+            draft.description = "rounded value retained"
+        assert reopened.setup.N1.freq == 0.14
+        assert reopened.setup.description == "rounded value retained"
+        assert YAML(typ="safe").load(source)["components"]["N1"]["freq"] == 140000.0
+
+
 def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
