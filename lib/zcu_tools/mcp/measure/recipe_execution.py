@@ -176,7 +176,7 @@ class RecipeExecution:
         self._answer: WritebackDecision | None = None
         self._pending_cancel = False
         self._last_status: StepStatus = "completed"
-        self._images: tuple[PngImage, ...] = ()
+        self._analysis_images: dict[AnalysisStage, tuple[PngImage, ...]] = {}
         self._stopped_operation: RunOperation | None = None
         self._run_cancel = GuiCancel("not_needed")
         self._worker = Thread(target=self._run, daemon=True)
@@ -268,13 +268,20 @@ class RecipeExecution:
                 min(timeout, 300.0),
             )
             progress = self.snapshot()
-            images = self._images
+            analysis_images = dict(self._analysis_images)
+            if isinstance(self._active, AnalyzeOperation):
+                capture = self._active.snapshot()
+                if capture is not None:
+                    analysis_images[capture.stage] = self._active.preview_images()
+            images = tuple(
+                image
+                for stage in ("primary", "post")
+                for image in analysis_images.get(stage, ())
+            )
             if not images and self._session is not None:
                 run = self._session.run_snapshot()
                 if run is not None:
                     images = run.preview_images
-            if isinstance(self._active, AnalyzeOperation):
-                images = self._active.preview_images() or images
             return ToolReply(
                 {**asdict(progress), "elapsed_s": time.monotonic() - began},
                 images,
@@ -516,10 +523,14 @@ class RecipeExecution:
                 if self._progress.finish_early_requested and not self._pending_cancel:
                     status = "finished_early"
             return run, status
-        delivery = operation.complete_in_current_worker()
-        with self._condition:
-            self._images = operation.preview_images()
-        return delivery
+        try:
+            return operation.complete_in_current_worker()
+        finally:
+            # Keep each stage and its confirmed previews even when completion fails.
+            capture = operation.snapshot()
+            if capture is not None:
+                with self._condition:
+                    self._analysis_images[capture.stage] = operation.preview_images()
 
     def _advance(self, generator: RecipeGenerator) -> None:
         operation = next(generator)

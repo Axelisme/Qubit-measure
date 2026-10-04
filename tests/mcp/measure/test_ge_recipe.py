@@ -9,16 +9,39 @@ from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
-from zcu_tools.mcp.measure import tools_recipes
-from zcu_tools.mcp.measure.session import GuiConnection
+from zcu_tools.mcp.core.reply import ToolReply
 
 from ._recipe_support import PNG, LookbackGui, scalar
-from ._support import full_execution_reply, make_client
+from ._support import MeasureClient, full_execution_reply, make_client
+
+
+def start_ge(client: MeasureClient) -> ToolReply:
+    """Start GE through public admission with a short local wait for blocked RPCs."""
+    return client.context.session.recipes.start(
+        client.context, "singleshot_ge", {"pi_ref": "pi"}
+    ).wait(0.01)
+
+
+def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
+    """Observe both captured stages and answer without draft writes."""
+    assert question.data["status"] == "awaiting_answer", question.data
+    assert tuple(question.data["question_items"]) == ("predict_offset", "classifier")
+    before = list(client.transport.sent)
+    reply = client.call(
+        "answer", {"recipe": question.data["execution"], "decision": "skipped"}
+    )
+    assert reply.data["status"] == "finished", reply.data
+    assert client.transport.sent == before
+    return reply
 
 
 class GeGui(LookbackGui):
-    def __init__(self):
+    def __init__(self, *, interactive=False):
         super().__init__()
+        self.interactive = interactive
+        self.current_stage = "primary"
+        self.done = {"primary": Event(), "post": Event()}
+        self.writes: list[dict[str, object]] = []
         self.calls = []
         self.library = {"pi": {}, "readout": {}}
         self.md = {"r_f": 5100.0}
@@ -42,7 +65,71 @@ class GeGui(LookbackGui):
 
     def __call__(self, method, params) -> dict[str, Any]:
         self.calls.append((method, deepcopy(params)))
+        if method == "tab.interact":
+            if params.get("payload", {}).get("command") == "done":
+                self.done[self.current_stage].set()
+            return {
+                "operation_id": 93 if self.current_stage == "primary" else 104,
+                "plugin": "ge-picker",
+                "state": {"stage": self.current_stage},
+                "info": {},
+                "commands": [{"name": "done"}],
+                "preview_active": True,
+                "figure": {"png_b64": base64.b64encode(PNG).decode()}
+                if params.get("include_figure", True)
+                else None,
+            }
+        if method == "operation.await" and params["operation_id"] in (93, 104):
+            stage = "primary" if params["operation_id"] == 93 else "post"
+            if self.interactive and not self.done[stage].is_set():
+                return {"reason": "timeout", "status": "interactive"}
+        if method == "tab.writeback_write":
+            self.writes.append(deepcopy(params))
+            return {
+                "written": [
+                    {
+                        "id": item["id"],
+                        "kind": "md",
+                        "target": item["id"],
+                        "before": {"value": 0.0},
+                        "after": {"value": 1.0},
+                    }
+                    for item in params["write"]
+                ]
+            }
+        if "operation_id" not in params and method in (
+            "tab.get_analyze_result",
+            "tab.get_post_analyze_result",
+            "tab.writeback_preview",
+        ):
+            return self._current_draft(method, params)
+        return self._native_reply(method, params)
+
+    def _current_draft(self, method, params):
+        if method in ("tab.get_analyze_result", "tab.get_post_analyze_result"):
+            return {"summary": {}}
+        if method == "tab.writeback_preview":
+            if params["subtab_id"] == "post_analysis":
+                return self._post_result(method, params)
+            return {
+                "has_draft": True,
+                "items": [
+                    {
+                        "id": "md-1",
+                        "kind": "metadict",
+                        "target_name": "predict_offset",
+                        "proposed": 0.24,
+                        "current": 0.0,
+                        "selected": False,
+                    }
+                ],
+                "destination_context": {"active_label": "sample"},
+            }
+        raise AssertionError(method)
+
+    def _native_reply(self, method, params):
         if method == "tab.post_analyze":
+            self.current_stage = "post"
             assert params == {
                 "tab_id": "t",
                 "updates": {},
@@ -51,7 +138,7 @@ class GeGui(LookbackGui):
             }
             return {
                 "operation_id": 104,
-                "interactive": False,
+                "interactive": self.interactive,
                 "params": {"bins": 64},
                 "invalidated_on_success": [],
             }
@@ -70,7 +157,33 @@ class GeGui(LookbackGui):
         if method == "tab.new":
             assert params == {"adapter_name": "singleshot/ge"}
             return {"tab_id": "t"}
-        return super().__call__(method, params)
+        reply = super().__call__(method, params)
+        if method == "tab.analyze":
+            self.current_stage = "primary"
+            reply["interactive"] = self.interactive
+        if method == "tab.edit_cfg":
+            self._edit_references(reply, params)
+        if method == "tab.writeback_preview":
+            reply["items"][0].update(
+                kind="metadict",
+                target_name="predict_offset",
+                current=0.0,
+                selected=False,
+            )
+        return reply
+
+    def _edit_references(self, reply, params):
+        modules = self.publication["tree"]["children"]["modules"]["children"]
+        for edit in params["edits"]:
+            if edit["path"][0] == "modules" and len(edit["path"]) == 2:
+                name = edit["value"]["__ref"]
+                if name is not None and name not in self.library:
+                    modules[edit["path"][1]].update(
+                        valid=False, error="unknown library"
+                    )
+                    reply["tree"]["children"]["modules"]["children"][
+                        edit["path"][1]
+                    ].update(valid=False, error="unknown library")
 
     def _post_result(self, method, params):
         assert params["subtab_id"] == "post_analysis"
@@ -82,7 +195,16 @@ class GeGui(LookbackGui):
         if method == "tab.writeback_preview":
             return {
                 "has_draft": True,
-                "items": [{"id": "classifier", "proposed": 0.98}],
+                "items": [
+                    {
+                        "id": "classifier",
+                        "kind": "metadict",
+                        "target_name": "classifier",
+                        "proposed": 0.98,
+                        "current": 0.0,
+                        "selected": False,
+                    }
+                ],
                 "destination_context": {"active_label": "sample"},
             }
         raise AssertionError(method)
@@ -147,7 +269,7 @@ def test_ge_estimates_preserve_three_native_fit_stages_without_post_refit(ge_cli
         return {"ok": True, "result": reply}
 
     client.transport.replies["tab.get_analyze_result"] = result
-    initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+    initial = skip_writeback(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
     assert initial.data["status"] == "finished", initial.data
     key = initial.data["execution"]
     before = len(client.transport.sent)
@@ -182,8 +304,7 @@ def test_ge_estimates_preserve_three_native_fit_stages_without_post_refit(ge_cli
 
 
 @pytest.fixture()
-def background_ge_client(ge_client, monkeypatch):
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+def background_ge_client(ge_client):
     return ge_client
 
 
@@ -213,7 +334,7 @@ def test_ge_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
 
     monkeypatch.setattr(client.transport, "send_line", send)
     try:
-        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        initial = start_ge(client)
         assert pending.wait(1)
         execution = initial.data["execution"]
         before = len(client.transport.sent)
@@ -236,7 +357,8 @@ def test_ge_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
         completed = client.call("wait", {"execution": execution, "timeout": 2})
         confirmed = client.call("status", {"execution": execution})
         if receipt == "delayed":
-            assert completed.data["status"] == "finished", completed.data
+            assert completed.data["status"] == "awaiting_answer", completed.data
+            skip_writeback(client, completed)
             assert confirmed["steps"]["analysis"][stage]["status"] == "finished"
         else:
             assert completed.data["status"] == "failed", completed.data
@@ -264,28 +386,46 @@ def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         return {"ok": True, "result": gui("tab.writeback_preview", params)}
 
     client.transport.replies["tab.writeback_preview"] = writeback
+    client.transport.replies["operation.cancel"] = {
+        "ok": True,
+        "result": {"status": "finished"},
+    }
     try:
-        initial = full_execution_reply(
-            client, client.call("singleshot_ge", {"pi_ref": "pi"})
-        )
+        initial = full_execution_reply(client, start_ge(client))
         assert pending.wait(1)
         execution = initial.data["execution"]
         status = client.call("status", {"execution": execution, "detail": "full"})
         assert status["analysis_stage"] == stage
-        assert client.call("cancel", {"execution": execution}).data["cancel_requested"]
-        release.set()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            request = pool.submit(client.call, "cancel", {"execution": execution})
+            try:
+                for _ in range(100):
+                    if client.call("status", {"execution": execution})[
+                        "cancel_requested"
+                    ]:
+                        break
+                    release.wait(0.01)
+                else:
+                    pytest.fail("Cancel intent did not reach the public snapshot")
+            finally:
+                release.set()
+            assert (
+                request.result(timeout=2).data["gui_cancel"]["status"] == "not_needed"
+            )
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
         data = terminal.data
         assert data["status"] == "cancelled", data
         assert data["writeback"]["items"][0]["id"] == "md-1"
-        assert data["analysis"]["status"] == "finished"
+        assert data["analysis"]["status"] == (
+            "cancelled" if stage == "primary" else "finished"
+        )
         assert data["raw_save"]["path"] == "/actual/raw.h5"
         assert len(terminal.images) == (1 if stage == "primary" else 2)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.post_analyze") == (0 if stage == "primary" else 1)
-        assert "operation.cancel" not in methods
+        assert methods.count("operation.cancel") == 1
         if stage == "post":
             assert data["post_writeback"]["items"][0]["id"] == "classifier"
     finally:
@@ -330,9 +470,7 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         }
     )
     try:
-        initial = full_execution_reply(
-            client, client.call("singleshot_ge", {"pi_ref": "pi"})
-        )
+        initial = full_execution_reply(client, start_ge(client))
         assert pending.wait(1)
         execution = initial.data["execution"]
         for _ in range(2):
@@ -367,18 +505,10 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
 
 @pytest.mark.parametrize("save_failed", [False, True])
 def test_ge_cancel_during_post_save_preserves_real_save_outcome(
-    background_ge_client, monkeypatch, save_failed
+    background_ge_client, save_failed
 ):
     gui, client = background_ge_client
-    pending, release, intent = Event(), Event(), Event()
-    read_internal = GuiConnection.read_internal
-
-    def read(connection, method, params, **kwargs):
-        if method == "operation.cancel":
-            intent.set()
-        return read_internal(connection, method, params, **kwargs)
-
-    monkeypatch.setattr(GuiConnection, "read_internal", read)
+    pending, release = Event(), Event()
 
     def save(params):
         if params["operation_id"] == 104:
@@ -401,22 +531,24 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
         "result": {"status": "finished"},
     }
     try:
-        initial = full_execution_reply(
-            client, client.call("singleshot_ge", {"pi_ref": "pi"})
-        )
+        initial = full_execution_reply(client, start_ge(client))
         assert pending.wait(1)
         execution = initial.data["execution"]
         with ThreadPoolExecutor(max_workers=1) as pool:
             request = pool.submit(client.call, "cancel", {"execution": execution})
             try:
-                assert intent.wait(1)
-                assert client.call("status", {"execution": execution})[
-                    "cancel_requested"
-                ]
+                for _ in range(100):
+                    if client.call("status", {"execution": execution})[
+                        "cancel_requested"
+                    ]:
+                        break
+                    release.wait(0.01)
+                else:
+                    pytest.fail("Cancel intent did not reach the public snapshot")
             finally:
                 release.set()
             cancelled = request.result(timeout=2)
-        assert cancelled.data["cancel_requested"]
+        assert cancelled.data["gui_cancel"]["status"] == "not_needed"
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
@@ -471,16 +603,16 @@ def test_ge_close_stops_stage_admission_without_reconnect(
     client.transport.replies[method_pending] = respond
     monkeypatch.setattr(client.transport, "close", disconnect)
     try:
-        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        initial = start_ge(client)
         assert pending.wait(1)
         before = len(client.transport.sent)
         client.context.session.close()
         data = client.call(
             "status", {"execution": initial.data["execution"], "detail": "full"}
         )
-        assert data["status"] == "failed", data
+        assert data["status"] == "cancelled", data
         assert data["phase"] == "terminal"
-        assert data["error"]["reason"] in ("session_closed", "connection_lost")
+        assert data["error"] is None
         assert data["raw_save"]["path"] == "/actual/raw.h5"
         assert data["analysis"]["status"] == (
             "failed" if method_pending == "tab.writeback_preview" else "finished"
@@ -519,7 +651,9 @@ def test_ge_preserves_calibrated_library_and_gui_shots_defaults(ge_client, expli
         modules["probe_pulse"]["ref"] = "pi"
         modules["readout"]["ref"] = "readout"
     arguments = {"pi_ref": "pi", "readout_ref": "readout"} if explicit else {}
-    data = full_execution_reply(client, client.call("singleshot_ge", arguments)).data
+    data = full_execution_reply(
+        client, skip_writeback(client, client.call("singleshot_ge", arguments))
+    ).data
     assert data["status"] == "finished", data
     fields = data["actual"]["fields"]
     assert fields["shots"]["value"] == 7000
@@ -545,7 +679,7 @@ def test_ge_optional_refs_are_explicit_and_omission_resets_them(ge_client, reuse
         "use_reset": None if reuse else "reset",
         "init_pulse_ref": None if reuse else "init",
     }
-    data = client.call("singleshot_ge", arguments).data
+    data = skip_writeback(client, client.call("singleshot_ge", arguments)).data
     assert data["status"] == "finished", data
     assert modules["reset"]["ref"] == (None if reuse else "reset")
     assert modules["init_pulse"]["ref"] == (None if reuse else "init")
@@ -640,7 +774,12 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
         assert data["post_analysis"] is None
     current = data["analysis" if stage == "primary" else "post_analysis"]
     if failure == "start":
-        assert current is None
+        assert current["status"] == "failed"
+        assert current["start"] == {
+            "status": "not_started",
+            "reason": "result_superseded",
+        }
+        assert current["op"] is None
     elif failure == "save" and stage == "post":
         assert current["saved_images"] == [
             {"figure_name": "cloud", "image_path": "/actual/cloud.png"}
@@ -737,6 +876,7 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
 
         client.transport.replies[method] = result
     reply = full_execution_reply(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
+    reply = full_execution_reply(client, skip_writeback(client, reply))
     data = json.loads(json.dumps(reply.data, allow_nan=False))
     assert data["status"] == "finished"
     assert data["raw_save"]["path"] == "/actual/raw.h5"
@@ -752,6 +892,101 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
             {"figure_name": image, "image_path": f"/actual/{image}.png"}
         ]
     assert "tab.writeback_apply" not in [method for method, _ in client.transport.sent]
+
+
+@pytest.mark.parametrize("decision", ["accepted", "skipped"])
+@pytest.mark.parametrize("interactive", [False, True])
+def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
+    tmp_path, decision, interactive
+):
+    gui = GeGui(interactive=interactive)
+    client = make_client(tmp_path, gui)
+    try:
+        reply = client.call("singleshot_ge", {"pi_ref": "pi"})
+        execution = reply.data["execution"]
+        if interactive:
+            assert reply.data["status"] == "interactive"
+            post = client.call(
+                "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+            )
+            assert post.data["execution"] == execution
+            assert post.data["status"] == "interactive"
+            assert post.data["analysis"]["stage"] == "post"
+            reply = client.call(
+                "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+            )
+        assert reply.data["status"] == "awaiting_answer", reply.data
+        assert reply.data["question_items"] == ("predict_offset", "classifier")
+        assert reply.data["writeback"]["receipts"] == ()
+        assert len(reply.images) == 2
+        assert (
+            len(reply.data["previews"]["primary"])
+            == len(reply.data["previews"]["post"])
+            == 1
+        )
+        assert gui.writes == []
+        before = list(client.transport.sent)
+        summary = client.call("status", {"execution": execution})
+        full = client.call("status", {"execution": execution, "detail": "full"})
+        assert summary["question_items"] == full["question_items"]
+        assert client.transport.sent == before
+        result = client.call("answer", {"recipe": execution, "decision": decision})
+        assert result.data["status"] == "finished", result.data
+        assert len(result.images) == 2
+        receipts = result.data["writeback"]["receipts"]
+        if decision == "accepted":
+            assert [request["subtab_id"] for request in gui.writes] == [
+                "analysis",
+                "post_analysis",
+            ]
+            assert [request["write"] for request in gui.writes] == [
+                [{"id": "md-1"}],
+                [{"id": "classifier"}],
+            ]
+            assert len(receipts) == 1
+            assert [stage["stage"] for stage in receipts[0]["completed"]] == [
+                "primary",
+                "post",
+            ]
+        else:
+            assert gui.writes == [] and receipts == ()
+    finally:
+        client.context.session.close()
+
+
+def test_ge_answer_failure_keeps_confirmed_primary_write_and_all_previews(ge_client):
+    gui, client = ge_client
+    question = client.call("singleshot_ge", {"pi_ref": "pi"})
+    assert question.data["status"] == "awaiting_answer", question.data
+
+    def write(params):
+        if params["subtab_id"] == "post_analysis":
+            return {
+                "ok": False,
+                "error": {
+                    "code": "io_error",
+                    "reason": "write_failed",
+                    "message": "Post write failed",
+                },
+            }
+        return {"ok": True, "result": gui("tab.writeback_write", params)}
+
+    client.transport.replies["tab.writeback_write"] = write
+    failed = client.call(
+        "answer", {"recipe": question.data["execution"], "decision": "accepted"}
+    )
+    assert failed.data["status"] == "failed" and failed.is_error
+    assert len(failed.images) == 2
+    (receipt,) = failed.data["writeback"]["receipts"]
+    assert [stage["stage"] for stage in receipt["completed"]] == ["primary"]
+    assert receipt["failed_stage"] == "post"
+    assert receipt["failed_stage_may_have_partial_writes"]
+    assert len(gui.writes) == 1
+    full = client.call(
+        "status", {"execution": failed.data["execution"], "detail": "full"}
+    )
+    assert full["raw_save"]["path"] == "/actual/raw.h5"
+    assert full["analysis"]["status"] == full["post_analysis"]["status"] == "finished"
 
 
 def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
@@ -776,7 +1011,10 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
     client = make_client(tmp_path, respond)
     try:
         reply = full_execution_reply(
-            client, client.call("singleshot_ge", {"pi_ref": "pi", "shots": 1234})
+            client,
+            skip_writeback(
+                client, client.call("singleshot_ge", {"pi_ref": "pi", "shots": 1234})
+            ),
         )
         data = reply.data
         assert data["status"] == "finished", data
