@@ -9,7 +9,7 @@ from time import sleep
 from typing import Any
 
 import pytest
-from zcu_tools.mcp.core.errors import GuiTransportTimeoutError
+from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
