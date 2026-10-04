@@ -349,8 +349,13 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
     assert _methods(client) == (
         [method, "operation.cancel", "operation.await"]
         if cancel
-        else [method, "operation.await", "tab.get_analyze_result"
-              if stage == "primary" else "tab.get_post_analyze_result"]
+        else [
+            method,
+            "operation.await",
+            "tab.get_analyze_result"
+            if stage == "primary"
+            else "tab.get_post_analyze_result",
+        ]
     )
 
 
