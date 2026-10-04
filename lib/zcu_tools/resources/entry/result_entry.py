@@ -3,7 +3,6 @@
 import errno
 import os
 import shutil
-from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
@@ -11,12 +10,7 @@ from uuid import uuid4
 
 from ruamel.yaml import YAML
 
-from zcu_tools.format_version import YamlValue
-from zcu_tools.resources.document_store import (
-    DocumentStore,
-    FieldPath,
-    UnitSpec,
-)
+from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
 from .errors import RenameRecoveryError
@@ -27,8 +21,6 @@ from .schema import (
     PARAMETER_VERSION,
     PointDocument,
     SetupDocument,
-    is_forward_minor,
-    validate_component_name,
 )
 from .views import SetupView
 
@@ -98,33 +90,8 @@ class ResultEntry:
             EntrySetupDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
-            units=lambda document: self._document_units(document, source=source),
             validate=self._validate_setup,
         )
-
-    def _document_units(
-        self, document: Mapping[str, YamlValue], *, source: Path
-    ) -> Mapping[FieldPath, UnitSpec]:
-        result: dict[FieldPath, UnitSpec] = {}
-        forward_minor = is_forward_minor(document, source=source)
-        components = document.get("components")
-        if isinstance(components, dict):
-            for name, fields in components.items():
-                validate_component_name(name, source=source)
-                if isinstance(fields, dict) and isinstance(
-                    kind := fields.get("kind"), str
-                ):
-                    component_registry.get(kind, source=source, component=name)
-                    if not forward_minor:
-                        component_registry.check_fields(kind, fields, path=name)
-                    for path, spec in component_registry.units(
-                        kind, source=source, component=name
-                    ).items():
-                        result[("components", name, *path)] = spec
-                        result[("provenance", f"{name}.{'.'.join(path)}", "stderr")] = (
-                            spec
-                        )
-        return result
 
     def _validate_setup(self, document: SetupDocument) -> None:
         component_registry.validate_references(
@@ -278,7 +245,6 @@ class ResultEntry:
             EntryPointDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
-            units=lambda document: self._document_units(document, source=source),
             validate=lambda document: component_registry.validate_references(
                 document.components, source=source
             ),

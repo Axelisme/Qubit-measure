@@ -1,17 +1,17 @@
 """Typed setup document at the persistence boundary."""
 
 import keyword
-import math
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from types import UnionType
-from typing import Annotated, ClassVar, Union, get_args, get_origin
+from typing import Annotated, ClassVar, Literal, Self, override
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -19,14 +19,30 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
-from pydantic.fields import FieldInfo
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
-from zcu_tools.resources.document_store import FieldPath, UnitSpec
+from zcu_tools.resources.document_store import FieldPath
 
 PARAMETER_FORMAT = "zcu.parameter-container"
 PARAMETER_VERSION = FormatVersion(1, 0)
+
+
+@dataclass(frozen=True)
+class UnitSpec:
+    """Schema annotation for a working unit; never validates or converts values."""
+
+    unit: str
+
+
+@dataclass(frozen=True)
+class Ref:
+    """Annotate a string field that names a component in the same document."""
+
+
+@dataclass(frozen=True)
+class ModuleSlot:
+    """Annotate a mapping of slot names to module_cfg path strings."""
 
 
 def is_forward_minor(document: Mapping[str, YamlValue], *, source: Path) -> bool:
@@ -71,13 +87,24 @@ def validate_component_name(name: str, *, source: Path | None = None) -> None:
         )
 
 
+_JSON_EXTENSIONS = TypeAdapter[YamlMap](
+    YamlMap, config=ConfigDict(strict=True, allow_inf_nan=False)
+)
+
+
 class SetupGeneral(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     entry_id: str
     created_at: str
     description: str | None = None
-    ext: YamlMap = Field(default_factory=dict)
+    flux_unit: Literal["A", "V"] | None = None
+    flux_value: Annotated[
+        float | None, UnitSpec("A/V"), Field(strict=True, allow_inf_nan=False)
+    ] = None
+    ext: Annotated[YamlMap, BeforeValidator(_JSON_EXTENSIONS.validate_python)] = Field(
+        default_factory=dict
+    )
 
     @field_validator("entry_id")
     @classmethod
@@ -98,7 +125,8 @@ class PointGeneral(BaseModel):
 
     created_at is an ISO-8601 timestamp with a UTC offset; Z and +00:00 are valid.
     description is optional human-readable text; None means no description.
-    ext is an arbitrary YAML mapping, empty by default, with no unit conversion.
+    ext is an arbitrary JSON mapping, empty by default, with no unit conversion.
+    Global flux_value uses flux_unit (A or V); both are optional.
     Unknown metadata fields and invalid timestamps raise Pydantic ValidationError.
     """
 
@@ -106,7 +134,13 @@ class PointGeneral(BaseModel):
 
     created_at: str
     description: str | None = None
-    ext: YamlMap = Field(default_factory=dict)
+    flux_unit: Literal["A", "V"] | None = None
+    flux_value: Annotated[
+        float | None, UnitSpec("A/V"), Field(strict=True, allow_inf_nan=False)
+    ] = None
+    ext: Annotated[YamlMap, BeforeValidator(_JSON_EXTENSIONS.validate_python)] = Field(
+        default_factory=dict
+    )
 
     @field_validator("created_at")
     @classmethod
@@ -114,32 +148,13 @@ class PointGeneral(BaseModel):
         return SetupGeneral.validate_created_at(value)
 
 
-class WiringSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    ch: int | None = Field(default=None, ge=0, strict=True)
-    ro_ch: int | None = Field(default=None, ge=0, strict=True)
-    flux_ch: int | None = Field(default=None, ge=0, strict=True)
-    time_of_flight: Annotated[float | None, UnitSpec("s", "us")] = Field(
-        default=None, ge=0
-    )
-
-    @field_validator("ch", "ro_ch", "flux_ch", mode="before")
-    @classmethod
-    def reject_null_channels(cls, value: object) -> object:
-        if value is None:
-            raise ValueError("a supplied wiring channel must be a non-negative integer")
-        return value
-
-
 class ComponentSchema(BaseModel):
     """Original notebook model for complete setup and point components.
 
     Required fields, defaults, factories and field validators use Pydantic
-    semantics. Field conversions must be idempotent under canonical equality.
-    Declared UnitSpec finite-float leaves use relative tolerance 1e-12 with no
-    absolute tolerance; other values compare exactly. Entry reports canonical
-    drift as ValidationError before commits or snapshot publication.
+    semantics. Field conversions must be idempotent under exact value equality.
+    Entry reports canonical drift as ValidationError before commits or snapshot
+    publication.
     Registration does not trial sample inputs. All model-level validators and
     custom model_post_init are rejected, including inherited and direct or
     nullable nested models. Cross-field checks are unsupported in this batch.
@@ -148,77 +163,13 @@ class ComponentSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: str
-    wiring: WiringSchema = Field(default_factory=WiringSchema)
     ext: YamlMap = Field(default_factory=dict)
 
-
-class ResonatorSchema(ComponentSchema):
-    freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
-    kappa: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
-    amplifier: str | None = None
-
-
-class QubitSchema(ComponentSchema):
-    freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
-    EJ: Annotated[float | None, UnitSpec("Hz", "GHz")] = None
-    EC: Annotated[float | None, UnitSpec("Hz", "GHz")] = None
-    pi_len: Annotated[float | None, UnitSpec("s", "us")] = None
-    t1: Annotated[float | None, UnitSpec("s", "us")] = None
-    t2: Annotated[float | None, UnitSpec("s", "us")] = None
-    pi_gain: Annotated[float | None, UnitSpec("1", "1")] = None
-    readout: str | None = None
-    flux_source: str | None = None
-
-
-class FluxoniumSchema(QubitSchema):
-    EL: Annotated[float | None, UnitSpec("Hz", "GHz")] = None
-    flux_half: Annotated[float | None, UnitSpec("A", "mA")] = None
-    flux_period: Annotated[float | None, UnitSpec("A", "mA")] = None
-
-
-class JpaSchema(ComponentSchema):
-    freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
-    gain: Annotated[float | None, UnitSpec("1", "1")] = None
-    current: Annotated[float | None, UnitSpec("A", "mA")] = None
-
-
-class CurrentSourceSchema(ComponentSchema):
-    current: Annotated[float | None, UnitSpec("A", "mA")] = None
-
-
-def field_annotations(
-    field: FieldInfo,
-) -> tuple[tuple[object, ...], tuple[object, ...]]:
-    annotation = field.annotation
-    alternatives = (
-        get_args(annotation)
-        if get_origin(annotation) in (Union, UnionType)
-        else (annotation,)
-    )
-    types: list[object] = []
-    metadata: list[object] = list(field.metadata)
-    for alternative in alternatives:
-        if get_origin(alternative) is Annotated:
-            alternative, *branch_metadata = get_args(alternative)
-            metadata.extend(branch_metadata)
-        types.append(alternative)
-    return tuple(types), tuple(metadata)
-
-
-def _same_canonical_value(
-    before: YamlValue, after: YamlValue, field: FieldInfo
-) -> bool:
-    if (
-        isinstance(before, float)
-        and isinstance(after, float)
-        and math.isfinite(before)
-        and math.isfinite(after)
-        and any(
-            isinstance(metadata, UnitSpec) for metadata in field_annotations(field)[1]
-        )
-    ):
-        return math.isclose(before, after, rel_tol=1e-12, abs_tol=0.0)
-    return before == after
+    @field_validator("ext", mode="before")
+    @classmethod
+    def validate_extension(cls, value: object) -> YamlMap:
+        # Keep the container boundary when a user model redeclares the field.
+        return _JSON_EXTENSIONS.validate_python(value)
 
 
 def canonical_errors(
@@ -233,7 +184,7 @@ def canonical_errors(
         validated.model_dump(exclude_unset=True)
     )
     errors: list[InitErrorDetails] = []
-    for name, field in type(validated).model_fields.items():
+    for name in type(validated).model_fields:
         if name not in fields and name not in canonical:
             continue
         before = fields.get(name, "(missing)")
@@ -248,9 +199,7 @@ def canonical_errors(
                     source=source,
                 )
             )
-        elif (name in fields) != (name in canonical) or not _same_canonical_value(
-            before, after, field
-        ):
+        elif (name in fields) != (name in canonical) or before != after:
             errors.append(
                 InitErrorDetails(
                     type=PydanticCustomError(
@@ -280,6 +229,46 @@ class _ParameterDocument(BaseModel):
     components: dict[str, ComponentSchema] = Field(default_factory=dict)
     provenance: dict[str, YamlMap] = Field(default_factory=dict)
 
+    @classmethod
+    @override
+    def model_validate(
+        cls,
+        obj: object,
+        *,
+        strict: bool | None = None,
+        extra: Literal["allow", "ignore", "forbid"] | None = None,
+        from_attributes: bool | None = None,
+        context: object = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        # Lookup errors must retain their public entry error type rather than
+        # becoming Pydantic field-validator ValueErrors.
+        from .registry import component_registry
+
+        if isinstance(obj, Mapping):
+            document = TypeAdapter(YamlMap).validate_python(obj)
+            forward_minor = is_forward_minor(document, source=cls._source)
+            components = TypeAdapter(dict[str, YamlMap]).validate_python(
+                document.get("components", {})
+            )
+            for name, fields in components.items():
+                validate_component_name(name, source=cls._source)
+                kind = fields.get("kind")
+                if isinstance(kind, str):
+                    component_registry.get(kind, source=cls._source, component=name)
+                    if not forward_minor:
+                        component_registry.check_fields(kind, fields, path=name)
+        return super().model_validate(
+            obj,
+            strict=strict,
+            extra=extra,
+            from_attributes=from_attributes,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
+
     @field_validator("components", mode="before")
     @classmethod
     def validate_components(
@@ -300,7 +289,10 @@ class _ParameterDocument(BaseModel):
         components = TypeAdapter(dict[str, YamlMap]).validate_python(value)
         result: dict[str, ComponentSchema] = {}
         for name, fields in components.items():
+            validate_component_name(name, source=cls._source)
             kind = fields.get("kind")
+            if isinstance(kind, str) and not forward_minor:
+                component_registry.check_fields(kind, fields, path=name)
             model = (
                 component_registry.get(kind, source=cls._source, component=name)
                 if isinstance(kind, str)

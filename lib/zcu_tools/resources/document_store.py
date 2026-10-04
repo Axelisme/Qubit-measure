@@ -6,9 +6,8 @@ All changed fields merge or conflict as one transaction. Schema/custom validatio
 and sibling-file replacement precede memory publication. This is single-file
 atomicity, not a crash journal or a multi-file durability guarantee.
 
-Declare structural paths for known physical values and their stderr in ``units``.
-Resolvers receive the current raw document. Only declared paths convert between
-SI on disk and working units in the model; untouched YAML nodes remain intact.
+Values retain the model/caller's working units on disk. This store does not
+interpret unit metadata or convert values; untouched YAML nodes remain intact.
 Forward-minor fields stay outside the typed view without being removed on disk.
 
 Observers run after publication and unlock. Their exceptions are logged at ERROR,
@@ -20,7 +19,7 @@ this module does not run a file watcher.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Generator, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -44,53 +43,9 @@ __all__ = (
     "DocumentStore",
     "FieldPath",
     "LockTimeoutError",
-    "UnitResolver",
-    "UnitSpec",
 )
 
 _SUPPORTED_VERSION = FormatVersion(1, 0)
-
-
-@dataclass(frozen=True)
-class UnitSpec:
-    """Units for one numeric scalar path, including a separate stderr path.
-
-    si_unit is the stored unit; working_unit is the model/caller unit. Each is
-    one of Hz, MHz, GHz, s, us, µs, A, mA, or 1 (dimensionless). Both must have
-    the same dimension. For example, UnitSpec("Hz", "MHz") stores 1e6 for a
-    working value of 1. Missing/null values stay missing/null; bool, sequences
-    and other nonnumeric values are not physical scalars.
-    """
-
-    si_unit: str
-    working_unit: str
-
-    def validate(self) -> None:
-        """Return None, or raise ValueError for unknown/incompatible unit names."""
-        _si_per_working_unit(self)
-
-
-type UnitResolver = Callable[[Mapping[str, YamlValue]], Mapping[FieldPath, UnitSpec]]
-
-
-def _si_per_working_unit(spec: UnitSpec) -> float:
-    """Return stored units per working unit; reject unsupported pairs with ValueError."""
-    scales = {
-        "Hz": ("Hz", 1.0),
-        "MHz": ("Hz", 1e6),
-        "GHz": ("Hz", 1e9),
-        "s": ("s", 1.0),
-        "us": ("s", 1e-6),
-        "µs": ("s", 1e-6),
-        "A": ("A", 1.0),
-        "mA": ("A", 1e-3),
-        "1": ("1", 1.0),
-    }
-    si = scales.get(spec.si_unit)
-    working = scales.get(spec.working_unit)
-    if si is None or working is None or si[0] != working[0]:
-        raise ValueError(f"Incompatible or unsupported units: {spec!r}")
-    return working[1] / si[1]
 
 
 @dataclass(frozen=True)
@@ -362,7 +317,6 @@ class DocumentStore[T: BaseModel]:
         *,
         format: str,
         supported_version: FormatVersion = _SUPPORTED_VERSION,
-        units: Mapping[FieldPath, UnitSpec] | UnitResolver | None = None,
         validate: Callable[[T], None] | None = None,
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
@@ -376,12 +330,9 @@ class DocumentStore[T: BaseModel]:
         supported_version sets the accepted major/current minor. Future minor
         fields survive raw round-trip but stay outside the typed snapshot.
 
-        units maps structural key tuples to UnitSpec, or resolves that mapping
-        from the current document. None disables conversion. Declare value and
-        stderr paths separately. Resolvers choose paths from structure or
-        discriminators; during commit, changed scalars are still in working
-        units while untouched nodes remain SI. validate receives each converted
-        typed model after schema validation and may raise to reject it.
+        Values use the same units in the document and typed model. Unit metadata
+        belongs to the caller's schema and is not interpreted here. validate
+        receives each typed model after schema validation and may raise to reject it.
 
         lock_path selects a shared sidecar, defaulting to path + ".lock".
         lock_timeout is FileLock's wait in seconds (negative waits indefinitely).
@@ -397,7 +348,6 @@ class DocumentStore[T: BaseModel]:
         self._model = model
         self._format = format
         self._supported_version = supported_version
-        self._units = units
         self._validate = validate
         self._lock_path = lock_path or Path(f"{path}.lock")
         self._lock_timeout = lock_timeout
@@ -417,8 +367,8 @@ class DocumentStore[T: BaseModel]:
         """Yield an independent working-unit draft, then commit one atomic edit.
 
         Entry and commit each briefly lock/reload; the body runs unlocked unless
-        the caller holds locked(). Changed paths compare against entry-time raw
-        SI values. A conflict rejects all changes; body/schema/validate/I/O errors
+        the caller holds locked(). Changed paths compare against entry-time
+        document values. A conflict rejects all changes; body/schema/validate/I/O errors
         do not publish a draft. Nested edits on this store raise RuntimeError.
         Missing, null, deleted and in-place default changes remain distinct.
 
@@ -457,7 +407,6 @@ class DocumentStore[T: BaseModel]:
         document, _ = self._read()
         self._merge_patches(document, base_document, base_values, patches)
         paths = tuple(path for path, _ in patches)
-        self._to_si_units(document, paths)
         snapshot = self._model_snapshot(document)
         if patches:
             self._replace_document(document)
@@ -490,12 +439,10 @@ class DocumentStore[T: BaseModel]:
         base_values: YamlValue,
         patches: tuple[tuple[FieldPath, YamlValue | _Missing], ...],
     ) -> None:
-        """Conflict-check raw SI baselines, then merge working-unit patches in place.
+        """Conflict-check baselines, then merge typed patches in place.
 
-        document/base_document are current/original raw SI trees; base_values
-        and patch replacements are typed working-unit projections. All conflicts
-        are checked before mutation. The result retains untouched raw SI nodes;
-        changed nodes remain working units for _to_si_units.
+        All conflicts are checked before mutation. The result retains untouched
+        raw YAML nodes; both patches and document values use the caller's units.
         """
         for path, _ in patches:
             self._check_conflict(base_document, document, path)
@@ -504,23 +451,6 @@ class DocumentStore[T: BaseModel]:
                 _lookup(document, path), _lookup(base_values, path), value
             )
             _apply(document, path, merged)
-
-    def _to_si_units(
-        self, document: YamlMap, changed_paths: tuple[FieldPath, ...]
-    ) -> None:
-        """Convert only changed working-unit paths in a merged tree to SI in place.
-
-        Resolvers see the merged structure/discriminators before conversion.
-        Unchanged raw SI nodes and undeclared extension values remain untouched.
-        Unsupported units or nonnumeric physical scalars raise ValueError.
-        """
-        for path, spec in self._unit_specs(document).items():
-            if any(path[: len(changed)] == changed for changed in changed_paths):
-                value = self._scale_value(
-                    _lookup(document, path), _si_per_working_unit(spec), path
-                )
-                if not isinstance(value, _Missing):
-                    _apply(document, path, value)
 
     def _check_conflict(self, base: YamlMap, current: YamlMap, path: FieldPath) -> None:
         for length in range(1, len(path) + 1):
@@ -553,7 +483,7 @@ class DocumentStore[T: BaseModel]:
         return document, self._model_snapshot(document)
 
     def _model_snapshot(self, document: YamlMap) -> T:
-        """Check the header, convert SI to working units, validate T and custom rules.
+        """Check the header, validate T and custom rules without converting values.
 
         Future-minor fields are ignored only in the typed result. Validation
         failures propagate before callers can publish it or replace the file.
@@ -567,35 +497,11 @@ class DocumentStore[T: BaseModel]:
         # Ignore future fields only in the typed view; retain them in the YAML tree.
         extra = "ignore" if version.minor > self._supported_version.minor else None
         snapshot = self._model.model_validate(
-            self._working_values(document), extra=extra
+            TypeAdapter(YamlMap).validate_python(document), extra=extra
         )
         if self._validate is not None:
             self._validate(snapshot)
         return snapshot
-
-    def _unit_specs(self, document: YamlMap) -> Mapping[FieldPath, UnitSpec]:
-        """Resolve paths from current structure, possibly before changed SI conversion."""
-        return self._units(document) if callable(self._units) else self._units or {}
-
-    def _working_values(self, document: YamlMap) -> YamlMap:
-        """Copy raw SI YAML to model units; keep null/missing and undeclared values."""
-        values = TypeAdapter(YamlMap).validate_python(document)
-        for path, spec in self._unit_specs(document).items():
-            value = self._scale_value(
-                _lookup(values, path), 1 / _si_per_working_unit(spec), path
-            )
-            if not isinstance(value, _Missing):
-                _apply(values, path, value)
-        return values
-
-    def _scale_value(
-        self, value: YamlValue | _Missing, factor: float, path: FieldPath
-    ) -> YamlValue | _Missing:
-        if value is None or isinstance(value, _Missing):
-            return value
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{self._path}: {path!r} must be a numeric physical value")
-        return value * factor
 
     def refresh(self) -> bool:
         """Reload/validate disk and publish its working-unit snapshot.

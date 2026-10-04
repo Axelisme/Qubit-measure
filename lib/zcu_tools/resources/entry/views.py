@@ -20,11 +20,11 @@ from .provenance import Provenance, validate_source
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
+    ModuleSlot,
     PointDocument,
     PointGeneral,
     SetupDocument,
     SetupGeneral,
-    WiringSchema,
     validate_component_name,
 )
 
@@ -235,6 +235,8 @@ class FieldView:
             value = getattr(model, name)
             if name not in model.model_fields_set and value is None:
                 raise AttributeError(f"{self._path}.{name}: field is not set")
+            if isinstance(value, BaseModel):
+                value = value.model_dump(exclude_unset=True)
             return TypeAdapter(YamlValue).validate_python(value)
         return model[name]
 
@@ -252,7 +254,7 @@ class FieldView:
                 )
                 setattr(draft, name, deepcopy(value))
             else:
-                draft[name] = TypeAdapter(YamlValue).validate_python(value)
+                draft[name] = TypeAdapter(YamlValue).validate_python(value, strict=True)
 
 
 class GeneralView(FieldView):
@@ -324,23 +326,41 @@ class ComponentView:
 
     @property
     def wiring(self) -> FieldView:
+        return self._container_view("wiring")
+
+    def _container_view(self, name: str) -> FieldView:
         return FieldView(
-            lambda: self._model().wiring, self._edit_wiring, f"{self._path}.wiring"
+            lambda: self._field_container(self._model(), name),
+            lambda field: self._edit_container(name, field),
+            f"{self._path}.{name}",
+        )
+
+    def _field_container(self, model: ComponentSchema, name: str) -> _FieldNode:
+        value: object = getattr(model, name)
+        return (
+            value
+            if isinstance(value, BaseModel)
+            else TypeAdapter(YamlMap).validate_python(value)
         )
 
     @contextmanager
-    def _edit_wiring(self, field: str) -> Generator[WiringSchema]:
-        with self._edit(f"wiring.{field}") as draft:
-            yield draft.wiring
-            draft.model_fields_set.add("wiring")
+    def _edit_container(self, name: str, field: str) -> Generator[_FieldNode]:
+        with self._edit(f"{name}.{field}") as draft:
+            container = self._field_container(draft, name)
+            yield container
+            setattr(draft, name, container)
+            draft.model_fields_set.add(name)
 
     @property
     def kind(self) -> str:
         return self._model().kind
 
-    def __getattr__(self, name: str) -> YamlValue:
+    def __getattr__(self, name: str) -> YamlValue | FieldView:
         model = self._model()
         component_registry.check_fields(model.kind, {name: None}, path=self._path)
+        field = type(model).model_fields[name]
+        if any(isinstance(marker, ModuleSlot) for marker in field.metadata):
+            return self._container_view(name)
         value = getattr(model, name)
         if name not in model.model_fields_set and value is None:
             raise AttributeError(f"{self._path}.{name}: field is not set")

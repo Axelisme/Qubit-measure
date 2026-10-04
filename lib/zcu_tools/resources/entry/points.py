@@ -113,7 +113,7 @@ class PointView:
         """Resolve only declared roles from this point's cached components.
 
         Explicit choices precede one matching focus, then registered references.
-        None declares the notebook shorthand qubit/readout. Errors identify the
+        None uses the caller-registered notebook shorthand. Errors identify the
         role, focus, kind and reason. The returned name mapping stays fixed while
         values follow this bound point's working-unit snapshot and edits.
         """

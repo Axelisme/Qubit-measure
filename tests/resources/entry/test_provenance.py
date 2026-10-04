@@ -4,7 +4,6 @@ import json
 import os
 from collections.abc import Generator
 from contextlib import ExitStack
-from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +13,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.format_version import FormatError, VersionError
-from zcu_tools.resources.document_store import ConflictError, UnitSpec
+from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ComponentSchema,
     MissingReferenceError,
@@ -22,6 +21,7 @@ from zcu_tools.resources.entry import (
     Provenance,
     ResultEntry,
     SetupView,
+    UnitSpec,
     UnknownFieldError,
     component_registry,
 )
@@ -29,29 +29,11 @@ from zcu_tools.resources.entry import (
 
 class Timing(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    width: Annotated[float, UnitSpec("s", "us")]
+    width: Annotated[float, UnitSpec("µs")]
 
 
 class NotebookComponent(ComponentSchema):
     timing: Timing
-
-
-@pytest.fixture(scope="module", autouse=True)
-def registry_module_guard() -> Generator[None]:
-    before = deepcopy(vars(component_registry))
-    yield
-    assert vars(component_registry) == before, (
-        "component registry polluted by provenance module"
-    )
-
-
-@pytest.fixture(autouse=True)
-def registry_state_guard(request: pytest.FixtureRequest) -> Generator[None]:
-    before = deepcopy(vars(component_registry))
-    yield
-    assert vars(component_registry) == before, (
-        f"registry polluter: {request.node.nodeid}"
-    )
 
 
 @pytest.fixture
@@ -78,7 +60,7 @@ def container(
 ) -> tuple[ResultEntry, SetupView | PointView, Path]:
     root = tmp_path / "results"
     entry = ResultEntry.create("entry", result_root=root, database_root=tmp_path / "db")
-    entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
     if request.param == "setup":
         return entry, entry.setup, root / "entry/setup.yaml"
     return entry, entry.new_point("a"), root / "entry/points/a/point.yaml"
@@ -89,19 +71,19 @@ def test_manual_write_records_source_and_value_together(
     container: tuple[ResultEntry, SetupView | PointView, Path], write: str
 ) -> None:
     _entry, view, source = container
-    assert view.meta("Q1.t1") is None
+    assert view.meta("Q1.duration") is None
     before = datetime.now(timezone.utc)
     if write == "attribute":
-        view.Q1.t1 = 12.0
+        view.Q1.duration = 12.0
     else:
         with view.edit() as draft:
             if write == "draft_attribute":
-                draft.Q1.t1 = 12.0
+                draft.Q1.duration = 12.0
             else:
-                draft.set("Q1.t1", 12.0)
-            assert view.meta("Q1.t1") is None
+                draft.set("Q1.duration", 12.0)
+            assert view.meta("Q1.duration") is None
     after = datetime.now(timezone.utc)
-    metadata = view.meta("Q1.t1")
+    metadata = view.meta("Q1.duration")
     assert metadata is not None
     assert asdict(metadata) == {
         "source": "manual",
@@ -113,12 +95,12 @@ def test_manual_write_records_source_and_value_together(
     }
     assert before <= datetime.fromisoformat(metadata.at) <= after
     stored = YAML(typ="safe").load(source.read_text())
-    assert stored["components"]["Q1"]["t1"] == pytest.approx(12e-6)
-    assert stored["provenance"]["Q1.t1"] == {
+    assert stored["components"]["Q1"]["duration"] == pytest.approx(12.0)
+    assert stored["provenance"]["Q1.duration"] == {
         key: value for key, value in asdict(metadata).items() if key != "cloned_from"
     }
     view.refresh()
-    assert view.meta("Q1.t1") == metadata
+    assert view.meta("Q1.duration") == metadata
 
 
 @pytest.fixture
@@ -141,9 +123,9 @@ def ledger(container: tuple[ResultEntry, SetupView | PointView, Path]) -> Path:
 @pytest.mark.parametrize(
     ("path", "value", "stderr", "stored_value", "stored_stderr"),
     [
-        ("Q1.t1", 20.0, 0.18, 20e-6, 0.18e-6),
-        ("Q1.freq", 5100.0, 0.2, 5.1e9, 2e5),
-        ("Q1.wiring.time_of_flight", 1.2, 0.05, 1.2e-6, 0.05e-6),
+        ("Q1.duration", 20.0, 0.18, 20.0, 0.18),
+        ("Q1.rate", 5100.0, 0.2, 5100.0, 0.2),
+        ("Q1.wiring.delay", 1.2, 0.05, 1.2, 0.05),
         ("Q1.ext.noise", 11.0, 2.0, 11.0, 2.0),
     ],
 )
@@ -158,7 +140,9 @@ def test_explicit_source_and_stderr_round_trip_in_the_values_document(
 ) -> None:
     _entry, view, source = container
     before = ledger.read_bytes()
-    metadata = Provenance("evt-1", "t1/decay", "run-1", "2026-10-04T00:00:00Z", stderr)
+    metadata = Provenance(
+        "evt-1", "duration/decay", "run-1", "2026-10-04T00:00:00Z", stderr
+    )
     with view.edit() as draft:
         draft.set(path, value, provenance=metadata)
     assert_metadata(view.meta(path), metadata)
@@ -187,18 +171,18 @@ def test_newer_minor_ledger_event_can_be_referenced_without_rewriting_it(
     before = ledger.read_bytes()
     metadata = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2)
     with view.edit() as draft:
-        draft.set("Q1.freq", 5300.0, provenance=metadata)
-    assert view.Q1.freq == 5300.0
-    assert_metadata(view.meta("Q1.freq"), metadata)
+        draft.set("Q1.rate", 5300.0, provenance=metadata)
+    assert view.Q1.rate == 5300.0
+    assert_metadata(view.meta("Q1.rate"), metadata)
     view.refresh()
-    assert_metadata(view.meta("Q1.freq"), metadata)
+    assert_metadata(view.meta("Q1.rate"), metadata)
     assert ledger.read_bytes() == before
 
 
 @pytest.mark.parametrize(
     ("write", "path"),
     [
-        ("add", "Q2.freq"),
+        ("add", "Q2.rate"),
         ("wiring", "Q1.wiring.ch"),
         ("nested_ext", "Q1.ext.batch.rate"),
         ("description", "general.description"),
@@ -213,10 +197,10 @@ def test_manual_sources_cover_created_values_and_written_container_leaves(
     _entry, view, source = container
     before = datetime.now(timezone.utc)
     if write == "add":
-        view.add_component("Q2", kind="qubit/transmon", freq=5200.0)
+        view.add_component("Q2", kind="fake/drive/a", rate=5200.0)
     elif write == "wiring":
         with view.edit() as draft:
-            draft.set("Q1.wiring", {"ch": 3, "time_of_flight": 1.2})
+            draft.set("Q1.wiring", {"ch": 3, "delay": 1.2})
     elif write == "nested_ext":
         view.Q1.ext.batch = {"rate": 12.0}
     elif write == "description":
@@ -246,7 +230,7 @@ def test_invalid_local_source_keeps_the_draft_value_and_source_unchanged(
 ) -> None:
     _entry, view, source = container
     before = source.read_bytes()
-    previous = view.meta("Q1.freq")
+    previous = view.meta("Q1.rate")
     if failure == "missing":
         ledger.unlink()
     elif failure == "absent_event":
@@ -260,15 +244,15 @@ def test_invalid_local_source_keeps_the_draft_value_and_source_unchanged(
     with view.edit() as draft:
         with pytest.raises((ValueError, FileNotFoundError)):
             draft.set(
-                "Q1.freq",
+                "Q1.rate",
                 5300.0,
                 provenance=Provenance(
                     "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
                 ),
             )
-        assert draft.Q1.freq == 5000.0
-    assert view.Q1.freq == 5000.0
-    assert view.meta("Q1.freq") == previous
+        assert draft.Q1.rate == 5000.0
+    assert view.Q1.rate == 5000.0
+    assert view.meta("Q1.rate") == previous
     assert source.read_bytes() == before
 
 
@@ -280,7 +264,7 @@ def test_failed_value_transaction_discards_its_formal_source(
 ) -> None:
     _entry, view, source = container
     before = source.read_bytes()
-    previous = view.meta("Q1.freq")
+    previous = view.meta("Q1.rate")
     error = (
         RuntimeError
         if failure == "body"
@@ -292,7 +276,7 @@ def test_failed_value_transaction_discards_its_formal_source(
     def fail_transaction() -> None:
         with view.edit() as draft:
             draft.set(
-                "Q1.freq",
+                "Q1.rate",
                 5300.0,
                 provenance=Provenance(
                     "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
@@ -301,14 +285,14 @@ def test_failed_value_transaction_discards_its_formal_source(
             if failure == "body":
                 raise RuntimeError("abort")
             if failure == "schema":
-                draft.Q1.t1 = "not-a-number"
+                draft.Q1.duration = "not-a-number"
             else:
-                draft.Q1.readout = "missing"
+                draft.Q1.sense = "missing"
 
     with pytest.raises(error):
         fail_transaction()
-    assert view.Q1.freq == 5000.0
-    assert view.meta("Q1.freq") == previous
+    assert view.Q1.rate == 5000.0
+    assert view.meta("Q1.rate") == previous
     assert source.read_bytes() == before
 
 
@@ -325,8 +309,8 @@ def test_notebook_nested_stderr_uses_the_registered_leaf_unit(
     assert view.N1.timing == {"width": 3.0}
     assert_metadata(view.meta("N1.timing.width"), metadata)
     stored = YAML(typ="safe").load(source.read_text())
-    assert stored["components"]["N1"]["timing"]["width"] == pytest.approx(3e-6)
-    assert stored["provenance"]["N1.timing.width"]["stderr"] == pytest.approx(0.18e-6)
+    assert stored["components"]["N1"]["timing"]["width"] == pytest.approx(3.0)
+    assert stored["provenance"]["N1.timing.width"]["stderr"] == pytest.approx(0.18)
     view.refresh()
     assert_metadata(view.meta("N1.timing.width"), metadata)
 
@@ -357,11 +341,11 @@ def test_invalid_ledger_header_keeps_the_value_source_and_files_unchanged(
     ledger.write_text(json.dumps(event) + "\n")
     ledger_before = ledger.read_bytes()
     before = source.read_bytes()
-    previous = view.meta("Q1.freq")
+    previous = view.meta("Q1.rate")
     with view.edit() as draft:
         with pytest.raises(error_type) as error:
             draft.set(
-                "Q1.freq",
+                "Q1.rate",
                 5300.0,
                 provenance=Provenance(
                     "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
@@ -370,9 +354,9 @@ def test_invalid_ledger_header_keeps_the_value_source_and_files_unchanged(
         assert error.value.source == ledger
         assert error.value.field == field
         assert error.value.actual == raw_value
-        assert draft.Q1.freq == 5000.0
-    assert view.Q1.freq == 5000.0
-    assert view.meta("Q1.freq") == previous
+        assert draft.Q1.rate == 5000.0
+    assert view.Q1.rate == 5000.0
+    assert view.meta("Q1.rate") == previous
     assert source.read_bytes() == before
     assert ledger.read_bytes() == ledger_before
 
@@ -381,20 +365,20 @@ def test_meta_is_cached_and_missing_values_or_sources_return_none(
     container: tuple[ResultEntry, SetupView | PointView, Path],
 ) -> None:
     _entry, view, source = container
-    view.Q1.t1 = 12.0
-    expected = view.meta("Q1.t1")
+    view.Q1.duration = 12.0
+    expected = view.meta("Q1.duration")
     assert expected is not None
     stored = YAML(typ="safe").load(source.read_text())
-    stored["provenance"]["Q1.t2"] = stored["provenance"]["Q1.t1"]
-    stored["provenance"].pop("Q1.freq")
+    stored["provenance"]["Q1.coherence"] = stored["provenance"]["Q1.duration"]
+    stored["provenance"].pop("Q1.rate")
     with source.open("w") as stream:
         YAML(typ="rt").dump(stored, stream)
     view.refresh()
     source.unlink()
-    assert view.meta("Q1.t1") == expected
-    assert view.meta("Q1.freq") is None
-    assert view.meta("Q1.t2") is None
-    assert view.meta("unknown.freq") is None
+    assert view.meta("Q1.duration") == expected
+    assert view.meta("Q1.rate") is None
+    assert view.meta("Q1.coherence") is None
+    assert view.meta("unknown.rate") is None
 
 
 @pytest.mark.parametrize("field", ["t1err", "t1_err"])
@@ -405,7 +389,7 @@ def test_flat_error_fields_are_rejected_without_changing_value_or_source(
     before = source.read_bytes()
     with pytest.raises(UnknownFieldError), view.edit() as draft:
         draft.set(f"Q1.{field}", 0.18)
-    assert view.Q1.freq == 5000.0
+    assert view.Q1.rate == 5000.0
     assert source.read_bytes() == before
 
 
@@ -424,23 +408,23 @@ def test_conflict_keeps_the_winning_value_and_source_together(
     with ExitStack() as transaction:
         draft = transaction.enter_context(view.edit())
         draft.set(
-            "Q1.freq",
+            "Q1.rate",
             5300.0,
             provenance=Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2),
         )
-        draft.Q1.t1 = 12.0
-        other.Q1.freq = 5400.0
+        draft.Q1.duration = 12.0
+        other.Q1.rate = 5400.0
         winning_bytes = source.read_bytes()
         with pytest.raises(ConflictError):
             transaction.close()
     assert source.read_bytes() == winning_bytes
     view.refresh()
-    assert view.Q1.freq == 5400.0
-    metadata = view.meta("Q1.freq")
+    assert view.Q1.rate == 5400.0
+    metadata = view.meta("Q1.rate")
     assert metadata is not None
     assert metadata.source == "manual"
     assert metadata.stderr is None
-    assert view.meta("Q1.t1") is None
+    assert view.meta("Q1.duration") is None
 
 
 @pytest.mark.parametrize("container", ["point"], indirect=True)
@@ -451,24 +435,24 @@ def test_clone_sources_are_independent_and_reacceptance_clears_the_origin(
     original = entry.new_point("original")
     expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
     with original.edit() as draft:
-        draft.set("Q1.t1", 12.0, provenance=expected)
+        draft.set("Q1.duration", 12.0, provenance=expected)
     clone = entry.new_point("clone", clone_from=original)
-    metadata = clone.meta("Q1.t1")
+    metadata = clone.meta("Q1.duration")
     assert metadata is not None
     origin = metadata.cloned_from
     assert origin is not None
     assert origin == {"entry_id": entry.entry_id, "point": "original"}
     origin["point"] = "mutated-return"
-    assert clone.meta("Q1.t1") != metadata
+    assert clone.meta("Q1.duration") != metadata
     with clone.edit() as draft:
-        draft.set("Q1.t1", 12.0, provenance=expected)
-    assert_metadata(clone.meta("Q1.t1"), expected)
-    assert_metadata(original.meta("Q1.t1"), expected)
-    clone.Q1.t1 = 12.0
-    accepted = clone.meta("Q1.t1")
+        draft.set("Q1.duration", 12.0, provenance=expected)
+    assert_metadata(clone.meta("Q1.duration"), expected)
+    assert_metadata(original.meta("Q1.duration"), expected)
+    clone.Q1.duration = 12.0
+    accepted = clone.meta("Q1.duration")
     assert accepted is not None
     assert_metadata(accepted, Provenance("manual", None, None, accepted.at, None))
-    assert_metadata(original.meta("Q1.t1"), expected)
+    assert_metadata(original.meta("Q1.duration"), expected)
 
 
 @pytest.mark.parametrize("container", ["setup"], indirect=True)
@@ -478,15 +462,15 @@ def test_setup_seed_preserves_formal_source_without_following_later_edits(
     entry, setup, _source = container
     expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
     with setup.edit() as draft:
-        draft.set("Q1.t1", 12.0, provenance=expected)
+        draft.set("Q1.duration", 12.0, provenance=expected)
     point = entry.new_point("seed")
-    assert_metadata(point.meta("Q1.t1"), expected)
-    setup.Q1.t1 = 15.0
-    assert point.Q1.t1 == 12.0
-    assert_metadata(point.meta("Q1.t1"), expected)
-    point.Q1.t1 = 13.0
-    assert setup.Q1.t1 == pytest.approx(15.0)
-    assert point.meta("Q1.t1") != setup.meta("Q1.t1")
+    assert_metadata(point.meta("Q1.duration"), expected)
+    setup.Q1.duration = 15.0
+    assert point.Q1.duration == 12.0
+    assert_metadata(point.meta("Q1.duration"), expected)
+    point.Q1.duration = 13.0
+    assert setup.Q1.duration == pytest.approx(15.0)
+    assert point.meta("Q1.duration") != setup.meta("Q1.duration")
 
 
 def test_failed_atomic_replace_preserves_value_source_and_file(
@@ -496,7 +480,7 @@ def test_failed_atomic_replace_preserves_value_source_and_file(
 ) -> None:
     _entry, view, source = container
     before = source.read_bytes()
-    previous = view.meta("Q1.freq")
+    previous = view.meta("Q1.rate")
 
     def reject_replace(_source: str | Path, _destination: str | Path) -> None:
         raise OSError("replace rejected")
@@ -504,12 +488,12 @@ def test_failed_atomic_replace_preserves_value_source_and_file(
     monkeypatch.setattr(os, "replace", reject_replace)
     with pytest.raises(OSError, match="replace rejected"), view.edit() as draft:
         draft.set(
-            "Q1.freq",
+            "Q1.rate",
             5300.0,
             provenance=Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2),
         )
-    assert view.Q1.freq == 5000.0
-    assert view.meta("Q1.freq") == previous
+    assert view.Q1.rate == 5000.0
+    assert view.meta("Q1.rate") == previous
     assert source.read_bytes() == before
 
 
@@ -519,14 +503,14 @@ def test_newer_minor_retains_unknown_source_fields_when_accepting_a_value(
     _entry, view, source = container
     stored = YAML(typ="safe").load(source.read_text())
     stored["format_version"] = "1.1"
-    stored["provenance"]["Q1.freq"]["future_quality"] = {"method": "future"}
+    stored["provenance"]["Q1.rate"]["future_quality"] = {"method": "future"}
     with source.open("w") as stream:
         YAML(typ="rt").dump(stored, stream)
     view.refresh()
-    view.Q1.freq = 5300.0
+    view.Q1.rate = 5300.0
     accepted = YAML(typ="safe").load(source.read_text())
     assert accepted["format_version"] == "1.1"
-    assert accepted["provenance"]["Q1.freq"]["future_quality"] == {"method": "future"}
-    metadata = view.meta("Q1.freq")
+    assert accepted["provenance"]["Q1.rate"]["future_quality"] == {"method": "future"}
+    metadata = view.meta("Q1.rate")
     assert metadata is not None
     assert metadata.source == "manual"

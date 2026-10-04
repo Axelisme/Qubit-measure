@@ -1,5 +1,6 @@
 """Notebook component declarations through the public registry interface."""
 
+from collections.abc import Mapping
 from typing import Annotated, Literal, Self, cast
 
 import pytest
@@ -11,42 +12,17 @@ from pydantic import (
     create_model,
     model_validator,
 )
-from zcu_tools.resources.document_store import UnitSpec
 from zcu_tools.resources.entry import (
     ComponentRegistry,
     ComponentSchema,
+    ModuleSlot,
+    Ref,
     UnknownKindError,
 )
-from zcu_tools.resources.entry.schema import WiringSchema
 
 
 class PairSchema(ComponentSchema):
     target: str
-
-
-class ScalarWithoutUnits(ComponentSchema):
-    freq: float
-
-
-class IntegerWithoutUnits(ComponentSchema):
-    gain: int
-
-
-class NullableScalarWithoutUnits(ComponentSchema):
-    freq: float | None
-
-
-class NestedPhysicalWithoutUnits(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    freq: float
-
-
-class NestedWithoutUnits(ComponentSchema):
-    physical: NestedPhysicalWithoutUnits
-
-
-class NullableNestedWithoutUnits(ComponentSchema):
-    physical: NestedPhysicalWithoutUnits | None
 
 
 class UnrelatedSchema(BaseModel):
@@ -61,6 +37,57 @@ class PairLinks(BaseModel):
 
 class NestedPairSchema(ComponentSchema):
     links: PairLinks
+
+
+class ScalarSlotSchema(ComponentSchema):
+    slots: Annotated[str, ModuleSlot()]
+
+
+class NumericSlotSchema(ComponentSchema):
+    slots: Annotated[dict[str, int], ModuleSlot()]
+
+
+class NumericKeySlotSchema(ComponentSchema):
+    slots: Annotated[dict[int, str], ModuleSlot()]
+
+
+class NullableSlotSchema(ComponentSchema):
+    slots: Annotated[dict[str, str] | None, ModuleSlot()] = None
+
+
+class MappingSlotSchema(ComponentSchema):
+    slots: Annotated[Mapping[str, str], ModuleSlot()]
+
+
+class NumericRefSchema(ComponentSchema):
+    target: Annotated[int, Ref()]
+
+
+@pytest.mark.parametrize(
+    "model",
+    [ScalarSlotSchema, NumericSlotSchema, NumericKeySlotSchema, NullableSlotSchema],
+)
+@pytest.mark.parametrize("placement", ["direct", "nullable"])
+def test_malformed_module_slot_rejects_registration_without_reserving_kind(
+    model: type[ComponentSchema], placement: str
+) -> None:
+    if placement == "nullable":
+        model = create_model(
+            "NestedSlot", __base__=ComponentSchema, child=(model | None, None)
+        )
+    registry = ComponentRegistry()
+    with pytest.raises(TypeError, match="ModuleSlot"):
+        registry.register("notebook/slots", model)
+    registry.register("notebook/slots", MappingSlotSchema)
+    assert registry.get("notebook/slots") is MappingSlotSchema
+
+
+def test_malformed_reference_marker_does_not_reserve_kind() -> None:
+    registry = ComponentRegistry()
+    with pytest.raises(ValueError, match="reference"):
+        registry.register("notebook/link", NumericRefSchema)
+    registry.register("notebook/link", PairSchema, references=("target",))
+    assert registry.get("notebook/link") is PairSchema
 
 
 class BeforeModelSchema(ComponentSchema):
@@ -88,40 +115,6 @@ class AfterModelSchema(ComponentSchema):
 class PostInitSchema(ComponentSchema):
     def model_post_init(self, context: object) -> None:
         pass
-
-
-@pytest.mark.parametrize("units", [UnitSpec("Hz", "us"), UnitSpec("bogus", "MHz")])
-def test_nullable_branch_invalid_units_do_not_reserve_kind(units: UnitSpec) -> None:
-    class InvalidFrequency(ComponentSchema):
-        freq: Annotated[float, units] | None = None
-
-    class ValidFrequency(ComponentSchema):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
-
-    registry = ComponentRegistry()
-    kind = "notebook/nullable-unit"
-    with pytest.raises(ValueError, match="Incompatible or unsupported units"):
-        registry.register(kind, InvalidFrequency)
-    with pytest.raises(UnknownKindError):
-        registry.get(kind)
-    registry.register(kind, ValidFrequency)
-    assert registry.get(kind) is ValidFrequency
-
-
-def test_conflicting_nullable_branch_units_do_not_reserve_kind() -> None:
-    class AmbiguousFrequency(ComponentSchema):
-        freq: (
-            Annotated[float, UnitSpec("Hz", "MHz")]
-            | Annotated[int, UnitSpec("Hz", "GHz")]
-            | None
-        ) = None
-
-    registry = ComponentRegistry()
-    kind = "notebook/ambiguous-unit"
-    with pytest.raises(ValueError, match="Conflicting UnitSpec"):
-        registry.register(kind, AmbiguousFrequency)
-    with pytest.raises(UnknownKindError):
-        registry.get(kind)
 
 
 @pytest.mark.parametrize(
@@ -198,96 +191,21 @@ def test_registry_lifecycle_rejects_duplicates_and_allows_explicit_replacement()
     assert registry.get("notebook/pair") is NestedPairSchema
 
 
-@pytest.mark.parametrize(
-    "model",
-    (
-        ScalarWithoutUnits,
-        IntegerWithoutUnits,
-        NullableScalarWithoutUnits,
-        NestedWithoutUnits,
-        NullableNestedWithoutUnits,
-    ),
-)
-def test_registration_requires_units_for_physical_numbers_without_reserving_kind(
-    model: type[ComponentSchema],
-) -> None:
-    registry = ComponentRegistry()
-    with pytest.raises(ValueError, match="UnitSpec.*(freq|gain)"):
-        registry.register("notebook/physical", model)
-
-    registry.register("notebook/physical", PairSchema)
-    assert registry.get("notebook/physical") is PairSchema
-
-
-def test_registration_accepts_dimensionless_units_and_unconverted_channel_indices() -> (
-    None
-):
-    class PhysicalModel(ComponentSchema):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")]
-        gain: Annotated[int, UnitSpec("1", "1")]
-
-    registry = ComponentRegistry()
-    registry.register("notebook/physical", PhysicalModel)
-    assert registry.get("notebook/physical") is PhysicalModel
-    assert registry.units("notebook/physical") == {
-        ("freq",): UnitSpec("Hz", "MHz"),
-        ("gain",): UnitSpec("1", "1"),
-        ("wiring", "time_of_flight"): UnitSpec("s", "us"),
-    }
-    model = PhysicalModel.model_validate(
-        {"kind": "notebook/physical", "freq": 5.0, "gain": 2, "wiring": {"ch": 3}}
-    )
-    assert model.wiring.ch == 3
-    assert model.gain == 2
-
-
 def test_registration_preserves_required_wiring_indices_without_physical_units() -> (
     None
 ):
-    RequiredWiring = create_model(
-        "RequiredWiring", __base__=WiringSchema, ch=(int, Field(ge=0, strict=True))
-    )
-    RequiredChannelModel = create_model(
-        "RequiredChannelModel",
-        __base__=ComponentSchema,
-        wiring=(RequiredWiring, ...),
-    )
+    class RequiredWiring(BaseModel):
+        ch: int = Field(ge=0, strict=True)
+
+    class RequiredChannelModel(ComponentSchema):
+        wiring: RequiredWiring
 
     registry = ComponentRegistry()
     registry.register("notebook/required-channel", RequiredChannelModel)
-    assert registry.units("notebook/required-channel") == {
-        ("wiring", "time_of_flight"): UnitSpec("s", "us")
-    }
     model = RequiredChannelModel.model_validate(
         {"kind": "notebook/required-channel", "wiring": {"ch": 3}}
     )
     assert model.wiring.ch == 3
-
-
-def test_registration_rejects_unit_metadata_on_non_numeric_fields() -> None:
-    class TextUnitModel(ComponentSchema):
-        freq: Annotated[str, UnitSpec("Hz", "MHz")]
-
-    registry = ComponentRegistry()
-    with pytest.raises(TypeError, match="numeric"):
-        registry.register("notebook/physical", TextUnitModel)
-    registry.register("notebook/physical", PairSchema)
-    assert registry.get("notebook/physical") is PairSchema
-
-
-@pytest.mark.parametrize("spec", [UnitSpec("Hz", "us"), UnitSpec("Hz", "unknown")])
-def test_registration_rejects_invalid_units_without_reserving_the_kind(
-    spec: UnitSpec,
-) -> None:
-    class UnitModel(ComponentSchema):
-        freq: Annotated[float, spec]
-
-    registry = ComponentRegistry()
-    with pytest.raises(ValueError, match="units"):
-        registry.register("notebook/physical", UnitModel)
-
-    registry.register("notebook/physical", PairSchema, references=("target",))
-    assert registry.get("notebook/physical") is PairSchema
 
 
 @pytest.mark.parametrize(

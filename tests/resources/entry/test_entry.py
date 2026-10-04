@@ -2,12 +2,13 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 from ruamel.yaml import YAML
-from zcu_tools.format_version import YamlMap
+from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     MissingReferenceError,
     RenameRecoveryError,
@@ -34,22 +35,22 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     write_forward_setup(setup_path)
     document = YAML(typ="safe").load(setup_path)
     before = setup_path.read_bytes()
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert setup_path.read_bytes() == before
-    assert reopened.setup.R1.freq == pytest.approx(6500.0)
-    assert reopened.setup.R1.wiring.time_of_flight == pytest.approx(1.2)
-    reopened.setup.R1.freq = 6600.0
+    assert reopened.setup.R1.rate == pytest.approx(6500.0)
+    assert reopened.setup.R1.wiring.delay == pytest.approx(1.2)
+    reopened.setup.R1.rate = 6600.0
     with reopened.setup.edit() as draft:
-        draft.set("R1.wiring.time_of_flight", 1.5)
+        draft.set("R1.wiring.delay", 1.5)
         draft.general.description = "edited with the older reader"
 
-    document["components"]["R1"]["freq"] = 6.6e9
-    document["components"]["R1"]["wiring"]["time_of_flight"] = 1.5e-6
+    document["components"]["R1"]["rate"] = 6600.0
+    document["components"]["R1"]["wiring"]["delay"] = 1.5
     document["general"]["description"] = "edited with the older reader"
     stored = YAML(typ="safe").load(setup_path)
     # Source timestamps change on acceptance; source behavior has its own seam tests.
@@ -57,8 +58,8 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     document.pop("provenance")
     assert stored == document
     again = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert again.setup.R1.freq == pytest.approx(6600.0)
-    assert again.setup.R1.wiring.time_of_flight == pytest.approx(1.5)
+    assert again.setup.R1.rate == pytest.approx(6600.0)
+    assert again.setup.R1.wiring.delay == pytest.approx(1.5)
     assert again.setup.description == "edited with the older reader"
 
 
@@ -78,7 +79,7 @@ def test_newer_minor_keeps_unknown_fields_outside_the_public_typed_interface(
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     write_forward_setup(setup_path)
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     before = setup_path.read_bytes()
@@ -96,22 +97,22 @@ def test_newer_minor_keeps_unknown_fields_outside_the_public_typed_interface(
         elif operation == "general":
             reopened.setup.general.future_general = 1.0
         else:
-            reopened.setup.add_component("R2", kind="resonator", future_physical=1.0)
+            reopened.setup.add_component("R2", kind="fake/sensor", future_physical=1.0)
 
     with pytest.raises(UnknownFieldError) as failure:
         perform_operation()
     assert failure.value.path == path
     assert setup_path.read_bytes() == before
-    assert reopened.setup.R1.freq == pytest.approx(6500.0)
+    assert reopened.setup.R1.rate == pytest.approx(6500.0)
 
 
 @pytest.mark.parametrize("operation", ["open", "refresh"])
 @pytest.mark.parametrize(
     ("field", "value", "error"),
     [
-        ("freq", "not a frequency", ValueError),
+        ("rate", "not a frequency", ValueError),
         ("wiring", {"ch": None}, ValidationError),
-        ("amplifier", "absent", MissingReferenceError),
+        ("booster", "absent", MissingReferenceError),
         ("kind", "future-kind", UnknownKindError),
     ],
 )
@@ -125,7 +126,7 @@ def test_newer_minor_still_validates_known_values_references_and_kinds(
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     write_forward_setup(setup_path)
     document = YAML(typ="safe").load(setup_path)
     document["components"]["R1"][field] = value
@@ -142,7 +143,7 @@ def test_newer_minor_still_validates_known_values_references_and_kinds(
     with pytest.raises(error):
         perform_operation()
     assert setup_path.read_bytes() == before
-    assert entry.setup.R1.freq == pytest.approx(6500.0)
+    assert entry.setup.R1.rate == pytest.approx(6500.0)
 
 
 @pytest.mark.parametrize("method", ["attribute", "path"])
@@ -169,8 +170,8 @@ def test_description_alias_and_general_path_validate_before_changing_the_draft(
 @pytest.mark.parametrize(
     ("path", "field", "suggestion"),
     [
-        ("R1.frq", "frq", "freq"),
-        ("R1.wiring.time_of_flit", "time_of_flit", "time_of_flight"),
+        ("R1.raet", "raet", "rate"),
+        ("R1.wiring.dealy", "dealy", "delay"),
         ("general.descriptin", "descriptin", "description"),
     ],
 )
@@ -182,7 +183,7 @@ def test_dotted_path_typos_report_the_same_field_location_and_suggestions(
     suggestion: str,
 ) -> None:
     results, _database = entry_roots
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     setup_path = results / "entry" / "setup.yaml"
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
@@ -192,7 +193,7 @@ def test_dotted_path_typos_report_the_same_field_location_and_suggestions(
         assert failure.value.field == field
         assert suggestion in failure.value.suggestions
     assert setup_path.read_bytes() == before
-    assert entry.setup.R1.freq == pytest.approx(6500.0)
+    assert entry.setup.R1.rate == pytest.approx(6500.0)
 
 
 @pytest.mark.parametrize("method", ["attribute", "path"])
@@ -200,54 +201,54 @@ def test_missing_reference_discards_all_other_shared_draft_changes(
     entry_roots: tuple[Path, Path], entry: ResultEntry, method: str
 ) -> None:
     results, _database = entry_roots
-    entry.setup.add_component("A1", kind="amplifier/jpa")
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0, amplifier="A1")
+    entry.setup.add_component("A1", kind="fake/booster")
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, booster="A1")
     setup_path = results / "entry" / "setup.yaml"
     before = setup_path.read_bytes()
 
     def perform_operation() -> None:
         with entry.setup.edit() as draft:
             draft.description = "discarded"
-            draft.R1.freq = 6550.0
+            draft.R1.rate = 6550.0
             if method == "attribute":
-                draft.R1.amplifier = "absent"
+                draft.R1.booster = "absent"
             else:
-                draft.set("R1.amplifier", "absent")
+                draft.set("R1.booster", "absent")
 
     with pytest.raises(MissingReferenceError):
         perform_operation()
     assert setup_path.read_bytes() == before
     assert entry.setup.description is None
-    assert entry.setup.R1.freq == pytest.approx(6500.0)
-    assert entry.setup.R1.amplifier == "A1"
+    assert entry.setup.R1.rate == pytest.approx(6500.0)
+    assert entry.setup.R1.booster == "A1"
 
 
 @pytest.mark.parametrize("method", ["attribute", "path"])
-@pytest.mark.parametrize("field", ["freq", "wiring.ch"])
+@pytest.mark.parametrize("field", ["rate", "wiring.ch"])
 def test_draft_attribute_and_path_validation_reject_bad_values_without_tainting_draft(
     entry_roots: tuple[Path, Path], entry: ResultEntry, method: str, field: str
 ) -> None:
     results, database = entry_roots
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0, wiring={"ch": 1})
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, wiring={"ch": 1})
     with entry.setup.edit() as draft:
         draft.description = "the remaining valid draft may commit"
 
         def perform_operation() -> None:
             if method == "path":
                 draft.set(f"R1.{field}", "invalid")
-            elif field == "freq":
-                draft.R1.freq = "invalid"
+            elif field == "rate":
+                draft.R1.rate = "invalid"
             else:
                 draft.R1.wiring.ch = "invalid"
 
         with pytest.raises(ValidationError):
             perform_operation()
-        assert draft.R1.freq == pytest.approx(6500.0)
+        assert draft.R1.rate == pytest.approx(6500.0)
         assert draft.R1.wiring.ch == 1
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.description == "the remaining valid draft may commit"
-    assert reopened.setup.R1.freq == pytest.approx(6500.0)
+    assert reopened.setup.R1.rate == pytest.approx(6500.0)
     assert reopened.setup.R1.wiring.ch == 1
 
 
@@ -256,25 +257,25 @@ def test_path_set_and_attribute_edits_use_the_same_shared_draft(
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0, wiring={"ch": 1})
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, wiring={"ch": 1})
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
-        draft.set("R1.freq", 6550.0)
+        draft.set("R1.rate", 6550.0)
         draft.set("R1.wiring.ch", 2)
         draft.set("R1.ext.note", "same draft")
         draft.set("general.ext.temperature", 0.03)
         draft.set("general.description", "prepared")
-        assert draft.R1.freq == pytest.approx(6550.0)
+        assert draft.R1.rate == pytest.approx(6550.0)
         assert draft.general.ext.temperature == 0.03
         assert setup_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.R1.freq == pytest.approx(6550.0)
+    assert reopened.setup.R1.rate == pytest.approx(6550.0)
     assert reopened.setup.R1.wiring.ch == 2
     assert reopened.setup.R1.ext.note == "same draft"
     assert reopened.setup.general.ext.temperature == 0.03
     assert reopened.setup.description == "prepared"
-    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["freq"] == 6.55e9
+    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["rate"] == 6550.0
 
 
 @pytest.mark.parametrize("operation", ["direct", "draft"])
@@ -283,7 +284,7 @@ def test_entry_identity_cannot_be_replaced_through_general_or_a_whole_draft(
 ) -> None:
     results, _database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     original_id = entry.entry_id
     before = setup_path.read_bytes()
 
@@ -293,7 +294,7 @@ def test_entry_identity_cannot_be_replaced_through_general_or_a_whole_draft(
             entry.setup.general.entry_id = replacement
         else:
             with entry.setup.edit() as draft:
-                draft.R1.freq = 6550.0
+                draft.R1.rate = 6550.0
                 draft.description = "must be rolled back with the invalid identity"
                 draft.general.entry_id = replacement
 
@@ -303,7 +304,7 @@ def test_entry_identity_cannot_be_replaced_through_general_or_a_whole_draft(
     assert entry.entry_id == original_id
     assert entry.setup.general.entry_id == original_id
     assert entry.setup.description is None
-    assert entry.setup.R1.freq == pytest.approx(6500.0)
+    assert entry.setup.R1.rate == pytest.approx(6500.0)
 
 
 def test_general_extensions_support_direct_and_shared_draft_writes_without_scaling(
@@ -315,7 +316,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
     entry.setup.general.description = "prepared metadata"
     assert entry.setup.description == "prepared metadata"
     entry.setup.general.ext.temperature = 0.02
-    entry.setup.general.ext["_arbitrary.key"] = {"freq": 12.3, "flags": [True, None]}
+    entry.setup.general.ext["_arbitrary.key"] = {"rate": 12.3, "flags": [True, None]}
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
         draft.general.ext.temperature = 0.03
@@ -330,7 +331,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
     assert reopened.setup.general.ext.temperature == 0.03
     assert reopened.setup.general.ext.note == "cooldown"
     assert reopened.setup.general.ext["_arbitrary.key"] == {
-        "freq": 12.3,
+        "rate": 12.3,
         "flags": [True, None],
     }
     assert reopened.setup.general.entry_id == entry.entry_id
@@ -346,60 +347,60 @@ def test_component_draft_edits_publish_together_only_after_context_exit(
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0, wiring={"ch": 1})
-    entry.setup.add_component("R2", kind="resonator", freq=6600.0)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, wiring={"ch": 1})
+    entry.setup.add_component("R2", kind="fake/sensor", rate=6600.0)
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
-        draft.R1.freq = 6550.0
+        draft.R1.rate = 6550.0
         draft.R1.wiring.ch = 2
         draft.R1.ext.note = "shared draft"
-        draft.R2.freq = 6650.0
-        assert draft.R1.freq == pytest.approx(6550.0)
-        assert entry.setup.R1.freq == pytest.approx(6500.0)
-        assert entry.setup.R2.freq == pytest.approx(6600.0)
+        draft.R2.rate = 6650.0
+        assert draft.R1.rate == pytest.approx(6550.0)
+        assert entry.setup.R1.rate == pytest.approx(6500.0)
+        assert entry.setup.R2.rate == pytest.approx(6600.0)
         assert setup_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.R1.freq == pytest.approx(6550.0)
+    assert reopened.setup.R1.rate == pytest.approx(6550.0)
     assert reopened.setup.R1.wiring.ch == 2
     assert reopened.setup.R1.ext.note == "shared draft"
-    assert reopened.setup.R2.freq == pytest.approx(6650.0)
+    assert reopened.setup.R2.rate == pytest.approx(6650.0)
 
 
-@pytest.mark.parametrize("kind", ["qubit/transmon", "qubit/fluxonium"])
+@pytest.mark.parametrize("kind", ["fake/drive/a", "fake/drive/b"])
 def test_reference_chains_survive_reopening_and_can_be_rewired(
     entry_roots: tuple[Path, Path], entry: ResultEntry, kind: str
 ) -> None:
     results, database = entry_roots
-    entry.setup.add_component("A1", kind="amplifier/jpa", current=0.2)
-    entry.setup.add_component("I1", kind="device/current_source", current=0.3)
-    entry.setup.add_component("I2", kind="device/current_source", current=-0.4)
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0, amplifier="A1")
-    entry.setup.add_component("R2", kind="resonator", freq=6600.0)
-    entry.setup.add_component("Q1", kind=kind, readout="R1", flux_source="I1")
-    entry.setup.Q1.readout = "R2"
-    entry.setup.Q1.flux_source = "I2"
+    entry.setup.add_component("A1", kind="fake/booster", level=0.2)
+    entry.setup.add_component("I1", kind="fake/supply", level=0.3)
+    entry.setup.add_component("I2", kind="fake/supply", level=-0.4)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, booster="A1")
+    entry.setup.add_component("R2", kind="fake/sensor", rate=6600.0)
+    entry.setup.add_component("Q1", kind=kind, sense="R1", source="I1")
+    entry.setup.Q1.sense = "R2"
+    entry.setup.Q1.source = "I2"
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.Q1.readout == "R2"
-    assert reopened.setup.Q1.flux_source == "I2"
-    assert reopened.setup.R1.amplifier == "A1"
-    assert reopened.setup.R1.freq == pytest.approx(6500.0)
-    assert reopened.setup.I2.current == pytest.approx(-0.4)
+    assert reopened.setup.Q1.sense == "R2"
+    assert reopened.setup.Q1.source == "I2"
+    assert reopened.setup.R1.booster == "A1"
+    assert reopened.setup.R1.rate == pytest.approx(6500.0)
+    assert reopened.setup.I2.level == pytest.approx(-0.4)
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert document["components"]["Q1"]["readout"] == "R2"
-    assert document["components"]["Q1"]["flux_source"] == "I2"
-    assert document["components"]["R1"]["amplifier"] == "A1"
+    assert document["components"]["Q1"]["sense"] == "R2"
+    assert document["components"]["Q1"]["source"] == "I2"
+    assert document["components"]["R1"]["booster"] == "A1"
 
 
 @pytest.mark.parametrize(
     ("kind", "field", "target_kind"),
     [
-        ("resonator", "amplifier", "amplifier/jpa"),
-        ("qubit/fluxonium", "readout", "resonator"),
-        ("qubit/fluxonium", "flux_source", "device/current_source"),
-        ("qubit/transmon", "readout", "resonator"),
-        ("qubit/transmon", "flux_source", "device/current_source"),
+        ("fake/sensor", "booster", "fake/booster"),
+        ("fake/drive/b", "sense", "fake/sensor"),
+        ("fake/drive/b", "source", "fake/supply"),
+        ("fake/drive/a", "sense", "fake/sensor"),
+        ("fake/drive/a", "source", "fake/supply"),
     ],
 )
 @pytest.mark.parametrize("operation", ["add", "write", "open", "refresh"])
@@ -444,70 +445,19 @@ def test_missing_component_references_report_location_without_publishing_invalid
             _ = entry.setup.C2
 
 
-@pytest.mark.parametrize(
-    ("kind", "field", "working_value", "stored_value"),
-    [
-        ("resonator", "kappa", 2.5, 2.5e6),
-        ("amplifier/jpa", "freq", 6500.0, 6.5e9),
-        ("amplifier/jpa", "gain", 20.0, 20.0),
-        ("amplifier/jpa", "current", 0.2, 0.0002),
-        ("qubit/fluxonium", "freq", 500.0, 5e8),
-        ("qubit/fluxonium", "EJ", 8.0, 8e9),
-        ("qubit/fluxonium", "EC", 1.2, 1.2e9),
-        ("qubit/fluxonium", "EL", 0.5, 5e8),
-        ("qubit/fluxonium", "flux_half", -0.4, -0.0004),
-        ("qubit/fluxonium", "flux_period", 0.8, 0.0008),
-        ("qubit/fluxonium", "pi_len", 0.04, 4e-8),
-        ("qubit/fluxonium", "t1", 50.0, 5e-5),
-        ("qubit/fluxonium", "t2", 25.0, 2.5e-5),
-        ("qubit/fluxonium", "pi_gain", 0.3, 0.3),
-        ("qubit/transmon", "freq", 5000.0, 5e9),
-        ("qubit/transmon", "EJ", 20.0, 2e10),
-        ("qubit/transmon", "EC", 0.3, 3e8),
-        ("qubit/transmon", "pi_len", 0.02, 2e-8),
-        ("qubit/transmon", "t1", 40.0, 4e-5),
-        ("qubit/transmon", "t2", 20.0, 2e-5),
-        ("qubit/transmon", "pi_gain", 0.2, 0.2),
-    ],
-)
-def test_builtin_physical_fields_round_trip_through_add_write_and_reopen(
-    entry_roots: tuple[Path, Path],
-    entry: ResultEntry,
-    kind: str,
-    field: str,
-    working_value: float,
-    stored_value: float,
-) -> None:
-    results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("C1", kind=kind, **{field: working_value})
-    component = entry.setup.C1
-    assert getattr(component, field) == pytest.approx(working_value)
-    assert YAML(typ="safe").load(setup_path)["components"]["C1"][
-        field
-    ] == pytest.approx(stored_value)
-
-    setattr(component, field, working_value * 2)
-    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert getattr(reopened.setup.C1, field) == pytest.approx(working_value * 2)
-    assert YAML(typ="safe").load(setup_path)["components"]["C1"][
-        field
-    ] == pytest.approx(stored_value * 2)
-
-
 def test_device_current_round_trips_without_using_the_entry_name(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    entry.setup.add_component("I1", kind="device/current_source", current=0.25)
-    assert entry.setup.I1.current == pytest.approx(0.25)
-    entry.setup.I1.current = -0.4
+    entry.setup.add_component("I1", kind="fake/supply", level=0.25)
+    assert entry.setup.I1.level == pytest.approx(0.25)
+    entry.setup.I1.level = -0.4
 
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert document["components"]["I1"]["current"] == pytest.approx(-0.0004)
+    assert document["components"]["I1"]["level"] == pytest.approx(-0.4)
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.I1.kind == "device/current_source"
-    assert reopened.setup.I1.current == pytest.approx(-0.4)
+    assert reopened.setup.I1.kind == "fake/supply"
+    assert reopened.setup.I1.level == pytest.approx(-0.4)
 
 
 def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conversion(
@@ -515,42 +465,129 @@ def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conver
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0, ext={"freq": 12.3})
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, ext={"rate": 12.3})
     extension = entry.setup.R1.ext
-    assert extension.freq == 12.3
+    assert extension.rate == 12.3
     extension.note = "unscaled annotation"
-    payload: YamlMap = {"freq": 321.0, "optional": None, "flags": [True, "cold"]}
+    payload: YamlMap = {"rate": 321.0, "optional": None, "flags": [True, "cold"]}
     extension["_arbitrary.key"] = payload
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.R1.ext.note == "unscaled annotation"
     assert reopened.setup.R1.ext["_arbitrary.key"] == payload
     document = YAML(typ="safe").load(setup_path)["components"]["R1"]
-    assert document["freq"] == 6.5e9
+    assert document["rate"] == 6500.0
     assert document["ext"] == {
-        "freq": 12.3,
+        "rate": 12.3,
         "note": "unscaled annotation",
         "_arbitrary.key": payload,
     }
 
 
-@pytest.mark.parametrize("field", ["ch", "ro_ch", "flux_ch"])
+@pytest.mark.parametrize("owner", ["R1", "general"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        float("inf"),
+        float("nan"),
+        b"binary",
+        (1, 2),
+        {1: "key"},
+        {"nested": [float("inf")]},
+    ],
+    ids=["infinity", "nan", "bytes", "tuple", "non_string_key", "nested_infinity"],
+)
+def test_non_json_extension_write_preserves_draft_and_sources(
+    entry: ResultEntry, owner: str, value: object
+) -> None:
+    entry.setup.add_component("R1", kind="fake/sensor")
+    with entry.setup.edit() as draft:
+        extension = draft.R1.ext if owner == "R1" else draft.general.ext
+        with pytest.raises(ValidationError):
+            extension["bad"] = value
+        with pytest.raises(KeyError):
+            _ = extension["bad"]
+        extension["accepted"] = {"flag": True, "empty": None}
+    extension = entry.setup.R1.ext if owner == "R1" else entry.setup.general.ext
+    assert extension["accepted"] == {"flag": True, "empty": None}
+    assert entry.setup.meta(f"{owner}.ext.bad") is None
+
+
+@pytest.mark.parametrize("owner", ["R1", "general"])
+def test_dotted_extension_path_rejects_non_json_input_before_coercion(
+    entry: ResultEntry, owner: str
+) -> None:
+    entry.setup.add_component("R1", kind="fake/sensor")
+    with entry.setup.edit() as draft:
+        with pytest.raises(ValidationError):
+            draft.set(f"{owner}.ext.bad", cast(YamlValue, (1, 2)))
+        draft.set(f"{owner}.ext.accepted", [True, None, 3])
+    extension = entry.setup.R1.ext if owner == "R1" else entry.setup.general.ext
+    assert extension.accepted == [True, None, 3]
+    with pytest.raises(KeyError):
+        _ = extension["bad"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [float("inf"), b"binary", (1, 2), {1: "key"}],
+    ids=["infinity", "bytes", "tuple", "non_string_key"],
+)
+def test_add_component_rejects_non_json_extension_before_publishing(
+    entry: ResultEntry, value: object
+) -> None:
+    with pytest.raises(ValidationError):
+        entry.setup.add_component(
+            "N1", kind="fake/sensor", ext=cast(YamlValue, {"bad": value})
+        )
+    with pytest.raises(AttributeError):
+        _ = entry.setup.N1
+
+
+@pytest.mark.parametrize("owner", ["components", "general"])
+def test_reload_rejects_non_json_extension_without_repairing_file(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], owner: str
+) -> None:
+    entry.setup.add_component("R1", kind="fake/sensor", ext={"signal": 1.0})
+    entry.setup.general.ext.signal = 2.0
+    source = entry_roots[0] / "entry/setup.yaml"
+    yaml = YAML(typ="rt")
+    document = yaml.load(source.read_text())
+    node = (
+        document["components"]["R1"] if owner == "components" else document["general"]
+    )
+    node["ext"]["signal"] = float("inf")
+    with source.open("w") as stream:
+        yaml.dump(document, stream)
+    invalid = source.read_bytes()
+    with pytest.raises(ValidationError):
+        entry.setup.refresh()
+    assert entry.setup.R1.ext.signal == 1.0
+    assert entry.setup.general.ext.signal == 2.0
+    with pytest.raises(ValidationError):
+        ResultEntry.open(
+            "entry", result_root=entry_roots[0], database_root=entry_roots[1]
+        )
+    assert source.read_bytes() == invalid
+
+
+@pytest.mark.parametrize("field", ["ch", "ro_ch", "bias_ch"])
 @pytest.mark.parametrize("operation", ["add", "write", "open"])
 def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
     entry_roots: tuple[Path, Path], entry: ResultEntry, field: str, operation: str
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", wiring={field: 2})
+    entry.setup.add_component("R1", kind="fake/sensor", wiring={field: 2})
     if operation == "open":
         write_setup_component(
-            setup_path, "R1", {"kind": "resonator", "wiring": {field: None}}
+            setup_path, "R1", {"kind": "fake/sensor", "wiring": {field: None}}
         )
     before = setup_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
-            entry.setup.add_component("R2", kind="resonator", wiring={field: None})
+            entry.setup.add_component("R2", kind="fake/sensor", wiring={field: None})
         elif operation == "write":
             setattr(entry.setup.R1.wiring, field, None)
         else:
@@ -570,23 +607,23 @@ def test_wiring_fields_stay_separate_and_use_their_declared_working_units(
     setup_path = results / "entry" / "setup.yaml"
     entry.setup.add_component(
         "R1",
-        kind="resonator",
-        freq=6500.0,
-        wiring={"ch": 2, "time_of_flight": 0.4},
+        kind="fake/sensor",
+        rate=6500.0,
+        wiring={"ch": 2, "delay": 0.4},
     )
-    resonator = entry.setup.R1
-    assert resonator.wiring.ch == 2
-    assert resonator.wiring.time_of_flight == pytest.approx(0.4)
-    resonator.wiring.flux_ch = 3
-    resonator.wiring.time_of_flight = 0.5
+    sensor = entry.setup.R1
+    assert sensor.wiring.ch == 2
+    assert sensor.wiring.delay == pytest.approx(0.4)
+    sensor.wiring.bias_ch = 3
+    sensor.wiring.delay = 0.5
 
     document = YAML(typ="safe").load(setup_path)["components"]["R1"]
-    assert document["wiring"]["time_of_flight"] == pytest.approx(0.5e-6)
-    assert document["wiring"]["flux_ch"] == 3
-    assert "ch" not in document and "flux_ch" not in document
+    assert document["wiring"]["delay"] == pytest.approx(0.5)
+    assert document["wiring"]["bias_ch"] == 3
+    assert "ch" not in document and "bias_ch" not in document
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.R1.freq == pytest.approx(6500.0)
-    assert reopened.setup.R1.wiring.time_of_flight == pytest.approx(0.5)
+    assert reopened.setup.R1.rate == pytest.approx(6500.0)
+    assert reopened.setup.R1.wiring.delay == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize(
@@ -599,12 +636,12 @@ def test_component_names_must_support_unambiguous_public_attribute_access(
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
     if operation == "open":
-        write_setup_component(setup_path, name, {"kind": "resonator"})
+        write_setup_component(setup_path, name, {"kind": "fake/sensor"})
     before = setup_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
-            entry.setup.add_component(name, kind="resonator")
+            entry.setup.add_component(name, kind="fake/sensor")
         else:
             ResultEntry.open("entry", result_root=results, database_root=database)
 
@@ -617,11 +654,11 @@ def test_absent_optional_physical_fields_are_not_fabricated_or_readable(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, _database = entry_roots
-    entry.setup.add_component("R1", kind="resonator")
+    entry.setup.add_component("R1", kind="fake/sensor")
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert "freq" not in document["components"]["R1"]
-    with pytest.raises(AttributeError, match=r"R1\.freq.*not set"):
-        _ = entry.setup.R1.freq
+    assert "rate" not in document["components"]["R1"]
+    with pytest.raises(AttributeError, match=r"R1\.rate.*not set"):
+        _ = entry.setup.R1.rate
 
 
 @pytest.mark.parametrize("operation", ["add", "read", "write", "open"])
@@ -630,20 +667,20 @@ def test_unknown_component_fields_report_the_path_and_a_close_name(
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     if operation == "open":
         write_setup_component(
-            setup_path, "R1", {"kind": "resonator", "freq": 6.5e9, "frq": 6.6e9}
+            setup_path, "R1", {"kind": "fake/sensor", "rate": 6.5e9, "raet": 6.6e9}
         )
     before = setup_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
-            entry.setup.add_component("R2", kind="resonator", frq=6600.0)
+            entry.setup.add_component("R2", kind="fake/sensor", raet=6600.0)
         elif operation == "read":
-            _ = entry.setup.R1.frq
+            _ = entry.setup.R1.raet
         elif operation == "write":
-            entry.setup.R1.frq = 6600.0
+            entry.setup.R1.raet = 6600.0
         else:
             ResultEntry.open("entry", result_root=results, database_root=database)
 
@@ -651,9 +688,9 @@ def test_unknown_component_fields_report_the_path_and_a_close_name(
         perform_operation()
 
     component = "R2" if operation == "add" else "R1"
-    assert failure.value.path == f"{component}.frq"
-    assert failure.value.field == "frq"
-    assert "freq" in failure.value.suggestions
+    assert failure.value.path == f"{component}.raet"
+    assert failure.value.field == "raet"
+    assert "rate" in failure.value.suggestions
     assert setup_path.read_bytes() == before
 
 
@@ -664,12 +701,12 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
     if operation == "open":
-        write_setup_component(setup_path, "R1", {"kind": "resonatr"})
+        write_setup_component(setup_path, "R1", {"kind": "fake/sensr"})
     before = setup_path.read_bytes()
 
     def perform_operation() -> None:
         if operation == "add":
-            entry.setup.add_component("R1", kind="resonatr")
+            entry.setup.add_component("R1", kind="fake/sensr")
         else:
             ResultEntry.open("entry", result_root=results, database_root=database)
 
@@ -678,38 +715,38 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
 
     assert failure.value.source == setup_path
     assert failure.value.component == "R1"
-    assert failure.value.kind == "resonatr"
-    assert "resonator" in failure.value.suggestions
+    assert failure.value.kind == "fake/sensr"
+    assert "fake/sensor" in failure.value.suggestions
     assert setup_path.read_bytes() == before
 
 
-def test_component_frequency_round_trips_between_si_and_working_units(
+def test_component_frequency_round_trips_in_working_units(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
-    resonator = entry.setup.R1
-    assert resonator.freq == pytest.approx(6500.0)
-    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["freq"] == 6.5e9
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    sensor = entry.setup.R1
+    assert sensor.rate == 6500.0
+    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["rate"] == 6500.0
 
-    resonator.freq = 6550.0
-    assert resonator.freq == pytest.approx(6550.0)
+    sensor.rate = 6550.0
+    assert sensor.rate == 6550.0
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.R1.freq == pytest.approx(6550.0)
-    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["freq"] == 6.55e9
+    assert reopened.setup.R1.rate == 6550.0
+    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["rate"] == 6550.0
 
 
 def test_added_component_survives_reopening_with_its_declared_kind(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    entry.setup.add_component("R1", kind="resonator", ext={"note": "readout line"})
+    entry.setup.add_component("R1", kind="fake/sensor", ext={"note": "sense line"})
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.R1.kind == "resonator"
+    assert reopened.setup.R1.kind == "fake/sensor"
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert document["components"]["R1"]["ext"]["note"] == "readout line"
+    assert document["components"]["R1"]["ext"]["note"] == "sense line"
 
 
 def write_forward_setup(path: Path) -> None:
@@ -719,7 +756,7 @@ def write_forward_setup(path: Path) -> None:
     document["general"]["future_general"] = "next metadata"
     document["components"]["R1"]["future_physical"] = 7.5e9
     document["components"]["R1"]["wiring"] = {
-        "time_of_flight": 1.2e-6,
+        "delay": 1.2,
         "future_wiring": {"channel": 3},
     }
     with path.open("w", encoding="utf-8") as stream:

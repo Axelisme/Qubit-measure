@@ -2,9 +2,8 @@
 
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from copy import deepcopy
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 import pytest
 from pydantic import (
@@ -17,24 +16,27 @@ from pydantic import (
 )
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
-from zcu_tools.resources.document_store import UnitSpec
 from zcu_tools.resources.entry import (
     ComponentSchema,
     MissingReferenceError,
+    ModuleSlot,
+    Ref,
     ResultEntry,
+    UnitSpec,
     UnknownFieldError,
     component_registry,
 )
+from zcu_tools.resources.entry.views import FieldView
 
 
 class RequiredPhysicalSchema(ComponentSchema):
-    freq: Annotated[float, UnitSpec("Hz", "MHz")]
+    rate: Annotated[float, UnitSpec("MHz")]
     title: str
 
 
 class RequiredTiming(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    width: Annotated[float, UnitSpec("s", "us")]
+    width: Annotated[float, UnitSpec("µs")]
     label: str
 
 
@@ -59,26 +61,6 @@ class PairSchema(ComponentSchema):
 
 class OptionalPairSchema(ComponentSchema):
     links: PairLinks | None = None
-
-
-@pytest.fixture(scope="module", autouse=True)
-def registry_module_guard() -> Generator[None]:
-    before = deepcopy(vars(component_registry))
-    yield
-    assert vars(component_registry) == before, (
-        "component registry polluted by this module"
-    )
-
-
-@pytest.fixture(autouse=True)
-def registry_state_guard(
-    request: pytest.FixtureRequest,
-) -> Generator[None]:
-    before = deepcopy(vars(component_registry))
-    yield
-    assert vars(component_registry) == before, (
-        f"registry polluter: {request.node.nodeid}"
-    )
 
 
 @contextmanager
@@ -118,6 +100,132 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     results, database = tmp_path / "results", tmp_path / "Database"
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     return entry, results, database
+
+
+def test_nested_wiring_view_returns_maps_and_preserves_snapshot_aliases(
+    tmp_path: Path,
+) -> None:
+    class Pin(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        index: int = Field(strict=True, ge=0)
+
+    class Pins(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        link: Pin
+
+    class Wired(ComponentSchema):
+        wiring: Pins
+
+    with registered_model("notebook/wired", Wired) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, wiring={"link": {"index": 2}})
+        value = entry.setup.N1.wiring.link
+        assert value == {"index": 2}
+        assert isinstance(value, dict)
+        value["index"] = 99
+        assert entry.setup.N1.wiring.link == {"index": 2}
+        with entry.setup.edit() as draft:
+            draft.set("N1.wiring.link.index", 5)
+            assert draft.N1.wiring.link == {"index": 5}
+            assert entry.setup.N1.wiring.link == {"index": 2}
+        entry.setup.refresh()
+        assert entry.setup.N1.wiring.link == {"index": 5}
+
+
+def test_marked_module_slots_edit_seed_and_reload_without_resolving_paths(
+    tmp_path: Path,
+) -> None:
+    class Programmed(ComponentSchema):
+        programs: Annotated[dict[str, str], ModuleSlot()] = Field(default_factory=dict)
+
+    with registered_model("notebook/programmed", Programmed) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component(
+            "N1", kind=kind, programs={"drive": "unresolved.drive"}
+        )
+        slots = cast(FieldView, entry.setup.N1.programs)
+        assert slots.drive == "unresolved.drive"
+        slots.drive = "another.path"
+        point = entry.new_point("working")
+        with point.edit() as draft:
+            draft.set("N1.programs.sense", "unresolved.sense")
+        point_slots = cast(FieldView, point.N1.programs)
+        assert point_slots.drive == "another.path"
+        assert point_slots.sense == "unresolved.sense"
+        with pytest.raises(ValidationError):
+            point_slots.drive = 3
+        assert point_slots.drive == "another.path"
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert (
+            cast(FieldView, reopened.use_point("working").N1.programs).sense
+            == "unresolved.sense"
+        )
+        assert slots.drive == "another.path"
+
+
+def test_marked_reference_validates_add_write_and_reload(tmp_path: Path) -> None:
+    class Linked(ComponentSchema):
+        link: Annotated[str | None, Ref()] = None
+
+    with registered_model("notebook/marked-link", Linked) as kind:
+        entry, results, database = create_entry(tmp_path)
+        before = (results / "entry/setup.yaml").read_bytes()
+        with pytest.raises(MissingReferenceError) as error:
+            entry.setup.add_component("L1", kind=kind, link="missing")
+        assert error.value.field == "link"
+        assert (results / "entry/setup.yaml").read_bytes() == before
+        entry.setup.add_component("T1", kind=kind)
+        entry.setup.add_component("L1", kind=kind, link="T1")
+        point = entry.new_point("working")
+        with pytest.raises(MissingReferenceError):
+            point.L1.link = "missing"
+        assert point.L1.link == "T1"
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.use_point("working").L1.link == "T1"
+
+
+def test_nullable_nested_markers_validate_reference_and_accept_null(
+    tmp_path: Path,
+) -> None:
+    class Links(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        target: Annotated[str | None, Ref()] = None
+
+    class Linked(ComponentSchema):
+        links: Links | None = None
+
+    with registered_model("notebook/nested-links", Linked) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        entry.setup.add_component("T1", kind=kind, links=None)
+        entry.setup.add_component("N1", kind=kind, links={"target": "T1"})
+        point = entry.new_point("working")
+        with pytest.raises(MissingReferenceError) as error:
+            point.N1.links = {"target": "missing"}
+        assert error.value.field == "links.target"
+        assert point.N1.links == {"target": "T1"}
+        with point.edit() as draft:
+            draft.set("N1.links.target", None)
+        point.refresh()
+        assert point.N1.links == {"target": None}
+        point.N1.links = None
+        point.refresh()
+        assert point.N1.links is None
+
+
+def test_overridden_extension_annotation_keeps_json_boundary(tmp_path: Path) -> None:
+    class Extended(ComponentSchema):
+        ext: YamlMap = Field(default_factory=dict)
+
+    with registered_model("notebook/extensions", Extended) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        with pytest.raises(ValidationError):
+            entry.setup.add_component("N1", kind=kind, ext={"bad": float("inf")})
+        entry.setup.add_component("N1", kind=kind, ext={"valid": [True, None]})
+        assert entry.setup.N1.ext.valid == [True, None]
 
 
 @pytest.mark.parametrize(
@@ -286,103 +394,40 @@ def test_caught_alias_validation_failure_preserves_shared_draft(
 
 def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
     class NullableFrequency(ComponentSchema):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
+        rate: Annotated[float, UnitSpec("MHz")] | None = None
 
     with registered_model("notebook/nullable-unit", NullableFrequency) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, freq=10.0)
+        entry.setup.add_component("N1", kind=kind, rate=10.0)
         source = results / "entry" / "setup.yaml"
         document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
-        assert document["components"]["N1"]["freq"] == 10_000_000.0
-        assert entry.setup.N1.freq == 10.0
+        assert document["components"]["N1"]["rate"] == 10.0
+        assert entry.setup.N1.rate == 10.0
 
-        entry.setup.N1.freq = 12.0
+        entry.setup.N1.rate = 12.0
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.N1.freq == 12.0
+        assert reopened.setup.N1.rate == 12.0
         document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
-        assert document["components"]["N1"]["freq"] == 12_000_000.0
+        assert document["components"]["N1"]["rate"] == 12.0
 
-        entry.setup.N1.freq = None
+        entry.setup.N1.rate = None
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.N1.freq is None
+        assert reopened.setup.N1.rate is None
         document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
-        assert document["components"]["N1"]["freq"] is None
-
-
-def test_nullable_branch_unit_uses_canonical_float_tolerance(tmp_path: Path) -> None:
-    class RoundedFrequency(ComponentSchema):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
-
-        @field_validator("freq")
-        @classmethod
-        def normalize_frequency(cls, value: float | None) -> float | None:
-            return round(value, 2) if value is not None else None
-
-    with registered_model("notebook/nullable-rounded", RoundedFrequency) as kind:
-        entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, freq=0.14)
-        reopened = ResultEntry.open(
-            "entry", result_root=results, database_root=database
-        )
-        assert reopened.setup.N1.freq == 0.14
-        document = YAML(typ="safe").load(
-            (results / "entry" / "setup.yaml").read_text(encoding="utf-8")
-        )
-        assert document["components"]["N1"]["freq"] == 140_000.0
-
-
-@pytest.mark.parametrize(
-    ("initial", "delta", "accepted"),
-    [(1.0, 5e-13, True), (1.0, 2e-12, False), (0.0, 5e-15, False)],
-)
-def test_unitspec_float_drift_has_relative_tolerance_without_absolute_tolerance(
-    tmp_path: Path,
-    registry_state_guard: None,
-    initial: float,
-    delta: float,
-    accepted: bool,
-) -> None:
-    class ShiftedSchema(ComponentSchema):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")]
-
-        @field_validator("freq")
-        @classmethod
-        def shift_frequency(cls, value: float) -> float:
-            return value + delta
-
-    with registered_model("notebook/shifted", ShiftedSchema) as kind:
-        entry, results, database = create_entry(tmp_path)
-        source = results / "entry" / "setup.yaml"
-        before = source.read_bytes()
-        if accepted:
-            entry.setup.add_component("N1", kind=kind, freq=initial)
-            assert entry.setup.N1.freq == pytest.approx(
-                1.000000000001, rel=1e-15, abs=0.0
-            )
-            reopened = ResultEntry.open(
-                "entry", result_root=results, database_root=database
-            )
-            assert reopened.setup.N1.freq == entry.setup.N1.freq
-        else:
-            with pytest.raises(ValidationError) as failure:
-                entry.setup.add_component("N1", kind=kind, freq=initial)
-            assert failure.value.errors()[0]["loc"] == ("components", "N1", "freq")
-            assert source.read_bytes() == before
-            with pytest.raises(AttributeError, match="Unknown component 'N1'"):
-                _ = entry.setup.N1
+        assert document["components"]["N1"]["rate"] is None
 
 
 def test_unitspec_integer_output_keeps_exact_canonical_comparison(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
     class IntegerShiftedSchema(ComponentSchema):
-        freq: Annotated[int, UnitSpec("Hz", "Hz")]
+        rate: Annotated[int, UnitSpec("Hz")]
 
-        @field_validator("freq")
+        @field_validator("rate")
         @classmethod
         def shift_frequency(cls, value: int) -> int:
             return value + 1
@@ -392,8 +437,8 @@ def test_unitspec_integer_output_keeps_exact_canonical_comparison(
         source = results / "entry" / "setup.yaml"
         before = source.read_bytes()
         with pytest.raises(ValidationError) as failure:
-            entry.setup.add_component("N1", kind=kind, freq=1_000_000_000_000_000)
-        assert failure.value.errors()[0]["loc"] == ("components", "N1", "freq")
+            entry.setup.add_component("N1", kind=kind, rate=1_000_000_000_000_000)
+        assert failure.value.errors()[0]["loc"] == ("components", "N1", "rate")
         assert source.read_bytes() == before
         with pytest.raises(AttributeError, match="Unknown component 'N1'"):
             _ = entry.setup.N1
@@ -404,9 +449,9 @@ def test_nullable_nested_rounding_publishes_working_canonical_values(
 ) -> None:
     class RoundedTiming(BaseModel):
         model_config = ConfigDict(extra="forbid")
-        freq: Annotated[float, UnitSpec("Hz", "MHz")]
+        rate: Annotated[float, UnitSpec("MHz")]
 
-        @field_validator("freq")
+        @field_validator("rate")
         @classmethod
         def round_frequency(cls, value: float) -> float:
             return round(value, 2)
@@ -416,17 +461,17 @@ def test_nullable_nested_rounding_publishes_working_canonical_values(
 
     with registered_model("notebook/nested-rounded", RoundedSchema) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, timing={"freq": 0.143})
+        entry.setup.add_component("N1", kind=kind, timing={"rate": 0.143})
         source = results / "entry" / "setup.yaml"
-        assert entry.setup.N1.timing == {"freq": 0.14}
+        assert entry.setup.N1.timing == {"rate": 0.14}
         assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] == {
-            "freq": 140000.0
+            "rate": 0.14
         }
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
         reopened.setup.refresh()
-        assert reopened.setup.N1.timing == {"freq": 0.14}
+        assert reopened.setup.N1.timing == {"rate": 0.14}
         reopened.setup.N1.timing = None
         assert reopened.setup.N1.timing is None
         assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] is None
@@ -483,34 +528,34 @@ def test_unitless_extension_structure_keeps_exact_canonical_comparison(
             _ = entry.setup.N1
 
 
-def test_idempotent_numeric_rounding_survives_si_round_trip_and_publishes_canonical(
+def test_idempotent_numeric_rounding_survives_reload_and_publishes_canonical(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
     class RoundedSchema(ComponentSchema):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")]
+        rate: Annotated[float, UnitSpec("MHz")]
 
-        @field_validator("freq")
+        @field_validator("rate")
         @classmethod
         def round_frequency(cls, value: float) -> float:
             return round(value, 2)
 
     with registered_model("notebook/rounded", RoundedSchema) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, freq=0.143)
+        entry.setup.add_component("N1", kind=kind, rate=0.143)
         source = results / "entry" / "setup.yaml"
-        assert YAML(typ="safe").load(source)["components"]["N1"]["freq"] == 140000.0
-        assert entry.setup.N1.freq == 0.14
+        assert YAML(typ="safe").load(source)["components"]["N1"]["rate"] == 0.14
+        assert entry.setup.N1.rate == 0.14
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
         reopened.setup.refresh()
-        assert reopened.setup.N1.freq == 0.14
+        assert reopened.setup.N1.rate == 0.14
         with reopened.setup.edit() as draft:
-            assert draft.N1.freq == 0.14
+            assert draft.N1.rate == 0.14
             draft.description = "rounded value retained"
-        assert reopened.setup.N1.freq == 0.14
+        assert reopened.setup.N1.rate == 0.14
         assert reopened.setup.description == "rounded value retained"
-        assert YAML(typ="safe").load(source)["components"]["N1"]["freq"] == 140000.0
+        assert YAML(typ="safe").load(source)["components"]["N1"]["rate"] == 0.14
 
 
 def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
@@ -527,7 +572,7 @@ def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
 
     with registered_model("notebook/doubled", DoubledSchema) as kind:
         entry, results, _ = create_entry(tmp_path)
-        entry.setup.add_component("R1", kind="resonator", freq=10.0)
+        entry.setup.add_component("R1", kind="fake/sensor", rate=10.0)
         entry.setup.add_component(
             "N1", kind=kind, timing={"width": 0.0, "label": "initial"}
         )
@@ -537,7 +582,7 @@ def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
         def edit() -> None:
             with entry.setup.edit() as draft:
                 draft.description = "must roll back"
-                draft.R1.freq = 15.0
+                draft.R1.rate = 15.0
                 draft.set("N1.timing.width", 10.0)
 
         with pytest.raises(ValidationError) as failure:
@@ -546,7 +591,7 @@ def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
         assert error["loc"] == ("components", "N1", "timing", "width")
         assert "20.0" in error["msg"] and "40.0" in error["msg"]
         assert source.read_bytes() == before
-        assert entry.setup.R1.freq == 10.0
+        assert entry.setup.R1.rate == 10.0
         assert entry.setup.N1.timing == {"width": 0.0, "label": "initial"}
         assert entry.setup.description is None
 
@@ -625,7 +670,7 @@ def test_non_idempotent_field_conversion_rejects_add_without_publishing(
 
     with registered_model("notebook/stamped", StampedSchema) as kind:
         entry, results, _ = create_entry(tmp_path)
-        entry.setup.add_component("R1", kind="resonator", freq=10.0)
+        entry.setup.add_component("R1", kind="fake/sensor", rate=10.0)
         source = results / "entry" / "setup.yaml"
         before = source.read_bytes()
         with pytest.raises(ValidationError) as failure:
@@ -634,7 +679,7 @@ def test_non_idempotent_field_conversion_rejects_add_without_publishing(
         assert error["loc"] == ("components", "N1", "title")
         assert "prepared!" in error["msg"] and "prepared!!" in error["msg"]
         assert source.read_bytes() == before
-        assert entry.setup.R1.freq == 10.0
+        assert entry.setup.R1.rate == 10.0
         with pytest.raises(AttributeError, match="Unknown component 'N1'"):
             _ = entry.setup.N1
 
@@ -727,8 +772,8 @@ def test_optional_nested_references_validate_supplied_targets_and_allow_null(
         references=("links.control", "links.target", "links.coupler"),
     ) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("Q1", kind="qubit/transmon")
-        entry.setup.add_component("Q2", kind="qubit/transmon")
+        entry.setup.add_component("Q1", kind="fake/drive/a")
+        entry.setup.add_component("Q2", kind="fake/drive/a")
         entry.setup.add_component("P0", kind=kind, links=None)
         assert entry.setup.P0.links is None
         entry.setup.add_component(
@@ -801,7 +846,7 @@ def test_optional_nested_complete_values_round_trip_units(
         setup_path = results / "entry" / "setup.yaml"
         assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
             "width"
-        ] == pytest.approx(1e-5)
+        ] == pytest.approx(10.0)
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
@@ -809,7 +854,7 @@ def test_optional_nested_complete_values_round_trip_units(
         reopened.setup.N1.timing = {"label": "updated", "width": 20.0}
         assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
             "width"
-        ] == pytest.approx(2e-5)
+        ] == pytest.approx(20.0)
         again = ResultEntry.open("entry", result_root=results, database_root=database)
         assert again.setup.N1.timing == {"label": "updated", "width": 20.0}
 
@@ -818,8 +863,8 @@ def test_nested_reference_path_failure_discards_the_shared_draft(
     tmp_path: Path, pair_kind: str
 ) -> None:
     entry, results, _database = create_entry(tmp_path)
-    entry.setup.add_component("Q1", kind="qubit/transmon")
-    entry.setup.add_component("Q2", kind="qubit/fluxonium")
+    entry.setup.add_component("Q1", kind="fake/drive/a")
+    entry.setup.add_component("Q2", kind="fake/drive/b")
     links: YamlMap = {"control": "Q1", "target": "Q2"}
     entry.setup.add_component("P1", kind=pair_kind, links=links)
     setup_path = results / "entry" / "setup.yaml"
@@ -856,7 +901,7 @@ def test_nested_model_values_use_yaml_maps_and_dotted_edits_in_working_units(
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.N1.timing == {"width": 10.0, "label": "prepared"}
     assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"]["width"] == (
-        pytest.approx(1e-5)
+        pytest.approx(10.0)
     )
 
 
@@ -867,8 +912,8 @@ def test_nested_references_reject_missing_targets_with_the_declared_path(
 ) -> None:
     entry, results, database = create_entry(tmp_path)
     setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("Q1", kind="qubit/transmon")
-    entry.setup.add_component("Q2", kind="qubit/fluxonium")
+    entry.setup.add_component("Q1", kind="fake/drive/a")
+    entry.setup.add_component("Q2", kind="fake/drive/b")
     valid_links: YamlMap = {"control": "Q1", "target": "Q2"}
     entry.setup.add_component("P1", kind=pair_kind, links=valid_links)
     invalid_links = {**valid_links, field: "absent"}
@@ -908,10 +953,10 @@ def test_required_component_values_reject_invalid_edits(
     value: str | None,
 ) -> None:
     entry, results, _ = create_entry(tmp_path)
-    entry.setup.add_component("N1", kind=required_kind, freq=5000.0, title="initial")
+    entry.setup.add_component("N1", kind=required_kind, rate=5000.0, title="initial")
     setup_file = results / "entry" / "setup.yaml"
     before = setup_file.read_bytes()
-    with pytest.raises(ValidationError, match="freq"):
-        entry.setup.N1.freq = value
+    with pytest.raises(ValidationError, match="rate"):
+        entry.setup.N1.rate = value
     assert setup_file.read_bytes() == before
-    assert entry.setup.N1.freq == 5000.0
+    assert entry.setup.N1.rate == 5000.0

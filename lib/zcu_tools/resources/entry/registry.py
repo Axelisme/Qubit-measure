@@ -1,6 +1,7 @@
 """Component model declarations, independent of experiment definitions."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
 from types import UnionType
@@ -8,19 +9,8 @@ from typing import Union, get_args, get_origin
 
 from pydantic import BaseModel
 
-from zcu_tools.resources.document_store import FieldPath, UnitSpec
-
 from .errors import MissingReferenceError, UnknownFieldError, UnknownKindError
-from .schema import (
-    ComponentSchema,
-    CurrentSourceSchema,
-    FluxoniumSchema,
-    JpaSchema,
-    QubitSchema,
-    ResonatorSchema,
-    WiringSchema,
-    field_annotations,
-)
+from .schema import ComponentSchema, ModuleSlot, Ref
 
 
 def _nested_model(annotation: object) -> type[BaseModel] | None:
@@ -36,45 +26,7 @@ def _nested_model(annotation: object) -> type[BaseModel] | None:
     return None
 
 
-def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
-    result: dict[FieldPath, UnitSpec] = {}
-    for name, field in model.model_fields.items():
-        types, field_metadata = field_annotations(field)
-        numeric = any(isinstance(item, type) and item in (float, int) for item in types)
-        for metadata in field_metadata:
-            if isinstance(metadata, UnitSpec):
-                if not numeric or not all(
-                    isinstance(item, type) and item in (float, int, type(None))
-                    for item in types
-                ):
-                    raise TypeError(f"Unit metadata requires a numeric field: {name}")
-                metadata.validate()
-                if (name,) in result and result[(name,)] != metadata:
-                    raise ValueError(f"Conflicting UnitSpec declarations: {name}")
-                result[(name,)] = metadata
-        wiring_field = WiringSchema.model_fields.get(name)
-        channel_index = (
-            issubclass(model, WiringSchema)
-            and wiring_field is not None
-            and not any(
-                isinstance(metadata, UnitSpec) for metadata in wiring_field.metadata
-            )
-            and all(
-                isinstance(item, type) and item in (int, type(None)) for item in types
-            )
-        )
-        if numeric and (name,) not in result and not channel_index:
-            raise ValueError(
-                f"UnitSpec required for numeric field: {model.__name__}.{name}"
-            )
-        nested_model = _nested_model(field.annotation)
-        if nested_model is not None:
-            for path, spec in _model_units(nested_model).items():
-                result[(name, *path)] = spec
-    return result
-
-
-def _validate_supported_hooks(model: type[BaseModel]) -> None:
+def _validate_supported_model(model: type[BaseModel]) -> None:
     for validator in model.__pydantic_decorators__.model_validators.values():
         raise ValueError(
             f"{model.__name__}: {validator.info.mode} model validator is unsupported "
@@ -84,10 +36,18 @@ def _validate_supported_hooks(model: type[BaseModel]) -> None:
         raise ValueError(
             f"{model.__name__}: custom model_post_init is unsupported in component models"
         )
-    for field in model.model_fields.values():
+    for name, field in model.model_fields.items():
+        if any(isinstance(marker, ModuleSlot) for marker in field.metadata) and (
+            get_origin(field.annotation) not in (dict, Mapping)
+            or get_args(field.annotation) != (str, str)
+        ):
+            raise TypeError(
+                f"{model.__name__}.{name}: ModuleSlot requires a non-null "
+                "mapping of string slot names to string paths"
+            )
         nested_model = _nested_model(field.annotation)
         if nested_model is not None:
-            _validate_supported_hooks(nested_model)
+            _validate_supported_model(nested_model)
 
 
 def _validate_component_model(model: object) -> None:
@@ -120,45 +80,129 @@ def _validate_reference(model: type[BaseModel], reference: str) -> None:
     raise ValueError(f"Invalid component reference path: {reference!r}")
 
 
+@dataclass(frozen=True)
+class RoleSpec:
+    """Required component kind pattern and optional resolved-role reference path."""
+
+    kind: str
+    via: str | None = None
+
+
+class RoleRegistry:
+    """Register notebook/adapter role names without loading experiment modules."""
+
+    def __init__(self) -> None:
+        self._roles: dict[str, RoleSpec] = {}
+        self._shorthand: tuple[str, ...] = ()
+        self._focus_kinds: tuple[str, ...] = ()
+
+    def configure(
+        self, *, shorthand: Sequence[str], focus_kinds: Sequence[str]
+    ) -> None:
+        """Declare notebook roles and kind patterns eligible for default focus.
+
+        All shorthand roles must already be registered and unique. Kind patterns
+        must be nonempty. Reject invalid declarations without changing either
+        setting. Empty tuples disable shorthand or automatic focus respectively.
+        """
+        names, patterns = tuple(shorthand), tuple(focus_kinds)
+        for name in names:
+            self.get(name)
+        if len(set(names)) != len(names):
+            raise ValueError("Shorthand roles must be unique")
+        if any(not pattern for pattern in patterns):
+            raise ValueError("A focus kind pattern must not be empty")
+        self._shorthand, self._focus_kinds = names, patterns
+
+    @property
+    def shorthand(self) -> tuple[str, ...]:
+        """Return the declared ordered notebook roles."""
+        return self._shorthand
+
+    @property
+    def focus_kinds(self) -> tuple[str, ...]:
+        """Return the declared patterns eligible for automatic focus."""
+        return self._focus_kinds
+
+    def register(self, name: str, spec: RoleSpec) -> None:
+        """Register a unique public role name; invalid declarations reserve nothing."""
+        if not name.isidentifier() or name.startswith("_") or name == "components":
+            raise ValueError(f"Invalid role name {name!r}")
+        if name in self._roles:
+            raise ValueError(f"Role {name!r} is already registered")
+        if not spec.kind:
+            raise ValueError("A role kind pattern must not be empty")
+        if spec.via is not None:
+            parts = spec.via.split(".")
+            if len(parts) < 2 or any(
+                not part.isidentifier() or part.startswith("_") for part in parts
+            ):
+                raise ValueError(f"Invalid role reference path {spec.via!r}")
+        self._roles[name] = spec
+
+    def unregister(self, name: str) -> None:
+        """Remove a declaration; missing names raise KeyError."""
+        del self._roles[name]
+
+    def get(self, name: str) -> RoleSpec:
+        """Return a registered declaration; unknown names raise ValueError."""
+        try:
+            return self._roles[name]
+        except KeyError as cause:
+            raise ValueError(f"Unknown role {name!r}") from cause
+
+
+def _marked_references(model: type[BaseModel], prefix: str = "") -> tuple[str, ...]:
+    paths: list[str] = []
+    for name, field in model.model_fields.items():
+        path = f"{prefix}.{name}" if prefix else name
+        if any(isinstance(marker, Ref) for marker in field.metadata):
+            paths.append(path)
+        nested_model = _nested_model(field.annotation)
+        if nested_model is not None:
+            paths.extend(_marked_references(nested_model, path))
+    return tuple(paths)
+
+
 class ComponentRegistry:
     def __init__(self) -> None:
         self._models: dict[str, type[ComponentSchema]] = {}
         self._references: dict[str, tuple[str, ...]] = {}
-        self._units: dict[str, dict[FieldPath, UnitSpec]] = {}
+        self.roles = RoleRegistry()
 
     def register(
         self, kind: str, model: type[ComponentSchema], *, references: Sequence[str] = ()
     ) -> None:
         """Register a unique document kind and its component schema.
 
-        ``model`` must extend ComponentSchema with extra=forbid and UnitSpec on
-        physical numeric fields. ``references`` contains component-reference
-        field paths, including nested paths. All model-level validators and custom
-        model_post_init are rejected, including inherited and direct or nullable
-        nested declarations. Cross-field checks are unsupported in this batch;
+        ``model`` must extend ComponentSchema with extra=forbid.
+        ``references`` contains component-reference field paths. Annotated Ref
+        fields are collected automatically, including nested paths. All
+        model-level validators and custom model_post_init are rejected, including
+        inherited and direct or nullable nested declarations. Cross-field checks
+        are unsupported in this batch;
         field validators retain their conversions and canonical constraints.
         Defaults and default_factory retain Pydantic semantics.
 
-        Raise ValueError for duplicates, invalid references, missing units or
-        unsupported model hooks; raise TypeError for invalid model or unit
-        declarations. Failure does not reserve kind or execute a trial model.
+        Raise ValueError for duplicates, invalid references or unsupported model
+        hooks; raise TypeError for invalid model declarations. Failure does not
+        reserve kind or execute a trial model.
         """
         if kind in self._models:
             raise ValueError(f"Kind {kind!r} is already registered")
         _validate_component_model(model)
-        _validate_supported_hooks(model)
-        reference_paths = tuple(references)
+        _validate_supported_model(model)
+        reference_paths = tuple(
+            dict.fromkeys((*references, *_marked_references(model)))
+        )
         for reference in reference_paths:
             _validate_reference(model, reference)
-        units = _model_units(model)
         self._models[kind] = model
         self._references[kind] = reference_paths
-        self._units[kind] = units
 
     def unregister(self, kind: str) -> None:
         del self._models[kind]
         del self._references[kind]
-        del self._units[kind]
 
     def get(
         self, kind: str, *, source: Path | None = None, component: str | None = None
@@ -205,20 +249,5 @@ class ComponentRegistry:
         self.get(kind)
         return self._references[kind]
 
-    def units(
-        self, kind: str, *, source: Path | None = None, component: str | None = None
-    ) -> Mapping[FieldPath, UnitSpec]:
-        self.get(kind, source=source, component=component)
-        return dict(self._units[kind])
-
 
 component_registry = ComponentRegistry()
-component_registry.register("resonator", ResonatorSchema, references=("amplifier",))
-component_registry.register("device/current_source", CurrentSourceSchema)
-component_registry.register("amplifier/jpa", JpaSchema)
-component_registry.register(
-    "qubit/fluxonium", FluxoniumSchema, references=("readout", "flux_source")
-)
-component_registry.register(
-    "qubit/transmon", QubitSchema, references=("readout", "flux_source")
-)
