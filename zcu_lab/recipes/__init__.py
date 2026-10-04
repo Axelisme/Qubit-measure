@@ -2,6 +2,7 @@
 
 from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
+from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
 from .lookback import DEFINITION as LOOKBACK
 from .onetone_spectrum import DEFINITION as ONETONE_SPECTRUM
 from .onetone_spectrum_over_flux import DEFINITION as ONETONE_FLUX
@@ -20,4 +21,5 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     T2RAMSEY,
     T2ECHO,
     T1,
+    AMPLITUDE_RABI,
 )

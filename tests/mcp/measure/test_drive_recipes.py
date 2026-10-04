@@ -1,14 +1,17 @@
 """Drive recipe behavior through shipped tools and the GUI wire boundary."""
 
+import base64
 from contextlib import contextmanager
 from copy import deepcopy
+from threading import Event
 from typing import Any
 
 import pytest
 from simpleeval import simple_eval
+from zcu_tools.mcp.core.reply import ToolReply
 
-from ._recipe_support import LookbackGui, scalar, section
-from ._support import full_execution_reply, make_client
+from ._recipe_support import PNG, LookbackGui, scalar, section
+from ._support import MeasureClient, full_execution_reply, make_client
 
 
 @contextmanager
@@ -18,6 +21,18 @@ def recipe_client(tmp_path, respond):
         yield client
     finally:
         client.context.session.close()
+
+
+def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
+    """Finish the captured Primary question without writing the GUI draft."""
+    assert question.data["status"] == "awaiting_answer", question.data
+    before = list(client.transport.sent)
+    reply = client.call(
+        "answer", {"recipe": question.data["execution"], "decision": "skipped"}
+    )
+    assert reply.data["status"] == "finished", reply.data
+    assert client.transport.sent == before
+    return reply
 
 
 class TimeRabiGui(LookbackGui):
@@ -165,8 +180,11 @@ def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tm
 
 
 class AmplitudeRabiGui(TimeRabiGui):
-    def __init__(self, md=None):
+    def __init__(self, md=None, *, interactive=False):
         super().__init__(md)
+        self.interactive = interactive
+        self.done = Event()
+        self.writes: list[dict[str, object]] = []
         tree = self.publication["tree"]["children"]
         tree["sweep"] = section(
             gain={
@@ -195,12 +213,83 @@ class AmplitudeRabiGui(TimeRabiGui):
             else:
                 ordinary.append(edit)
         super()._edit({**params, "edits": ordinary})
+        modules = self.publication["tree"]["children"]["modules"]["children"]
+        for edit in ordinary:
+            if edit["path"][0] == "modules" and len(edit["path"]) == 2:
+                name = edit["value"]["__ref"]
+                if name is not None and name not in ("drive", "calibrated", "reset"):
+                    modules[edit["path"][1]].update(
+                        valid=False, error="unknown library"
+                    )
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "tab.interact":
+            if params.get("payload", {}).get("command") == "done":
+                self.done.set()
+            return {
+                "operation_id": 93,
+                "plugin": "rabi-picker",
+                "state": {},
+                "info": {},
+                "commands": [{"name": "done"}],
+                "preview_active": True,
+                "figure": {"png_b64": base64.b64encode(PNG).decode()}
+                if params.get("include_figure", True)
+                else None,
+            }
+        if (
+            method == "operation.await"
+            and params["operation_id"] == 93
+            and self.interactive
+            and not self.done.is_set()
+        ):
+            return {"reason": "timeout", "status": "interactive"}
+        if method == "tab.writeback_write":
+            self.writes.append(deepcopy(params))
+            return {
+                "written": [
+                    {
+                        "id": item["id"],
+                        "kind": "md",
+                        "target": "pi_gain",
+                        "before": {"value": 0.14},
+                        "after": {"value": 0.21},
+                    }
+                    for item in params["write"]
+                ]
+            }
+        return self._native_reply(method, params)
+
+    def _native_reply(self, method, params):
         if method == "tab.new":
             assert params == {"adapter_name": "twotone/rabi/amp_rabi"}
             return {"tab_id": "t"}
+        if method == "tab.writeback_preview":
+            assert params["subtab_id"] == "analysis"
+            return {
+                "has_draft": True,
+                "items": [
+                    {
+                        "id": "md-1",
+                        "kind": "metadict",
+                        "target_name": "pi_gain",
+                        "proposed": 0.21,
+                        "current": 0.14,
+                        "selected": False,
+                    }
+                ],
+                "destination_context": {"active_label": "sample"},
+            }
+        if method == "tab.get_post_analyze_result":
+            assert "operation_id" not in params
+            return {"summary": None}
+        if method == "tab.get_analyze_result" and "operation_id" not in params:
+            return {"summary": {}}
         result = super().__call__(method, params)
+        if method == "tab.analyze":
+            result["interactive"] = self.interactive
+        if method == "tab.get_analyze_result":
+            result["summary"] = {"pi_gain": 0.21, "pi_gain_err": 0.01, "pi2_gain": 0.11}
         if method == "tab.snapshot":
             result["tabs"][0]["adapter_name"] = "twotone/rabi/amp_rabi"
         return result
@@ -213,16 +302,19 @@ def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
     with recipe_client(tmp_path, AmplitudeRabiGui({"r_f": 7200.0})) as client:
         data = full_execution_reply(
             client,
-            client.call(
-                "amplitude_rabi",
-                {
-                    "frequency_mhz": number,
-                    "pulse_length_us": number,
-                    "gain_range": [number - 1, number],
-                    "points": 3,
-                    "reps": 2,
-                    "rounds": 1,
-                },
+            skip_writeback(
+                client,
+                client.call(
+                    "amplitude_rabi",
+                    {
+                        "frequency_mhz": number,
+                        "pulse_length_us": number,
+                        "gain_range": [number - 1, number],
+                        "points": 3,
+                        "reps": 2,
+                        "rounds": 1,
+                    },
+                ),
             ),
         ).data
         assert data["status"] == "finished", data
@@ -248,6 +340,14 @@ def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
         assert len(edits) == 1
         assert type(edits[0]["value"]["start"]) is float
         assert type(edits[0]["value"]["stop"]) is float
+        assert fields["sweep.gain"]["source"] == {
+            "start": "gain_range",
+            "stop": "gain_range",
+            "expts": "points",
+        }
+        assert (
+            fields["modules.qub_pulse.waveform.length"]["source"] == "pulse_length_us"
+        )
 
 
 def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
@@ -255,16 +355,19 @@ def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
-            client.call(
-                "amplitude_rabi",
-                {
-                    "frequency_mhz": 6150.0,
-                    "pulse_length_us": 0.23,
-                    "gain_range": [-0.1, 0.5],
-                    "points": 29,
-                    "reps": 13,
-                    "rounds": 9,
-                },
+            skip_writeback(
+                client,
+                client.call(
+                    "amplitude_rabi",
+                    {
+                        "frequency_mhz": 6150.0,
+                        "pulse_length_us": 0.23,
+                        "gain_range": [-0.1, 0.5],
+                        "points": 29,
+                        "reps": 13,
+                        "rounds": 9,
+                    },
+                ),
             ),
         )
         data = reply.data
@@ -317,7 +420,9 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
     if source == "explicit":
         arguments["frequency_mhz"] = 6150.0
     with recipe_client(tmp_path, gui) as client:
-        data = full_execution_reply(client, client.call(recipe, arguments)).data
+        data = full_execution_reply(
+            client, skip_writeback(client, client.call(recipe, arguments))
+        ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
         frequency = fields["modules.qub_pulse.freq"]
@@ -329,6 +434,11 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
             "library": "library:drive",
         }.get(source, "q_f")
         assert fields[f"sweep.{sweep}"]["value"] == expected
+        assert fields[f"sweep.{sweep}"]["source"] == {
+            "start": "gui_default",
+            "stop": "gui_default",
+            "expts": "gui_default",
+        }
         assert fields["reps"]["value"] == 19
         assert fields["rounds"]["value"] == 3
         scalar_path = (
@@ -337,6 +447,7 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
             else "modules.qub_pulse.waveform.length"
         )
         assert fields[scalar_path]["value"] == (0.14 if recipe == "time_rabi" else 1.0)
+        assert fields[scalar_path]["source"] == "gui_default"
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.reset_cfg") == 1
         assert "tab.new" not in methods
@@ -361,6 +472,7 @@ def test_rabi_inline_frequency_does_not_substitute_for_missing_sources(
             "frequency_mhz",
             "readout_ref",
         }
+        assert data["tab"] == "t"
         assert not gui.ran
 
 
@@ -418,13 +530,16 @@ def test_rabi_valid_library_sources_work_without_metadata_and_enable_explicit_re
     with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
             client,
-            client.call(
-                recipe,
-                {
-                    "drive_ref": "drive",
-                    "readout_ref": "calibrated",
-                    "use_reset": "reset",
-                },
+            skip_writeback(
+                client,
+                client.call(
+                    recipe,
+                    {
+                        "drive_ref": "drive",
+                        "readout_ref": "calibrated",
+                        "use_reset": "reset",
+                    },
+                ),
             ),
         ).data
         assert data["status"] == "finished", data
@@ -459,6 +574,124 @@ def test_rabi_stale_edit_stops_without_retry_or_run(tmp_path, recipe, gui_type):
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.edit_cfg") == 1
         assert "tab.new" not in methods
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.parametrize("decision", ["accepted", "skipped"])
+def test_amplitude_rabi_primary_handoff_waits_for_question_before_actual_write(
+    tmp_path, interactive, decision
+):
+    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0}, interactive=interactive)
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("amplitude_rabi", {})
+        execution = reply.data["execution"]
+        if interactive:
+            assert reply.data["status"] == "interactive", reply.data
+            assert gui.raw_saved
+            assert not gui.writes
+            before = list(client.transport.sent)
+            status = client.call("status", {"execution": execution})
+            assert status["question_items"] is None
+            assert client.transport.sent == before
+            reply = client.call(
+                "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+            )
+            assert reply.data["execution"] == execution
+        assert reply.data["status"] == "awaiting_answer", reply.data
+        assert tuple(reply.data["question_items"]) == ("pi_gain",)
+        assert reply.data["previews"]["primary"]
+        assert not gui.writes
+        before = list(client.transport.sent)
+        status = client.call("status", {"execution": execution})
+        assert status["question_preview"]["primary"]["items"][0]["selected"] is False
+        assert client.transport.sent == before
+        reply = client.call("answer", {"recipe": execution, "decision": decision})
+        assert reply.data["status"] == "finished", reply.data
+        receipts = reply.data["writeback"]["receipts"]
+        if decision == "accepted":
+            assert gui.writes == [
+                {"tab_id": "t", "subtab_id": "analysis", "write": [{"id": "md-1"}]}
+            ]
+            assert receipts[0]["completed"][0]["written"][0]["target"] == "pi_gain"
+        else:
+            assert client.transport.sent == before
+            assert not gui.writes
+            assert not receipts
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == 1
+        assert methods.count("tab.analyze") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.analyze")
+
+
+def test_amplitude_rabi_cancelled_run_stops_before_raw_save(tmp_path):
+    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        client.transport.replies["operation.await"] = {
+            "ok": True,
+            "result": {"reason": "completed", "status": "cancelled"},
+        }
+        reply = full_execution_reply(client, client.call("amplitude_rabi", {}))
+        assert reply.data["status"] == "cancelled", reply.data
+        assert reply.data["run_outcome"]["status"] == "cancelled"
+        assert reply.data["tab"] == "t"
+        assert not gui.raw_saved
+        assert not gui.writes
+        methods = [method for method, _ in client.transport.sent]
+        assert "tab.save_data" not in methods
+        assert "tab.analyze" not in methods
+
+
+def test_amplitude_rabi_cancelled_question_retains_preview_without_writing(tmp_path):
+    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        question = client.call("amplitude_rabi", {})
+        assert question.data["status"] == "awaiting_answer", question.data
+        execution = question.data["execution"]
+        before = list(client.transport.sent)
+        client.call("cancel", {"execution": execution})
+        reply = client.call("wait", {"execution": execution, "timeout": 5})
+        assert reply.data["status"] == "cancelled", reply.data
+        assert reply.data["previews"]["primary"]
+        assert not reply.data["writeback"]["receipts"]
+        assert client.transport.sent == before
+        assert not gui.writes
+
+
+@pytest.mark.parametrize("parameter", ["readout_ref", "drive_ref", "use_reset"])
+def test_amplitude_rabi_invalid_reference_stops_without_fallback(tmp_path, parameter):
+    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("amplitude_rabi", {parameter: "absent"})
+        assert reply.data["status"] == "failed", reply.data
+        assert not gui.ran
+        assert not gui.raw_saved
+        assert "tab.run_start" not in [method for method, _ in client.transport.sent]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"reuse_tab_id": " "},
+        {"readout_ref": " "},
+        {"drive_ref": " "},
+        {"use_reset": " "},
+        {"points": 1},
+        {"reps": 1.0},
+        {"rounds": 1.0},
+    ],
+)
+def test_amplitude_rabi_invalid_arguments_fail_before_gui_binding(tmp_path, arguments):
+    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("amplitude_rabi", arguments)
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["phase"] == "preparing"
+        assert "context.snapshot" not in [method for method, _ in client.transport.sent]
+        before = list(client.transport.sent)
+        status = client.call("status", {"execution": reply.data["execution"]})
+        assert status["status"] == "failed"
+        assert client.transport.sent == before
 
 
 class DriveGui(LookbackGui):
