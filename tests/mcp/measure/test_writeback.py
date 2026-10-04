@@ -38,6 +38,40 @@ def accept_client(tmp_path):
     return client
 
 
+@pytest.mark.parametrize("r2", [-0.25, 0.0])
+def test_accept_writes_whole_drafts_despite_low_fit_quality(accept_client, r2):
+    for method in ("tab.get_analyze_result", "tab.get_post_analyze_result"):
+        accept_client.transport.replies[method] = {
+            "ok": True,
+            "result": {
+                "summary": {
+                    "fidelity": 0.98,
+                    "fit_quality": {
+                        "fit": {
+                            "r2": r2,
+                            "normalized_residual_rms": 0.31,
+                            "relative_parameter_errors": {"decay_time": None},
+                            "invalid": [
+                                {
+                                    "path": "summary.fit_quality.fit.relative_parameter_errors.decay_time",
+                                    "reason": "covariance_unavailable",
+                                }
+                            ],
+                        }
+                    },
+                },
+                "invalid": [],
+            },
+        }
+    result = accept_client.call("accept", {"tab": "t"})
+    assert result["status"] == "finished"
+    assert result["skipped"] == result["not_started"] == []
+    assert [
+        (stage["stage"], [item["id"] for item in stage["written"]])
+        for stage in result["completed"]
+    ] == [("primary", ["md-1", "wf-1"]), ("post", ["md-1", "wf-1"])]
+
+
 def test_accept_writes_all_ids_in_each_pane_without_hidden_reads(accept_client):
     result = accept_client.call("accept", {"tab": "t"})
     assert result == {

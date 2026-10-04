@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import ClassVar
@@ -7,7 +8,12 @@ from typing import ClassVar
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    fit_decay,
+    fit_decay_fringe,
+)
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     US_TO_S,
@@ -78,6 +84,7 @@ class T2RamseyAnalysis:
     t2r_err: float
     detune: float
     detune_err: float
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
@@ -190,13 +197,25 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
                 else:
                     init_phase = 180.0
                 fixedparams = [None, None, None, init_phase, None]
-            t2r, t2rerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
+            t2r, t2rerr, detune, detune_err, y_fit, (pOpt, pCov) = fit_decay_fringe(
                 lengths, real_signals, fixedparams=fixedparams
             )
         else:
-            t2r, t2rerr, y_fit, _ = fit_decay(lengths, real_signals)
+            t2r, t2rerr, y_fit, (pOpt, pCov) = fit_decay(lengths, real_signals)
             detune = 0.0
             detune_err = 0.0
+
+        names = (
+            ("y0", "yscale", "freq", "phase", "decay_time")
+            if fit_fringe
+            else ("y0", "yscale", "decay_time")
+        )
+        quality = compute_fit_quality(
+            real_signals,
+            y_fit,
+            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
+            pCov,
+        )
 
         fig, ax = plots.subplots("fit", figsize=config.figsize)
 
@@ -220,4 +239,5 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
             t2r_err=float(t2rerr),
             detune=float(detune),
             detune_err=float(detune_err),
+            fit_quality={"fit": quality},
         )

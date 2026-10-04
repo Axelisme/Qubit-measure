@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — program/v2 實驗
 
-**Last updated:** 2026-10-02, Options namespace
+**Last updated:** 2026-10-04, fit quality in numeric analysis
 
 本目錄提供使用 [program/v2](../../program/v2/README.md) 的實驗實作。共同實驗介面、Result 保存映射與 cfg 組裝見[父層 README](../README.md)；本頁聚焦實驗家族、具體 workflow 與實驗撰寫慣例。
 
@@ -9,6 +9,8 @@
 ---
 
 ## T1、singleshot GE 與 OneTone 的核心入口
+
+T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 的數值 Analysis 保存本次 fit_quality，普通擬合名為 fit。品質只使用 skip／mask 後的資料、已提交模型與 optimizer covariance，不重新擬合。GE 保存 joint、ground、excited 三階段，各自使用自己的資料、模型與 covariance；post 沿用 primary calibration。品質不改曲線、校正有效性或 writeback policy。
 
 `twotone.time_domain.T1Exp` 使用無跨次狀態的 `run(config, *, context)` 和 `analyze(source, options, *, plots)`。T1Result 只含 times／signals；RunRecord 將 typed cfg 與資料配成來源，`T1Cfg.uniform` 隨 record cfg 保存。T1AnalyzeOptions 提供 skip 與 dual_exp 的 defaults，T1Analysis 只含數值。T1 分析接受 cfg=None 的來源，預設 canonical saver 則拒絕缺 cfg。Run 建立具名 measurement liveplot，分析建立 fit 圖；caller 負責操作結束後 finish 及釋放呈現，不以新操作關閉舊圖。
 

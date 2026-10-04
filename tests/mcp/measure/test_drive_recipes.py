@@ -8,7 +8,7 @@ import pytest
 from simpleeval import simple_eval
 
 from ._recipe_support import LookbackGui, scalar, section
-from ._support import make_client
+from ._support import full_execution_reply, make_client
 
 
 @contextmanager
@@ -81,19 +81,64 @@ class TimeRabiGui(LookbackGui):
         return result
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, TimeRabiGui({"r_f": 7200.0})) as client:
+        data = full_execution_reply(
+            client,
+            client.call(
+                "time_rabi",
+                {
+                    "frequency_mhz": number,
+                    "gain": number,
+                    "max_length_us": number,
+                    "points": 3,
+                },
+            ),
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.gain"):
+            assert fields[path]["value"] == 1.0
+            assert type(fields[path]["value"]) is float
+        sweep = fields["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        by_path = {
+            tuple(edit["path"]): edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+        }
+        for path in (
+            ("modules", "qub_pulse", "freq"),
+            ("modules", "qub_pulse", "gain"),
+        ):
+            assert by_path[path] == 1.0
+            assert type(by_path[path]) is float
+        assert type(by_path["sweep", "length"]["stop"]) is float
+
+
 def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tmp_path):
     gui = TimeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "time_rabi",
-            {
-                "frequency_mhz": 6150.0,
-                "gain": 0.21,
-                "max_length_us": 1.5,
-                "points": 71,
-                "reps": 13,
-                "rounds": 9,
-            },
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "time_rabi",
+                {
+                    "frequency_mhz": 6150.0,
+                    "gain": 0.21,
+                    "max_length_us": 1.5,
+                    "points": 71,
+                    "reps": 13,
+                    "rounds": 9,
+                },
+            ),
         )
         data = reply.data
         assert data["status"] == "finished", data
@@ -161,19 +206,66 @@ class AmplitudeRabiGui(TimeRabiGui):
         return result
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, AmplitudeRabiGui({"r_f": 7200.0})) as client:
+        data = full_execution_reply(
+            client,
+            client.call(
+                "amplitude_rabi",
+                {
+                    "frequency_mhz": number,
+                    "pulse_length_us": number,
+                    "gain_range": [number - 1, number],
+                    "points": 3,
+                    "reps": 2,
+                    "rounds": 1,
+                },
+            ),
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.waveform.length"):
+            assert fields[path]["value"] == 1.0
+            assert type(fields[path]["value"]) is float
+        sweep = fields["sweep.gain"]["value"]
+        assert sweep == {"start": 0.0, "stop": 1.0, "expts": 3}
+        assert type(sweep["start"]) is float
+        assert type(sweep["stop"]) is float
+        assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            assert fields[name]["value"] == count
+            assert type(fields[name]["value"]) is int
+        edits = [
+            edit
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "gain"]
+        ]
+        assert len(edits) == 1
+        assert type(edits[0]["value"]["start"]) is float
+        assert type(edits[0]["value"]["stop"]) is float
+
+
 def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
     gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "amplitude_rabi",
-            {
-                "frequency_mhz": 6150.0,
-                "pulse_length_us": 0.23,
-                "gain_range": [-0.1, 0.5],
-                "points": 29,
-                "reps": 13,
-                "rounds": 9,
-            },
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "amplitude_rabi",
+                {
+                    "frequency_mhz": 6150.0,
+                    "pulse_length_us": 0.23,
+                    "gain_range": [-0.1, 0.5],
+                    "points": 29,
+                    "reps": 13,
+                    "rounds": 9,
+                },
+            ),
         )
         data = reply.data
         assert data["status"] == "finished", data
@@ -225,7 +317,7 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
     if source == "explicit":
         arguments["frequency_mhz"] = 6150.0
     with recipe_client(tmp_path, gui) as client:
-        data = client.call(recipe, arguments).data
+        data = full_execution_reply(client, client.call(recipe, arguments)).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
         frequency = fields["modules.qub_pulse.freq"]
@@ -279,6 +371,9 @@ def test_rabi_inline_frequency_does_not_substitute_for_missing_sources(
         ("time_rabi", TimeRabiGui, {"gain": float("nan")}),
         ("time_rabi", TimeRabiGui, {"max_length_us": float("inf")}),
         ("time_rabi", TimeRabiGui, {"points": 2.5}),
+        ("time_rabi", TimeRabiGui, {"points": 1.0}),
+        ("time_rabi", TimeRabiGui, {"reps": 1.0}),
+        ("time_rabi", TimeRabiGui, {"rounds": 1.0}),
         ("amplitude_rabi", AmplitudeRabiGui, {"pulse_length_us": True}),
         ("amplitude_rabi", AmplitudeRabiGui, {"frequency_mhz": float("nan")}),
         ("amplitude_rabi", AmplitudeRabiGui, {"gain_range": [0.1]}),
@@ -300,6 +395,7 @@ def test_rabi_invalid_explicit_values_fail_before_preparing(
     with recipe_client(tmp_path, gui) as client:
         data = client.call(recipe, arguments).data
         assert data["status"] == "failed", data
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
@@ -320,9 +416,16 @@ def test_rabi_valid_library_sources_work_without_metadata_and_enable_explicit_re
     drive = gui.publication["tree"]["children"]["modules"]["children"]["qub_pulse"]
     drive["children"]["freq"] = scalar(6280.0)
     with recipe_client(tmp_path, gui) as client:
-        data = client.call(
-            recipe,
-            {"drive_ref": "drive", "readout_ref": "calibrated", "use_reset": "reset"},
+        data = full_execution_reply(
+            client,
+            client.call(
+                recipe,
+                {
+                    "drive_ref": "drive",
+                    "readout_ref": "calibrated",
+                    "use_reset": "reset",
+                },
+            ),
         ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -462,16 +565,19 @@ def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readou
     gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call(
-            "twotone_spectrum",
-            {
-                "readout_ref": readout_ref,
-                "gain": 0.18,
-                "pulse_length_us": 3.0,
-                "points": 31,
-                "reps": 23,
-                "rounds": 7,
-            },
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "twotone_spectrum",
+                {
+                    "readout_ref": readout_ref,
+                    "gain": 0.18,
+                    "pulse_length_us": 3.0,
+                    "points": 31,
+                    "reps": 23,
+                    "rounds": 7,
+                },
+            ),
         )
         data = reply.data
         assert data["status"] == "finished", data
@@ -530,7 +636,7 @@ def test_twotone_rejects_invalid_explicit_values_before_preparation(
     gui = DriveGui()
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call("twotone_spectrum", arguments)
+        reply = full_execution_reply(client, client.call("twotone_spectrum", arguments))
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["phase"] == "preparing"
         assert not any(
@@ -545,7 +651,7 @@ def test_twotone_requires_calibrated_readout_instead_of_inline_template(tmp_path
     gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0})
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call("twotone_spectrum", {})
+        reply = full_execution_reply(client, client.call("twotone_spectrum", {}))
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {"readout_ref"}
         assert not gui.ran
@@ -560,7 +666,9 @@ def test_twotone_reports_all_missing_frequency_sources_without_running(
     gui = DriveGui()
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call("twotone_spectrum", {"reuse_tab_id": reuse_tab_id})
+        reply = full_execution_reply(
+            client, client.call("twotone_spectrum", {"reuse_tab_id": reuse_tab_id})
+        )
         methods = [method for method, _ in client.transport.sent]
         assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
         assert ("tab.new" in methods) is (reuse_tab_id is None)
@@ -581,8 +689,11 @@ def test_twotone_explicit_center_removes_missing_calibration_dependency(
 ):
     gui = DriveGui({"qf_w": 4.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "twotone_spectrum", {"center_mhz": 6300.0, "span_mhz": span_mhz}
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "twotone_spectrum", {"center_mhz": 6300.0, "span_mhz": span_mhz}
+            ),
         )
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
@@ -596,7 +707,7 @@ def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
     readout["ref"] = "calibrated"
     readout["children"]["ro_cfg"]["children"]["ro_freq"] = scalar(None)
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("twotone_spectrum", {})
+        reply = full_execution_reply(client, client.call("twotone_spectrum", {}))
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
         assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
@@ -621,7 +732,9 @@ def test_twotone_invalid_reference_stops_without_fallback(tmp_path, parameter):
         return result
 
     with recipe_client(tmp_path, respond) as client:
-        reply = client.call("twotone_spectrum", {parameter: "unknown"})
+        reply = full_execution_reply(
+            client, client.call("twotone_spectrum", {parameter: "unknown"})
+        )
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["reason"] == "invalid_cfg"
         assert not gui.ran
@@ -631,9 +744,12 @@ def test_twotone_invalid_reference_stops_without_fallback(tmp_path, parameter):
 def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
     gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "twotone_spectrum",
-            {"reuse_tab_id": "t", "drive_ref": "drive", "use_reset": "reset"},
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "twotone_spectrum",
+                {"reuse_tab_id": "t", "drive_ref": "drive", "use_reset": "reset"},
+            ),
         )
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
@@ -667,7 +783,9 @@ def test_twotone_reuse_failure_stops_without_retry_or_replacement(tmp_path, fail
             else:
                 snapshot["tabs"][0]["adapter_name"] = "other"
             client.transport.replies["tab.snapshot"] = {"ok": True, "result": snapshot}
-        reply = client.call("twotone_spectrum", {"reuse_tab_id": "t"})
+        reply = full_execution_reply(
+            client, client.call("twotone_spectrum", {"reuse_tab_id": "t"})
+        )
         assert reply.is_error
         assert reply.data["tab"] == "t"
         methods = [method for method, _ in client.transport.sent]

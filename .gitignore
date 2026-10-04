@@ -22,7 +22,6 @@ token.json
 !.claude/agents/**
 !.claude/settings.json
 
-agent_memory/
 /measure_knowledge
 Database/
 result/

@@ -5,7 +5,7 @@ Every MCP server in this repo speaks the same stdio protocol to its host
 surface, independent of any GUI connection:
 
   - :class:`McpServerConfig` carries the tool prefix, display name, and
-    instructions. In-process servers (agent-memory) need only this; GUI bridges
+    instructions. In-process servers need only this; GUI bridges
     extend it with launch knobs in :mod:`zcu_tools.mcp.core.bridge`.
   - ``coerce_arg`` / ``make_forwarder`` / ``generate_tools`` build one MCP tool per
     wire method spec; ``assemble_tools`` merges hand-written overrides.
@@ -43,8 +43,8 @@ class McpServerConfig:
     """The minimal config the stdio loop + tool generation need.
 
     ``tool_prefix`` is the wire-method -> tool-name prefix (e.g. ``fluxdep_``). A
-    no-subprocess server (e.g. agent-memory, dispatching in-process) needs only
-    this; the GUI bridges add the launch fields via :class:`MCPBridgeConfig`.
+    no-subprocess server needs only this; the GUI bridges add the launch fields
+    via :class:`MCPBridgeConfig`.
     """
 
     tool_prefix: str

@@ -17,7 +17,7 @@ def _finite(value: object) -> TypeGuard[int | float]:
 
 
 def _validate(arguments: dict[str, Any]) -> None:
-    for name in ("reuse_tab_id", "readout_ref", "flux_device"):
+    for name in ("reuse_tab_id", "readout_ref", "flux_device", "flux_unit"):
         value = arguments.get(name)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{name} must be a non-empty string or null")
@@ -115,7 +115,31 @@ def _flux_device(
     else:
         snapshot = ctx.rpc("device.snapshot", {"name": device})["snapshot"]
         unit = snapshot["unit"]
-        if not isinstance(unit, str) or not unit.strip() or unit == "none":
+        info = snapshot.get("info")
+        if (
+            unit == "none"
+            and snapshot.get("type_name") == "FakeDevice"
+            and isinstance(info, dict)
+            and info.get("type") == "FakeDevice"
+            and arguments.get("flux_unit") == "native"
+        ):
+            return device, "native"
+        if snapshot.get("type_name") == "FakeDevice" or (
+            isinstance(info, dict) and info.get("type") == "FakeDevice"
+        ):
+            raise GuiRpcError(
+                "Fake flux requires confirmed native coordinates",
+                reason="invalid_device",
+            )
+        requested_unit = arguments.get("flux_unit")
+        if requested_unit is not None and (
+            requested_unit != unit or requested_unit == "native"
+        ):
+            raise GuiRpcError(
+                "Flux unit does not match the device coordinate",
+                reason="invalid_device",
+            )
+        if not isinstance(unit, str) or not unit.strip() or unit in ("none", "native"):
             if arguments.get("flux_device") is not None:
                 raise GuiRpcError(
                     "Flux device has no physical unit", reason="invalid_device"
@@ -127,7 +151,7 @@ def _flux_device(
 
 
 def onetone_spectrum_over_flux(ctx: RecipeContext, arguments: dict[str, Any]) -> None:
-    """Run one frequency/physical-flux survey with Primary analysis."""
+    """Run one frequency/physical-or-native-flux survey with Primary analysis."""
     _validate(arguments)
     sources = ctx.rpc("context.snapshot", {})
     publication = ctx.prepare_tab("onetone/flux_dep", arguments.get("reuse_tab_id"))

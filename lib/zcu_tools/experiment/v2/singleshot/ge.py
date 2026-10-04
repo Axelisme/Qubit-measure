@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import ClassVar, Literal, cast
@@ -9,6 +10,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -208,6 +210,7 @@ class GEAnalysis:
     g_center: complex
     e_center: complex
     init_pops: NDArray[np.float64]
+    fit_quality: Mapping[str, FitQuality] | None = None
 
     def validate_calibration(self) -> None:
         populations = np.asarray(self.init_pops, dtype=np.float64)
@@ -372,6 +375,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
             g_center=fit["g_center"],
             e_center=fit["e_center"],
             init_pops=init_pops,
+            fit_quality=fit["fit_quality"],
         )
         analysis.validate_calibration()
         return analysis

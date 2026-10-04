@@ -19,6 +19,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgDefinition,
     scaled_md,
 )
+from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
+    fit_quality_summary,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -71,6 +74,7 @@ class GEAnalyzeResult(GEAnalysis, AnalyzeResultBase):
             "threshold": self.threshold,
             "ge_s": self.ge_s,
             "init_pops": self.init_pops.tolist(),
+            "fit_quality": fit_quality_summary(self.fit_quality),
         }
 
 
@@ -184,6 +188,7 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             g_center=analysis.g_center,
             e_center=analysis.e_center,
             init_pops=analysis.init_pops,
+            fit_quality=analysis.fit_quality,
         )
 
     def get_post_analyze_params(

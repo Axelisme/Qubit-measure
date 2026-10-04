@@ -20,6 +20,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     SweepDefault,
     scaled_md,
 )
+from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
+    fit_quality_summary,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain._detune_shared import (
     detune_ratio_of,
@@ -61,6 +64,7 @@ class T2RamseyAnalyzeResult(AnalyzeResultBase):
     # fringe fit ran (``fit_fringe`` True). Decay-only fits report 0.0.
     detune: float
     fit_fringe: bool
+    fit_quality: dict[str, dict[str, object]] | None = None
 
 
 class T2RamseyAdapter(
@@ -184,6 +188,7 @@ class T2RamseyAdapter(
         return T2RamseyAnalyzeResult(
             t2r=analysis.t2r,
             t2r_err=analysis.t2r_err,
+            fit_quality=fit_quality_summary(analysis.fit_quality),
             detune=analysis.detune,
             fit_fringe=params.fit_fringe,
         )

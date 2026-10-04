@@ -8,17 +8,36 @@ redeclaring ``figure: Figure`` each.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from matplotlib.figure import Figure
 
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 
 _FigureOnlyT = TypeVar("_FigureOnlyT", bound="FigureOnlyAnalyzeResult")
+
+
+def fit_quality_summary(
+    qualities: Mapping[str, FitQuality] | None,
+) -> dict[str, dict[str, object]] | None:
+    """Project committed numeric quality, qualifying native summary issue paths."""
+    if qualities is None:
+        return None
+    result = {}
+    for name, quality in qualities.items():
+        summary = quality.to_summary_dict()
+        summary["invalid"] = [
+            {"path": f"summary.fit_quality.{name}.{issue.path}", "reason": issue.reason}
+            for issue in quality.invalid
+        ]
+        result[name] = summary
+    return result
 
 
 @dataclass

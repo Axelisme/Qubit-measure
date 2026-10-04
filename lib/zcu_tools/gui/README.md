@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-02, explicit rendering initialization
+**Last updated:** 2026-10-04, shared string enum contracts
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -27,6 +27,13 @@ Shared endpoint 無法編碼 RPC 回覆時送有界的 `internal` error，reason
 `response_encoding_failed`。Handler 可能已執行，caller 不可因回覆失敗而盲目重送 mutation。
 若 correlated fallback 仍無法編碼，或 reply queue 拒收，就中止該連線，交 IO owner
 釋放其 app context。Push 的 drop policy 不變；shared transport 不解讀 method、guard 或 operation。
+
+## Remote parameter declarations
+
+`gui.remote.ParamSpec` owns optional string enum declarations, schema projection
+and request membership validation. Callers without an enum keep their existing
+required/null/default behavior. Domain plugins supply their own authoritative
+choices; MCP does not maintain another allowlist.
 
 ## Expected Errors (`expected_error.py`)
 

@@ -12,8 +12,8 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
-from ._recipe_support import PNG, LookbackGui
-from ._support import make_client
+from ._recipe_support import PNG, LookbackGui, recipe_client
+from ._support import full_execution_reply, make_client
 
 
 def test_lookback_initial_wait_returns_while_the_same_execution_continues(
@@ -36,7 +36,11 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
 
     def call_recipe():
-        replies.append(client.call("lookback", {"frequency_mhz": 6020.0}))
+        replies.append(
+            full_execution_reply(
+                client, client.call("lookback", {"frequency_mhz": 6020.0})
+            )
+        )
         returned.set()
 
     caller = Thread(target=call_recipe)
@@ -49,14 +53,18 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         execution = initial["execution"]
         initial["actual"]["fields"].clear()
         before = len(client.transport.sent)
-        status = client.call("status", {"execution": execution})
-        waiting = client.call("wait", {"execution": execution, "timeout": 0})
+        status = client.call("status", {"execution": execution, "detail": "full"})
+        waiting = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 0})
+        )
         assert status["actual"]["fields"]
         assert waiting.data["execution"] == execution
         assert waiting.data["status"] == "running"
         assert len(client.transport.sent) == before
         release_run.set()
-        completed = client.call("wait", {"execution": execution, "timeout": 2})
+        completed = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert completed.data["status"] == "finished", completed.data
         assert completed.data["run_op"] == initial["run_op"]
         assert completed.data["raw_save"]["path"] == "/actual/raw.h5"
@@ -100,7 +108,9 @@ def interactive_recipe(tmp_path, handoff_failure):
                     "png_b64": "invalid"
                     if failure == "png"
                     else base64.b64encode(PNG).decode()
-                },
+                }
+                if params.get("include_figure", True)
+                else None,
                 "state": {"offset": 0.24},
                 "commands": [{"name": "done"}],
                 "prompt": "Confirm offset",
@@ -138,10 +148,18 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     interactive_recipe, handoff_failure
 ):
     client, writeback_read = interactive_recipe
-    handoff = client.call("lookback", {"frequency_mhz": 6020.0})
+    initial = client.call("lookback", {"frequency_mhz": 6020.0})
+    handoff = full_execution_reply(client, initial)
     assert handoff.data["status"] == "interactive"
     assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
     assert handoff.data["analysis"]["op"] == handoff.data["op"]
+    assert initial.data["status"] == "interactive"
+    assert initial.data["steps"]["run"]["status"] == "finished"
+    assert initial.data["steps"]["raw_save"]["status"] == "saved"
+    assert initial.data["steps"]["analysis"]["primary"]["status"] == "interactive"
+    assert initial.data["artifacts"]["raw"]["data"]["members"]["data"] == [
+        {"path": "/actual/raw.h5", "status": "saved"}
+    ]
     interaction = handoff.data["analysis"]["interaction"]
     assert interaction is not None
     if handoff_failure:
@@ -156,6 +174,11 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     if handoff_failure not in ("query", "replaced"):
         assert interaction["state"] == {"offset": 0.24}
         assert interaction["commands"] == [{"name": "done"}]
+    assert initial.data["previews"] == {
+        "run": [],
+        "primary": [] if handoff_failure else [interaction["figure"]],
+        "post": [],
+    }
     analysis_execution = handoff.data["analysis"]["execution"]
     execution = handoff.data["execution"]
     read = client.call("tab_interact", {"tab": "t"})
@@ -166,7 +189,9 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     )
     assert finished_analysis.data["status"] == "finished"
     assert writeback_read.wait(2), "Recipe must resume after interactive analysis"
-    finished = client.call("wait", {"execution": execution, "timeout": 2})
+    finished = full_execution_reply(
+        client, client.call("wait", {"execution": execution, "timeout": 2})
+    )
     assert finished.data["status"] == "finished", finished.data
     assert finished.data["analysis"]["execution"] == analysis_execution
     assert read.data["execution"] == analysis_execution
@@ -204,7 +229,9 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
         assert pending.wait(1)
         client.context.session.close()
         before = len(client.transport.sent)
-        result = client.call("status", {"execution": initial.data["execution"]})
+        result = client.call(
+            "status", {"execution": initial.data["execution"], "detail": "full"}
+        )
         assert result["status"] == "failed", result
         assert result["phase"] == "terminal"
         assert result["error"]["reason"] in ("session_closed", "connection_lost")
@@ -241,13 +268,17 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         execution = initial.data["execution"]
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["execution"] == execution
         client.call("cancel", {"op": initial.data["run_op"]})
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert terminal.data["status"] == "cancelled"
         assert terminal.data["run_outcome"]["status"] == "cancelled"
         before = client.call("status", {"execution": execution})
@@ -291,18 +322,45 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         execution = initial.data["execution"]
         early = client.call("finish_early", {"op": initial.data["run_op"]})
-        assert early.data["finish_early_requested"]
-        assert not early.data["cancel_requested"]
+        assert early.data == {
+            "execution": execution,
+            "op": initial.data["op"],
+            "run_op": initial.data["run_op"],
+            "status": "running",
+            "phase": "run",
+            "cancel_requested": False,
+            "finish_early_requested": True,
+            "gui_cancel": {"status": "requested", "error": None},
+        }
         client.call("finish_early", {"execution": execution})
         if cancel_after:
             client.call("cancel", {"execution": execution})
         release_run.set()
-        result = client.call("wait", {"execution": execution, "timeout": 2})
+        result = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert result.data["status"] == expected, result.data
         assert result.data["run_outcome"]["status"] == "cancelled"
+        frozen = client.call("status", {"execution": execution, "detail": "full"})
+        later = client.call("finish_early", {"execution": execution})
+        assert later.data == {
+            "execution": execution,
+            "op": result.data["op"],
+            "run_op": initial.data["run_op"],
+            "status": "not_applicable",
+            "phase": "terminal",
+            "cancel_requested": cancel_after,
+            "finish_early_requested": True,
+            "gui_cancel": None,
+        }
+        assert (
+            client.call("status", {"execution": execution, "detail": "full"}) == frozen
+        )
         if expected == "finished":
             assert result.data["raw_save"]["path"] == "/actual/raw.h5"
             assert result.data["analysis"]["status"] == "finished"
@@ -339,7 +397,9 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         assert saving.wait(1)
         execution = initial.data["execution"]
         early = client.call("finish_early", {"execution": execution})
@@ -347,10 +407,20 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["gui_cancel"]["status"] == "not_cancellable"
         assert cancelled.data["cancel_requested"]
-        assert cancelled.data["raw_save"]["status"] == "saving"
-        assert cancelled.data["raw_save"]["path"] is None
+        during_save = client.call("status", {"execution": execution, "detail": "full"})
+        assert during_save["raw_save"]["status"] == "saving"
+        assert during_save["raw_save"]["path"] is None
+        saving_summary = client.call("status", {"execution": execution})
+        assert saving_summary["steps"]["raw_save"]["status"] == "saving"
+        assert saving_summary["artifacts"]["raw"]["data"] == {
+            "status": "saving",
+            "lifetime": "persistent",
+            "members": {"data": [{"path": "/actual/raw.h5", "status": "reserved"}]},
+        }
         release_save.set()
-        final = client.call("wait", {"execution": execution, "timeout": 2})
+        final = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert not final.is_error  # Successful query, even when execution failed.
         assert final.data["status"] == ("cancelled" if save_succeeds else "failed")
         assert final.data["raw_save"]["status"] == (
@@ -361,6 +431,19 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         )
         if not save_succeeds:
             assert final.data["error"]["reason"] == "raw_save_failed"
+        summary = client.call("status", {"execution": execution})
+        assert summary["status"] == final.data["status"]
+        assert summary["cancel_requested"] is True
+        assert summary["steps"]["raw_save"]["status"] == (
+            "saved" if save_succeeds else "failed"
+        )
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+            {
+                "path": "/actual/raw.h5",
+                "status": "saved" if save_succeeds else "reserved",
+            }
+        ]
+        assert summary["error"] == final.data["error"]
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.save_data") == 1
         assert "operation.cancel" not in methods
@@ -407,7 +490,9 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     monkeypatch.setattr(MeasureMcpSession.GuiConnection, "send_gui_rpc", delay_handoff)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         assert handoff_waiting.wait(1)
         execution = initial.data["execution"]
         (analysis_receipt,) = client.context.session.executions.snapshots()
@@ -418,7 +503,9 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
         allow_terminal.set()
         terminal = initial
         for _ in range(100):
-            terminal = client.call("wait", {"execution": execution, "timeout": 0.01})
+            terminal = full_execution_reply(
+                client, client.call("wait", {"execution": execution, "timeout": 0.01})
+            )
             if terminal.data["phase"] == "terminal":
                 break
             sleep(0.01)
@@ -474,7 +561,9 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         assert analyzing.wait(1)
         execution = initial.data["execution"]
         state = client.call("status", {"execution": execution})
@@ -487,7 +576,9 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["gui_cancel"]["status"] == "requested"
         client.call("cancel", {"execution": execution})
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert terminal.data["status"] == "cancelled"
         assert terminal.data["analysis"]["status"] == "cancelled"
         assert terminal.data["analysis"]["cancel_requested"]
@@ -534,7 +625,9 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     controller = None
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         assert pending.wait(1)
         execution = initial.data["execution"]
         controller = Thread(
@@ -555,7 +648,9 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
         controller.join(2)
         assert not controller.is_alive()
         assert control_replies[0].data["cancel_requested"]
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert terminal.data["status"] == "cancelled"
         methods = [method for method, _ in client.transport.sent]
         assert forbidden_method not in methods
@@ -604,7 +699,9 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         assert pending.wait(1)
         execution = initial.data["execution"]
         for _ in range(2):
@@ -612,7 +709,9 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
             assert reply.data[f"{control}_requested"]
         assert not stopped.is_set()
         release.set()
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert stopped.is_set()
         assert terminal.data["status"] == (
             "finished" if control == "finish_early" else "cancelled"
@@ -673,9 +772,8 @@ def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safel
     def fail_start(self):
         raise RuntimeError("no thread resources")
 
-    client = make_client(tmp_path, LookbackGui())
-    monkeypatch.setattr(Thread, "start", fail_start)
-    try:
+    with recipe_client(tmp_path, LookbackGui()) as client:
+        monkeypatch.setattr(Thread, "start", fail_start)
         reply = client.call("lookback", {"frequency_mhz": 6020.0})
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -689,8 +787,6 @@ def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safel
         assert cancelled.data["status"] == "failed"
         assert not cancelled.data["cancel_requested"]
         assert "tab.new" not in [method for method, _ in client.transport.sent]
-    finally:
-        client.context.session.close()
 
 
 def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
@@ -709,13 +805,17 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         assert reading.wait(1)
         execution = initial.data["execution"]
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         release.set()
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         assert terminal.data["status"] == "cancelled"
         assert terminal.data["cancel_requested"]
         assert terminal.data["writeback"]["items"][0]["proposed"] == 0.24
@@ -746,9 +846,10 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
             }
         return reply
 
-    client = make_client(tmp_path, respond)
-    try:
-        reply = client.call("lookback", {"frequency_mhz": 6020.0})
+    with recipe_client(tmp_path, respond) as client:
+        reply = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
         assert reply.is_error
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "result_superseded"
@@ -759,27 +860,30 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
         assert methods.count("tab.run_start") == 1
         assert "tab.save_data" not in methods
         assert "tab.analyze" not in methods
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize("reuse", [False, True])
+@pytest.mark.parametrize(
+    "readout_length,offset,expected",
+    [(4.0, 0.2, (4.0, 0.2)), (1, 1, (1.0, 1.0)), (1.0, 1.0, (1.0, 1.0))],
+)
 def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
-    tmp_path,
-    reuse,
+    tmp_path, reuse, readout_length, offset, expected
 ):
     gui = LookbackGui()
-    client = make_client(tmp_path, gui)
-    try:
-        reply = client.call(
-            "lookback",
-            {
-                "reuse_tab_id": "t" if reuse else None,
-                "frequency_mhz": 6020.0,
-                "readout_length_us": 4.0,
-                "trigger_offset_us": 0.2,
-                "rounds": 7,
-            },
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "lookback",
+                {
+                    "reuse_tab_id": "t" if reuse else None,
+                    "frequency_mhz": 6020.0,
+                    "readout_length_us": readout_length,
+                    "trigger_offset_us": offset,
+                    "rounds": 7,
+                },
+            ),
         )
         assert isinstance(reply, ToolReply)
         data = reply.data
@@ -798,11 +902,16 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert data["elapsed_s"] >= 0
         actual = data["actual"]
         assert actual["cfg_ref"] == gui.publication["cfg_ref"]
-        assert actual["fields"]["modules.readout.pulse_cfg.freq"]["value"] == 6020.0
-        assert actual["fields"]["modules.readout.ro_cfg.ro_freq"]["value"] == 6020.0
-        assert actual["fields"]["modules.readout.ro_cfg.ro_length"]["value"] == 4.0
-        assert actual["fields"]["modules.readout.ro_cfg.trig_offset"]["value"] == 0.2
-        assert actual["fields"]["rounds"]["value"] == 7
+        fields = actual["fields"]
+        for path, value in {
+            "modules.readout.pulse_cfg.freq": 6020.0,
+            "modules.readout.ro_cfg.ro_freq": 6020.0,
+            "modules.readout.ro_cfg.ro_length": expected[0],
+            "modules.readout.ro_cfg.trig_offset": expected[1],
+            "rounds": 7,
+        }.items():
+            assert fields[path]["value"] == value
+            assert type(fields[path]["value"]) is type(value)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.reset_cfg") == int(reuse)
@@ -822,8 +931,9 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         by_path = {tuple(edit["path"]): edit["value"] for edit in edits}
         assert by_path["modules", "reset"] == {"__ref": None}
         assert by_path["modules", "init_pulse"] == {"__ref": None}
-    finally:
-        client.context.session.close()
+        for key, value in zip(("ro_length", "trig_offset"), expected, strict=True):
+            assert by_path["modules", "readout", "ro_cfg", key] == value
+            assert type(by_path["modules", "readout", "ro_cfg", key]) is float
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "kept"])
@@ -879,8 +989,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
             return deepcopy(publication)
         raise AssertionError(f"Missing frequency must not start work: {method}")
 
-    client = make_client(tmp_path, respond)
-    try:
+    with recipe_client(tmp_path, respond) as client:
         arguments = {} if reuse_tab_id is None else {"reuse_tab_id": reuse_tab_id}
         reply = client.call("lookback", arguments)
         assert isinstance(reply, ToolReply)
@@ -894,8 +1003,6 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         assert "tab.run_start" not in methods
         assert ("tab.new" in methods) is (reuse_tab_id is None)
         assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
@@ -917,9 +1024,8 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
     if source == "library_invalid":
         pulse["valid"] = False
         pulse["input"]["validation_error"] = "outside range"
-    client = make_client(tmp_path, gui)
-    try:
-        reply = client.call("lookback", arguments)
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(client, client.call("lookback", arguments))
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
         expected_pulse = 6100.0 if source == "library" else 6500.0
@@ -932,8 +1038,6 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
         assert fields["modules.readout.ro_cfg.ro_length"]["value"] == 2.0
         assert fields["modules.readout.ro_cfg.trig_offset"]["value"] == 0.1
         assert fields["rounds"]["value"] == 3
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
@@ -944,6 +1048,7 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
         {"readout_length_us": float("inf")},
         {"trigger_offset_us": "0.1"},
         {"rounds": True},
+        {"rounds": 1.0},
         {"rounds": 2.5},
         {"reuse_tab_id": ""},
         {"readout_ref": ""},
@@ -956,16 +1061,13 @@ def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
 ):
     gui = LookbackGui()
     gui.md["r_f"] = 6500.0
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("lookback", arguments)
         assert reply.is_error
         assert reply.data["status"] == "failed"
         assert reply.data["tab"] is None
         assert not gui.ran
         assert not any(method.startswith("tab.") for method, _ in client.transport.sent)
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize("partial_data", [False, True])
@@ -980,9 +1082,10 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
             return {"reason": "completed", "status": "cancelled"}
         return gui(method, params)
 
-    client = make_client(tmp_path, respond)
-    try:
-        reply = client.call("lookback", {"frequency_mhz": 6000.0})
+    with recipe_client(tmp_path, respond) as client:
+        reply = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6000.0})
+        )
         assert reply.data["status"] == "cancelled"
         assert not reply.data["cancel_requested"]
         assert not reply.data["finish_early_requested"]
@@ -992,8 +1095,6 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
         assert "tab.save_data" not in methods
         assert "tab.analyze" not in methods
         assert "operation.cancel" not in methods
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize(
@@ -1012,8 +1113,7 @@ def test_explicit_invalid_library_reference_is_not_disabled_or_replaced(
     gui.publication["tree"]["children"]["modules"]["children"][module].update(
         valid=False, error="missing library entry"
     )
-    client = make_client(tmp_path, gui)
-    try:
+    with recipe_client(tmp_path, gui) as client:
         reply = client.call("lookback", {argument: "missing"})
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -1029,69 +1129,6 @@ def test_explicit_invalid_library_reference_is_not_disabled_or_replaced(
             "edits"
         ]
         assert "tab.run_start" not in [method for method, _ in client.transport.sent]
-    finally:
-        client.context.session.close()
-
-
-@pytest.mark.parametrize(
-    ("pending_method", "wire_op", "phase", "raw_status"),
-    [
-        ("operation.await", 71, "run", "not_started"),
-        ("tab.save_data", None, "raw_save", "unknown"),
-        ("operation.await", 82, "raw_save", "unknown"),
-        ("operation.await", 93, "analysis", "saved"),
-    ],
-)
-def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
-    tmp_path, monkeypatch, pending_method, wire_op, phase, raw_status
-):
-    client = make_client(tmp_path, LookbackGui(), port_is_open=lambda port: True)
-    send_line = client.transport.send_line
-    pending = Event()
-    reconnects = []
-
-    def send(payload):
-        if payload["method"] == pending_method and (
-            wire_op is None or payload["params"]["operation_id"] == wire_op
-        ):
-            client.transport.sent.append((payload["method"], payload["params"]))
-            pending.set()
-            return
-        send_line(payload)
-
-    def unexpected_connect(*args, **kwargs):
-        reconnects.append((args, kwargs))
-        raise AssertionError("Recipe must not reconnect")
-
-    monkeypatch.setattr(client.transport, "send_line", send)
-    monkeypatch.setattr(client.context.bridge, "connect", unexpected_connect)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
-    try:
-        initial = client.call("lookback", {"frequency_mhz": 6000.0})
-        assert pending.wait(1)
-        client.transport.close()
-        assert client.transport.on_closed is not None
-        client.transport.on_closed(None)
-        execution = initial.data["execution"]
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
-        assert terminal.data["status"] == "failed"
-        assert terminal.data["error"]["reason"] == "connection_lost"
-        assert terminal.data["error"]["phase"] == phase
-        assert terminal.data["raw_save"]["status"] == raw_status
-        if wire_op == 82:
-            assert terminal.data["raw_save"]["reserved_path"] == "/actual/raw.h5"
-            assert terminal.data["raw_save"]["path"] is None
-        if raw_status == "saved":
-            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
-        state = client.call("status", {"execution": execution})
-        assert state["error"] == terminal.data["error"]
-        assert not reconnects
-        assert client.transport.sent[-1][0] == pending_method
-        assert [method for method, _ in client.transport.sent].count(
-            "tab.run_start"
-        ) == 1
-    finally:
-        client.context.session.close()
 
 
 @pytest.mark.parametrize("failure", ["wrong_experiment", "busy", "missing", "stale"])
@@ -1124,91 +1161,5 @@ def test_lookback_reuse_errors_do_not_create_replacement_or_retry(tmp_path, fail
         assert "tab.new" not in methods
         assert "tab.run_start" not in methods
         assert methods.count("tab.reset_cfg") == int(failure == "stale")
-    finally:
-        client.context.session.close()
-
-
-@pytest.mark.parametrize(
-    "failure, phase, raw_status",
-    [
-        ("run", "run", "not_started"),
-        ("raw_start", "raw_save", "failed"),
-        ("raw_finish", "raw_save", "failed"),
-        ("analysis", "analysis", "saved"),
-        ("superseded_raw", "raw_save", "failed"),
-        ("superseded_analysis", "analysis", "saved"),
-        ("superseded_writeback", "writeback_read", "saved"),
-        ("image", "analysis", "saved"),
-        ("writeback", "writeback_read", "saved"),
-    ],
-)
-def test_lookback_failure_preserves_completed_prefix_without_retry(
-    tmp_path, failure, phase, raw_status
-):
-    gui = LookbackGui()
-
-    def respond(method, params):
-        fail_operation = {"run": 71, "raw_finish": 82, "analysis": 93}.get(failure)
-        if method == "operation.await" and params["operation_id"] == fail_operation:
-            return {
-                "reason": "completed",
-                "status": "failed",
-                "error": "injected failure",
-            }
-        return gui(method, params)
-
-    client = make_client(tmp_path, respond)
-    failed_method = {
-        "raw_start": "tab.save_data",
-        "superseded_raw": "tab.save_data",
-        "superseded_analysis": "tab.analyze",
-        "superseded_writeback": "tab.writeback_preview",
-        "image": "tab.save_image",
-        "writeback": "tab.writeback_preview",
-    }.get(failure)
-    if failed_method:
-        client.transport.replies[failed_method] = {
-            "ok": False,
-            "error": {
-                "code": "precondition_failed",
-                "reason": "result_superseded"
-                if failure.startswith("superseded")
-                else "injected",
-                "message": "injected failure",
-            },
-        }
-    try:
-        reply = client.call("lookback", {"frequency_mhz": 6000.0})
-        data = reply.data
-        assert data["status"] == "failed", data
-        assert reply.is_error
-        assert data["error"]["phase"] == phase
-        if failure.startswith("superseded"):
-            assert data["error"]["reason"] == "result_superseded"
-        assert data["raw_save"]["status"] == raw_status
-        assert data["tab"] == "t"
-        assert data["run_op"] is not None
-        if raw_status == "saved":
-            assert data["raw_save"]["path"] == "/actual/raw.h5"
-        if failure == "raw_finish":
-            assert data["raw_save"]["reserved_path"] == "/actual/raw.h5"
-            assert data["raw_save"]["operation_outcome"]["status"] == "failed"
-        if failure in ("image", "writeback"):
-            assert data["analysis"]["result"]["summary"] == {"offset": 0.24}
-        if failure == "writeback":
-            assert data["analysis"]["saved_images"] == [
-                {"figure_name": "trace", "image_path": "/actual/trace.png"}
-            ]
-            assert reply.images[0].data == PNG
-        methods = [method for method, _ in client.transport.sent]
-        for method in (
-            "tab.run_start",
-            "tab.save_data",
-            "tab.analyze",
-            "tab.writeback_preview",
-        ):
-            assert methods.count(method) <= 1
-        if raw_status != "saved":
-            assert "tab.analyze" not in methods
     finally:
         client.context.session.close()

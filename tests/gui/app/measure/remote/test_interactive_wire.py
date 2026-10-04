@@ -561,7 +561,10 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             )
             assert result["interaction"]["state"] == changed["state"]
             assert result["status"] == "finished", result
-            assert Path(result["figure"]).read_bytes().startswith(b"\x89PNG")
+            assert result["op"] == op
+            assert result["previews"]["primary"]
+            for preview_path in result["previews"]["primary"]:
+                assert Path(preview_path).read_bytes().startswith(b"\x89PNG")
             committed = fx.state.get_tab(tab_id).analysis.plots
             assert committed is not None
             assert committed["pick"] is not widget.figure

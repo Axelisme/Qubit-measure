@@ -7,7 +7,7 @@ import time
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.images import validated_png
@@ -16,11 +16,21 @@ from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcp
 AnalysisStage = Literal["primary", "post"]
 ExecutionStatus = Literal["running", "interactive", "finished", "failed", "cancelled"]
 ExecutionPhase = Literal[
-    "operation", "result_read", "image_save", "figure_read", "terminal"
+    "operation",
+    "result_read",
+    "image_save",
+    "figure_read",
+    "writeback_read",
+    "terminal",
 ]
 SaveStatus = Literal[
     "not_started", "not_available", "saving", "saved", "incomplete", "unknown"
 ]
+
+
+class InvalidAnalysisValue(TypedDict):
+    path: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,7 @@ class AnalysisResult:
     summary: Any
     params: dict[str, Any]
     operation_state: dict[str, Any]
+    invalid: list[InvalidAnalysisValue]
 
 
 @dataclass(frozen=True)
@@ -45,11 +56,59 @@ class ExecutionError:
 
 
 @dataclass(frozen=True)
+class AnalysisStart:
+    status: Literal["not_started", "unknown", "running"] = "not_started"
+    reason: str | None = None
+
+
+class AnalysisWriteback(TypedDict):
+    """Detached GUI writeback preview for one completed analysis operation.
+
+    has_draft: Whether the owner published a draft; false is a confirmed absence.
+    items: All native candidates, including selected=false; values and targets
+        stay in the GUI owner's wire representation.
+    destination_context: Native destination identity and readiness at capture
+        time, not an observation or authorization for a later write.
+    """
+
+    has_draft: bool
+    items: list[dict[str, object]]
+    destination_context: dict[str, object]
+
+
+@dataclass(frozen=True)
 class ExecutionSnapshot:
+    """Detached progress of one session-local Primary or Post completion.
+
+    execution: Session-local execution ID; not a persistent run ID.
+    tab: GUI tab locator on the fixed connection.
+    stage: primary or post, never an inferred recipe identity.
+    op: Opaque session operation handle, or None before receipt.
+    start: Start admission/receipt status and any rejection reason.
+    status: running, interactive, finished, failed or cancelled.
+    phase: Current continuation step, or terminal after completion/failure.
+    cancel_requested: Latched stop intent, not a GUI outcome.
+    operation_outcome: Native terminal await reply, or None while unresolved.
+    params: Accepted start or result parameters, or None before capture.
+    invalidated: Owner's invalidated sections after success, or None if unknown.
+    result: Captured native analysis result, or None before result_read.
+    interaction: Latest interaction handoff, or None if none was delivered.
+    save_status: not_started, not_available, saving, saved, incomplete or unknown.
+    saved_images: Confirmed persistent image paths; failures retain this prefix.
+    remaining_images: Unsaved owner image names, or None before result_read.
+    unconfirmed_image: Admitted save with unknown outcome, or None.
+    figure: Session preview path, or None if unavailable/not delivered.
+    writeback: Completed operation's preview, or None before writeback_read.
+        Interactive handoff does not capture; done joins this completion.
+        A failed read retains result/save/preview facts and reports error.
+    error: Continuation failure with attempted phase/reason/code, or None.
+    """
+
     execution: str
     tab: str
     stage: AnalysisStage
-    op: int
+    op: int | None
+    start: AnalysisStart = field(default_factory=AnalysisStart)
     status: ExecutionStatus = "running"
     phase: ExecutionPhase = "operation"
     cancel_requested: bool = False
@@ -63,7 +122,25 @@ class ExecutionSnapshot:
     remaining_images: list[str] | None = None
     unconfirmed_image: str | None = None
     figure: str | None = None
+    writeback: AnalysisWriteback | None = None
     error: ExecutionError | None = None
+
+
+def _invalid_analysis_values(value: object) -> list[InvalidAnalysisValue]:
+    if not isinstance(value, list):
+        raise GuiRpcError("invalid analysis field reasons", reason="incompatible_wire")
+    invalid: list[InvalidAnalysisValue] = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("path"), str)
+            or not isinstance(item.get("reason"), str)
+        ):
+            raise GuiRpcError(
+                "invalid analysis field reasons", reason="incompatible_wire"
+            )
+        invalid.append({"path": item["path"], "reason": item["reason"]})
+    return invalid
 
 
 def _analysis_result(
@@ -86,7 +163,10 @@ def _analysis_result(
     ):
         raise GuiRpcError("invalid analysis figure names", reason="incompatible_wire")
     return AnalysisResult(
-        deepcopy(reply["summary"]), deepcopy(params), deepcopy(state)
+        summary=deepcopy(reply["summary"]),
+        params=deepcopy(params),
+        operation_state=deepcopy(state),
+        invalid=_invalid_analysis_values(reply.get("invalid")),
     ), list(names)
 
 
@@ -136,13 +216,19 @@ class AnalysisExecution:
         self._images: tuple[PngImage, ...] = ()
         self._thread: Thread | None = None
         self._gui_cancel: GuiCancel | None = None
+        self._cancel_in_flight = False
 
     def snapshot(self) -> ExecutionSnapshot:
         with self._condition:
             return deepcopy(self._snapshot)
 
     def wait(self, timeout: float) -> ToolReply:
-        """Wait locally for completion or an interactive handoff, never cancel."""
+        """Wait up to timeout seconds for completion or an interactive handoff.
+
+        Zero returns current progress. Data is the detached ExecutionSnapshot;
+        images are captured previews. Failed completion is an error ToolReply,
+        not a query exception. This local wait neither reads GUI nor cancels.
+        """
         with self._condition:
             self._condition.wait_for(
                 lambda: (
@@ -170,18 +256,23 @@ class AnalysisExecution:
         with self._condition:
             if self._snapshot.phase == "terminal":
                 return self._cancel_reply(GuiCancel("not_needed"))
-            if self._snapshot.cancel_requested:
-                self._condition.wait_for(lambda: self._gui_cancel is not None)
-                assert self._gui_cancel is not None
-                return self._cancel_reply(self._gui_cancel)
             self._snapshot = replace(
                 self._snapshot, cancel_requested=True, status="running"
             )
             self._condition.notify_all()
+            op = self._snapshot.op
+            if op is None:
+                # Intent is retained. A late receipt triggers the original-bound stop.
+                return self._cancel_reply(GuiCancel("not_needed"))
+            if self._cancel_in_flight:
+                self._condition.wait_for(lambda: self._gui_cancel is not None)
+                assert self._gui_cancel is not None
+                return self._cancel_reply(self._gui_cancel)
+            self._cancel_in_flight = True
         # Never hold the execution lock while waiting for RPC serialization.
         try:
             reply = self._connection.read_internal(
-                "operation.cancel", {}, operation_handle=self._snapshot.op
+                "operation.cancel", {}, operation_handle=op
             )
             status = reply.get("status")
             if status == "cancelling":
@@ -229,6 +320,42 @@ class AnalysisExecution:
                 status="running" if done else self._snapshot.status,
             )
             self._condition.notify_all()
+
+    def admit_start(self) -> None:
+        """Mark ambiguity at dispatch, not when the execution is registered."""
+        with self._condition:
+            if self._closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+            if self._snapshot.cancel_requested:
+                raise _ContinuationCancelled
+            self._snapshot = replace(self._snapshot, start=AnalysisStart("unknown"))
+            self._condition.notify_all()
+
+    def observe_start(self, started: dict[str, Any]) -> None:
+        """Attach a delivered receipt to the already queryable execution."""
+        with self._condition:
+            self._invalidated = deepcopy(started["invalidated_on_success"])
+            self._snapshot = replace(
+                self._snapshot,
+                op=started["handle"],
+                start=AnalysisStart("running"),
+                params=deepcopy(started["params"]),
+                status="interactive" if started.get("interactive") else "running",
+            )
+            self._condition.notify_all()
+
+    def fail_start(self, exc: Exception) -> None:
+        """Keep sent requests ambiguous unless GUI explicitly rejects admission."""
+        if isinstance(exc, _ContinuationCancelled):
+            self._finish()
+            return
+        with self._condition:
+            if isinstance(exc, GuiRpcError) and exc.request_rejected:
+                self._snapshot = replace(
+                    self._snapshot,
+                    start=AnalysisStart("not_started", exc.reason or exc.code),
+                )
+        self._fail(exc)
 
     def start(self) -> None:
         """Called under the registry lock, so close cannot miss an admitted worker."""
@@ -327,6 +454,8 @@ class AnalysisExecution:
     def _run(self) -> None:
         # This is the worker isolation boundary: retain partial facts for every failure.
         try:
+            if self.snapshot().cancel_requested:
+                self.cancel()
             if not self._await_operation():
                 return
             self._complete_analysis()
@@ -399,9 +528,6 @@ class AnalysisExecution:
         self._publish(
             result=result, params=deepcopy(result.params), remaining_images=names
         )
-        if not names:
-            self._finish(save_status="not_available")
-            return
         saved: list[SavedImage] = []
         for index, name in enumerate(names):
             reply = self._rpc(
@@ -426,20 +552,36 @@ class AnalysisExecution:
                 remaining_images=names[index + 1 :],
                 unconfirmed_image=None,
             )
-        self._publish(save_status="saved")
-        reply = self._rpc(
-            "figure_read", "tab.get_figure", {"tab_id": snapshot.tab, "subtab_id": pane}
-        )
-        encoded = reply.get("png_b64")
-        if not isinstance(encoded, str):
-            raise GuiRpcError(
-                "invalid analysis preview reply", reason="incompatible_wire"
+        self._publish(save_status="saved" if names else "not_available")
+        if names:
+            reply = self._rpc(
+                "figure_read",
+                "tab.get_figure",
+                {"tab_id": snapshot.tab, "subtab_id": pane},
             )
-        image = validated_png(base64.b64decode(encoded, validate=True))
-        path = self._session.write_png(image.data)
-        with self._condition:
-            self._images = (image,)
-            self._finish(figure=str(path))
+            encoded = reply.get("png_b64")
+            if not isinstance(encoded, str):
+                raise GuiRpcError(
+                    "invalid analysis preview reply", reason="incompatible_wire"
+                )
+            image = validated_png(base64.b64decode(encoded, validate=True))
+            path = self._session.write_png(image.data)
+            with self._condition:
+                self._images = (image,)
+                self._publish(figure=str(path))
+        reply = self._rpc(
+            "writeback_read",
+            "tab.writeback_preview",
+            {"tab_id": snapshot.tab, "subtab_id": pane},
+        )
+        self._publish(
+            writeback=AnalysisWriteback(
+                has_draft=reply["has_draft"],
+                items=deepcopy(reply["items"]),
+                destination_context=deepcopy(reply["destination_context"]),
+            )
+        )
+        self._finish()
 
 
 class AnalysisExecutions:
@@ -458,14 +600,14 @@ class AnalysisExecutions:
         connection: GuiConnection,
         tab: str,
         stage: AnalysisStage,
-        started: dict[str, Any],
+        started: dict[str, Any] | None = None,
         *,
         interaction: dict[str, Any] | None = None,
     ) -> AnalysisExecution:
         """Retain the delivered start receipt, even when close wins admission."""
         with self._lock:
-            op = started["handle"]
-            if op in self._by_op:
+            op = started["handle"] if started is not None else None
+            if op is not None and op in self._by_op:
                 return self._by_op[op]
             execution = AnalysisExecution(
                 ExecutionSnapshot(
@@ -473,20 +615,41 @@ class AnalysisExecutions:
                     tab=tab,
                     stage=stage,
                     op=op,
-                    params=deepcopy(started["params"]),
-                    status="interactive" if started.get("interactive") else "running",
+                    start=AnalysisStart("running" if op is not None else "not_started"),
+                    params=deepcopy(started["params"]) if started is not None else None,
+                    status="interactive"
+                    if started is not None and started.get("interactive")
+                    else "running",
                     interaction=deepcopy(interaction),
                 ),
                 connection,
                 self._session,
                 self._closed,
-                deepcopy(started["invalidated_on_success"]),
+                deepcopy(started["invalidated_on_success"])
+                if started is not None
+                else None,
             )
             self._next_id += 1
-            self._by_op[op] = execution
             self._by_id[execution.snapshot().execution] = execution
-            execution.start()
+            if op is not None:
+                self._by_op[op] = execution
+                execution.start()
             return execution
+
+    def accept_start(
+        self, execution: AnalysisExecution, started: dict[str, Any]
+    ) -> None:
+        """Bind a late receipt without creating a second completion owner."""
+        with self._lock:
+            op = started["handle"]
+            execution.observe_start(started)
+            if op in self._by_op and self._by_op[op] is not execution:
+                raise GuiRpcError(
+                    "Analysis operation already has a completion owner",
+                    reason="incompatible_wire",
+                )
+            self._by_op[op] = execution
+            execution.start()
 
     def for_op(self, op: int) -> AnalysisExecution | None:
         """Find an existing completion owner without creating a new job."""
@@ -513,12 +676,12 @@ class AnalysisExecutions:
         """Permanently reject new workers and wake existing ones."""
         self._closed.set()
         with self._lock:
-            for execution in self._by_op.values():
+            for execution in self._by_id.values():
                 execution.wake()
 
     def join(self) -> None:
         """Join admitted workers after transport disconnect, before PNG cleanup."""
         with self._lock:
-            executions = list(self._by_op.values())
+            executions = list(self._by_id.values())
         for execution in executions:
             execution.join()

@@ -8,6 +8,7 @@ from zcu_tools.mcp.measure import (
     tools_recipes,
     tools_rpc,
     tools_run_analyze,
+    tools_setup,
     tools_tab,
     tools_writeback,
 )
@@ -25,6 +26,7 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
         tools_run_analyze.build_run_analyze_tools(context),
         tools_writeback.build_writeback_tools(context),
         tools_recipes.build_recipe_tools(context),
+        tools_setup.build_setup_tools(context),
     ):
         for name, entry in source.items():
             if name in tools:

@@ -50,6 +50,50 @@ def test_optional_string_allows_empty_and_missing():
     assert validate_params(_spec(JsonType.STRING, required=False), {}) == {"x": None}
 
 
+def test_string_enum_rejects_non_member_after_type_validation():
+    specs = (ParamSpec("mode", JsonType.STRING, enum=("fast", "careful")),)
+    assert validate_params(specs, {"mode": "fast"}) == {"mode": "fast"}
+    with pytest.raises(RemoteError, match="mode") as error:
+        validate_params(specs, {"mode": "other"})
+    assert error.value.code is ErrorCode.INVALID_PARAMS
+
+
+@pytest.mark.parametrize(
+    "json_type,enum,default",
+    [
+        (JsonType.NUMBER, ("fast",), None),
+        (JsonType.STRING, (), None),
+        (JsonType.STRING, ("fast", 1), None),
+        (JsonType.STRING, ("fast", "fast"), None),
+        (JsonType.STRING, ("fast", "careful"), "other"),
+    ],
+)
+def test_enum_declaration_rejects_invalid_contract(json_type, enum, default):
+    with pytest.raises(ValueError, match="enum"):
+        ParamSpec("mode", json_type, default=default, enum=enum)
+
+
+def test_string_enum_is_projected_by_shared_schema():
+    spec = ParamSpec("mode", JsonType.STRING, enum=("fast", "careful"))
+    assert schema_property(spec) == {
+        "type": "string",
+        "enum": ["fast", "careful"],
+    }
+
+
+@pytest.mark.parametrize("default", [None, "fast"])
+@pytest.mark.parametrize("params", [{}, {"mode": None}])
+def test_optional_enum_preserves_omission_and_null_default(default, params):
+    spec = ParamSpec(
+        "mode",
+        JsonType.STRING,
+        required=False,
+        default=default,
+        enum=("fast", "careful"),
+    )
+    assert validate_params((spec,), params) == {"mode": default}
+
+
 def test_integer_rejects_bool():
     with pytest.raises(RemoteError, match="must be an integer"):
         validate_params(_spec(JsonType.INTEGER), {"x": True})

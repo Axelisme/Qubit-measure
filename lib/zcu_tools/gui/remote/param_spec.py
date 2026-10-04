@@ -1,7 +1,8 @@
 """Single source of truth for a wire method's parameter contract.
 
 A ``ParamSpec`` declares one parameter's name, JSON type, requiredness and
-default. The dispatcher validates incoming params against a method's ParamSpec
+default, and optional string enum. Enum declarations fail fast on empty or
+invalid choices and defaults. The dispatcher validates incoming params against a method's ParamSpec
 tuple *before* calling the handler, so the handler receives already-typed
 values. The same specs generate the MCP ``inputSchema`` (Step 7), so the wire
 type contract and the runtime validation can never drift.
@@ -38,6 +39,13 @@ class JsonType(str, Enum):
     ARRAY = "array"  # homogeneous string list; emits {"type":"array","items":{"type":"string"}}
 
 
+def _validate_string_enum(values: tuple[object, ...]) -> None:
+    if not values or any(not isinstance(value, str) for value in values):
+        raise ValueError("enum must be a non-empty tuple of strings")
+    if len(set(values)) != len(values):
+        raise ValueError("enum must not contain duplicates")
+
+
 @dataclass(frozen=True)
 class ParamSpec:
     name: str
@@ -49,6 +57,16 @@ class ParamSpec:
     # omitted from the MCP inputSchema — a wire-only param the mcp layer fills
     # (e.g. ``expected_versions``), never surfaced to the agent.
     mcp_hidden: bool = False
+    enum: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.enum is None:
+            return
+        if self.json_type is not JsonType.STRING:
+            raise ValueError("enum requires a STRING parameter")
+        _validate_string_enum(self.enum)
+        if self.default is not None and self.default not in self.enum:
+            raise ValueError("default must belong to enum")
 
     def _coerce(self, present: bool, value: object) -> object:
         if not present or value is None:
@@ -128,7 +146,13 @@ def validate_params(
     out: dict[str, object] = {}
     for spec in specs:
         present = spec.name in params
-        out[spec.name] = spec._coerce(present, params.get(spec.name))
+        value = spec._coerce(present, params.get(spec.name))
+        if spec.enum is not None and value is not None and value not in spec.enum:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be one of {spec.enum!r}",
+            )
+        out[spec.name] = value
     return out
 
 
@@ -157,6 +181,8 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
             JsonType.BOOLEAN: "boolean",
             JsonType.OBJECT: "object",
         }[spec.json_type]
+    if spec.enum is not None:
+        prop["enum"] = list(spec.enum)
     if spec.description:
         prop["description"] = spec.description
     return prop

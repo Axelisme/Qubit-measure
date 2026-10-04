@@ -17,11 +17,19 @@ class MeasureToolContext:
     resolve_connect_port: Callable[[MCPBridgeConfig, int | None], int]
     connection: GuiConnection | None = None
 
-    def bound(self) -> MeasureToolContext:
-        """Keep an inherited binding, or capture this operation's GUI once."""
+    def bound(self, *, require_connected: bool = False) -> MeasureToolContext:
+        """Return this bound context, or a copy capturing this session's GUI.
+
+        require_connected=True refuses initial attach/reconnect and raises
+        GuiRpcError when no GUI transport is open. False preserves lazy attach.
+        Catalog/handshake errors propagate. An inherited binding is not refreshed;
+        its next RPC rejects any lost or replacement GUI without reconnecting.
+        """
         if self.connection is not None:
             return self
-        return replace(self, connection=self.session.bind())
+        return replace(
+            self, connection=self.session.bind(require_connected=require_connected)
+        )
 
     @property
     def gui(self) -> GuiConnection:

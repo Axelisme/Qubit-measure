@@ -20,6 +20,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     SweepDefault,
     scaled_md,
 )
+from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
+    fit_quality_summary,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain._detune_shared import (
     detune_ratio_of,
@@ -58,6 +61,7 @@ class T2EchoAnalyzeParams:
 class T2EchoAnalyzeResult(AnalyzeResultBase):
     t2e: float
     t2e_err: float
+    fit_quality: dict[str, dict[str, object]] | None = None
 
 
 class T2EchoAdapter(
@@ -180,6 +184,7 @@ class T2EchoAdapter(
         return T2EchoAnalyzeResult(
             t2e=analysis.t2e,
             t2e_err=analysis.t2e_err,
+            fit_quality=fit_quality_summary(analysis.fit_quality),
         )
 
     def get_writeback_items(
