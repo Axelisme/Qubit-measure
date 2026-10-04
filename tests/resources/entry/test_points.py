@@ -96,6 +96,51 @@ def test_new_point_inherits_setup_without_copying_values(
     assert point.Q1.freq == 5000.0
 
 
+def test_list_points_sorts_complete_points_and_ignores_incomplete_directories(
+    entry: ResultEntry, entry_roots: tuple[Path, Path]
+) -> None:
+    entry.new_point("z (cold)")
+    entry.new_point("a (warm)")
+    partial = entry_roots[0] / "entry/points/partial"
+    partial.mkdir()
+    (partial / "point.yaml").touch()
+
+    assert entry.list_points() == ["a (warm)", "z (cold)"]
+    with pytest.raises(FileNotFoundError):
+        entry.use_point("partial")
+    assert entry.list_points() == ["a (warm)", "z (cold)"]
+
+
+@pytest.mark.parametrize("label", ["", ".", "..", "../outside", "nested/point", "x\\y"])
+@pytest.mark.parametrize("operation", ["new_point", "use_point"])
+def test_point_labels_reject_unsafe_path_segments(
+    entry: ResultEntry, label: str, operation: Literal["new_point", "use_point"]
+) -> None:
+    create_or_open = entry.new_point if operation == "new_point" else entry.use_point
+    with pytest.raises(ValueError, match="single path component"):
+        create_or_open(label)
+    assert entry.list_points() == []
+
+
+def test_new_point_rejects_missing_notebook_values_and_cleans_destination(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], range_kind: str
+) -> None:
+    entry.setup.add_component("R1", kind=range_kind, low=1.0)
+    root = entry_roots[0] / "entry"
+    before = (root / "setup.yaml").read_bytes()
+    with pytest.raises(ValidationError, match="R1.high"):
+        entry.new_point("invalid")
+    assert (root / "setup.yaml").read_bytes() == before
+    assert not (root / "points/invalid").exists()
+    assert entry.list_points() == []
+    assert entry.setup.R1.low == 1.0
+
+    entry.setup.R1.high = 2.0
+    point = entry.new_point("valid")
+    assert point.R1.low == 1.0
+    assert point.R1.high == 2.0
+
+
 def test_point_edit_routes_existing_and_new_fields_to_their_layers(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
