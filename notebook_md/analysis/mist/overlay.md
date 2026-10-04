@@ -9,7 +9,7 @@ from typing import List, cast
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
 from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.simulate import mA2flx, flx2mA
+from zcu_tools.simulate import value2flux, flux2value
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.notebook.analysis.mist.branch.overlay import calc_overlay, plot_overlay
 
@@ -126,7 +126,7 @@ for filepath in filepaths:
     mist_run = ze.mist.flux_dep.FluxDepExp().load(Path(filepath))
     signals, As, pdrs = mist_run.result.signals, mist_run.result.values, mist_run.result.gains
 
-    flxs = mA2flx(As, mA_c, period)
+    flxs = value2flux(As, mA_c, period)
     photons = ac_coeff * pdrs**2
 
     real_signals = mist_signal2real(signals.astype(np.complex128))
@@ -181,7 +181,7 @@ sim_flxs = data["flxs"]
 sim_photons = data["photons"]
 overlay_over_flx = data["overlay_over_flx"]
 
-sim_As = flx2mA(sim_flxs, mA_c, period)
+sim_As = flux2value(sim_flxs, mA_c, period)
 ```
 
 ```python
@@ -198,7 +198,7 @@ for filepath in filepaths:
     mist_run = ze.mist.flux_dep.FluxDepExp().load(Path(filepath))
     signals, As, pdrs = mist_run.result.signals, mist_run.result.values, mist_run.result.gains
 
-    flxs = mA2flx(As, mA_c, period)
+    flxs = value2flux(As, mA_c, period)
     photons = ac_coeff * pdrs**2
 
     real_signals = mist_signal2real(signals.astype(np.complex128))
