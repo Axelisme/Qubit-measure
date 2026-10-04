@@ -203,7 +203,7 @@ class ResultEntry:
                     .isoformat()
                     .replace("+00:00", "Z")
                 },
-                "components": deepcopy(template["components"]),
+                "components": deepcopy(template.get("components", {})),
                 "provenance": deepcopy(template.get("provenance", {})),
             }
             with (destination / "point.yaml").open("x", encoding="utf-8") as stream:
