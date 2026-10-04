@@ -475,31 +475,6 @@ def test_unknown_execution_is_a_query_failure_without_gui_access(
         client.context.session.close()
 
 
-def test_cancel_reports_failure_during_its_short_wait(tmp_path: Path) -> None:
-    client = make_client(tmp_path)
-    op = discover_operation(client, 31)
-    client.transport.replies["operation.cancel"] = {
-        "ok": True,
-        "result": {"status": "cancelling"},
-    }
-    client.transport.replies["operation.await"] = {
-        "ok": True,
-        "result": {
-            "reason": "completed",
-            "status": "failed",
-            "error": {"reason": "failed", "message": "ramp failed"},
-        },
-    }
-
-    with pytest.raises(RuntimeError, match="ramp failed") as exc_info:
-        client.call("cancel", {"op": op})
-    assert getattr(exc_info.value, "reason", None) == "operation_failed"
-    assert (
-        "operation.await",
-        {"operation_id": 31, "timeout": 0.25},
-    ) in client.transport.sent
-
-
 def test_wait_rejects_bad_timeout_without_sending_an_operation(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     for timeout in (-1, 301, float("nan"), True):
@@ -508,8 +483,9 @@ def test_wait_rejects_bad_timeout_without_sending_an_operation(tmp_path: Path) -
     assert not any(method == "operation.await" for method, _ in client.transport.sent)
 
 
-def test_cancel_short_wait_observes_stop_and_respects_non_cancellable(
-    tmp_path: Path,
+@pytest.mark.parametrize("outcome", ["cancelled", "finished", "failed"])
+def test_cancel_reports_the_gui_request_and_wait_observes_the_outcome(
+    tmp_path: Path, outcome: str
 ) -> None:
     client = make_client(tmp_path)
     run_op = discover_operation(client, 31)
@@ -522,11 +498,22 @@ def test_cancel_short_wait_observes_stop_and_respects_non_cancellable(
         "ok": True,
         "result": {
             "reason": "completed",
-            "status": "cancelled",
+            "status": outcome,
             "feedback": "Stop requested",
+            "error": {"reason": "failed", "message": "ramp failed"},
         },
     }
-    assert client.call("cancel", {"op": run_op}) == {"status": "cancelled"}
+    receipt = client.call("cancel", {"op": run_op})
+    assert receipt == {
+        "execution": None,
+        "op": run_op,
+        "status": "cancelling",
+        "cancel_requested": True,
+    }
+    terminal = client.call("wait", {"op": run_op, "timeout": 2})
+    assert terminal["status"] == outcome
+    if outcome == "failed":
+        assert terminal["error"]["message"] == "ramp failed"
     client.transport.replies["operation.cancel"] = {
         "ok": False,
         "error": {
