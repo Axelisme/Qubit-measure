@@ -84,7 +84,8 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "tabs": tabs,
         "executions": [
             project_execution(
-                item, definition=definitions[item["recipe"]] if "recipe" in item else None
+                item,
+                definition=definitions[item["recipe"]] if "recipe" in item else None,
             )
             for item in execution_snapshots
             if item["phase"] != "terminal"

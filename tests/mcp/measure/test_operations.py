@@ -137,9 +137,7 @@ def test_status_indexes_gui_operations_and_session_executions(
     pending = client.context.session.executions.start(
         client.context.session.bind(), "pending-tab", "post"
     )
-    pending_summary = client.call(
-        "status", {"execution": pending.snapshot().execution}
-    )
+    pending_summary = client.call("status", {"execution": pending.snapshot().execution})
     assert client.call("status", {}) == {
         "project": {"chip": "chip", "qubit": "qubit", "resonator": "res"},
         "soc": {"connected": True, "mock": True},
@@ -162,9 +160,7 @@ def test_status_indexes_gui_operations_and_session_executions(
     assert client.call("status", {})["executions"] == [pending_summary]
     before = len(client.transport.sent)
     for item in executions:
-        full = client.call(
-            "status", {"execution": item["execution"], "detail": "full"}
-        )
+        full = client.call("status", {"execution": item["execution"], "detail": "full"})
         assert full["status"] == "finished"
         assert full["execution"] == item["execution"]
     assert len(client.transport.sent) == before
