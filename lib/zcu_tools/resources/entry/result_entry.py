@@ -110,7 +110,7 @@ class ResultEntry:
         components = document.get("components")
         if isinstance(components, dict):
             for name, fields in components.items():
-                validate_component_name(name, source=self._result_path / "setup.yaml")
+                validate_component_name(name, source=source)
                 if isinstance(fields, dict) and isinstance(
                     kind := fields.get("kind"), str
                 ):

@@ -159,9 +159,7 @@ def test_seed_accepts_omitted_components_without_rewriting_setup(
     write_yaml(source, template)
     before = source.read_bytes()
 
-    reopened = ResultEntry.open(
-        "entry", result_root=results, database_root=database
-    )
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     reopened.setup.refresh()
     point = reopened.new_point("empty")
 

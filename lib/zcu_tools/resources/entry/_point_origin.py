@@ -19,7 +19,7 @@ def register(view: PointView, source: Path) -> None:
 
 
 def clone_source(view: PointView, entry: Path) -> Path:
-    """ResultEntry's clone caller holds entry's lock before this identity check."""
+    """Return the source directory after checking the view belongs to this entry."""
     source = _sources[view]
     if source.resolve().parents[2] != entry.resolve():
         raise ValueError("Cross-entry cloning is not supported")
