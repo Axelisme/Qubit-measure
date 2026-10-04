@@ -121,6 +121,32 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+@pytest.mark.parametrize("write", ["attribute", "set", "whole-field"])
+def test_leaf_write_runs_owning_field_normalization(tmp_path: Path, write: str) -> None:
+    class NormalizeExt(ComponentSchema):
+        @field_validator("ext")
+        @classmethod
+        def normalize_title(cls, value: YamlMap) -> YamlMap:
+            value["title"] = str(value["title"]).strip().lower()
+            return value
+
+    with registered_model("notebook/normalize-ext", NormalizeExt) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, ext={"title": "prepared"})
+        with entry.setup.edit() as draft:
+            if write == "attribute":
+                draft.N1.ext.title = "  Changed  "
+            elif write == "set":
+                draft.set("N1.ext.title", "  Changed  ")
+            else:
+                draft.N1.ext = {"title": "  Changed  "}
+        assert entry.setup.N1.ext.title == "changed"
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.N1.ext.title == "changed"
+
+
 def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
     class NullableFrequency(ComponentSchema):
         freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
