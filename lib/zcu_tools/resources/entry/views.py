@@ -162,6 +162,36 @@ class EditView:
     def _edit_general(self) -> Generator[SetupGeneral]:
         yield self._draft.general
 
+    def set(self, path: str, value: YamlValue) -> None:
+        parts = path.split(".")
+        if len(parts) < 2 or not all(parts):
+            raise ValueError(f"{path!r}: expected a dotted field path")
+        node: _FieldNode
+        if parts[0] == "general":
+            node = self._draft.general
+        else:
+            if parts[0] not in self._draft.components:
+                raise AttributeError(f"Unknown component {parts[0]!r}")
+            node = self._draft.components[parts[0]]
+        for index, name in enumerate(parts[1:-1], start=1):
+            parent_path = ".".join(parts[:index])
+            if isinstance(node, BaseModel):
+                component_registry.check_fields(
+                    type(node), {name: None}, path=parent_path
+                )
+                child = getattr(node, name)
+            else:
+                child = node[name]
+            if not isinstance(child, (BaseModel, dict)):
+                raise AttributeError(f"{parent_path}.{name}: not a field container")
+            node = child
+
+        @contextmanager
+        def edit_node() -> Generator[_FieldNode]:
+            yield node
+
+        FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
+
     @property
     def description(self) -> str | None:
         return self._draft.general.description
