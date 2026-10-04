@@ -447,7 +447,15 @@ def test_t1_number_inputs_publish_floats_and_keep_integer_counts(tmp_path, delay
 
 def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
     gui = CoherenceGui()
-    client = make_client(tmp_path, gui)
+
+    def respond(method, params):
+        reply = gui(method, params)
+        if method == "tab.get_analyze_result":
+            reply["summary"] = {"t1": 42.0, "t1_err": None, "warnings": ["singular error"]}
+            reply["invalid"] = [{"path": "summary.t1_err", "reason": "non_finite"}]
+        return reply
+
+    client = make_client(tmp_path, respond)
     try:
         reply = full_execution_reply(
             client,
@@ -478,6 +486,26 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
         assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5100.0
         assert data["raw_save"]["path"] == "/actual/raw.h5"
         assert data["analysis"]["status"] == "finished"
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        assert len(client.transport.sent) == before
+        assert summary["analysis"]["primary"] == {
+            "params": {"threshold": 0.5},
+            "estimates": {
+                "t1": {"value": 42.0, "stderr": None, "unit": "us", "quality": None}
+            },
+            "details": {},
+            "warnings": ["singular error"],
+        }
+        assert summary["invalid"] == [
+            {"path": "analysis.primary.estimates.t1.stderr", "reason": "non_finite"}
+        ]
+        assert data["analysis"]["result"]["summary"]["t1"] == 42.0
+        assert summary["actual"]["parameters"]["delay"]["value"] == {
+            "start": 0.04,
+            "stop": 80.0,
+            "expts": 81,
+        }
         assert data["writeback"]["items"]
         assert reply.images
         methods = [method for method, _ in client.transport.sent]

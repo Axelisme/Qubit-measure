@@ -525,6 +525,13 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     assert handoff.data["status"] == "interactive"
     assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
     assert handoff.data["analysis"]["op"] == handoff.data["op"]
+    assert initial.data["status"] == "interactive"
+    assert initial.data["steps"]["run"]["status"] == "finished"
+    assert initial.data["steps"]["raw_save"]["status"] == "saved"
+    assert initial.data["steps"]["analysis"]["primary"]["status"] == "interactive"
+    assert initial.data["artifacts"]["raw"]["data"]["members"]["data"] == [
+        {"path": "/actual/raw.h5", "status": "saved"}
+    ]
     interaction = handoff.data["analysis"]["interaction"]
     assert interaction is not None
     if handoff_failure:
@@ -775,6 +782,13 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         during_save = client.call("status", {"execution": execution, "detail": "full"})
         assert during_save["raw_save"]["status"] == "saving"
         assert during_save["raw_save"]["path"] is None
+        saving_summary = client.call("status", {"execution": execution})
+        assert saving_summary["steps"]["raw_save"]["status"] == "saving"
+        assert saving_summary["artifacts"]["raw"]["data"] == {
+            "status": "saving",
+            "lifetime": "persistent",
+            "members": {"data": [{"path": "/actual/raw.h5", "status": "reserved"}]},
+        }
         release_save.set()
         final = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})
@@ -789,6 +803,19 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         )
         if not save_succeeds:
             assert final.data["error"]["reason"] == "raw_save_failed"
+        summary = client.call("status", {"execution": execution})
+        assert summary["status"] == final.data["status"]
+        assert summary["cancel_requested"] is True
+        assert summary["steps"]["raw_save"]["status"] == (
+            "saved" if save_succeeds else "failed"
+        )
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+            {
+                "path": "/actual/raw.h5",
+                "status": "saved" if save_succeeds else "reserved",
+            }
+        ]
+        assert summary["error"] == final.data["error"]
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.save_data") == 1
         assert "operation.cancel" not in methods
@@ -1629,7 +1656,23 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
             client, client.call("lookback", {"frequency_mhz": 6000.0})
         )
         data = reply.data
-        assert data["status"] == "failed", data
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        assert len(client.transport.sent) == before
+        assert summary["status"] == data["status"] == "failed", data
+        assert summary["error"] == data["error"]
+        assert summary["steps"]["raw_save"]["status"] == raw_status
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == (
+            [{"path": "/actual/raw.h5", "status": "saved"}]
+            if raw_status == "saved"
+            else [{"path": "/actual/raw.h5", "status": "reserved"}]
+            if failure == "raw_finish"
+            else []
+        )
+        if failure == "writeback":
+            assert summary["artifacts"]["analysis"]["trace"]["members"]["image"] == [
+                {"path": "/actual/trace.png", "status": "saved"}
+            ]
         assert reply.is_error
         assert data["error"]["phase"] == phase
         if failure.startswith("superseded"):

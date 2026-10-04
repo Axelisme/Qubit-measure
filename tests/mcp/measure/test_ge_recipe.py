@@ -670,7 +670,19 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
     modules = gui.publication["tree"]["children"]["modules"]["children"]
     modules["reset"]["ref"] = "old_reset"
     modules["init_pulse"]["ref"] = "old_init"
-    client = make_client(tmp_path, gui)
+
+    def respond(method, params):
+        reply = gui(method, params)
+        if method == "tab.get_analyze_result":
+            reply["summary"] = {"centers": {"ground": [0.1, 0.2], "excited": [0.8, 0.9]}}
+        elif method == "tab.get_post_analyze_result":
+            reply["summary"] = {
+                "fidelity": 0.98,
+                "populations": {"ground": 0.97, "excited": 0.03},
+            }
+        return reply
+
+    client = make_client(tmp_path, respond)
     try:
         reply = full_execution_reply(
             client, client.call("singleshot_ge", {"pi_ref": "pi", "shots": 1234})
@@ -679,8 +691,29 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         assert data["status"] == "finished", data
         assert data["analysis_mode"] == "primary_post"
         assert data["analysis_stage"] == "post"
-        assert data["analysis"]["result"]["summary"] == {"offset": 0.24}
-        assert data["post_analysis"]["result"]["summary"] == {"fidelity": 0.98}
+        assert data["analysis"]["result"]["summary"] == {
+            "centers": {"ground": [0.1, 0.2], "excited": [0.8, 0.9]}
+        }
+        assert data["post_analysis"]["result"]["summary"] == {
+            "fidelity": 0.98,
+            "populations": {"ground": 0.97, "excited": 0.03},
+        }
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        assert len(client.transport.sent) == before
+        assert summary["analysis"]["primary"]["details"] == {
+            "centers": {"ground": [0.1, 0.2], "excited": [0.8, 0.9]}
+        }
+        assert summary["analysis"]["post"]["details"] == {
+            "fidelity": 0.98,
+            "populations": {"ground": 0.97, "excited": 0.03},
+        }
+        assert summary["artifacts"]["analysis"]["trace"]["members"]["image"] == [
+            {"path": "/actual/trace.png", "status": "saved"}
+        ]
+        assert summary["artifacts"]["post_analysis"]["cloud"]["members"]["image"] == [
+            {"path": "/actual/cloud.png", "status": "saved"}
+        ]
         assert data["analysis"]["saved_images"] == [
             {"figure_name": "trace", "image_path": "/actual/trace.png"}
         ]
