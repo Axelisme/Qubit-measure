@@ -87,7 +87,7 @@ status: draft
 | C12 | `forbidden` | 穩定工具不依賴有狀態模組 |
 | C13 | `forbidden` | `mcp` 只使用 `gui.remote` 與各 app 的 wire spec |
 
-尚未建立的投影：`zcu_tools` 不 import `zcu_lab`，等 `zcu_lab` 存在後加入 root packages 再建立；`resources/_document_commit.py` 只能由 `resources` 內部 import（`protected`），等該 module 進入 main 後建立。
+尚未建立的投影：`zcu_tools` 不 import `zcu_lab`，等 `zcu_lab` 存在後加入 root packages 再建立。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。萬用字元只用於合法例外，例如 C1 的 `v2_gui`，註解寫明「不是債務」。`ignore_imports` 只減不增。
 

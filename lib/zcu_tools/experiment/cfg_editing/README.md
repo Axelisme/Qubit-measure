@@ -1,11 +1,11 @@
 # `zcu_tools.experiment.cfg_editing` — experiment cfg editing support
 
-**Last updated:** 2026-09-27 — experiment cfg editing relocation
+**Last updated:** 2026-10-04 — lazy experiment exports
 
 此 Qt-free 實驗側編輯支援 package 是 program/v2 module/waveform editable shape 的唯一 owner。`PROGRAM_SHAPES`
 固定列出七種 module 與六種 waveform discriminator、label與fresh Spec factory；它不做runtime
-registration。Import 會經 experiment package root 載入 `experiment.base` 與其 device/datafile 依賴；
-本 package 不載入 program runtime、app、session、resources、notebook 或 Qt。
+registration。Experiment package root 的公開 exports 按需載入，匯入本 package 不載入
+`experiment.base`、device、datafile、program runtime、app、session、resources、notebook 或 Qt。
 
 每次`ProgramShape.make_spec(policy)`都建立deep-fresh tree。`ProgramSpecPolicy`只容許兩個跨app
 差異：Arb data的choices source，以及Direct/Pulse Readout間的inheritance hook。main與autoflux

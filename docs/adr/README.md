@@ -38,7 +38,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Persistence
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分 memento、experiment result、run artifact、參數、樣品座標與波形資產的 owner、完整性、失敗與引用邊界；局部格式見各 owner 文件。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分 memento、experiment result、run artifact、參數、樣品座標與波形資產的 owner、完整性、失敗與引用邊界；參數容器使用工作單位與顯式定義注入，局部格式見各 owner 文件。
 
 ## Experiment runtime／Autofluxdep workflow
 
