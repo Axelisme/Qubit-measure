@@ -77,7 +77,9 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     return result
 
 
-def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
+def _partial_model[_Model: BaseModel](
+    model: type[_Model], *, component_root: bool = False
+) -> type[_Model]:
     fields: dict[str, tuple[object, FieldInfo]] = {}
     for name, field in model.model_fields.items():
         annotation = field.annotation
@@ -92,7 +94,7 @@ def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
         partial_field = deepcopy(field)
         # D101: only supplied fields run validators in a partial document.
         partial_field.validate_default = False
-        if name != "kind" and field.is_required():
+        if field.is_required() and not (component_root and name == "kind"):
             # Missing values stay outside model_fields_set and serialized patches.
             # Supplied values retain the original non-nullable annotation.
             partial_field.default = None
@@ -175,7 +177,7 @@ class ComponentRegistry:
         for reference in reference_paths:
             _validate_reference(model, reference)
         units = _model_units(model)
-        partial_model = _partial_model(model)
+        partial_model = _partial_model(model, component_root=True)
         self._models[kind] = model
         self._references[kind] = reference_paths
         self._units[kind] = units
