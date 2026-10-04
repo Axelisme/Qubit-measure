@@ -29,6 +29,32 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_path_set_and_attribute_edits_use_the_same_shared_draft(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0, wiring={"ch": 1})
+    before = setup_path.read_bytes()
+    with entry.setup.edit() as draft:
+        draft.set("R1.freq", 6550.0)
+        draft.set("R1.wiring.ch", 2)
+        draft.set("R1.ext.note", "same draft")
+        draft.set("general.ext.temperature", 0.03)
+        draft.set("general.description", "prepared")
+        assert draft.R1.freq == pytest.approx(6550.0)
+        assert draft.general.ext.temperature == 0.03
+        assert setup_path.read_bytes() == before
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.R1.freq == pytest.approx(6550.0)
+    assert reopened.setup.R1.wiring.ch == 2
+    assert reopened.setup.R1.ext.note == "same draft"
+    assert reopened.setup.general.ext.temperature == 0.03
+    assert reopened.setup.description == "prepared"
+    assert YAML(typ="safe").load(setup_path)["components"]["R1"]["freq"] == 6.55e9
+
+
 @pytest.mark.parametrize("operation", ["direct", "draft"])
 def test_entry_identity_cannot_be_replaced_through_general_or_a_whole_draft(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
