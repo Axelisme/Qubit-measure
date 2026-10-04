@@ -140,7 +140,9 @@ def _image_artifacts(execution: dict[str, Any] | None) -> dict[str, Any]:
     for name in execution.get("remaining_images") or []:
         if name not in artifacts:
             artifacts[name] = {
-                "status": "incomplete"
+                "status": execution["save_status"]
+                if name == execution.get("unconfirmed_image")
+                else "incomplete"
                 if execution["phase"] == "terminal"
                 else "not_started",
                 "lifetime": "persistent",
