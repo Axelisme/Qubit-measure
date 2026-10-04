@@ -95,6 +95,7 @@ class ComponentSchema(BaseModel):
 class ResonatorSchema(ComponentSchema):
     freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
     kappa: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
+    amplifier: str | None = None
 
 
 class QubitSchema(ComponentSchema):
@@ -105,6 +106,8 @@ class QubitSchema(ComponentSchema):
     t1: Annotated[float | None, UnitSpec("s", "us")] = None
     t2: Annotated[float | None, UnitSpec("s", "us")] = None
     pi_gain: Annotated[float | None, UnitSpec("1", "1")] = None
+    readout: str | None = None
+    flux_source: str | None = None
 
 
 class FluxoniumSchema(QubitSchema):

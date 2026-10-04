@@ -28,6 +28,17 @@ class UnknownKindError(ValueError):
         )
 
 
+class MissingReferenceError(ValueError):
+    def __init__(self, source: Path, component: str, field: str, target: str) -> None:
+        self.source = source
+        self.component = component
+        self.field = field
+        self.target = target
+        super().__init__(
+            f"{source}: {component}.{field}: component reference {target!r} does not exist"
+        )
+
+
 class PartialCommitError(OSError):
     def __init__(
         self,

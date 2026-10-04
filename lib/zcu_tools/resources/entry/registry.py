@@ -169,8 +169,12 @@ class ComponentRegistry:
 
 
 component_registry = ComponentRegistry()
-component_registry.register("resonator", ResonatorSchema)
+component_registry.register("resonator", ResonatorSchema, references=("amplifier",))
 component_registry.register("device/current_source", CurrentSourceSchema)
 component_registry.register("amplifier/jpa", JpaSchema)
-component_registry.register("qubit/fluxonium", FluxoniumSchema)
-component_registry.register("qubit/transmon", QubitSchema)
+component_registry.register(
+    "qubit/fluxonium", FluxoniumSchema, references=("readout", "flux_source")
+)
+component_registry.register(
+    "qubit/transmon", QubitSchema, references=("readout", "flux_source")
+)

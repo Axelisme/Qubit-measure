@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
+    MissingReferenceError,
     PartialCommitError,
     ResultEntry,
     UnknownFieldError,
@@ -26,6 +27,58 @@ def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
 def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     results, database = entry_roots
     return ResultEntry.create("entry", result_root=results, database_root=database)
+
+
+@pytest.mark.parametrize(
+    ("kind", "field", "target_kind"),
+    [
+        ("resonator", "amplifier", "amplifier/jpa"),
+        ("qubit/fluxonium", "readout", "resonator"),
+        ("qubit/fluxonium", "flux_source", "device/current_source"),
+        ("qubit/transmon", "readout", "resonator"),
+        ("qubit/transmon", "flux_source", "device/current_source"),
+    ],
+)
+@pytest.mark.parametrize("operation", ["add", "write", "open", "refresh"])
+def test_missing_component_references_report_location_without_publishing_invalid_values(
+    entry_roots: tuple[Path, Path],
+    entry: ResultEntry,
+    kind: str,
+    field: str,
+    target_kind: str,
+    operation: str,
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("T1", kind=target_kind)
+    entry.setup.add_component("C1", kind=kind, **{field: "T1"})
+    if operation in ("open", "refresh"):
+        write_setup_component(setup_path, "C1", {"kind": kind, field: "absent"})
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        if operation == "add":
+            entry.setup.add_component("C2", kind=kind, **{field: "absent"})
+        elif operation == "write":
+            setattr(entry.setup.C1, field, "absent")
+        elif operation == "refresh":
+            entry.setup.refresh()
+        else:
+            ResultEntry.open("entry", result_root=results, database_root=database)
+
+    with pytest.raises(MissingReferenceError) as failure:
+        perform_operation()
+    component = "C2" if operation == "add" else "C1"
+    assert failure.value.source == setup_path
+    assert failure.value.component == component
+    assert failure.value.field == field
+    assert failure.value.target == "absent"
+    assert f"{component}.{field}" in str(failure.value)
+    assert setup_path.read_bytes() == before
+    assert getattr(entry.setup.C1, field) == "T1"
+    if operation == "add":
+        with pytest.raises(AttributeError, match="C2"):
+            _ = entry.setup.C2
 
 
 @pytest.mark.parametrize(
