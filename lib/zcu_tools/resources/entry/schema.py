@@ -1,6 +1,7 @@
 """Typed setup document at the persistence boundary."""
 
 import keyword
+import math
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
+from pydantic.fields import FieldInfo
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
@@ -160,6 +162,20 @@ class CurrentSourceSchema(ComponentSchema):
     current: Annotated[float | None, UnitSpec("A", "mA")] = None
 
 
+def _same_canonical_value(
+    before: YamlValue, after: YamlValue, field: FieldInfo
+) -> bool:
+    if (
+        isinstance(before, float)
+        and isinstance(after, float)
+        and math.isfinite(before)
+        and math.isfinite(after)
+        and any(isinstance(metadata, UnitSpec) for metadata in field.metadata)
+    ):
+        return math.isclose(before, after, rel_tol=1e-12, abs_tol=0.0)
+    return before == after
+
+
 def _canonical_errors(
     fields: YamlMap, validated: BaseModel, path: FieldPath, *, source: Path
 ) -> list[InitErrorDetails]:
@@ -168,7 +184,7 @@ def _canonical_errors(
         validated.model_dump(exclude_unset=True)
     )
     errors: list[InitErrorDetails] = []
-    for name in type(validated).model_fields:
+    for name, field in type(validated).model_fields.items():
         if name not in fields and name not in canonical:
             continue
         before = fields.get(name, "(missing)")
@@ -178,7 +194,9 @@ def _canonical_errors(
             errors.extend(
                 _canonical_errors(before, nested, (*path, name), source=source)
             )
-        elif (name in fields) != (name in canonical) or before != after:
+        elif (name in fields) != (name in canonical) or not _same_canonical_value(
+            before, after, field
+        ):
             errors.append(
                 InitErrorDetails(
                     type=PydanticCustomError(
