@@ -24,6 +24,8 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 日常量測先選對應 recipe，讀其現行 schema。分析既有資料先用 `tab_analyze`，互動判讀用 `tab_interact` 取得狀態、圖與可用命令。Client 延後顯示工具時，先搜尋對應 recipe 或共用入口。這是操作指引，不是日常／排查權限模式。
 
+選擇新建或重用 tab、再次呼叫同 adapter 的 recipe、保存不完整或清理工作頁時，讀 [Tab 生命週期](references/tab-strategy.md)。
+
 細部設定、保存、writeback 或排查使用 `rpc_list` → `rpc_describe` → `rpc_call`。讀 adapter guide 時查 `adapter.guide` 的 live schema。所有公開 RPC 都可用，不因已有 recipe 或共用工具而禁止直接呼叫。Raw RPC 不代為聚合結果、解碼 PNG 或完成共用分析的保存流程。
 
 Recipe 首次呼叫最多等待 300 秒。Client deadline 必須超過 300 秒並留傳輸餘裕。首次等待期間，同一 stdio 連線的另一請求不保證立即處理。回傳仍執行中的 execution 後，用 `status(execution)` 或 `wait(execution)` 追蹤整個流程。`wait(op)` 只等待單個 GUI operation。逾時只停止等待，不取消量測，也不是重跑依據。
@@ -36,13 +38,15 @@ Recipe、`tab_analyze` 與 `wait(execution)` 回傳同一摘要。先核對 `act
 
 寫入前明確讀取相關完整 snapshot。Tab 用 `tab.snapshot`，context 用 `context.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 編輯與 Run 另需 `tab.get_cfg` 回傳的 cfg_ref。摘要與 `status` 不替代這些 guard 觀察。`accept(tab)` 接受 Primary 與既有 Post 的全部候選，包含未勾選項；先核對提案與當前目的地。個別候選的修改或寫入走 RPC。
 
+來源記錄帶有 `cloned_from` 的沿用值，在用於量測或校準前至少快速驗證一次。按該值的用途選驗證，例如用短掃描核對頻率，或用 Rabi 核對 pulse 候選。讀 [Tab 生命週期的沿用值驗證](references/tab-strategy.md#沿用值驗證) 決定證據與下一步。驗證仍受當次硬體、資料及資源授權限制。
+
 完成條件是已選定入口、核對其 schema 與適用授權，且 client 等待期限能容納本次呼叫。
 
 ## 每輪實驗推理
 
 ### 整合證據
 
-把新結果放回累積實驗中理解。需要判斷正常表現、品質、陌生症狀或改道時，按 [經驗維護](references/knowledge.md) 查找相關內容；仍適用且已讀的內容不必每輪重讀。
+把新結果放回累積實驗中理解。需要判斷正常表現、品質、陌生症狀或改道時，按 [經驗維護](references/knowledge.md) 查找相關內容；仍適用且已讀的內容不必每輪重讀。判讀 T1 的時間窗口、尾端、參數誤差或 repeat，以及 Rabi 的週期、第一個峰或 fit 一致性時，從 `<repo>/measure_knowledge/routing.md` 進入相應條目。
 
 分開描述直接觀察、暫定物理圖像與未解問題。物理圖像可以定性，也可以有多個候選解釋。說明哪些觀察支持它，以及什麼結果會迫使你修改它。
 
