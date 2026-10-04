@@ -19,14 +19,8 @@ from pydantic import (
 
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
-from zcu_tools.format_version import (
-    FieldPath,
-    FormatVersion,
-    YamlMap,
-    YamlValue,
-    validate_header,
-)
-from zcu_tools.resources.document_store import UnitSpec
+from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
+from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
 PARAMETER_FORMAT = "zcu.parameter-container"
 PARAMETER_VERSION = FormatVersion(1, 0)
