@@ -137,6 +137,13 @@ def _image_artifacts(execution: dict[str, Any] | None) -> dict[str, Any]:
             "lifetime": "persistent",
             "members": {"image": [{"path": image["image_path"], "status": "saved"}]},
         }
+    for name in execution.get("remaining_images") or []:
+        if name not in artifacts:
+            artifacts[name] = {
+                "status": "incomplete" if execution["phase"] == "terminal" else "not_started",
+                "lifetime": "persistent",
+                "members": {"image": []},
+            }
     return artifacts
 
 
