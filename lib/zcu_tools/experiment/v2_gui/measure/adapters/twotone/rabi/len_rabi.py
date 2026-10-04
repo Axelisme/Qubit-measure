@@ -20,6 +20,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     SweepDefault,
     scaled_md,
 )
+from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
+    fit_quality_summary,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
@@ -58,6 +61,7 @@ class LenRabiAnalyzeResult(AnalyzeResultBase):
     # Rabi oscillation frequency in MHz (1/us), preserved for writeback as 'rabi_f'.
     rabi_f: float
     rabi_f_err: float
+    fit_quality: dict[str, dict[str, object]] | None = None
 
 
 class LenRabiAdapter(
@@ -183,6 +187,7 @@ class LenRabiAdapter(
             pi2_len_err=analysis.pi2_len_err,
             rabi_f=analysis.rabi_f,
             rabi_f_err=analysis.rabi_f_err,
+            fit_quality=fit_quality_summary(analysis.fit_quality),
         )
 
     def get_writeback_items(

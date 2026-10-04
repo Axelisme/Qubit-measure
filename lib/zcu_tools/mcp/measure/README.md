@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-04, captured execution summaries and session previews
+**Last updated:** 2026-10-04, fit quality in execution estimates
 
 # `zcu_tools/mcp/measure/`
 
@@ -34,6 +34,10 @@ GUI 的分析投影把非有限 summary 數字換成 null，以 `invalid` 記錄
 Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(execution)` 不重新推導原因。
 不可估誤差不刪除有限 fit value、warning 或已確認的保存路徑，也不觸發自動 accept。
 這項表示轉換不改 operation 的 failed outcome 或 generic context 的拒絕規則。
+
+T1、T2、Rabi 與 GE 的 estimate.quality 使用 native summary 的 named fit_quality，不重算指標。GE 保留 joint、ground、excited，各階段使用自己的 optimizer covariance。每個 estimate 的 quality.invalid 與 execution.invalid 都指出回覆中的實際欄位。Full 保留同一份 native summary 與原路徑。品質不新增 accept 門檻。
+
+Analysis-only 沒有 recipe 身分。Native summary 帶 fit_quality 時，摘要使用 recipes.RECIPES 已宣告的 scalar value_key，完全相同的 name/error_key/unit 宣告可合併。Present key 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取；native full 仍可查詢。沒有品質的其他 analysis-only 結果留在 details。
 
 `tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 不加 seen guard，較晚的 owner-loop commit 生效。沒有來源鎖或自動重試。
 

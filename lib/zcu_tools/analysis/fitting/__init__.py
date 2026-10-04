@@ -27,6 +27,7 @@ from .decay import (
     fit_ge_decay,
 )
 from .multi_decay import fit_transition_rates
+from .quality import FitQuality, QualityIssue, compute_fit_quality
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
 from .resonance import HangerModel, TransmissionModel, get_proper_model

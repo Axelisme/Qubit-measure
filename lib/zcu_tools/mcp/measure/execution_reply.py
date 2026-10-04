@@ -95,18 +95,57 @@ def _actual(
     }
 
 
+def _summary_estimates(
+    details: dict[str, Any], definition: RecipeDefinition | None
+) -> tuple[SummaryEstimate, ...]:
+    if definition is not None:
+        return definition.summary_estimates
+    if details.get("fit_quality") is None:
+        return ()
+    from recipes import RECIPES
+
+    # Analysis-only carries no recipe identity. Only unambiguous declarations
+    # may project present scalar keys; never infer an experiment or read the GUI.
+    by_key: dict[str, SummaryEstimate] = {}
+    for recipe in RECIPES:
+        for estimate in recipe.summary_estimates:
+            if estimate.value_key not in details:
+                continue
+            previous = by_key.setdefault(estimate.value_key, estimate)
+            if previous != estimate:
+                raise ValueError(
+                    f"Ambiguous analysis estimate {estimate.value_key!r}: "
+                    "recipe declarations disagree"
+                )
+    return tuple(by_key.values())
+
+
+def _estimate_quality(
+    qualities: dict[str, Any] | None, stage: str, estimate: str
+) -> dict[str, Any] | None:
+    if qualities is None:
+        return None
+    projected = deepcopy(qualities)
+    prefix = f"analysis.{stage}.estimates.{estimate}.quality."
+    for quality in projected.values():
+        for issue in quality["invalid"]:
+            issue["path"] = prefix + issue["path"].removeprefix("summary.fit_quality.")
+    return projected
+
+
 def _pane(
-    execution: dict[str, Any] | None, definition: RecipeDefinition | None
-) -> tuple[dict[str, Any] | None, dict[str, str]]:
+    execution: dict[str, Any] | None, definition: RecipeDefinition | None, stage: str
+) -> tuple[dict[str, Any] | None, dict[str, list[str]]]:
     if execution is None:
         return None, {}
     result = execution.get("result") or {}
     native = result.get("summary")
     details = deepcopy(native) if isinstance(native, dict) else {"result": native}
     warnings = details.pop("warnings", [])
+    qualities = details.get("fit_quality")
     estimates: dict[str, EstimateReply] = {}
-    paths = {}
-    for estimate in definition.summary_estimates if definition else ():
+    paths: dict[str, list[str]] = {}
+    for estimate in _summary_estimates(details, definition):
         if estimate.value_key not in details:
             continue
         estimates[estimate.name] = {
@@ -115,17 +154,53 @@ def _pane(
             if estimate.error_key
             else None,
             "unit": estimate.unit,
-            "quality": None,
+            "quality": _estimate_quality(qualities, stage, estimate.name),
         }
-        paths[f"summary.{estimate.value_key}"] = f"estimates.{estimate.name}.value"
+        paths[f"summary.{estimate.value_key}"] = [f"estimates.{estimate.name}.value"]
         if estimate.error_key:
-            paths[f"summary.{estimate.error_key}"] = f"estimates.{estimate.name}.stderr"
+            paths[f"summary.{estimate.error_key}"] = [
+                f"estimates.{estimate.name}.stderr"
+            ]
+        if qualities is not None:
+            paths.setdefault("summary.fit_quality", []).append(
+                f"estimates.{estimate.name}.quality"
+            )
+    if "summary.fit_quality" in paths:
+        details.pop("fit_quality")
     return {
         "params": result.get("params", execution.get("params")),
         "estimates": estimates,
         "details": details,
         "warnings": warnings,
     }, paths
+
+
+def _pane_invalid(
+    execution: dict[str, Any] | None, paths: dict[str, list[str]], stage: str
+) -> list[dict[str, str]]:
+    result = (execution or {}).get("result") or {}
+    qualities = (result.get("summary") or {}).get("fit_quality") or {}
+    issues = [
+        *result.get("invalid", []),
+        *(issue for quality in qualities.values() for issue in quality["invalid"]),
+    ]
+    projected = []
+    seen = set()
+    for issue in issues:
+        path = issue["path"]
+        destinations = paths.get(path)
+        if destinations is None and path.startswith("summary.fit_quality."):
+            suffix = path.removeprefix("summary.fit_quality")
+            destinations = [
+                prefix + suffix for prefix in paths.get("summary.fit_quality", [])
+            ]
+        for destination in destinations or [path.replace("summary.", "details.", 1)]:
+            qualified = f"analysis.{stage}.{destination}"
+            key = (qualified, issue["reason"])
+            if key not in seen:
+                seen.add(key)
+                projected.append({"path": qualified, "reason": issue["reason"]})
+    return projected
 
 
 def _image_artifacts(execution: dict[str, Any] | None) -> dict[str, Any]:
@@ -310,17 +385,12 @@ def project_execution(
     interaction = (primary_execution or {}).get("interaction") or (
         post_execution or {}
     ).get("interaction")
-    primary, primary_paths = _pane(primary_execution, definition)
-    post, post_paths = _pane(post_execution, definition)
-    invalid = []
-    for stage, execution, paths in (
-        ("primary", primary_execution, primary_paths),
-        ("post", post_execution, post_paths),
-    ):
-        for item in ((execution or {}).get("result") or {}).get("invalid", []):
-            path = item["path"]
-            projected_path = paths.get(path, path.replace("summary.", "details.", 1))
-            invalid.append({**item, "path": f"analysis.{stage}.{projected_path}"})
+    primary, primary_paths = _pane(primary_execution, definition, "primary")
+    post, post_paths = _pane(post_execution, definition, "post")
+    invalid = [
+        *_pane_invalid(primary_execution, primary_paths, "primary"),
+        *_pane_invalid(post_execution, post_paths, "post"),
+    ]
     raw = snapshot["raw_save"]
     paths = []
     if raw["path"] is not None:

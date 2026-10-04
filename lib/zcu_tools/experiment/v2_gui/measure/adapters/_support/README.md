@@ -1,10 +1,12 @@
-**Last updated:** 2026-10-04, domain-owned flux-line role choices
+**Last updated:** 2026-10-04, fit quality projection, domain-owned flux-line role choices
 
 # adapters/_support
 
 這個 private package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：context-free cfg definition builder、typed default seeds、module role/default assembly、
 analysis carriers、writeback helpers與跨實驗的 context utilities。
+
+`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
 
 依賴方向固定為 `gui/experiment contracts → _support → concrete adapters → registry`。
 `_support` 不 import concrete adapter 或 `registry.py`，也不宣告 experiment order。只屬於

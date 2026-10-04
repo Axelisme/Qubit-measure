@@ -5,7 +5,10 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
+from zcu_tools.analysis.fitting import calc_population_pdf, compute_fit_quality
 from zcu_tools.experiment import RunRecord
+from zcu_tools.experiment.utils.single_shot.ge import base as ge_fitting
 from zcu_tools.experiment.v2.singleshot.ge import (
     GE_Cfg,
     GE_Exp,
@@ -59,6 +62,92 @@ def ge_source() -> RunRecord[GE_Cfg, GE_Result]:
         ),
     )
     return RunRecord(cfg, GE_Result(signals, np.arange(6000), np.array([0, 1])))
+
+
+def test_quality_keeps_joint_and_population_fit_inputs_and_covariances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    joint_parameters = (-1.0, 1.0, 0.2, 0.8, 0.1, 0.5, 0.01)
+    joint_covariance = np.diag([0.01, 0.04, 0.0016, 0.0004, 0.0001, 0.0025, 0.0001])
+    populations = [(0.85, 0.1, 0.01), (0.15, 0.8, 0.02)]
+    covariances = [
+        np.diag([0.007225, 0.0004, 0.000004]),
+        np.diag([0.0036, 0.0144, 0.000016]),
+    ]
+    joint_inputs: list[
+        tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+    ] = []
+    population_inputs: list[tuple[NDArray[np.float64], NDArray[np.float64]]] = []
+
+    def joint(
+        xs: NDArray[np.float64],
+        ground: NDArray[np.float64],
+        excited: NDArray[np.float64],
+        **kwargs: object,
+    ):
+        joint_inputs.append((xs.copy(), ground.copy(), excited.copy()))
+        return joint_parameters, joint_covariance
+
+    def population(
+        xs: NDArray[np.float64],
+        pdfs: NDArray[np.float64],
+        *args: object,
+        **kwargs: object,
+    ):
+        index = len(population_inputs)
+        population_inputs.append((xs.copy(), pdfs.copy()))
+        return populations[index], covariances[index]
+
+    monkeypatch.setattr(ge_fitting, "fit_singleshot", joint)
+    monkeypatch.setattr(ge_fitting, "fit_singleshot_p0", population)
+    plots = Plots(NonPresentingHost())
+    try:
+        result = GE_Exp().analyze(
+            ge_source(), GEAnalyzeOptions(angle=0.0, align_t1=False), plots=plots
+        )
+        # Quality cannot introduce another optimizer invocation.
+        assert len(joint_inputs) == 1
+        assert len(population_inputs) == 2
+        xs, ground, excited = joint_inputs[0]
+        expected_joint = compute_fit_quality(
+            np.concatenate([ground, excited]),
+            np.concatenate(
+                [
+                    calc_population_pdf(xs, *joint_parameters),
+                    calc_population_pdf(xs, -1.0, 1.0, 0.2, 0.1, 0.8, 0.5, 0.01),
+                ]
+            ),
+            dict(
+                zip(
+                    ("sg", "se", "s", "p0_g", "p0_e", "p_avg", "length_ratio"),
+                    joint_parameters,
+                    strict=True,
+                )
+            ),
+            joint_covariance,
+        )
+        assert result.fit_quality is not None
+        assert set(result.fit_quality) == {"joint", "ground", "excited"}
+        assert result.fit_quality["joint"] == expected_joint
+        for index, stage in enumerate(("ground", "excited")):
+            x_stage, data = population_inputs[index]
+            p0_g, p0_e, ratio = populations[index]
+            expected = compute_fit_quality(
+                data,
+                calc_population_pdf(x_stage, -1.0, 1.0, 0.2, p0_g, p0_e, 0.5, ratio),
+                {"p0_g": p0_g, "p0_e": p0_e, "length_ratio": ratio},
+                covariances[index],
+            )
+            assert result.fit_quality[stage] == expected
+        assert result.fit_quality["ground"].relative_parameter_errors[
+            "p0_g"
+        ] == pytest.approx(0.1)
+        assert result.fit_quality["excited"].relative_parameter_errors[
+            "p0_g"
+        ] == pytest.approx(0.4)
+    finally:
+        plots.finish()
+        plots.release()
 
 
 def test_explicit_source_can_fit_without_cfg() -> None:

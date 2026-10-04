@@ -3,11 +3,15 @@
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from threading import Event
 
 import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure.assembly import build_measure_tools
+from zcu_tools.mcp.measure.execution_reply import SummaryEstimate
+
+import recipes
 
 from ._analyze_support import (
     PNG as _PNG,
@@ -42,6 +46,111 @@ from ._analyze_support import (
 from ._analyze_support import (
     stdio_data as _data,
 )
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        SummaryEstimate("other", "t1", "t1_err", "us"),
+        SummaryEstimate("t1", "t1", "other_err", "us"),
+        SummaryEstimate("t1", "t1", "t1_err", "ns"),
+    ],
+)
+def test_analysis_only_rejects_conflicting_estimate_declarations(
+    tmp_path, clients, monkeypatch, declaration
+):
+    t1 = next(recipe for recipe in recipes.RECIPES if recipe.name == "t1")
+    conflict = replace(
+        t1,
+        name="conflicting-t1",
+        summary_estimates=(declaration,),
+    )
+    monkeypatch.setattr(recipes, "RECIPES", (*recipes.RECIPES, conflict))
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return _start_reply({}, [])
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.get_analyze_result":
+            result = _result_reply("analysis", [], {})
+            result["summary"] = {
+                "t1": 25.0,
+                "fit_quality": {
+                    "fit": {
+                        "r2": 0.9,
+                        "normalized_residual_rms": 0.02,
+                        "relative_parameter_errors": {},
+                        "invalid": [],
+                    }
+                },
+            }
+            return result
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    with pytest.raises(ValueError, match="Ambiguous analysis estimate 't1'"):
+        client.call("tab_analyze", {"tab": "t"})
+
+
+@pytest.mark.parametrize("stage", ["primary", "post"])
+def test_analysis_only_uses_unambiguous_native_quality_without_live_reads(
+    tmp_path, clients, monkeypatch, stage
+):
+    t1 = next(recipe for recipe in recipes.RECIPES if recipe.name == "t1")
+    identical = replace(t1, name="identical-t1")
+    monkeypatch.setattr(recipes, "RECIPES", (*recipes.RECIPES, identical))
+    native_issue = {
+        "path": "summary.fit_quality.fit.relative_parameter_errors.decay_time",
+        "reason": "covariance_unavailable",
+    }
+    quality = {
+        "fit": {
+            "r2": -0.25,
+            "normalized_residual_rms": 0.31,
+            "relative_parameter_errors": {"decay_time": None},
+            "invalid": [native_issue],
+        }
+    }
+
+    def respond(method, params):
+        if method in {"tab.analyze", "tab.post_analyze"}:
+            return _start_reply({}, [])
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
+            pane = "analysis" if stage == "primary" else "post_analysis"
+            result = _result_reply(pane, [], {})
+            result["summary"] = {"t1": 25.0, "t1_err": None, "fit_quality": quality}
+            return result
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
+    assert initial.data["status"] == "finished", initial.data
+    execution = initial.data["execution"]
+    before = len(client.transport.sent)
+    summary = client.call("status", {"execution": execution})
+    full = client.call("status", {"execution": execution, "detail": "full"})
+    waited = client.call("wait", {"execution": execution, "timeout": 0}).data
+    assert initial.data == summary
+    assert {k: v for k, v in waited.items() if k != "elapsed_s"} == summary
+    assert len(client.transport.sent) == before
+    assert full["result"]["summary"]["fit_quality"] == quality
+    estimate = summary["analysis"][stage]["estimates"]["t1"]
+    assert estimate["value"] == 25.0
+    assert estimate["unit"] == "us"
+    assert estimate["quality"]["fit"]["r2"] == -0.25
+    assert estimate["quality"]["fit"]["normalized_residual_rms"] == 0.31
+    issue = {
+        "path": f"analysis.{stage}.estimates.t1.quality.fit.relative_parameter_errors.decay_time",
+        "reason": "covariance_unavailable",
+    }
+    assert estimate["quality"]["fit"]["invalid"] == [issue]
+    assert summary["invalid"] == [issue]
+    assert summary["analysis"][stage]["details"] == {}
+    json.dumps(summary, allow_nan=False)
+    json.dumps(full, allow_nan=False)
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])

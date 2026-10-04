@@ -97,6 +97,89 @@ def ge_client(tmp_path):
         client.context.session.close()
 
 
+def test_ge_estimates_preserve_three_native_fit_stages_without_post_refit(ge_client):
+    gui, client = ge_client
+    quality = {
+        "joint": {
+            "r2": None,
+            "normalized_residual_rms": 0.1,
+            "relative_parameter_errors": {"sigma": 0.2},
+            "invalid": [
+                {"path": "summary.fit_quality.joint.r2", "reason": "non_finite"}
+            ],
+        },
+        "ground": {
+            "r2": 0.85,
+            "normalized_residual_rms": 0.02,
+            "relative_parameter_errors": {"p0": None},
+            "invalid": [
+                {
+                    "path": "summary.fit_quality.ground.relative_parameter_errors.p0",
+                    "reason": "zero_parameter",
+                }
+            ],
+        },
+        "excited": {
+            "r2": 0.9,
+            "normalized_residual_rms": None,
+            "relative_parameter_errors": {"p0": 0.3},
+            "invalid": [
+                {
+                    "path": "summary.fit_quality.excited.normalized_residual_rms",
+                    "reason": "zero_range",
+                }
+            ],
+        },
+    }
+
+    def result(params):
+        reply = gui("tab.get_analyze_result", params)
+        reply["summary"] = {
+            "fidelity": 0.98,
+            "theta": 0.2,
+            "threshold": -0.1,
+            "ge_s": 0.42,
+            "init_pops": [[0.9, 0.1], [0.05, 0.95]],
+            "fit_quality": quality,
+        }
+        reply["invalid"] = quality["joint"]["invalid"]
+        return {"ok": True, "result": reply}
+
+    client.transport.replies["tab.get_analyze_result"] = result
+    initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+    assert initial.data["status"] == "finished", initial.data
+    key = initial.data["execution"]
+    before = len(client.transport.sent)
+    summary = client.call("status", {"execution": key})
+    full = client.call("status", {"execution": key, "detail": "full"})
+    assert len(client.transport.sent) == before
+    assert full["analysis"]["result"]["summary"]["fit_quality"] == quality
+    primary = summary["analysis"]["primary"]
+    assert set(primary["estimates"]) == {"fidelity", "theta", "threshold", "ge_s"}
+    for name, estimate in primary["estimates"].items():
+        stages = estimate["quality"]
+        assert set(stages) == {"joint", "ground", "excited"}
+        assert stages["joint"]["r2"] is None
+        assert stages["ground"]["r2"] == 0.85
+        assert stages["excited"]["relative_parameter_errors"]["p0"] == 0.3
+        issue = {
+            "path": f"analysis.primary.estimates.{name}.quality.joint.r2",
+            "reason": "non_finite",
+        }
+        assert stages["joint"]["invalid"] == [issue]
+        assert summary["invalid"].count(issue) == 1
+        assert all(
+            issue["path"].startswith(f"analysis.primary.estimates.{name}.quality.")
+            for stage in stages.values()
+            for issue in stage["invalid"]
+        )
+    assert len(summary["invalid"]) == 12
+    assert primary["details"] == {"init_pops": [[0.9, 0.1], [0.05, 0.95]]}
+    assert summary["analysis"]["post"]["estimates"]["fidelity"]["quality"] is None
+    json.dumps(summary, allow_nan=False)
+    json.dumps(full, allow_nan=False)
+
+
 @pytest.fixture()
 def background_ge_client(ge_client, monkeypatch):
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
@@ -706,8 +789,13 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         assert summary["analysis"]["primary"]["details"] == {
             "centers": {"ground": [0.1, 0.2], "excited": [0.8, 0.9]}
         }
+        assert summary["analysis"]["post"]["estimates"]["fidelity"] == {
+            "value": 0.98,
+            "stderr": None,
+            "unit": None,
+            "quality": None,
+        }
         assert summary["analysis"]["post"]["details"] == {
-            "fidelity": 0.98,
             "populations": {"ground": 0.97, "excited": 0.03},
         }
         assert summary["artifacts"]["analysis"]["trace"]["members"]["image"] == [

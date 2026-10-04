@@ -122,7 +122,12 @@ RECIPES = (
             SummaryParameter("pi_ref", "modules.probe_pulse"),
             SummaryParameter("init_pulse_ref", "modules.init_pulse"),
         ),
-        summary_estimates=(),
+        summary_estimates=(
+            SummaryEstimate("fidelity", "fidelity"),
+            SummaryEstimate("theta", "theta"),
+            SummaryEstimate("threshold", "threshold"),
+            SummaryEstimate("ge_s", "ge_s"),
+        ),
     ),
     *(
         RecipeDefinition(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import ClassVar
@@ -7,7 +8,7 @@ from typing import ClassVar
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fitting import fit_rabi
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     AxesSpec,
@@ -51,6 +52,7 @@ class AmpRabiAnalysis:
     pi_amp_err: float
     pi2_amp: float
     pi2_amp_err: float
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -152,8 +154,16 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         else:
             init_phase = 180.0
 
-        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, _, _, y_fit, _ = fit_rabi(
+        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, _, _, y_fit, (pOpt, pCov) = fit_rabi(
             gains, real_signals, decay=False, init_phase=init_phase
+        )
+
+        names = ("y0", "yscale", "freq", "phase")
+        quality = compute_fit_quality(
+            real_signals,
+            y_fit,
+            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
+            pCov,
         )
 
         fig, ax = plots.subplots("fit", figsize=config.figsize)
@@ -180,4 +190,6 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
 
         # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
         # summary carries the gain errors (the figure labels already show them).
-        return AmpRabiAnalysis(pi_amp, pi_amp_err, pi2_amp, pi2_amp_err)
+        return AmpRabiAnalysis(
+            pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": quality}
+        )

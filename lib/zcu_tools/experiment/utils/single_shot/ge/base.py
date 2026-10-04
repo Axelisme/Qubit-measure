@@ -11,6 +11,7 @@ from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
 )
 
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
 from zcu_tools.analysis.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,
@@ -164,6 +165,7 @@ class GE_FitResult(TypedDict, closed=True):
     threshold: float
     g_center: complex
     e_center: complex
+    fit_quality: dict[str, FitQuality]
 
 
 def fitting_ge_and_plot(
@@ -204,9 +206,11 @@ def fitting_ge_and_plot(
     xs = 0.5 * (bins[:-1] + bins[1:])
 
     fixedparams = [None, None, None, init_p0_g, init_p0_e, avg_p, length_ratio]
-    ge_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
+    ge_params, joint_covariance = fit_singleshot(
+        xs, g_pdfs, e_pdfs, fixedparams=fixedparams
+    )
     sg, se, s, joint_p0_gg, joint_p0_ge, p_avg, length_ratio = ge_params
-    (p0_gg, p0_ge, l_ratio_g), _ = fit_singleshot_p0(
+    (p0_gg, p0_ge, l_ratio_g), ground_covariance = fit_singleshot_p0(
         xs,
         g_pdfs,
         joint_p0_gg,
@@ -214,7 +218,7 @@ def fitting_ge_and_plot(
         ge_params=ge_params,
         fit_length_ratio=not align_t1,
     )
-    (p0_eg, p0_ee, l_ratio_e), _ = fit_singleshot_p0(
+    (p0_eg, p0_ee, l_ratio_e), excited_covariance = fit_singleshot_p0(
         xs,
         e_pdfs,
         joint_p0_ge,
@@ -237,6 +241,33 @@ def fitting_ge_and_plot(
 
     fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_gg, p0_ge, p_avg, l_ratio_g)
     fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_eg, p0_ee, p_avg, l_ratio_e)
+    # Joint parameters describe the original paired histogram model, not the
+    # independently refined populations used for the final plotted PDFs.
+    joint_g_pdfs = calc_population_pdf(xs, *ge_params)
+    joint_e_pdfs = calc_population_pdf(
+        xs, sg, se, s, joint_p0_ge, joint_p0_gg, p_avg, length_ratio
+    )
+    joint_names = ("sg", "se", "s", "p0_g", "p0_e", "p_avg", "length_ratio")
+    fit_quality = {
+        "joint": compute_fit_quality(
+            np.concatenate([g_pdfs, e_pdfs]),
+            np.concatenate([joint_g_pdfs, joint_e_pdfs]),
+            dict(zip(joint_names, ge_params, strict=True)),
+            joint_covariance,
+        ),
+        "ground": compute_fit_quality(
+            g_pdfs,
+            fit_g_pdfs,
+            {"p0_g": p0_gg, "p0_e": p0_ge, "length_ratio": l_ratio_g},
+            ground_covariance,
+        ),
+        "excited": compute_fit_quality(
+            e_pdfs,
+            fit_e_pdfs,
+            {"p0_g": p0_eg, "p0_e": p0_ee, "length_ratio": l_ratio_e},
+            excited_covariance,
+        ),
+    }
     gg_fit = p0_gg * gauss_func(xs, sg, s)
     ge_fit = p0_ge * gauss_func(xs, se, s)
     eg_fit = p0_eg * gauss_func(xs, sg, s)
@@ -355,5 +386,6 @@ def fitting_ge_and_plot(
             threshold=threshold,
             g_center=rotated_g_center * np.exp(-1j * theta),
             e_center=rotated_e_center * np.exp(-1j * theta),
+            fit_quality=fit_quality,
         ),
     )

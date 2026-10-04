@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 
 import numpy as np
@@ -57,6 +58,67 @@ def _analyze(
         AnalyzeRequest(source_r, params_r, md, ml, None), plots=plots
     )
     return result_r.t2r, plots
+
+
+@pytest.mark.parametrize("echo", [False, True])
+@pytest.mark.parametrize("fringe", [False, True])
+def test_t2_summary_quality_describes_the_selected_model(
+    echo: bool, fringe: bool
+) -> None:
+    times = np.linspace(0, 12, 101)
+    values = 0.2 + 0.8 * np.exp(-times / 5)
+    if fringe:
+        values = 0.2 + 0.8 * np.exp(-times / 25) * np.cos(2 * np.pi * 0.4 * times + 0.6)
+    values += np.where(np.arange(times.size) % 2 == 0, 0.01, -0.01)
+    if echo:
+        values[0] = 1000  # Echo's existing optimizer excludes the first sample.
+    signals = values.astype(np.complex128)
+    plots = Plots(NonPresentingHost())
+    md, ml = MetaDict(), ModuleLibrary()
+    try:
+        if echo:
+            source_e = RunRecord[T2EchoCfg, T2EchoResult](
+                cfg=None, result=T2EchoResult(times, signals)
+            )
+            result_e = T2EchoAdapter().analyze(
+                AnalyzeRequest(
+                    source_e,
+                    T2EchoAnalyzeParams(
+                        fit_method="fringe" if fringe else "decay", fit_phase=True
+                    ),
+                    md,
+                    ml,
+                    None,
+                ),
+                plots=plots,
+            )
+            summary = result_e.to_summary_dict()
+        else:
+            source_r = RunRecord[T2RamseyCfg, T2RamseyResult](
+                cfg=None, result=T2RamseyResult(times, signals, 0.0)
+            )
+            result_r = T2RamseyAdapter().analyze(
+                AnalyzeRequest(
+                    source_r,
+                    T2RamseyAnalyzeParams(fit_fringe=fringe, fit_phase=True),
+                    md,
+                    ml,
+                    None,
+                ),
+                plots=plots,
+            )
+            summary = result_r.to_summary_dict()
+        quality = json.loads(json.dumps(summary, allow_nan=False))["fit_quality"]["fit"]
+        assert 0.99 < quality["r2"] < 1.0
+        assert 0.005 < quality["normalized_residual_rms"] < 0.03
+        assert set(quality["relative_parameter_errors"]) == (
+            {"y0", "yscale", "freq", "phase", "decay_time"}
+            if fringe
+            else {"y0", "yscale", "decay_time"}
+        )
+    finally:
+        plots.finish()
+        plots.release()
 
 
 @pytest.mark.parametrize("echo", [False, True])

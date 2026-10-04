@@ -1,5 +1,6 @@
 """Coherence behavior through shipped tools and the GUI wire boundary."""
 
+import json
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
@@ -91,6 +92,65 @@ class CoherenceGui(LookbackGui):
         if method == "context.snapshot":
             result["ml"]["modules"] = self.library
         return result
+
+
+def test_recipe_estimates_share_native_fit_quality_and_precise_issue_paths(tmp_path):
+    gui = CoherenceGui(pi_ref="pi")
+    quality = {
+        "fit": {
+            "r2": -0.25,
+            "normalized_residual_rms": 0.31,
+            "relative_parameter_errors": {"decay_time": None},
+            "invalid": [
+                {
+                    "path": "summary.fit_quality.fit.relative_parameter_errors.decay_time",
+                    "reason": "covariance_unavailable",
+                }
+            ],
+        }
+    }
+
+    def respond(method, params):
+        result = gui(method, params)
+        if method == "tab.get_analyze_result":
+            result["summary"] = {
+                "t1": 25.0,
+                "t1_err": None,
+                "t1b": 50.0,
+                "t1b_err": None,
+                "fit_quality": quality,
+            }
+        return result
+
+    with recipe_client(tmp_path, respond) as client:
+        initial = client.call("t1", {})
+        assert initial.data["status"] == "finished", initial.data
+        execution = initial.data["execution"]
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": execution})
+        full = client.call("status", {"execution": execution, "detail": "full"})
+        waited = client.call("wait", {"execution": execution, "timeout": 0}).data
+        assert {k: v for k, v in initial.data.items() if k != "elapsed_s"} == summary
+        assert {k: v for k, v in waited.items() if k != "elapsed_s"} == summary
+        assert len(client.transport.sent) == before
+        assert full["analysis"]["result"]["summary"]["fit_quality"] == quality
+        expected_invalid = []
+        for name, value in (("t1", 25.0), ("t1b", 50.0)):
+            estimate = summary["analysis"]["primary"]["estimates"][name]
+            assert estimate["value"] == value
+            assert estimate["stderr"] is None
+            assert estimate["quality"]["fit"]["r2"] == -0.25
+            assert estimate["quality"]["fit"]["normalized_residual_rms"] == 0.31
+            issue = {
+                "path": f"analysis.primary.estimates.{name}.quality.fit.relative_parameter_errors.decay_time",
+                "reason": "covariance_unavailable",
+            }
+            assert estimate["quality"]["fit"]["invalid"] == [issue]
+            expected_invalid.append(issue)
+        assert summary["invalid"] == expected_invalid
+        assert summary["analysis"]["primary"]["details"] == {}
+        json.dumps(summary, allow_nan=False)
+        json.dumps(full, allow_nan=False)
 
 
 @pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])

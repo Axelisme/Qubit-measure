@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
@@ -19,6 +19,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgDefinition,
     SweepDefault,
     scaled_md,
+)
+from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
+    fit_quality_summary,
 )
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
@@ -59,7 +62,13 @@ class T1AnalyzeResult:
         return self.analysis.t1_err
 
     def to_summary_dict(self) -> dict[str, object]:
-        return asdict(self.analysis)
+        return {
+            "t1": self.analysis.t1,
+            "t1_err": self.analysis.t1_err,
+            "t1b": self.analysis.t1b,
+            "t1b_err": self.analysis.t1b_err,
+            "fit_quality": fit_quality_summary(self.analysis.fit_quality),
+        }
 
 
 class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
