@@ -41,6 +41,9 @@ def test_noisy_curves_report_residuals_and_named_relative_errors(
     ("parameter", "variance", "reason"),
     [
         (0.0, 1.0, "zero_parameter"),
+        (0.0, 0.0, "zero_parameter"),
+        (0.0, np.nan, "non_finite"),
+        (0.0, -1.0, "negative_variance"),
         (1.0, np.inf, "non_finite"),
         (1.0, np.nan, "non_finite"),
         (np.inf, 1.0, "non_finite"),
@@ -128,6 +131,30 @@ def test_unestimable_residual_metrics_keep_parameter_error(
 
 
 @pytest.mark.parametrize(
+    "covariance",
+    [
+        np.array([[1.0, 3.0], [0.0, 4.0]]),
+        np.array([[1.0, np.nan], [np.inf, 4.0]]),
+    ],
+    ids=["asymmetric", "nonfinite-off-diagonal"],
+)
+def test_marginal_errors_use_only_covariance_diagonal(
+    covariance: np.ndarray,
+) -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.array([0.0, 1.0, 2.0]),
+        {"first": 2.0, "second": -4.0},
+        covariance,
+    )
+    assert quality.relative_parameter_errors == {"first": 0.5, "second": 0.5}
+    assert quality.invalid == ()
+    assert quality.r2 == 1.0
+    assert quality.normalized_residual_rms == 0.0
+    json.dumps(quality.to_summary_dict(), allow_nan=False)
+
+
+@pytest.mark.parametrize(
     ("observations", "fitted", "parameters", "covariance", "message"),
     [
         (np.array([]), np.array([]), {"p": 1.0}, np.eye(1), "nonempty"),
@@ -136,6 +163,7 @@ def test_unestimable_residual_metrics_keep_parameter_error(
         (np.ones(2, dtype=complex), np.ones(2), {"p": 1.0}, np.eye(1), "real"),
         (np.ones(2), np.ones(2), {"": 1.0}, np.eye(1), "nonempty"),
         (np.ones(2), np.ones(2), {"p": 1.0}, np.eye(2), "covariance shape"),
+        (np.ones(2), np.ones(2), {"p": 1.0}, np.eye(1, dtype=complex), "real"),
     ],
 )
 def test_caller_shape_and_name_mistakes_fail_fast(

@@ -11,18 +11,68 @@ from numpy.typing import NDArray
 
 @dataclass(frozen=True)
 class QualityIssue:
+    """The direct reason one field of a computed FitQuality is unestimable.
+
+    Attributes:
+        path: Relative to FitQuality or its summary: "r2",
+            "normalized_residual_rms", or "relative_parameter_errors.<name>".
+            After the last fixed prefix, <name> is the complete mapping key;
+            dots in a parameter name do not denote further nested fields.
+        reason: One of six codes: "zero_variance" (constant observations for r2),
+            "zero_range" (constant observations for normalized residual RMS),
+            "zero_parameter" (zero relative-error denominator),
+            "covariance_unavailable" (no parameter covariance),
+            "negative_variance" (negative covariance diagonal), or "non_finite"
+            (non-finite inputs, intermediate arithmetic, or result).
+
+    An issue explains a None, not an invalid fit or calibration.
+    """
+
     path: str
     reason: str
 
 
 @dataclass(frozen=True)
 class FitQuality:
+    """Model-independent diagnostics; no fit/calibration acceptance policy.
+
+    Attributes:
+        r2: 1 - sum((y - y_fit)**2) / sum((y - mean(y))**2), without clamping;
+            negative values are retained. None for zero observation variance
+            (zero_variance) or non-finite data/arithmetic (non_finite).
+        normalized_residual_rms: sqrt(mean((y - y_fit)**2)) / (max(y) - min(y)).
+            y is the actual optimizer observations after any skip/mask, not
+            the full raw trace. None for zero observation range (zero_range)
+            or non-finite data/arithmetic (non_finite).
+        relative_parameter_errors: Each original parameter name maps to
+            sqrt(covariance[i, i]) / abs(parameter), or None. Missing covariance
+            keeps every name with None/covariance_unavailable. Otherwise the
+            first applicable reason is non_finite parameter, non_finite
+            diagonal, negative_variance, zero_parameter, then non_finite ratio.
+            Off-diagonal entries do not affect these marginal errors.
+        invalid: Direct explanations of unestimable fields, not fit validity.
+            In computed results, every None has exactly one matching
+            QualityIssue, and no finite field has an issue. Relative-error
+            paths use the entire parameter name, even when it contains dots.
+
+    compute_fit_quality returns finite numbers or None. This dataclass stores
+    those results without validating manually constructed instances.
+    """
+
     r2: float | None
     normalized_residual_rms: float | None
     relative_parameter_errors: Mapping[str, float | None]
     invalid: tuple[QualityIssue, ...]
 
     def to_summary_dict(self) -> dict[str, object]:
+        """Copy a computed result into the fixed JSON-safe summary structure.
+
+        Keys are r2, normalized_residual_rms, relative_parameter_errors (a dict
+        retaining every name), and invalid (a list of {"path", "reason"} dicts).
+        None remains None and serializes as JSON null. A result returned by
+        compute_fit_quality supports json.dumps(..., allow_nan=False); manually
+        constructed instances are not validated or repaired here.
+        """
         return {
             "r2": self.r2,
             "normalized_residual_rms": self.normalized_residual_rms,
@@ -39,11 +89,35 @@ def compute_fit_quality(
     parameters: Mapping[str, float],
     covariance: NDArray[np.float64] | None,
 ) -> FitQuality:
-    """Use matching nonempty real vectors and covariance in parameter insertion order.
+    """Compute diagnostics from the actual optimizer inputs, without refitting.
 
-    Caller shape/name mistakes raise ValueError. Known unestimable metrics are
-    None with their direct reason; missing covariance does not discard residual
-    metrics. This helper does not refit or decide whether calibration is valid.
+    Args:
+        y: Nonempty 1-D real observations passed to the optimizer after any
+            skip/mask. Real integer and floating-point arrays are accepted.
+        y_fit: Model values at exactly the same observations/coordinates as y,
+            with the same shape and also a real numeric dtype.
+        parameters: Parameter values keyed by nonblank string names. Mapping
+            insertion order defines covariance row/column order. An empty
+            mapping is allowed; dots in names remain part of the key.
+        covariance: Real square matrix of shape (len(parameters), len(parameters))
+            in that order, or None when unavailable. Only the diagonal is used
+            for marginal errors; no symmetry or positive-semidefinite gate is
+            applied to off-diagonal entries.
+
+    Returns:
+        FitQuality with the definitions and None/issue correspondence documented
+        on that type. Missing covariance takes priority over parameter-value
+        errors, keeps all parameter keys, and does not discard residual metrics.
+        Non-finite data/arithmetic, zero denominators, and negative diagonal
+        variances produce None plus a direct issue, rather than raising.
+
+    Raises:
+        ValueError: Observation/model vectors are empty, not 1-D, mismatched in
+            shape, or complex; a parameter name is not a nonblank string; or
+            covariance has the wrong shape or is complex.
+
+    Inputs are not modified. No optimizer, calibration, accept, or writeback
+    policy is changed.
     """
     _validate_observations(y, y_fit)
     _validate_parameter_names(parameters)
@@ -85,6 +159,10 @@ def _validate_observations(y: NDArray[np.float64], y_fit: NDArray[np.float64]) -
 def _ratio(
     numerator: float, denominator: float, zero_reason: str
 ) -> tuple[float | None, str | None]:
+    """Return a finite ratio/no reason, or None/one direct reason.
+
+    Non-finite inputs/result use non_finite; a zero denominator uses zero_reason.
+    """
     if not np.isfinite([numerator, denominator]).all():
         return None, "non_finite"
     if denominator == 0:
@@ -126,12 +204,11 @@ def _residual_metrics(
 def _relative_error(
     parameter: float, variance: float | None
 ) -> tuple[float | None, str | None]:
-    if not np.isfinite(parameter):
-        return None, "non_finite"
-    if parameter == 0:
-        return None, "zero_parameter"
+    """Return a marginal relative error, with missing covariance taking priority."""
     if variance is None:
         return None, "covariance_unavailable"
+    if not np.isfinite(parameter):
+        return None, "non_finite"
     if not np.isfinite(variance):
         return None, "non_finite"
     if variance < 0:
