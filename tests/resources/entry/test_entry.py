@@ -29,6 +29,31 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+@pytest.mark.parametrize("method", ["attribute", "path"])
+@pytest.mark.parametrize("field", ["freq", "wiring.ch"])
+def test_draft_attribute_and_path_validation_reject_bad_values_without_tainting_draft(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, method: str, field: str
+) -> None:
+    results, database = entry_roots
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0, wiring={"ch": 1})
+    with entry.setup.edit() as draft:
+        draft.description = "the remaining valid draft may commit"
+        with pytest.raises(ValidationError):
+            if method == "path":
+                draft.set(f"R1.{field}", "invalid")
+            elif field == "freq":
+                draft.R1.freq = "invalid"
+            else:
+                draft.R1.wiring.ch = "invalid"
+        assert draft.R1.freq == pytest.approx(6500.0)
+        assert draft.R1.wiring.ch == 1
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.description == "the remaining valid draft may commit"
+    assert reopened.setup.R1.freq == pytest.approx(6500.0)
+    assert reopened.setup.R1.wiring.ch == 1
+
+
 def test_path_set_and_attribute_edits_use_the_same_shared_draft(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
