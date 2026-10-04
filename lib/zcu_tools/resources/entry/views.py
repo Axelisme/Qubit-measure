@@ -139,6 +139,19 @@ class EditView:
     def description(self, value: str | None) -> None:
         self._draft.general.description = value
 
+    def __getattr__(self, name: str) -> ComponentView:
+        if name not in self._draft.components:
+            raise AttributeError(f"Unknown component {name!r}")
+        return ComponentView(
+            lambda: self._draft.components[name],
+            lambda: self._edit_component(name),
+            name,
+        )
+
+    @contextmanager
+    def _edit_component(self, name: str) -> Generator[ComponentSchema]:
+        yield self._draft.components[name]
+
 
 class SetupView:
     def __init__(self, store: DocumentStore[SetupDocument], source: Path) -> None:
