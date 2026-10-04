@@ -193,7 +193,10 @@ class RecipeContext:
         rejected = StartReceipt("not_started", error.reason or error.code)
         if self.progress.phase == "run" and self.progress.run_start.status == "unknown":
             self._publish(run_start=rejected)
-        elif self.progress.phase == "analysis":
+        elif (
+            self.progress.phase == "analysis"
+            and self.progress.analysis_stage is not None
+        ):
             stage = self.progress.analysis_stage
             pending = self.progress.analysis_starts.get(stage)
             if pending is not None and pending.status == "unknown":
