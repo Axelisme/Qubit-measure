@@ -34,6 +34,7 @@ from zcu_tools.mcp.measure.raw_save import RawSaveReceipt, RawSaveRequest, save_
 from zcu_tools.mcp.measure.recipe_capture import (
     ActualField,
     RecipeActual,
+    SweepSources,
     capture_actual,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -415,7 +416,8 @@ class _TabBinding:
     publication is the last returned cfg observation, never refreshed on failure.
     calibrations contains opaque md values from the declared context observation.
     libraries contains the observed module-library names. origins records sources
-    by public/derived field name for the later Run capture; flux_unit is its asserted unit.
+    by public/derived field name for the later Run capture, including individual
+    sweep labels. flux_unit is the asserted device unit.
     """
 
     tools: MeasureToolContext
@@ -426,7 +428,7 @@ class _TabBinding:
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
-    origins: dict[str, str] = field(default_factory=dict)
+    origins: dict[str, str | SweepSources] = field(default_factory=dict)
     flux_unit: str | None = None
     frequency_sweep: str | None = None
     flux_sweeps: set[str] = field(default_factory=set)
@@ -558,6 +560,7 @@ class RecipeSession:
         self._closed = closed if closed is not None else Event()
         self._condition = condition if condition is not None else Condition()
         self._consume_cancel = consume_cancel
+        self._tab: str | None = None
         self._run: RunOperation | None = None
         self._analysis: AnalyzeOperation | None = None
         self._written: list[WritebackReceipt] = []
@@ -585,6 +588,17 @@ class RecipeSession:
         """
         with self._condition:
             return deepcopy(tuple(self._written))
+
+    def tab_locator(self) -> str | None:
+        """Read the latest prepared/requested tab locator without GUI requests.
+
+        A successful creation receipt or explicit reuse records its locator before
+        cfg reads/reset/validation can fail. None means neither has occurred.
+        A requested reuse locator does not certify existence, adapter or readiness.
+        The driver uses this capture when no Run attempt exists yet.
+        """
+        with self._condition:
+            return self._tab
 
     def analysis_snapshot(self) -> ExecutionSnapshot | None:
         """Read the latest analysis attempt, including a not-yet-yielded failure.
@@ -632,9 +646,13 @@ class RecipeSession:
                 raise GuiRpcError(
                     "Invalid tab creation reply", reason="incompatible_wire"
                 )
+            with self._condition:
+                self._tab = tab
             publication = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
         else:
             tab = reuse
+            with self._condition:
+                self._tab = tab
             observed = self._tools.send_gui_rpc("tab.snapshot", {"tab_id": tab})["tabs"]
             if not isinstance(observed, list) or len(observed) != 1:
                 raise GuiRpcError("Requested tab was not found", reason="unknown_tab")
@@ -1135,13 +1153,28 @@ class RecipeTab:
         start: float | None = None,
         stop: float | None = None,
         expts: int | None = None,
+        sources: SweepSources | None = None,
     ) -> None:
         """Edit only supplied sweep fields in their native unit; retain omitted ones.
 
         Supplied endpoints must be finite and not boolean. expts is an integer
-        of at least 2; None retains the GUI count. Invalid explicit inputs and
-        unknown fields raise ValueError. GUI field errors raise GuiRpcError.
+        of at least 2; None retains the GUI count. sources optionally labels
+        start/stop/expts separately in the Run capture; all three non-empty labels
+        are required. Omitted values always retain gui_default provenance.
+        Without sources, capture uses the existing explicit/gui_default labels.
+        Invalid explicit inputs, sources and unknown fields raise ValueError.
+        GUI field errors raise GuiRpcError.
         """
+        if sources is not None and (
+            set(sources) != {"start", "stop", "expts"}
+            or any(
+                not isinstance(label, str) or not label.strip()
+                for label in sources.values()
+            )
+        ):
+            raise ValueError(
+                "sources must label start, stop and expts with non-empty strings"
+            )
         _check_points(expts)
         for endpoint in (start, stop):
             if endpoint is not None and not _finite_frequency(endpoint):
@@ -1151,11 +1184,19 @@ class RecipeTab:
             if value is not None:
                 values[key] = value
         self._write_sweep(field, values)
-        self._binding.origins[field] = "explicit" if values else "gui_default"
+        captured_sources: SweepSources = (
+            deepcopy(sources)
+            if sources is not None
+            else {"start": "explicit", "stop": "explicit", "expts": "explicit"}
+        )
         for key in ("start", "stop", "expts"):
-            self._binding.origins[f"{field}.{key}"] = (
-                "explicit" if key in values else "gui_default"
-            )
+            if key not in values:
+                captured_sources[key] = "gui_default"
+            self._binding.origins[f"{field}.{key}"] = captured_sources[key]
+        if sources is not None:
+            self._binding.origins[field] = captured_sources
+        else:
+            self._binding.origins[field] = "explicit" if values else "gui_default"
 
     def run(self) -> RunOperation:
         """Immediately send Run with captured cfg ref and return its yield handle.
@@ -1218,7 +1259,7 @@ class RecipeTab:
         )
         return operation
 
-    def _capture_cfg_field(self, name: str, source: str) -> ActualField:
+    def _capture_cfg_field(self, name: str, source: str | SweepSources) -> ActualField:
         """Capture one scalar, reference, sweep or sweep member from the publication."""
         parts = _field_path(name)
         parent = self._node(".".join(parts[:-1])) if len(parts) > 1 else None

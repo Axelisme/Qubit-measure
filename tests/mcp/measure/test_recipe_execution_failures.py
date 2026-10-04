@@ -62,6 +62,39 @@ def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertai
         assert finally_calls == ["closed"]
 
 
+@pytest.mark.parametrize("reuse", [None, "t"])
+def test_pre_run_cfg_failure_retains_prepared_or_requested_locator(tmp_path, reuse):
+    def sample(session: RecipeSession) -> RecipeGenerator:
+        tab = session.open_tab("lookback", reuse=reuse)
+        _, _ = yield tab.run()
+
+    gui = LookbackGui()
+    with (
+        recipe_client(tmp_path, gui) as client,
+        registry(client.context, definition(sample)) as executions,
+    ):
+        client.transport.replies["tab.get_cfg"] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "stale_cfg",
+                "message": "Changed",
+            },
+        }
+        execution = executions.start(client.context, "sample", {})
+        reply = execution.wait(5)
+        assert reply.data["status"] == "failed"
+        assert reply.data["tab"] == "t"
+        assert reply.data["actual"] is None
+        assert reply.data["run_start"]["status"] == "not_started"
+        assert not gui.ran
+        before = list(client.transport.sent)
+        assert execution.snapshot().tab == "t"
+        assert client.transport.sent == before
+        execution.close()
+        execution.join()
+
+
 @pytest.mark.parametrize("control", ["cancel", "finish_early"])
 def test_stop_intent_does_not_relabel_failed_native_run(tmp_path, control):
     caught: list[str | None] = []

@@ -7,6 +7,7 @@ from simpleeval import simple_eval
 from zcu_tools.mcp.measure.recipe import (
     RecipeNeedsParameters,
     RecipeSession,
+    SweepSources,
     WritebackError,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -434,6 +435,47 @@ def test_author_sweep_only_edits_supplied_fields(tmp_path):
     assert inputs["start"]["resolved"] == 6000.0
     assert inputs["stop"] == before["stop"]
     assert inputs["expts"]["resolved"] == 2
+
+
+def test_author_sweep_captures_individual_labels_and_omitted_gui_sources(tmp_path):
+    gui = _SweepGui()
+    sources: SweepSources = {
+        "start": "start_mhz",
+        "stop": "stop_mhz",
+        "expts": "points",
+    }
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.set_sweep("sweep.freq", start=6000.0, expts=2, sources=sources)
+        sources["start"] = "changed after preparation"
+        capture = tab.run().snapshot()
+        assert capture is not None
+        fields = capture.actual["fields"]
+        assert fields["sweep.freq"].get("source") == {
+            "start": "start_mhz",
+            "stop": "gui_default",
+            "expts": "points",
+        }
+        assert fields["sweep.freq.start"].get("source") == "start_mhz"
+        assert fields["sweep.freq.stop"].get("source") == "gui_default"
+        assert fields["sweep.freq.expts"].get("source") == "points"
+
+
+@pytest.mark.parametrize("key", ["start", "stop", "expts"])
+@pytest.mark.parametrize("label", ["", " "])
+def test_author_sweep_rejects_empty_sources_before_any_edit(tmp_path, key, label):
+    gui = _SweepGui()
+    sources: SweepSources = {
+        "start": "start_mhz",
+        "stop": "stop_mhz",
+        "expts": "points",
+    }
+    sources[key] = label
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        with pytest.raises(ValueError, match="sources"):
+            tab.set_sweep("sweep.freq", start=6000.0, sources=sources)
+        assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
 @pytest.mark.parametrize("name", [None, "coil"])

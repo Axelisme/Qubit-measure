@@ -88,7 +88,8 @@ class RecipeSnapshot:
     """Detached recipe progress; queries never send RPCs or refresh GUI guards.
 
     execution is a session-local ID; recipe is its injected tool name.
-    tab is the last Run's GUI locator, or None before Run preparation.
+    tab is the last Run's locator, or the prepared/requested locator before Run.
+    A requested locator alone does not certify GUI existence/readiness.
     status is running/interactive/awaiting_answer, or a terminal status.
     phase is the active yield, preparing between yields, or terminal.
     cancel_requested is one unconsumed stop intent, not a native outcome.
@@ -203,7 +204,11 @@ class RecipeExecution:
             progress = self._progress
             session = self._session
             if session is not None:
-                progress = replace(progress, written=session.writeback_receipts())
+                progress = replace(
+                    progress,
+                    tab=session.tab_locator(),
+                    written=session.writeback_receipts(),
+                )
                 run = session.run_snapshot()
                 if run is not None:
                     progress = replace(

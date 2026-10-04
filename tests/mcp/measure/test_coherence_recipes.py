@@ -1,14 +1,17 @@
 """Coherence behavior through shipped tools and the GUI wire boundary."""
 
+import base64
 import json
 from contextlib import contextmanager
 from copy import deepcopy
+from threading import Event
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.core.reply import ToolReply
 
-from ._recipe_support import LookbackGui, scalar, section
-from ._support import full_execution_reply, make_client
+from ._recipe_support import PNG, LookbackGui, scalar, section
+from ._support import MeasureClient, full_execution_reply, make_client
 
 
 @contextmanager
@@ -20,10 +23,32 @@ def recipe_client(tmp_path, gui):
         client.context.session.close()
 
 
+def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
+    """Finish the captured Primary question without changing the GUI draft."""
+    assert question.data["status"] == "awaiting_answer", question.data
+    before = list(client.transport.sent)
+    reply = client.call(
+        "answer", {"recipe": question.data["execution"], "decision": "skipped"}
+    )
+    assert reply.data["status"] == "finished", reply.data
+    assert client.transport.sent == before
+    return reply
+
+
 class CoherenceGui(LookbackGui):
-    def __init__(self, pi_ref="<Custom:Pulse>", adapter="t1", pi2_ref="<Custom:Pulse>"):
+    def __init__(
+        self,
+        pi_ref="<Custom:Pulse>",
+        adapter="t1",
+        pi2_ref="<Custom:Pulse>",
+        *,
+        interactive=False,
+    ):
         super().__init__()
         self.adapter = adapter
+        self.interactive = interactive
+        self.done = Event()
+        self.writes: list[dict[str, Any]] = []
         self.md = {"r_f": 5100.0}
         self.library = {
             "pi": {"type": "pulse"},
@@ -79,6 +104,44 @@ class CoherenceGui(LookbackGui):
         super()._edit({**params, "edits": ordinary})
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "tab.interact":
+            if params.get("payload", {}).get("command") == "done":
+                self.done.set()
+            return {
+                "operation_id": 93,
+                "plugin": "coherence-picker",
+                "state": {},
+                "info": {},
+                "commands": [{"name": "done"}],
+                "preview_active": True,
+                "figure": {"png_b64": base64.b64encode(PNG).decode()}
+                if params.get("include_figure", True)
+                else None,
+            }
+        if (
+            method == "operation.await"
+            and params["operation_id"] == 93
+            and self.interactive
+            and not self.done.is_set()
+        ):
+            return {"reason": "timeout", "status": "interactive"}
+        if method == "tab.writeback_write":
+            self.writes.append(deepcopy(params))
+            return {
+                "written": [
+                    {
+                        "id": item["id"],
+                        "kind": "md",
+                        "target": "decay_time",
+                        "before": {"value": 20.0},
+                        "after": {"value": 35.0},
+                    }
+                    for item in params["write"]
+                ]
+            }
+        return self._native_reply(method, params)
+
+    def _native_reply(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.new":
             assert params == {"adapter_name": f"twotone/{self.adapter}"}
             return {"tab_id": "t"}
@@ -86,12 +149,55 @@ class CoherenceGui(LookbackGui):
             revision = self.publication["cfg_ref"]
             self.publication = deepcopy(self.defaults)
             self.publication["cfg_ref"] = revision
+        if method == "tab.get_post_analyze_result":
+            assert "operation_id" not in params
+            return {"summary": None}
+        if method == "tab.get_analyze_result" and "operation_id" not in params:
+            return {"summary": {}}
+        if method == "tab.writeback_preview" and "operation_id" not in params:
+            assert params == {"tab_id": "t", "subtab_id": "analysis"}
+            return self._draft()
         result = super().__call__(method, params)
+        if method == "tab.edit_cfg":
+            self._edit_references(result, params)
+        if method == "tab.analyze":
+            result["interactive"] = self.interactive
+        if method == "tab.writeback_preview":
+            return self._draft()
         if method == "tab.snapshot":
             result["tabs"][0]["adapter_name"] = f"twotone/{self.adapter}"
         if method == "context.snapshot":
             result["ml"]["modules"] = self.library
         return result
+
+    def _edit_references(self, result, params):
+        modules = self.publication["tree"]["children"]["modules"]["children"]
+        for edit in params["edits"]:
+            if edit["path"][0] == "modules" and len(edit["path"]) == 2:
+                name = edit["value"]["__ref"]
+                if name is not None and name not in self.library:
+                    modules[edit["path"][1]].update(
+                        valid=False, error="unknown library"
+                    )
+                    result["tree"]["children"]["modules"]["children"][
+                        edit["path"][1]
+                    ].update(valid=False, error="unknown library")
+
+    def _draft(self) -> dict[str, Any]:
+        return {
+            "has_draft": True,
+            "items": [
+                {
+                    "id": "md-1",
+                    "kind": "metadict",
+                    "target_name": "decay_time",
+                    "proposed": 35.0,
+                    "current": 20.0,
+                    "selected": False,
+                }
+            ],
+            "destination_context": {"active_label": "sample"},
+        }
 
 
 def test_recipe_estimates_share_native_fit_quality_and_precise_issue_paths(tmp_path):
@@ -165,7 +271,7 @@ def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
     ] = scalar(999)["input"]
     with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
-            client, client.call(recipe, {"reuse_tab_id": "t"})
+            client, skip_writeback(client, client.call(recipe, {"reuse_tab_id": "t"}))
         ).data
         assert data["status"] == "finished", data
         sweep = data["actual"]["fields"]["sweep.length"]
@@ -185,7 +291,10 @@ def test_coherence_explicit_readout_and_reset_use_library_without_rf(tmp_path, r
     with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
             client,
-            client.call(recipe, {"readout_ref": "readout", "use_reset": "reset"}),
+            skip_writeback(
+                client,
+                client.call(recipe, {"readout_ref": "readout", "use_reset": "reset"}),
+            ),
         ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -276,7 +385,7 @@ def test_coherence_failure_retains_tab_and_already_saved_paths(tmp_path, recipe,
             assert data["run_outcome"]["status"] == "finished"
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
-        assert not any("accept" in method for method in methods)
+        assert not gui.writes
 
 
 @pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
@@ -331,7 +440,9 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
     if recipe == "t2echo":
         arguments["pi_ref"] = "pi"
     with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(client, client.call(recipe, arguments))
+        reply = full_execution_reply(
+            client, skip_writeback(client, client.call(recipe, arguments))
+        )
         data = reply.data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -340,6 +451,14 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
             "stop": 84.0,
             "expts": 43,
         }
+        assert fields["sweep.length"]["source"] == {
+            "start": "gui_default",
+            "stop": "max_delay_us",
+            "expts": "points",
+        }
+        assert fields["detune_ratio"]["source"] == "detune_ratio"
+        assert fields["reps"]["source"] == "reps"
+        assert fields["rounds"]["source"] == "rounds"
         assert fields["detune_ratio"]["value"] == 0.37
         assert fields["modules.pi2_pulse"]["value"] == "pi2"
         if recipe == "t2echo":
@@ -362,9 +481,12 @@ def test_t2_number_delay_and_detune_publish_floats(tmp_path, number):
     with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
             client,
-            client.call(
-                "t2ramsey",
-                {"max_delay_us": number, "detune_ratio": number, "points": 3},
+            skip_writeback(
+                client,
+                client.call(
+                    "t2ramsey",
+                    {"max_delay_us": number, "detune_ratio": number, "points": 3},
+                ),
             ),
         ).data
         assert data["status"] == "finished", data
@@ -385,6 +507,129 @@ def test_t2_number_delay_and_detune_publish_floats(tmp_path, number):
         ]
         assert detune_edits == [1.0]
         assert type(detune_edits[0]) is float
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"max_delay_us": True},
+        {"max_delay_us": float("nan")},
+        {"max_delay_us": float("inf")},
+        {"max_delay_us": 0},
+        {"max_delay_us": -1},
+        {"points": 1},
+        {"points": 2.5},
+        {"points": 1.0},
+        {"points": True},
+        {"reps": False},
+        {"reps": 1.0},
+        {"rounds": 1.0},
+        {"rounds": 1.5},
+        {"pi2_ref": " "},
+        {"readout_ref": 7},
+        {"use_reset": False},
+        {"reuse_tab_id": ""},
+    ],
+)
+def test_t2ramsey_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
+    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2")
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("t2ramsey", arguments)
+        assert reply.is_error
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["tab"] is None
+        assert not gui.ran
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.parametrize("decision", ["accepted", "skipped"])
+def test_t2ramsey_primary_handoff_waits_before_question_and_actual_writes(
+    tmp_path, interactive, decision
+):
+    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2", interactive=interactive)
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("t2ramsey", {})
+        execution = reply.data["execution"]
+        if interactive:
+            assert reply.data["status"] == "interactive", reply.data
+            assert gui.raw_saved
+            assert not gui.writes
+            before = list(client.transport.sent)
+            status = client.call("status", {"execution": execution})
+            assert status["question_items"] is None
+            assert client.transport.sent == before
+            reply = client.call(
+                "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+            )
+            assert reply.data["execution"] == execution
+        assert reply.data["status"] == "awaiting_answer", reply.data
+        assert tuple(reply.data["question_items"]) == ("decay_time",)
+        assert reply.data["previews"]["primary"]
+        assert not gui.writes
+        before = list(client.transport.sent)
+        status = client.call("status", {"execution": execution})
+        assert status["question_preview"]["primary"]["items"][0]["selected"] is False
+        assert client.transport.sent == before
+        reply = client.call("answer", {"recipe": execution, "decision": decision})
+        assert reply.data["status"] == "finished", reply.data
+        receipts = reply.data["writeback"]["receipts"]
+        if decision == "accepted":
+            assert gui.writes == [
+                {
+                    "tab_id": "t",
+                    "subtab_id": "analysis",
+                    "write": [{"id": "md-1"}],
+                }
+            ]
+            assert receipts[0]["status"] == "finished"
+            assert receipts[0]["completed"][0]["stage"] == "primary"
+            assert receipts[0]["completed"][0]["written"][0]["target"] == "decay_time"
+        else:
+            assert client.transport.sent == before
+            assert not gui.writes
+            assert not receipts
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == 1
+        assert methods.count("tab.analyze") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.analyze")
+
+
+def test_t2ramsey_cancelled_run_stops_before_raw_save(tmp_path):
+    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2")
+    with recipe_client(tmp_path, gui) as client:
+        client.transport.replies["operation.await"] = {
+            "ok": True,
+            "result": {"reason": "completed", "status": "cancelled"},
+        }
+        reply = full_execution_reply(client, client.call("t2ramsey", {}))
+        assert reply.data["status"] == "cancelled", reply.data
+        assert reply.data["run_outcome"]["status"] == "cancelled"
+        assert reply.data["tab"] == "t"
+        assert not gui.raw_saved
+        assert not gui.writes
+        methods = [method for method, _ in client.transport.sent]
+        assert "tab.save_data" not in methods
+        assert "tab.analyze" not in methods
+
+
+def test_t2ramsey_cancelled_question_stops_without_writing(tmp_path):
+    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2")
+    with recipe_client(tmp_path, gui) as client:
+        question = client.call("t2ramsey", {})
+        assert question.data["status"] == "awaiting_answer", question.data
+        execution = question.data["execution"]
+        before = list(client.transport.sent)
+        client.call("cancel", {"execution": execution})
+        reply = client.call("wait", {"execution": execution, "timeout": 5})
+        assert reply.data["status"] == "cancelled", reply.data
+        assert reply.data["previews"]["primary"]
+        assert not reply.data["writeback"]["receipts"]
+        assert client.transport.sent == before
+        assert not gui.writes
 
 
 def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
