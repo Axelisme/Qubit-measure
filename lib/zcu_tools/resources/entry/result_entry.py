@@ -79,9 +79,15 @@ class ResultEntry:
         self._result_path = result_path
         self._database_path = database_path
         self._entry_id: str | None = None
-        self._setup_store = DocumentStore(
-            result_path / "setup.yaml",
-            SetupDocument,
+        source = result_path / "setup.yaml"
+
+        # Bind diagnostics to this handle without shared mutable model context.
+        class EntrySetupDocument(SetupDocument):
+            _source = source
+
+        self._setup_store = DocumentStore[SetupDocument](
+            source,
+            EntrySetupDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
             units=self._setup_units,

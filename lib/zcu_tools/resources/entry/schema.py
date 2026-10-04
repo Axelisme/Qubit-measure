@@ -4,7 +4,7 @@ import keyword
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, ClassVar
 from uuid import UUID
 
 from pydantic import (
@@ -161,7 +161,7 @@ class CurrentSourceSchema(ComponentSchema):
 
 
 def _canonical_errors(
-    fields: YamlMap, validated: BaseModel, path: FieldPath
+    fields: YamlMap, validated: BaseModel, path: FieldPath, *, source: Path
 ) -> list[InitErrorDetails]:
     """Compare supplied known fields in working units, not the original user input."""
     canonical = TypeAdapter(YamlMap).validate_python(
@@ -175,14 +175,20 @@ def _canonical_errors(
         after = canonical.get(name, "(missing)")
         nested = getattr(validated, name)
         if isinstance(before, dict) and isinstance(nested, BaseModel):
-            errors.extend(_canonical_errors(before, nested, (*path, name)))
+            errors.extend(
+                _canonical_errors(before, nested, (*path, name), source=source)
+            )
         elif (name in fields) != (name in canonical) or before != after:
             errors.append(
                 InitErrorDetails(
                     type=PydanticCustomError(
                         "canonical_value",
-                        "Field validation changed canonical value from {before} to {after}",
-                        {"before": repr(before), "after": repr(after)},
+                        "{source}: field validation changed canonical value from {before} to {after}",
+                        {
+                            "source": str(source),
+                            "before": repr(before),
+                            "after": repr(after),
+                        },
                     ),
                     loc=(*path, name),
                     input=before,
@@ -193,6 +199,7 @@ def _canonical_errors(
 
 class SetupDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    _source: ClassVar[Path] = Path("setup.yaml")
 
     format: str
     format_version: str
@@ -215,7 +222,7 @@ class SetupDocument(BaseModel):
                 "format": info.data["format"],
                 "format_version": info.data["format_version"],
             },
-            source=Path("setup.yaml"),
+            source=cls._source,
         )
         components = TypeAdapter(dict[str, YamlMap]).validate_python(value)
         result: dict[str, ComponentSchema] = {}
@@ -229,7 +236,9 @@ class SetupDocument(BaseModel):
             result[name] = model.model_validate(
                 fields, extra="ignore" if forward_minor else None
             )
-            errors = _canonical_errors(fields, result[name], (name,))
+            errors = _canonical_errors(
+                fields, result[name], (name,), source=cls._source
+            )
             if errors:
                 raise ValidationError.from_exception_data(model.__name__, errors)
         return result
