@@ -425,7 +425,9 @@ def test_duplicate_analysis_receipt_retains_the_confirmed_handle(
 ):
     method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
     result_method = (
-        "tab.get_analyze_result" if stage == "primary" else "tab.get_post_analyze_result"
+        "tab.get_analyze_result"
+        if stage == "primary"
+        else "tab.get_post_analyze_result"
     )
     pane = "analysis" if stage == "primary" else "post_analysis"
 
