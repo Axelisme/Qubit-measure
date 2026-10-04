@@ -114,13 +114,11 @@ class ResultEntry:
                 if isinstance(fields, dict) and isinstance(
                     kind := fields.get("kind"), str
                 ):
-                    component_registry.get(
-                        kind, source=self._result_path / "setup.yaml", component=name
-                    )
+                    component_registry.get(kind, source=source, component=name)
                     if not forward_minor:
                         component_registry.check_fields(kind, fields, path=name)
                     for path, spec in component_registry.units(
-                        kind, source=self._result_path / "setup.yaml", component=name
+                        kind, source=source, component=name
                     ).items():
                         result[("components", name, *path)] = spec
         return result

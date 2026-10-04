@@ -376,14 +376,17 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
     setup_before = setup_source.read_bytes()
     entered: list[bool] = []
 
-    with pytest.raises(UnknownKindError) as error:
-        if operation == "use":
-            entry.use_point("a")
-        elif operation == "refresh":
-            working_point.refresh()
-        else:
-            with working_point.edit():
-                entered.append(True)
+    if operation == "edit":
+        with pytest.raises(UnknownKindError) as error, working_point.edit():
+            entered.append(True)
+    else:
+        reload_point = (
+            working_point.refresh
+            if operation == "refresh"
+            else lambda: entry.use_point("a")
+        )
+        with pytest.raises(UnknownKindError) as error:
+            reload_point()
 
     assert error.value.source == source
     assert error.value.component == "Q1"
