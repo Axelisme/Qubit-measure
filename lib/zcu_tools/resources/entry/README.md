@@ -1,12 +1,12 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04，numeric unit declarations
+**Last updated:** 2026-10-04，working-point layering checkpoint
 
 `ResultEntry` 組合兩個明確傳入的根目錄。名稱是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 不接受 refresh 帶入另一個身分。
 
 `ResultEntry.create` 建立新格式 setup、points 與 records 目錄，以及同名 Database 目錄。任一目的地已存在就拒絕。建立失敗只清本次建立的條目目錄，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式條目，不猜測 legacy 格式。
 
-`SetupView` 與元件、wiring、ext 視圖讀取 DocumentStore 的記憶體快照。單行 description 與元件欄位寫入都使用型別化交易。DocumentStore 擁有單檔衝突檢查、版本、SI／工作單位邊界與 `.entry.lock`；ResultEntry 擁有身分的提交前驗證。
+`SetupView`、`PointView` 與元件、wiring、ext 視圖讀取記憶體快照，不在屬性讀取時做 I/O。工作點先讀 point，沒有才讀 setup；兩層有相同 leaf 時拒絕載入。既有值寫回原層，新值預設進 point。DocumentStore 擁有單檔衝突檢查、版本與 SI／工作單位邊界。ResultEntry 持有一次 `.entry.lock` 協調多層驗證、提交與普通失敗復原；全部 replace 成功後才發布快照。
 
 元件名稱是未保留的 public identifier，不能拆成點分路徑或遮蔽視圖。Registry 在註冊前驗證 ComponentSchema 型別、extra=forbid、數值欄位的單位與引用路徑，再保存整份宣告。物理數值必須宣告 UnitSpec，無因次量也宣告 1／1；直接或 nullable 巢狀 model 遵守同一規則。WiringSchema 的 channel 是離散 index，不換算，也不要求物理單位。失敗不占用 kind；重複註冊報錯，unregister 後可明確替換。已知欄位與 wiring 拒絕拼字錯誤，缺物理值的讀取明確報錯。UnitSpec 與比例換算沿用 DocumentStore，不從欄位名稱猜單位。Ext 使用獨立的任意 YAML mapping，沒有換算；非屬性形式的 key 可用 item access。
 
@@ -14,7 +14,7 @@
 
 Setup 允許省略 notebook model 與巢狀 model 的必填欄位。巢狀 model 可直接宣告，也可宣告為單一 model 與 None 的 union。這兩種形狀共用單位、typo 與 reference path 判斷。未填值不落盤，讀取明確報錯；有提供的值仍經型別驗證。Nullable 巢狀容器的 explicit None 保留為 null。Registry 保留原始完整 model，必填完整性由後續疊合視圖檢查。
 
-D101 將 notebook 驗證分為兩個階段。Setup 的 add、edit、open 與 refresh 只驗證供值欄位；field validators 的 before、after、wrap 與 plain 保留轉換，缺值不驗證 default。Registry 保留原始完整 model，並拒絕 before／wrap model validator 與自訂 model_post_init，包含繼承與支援的巢狀宣告。Field validator 讀取 info.data 在部分階段不受支援，caller 的例外照常傳出。跨欄位檢查放在 model after-validator。完整疊合與 after-validator 不改值的檢查由後續工作點切片提供，不在 partial setup 執行。
+D101 將 notebook 驗證分為兩個階段。Setup 的 add、edit、open 與 refresh 只驗證供值欄位；field validators 的 before、after、wrap 與 plain 保留轉換，缺值不驗證 default。Registry 保留原始完整 model，並拒絕 before／wrap model validator 與自訂 model_post_init，包含繼承與支援的巢狀宣告。Field validator 讀取 info.data 在部分階段不受支援，caller 的例外照常傳出。跨欄位檢查放在 model after-validator。完整疊合階段檢查必填與 model after-validator。每個 after-validator 的完整值在執行前後必須等價，包含未供值的 default 與直接／nullable 巢狀 model；不在 partial setup 執行這些檢查。
 
 D104 要求 field 轉換在 canonical 值上冪等，register 不試跑樣本。Entry 在提交前與 open、refresh、交易進入的讀取中檢查驗證前後的工作單位值。差異超出等價界線時，以 ValidationError 回報欄位、前後值與來源檔案，保留原檔與既有快照。D105 只對宣告 UnitSpec、兩邊都是有限 float 的葉節點使用 math.isclose，rel_tol=1e-12、abs_tol=0.0。其他值仍嚴格比較。容差內的微小轉換視為等價，通過後發布驗證後的值。Strip、lower 與固定精度 rounding 可用，不跳過 caller 的 field validator，也不攔截其例外。DocumentStore 不負責 canonical 等價規則。
 
@@ -24,4 +24,6 @@ EditView 的元件、wiring、ext 與 general 屬性更新同一份 draft。點�
 
 同 major 的較新 minor 文件保留未知欄位與原版本。Typed 視圖只投影已知欄位；頻率與 wiring 時間仍使用宣告的工作單位。未知欄位留在 DocumentStore 的 YAML tree，不換算，也不開放 typed API 讀寫。已知值、kind 與引用仍驗證；當前 minor 的未知正式欄位仍報錯。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。工作點、來源、stderr 接縫、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。
+工作點 reload 同時讀取最新 setup 與 point，完整驗證失敗不發布任一快照。move 在兩層間搬值與來源。Clone 只複製同條目的 point 與 module_cfg，保留 point 來源並標記直接來源工作點。跨條目 clone 明確拒絕。
+
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。工作點切片仍在實作；相同值重寫的 clone 標記清除、多層失敗情境尚未完成驗收。來源公開 API、stderr 接縫、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。

@@ -1,16 +1,24 @@
 """Component model declarations, independent of experiment definitions."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from difflib import get_close_matches
+from inspect import signature
 from pathlib import Path
 from types import UnionType
 from typing import Any, Union, cast, get_args, get_origin
 
-from pydantic import BaseModel, create_model
+from pydantic import (
+    BaseModel,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    create_model,
+)
 from pydantic.fields import FieldInfo
 
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
 from .errors import MissingReferenceError, UnknownFieldError, UnknownKindError
@@ -22,6 +30,7 @@ from .schema import (
     QubitSchema,
     ResonatorSchema,
     WiringSchema,
+    canonical_errors,
     field_annotations,
 )
 
@@ -112,6 +121,76 @@ def _partial_model[_Model: BaseModel](
     return partial
 
 
+@dataclass(frozen=True)
+class _CompleteContext:
+    source: Path
+
+
+def _checked_after(
+    validator: Callable[..., object],
+) -> Callable[[BaseModel, ValidationInfo], BaseModel]:
+    takes_info = len(signature(validator).parameters) > 1
+
+    def check(value: BaseModel, info: ValidationInfo) -> BaseModel:
+        context = info.context
+        if not isinstance(context, _CompleteContext):
+            raise ValueError("Complete validation requires its source file")
+        source = context.source
+        before = TypeAdapter(YamlMap).validate_python(value.model_dump())
+        result = validator(value, info) if takes_info else validator(value)
+        if not isinstance(result, BaseModel):
+            raise TypeError("Model after validator must return a model")
+        errors = canonical_errors(
+            before,
+            result,
+            (),
+            source=source,
+            include_defaults=True,
+        )
+        if errors:
+            raise ValidationError.from_exception_data(type(value).__name__, errors)
+        return result
+
+    return check
+
+
+def _checked_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
+    annotations: dict[str, object] = {}
+    fields: dict[str, FieldInfo] = {}
+    for name, field in model.model_fields.items():
+        nested = _nested_model(field.annotation)
+        if nested is not None:
+            checked_nested = _checked_model(nested)
+            annotation = (
+                checked_nested | None
+                if type(None) in get_args(field.annotation)
+                else checked_nested
+            )
+            annotations[name] = annotation
+            fields[name] = deepcopy(field)
+    checked = type(
+        f"{model.__name__}Checked",
+        (model,),
+        {
+            "__module__": model.__module__,
+            "__annotations__": annotations,
+            **fields,
+        },
+    )
+    if not issubclass(checked, model):
+        raise TypeError("Checked model must retain its registered base")
+    decorators = checked.__pydantic_decorators__
+    checked.__pydantic_decorators__ = replace(
+        decorators,
+        model_validators={
+            name: replace(decorator, func=_checked_after(decorator.func))
+            for name, decorator in decorators.model_validators.items()
+        },
+    )
+    checked.model_rebuild(force=True)
+    return checked
+
+
 def _validate_partial_contract(model: type[BaseModel]) -> None:
     for validator in model.__pydantic_decorators__.model_validators.values():
         if validator.info.mode != "after":
@@ -165,6 +244,7 @@ class ComponentRegistry:
         self._references: dict[str, tuple[str, ...]] = {}
         self._units: dict[str, dict[FieldPath, UnitSpec]] = {}
         self._partial_models: dict[str, type[ComponentSchema]] = {}
+        self._complete_models: dict[str, type[ComponentSchema]] = {}
 
     def register(
         self, kind: str, model: type[ComponentSchema], *, references: Sequence[str] = ()
@@ -178,16 +258,19 @@ class ComponentRegistry:
             _validate_reference(model, reference)
         units = _model_units(model)
         partial_model = _partial_model(model, component_root=True)
+        complete_model = _checked_model(model)
         self._models[kind] = model
         self._references[kind] = reference_paths
         self._units[kind] = units
         self._partial_models[kind] = partial_model
+        self._complete_models[kind] = complete_model
 
     def unregister(self, kind: str) -> None:
         del self._models[kind]
         del self._references[kind]
         del self._units[kind]
         del self._partial_models[kind]
+        del self._complete_models[kind]
 
     def get(
         self, kind: str, *, source: Path | None = None, component: str | None = None
@@ -205,6 +288,18 @@ class ComponentRegistry:
         """Validate supplied setup values while deferring required-field completeness."""
         self.get(kind, source=source, component=component)
         return self._partial_models[kind]
+
+    def validate_complete(
+        self, kind: str, fields: YamlMap, *, source: Path, component: str
+    ) -> ComponentSchema:
+        """Resources-only complete validation with non-mutating model invariants."""
+        self.get(kind, source=source, component=component)
+        model = self._complete_models[kind]
+        adapter = TypeAdapter[dict[str, ComponentSchema]](dict[str, model])
+        return adapter.validate_python(
+            {component: fields},
+            context=_CompleteContext(source),
+        )[component]
 
     def check_fields(
         self, kind: str | type[BaseModel], fields: Mapping[str, object], *, path: str

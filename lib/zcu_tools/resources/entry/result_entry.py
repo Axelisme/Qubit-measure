@@ -174,7 +174,13 @@ class ResultEntry:
             self._result_path / "points", label, new_destination=True
         )
         if clone_from is not None:
-            raise NotImplementedError("Point cloning is not implemented")
+            destination.mkdir()
+            try:
+                self._clone_point(destination, clone_from)
+                return self.use_point(label)
+            except BaseException:
+                shutil.rmtree(destination)
+                raise
         destination.mkdir()
         try:
             document = {
@@ -201,20 +207,98 @@ class ResultEntry:
             shutil.rmtree(destination)
             raise
 
+    def _clone_point(self, destination: Path, clone_from: str | PointView) -> None:
+        source = (
+            clone_from.clone_source(self._result_path)
+            if isinstance(clone_from, PointView)
+            else _entry_path(self._result_path / "points", clone_from)
+        )
+        with ExitStack() as stack, self._setup_store.locked():
+            setup_state = stack.enter_context(
+                self._setup_store.read_state(locked_by=self._setup_store)
+            )
+            store, _ = self._point_store(source / "point.yaml", setup_state.base)
+            compose(
+                setup_state.base,
+                store.snapshot(),
+                source / "point.yaml",
+                complete=True,
+            )
+            for filename in ("point.yaml", "module_cfg.yaml"):
+                shutil.copyfile(source / filename, destination / filename)
+            cloned_store, _ = self._point_store(
+                destination / "point.yaml", setup_state.base
+            )
+            cloned_state = stack.enter_context(
+                cloned_store.read_state(locked_by=self._setup_store)
+            )
+            cloned_state.draft.general.created_at = (
+                datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            )
+            for metadata in cloned_state.draft.provenance.values():
+                metadata["cloned_from"] = {
+                    "entry_id": setup_state.base.general.entry_id,
+                    "point": source.name,
+                }
+            prepared = cloned_store.prepare(cloned_state, locked_by=self._setup_store)
+            try:
+                prepared.replace()
+            finally:
+                prepared.discard()
+
     def use_point(self, label: str) -> PointView:
         directory = _entry_path(self._result_path / "points", label)
         source = directory / "point.yaml"
         module = directory / "module_cfg.yaml"
         if not module.is_file():
             raise FileNotFoundError(module)
-        store, context = self._point_store(source, self._setup_store.snapshot())
-        compose(context.setup, store.snapshot(), source, complete=True)
+        with ExitStack() as stack, self._setup_store.locked():
+            setup_state = stack.enter_context(
+                self._setup_store.read_state(locked_by=self._setup_store)
+            )
+            setup_prepared = self._setup_store.prepare(
+                setup_state, locked_by=self._setup_store
+            )
+            store, context = self._point_store(source, setup_prepared.snapshot)
+            compose(context.setup, store.snapshot(), source, complete=True)
+            self._setup_store.publish(setup_prepared, locked_by=self._setup_store)
         return PointView(
             store,
             self._setup_store,
             source,
             lambda: self._edit_point(store, context, source),
+            lambda: self._refresh_point(store, context, source),
         )
+
+    def _refresh_point(
+        self,
+        store: DocumentStore[PointDocument],
+        context: _PointContext,
+        source: Path,
+    ) -> None:
+        with ExitStack() as stack, self._setup_store.locked():
+            setup_state = stack.enter_context(
+                self._setup_store.read_state(locked_by=self._setup_store)
+            )
+            setup_prepared = self._setup_store.prepare(
+                setup_state, locked_by=self._setup_store
+            )
+            context.setup = setup_prepared.snapshot
+            try:
+                point_state = stack.enter_context(
+                    store.read_state(locked_by=self._setup_store)
+                )
+                point_prepared = store.prepare(point_state, locked_by=self._setup_store)
+                compose(
+                    setup_prepared.snapshot,
+                    point_prepared.snapshot,
+                    source,
+                    complete=True,
+                )
+                self._setup_store.publish(setup_prepared, locked_by=self._setup_store)
+                store.publish(point_prepared, locked_by=self._setup_store)
+            finally:
+                context.setup = self._setup_store.snapshot()
 
     def _point_store(
         self, source: Path, setup: SetupDocument
@@ -288,6 +372,7 @@ class ResultEntry:
                 point_state = stack.enter_context(
                     store.read_state(locked_by=self._setup_store)
                 )
+            compose(setup_state.base, point_state.base, source, complete=True)
             before = compose(setup_state.base, point_state.base, source, complete=False)
             draft = before.model_copy(deep=True)
             yield draft

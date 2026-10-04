@@ -31,11 +31,13 @@ class PointView:
         setup: DocumentStore[SetupDocument],
         source: Path,
         edit: Callable[[], AbstractContextManager[LayeredDocument]],
+        refresh: Callable[[], None],
     ) -> None:
         self._store = store
         self._setup = setup
         self._source = source
         self._edit_document = edit
+        self._refresh_document = refresh
 
     def _snapshot(self) -> LayeredDocument:
         return compose(
@@ -79,8 +81,17 @@ class PointView:
         with self._edit_document() as draft:
             yield EditView(draft)
 
+    def clone_source(self, entry: Path) -> Path:
+        """Resources-only identity check for an entry-owned clone."""
+        if self._source.resolve().parents[2] != entry.resolve():
+            raise ValueError("Cross-entry cloning is not supported")
+        return self._source.parent
+
     def refresh(self) -> None:
-        raise NotImplementedError("Layered refresh is not implemented")
+        self._refresh_document()
 
     def move(self, path: str, *, to: Literal["setup", "point"]) -> None:
-        raise NotImplementedError("Layer move is not implemented")
+        if to not in ("setup", "point"):
+            raise ValueError(f"{to!r}: expected setup or point")
+        with self._edit_document() as draft:
+            draft.moves.append((path, to))

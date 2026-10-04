@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import UnionType
-from typing import Annotated, ClassVar, Union, get_args, get_origin
+from typing import Annotated, ClassVar, Literal, Union, get_args, get_origin
 from uuid import UUID
 
 from pydantic import (
@@ -228,11 +228,16 @@ def _same_canonical_value(
 
 
 def canonical_errors(
-    fields: YamlMap, validated: BaseModel, path: FieldPath, *, source: Path
+    fields: YamlMap,
+    validated: BaseModel,
+    path: FieldPath,
+    *,
+    source: Path,
+    include_defaults: bool = False,
 ) -> list[InitErrorDetails]:
     """Compare supplied known fields in working units, not the original user input."""
     canonical = TypeAdapter(YamlMap).validate_python(
-        validated.model_dump(exclude_unset=True)
+        validated.model_dump(exclude_unset=not include_defaults)
     )
     errors: list[InitErrorDetails] = []
     for name, field in type(validated).model_fields.items():
@@ -243,7 +248,13 @@ def canonical_errors(
         nested = getattr(validated, name)
         if isinstance(before, dict) and isinstance(nested, BaseModel):
             errors.extend(
-                canonical_errors(before, nested, (*path, name), source=source)
+                canonical_errors(
+                    before,
+                    nested,
+                    (*path, name),
+                    source=source,
+                    include_defaults=include_defaults,
+                )
             )
         elif (name in fields) != (name in canonical) or not _same_canonical_value(
             before, after, field
@@ -272,6 +283,7 @@ class LayeredDocument(BaseModel):
     general: PointGeneral
     components: dict[str, ComponentSchema]
     provenance: dict[str, YamlMap] = Field(default_factory=dict)
+    moves: list[tuple[str, Literal["setup", "point"]]] = Field(default_factory=list)
 
 
 class SetupDocument(BaseModel):

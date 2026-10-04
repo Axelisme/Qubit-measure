@@ -180,8 +180,10 @@ def _edit_values(base: object, draft: object) -> tuple[YamlValue, YamlValue]:
             before, after = _edit_values(getattr(base, name), getattr(draft, name))
             if name in original:
                 original[name] = before
-            # An in-place edit does not mark its containing field as explicitly set.
-            if name in candidate or not _same_value(before, after):
+            # Track edits to an unset default, but preserve explicit field removal.
+            if name in candidate or (
+                name not in original and not _same_value(before, after)
+            ):
                 candidate[name] = after
         return original, candidate
     if isinstance(base, dict) and isinstance(draft, dict):

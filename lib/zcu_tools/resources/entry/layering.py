@@ -4,6 +4,7 @@ from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -96,15 +97,19 @@ def compose(
         supplied = _merge(
             _fields(base), point.components.get(name, {}), (name,), source
         )
-        model = (
-            component_registry.get(base.kind)
-            if complete
-            else component_registry.partial_model(base.kind)
-        )
-        validated = model.model_validate(deepcopy(supplied))
+        if complete:
+            validated = component_registry.validate_complete(
+                base.kind,
+                deepcopy(supplied),
+                source=source,
+                component=name,
+            )
+        else:
+            model = component_registry.partial_model(base.kind)
+            validated = model.model_validate(deepcopy(supplied))
         errors = canonical_errors(supplied, validated, (name,), source=source)
         if errors:
-            raise ValidationError.from_exception_data(model.__name__, errors)
+            raise ValidationError.from_exception_data(type(validated).__name__, errors)
         components[name] = validated
     component_registry.validate_references(components, source=source)
     return LayeredDocument(
@@ -149,6 +154,47 @@ def _put(document: YamlMap, path: FieldPath, value: YamlValue | _Absent) -> None
         node[path[-1]] = deepcopy(value)
 
 
+def _move(
+    path: str,
+    to: Literal["setup", "point"],
+    setup: SetupDocument,
+    point: PointDocument,
+) -> None:
+    parts = tuple(path.split("."))
+    if len(parts) < 2 or not all(parts):
+        raise ValueError(f"{path!r}: expected a dotted component field path")
+    name, *field_parts = parts
+    if name not in setup.components:
+        raise AttributeError(f"Unknown component {name!r}")
+    if field_parts[0] == "kind":
+        raise ValueError(f"{path}: kind belongs to setup")
+    setup_fields = _fields(setup.components[name])
+    point_fields = deepcopy(point.components.get(name, {}))
+    source_fields, destination_fields = (
+        (point_fields, setup_fields) if to == "setup" else (setup_fields, point_fields)
+    )
+    field_path = tuple(field_parts)
+    if not isinstance(_lookup(destination_fields, field_path), _Absent):
+        raise ValueError(f"{path}: destination {to} already has a value")
+    value = _lookup(source_fields, field_path)
+    if isinstance(value, _Absent):
+        raise AttributeError(f"{path}: field is not set in the source layer")
+    _put(destination_fields, field_path, value)
+    _put(source_fields, field_path, _Absent.VALUE)
+    setup.components[name] = component_registry.partial_model(
+        setup.components[name].kind
+    ).model_validate(setup_fields)
+    point.components[name] = point_fields
+    source_meta, destination_meta = (
+        (point.provenance, setup.provenance)
+        if to == "setup"
+        else (setup.provenance, point.provenance)
+    )
+    for key in tuple(source_meta):
+        if key == path or key.startswith(f"{path}."):
+            destination_meta[key] = source_meta.pop(key)
+
+
 def route(
     before: LayeredDocument,
     after: LayeredDocument,
@@ -173,3 +219,5 @@ def route(
         ).model_validate(setup_fields)
         if point_fields:
             point.components[name] = point_fields
+    for path, destination in after.moves:
+        _move(path, destination, setup, point)
