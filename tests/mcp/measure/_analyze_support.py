@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from threading import Event
 from typing import Any
@@ -30,9 +31,20 @@ AMBIGUOUS_SAVE_ERRORS = {
 
 
 def analysis_client(
-    tmp_path: Path, clients: list[MeasureClient], responder: RpcResponder | None = None
+    tmp_path: Path,
+    clients: list[MeasureClient],
+    responder: RpcResponder | None = None,
+    *,
+    writeback: Mapping[str, object] | None = None,
 ) -> MeasureClient:
+    """Build the analysis seam with a confirmed empty draft unless supplied."""
     client = make_client(tmp_path, responder)
+    client.transport.replies["tab.writeback_preview"] = lambda params: {
+        "ok": True,
+        "result": dict(writeback)
+        if writeback is not None
+        else {"has_draft": False, "items": [], "destination_context": {}},
+    }
     clients.append(client)
     return client
 
@@ -190,7 +202,14 @@ def inject_analysis_rejection(
             "message": "original analysis was replaced",
         },
     }
-    if failure == "result_rejected":
+    if failure == "writeback_rejected":
+        client.transport.replies["tab.writeback_preview"] = rejection
+    elif failure == "writeback_timeout":
+        client.transport.replies["tab.writeback_preview"] = {
+            "ok": False,
+            "error": {"code": "timeout", "message": "draft read timed out"},
+        }
+    elif failure == "result_rejected":
         client.transport.replies["tab.get_analyze_result"] = rejection
     elif failure == "save_rejected" or failure in AMBIGUOUS_SAVE_ERRORS:
         save_error = (

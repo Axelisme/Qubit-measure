@@ -375,6 +375,8 @@ def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
         "analysis_stage": stage,
         "analysis": snapshot if stage == "primary" else None,
         "post_analysis": snapshot if stage == "post" else None,
+        "writeback": snapshot["writeback"] if stage == "primary" else None,
+        "post_writeback": snapshot["writeback"] if stage == "post" else None,
         "missing": [],
         "error": snapshot["error"],
     }

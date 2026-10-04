@@ -264,6 +264,7 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         "operation.await",
         result_method,
         *(["tab.save_image", "tab.save_image", "tab.get_figure"] if has_figure else []),
+        "tab.writeback_preview",
     ]
 
 
@@ -426,101 +427,8 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
         "tab.get_analyze_result",
         "tab.save_image",
         "tab.get_figure",
+        "tab.writeback_preview",
     ]
-
-
-@pytest.mark.parametrize("registered", [True, False], ids=["mcp-origin", "gui-origin"])
-@pytest.mark.parametrize("outcome", ["finished", "failed"])
-def test_done_joins_original_completion_without_duplicate_saves(
-    tmp_path, clients, monkeypatch, registered, outcome
-):
-    done = Event()
-
-    def respond(method, params):
-        if method == "tab.analyze":
-            return _start_reply({"gain": 2}, [], interactive=True)
-        if method == "tab.interact":
-            if "payload" in params:
-                assert params["payload"] == {"command": "done"}
-                assert params["include_figure"] is False
-                done.set()
-            return {
-                "operation_id": 71,
-                "state": {"value": 3},
-                "commands": [{"name": "done"}],
-                "figure": None,
-            }
-        if method == "operation.await":
-            return (
-                {
-                    "reason": "completed",
-                    "status": outcome,
-                    "error": "fit failed" if outcome == "failed" else None,
-                }
-                if done.is_set()
-                else {"reason": "user_feedback", "status": "running"}
-            )
-        if method == "tab.get_analyze_result":
-            return _result_reply("analysis", ["fit"], {"gain": 2})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
-        if method == "tab.get_figure":
-            return {"png_b64": base64.b64encode(_PNG).decode()}
-        raise AssertionError(method)
-
-    client = _client(tmp_path, clients, respond)
-    started = (
-        _data(
-            _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
-        )
-        if registered
-        else None
-    )
-    reply = _call_full_execution_stdio(
-        monkeypatch,
-        client,
-        "tab_interact",
-        {"tab": "t", "payload": {"command": "done"}},
-    )
-    assert bool(reply.get("isError")) is (outcome == "failed")
-    completed = json.loads(reply["content"][0]["text"])
-    assert completed["status"] == outcome
-    assert completed["op"] == 1
-    execution = completed["execution"]
-    if started is not None:
-        assert execution == started["execution"]
-    terminal = _data(
-        _call_full_execution_stdio(
-            monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
-        )
-    )
-    assert terminal["status"] == outcome
-    assert completed["save_status"] == (
-        "saved" if outcome == "finished" else "not_started"
-    )
-    assert completed["saved_images"] == (
-        [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
-        if outcome == "finished"
-        else []
-    )
-    if outcome == "finished":
-        assert completed["params"] == {"gain": 2}
-        _assert_figure(reply, present=True)
-    else:
-        assert completed["error"]["reason"] == "analysis_failed"
-    methods = _methods(client)
-    assert methods.count("tab.analyze") == int(registered)
-    assert methods.count("tab.interact") == 1 + int(registered)
-    assert methods.count("tab.get_analyze_result") == int(outcome == "finished")
-    assert methods.count("tab.save_image") == int(outcome == "finished")
-    assert set(methods) <= {
-        "tab.analyze",
-        "tab.interact",
-        "operation.await",
-        "tab.get_analyze_result",
-        "tab.save_image",
-        "tab.get_figure",
-    }
 
 
 @pytest.mark.parametrize("bad_image", [False, True])

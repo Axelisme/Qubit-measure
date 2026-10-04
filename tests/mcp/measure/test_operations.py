@@ -91,6 +91,11 @@ def test_status_indexes_gui_operations_and_session_executions(
     tmp_path: Path, analysis_count: int
 ) -> None:
     replies: dict[str, dict[str, Any]] = {
+        "tab.writeback_preview": {
+            "has_draft": False,
+            "items": [],
+            "destination_context": {},
+        },
         "state.has_project": {"value": True},
         "project.info": {"chip_name": "chip", "qub_name": "qubit", "res_name": "res"},
         "state.has_context": {"value": True},

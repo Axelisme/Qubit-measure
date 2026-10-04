@@ -83,6 +83,7 @@ class GeGui(LookbackGui):
             return {
                 "has_draft": True,
                 "items": [{"id": "classifier", "proposed": 0.98}],
+                "destination_context": {"active_label": "sample"},
             }
         raise AssertionError(method)
 
@@ -481,7 +482,12 @@ def test_ge_close_stops_stage_admission_without_reconnect(
         assert data["phase"] == "terminal"
         assert data["error"]["reason"] in ("session_closed", "connection_lost")
         assert data["raw_save"]["path"] == "/actual/raw.h5"
-        assert data["analysis"]["status"] == "finished"
+        assert data["analysis"]["status"] == (
+            "failed" if method_pending == "tab.writeback_preview" else "finished"
+        )
+        if method_pending == "tab.writeback_preview":
+            assert data["analysis"]["error"]["phase"] == "writeback_read"
+            assert data["analysis"]["writeback"] is None
         assert data["analysis"]["saved_images"] == [
             {"figure_name": "trace", "image_path": "/actual/trace.png"}
         ]

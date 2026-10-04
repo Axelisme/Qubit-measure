@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-04, explicit setup workflows
+**Last updated:** 2026-10-04, setup workflows and analysis writeback capture
 
 # `zcu_tools/mcp/measure/`
 
@@ -38,7 +38,9 @@ Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` �
 
 ## 分析、互動與接受
 
-`tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 負責結果、實際參數、失效內容、canonical 圖像保存與預覽交付。互動分析立即交接 tab、op、狀態、可用命令與圖像。
+`tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 負責結果、實際參數、失效內容、canonical 圖像保存、預覽及 writeback 候選。互動分析立即交接 tab、op、狀態、可用命令與圖像。
+
+Analysis completion 等原 GUI operation 完成，保存圖像及 preview 後，以原 opaque operation 讀一次 writeback preview。沒有圖像也讀候選。Interactive handoff 不 capture，`done` 加入原 execution，完成後才 capture 定案 draft。Recipe 重用同一份 snapshot，不另讀候選。Full 的 writeback 為 null 表示尚未取得；has_draft=false／items=[] 才是已確認空 draft。Read 失敗以 writeback_read error 回報，保留已知 result、保存路徑及 preview。來源 superseded 不改讀新 pane，不 retry，也不刷新 guard。Recipe wait 在 done 後等待本地 completion 的交接，不再提早交付舊 interactive handoff。
 
 GUI 的分析投影把非有限 summary 數字換成 null，以 `invalid` 記錄欄位路徑與原因。
 Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(execution)` 不重新推導原因。

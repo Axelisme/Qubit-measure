@@ -124,11 +124,26 @@ class RecipeContext:
             return asdict(self.progress)
 
     def wait(self, timeout: float) -> ToolReply:
-        """Wait locally; a timeout ends only this wait, never the worker."""
+        """Wait locally; timeout never stops the worker.
+
+        Interactive replies return early only while the joined analysis is still
+        interactive. After done, wait for the recipe to retain its completion.
+        """
         began = time.monotonic()
         with self._condition:
             self._condition.wait_for(
-                lambda: self.progress.status != "running" or self._closed.is_set(),
+                lambda: (
+                    self._closed.is_set()
+                    or (
+                        self.progress.status != "running"
+                        and (
+                            self.progress.status != "interactive"
+                            or self._analysis_execution is None
+                            or self._analysis_execution.snapshot().status
+                            == "interactive"
+                        )
+                    )
+                ),
                 timeout,
             )
             interaction = (self.progress.analysis or {}).get("interaction")
@@ -244,6 +259,9 @@ class RecipeContext:
                 self._analysis_execution if self.progress.phase == "analysis" else None
             )
         if analysis is not None:
+            if analysis.snapshot().phase == "writeback_read":
+                # The GUI analysis is already complete; retain the admitted read.
+                return self._control_reply(GuiCancel("not_needed"))
             reply = analysis.cancel()
             return ToolReply(
                 {**self.snapshot(), "gui_cancel": reply.data["gui_cancel"]},
@@ -463,7 +481,11 @@ class RecipeContext:
         stage: Literal["primary", "post"],
         primary_op: int | None = None,
     ) -> int | None:
-        """Join one ordered analysis stage without discarding an earlier result."""
+        """Join one stage and retain its result/writeback completion snapshot.
+
+        The analysis owner captures proposals, so this join does no second GUI
+        preview read. A failed capture keeps the saved analysis prefix.
+        """
         with self._condition:
             self._analysis_execution = None
             self._admit("analysis")
@@ -471,7 +493,6 @@ class RecipeContext:
             prior_images = self.images
         result_field = "analysis" if stage == "primary" else "post_analysis"
         writeback_field = "writeback" if stage == "primary" else "post_writeback"
-        pane = "analysis" if stage == "primary" else "post_analysis"
         started = self.tools.gui.send_gui_rpc(
             "tab.analyze" if stage == "primary" else "tab.post_analyze",
             {"tab_id": tab, "updates": {}},
@@ -500,7 +521,10 @@ class RecipeContext:
             with self._condition:
                 self.images = (*prior_images, *reply.images)
                 self._publish(
-                    **{result_field: reply.data},
+                    **{
+                        result_field: reply.data,
+                        writeback_field: reply.data["writeback"],
+                    },
                     status="interactive"
                     if reply.data["status"] == "interactive"
                     else "running",
@@ -515,6 +539,8 @@ class RecipeContext:
                 break
         if reply.data["status"] == "failed":
             error = reply.data["error"]
+            if error["phase"] == "writeback_read":
+                self._publish(phase="writeback_read")
             raise GuiRpcError(
                 error["message"], reason=error["reason"], code=error["code"]
             )
@@ -526,14 +552,6 @@ class RecipeContext:
                 else "terminal",
             )
             return None
-        self._publish(phase="writeback_read")
-        writeback = self.tools.gui.send_gui_rpc(
-            "tab.writeback_preview",
-            {"tab_id": tab, "subtab_id": pane},
-            operation_handle=started["handle"],
-            before_send=lambda: self._admit("writeback_read"),
-        )
-        self._publish(**{writeback_field: writeback})
         return started["handle"]
 
     def _admit_analysis(self, stage: Literal["primary", "post"]) -> None:

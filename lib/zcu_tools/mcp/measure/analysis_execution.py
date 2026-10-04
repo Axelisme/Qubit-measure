@@ -16,7 +16,12 @@ from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcp
 AnalysisStage = Literal["primary", "post"]
 ExecutionStatus = Literal["running", "interactive", "finished", "failed", "cancelled"]
 ExecutionPhase = Literal[
-    "operation", "result_read", "image_save", "figure_read", "terminal"
+    "operation",
+    "result_read",
+    "image_save",
+    "figure_read",
+    "writeback_read",
+    "terminal",
 ]
 SaveStatus = Literal[
     "not_started", "not_available", "saving", "saved", "incomplete", "unknown"
@@ -56,8 +61,49 @@ class AnalysisStart:
     reason: str | None = None
 
 
+class AnalysisWriteback(TypedDict):
+    """Detached GUI writeback preview for one completed analysis operation.
+
+    has_draft: Whether the owner published a draft; false is a confirmed absence.
+    items: All native candidates, including selected=false; values and targets
+        stay in the GUI owner's wire representation.
+    destination_context: Native destination identity and readiness at capture
+        time, not an observation or authorization for a later write.
+    """
+
+    has_draft: bool
+    items: list[dict[str, object]]
+    destination_context: dict[str, object]
+
+
 @dataclass(frozen=True)
 class ExecutionSnapshot:
+    """Detached progress of one session-local Primary or Post completion.
+
+    execution: Session-local execution ID; not a persistent run ID.
+    tab: GUI tab locator on the fixed connection.
+    stage: primary or post, never an inferred recipe identity.
+    op: Opaque session operation handle, or None before receipt.
+    start: Start admission/receipt status and any rejection reason.
+    status: running, interactive, finished, failed or cancelled.
+    phase: Current continuation step, or terminal after completion/failure.
+    cancel_requested: Latched stop intent, not a GUI outcome.
+    operation_outcome: Native terminal await reply, or None while unresolved.
+    params: Accepted start or result parameters, or None before capture.
+    invalidated: Owner's invalidated sections after success, or None if unknown.
+    result: Captured native analysis result, or None before result_read.
+    interaction: Latest interaction handoff, or None if none was delivered.
+    save_status: not_started, not_available, saving, saved, incomplete or unknown.
+    saved_images: Confirmed persistent image paths; failures retain this prefix.
+    remaining_images: Unsaved owner image names, or None before result_read.
+    unconfirmed_image: Admitted save with unknown outcome, or None.
+    figure: Session preview path, or None if unavailable/not delivered.
+    writeback: Completed operation's preview, or None before writeback_read.
+        Interactive handoff does not capture; done joins this completion.
+        A failed read retains result/save/preview facts and reports error.
+    error: Continuation failure with attempted phase/reason/code, or None.
+    """
+
     execution: str
     tab: str
     stage: AnalysisStage
@@ -76,6 +122,7 @@ class ExecutionSnapshot:
     remaining_images: list[str] | None = None
     unconfirmed_image: str | None = None
     figure: str | None = None
+    writeback: AnalysisWriteback | None = None
     error: ExecutionError | None = None
 
 
@@ -176,7 +223,12 @@ class AnalysisExecution:
             return deepcopy(self._snapshot)
 
     def wait(self, timeout: float) -> ToolReply:
-        """Wait locally for completion or an interactive handoff, never cancel."""
+        """Wait up to timeout seconds for completion or an interactive handoff.
+
+        Zero returns current progress. Data is the detached ExecutionSnapshot;
+        images are captured previews. Failed completion is an error ToolReply,
+        not a query exception. This local wait neither reads GUI nor cancels.
+        """
         with self._condition:
             self._condition.wait_for(
                 lambda: (
@@ -476,9 +528,6 @@ class AnalysisExecution:
         self._publish(
             result=result, params=deepcopy(result.params), remaining_images=names
         )
-        if not names:
-            self._finish(save_status="not_available")
-            return
         saved: list[SavedImage] = []
         for index, name in enumerate(names):
             reply = self._rpc(
@@ -503,20 +552,36 @@ class AnalysisExecution:
                 remaining_images=names[index + 1 :],
                 unconfirmed_image=None,
             )
-        self._publish(save_status="saved")
-        reply = self._rpc(
-            "figure_read", "tab.get_figure", {"tab_id": snapshot.tab, "subtab_id": pane}
-        )
-        encoded = reply.get("png_b64")
-        if not isinstance(encoded, str):
-            raise GuiRpcError(
-                "invalid analysis preview reply", reason="incompatible_wire"
+        self._publish(save_status="saved" if names else "not_available")
+        if names:
+            reply = self._rpc(
+                "figure_read",
+                "tab.get_figure",
+                {"tab_id": snapshot.tab, "subtab_id": pane},
             )
-        image = validated_png(base64.b64decode(encoded, validate=True))
-        path = self._session.write_png(image.data)
-        with self._condition:
-            self._images = (image,)
-            self._finish(figure=str(path))
+            encoded = reply.get("png_b64")
+            if not isinstance(encoded, str):
+                raise GuiRpcError(
+                    "invalid analysis preview reply", reason="incompatible_wire"
+                )
+            image = validated_png(base64.b64decode(encoded, validate=True))
+            path = self._session.write_png(image.data)
+            with self._condition:
+                self._images = (image,)
+                self._publish(figure=str(path))
+        reply = self._rpc(
+            "writeback_read",
+            "tab.writeback_preview",
+            {"tab_id": snapshot.tab, "subtab_id": pane},
+        )
+        self._publish(
+            writeback=AnalysisWriteback(
+                has_draft=reply["has_draft"],
+                items=deepcopy(reply["items"]),
+                destination_context=deepcopy(reply["destination_context"]),
+            )
+        )
+        self._finish()
 
 
 class AnalysisExecutions:

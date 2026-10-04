@@ -4,10 +4,12 @@ import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 
 import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
+from zcu_tools.mcp.measure.analysis_execution import AnalysisWriteback
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate
 
@@ -53,7 +55,7 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
     tmp_path, clients, stage
 ):
     pane = "analysis" if stage == "primary" else "post_analysis"
-    proposal = {
+    proposal: AnalysisWriteback = {
         "has_draft": True,
         "items": [
             {
@@ -92,12 +94,9 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
             result["summary"] = {"t1": 27.5}
             result["operation_state"][f"{pane}_state"]["has_writeback_draft"] = True
             return result
-        if method == "tab.writeback_preview":
-            assert params == {"tab_id": "t", "subtab_id": pane, "operation_id": 1}
-            return proposal
         raise AssertionError(method)
 
-    client = _client(tmp_path, clients, respond)
+    client = _client(tmp_path, clients, respond, writeback=proposal)
     initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
     assert initial.data["status"] == "finished", initial.data
     execution = initial.data["execution"]
@@ -131,8 +130,9 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
     full = client.call("status", {"execution": execution, "detail": "full"})
     assert full["writeback"] == proposal
     assert full["writeback"]["items"][0]["selected"] is False
-    methods = _methods(client)
-    assert methods.count("tab.writeback_preview") == 1
+    assert [p for m, p in client.transport.sent if m == "tab.writeback_preview"] == [
+        {"tab_id": "t", "subtab_id": pane, "operation_id": 71}
+    ]
     proposal["items"][0]["proposed"] = 999.0
     proposal["destination_context"]["active_label"] = "newer"
     full["writeback"]["items"].clear()
@@ -477,6 +477,7 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
             "tab.get_analyze_result"
             if stage == "primary"
             else "tab.get_post_analyze_result",
+            "tab.writeback_preview",
         ]
     )
 
@@ -576,7 +577,13 @@ def test_duplicate_analysis_receipt_retains_the_confirmed_handle(
     assert full["start"]["status"] == "running"
     assert full["error"]["reason"] == "incompatible_wire"
     assert conflicting.data["steps"]["analysis"][stage]["status"] == "running"
-    assert _methods(client) == [method, "operation.await", result_method, method]
+    assert _methods(client) == [
+        method,
+        "operation.await",
+        result_method,
+        "tab.writeback_preview",
+        method,
+    ]
 
 
 @pytest.mark.parametrize("outcome", ["finished", "failed"])
@@ -659,6 +666,173 @@ def test_execution_query_observes_background_completion_without_reconnect(
         assert client.transport.sent == sent
     finally:
         release.set()
+
+
+@pytest.mark.parametrize("registered", [True, False], ids=["mcp-origin", "gui-origin"])
+@pytest.mark.parametrize("outcome", ["finished", "failed"])
+def test_done_joins_original_completion_without_duplicate_saves(
+    tmp_path, clients, monkeypatch, registered, outcome
+):
+    done = Event()
+    proposal: AnalysisWriteback = {
+        "has_draft": False,
+        "items": [],
+        "destination_context": {"active_label": "done-destination"},
+    }
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            return _start_reply({"gain": 2}, [], interactive=True)
+        if method == "tab.interact":
+            if "payload" in params:
+                assert params["payload"] == {"command": "done"}
+                assert params["include_figure"] is False
+                proposal["has_draft"] = True
+                proposal["items"] = [
+                    {
+                        "id": "final",
+                        "kind": "metadict",
+                        "target_name": "frequency",
+                        "proposed": 8.5,
+                        "current": 3.0,
+                        "selected": False,
+                    }
+                ]
+                done.set()
+            return {
+                "operation_id": 71,
+                "state": {"value": 3},
+                "commands": [{"name": "done"}],
+                "figure": None,
+            }
+        if method == "operation.await":
+            return (
+                {
+                    "reason": "completed",
+                    "status": outcome,
+                    "error": "fit failed" if outcome == "failed" else None,
+                }
+                if done.is_set()
+                else {"reason": "user_feedback", "status": "running"}
+            )
+        if method == "tab.get_analyze_result":
+            return _result_reply("analysis", ["fit"], {"gain": 2})
+        if method == "tab.save_image":
+            return {"image_path": "/actual/fit.png"}
+        if method == "tab.get_figure":
+            return {"png_b64": base64.b64encode(_PNG).decode()}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond, writeback=proposal)
+    started = (
+        _data(
+            _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+        )
+        if registered
+        else None
+    )
+    if started is not None:
+        assert started["writeback"] is None
+        assert "tab.writeback_preview" not in _methods(client)
+    reply = _call_full_execution_stdio(
+        monkeypatch,
+        client,
+        "tab_interact",
+        {"tab": "t", "payload": {"command": "done"}},
+    )
+    assert bool(reply.get("isError")) is (outcome == "failed")
+    completed = json.loads(reply["content"][0]["text"])
+    assert completed["status"] == outcome
+    assert completed["op"] == 1
+    execution = completed["execution"]
+    if started is not None:
+        assert execution == started["execution"]
+    terminal = _data(
+        _call_full_execution_stdio(
+            monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
+        )
+    )
+    assert terminal["status"] == outcome
+    assert completed["save_status"] == (
+        "saved" if outcome == "finished" else "not_started"
+    )
+    assert completed["saved_images"] == (
+        [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+        if outcome == "finished"
+        else []
+    )
+    if outcome == "finished":
+        assert completed["params"] == {"gain": 2}
+        assert completed["writeback"] == proposal
+        summary = client.call("status", {"execution": execution})
+        assert summary["writeback"]["stages"]["primary"][0]["proposed"] == 8.5
+        assert summary["writeback"]["destination"] == {
+            "context": {"active_label": "done-destination"}
+        }
+        _assert_figure(reply, present=True)
+    else:
+        assert completed["error"]["reason"] == "analysis_failed"
+    methods = _methods(client)
+    assert methods.count("tab.analyze") == int(registered)
+    assert methods.count("tab.interact") == 1 + int(registered)
+    assert methods.count("tab.get_analyze_result") == int(outcome == "finished")
+    assert methods.count("tab.save_image") == int(outcome == "finished")
+    assert methods.count("tab.writeback_preview") == int(outcome == "finished")
+    assert set(methods) <= {
+        "tab.analyze",
+        "tab.interact",
+        "operation.await",
+        "tab.get_analyze_result",
+        "tab.save_image",
+        "tab.get_figure",
+        "tab.writeback_preview",
+    }
+
+
+@pytest.mark.parametrize("failure", ["writeback_rejected", "writeback_timeout"])
+def test_failed_writeback_capture_keeps_saved_analysis_and_preview(
+    tmp_path, clients, monkeypatch, failure
+):
+    def respond(method, params):
+        if method == "tab.analyze":
+            return _start_reply({"skip": 1}, [])
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.get_analyze_result":
+            return _result_reply("analysis", ["fit"], {"skip": 1})
+        if method == "tab.save_image":
+            return {"image_path": "/actual/fit.png"}
+        if method == "tab.get_figure":
+            return {"png_b64": base64.b64encode(_PNG).decode()}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    _inject_analysis_rejection(client, failure, monkeypatch)
+    reply = _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    assert reply["isError"] is True
+    data = json.loads(reply["content"][0]["text"])
+    assert data["status"] == "failed"
+    assert data["error"]["phase"] == "writeback_read"
+    assert data["error"]["reason"] == (
+        "superseded_result"
+        if failure == "writeback_rejected"
+        else "gui_handler_timeout"
+    )
+    assert data["writeback"] is None
+    assert data["result"]["params"] == {"skip": 1}
+    assert data["save_status"] == "saved"
+    assert data["saved_images"] == [
+        {"figure_name": "fit", "image_path": "/actual/fit.png"}
+    ]
+    assert Path(data["figure"]).read_bytes() == _PNG
+    assert reply["content"][1]["data"] == base64.b64encode(_PNG).decode()
+    assert _methods(client).count("tab.writeback_preview") == 1
+    before = list(client.transport.sent)
+    assert (
+        client.call("status", {"execution": data["execution"], "detail": "full"})
+        == data
+    )
+    assert client.transport.sent == before
 
 
 @pytest.mark.parametrize(
