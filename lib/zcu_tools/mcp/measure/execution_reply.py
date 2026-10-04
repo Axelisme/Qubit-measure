@@ -152,6 +152,16 @@ def _image_artifacts(execution: dict[str, Any] | None) -> dict[str, Any]:
     return artifacts
 
 
+def _preview_paths(execution: dict[str, Any] | None) -> list[str]:
+    if execution is None:
+        return []
+    paths = (
+        execution.get("figure"),
+        (execution.get("interaction") or {}).get("figure"),
+    )
+    return list(dict.fromkeys(path for path in paths if path is not None))
+
+
 def _module_summary(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -297,6 +307,10 @@ def project_execution(
         snapshot = _analysis_envelope(snapshot)
     primary_execution = snapshot.get("analysis")
     post_execution = snapshot.get("post_analysis")
+    preview = snapshot.get("preview")
+    interaction = (primary_execution or {}).get("interaction") or (
+        post_execution or {}
+    ).get("interaction")
     primary, primary_paths = _pane(primary_execution, definition)
     post, post_paths = _pane(post_execution, definition)
     invalid = []
@@ -370,8 +384,16 @@ def project_execution(
                 "post_analysis": _image_artifacts(post_execution),
             },
             "writeback": _writeback(snapshot),
-            "interaction": (primary_execution or {}).get("interaction")
-            or (post_execution or {}).get("interaction"),
+            "previews": {
+                "run": [preview["path"]] if preview is not None else [],
+                "primary": _preview_paths(primary_execution),
+                "post": _preview_paths(post_execution),
+            },
+            "interaction": {
+                key: value for key, value in interaction.items() if key != "figure"
+            }
+            if interaction is not None
+            else None,
             "missing": snapshot["missing"],
             "invalid": invalid,
             "error": snapshot["error"],
