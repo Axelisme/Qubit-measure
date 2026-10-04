@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
