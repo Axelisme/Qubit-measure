@@ -387,7 +387,9 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
         )
         try:
             assert occupied.wait(1)
-            called = pool.submit(client.call, "tab_analyze", {"tab": "t", "stage": stage})
+            called = pool.submit(
+                client.call, "tab_analyze", {"tab": "t", "stage": stage}
+            )
             deadline = time.monotonic() + 1
             snapshots = client.context.session.executions.snapshots()
             while not snapshots and time.monotonic() < deadline:
