@@ -50,6 +50,10 @@ class PairSchema(ComponentSchema):
     links: PairLinks
 
 
+class OptionalPairSchema(ComponentSchema):
+    links: PairLinks | None = None
+
+
 @pytest.fixture(scope="module", autouse=True)
 def registry_module_guard() -> Generator[None]:
     before = deepcopy(vars(component_registry))
@@ -107,6 +111,40 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     results, database = tmp_path / "results", tmp_path / "Database"
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     return entry, results, database
+
+
+def test_optional_nested_references_validate_supplied_targets_and_allow_null(
+    tmp_path: Path,
+) -> None:
+    with registered_model(
+        "notebook/optional-pair",
+        OptionalPairSchema,
+        references=("links.control", "links.target", "links.coupler"),
+    ) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("Q1", kind="qubit/transmon")
+        entry.setup.add_component("Q2", kind="qubit/transmon")
+        entry.setup.add_component("P0", kind=kind, links=None)
+        assert entry.setup.P0.links is None
+        entry.setup.add_component("P1", kind=kind, links={"control": "Q1"})
+        with entry.setup.edit() as draft:
+            draft.set("P1.links.target", "Q2")
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.P1.links == {"control": "Q1", "target": "Q2"}
+        setup_path = results / "entry" / "setup.yaml"
+        before = setup_path.read_bytes()
+        with pytest.raises(MissingReferenceError) as failure:
+            reopened.setup.P1.links = {"control": "Q1", "target": "absent"}
+        assert failure.value.component == "P1"
+        assert failure.value.field == "links.target"
+        assert failure.value.target == "absent"
+        assert setup_path.read_bytes() == before
+        assert reopened.setup.P1.links == {"control": "Q1", "target": "Q2"}
+        reopened.setup.P1.links = None
+        again = ResultEntry.open("entry", result_root=results, database_root=database)
+        assert again.setup.P1.links is None
 
 
 @pytest.mark.parametrize("operation", ["add", "attribute", "set"])
