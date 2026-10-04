@@ -121,6 +121,35 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
+    class NullableFrequency(ComponentSchema):
+        freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
+
+    with registered_model("notebook/nullable-unit", NullableFrequency) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, freq=10.0)
+        source = results / "entry" / "setup.yaml"
+        document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
+        assert document["components"]["N1"]["freq"] == 10_000_000.0
+        assert entry.setup.N1.freq == 10.0
+
+        entry.setup.N1.freq = 12.0
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.N1.freq == 12.0
+        document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
+        assert document["components"]["N1"]["freq"] == 12_000_000.0
+
+        entry.setup.N1.freq = None
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.N1.freq is None
+        document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
+        assert document["components"]["N1"]["freq"] is None
+
+
 @pytest.mark.parametrize(
     ("initial", "delta", "accepted"),
     [(1.0, 5e-13, True), (1.0, 2e-12, False), (0.0, 5e-15, False)],
