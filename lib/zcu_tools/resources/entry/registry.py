@@ -92,6 +92,23 @@ def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
     return partial
 
 
+def _validate_partial_contract(model: type[BaseModel]) -> None:
+    for validator in model.__pydantic_decorators__.model_validators.values():
+        if validator.info.mode != "after":
+            raise ValueError(
+                f"{model.__name__}: {validator.info.mode} model validator cannot "
+                "preserve its transformation in partial setup"
+            )
+    if model.model_post_init is not ComponentSchema.model_post_init:
+        raise ValueError(
+            f"{model.__name__}: custom model_post_init is unsupported in partial setup"
+        )
+    for field in model.model_fields.values():
+        nested_model = _nested_model(field.annotation)
+        if nested_model is not None:
+            _validate_partial_contract(nested_model)
+
+
 def _validate_component_model(model: object) -> None:
     if not isinstance(model, type) or not issubclass(model, ComponentSchema):
         raise TypeError("Registered models must derive from ComponentSchema")
@@ -135,6 +152,7 @@ class ComponentRegistry:
         if kind in self._models:
             raise ValueError(f"Kind {kind!r} is already registered")
         _validate_component_model(model)
+        _validate_partial_contract(model)
         reference_paths = tuple(references)
         for reference in reference_paths:
             _validate_reference(model, reference)

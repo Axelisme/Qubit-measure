@@ -140,7 +140,7 @@ def test_partial_setup_runs_supplied_field_validators_and_skips_invalid_defaults
 
             @field_validator("title", mode="wrap")
             @classmethod
-            def normalize_title(
+            def normalize_wrapped_title(
                 cls, value: object, handler: ValidatorFunctionWrapHandler
             ) -> str:
                 return normalize(handler(value))
@@ -171,6 +171,42 @@ def test_partial_setup_runs_supplied_field_validators_and_skips_invalid_defaults
         assert reopened.setup.N1.title == "prepared"
         with pytest.raises(ValidationError, match="title"):
             component_registry.get(kind).model_validate({"kind": kind})
+
+
+@pytest.mark.parametrize("nullable", [False, True])
+def test_partial_nested_setup_defers_model_after_validators(
+    tmp_path: Path,
+    registry_state_guard: None,
+    nullable: bool,
+) -> None:
+    class TimingSchema(RequiredTiming):
+        @model_validator(mode="after")
+        def check_width(self) -> Self:
+            if self.width <= 0:
+                raise ValueError("timing width must be positive")
+            return self
+
+    class NestedSchema(ComponentSchema):
+        timing: TimingSchema
+
+    class NullableSchema(ComponentSchema):
+        timing: TimingSchema | None = None
+
+    model = NullableSchema if nullable else NestedSchema
+    with registered_model("notebook/nested-invariant", model) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, timing={"label": "draft"})
+        with entry.setup.edit() as draft:
+            draft.set("N1.timing.width", -2.0)
+        reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+        reopened.setup.refresh()
+        assert reopened.setup.N1.timing == {"label": "draft", "width": -2.0}
+        persisted = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+        assert persisted["components"]["N1"]["timing"]["width"] == pytest.approx(-2e-6)
+        with pytest.raises(ValidationError, match="timing width"):
+            component_registry.get(kind).model_validate(
+                {"kind": kind, "timing": {"label": "draft", "width": -2e-6}}
+            )
 
 
 def test_partial_setup_defers_model_invariants_but_preserves_field_constraints(

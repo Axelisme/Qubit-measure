@@ -107,6 +107,16 @@ class WiringSchema(BaseModel):
 
 
 class ComponentSchema(BaseModel):
+    """Notebook declaration with separate partial and complete validation phases.
+
+    Partial setup validates supplied fields, including field-validator conversions.
+    Missing fields do not run validators. Model after-validators run only against
+    complete layered views and may check values but must not change them.
+    Registration rejects model before/wrap validators and custom model_post_init.
+    Cross-field constraints belong in model after-validators: field validators
+    reading info.data are unsupported in partial setup; their errors propagate.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     kind: str
