@@ -17,6 +17,7 @@ from pydantic import (
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
+    ComponentRegistry,
     ComponentSchema,
     MissingReferenceError,
     ModuleSlot,
@@ -163,6 +164,41 @@ def test_marked_module_slots_edit_seed_and_reload_without_resolving_paths(
             == "unresolved.sense"
         )
         assert slots.drive == "another.path"
+
+
+def test_nullable_branch_reference_validates_missing_target(tmp_path: Path) -> None:
+    class Linked(ComponentSchema):
+        link: Annotated[str, Ref()] | None = None
+
+    with registered_model("notebook/nullable-branch-link", Linked) as kind:
+        entry, results, _database = create_entry(tmp_path)
+        before = (results / "entry/setup.yaml").read_bytes()
+        with pytest.raises(MissingReferenceError) as error:
+            entry.setup.add_component("L1", kind=kind, link="missing")
+        assert error.value.field == "link"
+        assert (results / "entry/setup.yaml").read_bytes() == before
+
+
+def test_nullable_branch_numeric_reference_is_rejected_before_reserving_kind() -> None:
+    class InvalidRef(ComponentSchema):
+        link: Annotated[int, Ref()] | None = None
+
+    registry = ComponentRegistry()
+    with pytest.raises(ValueError, match="reference"):
+        registry.register("notebook/branch-ref", InvalidRef)
+    registry.register("notebook/branch-ref", ComponentSchema)
+    assert registry.get("notebook/branch-ref") is ComponentSchema
+
+
+def test_nullable_branch_module_slot_is_rejected_before_reserving_kind() -> None:
+    class InvalidSlot(ComponentSchema):
+        programs: Annotated[dict[str, str], ModuleSlot()] | None = None
+
+    registry = ComponentRegistry()
+    with pytest.raises(TypeError, match="ModuleSlot requires"):
+        registry.register("notebook/branch-slot", InvalidSlot)
+    registry.register("notebook/branch-slot", ComponentSchema)
+    assert registry.get("notebook/branch-slot") is ComponentSchema
 
 
 def test_marked_reference_validates_add_write_and_reload(tmp_path: Path) -> None:
