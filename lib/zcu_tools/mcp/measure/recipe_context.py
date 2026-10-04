@@ -258,11 +258,7 @@ class RecipeContext:
         with self._condition:
             if self.progress.phase != "run":
                 return ToolReply(
-                    {
-                        "execution": self.progress.execution,
-                        "status": "not_applicable",
-                        "phase": self.progress.phase,
-                    }
+                    {**asdict(self.progress), "status": "not_applicable"}
                 )
             self._publish(finish_early_requested=True)
         return self._control_reply(self._stop_run())
