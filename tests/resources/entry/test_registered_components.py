@@ -122,6 +122,46 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
 
 
 @pytest.mark.parametrize("mode", ["before", "after", "wrap", "plain"])
+def test_non_idempotent_field_conversion_rejects_add_without_publishing(
+    tmp_path: Path,
+    registry_state_guard: None,
+    mode: Literal["before", "after", "wrap", "plain"],
+) -> None:
+    class StampedSchema(ComponentSchema):
+        title: str
+
+        if mode == "wrap":
+
+            @field_validator("title", mode="wrap")
+            @classmethod
+            def stamp_wrapped_title(
+                cls, value: object, handler: ValidatorFunctionWrapHandler
+            ) -> str:
+                return str(handler(value)) + "!"
+        else:
+
+            @field_validator("title", mode=mode)
+            @classmethod
+            def stamp_title(cls, value: str) -> str:
+                return value + "!"
+
+    with registered_model("notebook/stamped", StampedSchema) as kind:
+        entry, results, _ = create_entry(tmp_path)
+        entry.setup.add_component("R1", kind="resonator", freq=10.0)
+        source = results / "entry" / "setup.yaml"
+        before = source.read_bytes()
+        with pytest.raises(ValidationError) as failure:
+            entry.setup.add_component("N1", kind=kind, title="prepared")
+        error = failure.value.errors()[0]
+        assert error["loc"] == ("components", "N1", "title")
+        assert "prepared!" in error["msg"] and "prepared!!" in error["msg"]
+        assert source.read_bytes() == before
+        assert entry.setup.R1.freq == 10.0
+        with pytest.raises(UnknownFieldError):
+            _ = entry.setup.N1
+
+
+@pytest.mark.parametrize("mode", ["before", "after", "wrap", "plain"])
 def test_partial_setup_runs_supplied_field_validators_and_skips_invalid_defaults(
     tmp_path: Path,
     registry_state_guard: None,
