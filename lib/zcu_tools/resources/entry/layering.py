@@ -24,6 +24,7 @@ from .schema import (
 
 
 class _Absent(Enum):
+    # YAML null is a value, so routing needs a separate marker for an absent leaf.
     VALUE = "absent"
 
 
@@ -52,6 +53,14 @@ def _merge(setup: YamlMap, point: YamlMap, path: FieldPath, source: Path) -> Yam
 def point_units(
     document: Mapping[str, YamlValue], setup: SetupDocument, source: Path
 ) -> Mapping[FieldPath, UnitSpec]:
+    """Return store unit paths for the point's setup-declared component names.
+
+    document is the raw YAML tree in either SI or working units; values are not
+    inspected or changed. setup supplies the registered kind of each component.
+    source is point.yaml for diagnostics. Paths begin with components/<name> and
+    include declared fields even when absent. Missing/non-mapping components
+    returns an empty map; an unknown component raises AttributeError.
+    """
     result: dict[FieldPath, UnitSpec] = {}
     components = document.get("components")
     if not isinstance(components, dict):
@@ -66,6 +75,17 @@ def point_units(
 
 
 def validate_point(document: PointDocument, setup: SetupDocument, source: Path) -> None:
+    """Validate and replace supplied point fields with canonical working values.
+
+    document is a working-unit point draft; setup supplies kinds for its names.
+    source is point.yaml for header and field diagnostics. Required fields may
+    remain absent. Unknown names raise AttributeError; point kind and unknown
+    current-minor fields raise UnknownFieldError. Invalid values or canonical
+    drift raise ValidationError; field-validator exceptions propagate.
+    Newer supported minor fields are omitted from this typed projection; the
+    store retains their raw YAML. A failure may leave earlier components updated,
+    so callers must discard the draft. No disk I/O or snapshot publication occurs.
+    """
     forward = is_forward_minor(
         {"format": document.format, "format_version": document.format_version},
         source=source,
@@ -92,6 +112,16 @@ def validate_point(document: PointDocument, setup: SetupDocument, source: Path) 
 def compose(
     setup: SetupDocument, point: PointDocument, source: Path, *, complete: bool
 ) -> LayeredDocument:
+    """Return an independent working-unit view combining validated layer drafts.
+
+    setup supplies component declarations; point supplies point-local values and
+    metadata. source must locate entry/points/<label>/point.yaml for diagnostics.
+    Reject any leaf present in both layers with LayerConflictError. complete=True
+    validates required fields against original registered models; False permits
+    missing fields for editing. Both modes validate references and canonical
+    values, raising their validation errors. Inputs are not changed and no I/O
+    occurs. The returned draft has copied provenance and no pending moves.
+    """
     components: dict[str, ComponentSchema] = {}
     for name, base in setup.components.items():
         supplied = _merge(
@@ -201,10 +231,17 @@ def route(
     setup: SetupDocument,
     point: PointDocument,
 ) -> None:
-    """Route logical value changes and accepted provenance to their owning layers.
+    """Apply a layered draft's edits to mutable working-unit layer drafts.
 
-    Provenance can change without a value diff, for example a same-value rewrite
-    clearing cloned_from. Move then carries the routed value and provenance.
+    before is the original combined view; after is its edited independent copy.
+    setup and point must represent the same original layers. Existing fields
+    retain their layer; new fields and general metadata go to point. Accepted
+    source changes keep their source layer even without a value diff, such as a
+    same-value rewrite clearing cloned_from. Apply after.moves last, carrying
+    values and descendant provenance together.
+    Invalid moves raise ValueError or AttributeError; partial-model validation
+    errors propagate. No disk I/O occurs and no rollback is provided here:
+    callers must discard both mutated drafts on failure.
     """
     point.general = after.general.model_copy(deep=True)
     for name, candidate in after.components.items():

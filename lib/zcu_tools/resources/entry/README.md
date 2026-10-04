@@ -26,4 +26,4 @@ EditView 的元件、wiring、ext 與 general 屬性更新同一份 draft。點�
 
 工作點 reload 同時讀取最新 setup 與 point，完整驗證失敗不發布任一快照。move 在兩層間搬值與來源。Clone 只複製同條目的 point 與 module_cfg，保留 point 來源並標記直接來源工作點。重新接受欄位會清除該欄位的 clone 標記，即使值相同；拒絕的寫入不清標記。跨條目 clone 明確拒絕。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。工作點切片仍未完成驗收。來源公開 API、stderr 接縫、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。來源公開 API、stderr 接縫、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。

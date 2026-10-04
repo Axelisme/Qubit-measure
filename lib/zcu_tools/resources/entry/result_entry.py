@@ -160,6 +160,12 @@ class ResultEntry:
         return self._setup_store.snapshot().general.entry_id
 
     def list_points(self) -> list[str]:
+        """Return sorted labels of directories containing both point files.
+
+        Inspect points/ on disk for point.yaml and module_cfg.yaml; incomplete
+        directories are omitted. File contents are not loaded or validated here.
+        Missing or unreadable points/ raises the underlying filesystem error.
+        """
         return sorted(
             path.name
             for path in (self._result_path / "points").iterdir()
@@ -171,6 +177,20 @@ class ResultEntry:
     def new_point(
         self, label: str, *, clone_from: str | PointView | None = None
     ) -> PointView:
+        """Create a new point directory and return its validated bound view.
+
+        label is a nonempty single path segment, not '.', '..', an absolute path
+        or a path containing separators or NUL. An escaping path raises ValueError;
+        any existing destination, including a symlink, raises FileExistsError.
+        With clone_from=None, create empty point values and a module-library
+        header; required values must already be supplied by setup.
+        clone_from is a source label or PointView from this entry. Copy only its
+        point.yaml and module_cfg.yaml, renew created_at, and tag copied sources
+        with cloned_from for that direct source. Setup values are not copied or
+        tagged. Cross-entry views raise ValueError. Missing files or invalid
+        combined values raise their loading/validation error. Creation failure
+        removes only the new point directory, never the source or shared setup.
+        """
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
@@ -248,6 +268,17 @@ class ResultEntry:
                 prepared.discard()
 
     def use_point(self, label: str) -> PointView:
+        """Load a point and latest setup, returning an independently bound view.
+
+        label follows new_point's single-segment path rules. Both point.yaml and
+        module_cfg.yaml must exist; the latter is not parsed here. Invalid labels
+        raise ValueError and missing files raise FileNotFoundError. Validate point
+        fields against setup's declared kinds, reject duplicate leaves, and check
+        required fields, references and canonical values in the combined view.
+        Loading or validation failure leaves the existing setup snapshot intact.
+        Success refreshes the shared setup snapshot without changing other views'
+        point bindings. No parameter files are committed or global active point selected.
+        """
         directory = _entry_path(self._result_path / "points", label)
         source = directory / "point.yaml"
         module = directory / "module_cfg.yaml"

@@ -40,7 +40,15 @@ class MissingReferenceError(ValueError):
 
 
 class LayerConflictError(ValueError):
+    """A component leaf is supplied by both setup and point.
+
+    path is its logical dotted field path, such as Q1.t1. setup_file and
+    point_file locate the two conflicting documents; their values are not read
+    by this exception. These three arguments are also exposed as attributes.
+    """
+
     def __init__(self, path: str, setup_file: Path, point_file: Path) -> None:
+        """Describe the duplicated leaf and files without changing either file."""
         self.path = path
         self.setup_file = setup_file
         self.point_file = point_file

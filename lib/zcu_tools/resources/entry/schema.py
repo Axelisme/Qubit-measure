@@ -95,6 +95,14 @@ class SetupGeneral(BaseModel):
 
 
 class PointGeneral(BaseModel):
+    """Metadata belonging to one point, never inherited from setup.
+
+    created_at is an ISO-8601 timestamp with a UTC offset; Z and +00:00 are valid.
+    description is optional human-readable text; None means no description.
+    ext is an arbitrary YAML mapping, empty by default, with no unit conversion.
+    Unknown metadata fields and invalid timestamps raise Pydantic ValidationError.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     created_at: str
@@ -108,6 +116,19 @@ class PointGeneral(BaseModel):
 
 
 class PointDocument(BaseModel):
+    """One point's parameter document, excluding values inherited from setup.
+
+    format is the parameter-container ID, zcu.parameter-container.
+    format_version is major.minor text, initially 1.0; the store validates header
+    compatibility rather than this model constructor.
+    general contains point-local creation time, description and YAML extensions.
+    components maps setup-declared names to partial field mappings without kind.
+    Numerical fields use SI on disk and working units in DocumentStore snapshots.
+    provenance maps dotted component-field paths to source metadata YAML mappings;
+    inherited setup sources do not belong here. Both mappings default to empty.
+    Entry validation supplies kind, field and layering checks beyond this model.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     format: str
@@ -277,7 +298,18 @@ def canonical_errors(
 
 
 class LayeredDocument(BaseModel):
-    """Working draft only; persisted point fields remain kind-free."""
+    """Independent working-unit draft of a point combined with setup.
+
+    general is a copy of the point's local metadata.
+    components maps every setup-declared name to a registered typed model,
+    including kind, with supplied values from both layers. A partial draft may
+    omit required fields; complete validation occurs at the entry boundary.
+    provenance maps dotted component-field paths to copied source YAML mappings
+    from both layers, defaulting to empty.
+    moves is an ordered list of (dotted field path, destination layer) requests;
+    destinations are setup or point. It defaults to empty and route applies it
+    after routing ordinary edits. This draft is not a persisted document format.
+    """
 
     general: PointGeneral
     components: dict[str, ComponentSchema]

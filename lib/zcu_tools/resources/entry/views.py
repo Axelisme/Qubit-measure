@@ -32,10 +32,15 @@ type _FieldNode = BaseModel | YamlMap
 def stage_component(
     draft: SetupDocument | LayeredDocument, name: str, field: str
 ) -> Generator[ComponentSchema]:
-    """Validate a detached candidate, then accept its relative field path.
+    """Yield an independent working-unit component candidate for a draft edit.
 
-    Only a successful stage clears cloned_from on that field and descendants.
-    The caller supplies a dotted path within the component, such as wiring.ch.
+    draft is a mutable setup or layered draft. name identifies an existing
+    component; an unknown name raises KeyError. field is the accepted relative
+    dotted path within it, such as t1 or wiring.ch, used for source bookkeeping.
+    Normal exit validates supplied fields, replaces draft's component, and clears
+    cloned_from on that path and descendants even for an unchanged value.
+    A body exception or validation failure leaves the draft and sources intact.
+    No complete required-field check, layer routing or disk I/O occurs here.
     """
     candidate = draft.components[name].model_copy(deep=True)
     yield candidate
@@ -61,6 +66,13 @@ def stage_general(draft: LayeredDocument) -> AbstractContextManager[PointGeneral
 def stage_general(
     draft: SetupDocument | LayeredDocument,
 ) -> Generator[SetupGeneral | PointGeneral]:
+    """Yield independent metadata, accepting it into draft on normal exit.
+
+    draft is a mutable setup or layered draft. The candidate is SetupGeneral for
+    setup, PointGeneral for a layered point. Successful validation replaces only
+    draft.general; a body exception or ValidationError leaves it unchanged.
+    This does no I/O and does not enforce entry identity or cross-layer rules.
+    """
     candidate = draft.general.model_copy(deep=True)
     yield candidate
     fields = candidate.model_dump(exclude_unset=True, warnings=False)
