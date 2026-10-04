@@ -1012,6 +1012,20 @@ def test_cancel_latches_intent_and_retains_original_terminal(
     cancelled = _call_stdio(monkeypatch, client, "cancel", args)
     assert bool(cancelled.get("isError")) is (gui_cancel == "failed")
     data = json.loads(cancelled["content"][0]["text"])
+    assert set(data) == {
+        "execution",
+        "op",
+        "run_op",
+        "status",
+        "phase",
+        "cancel_requested",
+        "finish_early_requested",
+        "gui_cancel",
+    }
+    assert data["op"] == started["op"]
+    assert data["run_op"] is None
+    assert data["status"] == "running"
+    assert data["finish_early_requested"] is False
     assert data["execution"] == started["execution"]
     assert data["cancel_requested"] is True
     assert data["gui_cancel"]["status"] == (
