@@ -29,6 +29,62 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+@pytest.mark.parametrize(
+    ("path", "field", "suggestion"),
+    [
+        ("R1.frq", "frq", "freq"),
+        ("R1.wiring.time_of_flit", "time_of_flit", "time_of_flight"),
+        ("general.descriptin", "descriptin", "description"),
+    ],
+)
+def test_dotted_path_typos_report_the_same_field_location_and_suggestions(
+    entry_roots: tuple[Path, Path],
+    entry: ResultEntry,
+    path: str,
+    field: str,
+    suggestion: str,
+) -> None:
+    results, _database = entry_roots
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    setup_path = results / "entry" / "setup.yaml"
+    before = setup_path.read_bytes()
+    with entry.setup.edit() as draft:
+        with pytest.raises(UnknownFieldError) as failure:
+            draft.set(path, 1.0)
+        assert failure.value.path == path
+        assert failure.value.field == field
+        assert suggestion in failure.value.suggestions
+    assert setup_path.read_bytes() == before
+    assert entry.setup.R1.freq == pytest.approx(6500.0)
+
+
+@pytest.mark.parametrize("method", ["attribute", "path"])
+def test_missing_reference_discards_all_other_shared_draft_changes(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, method: str
+) -> None:
+    results, _database = entry_roots
+    entry.setup.add_component("A1", kind="amplifier/jpa")
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0, amplifier="A1")
+    setup_path = results / "entry" / "setup.yaml"
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        with entry.setup.edit() as draft:
+            draft.description = "discarded"
+            draft.R1.freq = 6550.0
+            if method == "attribute":
+                draft.R1.amplifier = "absent"
+            else:
+                draft.set("R1.amplifier", "absent")
+
+    with pytest.raises(MissingReferenceError):
+        perform_operation()
+    assert setup_path.read_bytes() == before
+    assert entry.setup.description is None
+    assert entry.setup.R1.freq == pytest.approx(6500.0)
+    assert entry.setup.R1.amplifier == "A1"
+
+
 @pytest.mark.parametrize("method", ["attribute", "path"])
 @pytest.mark.parametrize("field", ["freq", "wiring.ch"])
 def test_draft_attribute_and_path_validation_reject_bad_values_without_tainting_draft(

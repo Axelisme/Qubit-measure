@@ -104,6 +104,30 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+def test_nested_reference_path_failure_discards_the_shared_draft(
+    tmp_path: Path, pair_kind: str
+) -> None:
+    entry, results, _database = create_entry(tmp_path)
+    entry.setup.add_component("Q1", kind="qubit/transmon")
+    entry.setup.add_component("Q2", kind="qubit/fluxonium")
+    links: YamlMap = {"control": "Q1", "target": "Q2"}
+    entry.setup.add_component("P1", kind=pair_kind, links=links)
+    setup_path = results / "entry" / "setup.yaml"
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        with entry.setup.edit() as draft:
+            draft.description = "discarded"
+            draft.set("P1.links.target", "absent")
+
+    with pytest.raises(MissingReferenceError) as failure:
+        perform_operation()
+    assert failure.value.field == "links.target"
+    assert setup_path.read_bytes() == before
+    assert entry.setup.description is None
+    assert entry.setup.P1.links == links
+
+
 def test_nested_model_values_use_yaml_maps_and_dotted_edits_in_working_units(
     tmp_path: Path, nested_kind: str
 ) -> None:
@@ -160,6 +184,7 @@ def test_nested_references_reject_missing_targets_with_the_declared_path(
     assert failure.value.field == f"links.{field}"
     assert failure.value.target == "absent"
     assert setup_path.read_bytes() == before
+    assert entry.setup.P1.links == valid_links
     if operation in ("add", "write"):
         entry.setup.P1.links = valid_links
 
