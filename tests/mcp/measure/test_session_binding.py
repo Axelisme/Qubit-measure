@@ -13,7 +13,7 @@ from zcu_tools.mcp.measure import tools_operation
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError
 
-from ._support import MeasureClient, WireTransport, make_client
+from ._support import MeasureClient, WireTransport, full_execution_reply, make_client
 
 
 def make_restartable_client(
@@ -312,7 +312,7 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
 
     monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
     try:
-        reply = client.call("tab_analyze", {"tab": "t"})
+        reply = full_execution_reply(client, client.call("tab_analyze", {"tab": "t"}))
         assert reply.is_error is True
         result = reply.data
         assert result["error"]["reason"] == "connection_lost"
@@ -327,7 +327,10 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
             ["residual"] if cut_after == "tab.save_image" else ["fit", "residual"]
         )
         assert result["unconfirmed_image"] is None
-        assert client.call("status", {"execution": result["execution"]}) == result
+        assert (
+            client.call("status", {"execution": result["execution"], "detail": "full"})
+            == result
+        )
         assert (
             client.call("cancel", {"execution": result["execution"]}).data[
                 "gui_cancel"

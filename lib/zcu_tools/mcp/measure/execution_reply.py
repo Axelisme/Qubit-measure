@@ -53,13 +53,13 @@ def _step(status: str, outcome: dict[str, Any] | None = None) -> StepReply:
 
 
 def _actual(
-    captured: dict[str, Any] | None, definition: RecipeDefinition
+    captured: dict[str, Any] | None, definition: RecipeDefinition | None
 ) -> dict[str, Any]:
     captured = captured or {}
     fields = captured.get("fields", {})
     parameters: dict[str, ParameterReply] = {}
     modules: dict[str, ParameterReply] = {}
-    for parameter in definition.summary_parameters:
+    for parameter in definition.summary_parameters if definition else ():
         fact = fields.get(parameter.field)
         if fact is None:
             continue
@@ -82,7 +82,7 @@ def _actual(
 
 
 def _pane(
-    execution: dict[str, Any] | None, definition: RecipeDefinition
+    execution: dict[str, Any] | None, definition: RecipeDefinition | None
 ) -> tuple[dict[str, Any] | None, dict[str, str]]:
     if execution is None:
         return None, {}
@@ -91,7 +91,7 @@ def _pane(
     details = deepcopy(native) if isinstance(native, dict) else {"result": native}
     estimates: dict[str, EstimateReply] = {}
     paths = {}
-    for estimate in definition.summary_estimates:
+    for estimate in definition.summary_estimates if definition else ():
         if estimate.value_key not in details:
             continue
         estimates[estimate.name] = {
@@ -227,15 +227,40 @@ def _analysis_save_step(execution: dict[str, Any] | None) -> StepReply:
     return _step(execution["save_status"] if execution else "not_started")
 
 
+def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Locate an analysis-only execution in the shared summary, not a fake recipe."""
+    stage = snapshot["stage"]
+    return {
+        "execution": snapshot["execution"],
+        "recipe": None,
+        "tab": snapshot["tab"],
+        "op": snapshot["op"],
+        "run_op": None,
+        "status": snapshot["status"],
+        "phase": snapshot["phase"],
+        "cancel_requested": snapshot["cancel_requested"],
+        "finish_early_requested": False,
+        "run_start": {"status": "not_started"},
+        "raw_save": {"status": "not_started", "path": None, "reserved_path": None},
+        "analysis_stage": stage,
+        "analysis": snapshot if stage == "primary" else None,
+        "post_analysis": snapshot if stage == "post" else None,
+        "missing": [],
+        "error": snapshot["error"],
+    }
+
+
 def project_execution(
     snapshot: dict[str, Any],
     *,
-    definition: RecipeDefinition,
+    definition: RecipeDefinition | None = None,
     detail: ReplyDetail = "summary",
 ) -> dict[str, Any]:
-    """Project one captured recipe snapshot without refreshing observations."""
+    """Project captured execution facts without refreshing observations."""
     if detail == "full":
         return deepcopy(snapshot)
+    if "recipe" not in snapshot:
+        snapshot = _analysis_envelope(snapshot)
     primary_execution = snapshot.get("analysis")
     post_execution = snapshot.get("post_analysis")
     primary, primary_paths = _pane(primary_execution, definition)

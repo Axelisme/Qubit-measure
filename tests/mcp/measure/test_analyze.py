@@ -79,6 +79,31 @@ def _call_stdio(
     return json.loads(out.getvalue(), parse_constant=_reject_json_constant)["result"]
 
 
+def _call_full_execution_stdio(
+    monkeypatch: pytest.MonkeyPatch,
+    client: MeasureClient,
+    name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep wire delivery checks while explicitly reading captured native detail."""
+    reply = _call_stdio(monkeypatch, client, name, arguments)
+    data = json.loads(reply["content"][0]["text"])
+    full = _call_stdio(
+        monkeypatch,
+        client,
+        "status",
+        {"execution": data["execution"], "detail": "full"},
+    )
+    if "elapsed_s" in data:
+        full_data = json.loads(full["content"][0]["text"])
+        full_data["elapsed_s"] = data["elapsed_s"]
+        full["content"][0]["text"] = json.dumps(
+            full_data, separators=(",", ":"), allow_nan=False
+        )
+    reply["content"][0] = full["content"][0]
+    return reply
+
+
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Invalid JSON constant: {value}")
 
@@ -347,7 +372,7 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         raise AssertionError(name)
 
     client = _client(tmp_path, clients, respond)
-    reply = _call_stdio(
+    reply = _call_full_execution_stdio(
         monkeypatch,
         client,
         "tab_analyze",
@@ -373,7 +398,9 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         ("status", {"execution": result["execution"]}),
         ("wait", {"execution": result["execution"], "timeout": 0}),
     ]:
-        observed = _data(_call_stdio(monkeypatch, client, tool, arguments))
+        observed = _data(
+            _call_full_execution_stdio(monkeypatch, client, tool, arguments)
+        )
         assert observed["result"] == result["result"]
         assert observed["saved_images"] == result["saved_images"]
     assert result["result"]["params"] == {"gain": 2, "model": "fit"}
@@ -422,7 +449,7 @@ def test_unfinished_analysis_never_reads_success_payload(
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond)
-    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    reply = _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
     result = json.loads(reply["content"][0]["text"])
     assert bool(reply.get("isError")) == (status == "failed")
     assert result["status"] == status
@@ -464,7 +491,7 @@ def test_interactive_start_hands_off_current_state_without_waiting(
         return {**interaction, "operation_id": 71}
 
     client = _client(tmp_path, clients, respond)
-    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    reply = _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
     data = _data(reply)
     assert data["status"] == "interactive"
     assert data["tab"] == "t"
@@ -510,13 +537,15 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond)
-    started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+    started = _data(
+        _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    )
     assert started["status"] == "interactive"
     execution = started["execution"]
     assert not saving.is_set()
     done.set()  # The GUI user, not an MCP command, completes the original operation.
     assert saving.wait(2), "completion stopped when the first tool call returned"
-    reply = _call_stdio(
+    reply = _call_full_execution_stdio(
         monkeypatch, client, "wait", {"execution": execution, "timeout": 2}
     )
     completed = _data(reply)
@@ -579,11 +608,13 @@ def test_done_joins_original_completion_without_duplicate_saves(
 
     client = _client(tmp_path, clients, respond)
     started = (
-        _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+        _data(
+            _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+        )
         if registered
         else None
     )
-    reply = _call_stdio(
+    reply = _call_full_execution_stdio(
         monkeypatch,
         client,
         "tab_interact",
@@ -597,7 +628,9 @@ def test_done_joins_original_completion_without_duplicate_saves(
     if started is not None:
         assert execution == started["execution"]
     terminal = _data(
-        _call_stdio(monkeypatch, client, "wait", {"execution": execution, "timeout": 0})
+        _call_full_execution_stdio(
+            monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
+        )
     )
     assert terminal["status"] == outcome
     assert completed["save_status"] == (
@@ -653,7 +686,9 @@ def test_rejected_done_keeps_registered_interaction_editable(
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond)
-    started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+    started = _data(
+        _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    )
     execution = started["execution"]
     client.transport.replies["tab.interact"] = {
         "ok": False,
@@ -667,7 +702,7 @@ def test_rejected_done_keeps_registered_interaction_editable(
     )
     assert rejected["isError"] is True
     assert "selection required" in rejected["content"][0]["text"]
-    snapshot = client.call("status", {"execution": execution})
+    snapshot = client.call("status", {"execution": execution, "detail": "full"})
     assert snapshot["status"] == "interactive"
     assert snapshot["error"] is None
     assert snapshot["interaction"]["state"] == {"value": 1}
@@ -681,7 +716,7 @@ def test_rejected_done_keeps_registered_interaction_editable(
     assert bool(updated.get("isError")) is bad_image
     data = json.loads(updated["content"][0]["text"])
     assert data["execution"] == execution
-    snapshot = client.call("status", {"execution": execution})
+    snapshot = client.call("status", {"execution": execution, "detail": "full"})
     assert snapshot["status"] == "interactive"
     assert snapshot["interaction"]["state"] == {"value": 2}
     assert bool(snapshot["interaction"].get("delivery_error")) is bad_image
@@ -716,7 +751,9 @@ def test_cancel_latches_intent_and_retains_original_terminal(
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond)
-    started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+    started = _data(
+        _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    )
     if gui_cancel in ("failed", "not_cancellable"):
         client.transport.replies["operation.cancel"] = {
             "ok": False,
@@ -744,7 +781,7 @@ def test_cancel_latches_intent_and_retains_original_terminal(
     assert _methods(client).count("operation.cancel") == 1
     terminal.set()
     completed = _data(
-        _call_stdio(
+        _call_full_execution_stdio(
             monkeypatch,
             client,
             "wait",
@@ -762,10 +799,15 @@ def test_cancel_latches_intent_and_retains_original_terminal(
         "operation.await",
         "operation.cancel",
     }
-    frozen = client.call("status", {"execution": started["execution"]})
+    frozen = client.call(
+        "status", {"execution": started["execution"], "detail": "full"}
+    )
     final = _data(_call_stdio(monkeypatch, client, "cancel", args))
     assert final["gui_cancel"]["status"] == "not_needed"
-    assert client.call("status", {"execution": started["execution"]}) == frozen
+    assert (
+        client.call("status", {"execution": started["execution"], "detail": "full"})
+        == frozen
+    )
     assert _methods(client).count("operation.cancel") == 1
 
 
@@ -831,14 +873,18 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
     with ThreadPoolExecutor(max_workers=1) as pool:
         try:
             started = _data(
-                _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+                _call_full_execution_stdio(
+                    monkeypatch, client, "tab_analyze", {"tab": "t"}
+                )
             )
             assert saving.wait(2)
             request = pool.submit(
                 client.call, "cancel", {"execution": started["execution"]}
             )
             assert intent.wait(2)
-            pending = client.call("status", {"execution": started["execution"]})
+            pending = client.call(
+                "status", {"execution": started["execution"], "detail": "full"}
+            )
             assert pending["cancel_requested"] is True
             assert pending["status"] == "running"
             assert pending["unconfirmed_image"] == "fit"
@@ -847,7 +893,7 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         cancelled = request.result(timeout=3)
     assert cancelled.data["cancel_requested"] is True
     completed = _data(
-        _call_stdio(
+        _call_full_execution_stdio(
             monkeypatch,
             client,
             "wait",
@@ -921,7 +967,9 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     with ThreadPoolExecutor(max_workers=2) as pool:
         try:
             started = _data(
-                _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+                _call_full_execution_stdio(
+                    monkeypatch, client, "tab_analyze", {"tab": "t"}
+                )
             )
             assert save_ready.wait(2)
             blocker = pool.submit(
@@ -930,7 +978,9 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
             assert dispatch_save.wait(2)
             request = pool.submit(client.call, "cancel", {"op": started["op"]})
             assert intent.wait(2)
-            pending = client.call("status", {"execution": started["execution"]})
+            pending = client.call(
+                "status", {"execution": started["execution"], "detail": "full"}
+            )
             assert pending["cancel_requested"] is True
             assert pending["unconfirmed_image"] is None
         finally:
@@ -939,7 +989,7 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
         blocker.result(timeout=3)
         assert request.result(timeout=3).data["cancel_requested"] is True
     completed = _data(
-        _call_stdio(
+        _call_full_execution_stdio(
             monkeypatch,
             client,
             "wait",
@@ -1017,7 +1067,9 @@ def test_close_drains_pending_save_and_cancel_before_png_cleanup(
     with ThreadPoolExecutor(max_workers=2) as pool:
         try:
             started = _data(
-                _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+                _call_full_execution_stdio(
+                    monkeypatch, client, "tab_analyze", {"tab": "t"}
+                )
             )
             assert saving.wait(2)
             if cancel_first:
@@ -1040,7 +1092,9 @@ def test_close_drains_pending_save_and_cancel_before_png_cleanup(
     assert cleanup_states[0].status == "failed"
     assert cleanup_states[0].phase == "terminal"
     assert not image.parent.exists()
-    completed = client.call("status", {"execution": started["execution"]})
+    completed = client.call(
+        "status", {"execution": started["execution"], "detail": "full"}
+    )
     assert completed["status"] == "failed"
     assert completed["save_status"] == "unknown"
     assert completed["unconfirmed_image"] == "fit"
@@ -1068,7 +1122,7 @@ def test_close_after_start_receipt_retains_operation_without_new_work(
         return reply
 
     monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
-    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    reply = _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
     assert reply["isError"] is True
     stopped = json.loads(reply["content"][0]["text"])
     assert stopped["op"] == 1
@@ -1079,7 +1133,10 @@ def test_close_after_start_receipt_retains_operation_without_new_work(
     assert stopped["cancel_requested"] is False
     assert stopped["save_status"] == "not_started"
     assert _methods(client) == ["tab.analyze"]
-    assert client.call("status", {"execution": stopped["execution"]}) == stopped
+    assert (
+        client.call("status", {"execution": stopped["execution"], "detail": "full"})
+        == stopped
+    )
 
 
 @pytest.mark.parametrize("interactive", [False, True])
@@ -1100,7 +1157,7 @@ def test_worker_start_failure_keeps_the_admitted_operation_receipt(
         return _start_reply({}, [], interactive=interactive)
 
     client = _client(tmp_path, clients, respond)
-    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    reply = _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
     assert reply["isError"] is True
     stopped = json.loads(reply["content"][0]["text"])
     assert stopped["op"] == 1
@@ -1145,10 +1202,12 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
             "message": "interactive session already completed",
         },
     }
-    started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+    started = _data(
+        _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    )
     assert started["op"] == 1
     completed = _data(
-        _call_stdio(
+        _call_full_execution_stdio(
             monkeypatch,
             client,
             "wait",
@@ -1255,7 +1314,7 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
         return {"png_b64": base64.b64encode(png).decode()}
 
     client = _client(tmp_path, clients, respond)
-    reply = _call_stdio(
+    reply = _call_full_execution_stdio(
         monkeypatch, client, "tab_analyze", {"tab": "t", "stage": stage}
     )
     assert reply["isError"] is True
@@ -1303,26 +1362,28 @@ def test_execution_query_observes_background_completion_without_reconnect(
 
     client = _client(tmp_path, clients, respond)
     try:
-        started = _data(_call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"}))
+        started = _data(
+            _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+        )
         assert awaiting.wait(2)
         assert started["status"] == "running"
         execution = started["execution"]
         running = _data(
-            _call_stdio(
+            _call_full_execution_stdio(
                 monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
             )
         )
         assert running["status"] == "running"
         assert running["cancel_requested"] is False
         assert running["elapsed_s"] >= 0
-        snapshot = client.call("status", {"execution": execution})
+        snapshot = client.call("status", {"execution": execution, "detail": "full"})
         snapshot["params"]["model"] = "caller mutation"
-        assert client.call("status", {"execution": execution})["params"] == {
-            "model": "fit"
-        }
+        assert client.call("status", {"execution": execution, "detail": "full"})[
+            "params"
+        ] == {"model": "fit"}
         assert _methods(client) == ["tab.analyze", "operation.await"]
         release.set()
-        completed_reply = _call_stdio(
+        completed_reply = _call_full_execution_stdio(
             monkeypatch, client, "wait", {"execution": execution, "timeout": 2}
         )
         completed = _data(completed_reply)
@@ -1341,10 +1402,12 @@ def test_execution_query_observes_background_completion_without_reconnect(
         sent = list(client.transport.sent)
         client.transport.close()
         terminal = _data(
-            _call_stdio(monkeypatch, client, "status", {"execution": execution})
+            _call_full_execution_stdio(
+                monkeypatch, client, "status", {"execution": execution}
+            )
         )
         repeated = _data(
-            _call_stdio(
+            _call_full_execution_stdio(
                 monkeypatch, client, "wait", {"execution": execution, "timeout": 0}
             )
         )
@@ -1452,7 +1515,7 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
     client = _client(tmp_path, clients, respond)
     _inject_analysis_rejection(client, failure, monkeypatch)
 
-    reply = _call_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
+    reply = _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
     assert reply["isError"] is True
     assert len(reply["content"]) == 1
     data = json.loads(reply["content"][0]["text"])

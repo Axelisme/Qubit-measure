@@ -6,6 +6,7 @@ from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.execution_reply import project_execution
 from zcu_tools.mcp.measure.interaction import handoff_interaction, interact
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -27,8 +28,8 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
     execution = ctx.session.executions.start(ctx.gui, tab, stage, started)
     if started["interactive"]:
         handoff_interaction(ctx, execution)
-        return execution.wait(0)
-    return execution.wait(2.0)
+    reply = execution.wait(0 if started["interactive"] else 2.0)
+    return ToolReply(project_execution(reply.data), reply.images, reply.is_error)
 
 
 def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
@@ -42,7 +43,10 @@ def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         params["payload"] = payload
-    return interact(ctx.bound(), params)
+    reply = interact(ctx.bound(), params)
+    if params.get("payload", {}).get("command") == "done":
+        return ToolReply(project_execution(reply.data), reply.images, reply.is_error)
+    return reply
 
 
 def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:

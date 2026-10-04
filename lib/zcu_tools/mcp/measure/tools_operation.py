@@ -29,7 +29,10 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
                 definition=definition,
                 detail=arguments.get("detail", "summary"),
             )
-        return asdict(ctx.session.executions.get(key).snapshot())
+        return project_execution(
+            asdict(ctx.session.executions.get(key).snapshot()),
+            detail=arguments.get("detail", "summary"),
+        )
     session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
@@ -75,8 +78,21 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "predictor": {"loaded": session.read_internal("predictor.info", {})["loaded"]},
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
-        "executions": [asdict(item) for item in ctx.session.executions.snapshots()]
-        + ctx.session.recipes.snapshots(),
+        "executions": [
+            project_execution(asdict(item))
+            for item in ctx.session.executions.snapshots()
+        ]
+        + [
+            project_execution(
+                item,
+                definition=next(
+                    definition
+                    for definition in RECIPES
+                    if definition.name == item["recipe"]
+                ),
+            )
+            for item in ctx.session.recipes.snapshots()
+        ],
         "running": [
             {**operation, "op": session.expose_operation(operation["op"])}
             for operation in session.read_internal("operation.active", {})["operations"]
@@ -126,10 +142,12 @@ def _wait_tool(
             else ctx.session.executions.get(key)
         )
         reply = execution.wait(timeout)
-        data = reply.data
-        if key.startswith("recipe-"):
-            definition = next(item for item in RECIPES if item.name == data["recipe"])
-            data = project_execution(data, definition=definition)
+        definition = (
+            next(item for item in RECIPES if item.name == reply.data["recipe"])
+            if key.startswith("recipe-")
+            else None
+        )
+        data = project_execution(reply.data, definition=definition)
         return ToolReply(
             {**data, "elapsed_s": max(0.0, time.monotonic() - start)},
             reply.images,
