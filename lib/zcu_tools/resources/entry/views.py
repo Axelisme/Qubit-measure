@@ -214,7 +214,7 @@ class EditView:
 
     @description.setter
     def description(self, value: str | None) -> None:
-        self._draft.general.description = value
+        self.general.description = value
 
     def __getattr__(self, name: str) -> ComponentView:
         if name not in self._draft.components:
