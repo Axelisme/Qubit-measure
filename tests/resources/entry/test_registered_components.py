@@ -9,6 +9,7 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from ruamel.yaml import YAML
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import UnitSpec
 from zcu_tools.resources.entry import (
     ComponentSchema,
@@ -112,7 +113,7 @@ def test_nested_references_reject_missing_targets_with_the_declared_path(
     setup_path = results / "entry" / "setup.yaml"
     entry.setup.add_component("Q1", kind="qubit/transmon")
     entry.setup.add_component("Q2", kind="qubit/fluxonium")
-    valid_links: dict[str, str] = {"control": "Q1", "target": "Q2"}
+    valid_links: YamlMap = {"control": "Q1", "target": "Q2"}
     entry.setup.add_component("P1", kind=pair_kind, links=valid_links)
     invalid_links = {**valid_links, field: "absent"}
     if operation in ("open", "refresh"):
@@ -139,7 +140,6 @@ def test_nested_references_reject_missing_targets_with_the_declared_path(
     assert failure.value.field == f"links.{field}"
     assert failure.value.target == "absent"
     assert setup_path.read_bytes() == before
-    # A successful short transaction proves the old published handle remains usable.
     if operation in ("add", "write"):
         entry.setup.P1.links = valid_links
 
