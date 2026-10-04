@@ -28,6 +28,21 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_device_current_round_trips_without_using_the_entry_name(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    entry.setup.add_component("I1", kind="device/current_source", current=0.25)
+    assert entry.setup.I1.current == pytest.approx(0.25)
+    entry.setup.I1.current = -0.4
+
+    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    assert document["components"]["I1"]["current"] == pytest.approx(-0.0004)
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.I1.kind == "device/current_source"
+    assert reopened.setup.I1.current == pytest.approx(-0.4)
+
+
 def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conversion(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
