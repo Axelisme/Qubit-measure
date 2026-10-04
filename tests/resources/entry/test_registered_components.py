@@ -15,6 +15,7 @@ from zcu_tools.resources.entry import (
     ComponentSchema,
     MissingReferenceError,
     ResultEntry,
+    UnknownFieldError,
     component_registry,
 )
 
@@ -106,6 +107,35 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     results, database = tmp_path / "results", tmp_path / "Database"
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     return entry, results, database
+
+
+@pytest.mark.parametrize("operation", ["add", "attribute", "set"])
+def test_optional_nested_typos_keep_the_same_path_and_field_suggestion(
+    tmp_path: Path, operation: str
+) -> None:
+    with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
+        entry, results, _database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
+        setup_path = results / "entry" / "setup.yaml"
+        before = setup_path.read_bytes()
+
+        def perform_operation() -> None:
+            if operation == "add":
+                entry.setup.add_component("N2", kind=kind, timing={"widht": 10.0})
+            elif operation == "attribute":
+                entry.setup.N1.timing = {"widht": 10.0}
+            else:
+                with entry.setup.edit() as draft:
+                    draft.set("N1.timing.widht", 10.0)
+
+        with pytest.raises(UnknownFieldError) as failure:
+            perform_operation()
+        name = "N2" if operation == "add" else "N1"
+        assert failure.value.path == f"{name}.timing.widht"
+        assert failure.value.field == "widht"
+        assert "width" in failure.value.suggestions
+        assert setup_path.read_bytes() == before
+        assert entry.setup.N1.timing == {"label": "prepared"}
 
 
 def test_optional_nested_setup_fields_defer_missing_values_and_round_trip_units(
