@@ -96,6 +96,10 @@ class ResonatorSchema(ComponentSchema):
     freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
 
 
+class CurrentSourceSchema(ComponentSchema):
+    current: Annotated[float | None, UnitSpec("A", "mA")] = None
+
+
 class SetupDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
