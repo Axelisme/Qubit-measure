@@ -94,6 +94,86 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
         ]
 
 
+def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
+    tmp_path,
+):
+    gui = LookbackGui()
+    current: dict[str, Any] = {
+        "type": "readout/pulse",
+        "cloned_from": "calibrated_readout",
+        "pulse_cfg": {
+            "type": "pulse",
+            "freq": 5000.0,
+            "gain": 0.1,
+            "phase": 0.0,
+            "waveform": {"style": "const", "length": 2.0},
+            "ch": 0,
+            "nqz": 1,
+        },
+        "ro_cfg": {
+            "type": "readout/direct",
+            "ro_freq": 5000.0,
+            "ro_length": 2.0,
+            "trig_offset": 0.1,
+            "ro_ch": 0,
+            "gen_ch": 0,
+        },
+    }
+    proposed = deepcopy(current)
+    proposed["pulse_cfg"].update(freq=5020.0, gain=0.15)
+    proposed["pulse_cfg"]["waveform"]["length"] = 2.5
+    proposed["ro_cfg"].update(ro_freq=5020.0, ro_length=2.5, trig_offset=0.2)
+
+    def respond(method, params):
+        response = gui(method, params)
+        if method == "tab.writeback_preview":
+            response["items"] = [
+                {
+                    "id": "ml-readout",
+                    "kind": "module",
+                    "target_name": "readout_rf",
+                    "proposed": proposed,
+                    "current": current,
+                }
+            ]
+        return response
+
+    with recipe_client(tmp_path, respond) as client:
+        completed = client.call("lookback", {"frequency_mhz": 6020.0})
+        assert completed.data["status"] == "finished", completed.data
+        sent = list(client.transport.sent)
+        summary = client.call("status", {"execution": completed.data["execution"]})
+        full = client.call(
+            "status", {"execution": completed.data["execution"], "detail": "full"}
+        )
+        assert client.transport.sent == sent
+        candidate = summary["writeback"]["stages"]["primary"][0]
+        assert candidate == completed.data["writeback"]["stages"]["primary"][0]
+        assert candidate["target"] == "readout_rf"
+        assert candidate["cfg_ref"] == summary["actual"]["cfg_ref"]
+        for source, expected in (("current", current), ("proposed", proposed)):
+            projected = candidate[source]
+            assert projected["type"] == "readout/pulse"
+            assert projected["cloned_from"] == "calibrated_readout"
+            assert projected["pulse_cfg"] == {
+                key: expected["pulse_cfg"][key]
+                for key in ("type", "freq", "gain", "phase", "waveform")
+            }
+            assert projected["ro_cfg"] == {
+                key: expected["ro_cfg"][key]
+                for key in ("type", "ro_freq", "ro_length", "trig_offset")
+            }
+            assert full["writeback"]["items"][0][source] == expected
+        assert set(candidate["changes"]) == {
+            "pulse_cfg.freq",
+            "pulse_cfg.gain",
+            "pulse_cfg.waveform.length",
+            "ro_cfg.ro_freq",
+            "ro_cfg.ro_length",
+            "ro_cfg.trig_offset",
+        }
+
+
 def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_path):
     gui = LookbackGui()
     current: dict[str, Any] = {
