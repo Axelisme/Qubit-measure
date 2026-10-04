@@ -27,6 +27,49 @@ def recipe_client(tmp_path, respond):
         client.context.session.close()
 
 
+@pytest.mark.parametrize("outcome", ["finished", "missing", "failed"])
+def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome):
+    gui = LookbackGui()
+
+    def respond(method, params):
+        if outcome == "failed" and method == "operation.await":
+            return {"reason": "completed", "status": "failed", "error": "Run failed"}
+        return gui(method, params)
+
+    with recipe_client(tmp_path, respond) as client:
+        initial = client.call(
+            "lookback", {} if outcome == "missing" else {"frequency_mhz": 6020.0}
+        )
+        key = initial.data["execution"]
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": key})
+        waited = client.call("wait", {"execution": key, "timeout": 0})
+        full = client.call("status", {"execution": key, "detail": "full"})
+        assert initial.data == summary
+        assert {k: v for k, v in waited.data.items() if k != "elapsed_s"} == summary
+        assert len(client.transport.sent) == before
+        assert summary["status"] == (
+            "needs_parameters" if outcome == "missing" else outcome
+        )
+        assert summary["run_id"] is None
+        assert summary["steps"]["run"]["status"] == (
+            "not_started" if outcome == "missing" else outcome
+        )
+        if outcome == "finished":
+            assert initial.images
+            assert not waited.images
+            assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+                {"path": "/actual/raw.h5", "status": "saved"}
+            ]
+            assert (
+                full["actual"]["publication"]["cfg_ref"] == summary["actual"]["cfg_ref"]
+            )
+        elif outcome == "missing":
+            assert summary["missing"] == full["missing"]
+        else:
+            assert summary["error"] == full["error"]
+
+
 def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_path):
     gui = LookbackGui()
     destination = {
