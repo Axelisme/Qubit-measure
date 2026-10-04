@@ -10,6 +10,7 @@ from typing import Annotated, ClassVar, Literal, Self, override
 from uuid import UUID
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -87,8 +88,39 @@ def validate_component_name(name: str, *, source: Path | None = None) -> None:
         )
 
 
+def _validate_extension_keys(value: YamlMap) -> YamlMap:
+    errors: list[InitErrorDetails] = []
+
+    def collect_errors(node: YamlValue, path: tuple[str | int, ...]) -> None:
+        if isinstance(node, dict):
+            for key, child in node.items():
+                key_path = (*path, key)
+                if not key or "." in key:
+                    errors.append(
+                        InitErrorDetails(
+                            type=PydanticCustomError(
+                                "extension_key",
+                                "Extension key at {path} must be non-empty and contain no '.'",
+                                {"path": repr(key_path)},
+                            ),
+                            loc=key_path,
+                            input=key,
+                        )
+                    )
+                collect_errors(child, key_path)
+        elif isinstance(node, list):
+            for index, child in enumerate(node):
+                collect_errors(child, (*path, index))
+
+    collect_errors(value, ())
+    if errors:
+        raise ValidationError.from_exception_data("ext", errors)
+    return value
+
+
 _JSON_EXTENSIONS = TypeAdapter[YamlMap](
-    YamlMap, config=ConfigDict(strict=True, allow_inf_nan=False)
+    Annotated[YamlMap, AfterValidator(_validate_extension_keys)],
+    config=ConfigDict(strict=True, allow_inf_nan=False),
 )
 
 
@@ -125,7 +157,8 @@ class PointGeneral(BaseModel):
 
     created_at is an ISO-8601 timestamp with a UTC offset; Z and +00:00 are valid.
     description is optional human-readable text; None means no description.
-    ext is an arbitrary JSON mapping, empty by default, with no unit conversion.
+    ext is a JSON mapping, empty by default, with no unit conversion.
+    Mapping keys at every depth must be non-empty strings without dots.
     Global flux_value uses flux_unit (A or V); both are optional.
     Unknown metadata fields and invalid timestamps raise Pydantic ValidationError.
     """
@@ -154,7 +187,8 @@ class ComponentSchema(BaseModel):
     Required fields, defaults, factories and field validators use Pydantic
     semantics. Field conversions must be idempotent under exact value equality.
     Entry reports canonical drift as ValidationError before commits or snapshot
-    publication.
+    publication. Ext accepts JSON values with non-empty, dot-free mapping keys
+    at every depth, including mappings inside lists.
     Registration does not trial sample inputs. All model-level validators and
     custom model_post_init are rejected, including inherited and direct or
     nullable nested models. Cross-field checks are unsupported in this batch.

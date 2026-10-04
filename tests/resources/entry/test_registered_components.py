@@ -1,9 +1,9 @@
 """Original registered models in complete documents, with registry custody."""
 
 from collections.abc import Generator, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal
 
 import pytest
 from pydantic import (
@@ -23,6 +23,7 @@ from zcu_tools.resources.entry import (
     ModuleSlot,
     Ref,
     ResultEntry,
+    RoleSpec,
     UnitSpec,
     UnknownFieldError,
     component_registry,
@@ -144,13 +145,15 @@ def test_marked_module_slots_edit_seed_and_reload_without_resolving_paths(
         entry.setup.add_component(
             "N1", kind=kind, programs={"drive": "unresolved.drive"}
         )
-        slots = cast(FieldView, entry.setup.N1.programs)
+        slots = entry.setup.N1.programs
+        assert isinstance(slots, FieldView)
         assert slots.drive == "unresolved.drive"
         slots.drive = "another.path"
         point = entry.new_point("working")
         with point.edit() as draft:
             draft.set("N1.programs.sense", "unresolved.sense")
-        point_slots = cast(FieldView, point.N1.programs)
+        point_slots = point.N1.programs
+        assert isinstance(point_slots, FieldView)
         assert point_slots.drive == "another.path"
         assert point_slots.sense == "unresolved.sense"
         with pytest.raises(ValidationError):
@@ -159,10 +162,9 @@ def test_marked_module_slots_edit_seed_and_reload_without_resolving_paths(
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert (
-            cast(FieldView, reopened.use_point("working").N1.programs).sense
-            == "unresolved.sense"
-        )
+        reopened_slots = reopened.use_point("working").N1.programs
+        assert isinstance(reopened_slots, FieldView)
+        assert reopened_slots.sense == "unresolved.sense"
         assert slots.drive == "another.path"
 
 
@@ -201,11 +203,18 @@ def test_nullable_branch_module_slot_is_rejected_before_reserving_kind() -> None
     assert registry.get("notebook/branch-slot") is ComponentSchema
 
 
-def test_marked_reference_validates_add_write_and_reload(tmp_path: Path) -> None:
-    class Linked(ComponentSchema):
+@pytest.mark.parametrize("inner_marker", [False, True], ids=["outer", "inner"])
+def test_marked_reference_validates_add_write_and_reload(
+    tmp_path: Path, inner_marker: bool
+) -> None:
+    class OuterLinked(ComponentSchema):
         link: Annotated[str | None, Ref()] = None
 
-    with registered_model("notebook/marked-link", Linked) as kind:
+    class InnerLinked(ComponentSchema):
+        link: Annotated[str, Ref()] | None = None
+
+    model = InnerLinked if inner_marker else OuterLinked
+    with registered_model("notebook/marked-link", model) as kind:
         entry, results, database = create_entry(tmp_path)
         before = (results / "entry/setup.yaml").read_bytes()
         with pytest.raises(MissingReferenceError) as error:
@@ -218,10 +227,45 @@ def test_marked_reference_validates_add_write_and_reload(tmp_path: Path) -> None
         with pytest.raises(MissingReferenceError):
             point.L1.link = "missing"
         assert point.L1.link == "T1"
+        with pytest.raises(MissingReferenceError), point.edit() as draft:
+            draft.set("L1.link", "missing")
+        assert point.L1.link == "T1"
+        with point.edit() as draft:
+            draft.set("L1.link", None)
+        assert point.L1.link is None
+        point.L1.link = "T1"
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
         assert reopened.use_point("working").L1.link == "T1"
+        roles = component_registry.roles
+        with ExitStack() as cleanup:
+            for name in ("marker_source", "link", "marker_target"):
+                roles.register(name, RoleSpec(kind))
+                cleanup.callback(roles.unregister, name)
+            same_name = point.resolve(["marker_source", "link"], marker_source="L1")
+            assert same_name.components == {"marker_source": "L1", "link": "T1"}
+            via = point.resolve(
+                {
+                    "marker_source": RoleSpec(kind),
+                    "marker_target": RoleSpec(kind, via="marker_source.link"),
+                },
+                marker_source="L1",
+            )
+            assert via.components == {"marker_source": "L1", "marker_target": "T1"}
+        path = results / "entry/points/working/point.yaml"
+        yaml = YAML(typ="safe")
+        document = yaml.load(path.read_text())
+        document["components"]["L1"]["link"] = "missing"
+        with path.open("w") as stream:
+            yaml.dump(document, stream)
+        before = path.read_bytes()
+        with pytest.raises(MissingReferenceError):
+            point.refresh()
+        assert point.L1.link == "T1"
+        with pytest.raises(MissingReferenceError):
+            reopened.use_point("working")
+        assert path.read_bytes() == before
 
 
 def test_nullable_nested_markers_validate_reference_and_accept_null(

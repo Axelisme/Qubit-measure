@@ -235,7 +235,7 @@ def test_role_mapping_stays_fixed_while_values_follow_bound_point(
     point = make_point(tmp_path)
     roles = point.resolve(driver="Q2")
     with pytest.raises(TypeError):
-        # Deliberately bypass the readonly type to exercise the runtime guard.
+        # D132 permits this negative test to mutate a readonly component mapping.
         cast(MutableMapping[str, str], roles.components)["driver"] = "Q1"
     roles.driver.rate = 5250.0
     assert point.Q2.rate == 5250.0

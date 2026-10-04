@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-05，工作單位、定義注入與 resonator 角色
+**Last updated:** 2026-10-05，ext key 語法與 nullable marker 驗證
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是條目身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 的 refresh 不接受另一個身分。
 
@@ -20,7 +20,7 @@ DocumentStore 擁有單檔衝突檢查與 atomic replace，不換算數值。檔
 
 元件名稱是未保留的 public identifier，不允許點號或遮蔽視圖。Setup 與 Point 都提供 `add_component`，以原 registered model 完整驗證必填欄位、型別與 field validators。引用只在同一文件內解析。缺少目標時回報來源檔案、元件、欄位與目標名稱，不發布無效快照。
 
-Registry 在註冊前驗證 ComponentSchema 型別、extra=forbid、引用路徑與欄位標記。`Ref()` 標記字串或 nullable 字串引用，包含直接與 nullable 巢狀 model。`ModuleSlot()` 標記槽名到字串路徑的 mapping；視圖提供槽值讀寫，不解析 ModuleLibrary。`UnitSpec(unit)` 只是標註，不檢查量綱、要求數值單位或建立換算表。失敗不占用 kind，重複註冊報錯，unregister 後可明確替換。
+Registry 在註冊前驗證 ComponentSchema 型別、extra=forbid、引用路徑與欄位標記。`Ref()` 標記字串或 nullable 字串引用，包含直接與 nullable 巢狀 model。Nullable Ref 支援外層 Annotated 及 Union 分支內的 Annotated。兩者都驗證引用並提供角色解析。Nullable ModuleSlot 與非字串 Ref 在註冊時拒絕。`ModuleSlot()` 標記槽名到字串路徑的 mapping；視圖提供槽值讀寫，不解析 ModuleLibrary。`UnitSpec(unit)` 只是標註，不檢查量綱、要求數值單位或建立換算表。失敗不占用 kind，重複註冊報錯，unregister 後可明確替換。
 
 Defaults、default_factory 與 field validators 使用 Pydantic 原生行為。加入元件時保留已產生的 default 值，避免重新載入或 seed 重生 factory 值。Seed 也複製當次 template validation 產生、原 YAML 尚未保存的 defaults。已知欄位拒絕拼字錯誤。沒有值且沒有非 null default 的欄位讀取明確報錯；有值的 native default 可以讀取。
 
@@ -56,7 +56,7 @@ Qubit 的 resonator 引用用於角色推導，readout 是 module 槽名。Globa
 
 ## 視圖、版本與失敗
 
-EditView 的元件、wiring、ext、general 與點分 set 共用同一份 draft。欄位驗證失敗不修改 draft；身分、引用或 canonical 驗證失敗使整筆交易不提交。description 未設定時為 None。Ext 接受任意字串 key 與 JSON 值，包括巢狀容器、null 與非 identifier key，不加領域 schema 或單位驗證。Bytes、tuple、非字串 key 與 NaN／Infinity 以原生 ValidationError 拒絕，不隱式轉型。非屬性形式的 key 可用 item access。巢狀 model 讀取回傳獨立 YAML mapping，點分 set 可更新已存在的容器。
+EditView 的元件、wiring、ext、general 與點分 set 共用同一份 draft。欄位驗證失敗不修改 draft；身分、引用或 canonical 驗證失敗使整筆交易不提交。description 未設定時為 None。Ext 接受 JSON 值，包括巢狀容器、null 與非 identifier key，不加領域 schema 或單位驗證。所有深度的 mapping key 都必須是非空字串且不含點號，list 裡的 mapping 也適用。寫入與讀檔在同一 schema 入口驗證，非法 key 以 ValidationError 指出路徑。名稱沒有其他 schema 限制，來源與 set 維持單一點分字串定址。Bytes、tuple、非字串 key 與 NaN／Infinity 以原生 ValidationError 拒絕，不隱式轉型。非屬性形式的 key 可用 item access。巢狀 model 讀取回傳獨立 YAML mapping，點分 set 可更新已存在的容器。
 
 同 major 的較新 minor 保留未知欄位與原版本。Typed 視圖只投影已知欄位。未知欄位留在 YAML tree，不換算，也不開放 typed API 讀寫。當前 minor 的未知正式欄位仍報錯。
 

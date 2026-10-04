@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
 from types import UnionType
-from typing import Union, get_args, get_origin
+from typing import Annotated, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -13,14 +13,31 @@ from .errors import MissingReferenceError, UnknownFieldError, UnknownKindError
 from .schema import ComponentSchema, ModuleSlot, Ref
 
 
-def _nested_model(annotation: object) -> type[BaseModel] | None:
+def _annotation_shape(
+    annotation: object,
+) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    # Pydantic retains Annotated inside nullable Union branches, not in metadata.
+    if get_origin(annotation) is Annotated:
+        underlying, *markers = get_args(annotation)
+        underlying_types, nested_markers = _annotation_shape(underlying)
+        return underlying_types, (*nested_markers, *markers)
     if get_origin(annotation) in (Union, UnionType):
-        alternatives = tuple(
-            item for item in get_args(annotation) if item is not type(None)
-        )
-        if len(alternatives) != 1:
-            return None
-        annotation = alternatives[0]
+        types: list[object] = []
+        metadata: list[object] = []
+        for branch in get_args(annotation):
+            branch_types, branch_markers = _annotation_shape(branch)
+            types.extend(branch_types)
+            metadata.extend(branch_markers)
+        return tuple(types), tuple(metadata)
+    return (annotation,), ()
+
+
+def _nested_model(annotation: object) -> type[BaseModel] | None:
+    types, _markers = _annotation_shape(annotation)
+    alternatives = tuple(item for item in types if item is not type(None))
+    if len(alternatives) != 1:
+        return None
+    annotation = alternatives[0]
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation
     return None
@@ -37,9 +54,13 @@ def _validate_supported_model(model: type[BaseModel]) -> None:
             f"{model.__name__}: custom model_post_init is unsupported in component models"
         )
     for name, field in model.model_fields.items():
-        if any(isinstance(marker, ModuleSlot) for marker in field.metadata) and (
-            get_origin(field.annotation) not in (dict, Mapping)
-            or get_args(field.annotation) != (str, str)
+        types, markers = _annotation_shape(field.annotation)
+        if any(
+            isinstance(marker, ModuleSlot) for marker in (*field.metadata, *markers)
+        ) and (
+            len(types) != 1
+            or get_origin(types[0]) not in (dict, Mapping)
+            or get_args(types[0]) != (str, str)
         ):
             raise TypeError(
                 f"{model.__name__}.{name}: ModuleSlot requires a non-null "
@@ -65,12 +86,8 @@ def _validate_reference(model: type[BaseModel], reference: str) -> None:
             break
         annotation = field.annotation
         if index == len(parts) - 1:
-            types = tuple(
-                item for item in get_args(annotation) if item is not type(None)
-            )
-            if annotation is str or (
-                get_origin(annotation) in (Union, UnionType) and types == (str,)
-            ):
+            types, _markers = _annotation_shape(annotation)
+            if tuple(item for item in types if item is not type(None)) == (str,):
                 return
             break
         nested_model = _nested_model(annotation)
@@ -156,7 +173,8 @@ def _marked_references(model: type[BaseModel], prefix: str = "") -> tuple[str, .
     paths: list[str] = []
     for name, field in model.model_fields.items():
         path = f"{prefix}.{name}" if prefix else name
-        if any(isinstance(marker, Ref) for marker in field.metadata):
+        _types, markers = _annotation_shape(field.annotation)
+        if any(isinstance(marker, Ref) for marker in (*field.metadata, *markers)):
             paths.append(path)
         nested_model = _nested_model(field.annotation)
         if nested_model is not None:

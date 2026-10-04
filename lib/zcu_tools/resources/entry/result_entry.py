@@ -161,7 +161,7 @@ class ResultEntry:
             raise
 
     def _seed_point(self, destination: Path) -> None:
-        # Copy SI YAML, not working-unit models, while the template lock is held.
+        # Copy the validated YAML snapshot while the template lock is held.
         with self._setup_store.locked():
             self._setup_store.refresh()
             components = self._setup_store.snapshot().components
@@ -182,7 +182,7 @@ class ResultEntry:
             with (destination / "point.yaml").open("x", encoding="utf-8") as stream:
                 yaml.dump(document, stream)
             # Missing YAML defaults may have been generated in the template's
-            # native model. Copy those values too, through the Store's SI boundary.
+            # native model. Copy those values too, in the same working units.
             with self._point_store(destination / "point.yaml").edit() as draft:
                 draft.components = components
         with (destination / "module_cfg.yaml").open("x", encoding="utf-8") as stream:

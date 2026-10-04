@@ -316,7 +316,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
     entry.setup.general.description = "prepared metadata"
     assert entry.setup.description == "prepared metadata"
     entry.setup.general.ext.temperature = 0.02
-    entry.setup.general.ext["_arbitrary.key"] = {"rate": 12.3, "flags": [True, None]}
+    entry.setup.general.ext["_arbitrary-key"] = {"rate": 12.3, "flags": [True, None]}
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
         draft.general.ext.temperature = 0.03
@@ -330,7 +330,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.general.ext.temperature == 0.03
     assert reopened.setup.general.ext.note == "cooldown"
-    assert reopened.setup.general.ext["_arbitrary.key"] == {
+    assert reopened.setup.general.ext["_arbitrary-key"] == {
         "rate": 12.3,
         "flags": [True, None],
     }
@@ -470,17 +470,17 @@ def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conver
     assert extension.rate == 12.3
     extension.note = "unscaled annotation"
     payload: YamlMap = {"rate": 321.0, "optional": None, "flags": [True, "cold"]}
-    extension["_arbitrary.key"] = payload
+    extension["_arbitrary-key"] = payload
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.R1.ext.note == "unscaled annotation"
-    assert reopened.setup.R1.ext["_arbitrary.key"] == payload
+    assert reopened.setup.R1.ext["_arbitrary-key"] == payload
     document = YAML(typ="safe").load(setup_path)["components"]["R1"]
     assert document["rate"] == 6500.0
     assert document["ext"] == {
         "rate": 12.3,
         "note": "unscaled annotation",
-        "_arbitrary.key": payload,
+        "_arbitrary-key": payload,
     }
 
 
@@ -520,6 +520,7 @@ def test_dotted_extension_path_rejects_non_json_input_before_coercion(
     entry.setup.add_component("R1", kind="fake/sensor")
     with entry.setup.edit() as draft:
         with pytest.raises(ValidationError):
+            # D132 permits this negative test to submit a non-JSON tuple.
             draft.set(f"{owner}.ext.bad", cast(YamlValue, (1, 2)))
         draft.set(f"{owner}.ext.accepted", [True, None, 3])
     extension = entry.setup.R1.ext if owner == "R1" else entry.setup.general.ext
@@ -537,6 +538,7 @@ def test_add_component_rejects_non_json_extension_before_publishing(
     entry: ResultEntry, value: object
 ) -> None:
     with pytest.raises(ValidationError):
+        # D132 permits this negative test to submit a non-JSON extension value.
         entry.setup.add_component(
             "N1", kind="fake/sensor", ext=cast(YamlValue, {"bad": value})
         )
