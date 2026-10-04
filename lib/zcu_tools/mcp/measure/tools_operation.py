@@ -16,7 +16,12 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Read a local execution, or GUI orientation and all session executions."""
+    """Read a local execution, or GUI orientation and nonterminal executions."""
+    detail = arguments.get("detail", "summary")
+    if detail not in ("summary", "full"):
+        raise ValueError("detail must be summary or full")
+    if detail == "full" and "execution" not in arguments:
+        raise ValueError("detail=full requires execution")
     if "execution" in arguments:
         key = _execution_id(arguments)
         if key.startswith("recipe-"):
@@ -27,11 +32,11 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             return project_execution(
                 snapshot,
                 definition=definition,
-                detail=arguments.get("detail", "summary"),
+                detail=detail,
             )
         return project_execution(
             asdict(ctx.session.executions.get(key).snapshot()),
-            detail=arguments.get("detail", "summary"),
+            detail=detail,
         )
     session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
@@ -247,7 +252,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read a local execution, or index the live GUI and session executions.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -258,6 +263,10 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
                         "default": "summary",
                     },
                 },
+                "anyOf": [
+                    {"required": ["execution"]},
+                    {"properties": {"detail": {"enum": ["summary"]}}},
+                ],
             },
         },
         "wait": {
