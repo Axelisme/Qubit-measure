@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04 — registry 宣告與部分 model 切片
+**Last updated:** 2026-10-04 — 內建 kinds 與元件引用
 
 `ResultEntry` 組合兩個明確傳入的根目錄。名稱是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 不接受 refresh 帶入另一個身分。
 
@@ -14,4 +14,6 @@
 
 Setup 允許省略 notebook model 的必填欄位與直接巢狀 model 的必填欄位。未填值不落盤，讀取明確報錯；有提供的值仍經型別驗證。Registry 保留原始完整 model，必填完整性由後續疊合視圖檢查。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。目前元件切片包含 resonator、typed wiring 與 ext。完整內建 kinds、元件引用驗證與完整 draft 視圖仍在實作中。工作點、來源和角色解析由後續切片提供，不改現行 context 的責任。
+內建 kinds 包含 resonator、fluxonium、transmon、JPA 與 current source。物理值可缺省，單位宣告涵蓋頻率、能量、電流、時間與無因次量。引用保存元件名稱，不展開目標物件。載入、refresh 與提交驗證有值的引用，包含 notebook 宣告的巢狀路徑；缺少目標時回報檔案、元件、欄位與目標名稱。失敗不發布無效快照。
+
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。完整 draft 視圖、forward-minor 元件欄位與其他 notebook model 形狀仍在實作中。工作點、來源和角色解析由後續切片提供，不改現行 context 的責任。

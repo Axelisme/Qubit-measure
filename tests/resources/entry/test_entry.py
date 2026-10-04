@@ -146,16 +146,16 @@ def test_builtin_physical_fields_round_trip_through_add_write_and_reopen(
     entry.setup.add_component("C1", kind=kind, **{field: working_value})
     component = entry.setup.C1
     assert getattr(component, field) == pytest.approx(working_value)
-    assert YAML(typ="safe").load(setup_path)["components"]["C1"][field] == pytest.approx(
-        stored_value
-    )
+    assert YAML(typ="safe").load(setup_path)["components"]["C1"][
+        field
+    ] == pytest.approx(stored_value)
 
     setattr(component, field, working_value * 2)
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert getattr(reopened.setup.C1, field) == pytest.approx(working_value * 2)
-    assert YAML(typ="safe").load(setup_path)["components"]["C1"][field] == pytest.approx(
-        stored_value * 2
-    )
+    assert YAML(typ="safe").load(setup_path)["components"]["C1"][
+        field
+    ] == pytest.approx(stored_value * 2)
 
 
 def test_device_current_round_trips_without_using_the_entry_name(
