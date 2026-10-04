@@ -215,21 +215,12 @@ def cancel(
         return execution.cancel()
     ctx = ctx.bound()
     response = ctx.gui.read_internal("operation.cancel", {}, operation_handle=op)
-    if response["status"] != "cancelling":
-        return {"status": response["status"]}
-    outcome = wait(ctx, {"op": op, "timeout": 0.25})
-    if outcome["status"] == "cancelled":
-        return {"status": "cancelled"}
-    if outcome["status"] == "failed":
-        error = outcome.get("error", {})
-        raise GuiRpcError(
-            f"operation {op} failed: {error.get('message', 'unknown failure')}",
-            reason="operation_failed",
-            code="precondition_failed",
-        )
-    if outcome["status"] == "finished":
-        return {"status": "finished"}
-    return {"status": "cancelling"}
+    return {
+        "execution": None,
+        "op": op,
+        "status": response["status"],
+        "cancel_requested": True,
+    }
 
 
 def finish_early(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
