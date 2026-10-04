@@ -239,7 +239,8 @@ def finish_early(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
             raise GuiRpcError(
                 f"No registered recipe for operation {op}", reason="unknown_operation"
             )
-    return recipe.finish_early()
+    reply = recipe.finish_early()
+    return ToolReply(project_control(reply.data), is_error=reply.is_error)
 
 
 def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
