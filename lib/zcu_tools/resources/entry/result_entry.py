@@ -20,6 +20,7 @@ from zcu_tools.resources.document_store import (
     UnitSpec,
 )
 
+from . import _point_origin
 from .errors import PartialCommitError
 from .layering import compose, point_units, route, validate_point
 from .points import PointView
@@ -208,12 +209,12 @@ class ResultEntry:
             raise
 
     def _clone_point(self, destination: Path, clone_from: str | PointView) -> None:
-        source = (
-            clone_from.clone_source(self._result_path)
-            if isinstance(clone_from, PointView)
-            else _entry_path(self._result_path / "points", clone_from)
-        )
         with ExitStack() as stack, self._setup_store.locked():
+            source = (
+                _point_origin.clone_source(clone_from, self._result_path)
+                if isinstance(clone_from, PointView)
+                else _entry_path(self._result_path / "points", clone_from)
+            )
             setup_state = stack.enter_context(
                 self._setup_store.read_state(locked_by=self._setup_store)
             )

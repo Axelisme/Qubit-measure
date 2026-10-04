@@ -380,6 +380,28 @@ def test_complete_nested_after_validator_reports_field_and_keeps_partial_setup(
         component_registry.unregister(kind)
 
 
+@pytest.mark.parametrize("source_mode", ["label", "view"])
+def test_cross_entry_clone_is_rejected_and_removes_new_destination(
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    source_mode: Literal["label", "view"],
+) -> None:
+    results, database = entry_roots
+    other = ResultEntry.create("other", result_root=results, database_root=database)
+    foreign_point = other.new_point("source")
+    foreign_source = results / "other/points/source/point.yaml"
+    before = foreign_source.read_bytes()
+    source_arg = "other/source" if source_mode == "label" else foreign_point
+    message = (
+        "single path component" if source_mode == "label" else "Cross-entry cloning"
+    )
+    with pytest.raises(ValueError, match=message):
+        entry.new_point("rejected", clone_from=source_arg)
+    assert entry.list_points() == []
+    assert not (results / "entry/points/rejected").exists()
+    assert foreign_source.read_bytes() == before
+
+
 def test_setup_commit_validates_complete_views_of_existing_points(
     entry: ResultEntry, entry_roots: tuple[Path, Path], range_kind: str
 ) -> None:

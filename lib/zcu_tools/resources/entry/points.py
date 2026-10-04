@@ -7,6 +7,7 @@ from typing import Literal
 
 from zcu_tools.resources.document_store import DocumentStore
 
+from . import _point_origin
 from .layering import compose
 from .schema import (
     ComponentSchema,
@@ -36,6 +37,7 @@ class PointView:
         self._store = store
         self._setup = setup
         self._source = source
+        _point_origin.register(self, source)
         self._edit_document = edit
         self._refresh_document = refresh
 
@@ -80,12 +82,6 @@ class PointView:
     def edit(self) -> Generator[EditView]:
         with self._edit_document() as draft:
             yield EditView(draft)
-
-    def clone_source(self, entry: Path) -> Path:
-        """Resources-only identity check for an entry-owned clone."""
-        if self._source.resolve().parents[2] != entry.resolve():
-            raise ValueError("Cross-entry cloning is not supported")
-        return self._source.parent
 
     def refresh(self) -> None:
         self._refresh_document()
