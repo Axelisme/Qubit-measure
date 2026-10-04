@@ -90,8 +90,8 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 測試遵循以下契約；新增、拆分或搬遷測試前，先讀 [tests/README.md](tests/README.md) 的套件結構、fixture 與搬遷規則，找出既有行為的 owner：
 
 - 測試位於 root `tests/`，檔名使用 `test_*.py`，以 `pytest` 涵蓋本次變更的主要行為與邏輯。
-- 測試目錄的路徑對應被測模組：含 `test_*.py` 的目錄必須對應一個實際存在的模組目錄。對應是模組層級，檔名不受約束。`scripts` 與 `tools` 對應 repo root 的同名目錄，其餘對應 `lib/zcu_tools/` 之下。`contract` 與 `parity` 為保留名稱，豁免該段及其以下，但其前的路徑前綴仍須對應；新增保留名稱需使用者同意。
-- 路徑對應以 `tools/check_test_path_correspondence.py` 判定。它目前對既有目錄回報非零；判讀對象是本次改動觸及的路徑，不是總數。
+- 測試目錄的路徑對應被測模組：含 `test_*.py` 的目錄必須對應一個實際存在的模組目錄。對應是模組層級，檔名不受約束。`scripts`、`tools` 與 `zcu_lab` 對應 repo root 的同名目錄，其餘對應 `lib/zcu_tools/` 之下。`contract` 與 `parity` 為保留名稱，豁免該段及其以下，但其前的路徑前綴仍須對應；新增保留名稱需使用者同意。
+- 路徑對應以 `tools/check_test_path_correspondence.py` 判定。判讀對象是本次改動觸及的路徑；若有既有違規，不以全庫總數判定本次改動。
 - 測試保持獨立、可重複、不依賴外部狀態。修改 module-level 集合、cache、registry 等 mutable state 後必須還原；共用狀態者在 module 前後比對，並由 guard 指出污染者。
 - 同一棵 tree 因測試選集或順序得出不同結論時，將該不穩定視為缺陷，不以偶然通過的結果驗收。
 
