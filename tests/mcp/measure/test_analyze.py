@@ -419,6 +419,40 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
     assert _methods(client) == ["tab.snapshot"]
 
 
+@pytest.mark.parametrize("stage", ["primary", "post"])
+def test_duplicate_analysis_receipt_retains_the_confirmed_handle(
+    tmp_path, clients, stage
+):
+    method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
+    result_method = (
+        "tab.get_analyze_result" if stage == "primary" else "tab.get_post_analyze_result"
+    )
+    pane = "analysis" if stage == "primary" else "post_analysis"
+
+    def respond(name, params):
+        if name == method:
+            return _start_reply({}, [])
+        if name == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if name == result_method:
+            return _result_reply(pane, [], {})
+        raise AssertionError(name)
+
+    client = _client(tmp_path, clients, respond)
+    first = client.call("tab_analyze", {"tab": "t", "stage": stage})
+    conflicting = client.call("tab_analyze", {"tab": "t", "stage": stage})
+    assert conflicting.is_error is True
+    assert conflicting.data["execution"] != first.data["execution"]
+    full = client.call(
+        "status", {"execution": conflicting.data["execution"], "detail": "full"}
+    )
+    assert full["op"] == first.data["op"]
+    assert full["start"]["status"] == "running"
+    assert full["error"]["reason"] == "incompatible_wire"
+    assert conflicting.data["steps"]["analysis"][stage]["status"] == "running"
+    assert _methods(client) == [method, "operation.await", result_method, method]
+
+
 def _start_reply(
     params: dict[str, Any], invalidated: list[str], *, interactive: bool = False
 ) -> dict[str, Any]:
