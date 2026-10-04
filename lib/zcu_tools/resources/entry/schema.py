@@ -16,7 +16,6 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
-
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
