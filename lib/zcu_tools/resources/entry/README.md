@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04，seed 工作點與 ledger 引用的版本邊界
+**Last updated:** 2026-10-04，角色解析與 ledger 引用的版本邊界
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是條目身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 的 refresh 不接受另一個身分。
 
@@ -38,6 +38,14 @@ D104 的 canonical 檢查由 entry 負責。提交前與 open、refresh、交易
 
 `edit_view.set(..., provenance=...)` 先驗證來源的本地引用。非 manual source 必須是本條目 records/ledger.jsonl 中同 ID、同 entry_id 的事件。被引用事件必須有 zcu.ledger 1.x 標頭，錯誤 format／版本指向 ledger 路徑；較新 minor 可讀且原 bytes 不變。Entry 不寫 ledger，不驗證完整事件 schema，也不從其他條目補來源。這個切片不提供 producer、accept／writeback 服務或 status／stale。
 
+## 角色與焦點
+
+`PointView.resolve` 只使用 bound point 的快照，不查 setup、其他 point 或 GUI session。Caller 宣告有序角色表，名稱必須經 role registry 註冊。Sequence 取 registry 的 RoleSpec，Mapping 可以覆寫 kind pattern 與 via。未傳角色表時，notebook shorthand 只宣告 qubit 與 readout。
+
+解析依序使用 explicit、匹配焦點、已解析元件的同名引用或 via。焦點只填一個角色。Point 只有一個 qubit 時，以它作預設焦點，多 qubit 不猜測。Via 的首段是已解析角色，其餘是該元件註冊的引用路徑，含巢狀欄位。一般字串欄位不當作引用。Notebook 可以註冊 pair 與 coupler，不增加內建 kind。
+
+多餘 explicit、未知角色、缺元件、kind 不符、缺引用或多個候選都以 RoleResolutionError 回報角色、焦點、要求的 kind 與原因。RoleView 固定解析當下的名稱映射，元件值仍經原 PointView 讀写與 refresh。回傳映射不可修改。
+
 ## 視圖、版本與失敗
 
 EditView 的元件、wiring、ext、general 與點分 set 共用同一份 draft。欄位驗證失敗不修改 draft；身分、引用或 canonical 驗證失敗使整筆交易不提交。description 未設定時為 None。Ext 保留任意 YAML 值，不換算單位；非屬性形式的 key 可用 item access。巢狀 model 讀取投影成工作單位 YAML mapping，點分 set 可更新已存在的容器。
@@ -46,4 +54,4 @@ EditView 的元件、wiring、ext、general 與點分 set 共用同一份 draft�
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次。復原也失敗時，RenameRecoveryError 回報已移動的 Result、預定 Database 目的地、無法復原的 Result 原路徑與兩個原始 I/O 原因。這不是跨檔掉電保證。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。Ledger producer、accept／writeback 服務與角色解析由後續切片提供，不改現行 context 的責任。
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。Ledger producer 與 accept／writeback 服務由後續切片提供，不改現行 context 的責任。

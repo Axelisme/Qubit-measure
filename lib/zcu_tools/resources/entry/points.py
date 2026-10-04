@@ -1,6 +1,6 @@
 """Working-point views over one complete parameter document."""
 
-from collections.abc import Generator
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -9,6 +9,7 @@ from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
 from .provenance import Provenance
+from .roles import RoleSpec, RoleView, resolve_names
 from .schema import ComponentSchema, PointDocument, PointGeneral
 from .views import (
     ComponentView,
@@ -101,6 +102,23 @@ class PointView:
         """
         with self._store.edit() as draft:
             yield EditView(draft, ledger=self._ledger, entry_id=self._entry_id)
+
+    def resolve(
+        self,
+        roles: Mapping[str, RoleSpec] | Sequence[str] | None = None,
+        *,
+        focus: str | None = None,
+        **explicit: str,
+    ) -> RoleView:
+        """Resolve only declared roles from this point's cached components.
+
+        Explicit choices precede one matching focus, then registered references.
+        None declares the notebook shorthand qubit/readout. Errors identify the
+        role, focus, kind and reason. The returned name mapping stays fixed while
+        values follow this bound point's working-unit snapshot and edits.
+        """
+        names = resolve_names(self._store.snapshot().components, roles, focus, explicit)
+        return RoleView(names, self.__getattr__)
 
     def meta(self, path: str) -> Provenance | None:
         """Return an independent cached source in working units, or None."""

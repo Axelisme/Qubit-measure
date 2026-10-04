@@ -1,4 +1,4 @@
-"""Errors that locate invalid components and rename recovery failures."""
+"""Errors that locate invalid components, role choices and rename failures."""
 
 from pathlib import Path
 
@@ -36,6 +36,21 @@ class MissingReferenceError(ValueError):
         self.target = target
         super().__init__(
             f"{source}: {component}.{field}: component reference {target!r} does not exist"
+        )
+
+
+class RoleResolutionError(ValueError):
+    """A role cannot be resolved from this point, focus and declaration."""
+
+    def __init__(
+        self, role: str, focus: str | None, required_kind: str | None, reason: str
+    ) -> None:
+        self.role = role
+        self.focus = focus
+        self.required_kind = required_kind
+        self.reason = reason
+        super().__init__(
+            f"Role {role!r} requires kind {required_kind!r}; focus={focus!r}: {reason}"
         )
 
 

@@ -200,6 +200,11 @@ class ComponentRegistry:
                 if isinstance(target, str) and target not in components:
                     raise MissingReferenceError(source, name, field, target)
 
+    def references(self, kind: str) -> tuple[str, ...]:
+        """Return registered reference paths, not arbitrary string fields."""
+        self.get(kind)
+        return self._references[kind]
+
     def units(
         self, kind: str, *, source: Path | None = None, component: str | None = None
     ) -> Mapping[FieldPath, UnitSpec]:
