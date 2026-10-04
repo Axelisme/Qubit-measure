@@ -11,6 +11,7 @@ from .singleshot_ge import DEFINITION as SINGLESHOT_GE
 from .t1 import DEFINITION as T1
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
+from .time_rabi import DEFINITION as TIME_RABI
 
 RECIPES: tuple[RecipeDefinition, ...] = (
     LOOKBACK,
@@ -22,4 +23,5 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     T2ECHO,
     T1,
     AMPLITUDE_RABI,
+    TIME_RABI,
 )

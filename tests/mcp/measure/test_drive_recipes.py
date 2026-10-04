@@ -36,9 +36,17 @@ def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
 
 
 class TimeRabiGui(LookbackGui):
-    def __init__(self, md=None):
+    """Rabi wire collaborator using the configured publication as reset defaults."""
+
+    def __init__(self, md=None, *, interactive=False):
         super().__init__()
         self.md = md or {}
+        self.interactive = interactive
+        self.done = Event()
+        self.writes: list[dict[str, object]] = []
+        self.adapter_name = "twotone/rabi/len_rabi"
+        self.target_name = "pi_len"
+        self.fit_summary = {"pi_len": 0.21, "pi_len_err": 0.01, "pi2_len": 0.11}
         tree = self.publication["tree"]["children"]
         tree["reps"] = scalar(19)
         tree["sweep"] = section(
@@ -70,139 +78,6 @@ class TimeRabiGui(LookbackGui):
             if edit["path"] == ["sweep", "length"]:
                 inputs = self.publication["tree"]["children"]["sweep"]["children"][
                     "length"
-                ]["inputs"]
-                inputs.update(
-                    {
-                        key: scalar(value)["input"]
-                        for key, value in edit["value"].items()
-                    }
-                )
-            else:
-                ordinary.append(edit)
-        super()._edit({**params, "edits": ordinary})
-
-    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if method == "tab.new":
-            assert params == {"adapter_name": "twotone/rabi/len_rabi"}
-            return {"tab_id": "t"}
-        result = super().__call__(method, params)
-        if method == "tab.snapshot":
-            result["tabs"][0]["adapter_name"] = "twotone/rabi/len_rabi"
-        if method == "context.snapshot":
-            result["ml"]["modules"] = {
-                "drive": {"type": "pulse"},
-                "calibrated": {"type": "readout/pulse"},
-            }
-        return result
-
-
-@pytest.mark.parametrize("number", [1, 1.0])
-def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
-    tmp_path, number
-):
-    with recipe_client(tmp_path, TimeRabiGui({"r_f": 7200.0})) as client:
-        data = full_execution_reply(
-            client,
-            client.call(
-                "time_rabi",
-                {
-                    "frequency_mhz": number,
-                    "gain": number,
-                    "max_length_us": number,
-                    "points": 3,
-                },
-            ),
-        ).data
-        assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.gain"):
-            assert fields[path]["value"] == 1.0
-            assert type(fields[path]["value"]) is float
-        sweep = fields["sweep.length"]["value"]
-        assert sweep["stop"] == 1.0
-        assert type(sweep["stop"]) is float
-        assert sweep["expts"] == 3
-        assert type(sweep["expts"]) is int
-        by_path = {
-            tuple(edit["path"]): edit["value"]
-            for method, params in client.transport.sent
-            if method == "tab.edit_cfg"
-            for edit in params["edits"]
-        }
-        for path in (
-            ("modules", "qub_pulse", "freq"),
-            ("modules", "qub_pulse", "gain"),
-        ):
-            assert by_path[path] == 1.0
-            assert type(by_path[path]) is float
-        assert type(by_path["sweep", "length"]["stop"]) is float
-
-
-def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tmp_path):
-    gui = TimeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
-    with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(
-            client,
-            client.call(
-                "time_rabi",
-                {
-                    "frequency_mhz": 6150.0,
-                    "gain": 0.21,
-                    "max_length_us": 1.5,
-                    "points": 71,
-                    "reps": 13,
-                    "rounds": 9,
-                },
-            ),
-        )
-        data = reply.data
-        assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["modules.qub_pulse.freq"]["value"] == 6150.0
-        assert fields["modules.qub_pulse.freq"]["source"] == "frequency_mhz"
-        assert fields["modules.qub_pulse.gain"]["value"] == 0.21
-        assert fields["sweep.length"]["value"] == {
-            "start": 0.04,
-            "stop": 1.5,
-            "expts": 71,
-        }
-        assert fields["reps"]["value"] == 13
-        assert fields["rounds"]["value"] == 9
-        assert fields["modules.reset"]["source"] == "disabled"
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
-        assert data["analysis"]["status"] == "finished"
-        assert data["writeback"]["items"]
-        assert reply.images
-        methods = [method for method, _ in client.transport.sent]
-        assert methods.count("tab.run_start") == 1
-        assert methods.count("tab.save_data") == 1
-        assert methods.index("tab.save_data") < methods.index("tab.analyze")
-
-
-class AmplitudeRabiGui(TimeRabiGui):
-    def __init__(self, md=None, *, interactive=False):
-        super().__init__(md)
-        self.interactive = interactive
-        self.done = Event()
-        self.writes: list[dict[str, object]] = []
-        tree = self.publication["tree"]["children"]
-        tree["sweep"] = section(
-            gain={
-                "kind": "sweep",
-                "valid": True,
-                "inputs": {
-                    key: scalar(value)["input"]
-                    for key, value in {"start": -0.2, "stop": 0.7, "expts": 43}.items()
-                },
-            }
-        )
-
-    def _edit(self, params):
-        ordinary = []
-        for edit in params["edits"]:
-            if edit["path"] == ["sweep", "gain"]:
-                inputs = self.publication["tree"]["children"]["sweep"]["children"][
-                    "gain"
                 ]["inputs"]
                 inputs.update(
                     {
@@ -251,7 +126,7 @@ class AmplitudeRabiGui(TimeRabiGui):
                     {
                         "id": item["id"],
                         "kind": "md",
-                        "target": "pi_gain",
+                        "target": self.target_name,
                         "before": {"value": 0.14},
                         "after": {"value": 0.21},
                     }
@@ -262,7 +137,7 @@ class AmplitudeRabiGui(TimeRabiGui):
 
     def _native_reply(self, method, params):
         if method == "tab.new":
-            assert params == {"adapter_name": "twotone/rabi/amp_rabi"}
+            assert params == {"adapter_name": self.adapter_name}
             return {"tab_id": "t"}
         if method == "tab.writeback_preview":
             assert params["subtab_id"] == "analysis"
@@ -272,7 +147,7 @@ class AmplitudeRabiGui(TimeRabiGui):
                     {
                         "id": "md-1",
                         "kind": "metadict",
-                        "target_name": "pi_gain",
+                        "target_name": self.target_name,
                         "proposed": 0.21,
                         "current": 0.14,
                         "selected": False,
@@ -289,10 +164,147 @@ class AmplitudeRabiGui(TimeRabiGui):
         if method == "tab.analyze":
             result["interactive"] = self.interactive
         if method == "tab.get_analyze_result":
-            result["summary"] = {"pi_gain": 0.21, "pi_gain_err": 0.01, "pi2_gain": 0.11}
+            result["summary"] = dict(self.fit_summary)
         if method == "tab.snapshot":
-            result["tabs"][0]["adapter_name"] = "twotone/rabi/amp_rabi"
+            result["tabs"][0]["adapter_name"] = self.adapter_name
+        if method == "context.snapshot":
+            result["ml"]["modules"] = {
+                "drive": {"type": "pulse"},
+                "calibrated": {"type": "readout/pulse"},
+                "reset": {"type": "reset"},
+            }
         return result
+
+
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, TimeRabiGui({"r_f": 7200.0})) as client:
+        data = full_execution_reply(
+            client,
+            skip_writeback(
+                client,
+                client.call(
+                    "time_rabi",
+                    {
+                        "frequency_mhz": number,
+                        "gain": number,
+                        "max_length_us": number,
+                        "points": 3,
+                    },
+                ),
+            ),
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        for path in ("modules.qub_pulse.freq", "modules.qub_pulse.gain"):
+            assert fields[path]["value"] == 1.0
+            assert type(fields[path]["value"]) is float
+        sweep = fields["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        by_path = {
+            tuple(edit["path"]): edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+        }
+        for path in (
+            ("modules", "qub_pulse", "freq"),
+            ("modules", "qub_pulse", "gain"),
+        ):
+            assert by_path[path] == 1.0
+            assert type(by_path[path]) is float
+        assert type(by_path["sweep", "length"]["stop"]) is float
+        assert fields["modules.qub_pulse.gain"]["source"] == "gain"
+        assert fields["sweep.length"]["source"] == {
+            "start": "gui_default",
+            "stop": "max_length_us",
+            "expts": "points",
+        }
+
+
+def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tmp_path):
+    gui = TimeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client,
+            skip_writeback(
+                client,
+                client.call(
+                    "time_rabi",
+                    {
+                        "frequency_mhz": 6150.0,
+                        "gain": 0.21,
+                        "max_length_us": 1.5,
+                        "points": 71,
+                        "reps": 13,
+                        "rounds": 9,
+                    },
+                ),
+            ),
+        )
+        data = reply.data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["modules.qub_pulse.freq"]["value"] == 6150.0
+        assert fields["modules.qub_pulse.freq"]["source"] == "frequency_mhz"
+        assert fields["modules.qub_pulse.gain"]["value"] == 0.21
+        assert fields["sweep.length"]["value"] == {
+            "start": 0.04,
+            "stop": 1.5,
+            "expts": 71,
+        }
+        assert fields["reps"]["value"] == 13
+        assert fields["rounds"]["value"] == 9
+        assert fields["modules.reset"]["source"] == "disabled"
+        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["analysis"]["status"] == "finished"
+        assert data["writeback"]["items"]
+        assert reply.images
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.analyze")
+
+
+class AmplitudeRabiGui(TimeRabiGui):
+    def __init__(self, md=None, *, interactive=False):
+        super().__init__(md, interactive=interactive)
+        self.adapter_name = "twotone/rabi/amp_rabi"
+        self.target_name = "pi_gain"
+        self.fit_summary = {"pi_gain": 0.21, "pi_gain_err": 0.01, "pi2_gain": 0.11}
+        tree = self.publication["tree"]["children"]
+        tree["sweep"] = section(
+            gain={
+                "kind": "sweep",
+                "valid": True,
+                "inputs": {
+                    key: scalar(value)["input"]
+                    for key, value in {"start": -0.2, "stop": 0.7, "expts": 43}.items()
+                },
+            }
+        )
+
+    def _edit(self, params):
+        ordinary = []
+        for edit in params["edits"]:
+            if edit["path"] == ["sweep", "gain"]:
+                inputs = self.publication["tree"]["children"]["sweep"]["children"][
+                    "gain"
+                ]["inputs"]
+                inputs.update(
+                    {
+                        key: scalar(value)["input"]
+                        for key, value in edit["value"].items()
+                    }
+                )
+            else:
+                ordinary.append(edit)
+        super()._edit({**params, "edits": ordinary})
 
 
 @pytest.mark.parametrize("number", [1, 1.0])
@@ -576,14 +588,21 @@ def test_rabi_stale_edit_stops_without_retry_or_run(tmp_path, recipe, gui_type):
         assert "tab.new" not in methods
 
 
+@pytest.mark.parametrize(
+    "recipe,gui_type,target",
+    [
+        ("amplitude_rabi", AmplitudeRabiGui, "pi_gain"),
+        ("time_rabi", TimeRabiGui, "pi_len"),
+    ],
+)
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize("decision", ["accepted", "skipped"])
-def test_amplitude_rabi_primary_handoff_waits_for_question_before_actual_write(
-    tmp_path, interactive, decision
+def test_rabi_primary_handoff_waits_for_question_before_actual_write(
+    tmp_path, recipe, gui_type, target, interactive, decision
 ):
-    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0}, interactive=interactive)
+    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0}, interactive=interactive)
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("amplitude_rabi", {})
+        reply = client.call(recipe, {})
         execution = reply.data["execution"]
         if interactive:
             assert reply.data["status"] == "interactive", reply.data
@@ -598,7 +617,7 @@ def test_amplitude_rabi_primary_handoff_waits_for_question_before_actual_write(
             )
             assert reply.data["execution"] == execution
         assert reply.data["status"] == "awaiting_answer", reply.data
-        assert tuple(reply.data["question_items"]) == ("pi_gain",)
+        assert tuple(reply.data["question_items"]) == (target,)
         assert reply.data["previews"]["primary"]
         assert not gui.writes
         before = list(client.transport.sent)
@@ -612,7 +631,7 @@ def test_amplitude_rabi_primary_handoff_waits_for_question_before_actual_write(
             assert gui.writes == [
                 {"tab_id": "t", "subtab_id": "analysis", "write": [{"id": "md-1"}]}
             ]
-            assert receipts[0]["completed"][0]["written"][0]["target"] == "pi_gain"
+            assert receipts[0]["completed"][0]["written"][0]["target"] == target
         else:
             assert client.transport.sent == before
             assert not gui.writes
@@ -624,14 +643,18 @@ def test_amplitude_rabi_primary_handoff_waits_for_question_before_actual_write(
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
 
 
-def test_amplitude_rabi_cancelled_run_stops_before_raw_save(tmp_path):
-    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+@pytest.mark.parametrize(
+    "recipe,gui_type",
+    [("amplitude_rabi", AmplitudeRabiGui), ("time_rabi", TimeRabiGui)],
+)
+def test_rabi_cancelled_run_stops_before_raw_save(tmp_path, recipe, gui_type):
+    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies["operation.await"] = {
             "ok": True,
             "result": {"reason": "completed", "status": "cancelled"},
         }
-        reply = full_execution_reply(client, client.call("amplitude_rabi", {}))
+        reply = full_execution_reply(client, client.call(recipe, {}))
         assert reply.data["status"] == "cancelled", reply.data
         assert reply.data["run_outcome"]["status"] == "cancelled"
         assert reply.data["tab"] == "t"
@@ -642,10 +665,16 @@ def test_amplitude_rabi_cancelled_run_stops_before_raw_save(tmp_path):
         assert "tab.analyze" not in methods
 
 
-def test_amplitude_rabi_cancelled_question_retains_preview_without_writing(tmp_path):
-    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+@pytest.mark.parametrize(
+    "recipe,gui_type",
+    [("amplitude_rabi", AmplitudeRabiGui), ("time_rabi", TimeRabiGui)],
+)
+def test_rabi_cancelled_question_retains_preview_without_writing(
+    tmp_path, recipe, gui_type
+):
+    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        question = client.call("amplitude_rabi", {})
+        question = client.call(recipe, {})
         assert question.data["status"] == "awaiting_answer", question.data
         execution = question.data["execution"]
         before = list(client.transport.sent)
@@ -658,11 +687,17 @@ def test_amplitude_rabi_cancelled_question_retains_preview_without_writing(tmp_p
         assert not gui.writes
 
 
+@pytest.mark.parametrize(
+    "recipe,gui_type",
+    [("amplitude_rabi", AmplitudeRabiGui), ("time_rabi", TimeRabiGui)],
+)
 @pytest.mark.parametrize("parameter", ["readout_ref", "drive_ref", "use_reset"])
-def test_amplitude_rabi_invalid_reference_stops_without_fallback(tmp_path, parameter):
-    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+def test_rabi_invalid_reference_stops_without_fallback(
+    tmp_path, recipe, gui_type, parameter
+):
+    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("amplitude_rabi", {parameter: "absent"})
+        reply = client.call(recipe, {parameter: "absent"})
         assert reply.data["status"] == "failed", reply.data
         assert not gui.ran
         assert not gui.raw_saved
@@ -681,10 +716,16 @@ def test_amplitude_rabi_invalid_reference_stops_without_fallback(tmp_path, param
         {"rounds": 1.0},
     ],
 )
-def test_amplitude_rabi_invalid_arguments_fail_before_gui_binding(tmp_path, arguments):
-    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+@pytest.mark.parametrize(
+    "recipe,gui_type",
+    [("amplitude_rabi", AmplitudeRabiGui), ("time_rabi", TimeRabiGui)],
+)
+def test_rabi_invalid_arguments_fail_before_gui_binding(
+    tmp_path, recipe, gui_type, arguments
+):
+    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("amplitude_rabi", arguments)
+        reply = client.call(recipe, arguments)
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["phase"] == "preparing"
         assert "context.snapshot" not in [method for method, _ in client.transport.sent]
