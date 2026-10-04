@@ -1,6 +1,8 @@
 """Working-point lifecycle and layered access through ResultEntry public views."""
 
+import shutil
 from collections.abc import Generator
+from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -8,10 +10,12 @@ from typing import Annotated, Literal, Self
 import pytest
 from pydantic import BaseModel, ValidationError, ValidationInfo, model_validator
 from ruamel.yaml import YAML
-from zcu_tools.resources.document_store import UnitSpec
+from zcu_tools.resources.document_store import ConflictError, UnitSpec
 from zcu_tools.resources.entry import (
     ComponentSchema,
     LayerConflictError,
+    PartialCommitError,
+    PointView,
     ResultEntry,
     component_registry,
 )
@@ -65,6 +69,14 @@ def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
 def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     results, database = entry_roots
     return ResultEntry.create("entry", result_root=results, database_root=database)
+
+
+@pytest.fixture
+def working_point(entry: ResultEntry) -> PointView:
+    entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
+    point = entry.new_point("a")
+    point.Q1.t1 = 12.0
+    return point
 
 
 def write_yaml(source: Path, document: object) -> None:
@@ -438,6 +450,39 @@ def test_complete_nested_after_validator_reports_field_and_keeps_partial_setup(
         component_registry.unregister(kind)
 
 
+def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
+    working_point: PointView,
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = entry_roots[0] / "entry"
+    source = root / "points/a"
+    before = {
+        name: (source / name).read_bytes() for name in ("point.yaml", "module_cfg.yaml")
+    }
+    copyfile = shutil.copyfile
+
+    def fail_module_copy(
+        source: str | Path, target: str | Path, *, follow_symlinks: bool = True
+    ) -> str | Path:
+        if Path(target) == root / "points/b/module_cfg.yaml":
+            raise OSError("module copy failed")
+        return copyfile(source, target, follow_symlinks=follow_symlinks)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shutil, "copyfile", fail_module_copy)
+        with pytest.raises(OSError, match="module copy failed"):
+            entry.new_point("b", clone_from=working_point)
+    assert not (root / "points/b").exists()
+    assert entry.list_points() == ["a"]
+    assert {
+        name: (source / name).read_bytes() for name in ("point.yaml", "module_cfg.yaml")
+    } == before
+    assert working_point.Q1.t1 == 12.0
+    assert entry.new_point("b", clone_from="a").Q1.t1 == 12.0
+
+
 @pytest.mark.parametrize("source_mode", ["label", "view"])
 def test_cross_entry_clone_is_rejected_and_removes_new_destination(
     entry: ResultEntry,
@@ -458,6 +503,174 @@ def test_cross_entry_clone_is_rejected_and_removes_new_destination(
     assert entry.list_points() == []
     assert not (results / "entry/points/rejected").exists()
     assert foreign_source.read_bytes() == before
+
+
+def test_independent_entry_edits_merge_different_leaves_across_layers(
+    working_point: PointView,
+    entry_roots: tuple[Path, Path],
+) -> None:
+    results, database = entry_roots
+    other = ResultEntry.open("entry", result_root=results, database_root=database)
+    with working_point.edit() as draft:
+        draft.Q1.freq = 5100.0
+        other.use_point("a").Q1.t1 = 14.0
+    assert working_point.Q1.freq == 5100.0
+    assert working_point.Q1.t1 == 14.0
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    point = reopened.use_point("a")
+    assert point.Q1.freq == 5100.0
+    assert point.Q1.t1 == 14.0
+
+
+@pytest.mark.parametrize("conflict", ["setup", "point"])
+def test_multilayer_conflict_rejects_all_changes_and_keeps_snapshot(
+    working_point: PointView,
+    entry_roots: tuple[Path, Path],
+    conflict: str,
+) -> None:
+    results, database = entry_roots
+    other = ResultEntry.open("entry", result_root=results, database_root=database)
+    other_point = other.use_point("a")
+    setup_source = results / "entry/setup.yaml"
+    point_source = results / "entry/points/a/point.yaml"
+    with ExitStack() as transaction:
+        draft = transaction.enter_context(working_point.edit())
+        draft.Q1.freq = 5100.0
+        draft.Q1.t1 = 13.0
+        if conflict == "setup":
+            other_point.Q1.freq = 5200.0
+        else:
+            other_point.Q1.t1 = 14.0
+        before = setup_source.read_bytes(), point_source.read_bytes()
+        with pytest.raises(ConflictError) as raised:
+            transaction.close()
+    assert raised.value.source == (
+        setup_source if conflict == "setup" else point_source
+    )
+    assert (setup_source.read_bytes(), point_source.read_bytes()) == before
+    assert working_point.Q1.freq == 5000.0
+    assert working_point.Q1.t1 == 12.0
+
+    working_point.refresh()
+    assert working_point.Q1.freq == (5200.0 if conflict == "setup" else 5000.0)
+    assert working_point.Q1.t1 == (12.0 if conflict == "setup" else 14.0)
+
+
+@pytest.mark.parametrize("restore_failure", [False, True])
+def test_second_layer_replace_failure_restores_or_reports_actual_partial_commit(
+    working_point: PointView,
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    restore_failure: bool,
+) -> None:
+    results, database = entry_roots
+    setup_source = results / "entry/setup.yaml"
+    point_source = results / "entry/points/a/point.yaml"
+    before = setup_source.read_bytes(), point_source.read_bytes()
+    replace = Path.replace
+    replaced_source: Path | None = None
+    write_failed = False
+    write_error = OSError("second replace failed")
+    recovery_error = OSError("restore failed")
+
+    def fail_second_replace(source: Path, target: str | Path) -> Path:
+        nonlocal replaced_source, write_failed
+        destination = Path(target)
+        if destination not in (setup_source, point_source):
+            return replace(source, target)
+        if replaced_source is None:
+            result = replace(source, target)
+            replaced_source = destination
+            return result
+        if not write_failed:
+            write_failed = True
+            raise write_error
+        if restore_failure:
+            raise recovery_error
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_second_replace)
+    with ExitStack() as transaction:
+        draft = transaction.enter_context(working_point.edit())
+        draft.Q1.freq = 5100.0
+        draft.Q1.t1 = 13.0
+        if restore_failure:
+            with pytest.raises(PartialCommitError) as raised:
+                transaction.close()
+            assert raised.value.completed == (replaced_source,)
+            assert raised.value.recovery_failed == (replaced_source,)
+            assert raised.value.pending == (
+                point_source if replaced_source == setup_source else setup_source,
+            )
+            assert raised.value.cause is write_error
+            assert raised.value.recovery_cause is recovery_error
+        else:
+            with pytest.raises(OSError, match="second replace failed"):
+                transaction.close()
+
+    assert working_point.Q1.freq == 5000.0
+    assert working_point.Q1.t1 == 12.0
+    assert entry.setup.Q1.freq == 5000.0
+    if restore_failure:
+        yaml = YAML(typ="safe")
+        assert yaml.load(setup_source.read_text())["components"]["Q1"]["freq"] == (
+            5.1e9 if replaced_source == setup_source else 5e9
+        )
+        assert yaml.load(point_source.read_text())["components"]["Q1"]["t1"] == (
+            13e-6 if replaced_source == point_source else 12e-6
+        )
+    else:
+        assert (setup_source.read_bytes(), point_source.read_bytes()) == before
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    observed = reopened.use_point("a")
+    assert observed.Q1.freq == (
+        5100.0 if restore_failure and replaced_source == setup_source else 5000.0
+    )
+    assert observed.Q1.t1 == (
+        13.0 if restore_failure and replaced_source == point_source else 12.0
+    )
+
+
+def test_failed_complete_point_validation_preserves_clone_origin_and_snapshots(
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    range_kind: str,
+) -> None:
+    entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
+    original = entry.new_point("a")
+    original.move("R1.high", to="point")
+    root = entry_roots[0] / "entry"
+    source = root / "points/a/point.yaml"
+    yaml = YAML(typ="rt")
+    stored = yaml.load(source.read_text())
+    provenance = {
+        "source": "manual",
+        "kind": None,
+        "run_id": None,
+        "at": "2026-10-04T00:00:00Z",
+        "stderr": None,
+    }
+    stored["provenance"]["R1.high"] = provenance
+    write_yaml(source, stored)
+    point = entry.new_point("b", clone_from="a")
+    setup_source = root / "setup.yaml"
+    point_source = root / "points/b/point.yaml"
+    before = setup_source.read_bytes(), point_source.read_bytes()
+
+    with (
+        pytest.raises(ValidationError, match="low must not exceed high"),
+        point.edit() as draft,
+    ):
+        draft.R1.high = 0.5
+    assert (setup_source.read_bytes(), point_source.read_bytes()) == before
+    assert point.R1.low == 1.0
+    assert point.R1.high == 2.0
+    assert entry.setup.R1.low == 1.0
+    assert yaml.load(point_source.read_text())["provenance"]["R1.high"] == {
+        **provenance,
+        "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
+    }
 
 
 def test_setup_commit_validates_complete_views_of_existing_points(

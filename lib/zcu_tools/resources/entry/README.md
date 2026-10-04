@@ -24,6 +24,6 @@ EditView 的元件、wiring、ext 與 general 屬性更新同一份 draft。點�
 
 同 major 的較新 minor 文件保留未知欄位與原版本。Typed 視圖只投影已知欄位；頻率與 wiring 時間仍使用宣告的工作單位。未知欄位留在 DocumentStore 的 YAML tree，不換算，也不開放 typed API 讀寫。已知值、kind 與引用仍驗證；當前 minor 的未知正式欄位仍報錯。
 
-工作點 reload 同時讀取最新 setup 與 point，完整驗證失敗不發布任一快照。move 在兩層間搬值與來源。Clone 只複製同條目的 point 與 module_cfg，保留 point 來源並標記直接來源工作點。跨條目 clone 明確拒絕。
+工作點 reload 同時讀取最新 setup 與 point，完整驗證失敗不發布任一快照。move 在兩層間搬值與來源。Clone 只複製同條目的 point 與 module_cfg，保留 point 來源並標記直接來源工作點。重新接受欄位會清除該欄位的 clone 標記，即使值相同；拒絕的寫入不清標記。跨條目 clone 明確拒絕。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。工作點切片仍在實作；相同值重寫的 clone 標記清除、多層失敗情境尚未完成驗收。來源公開 API、stderr 接縫、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。工作點切片仍未完成驗收。來源公開 API、stderr 接縫、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。
