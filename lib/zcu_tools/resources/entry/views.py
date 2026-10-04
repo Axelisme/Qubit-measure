@@ -13,6 +13,7 @@ from .registry import component_registry
 from .schema import (
     ComponentSchema,
     SetupDocument,
+    SetupGeneral,
     WiringSchema,
     validate_component_name,
 )
@@ -65,6 +66,28 @@ class FieldView:
                 setattr(draft, name, value)
             else:
                 draft[name] = TypeAdapter(YamlValue).validate_python(value)
+
+
+class GeneralView(FieldView):
+    _extension: FieldView
+
+    def __init__(
+        self,
+        model: Callable[[], SetupGeneral],
+        edit: Callable[[], AbstractContextManager[SetupGeneral]],
+    ) -> None:
+        super().__init__(model, edit, "general")
+
+        @contextmanager
+        def edit_extension() -> Generator[YamlMap]:
+            with edit() as draft:
+                yield draft.ext
+
+        self._extension = FieldView(lambda: model().ext, edit_extension, "general.ext")
+
+    @property
+    def ext(self) -> FieldView:
+        return self._extension
 
 
 class ComponentView:
@@ -132,6 +155,14 @@ class EditView:
         self._draft = draft
 
     @property
+    def general(self) -> GeneralView:
+        return GeneralView(lambda: self._draft.general, self._edit_general)
+
+    @contextmanager
+    def _edit_general(self) -> Generator[SetupGeneral]:
+        yield self._draft.general
+
+    @property
     def description(self) -> str | None:
         return self._draft.general.description
 
@@ -157,6 +188,15 @@ class SetupView:
     def __init__(self, store: DocumentStore[SetupDocument], source: Path) -> None:
         self._store = store
         self._source = source
+
+    @property
+    def general(self) -> GeneralView:
+        return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
+
+    @contextmanager
+    def _edit_general(self) -> Generator[SetupGeneral]:
+        with self._store.edit() as draft:
+            yield draft.general
 
     @property
     def description(self) -> str | None:
