@@ -218,6 +218,33 @@ def test_nullable_nested_rounding_publishes_working_canonical_values(
         assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] is None
 
 
+def test_in_place_field_conversion_cannot_mutate_away_canonical_drift(
+    tmp_path: Path, registry_state_guard: None
+) -> None:
+    class StampedExtensionSchema(ComponentSchema):
+        @field_validator("ext", mode="before")
+        @classmethod
+        def stamp_title(cls, value: YamlMap) -> YamlMap:
+            title = value["title"]
+            if not isinstance(title, str):
+                raise TypeError("title must be a string")
+            value["title"] = title + "!"
+            return value
+
+    with registered_model("notebook/in-place-stamp", StampedExtensionSchema) as kind:
+        entry, results, _ = create_entry(tmp_path)
+        source = results / "entry" / "setup.yaml"
+        before = source.read_bytes()
+        with pytest.raises(ValidationError) as failure:
+            entry.setup.add_component("N1", kind=kind, ext={"title": "prepared"})
+        error = failure.value.errors()[0]
+        assert error["loc"] == ("components", "N1", "ext")
+        assert "prepared!" in error["msg"] and "prepared!!" in error["msg"]
+        assert source.read_bytes() == before
+        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
+            _ = entry.setup.N1
+
+
 def test_unitless_extension_structure_keeps_exact_canonical_comparison(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
