@@ -175,6 +175,8 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
     assert entry.setup.general.description is None
+    entry.setup.general.description = "prepared metadata"
+    assert entry.setup.description == "prepared metadata"
     entry.setup.general.ext.temperature = 0.02
     entry.setup.general.ext["_arbitrary.key"] = {"freq": 12.3, "flags": [True, None]}
     before = setup_path.read_bytes()

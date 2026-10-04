@@ -72,6 +72,7 @@ class FieldView:
 
 
 class GeneralView(FieldView):
+    _general_model: Callable[[], SetupGeneral]
     _extension: FieldView
 
     def __init__(
@@ -80,6 +81,7 @@ class GeneralView(FieldView):
         edit: Callable[[], AbstractContextManager[SetupGeneral]],
     ) -> None:
         super().__init__(model, edit, "general")
+        self._general_model = model
 
         @contextmanager
         def edit_extension() -> Generator[YamlMap]:
@@ -94,9 +96,7 @@ class GeneralView(FieldView):
 
     @property
     def description(self) -> str | None:
-        return TypeAdapter(str | None).validate_python(
-            getattr(self._model(), "description")
-        )
+        return self._general_model().description
 
     @description.setter
     def description(self, value: str | None) -> None:
