@@ -1,0 +1,463 @@
+"""Value/source transactions through the public entry and view interfaces."""
+
+import json
+import os
+from collections.abc import Generator
+from contextlib import ExitStack
+from copy import deepcopy
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Annotated
+
+import pytest
+from pydantic import BaseModel, ConfigDict, ValidationError
+from ruamel.yaml import YAML
+from zcu_tools.resources.document_store import ConflictError, UnitSpec
+from zcu_tools.resources.entry import (
+    ComponentSchema,
+    MissingReferenceError,
+    PointView,
+    Provenance,
+    ResultEntry,
+    SetupView,
+    UnknownFieldError,
+    component_registry,
+)
+
+
+class Timing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    width: Annotated[float, UnitSpec("s", "us")]
+
+
+class NotebookComponent(ComponentSchema):
+    timing: Timing
+
+
+@pytest.fixture(scope="module", autouse=True)
+def registry_module_guard() -> Generator[None]:
+    before = deepcopy(vars(component_registry))
+    yield
+    assert vars(component_registry) == before, (
+        "component registry polluted by provenance module"
+    )
+
+
+@pytest.fixture(autouse=True)
+def registry_state_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    before = deepcopy(vars(component_registry))
+    yield
+    assert vars(component_registry) == before, (
+        f"registry polluter: {request.node.nodeid}"
+    )
+
+
+@pytest.fixture
+def notebook_kind(registry_state_guard: None) -> Generator[str]:
+    kind = "test/provenance-notebook"
+    component_registry.register(kind, NotebookComponent)
+    try:
+        yield kind
+    finally:
+        component_registry.unregister(kind)
+
+
+def assert_metadata(actual: Provenance | None, expected: Provenance) -> None:
+    assert actual is not None
+    fields = asdict(expected)
+    if expected.stderr is not None:
+        fields["stderr"] = pytest.approx(expected.stderr)
+    assert asdict(actual) == fields
+
+
+@pytest.fixture(params=["setup", "point"])
+def container(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> tuple[ResultEntry, SetupView | PointView, Path]:
+    root = tmp_path / "results"
+    entry = ResultEntry.create("entry", result_root=root, database_root=tmp_path / "db")
+    entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
+    if request.param == "setup":
+        return entry, entry.setup, root / "entry/setup.yaml"
+    return entry, entry.new_point("a"), root / "entry/points/a/point.yaml"
+
+
+@pytest.mark.parametrize("write", ["attribute", "draft_attribute", "set"])
+def test_manual_write_records_source_and_value_together(
+    container: tuple[ResultEntry, SetupView | PointView, Path], write: str
+) -> None:
+    _entry, view, source = container
+    assert view.meta("Q1.t1") is None
+    before = datetime.now(timezone.utc)
+    if write == "attribute":
+        view.Q1.t1 = 12.0
+    else:
+        with view.edit() as draft:
+            if write == "draft_attribute":
+                draft.Q1.t1 = 12.0
+            else:
+                draft.set("Q1.t1", 12.0)
+            assert view.meta("Q1.t1") is None
+    after = datetime.now(timezone.utc)
+    metadata = view.meta("Q1.t1")
+    assert metadata is not None
+    assert asdict(metadata) == {
+        "source": "manual",
+        "kind": None,
+        "run_id": None,
+        "at": metadata.at,
+        "stderr": None,
+        "cloned_from": None,
+    }
+    assert before <= datetime.fromisoformat(metadata.at) <= after
+    stored = YAML(typ="safe").load(source.read_text())
+    assert stored["components"]["Q1"]["t1"] == pytest.approx(12e-6)
+    assert stored["provenance"]["Q1.t1"] == {
+        key: value for key, value in asdict(metadata).items() if key != "cloned_from"
+    }
+    view.refresh()
+    assert view.meta("Q1.t1") == metadata
+
+
+@pytest.fixture
+def ledger(container: tuple[ResultEntry, SetupView | PointView, Path]) -> Path:
+    entry, view, source = container
+    root = source.parents[2] if isinstance(view, PointView) else source.parent
+    path = root / "records/ledger.jsonl"
+    event = {
+        "format": "zcu.ledger",
+        "format_version": "1.0",
+        "id": "evt-1",
+        "entry_id": entry.entry_id,
+        "type": "accepted",
+        "at": "2026-10-04T00:00:00Z",
+    }
+    path.write_text(json.dumps(event) + "\n")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "stderr", "stored_value", "stored_stderr"),
+    [
+        ("Q1.t1", 20.0, 0.18, 20e-6, 0.18e-6),
+        ("Q1.freq", 5100.0, 0.2, 5.1e9, 2e5),
+        ("Q1.wiring.time_of_flight", 1.2, 0.05, 1.2e-6, 0.05e-6),
+        ("Q1.ext.noise", 11.0, 2.0, 11.0, 2.0),
+    ],
+)
+def test_explicit_source_and_stderr_round_trip_in_the_values_document(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    path: str,
+    value: float,
+    stderr: float,
+    stored_value: float,
+    stored_stderr: float,
+) -> None:
+    _entry, view, source = container
+    before = ledger.read_bytes()
+    metadata = Provenance("evt-1", "t1/decay", "run-1", "2026-10-04T00:00:00Z", stderr)
+    with view.edit() as draft:
+        draft.set(path, value, provenance=metadata)
+    assert_metadata(view.meta(path), metadata)
+    stored = YAML(typ="safe").load(source.read_text())
+    assert stored["provenance"][path]["stderr"] == pytest.approx(stored_stderr)
+    node = stored["components"]
+    for segment in path.split("."):
+        node = node[segment]
+    assert node == pytest.approx(stored_value)
+    view.refresh()
+    assert_metadata(view.meta(path), metadata)
+    assert ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("write", "path"),
+    [
+        ("add", "Q2.freq"),
+        ("wiring", "Q1.wiring.ch"),
+        ("nested_ext", "Q1.ext.batch.rate"),
+        ("description", "general.description"),
+        ("general_ext", "general.ext.temperature"),
+        ("draft_general", "general.description"),
+        ("set_general", "general.ext.temperature"),
+    ],
+)
+def test_manual_sources_cover_created_values_and_written_container_leaves(
+    container: tuple[ResultEntry, SetupView | PointView, Path], write: str, path: str
+) -> None:
+    _entry, view, source = container
+    before = datetime.now(timezone.utc)
+    if write == "add":
+        view.add_component("Q2", kind="qubit/transmon", freq=5200.0)
+    elif write == "wiring":
+        with view.edit() as draft:
+            draft.set("Q1.wiring", {"ch": 3, "time_of_flight": 1.2})
+    elif write == "nested_ext":
+        view.Q1.ext.batch = {"rate": 12.0}
+    elif write == "description":
+        view.description = "accepted point"
+    elif write == "general_ext":
+        view.general.ext.temperature = 11.0
+    else:
+        with view.edit() as draft:
+            if write == "draft_general":
+                draft.general.description = "accepted point"
+            else:
+                draft.set("general.ext.temperature", 11.0)
+    metadata = view.meta(path)
+    assert metadata is not None
+    assert_metadata(metadata, Provenance("manual", None, None, metadata.at, None))
+    assert before <= datetime.fromisoformat(metadata.at) <= datetime.now(timezone.utc)
+    stored = YAML(typ="safe").load(source.read_text())
+    assert stored["provenance"][path]["source"] == "manual"
+    assert stored["provenance"][path]["at"] == metadata.at
+
+
+@pytest.mark.parametrize("failure", ["missing", "absent_event", "foreign", "malformed"])
+def test_invalid_local_source_keeps_the_draft_value_and_source_unchanged(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    failure: str,
+) -> None:
+    _entry, view, source = container
+    before = source.read_bytes()
+    previous = view.meta("Q1.freq")
+    if failure == "missing":
+        ledger.unlink()
+    elif failure == "absent_event":
+        ledger.write_text(ledger.read_text().replace("evt-1", "evt-other"))
+    elif failure == "foreign":
+        event = json.loads(ledger.read_text())
+        event["entry_id"] = "another-entry"
+        ledger.write_text(json.dumps(event) + "\n")
+    else:
+        ledger.write_text("{invalid-json\n")
+    with view.edit() as draft:
+        with pytest.raises((ValueError, FileNotFoundError)):
+            draft.set(
+                "Q1.freq",
+                5300.0,
+                provenance=Provenance(
+                    "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+                ),
+            )
+        assert draft.Q1.freq == 5000.0
+    assert view.Q1.freq == 5000.0
+    assert view.meta("Q1.freq") == previous
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["body", "schema", "reference"])
+def test_failed_value_transaction_discards_its_formal_source(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    failure: str,
+) -> None:
+    _entry, view, source = container
+    before = source.read_bytes()
+    previous = view.meta("Q1.freq")
+    error = (
+        RuntimeError
+        if failure == "body"
+        else ValidationError
+        if failure == "schema"
+        else MissingReferenceError
+    )
+
+    def fail_transaction() -> None:
+        with view.edit() as draft:
+            draft.set(
+                "Q1.freq",
+                5300.0,
+                provenance=Provenance(
+                    "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+                ),
+            )
+            if failure == "body":
+                raise RuntimeError("abort")
+            if failure == "schema":
+                draft.Q1.t1 = "not-a-number"
+            else:
+                draft.Q1.readout = "missing"
+
+    with pytest.raises(error):
+        fail_transaction()
+    assert view.Q1.freq == 5000.0
+    assert view.meta("Q1.freq") == previous
+    assert source.read_bytes() == before
+
+
+def test_notebook_nested_stderr_uses_the_registered_leaf_unit(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    notebook_kind: str,
+) -> None:
+    _entry, view, source = container
+    view.add_component("N1", kind=notebook_kind, timing={"width": 2.0})
+    metadata = Provenance("evt-1", "timing/fit", None, "2026-10-04T00:00:00Z", 0.18)
+    with view.edit() as draft:
+        draft.set("N1.timing.width", 3.0, provenance=metadata)
+    assert view.N1.timing == {"width": 3.0}
+    assert_metadata(view.meta("N1.timing.width"), metadata)
+    stored = YAML(typ="safe").load(source.read_text())
+    assert stored["components"]["N1"]["timing"]["width"] == pytest.approx(3e-6)
+    assert stored["provenance"]["N1.timing.width"]["stderr"] == pytest.approx(0.18e-6)
+    view.refresh()
+    assert_metadata(view.meta("N1.timing.width"), metadata)
+
+
+def test_meta_is_cached_and_missing_values_or_sources_return_none(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+) -> None:
+    _entry, view, source = container
+    view.Q1.t1 = 12.0
+    expected = view.meta("Q1.t1")
+    assert expected is not None
+    stored = YAML(typ="safe").load(source.read_text())
+    stored["provenance"]["Q1.t2"] = stored["provenance"]["Q1.t1"]
+    stored["provenance"].pop("Q1.freq")
+    with source.open("w") as stream:
+        YAML(typ="rt").dump(stored, stream)
+    view.refresh()
+    source.unlink()
+    assert view.meta("Q1.t1") == expected
+    assert view.meta("Q1.freq") is None
+    assert view.meta("Q1.t2") is None
+    assert view.meta("unknown.freq") is None
+
+
+@pytest.mark.parametrize("field", ["t1err", "t1_err"])
+def test_flat_error_fields_are_rejected_without_changing_value_or_source(
+    container: tuple[ResultEntry, SetupView | PointView, Path], field: str
+) -> None:
+    _entry, view, source = container
+    before = source.read_bytes()
+    with pytest.raises(UnknownFieldError), view.edit() as draft:
+        draft.set(f"Q1.{field}", 0.18)
+    assert view.Q1.freq == 5000.0
+    assert source.read_bytes() == before
+
+
+def test_conflict_keeps_the_winning_value_and_source_together(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    tmp_path: Path,
+) -> None:
+    _entry, view, source = container
+    other_entry = ResultEntry.open(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
+    )
+    other = (
+        other_entry.use_point("a") if isinstance(view, PointView) else other_entry.setup
+    )
+    with ExitStack() as transaction:
+        draft = transaction.enter_context(view.edit())
+        draft.set(
+            "Q1.freq",
+            5300.0,
+            provenance=Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2),
+        )
+        draft.Q1.t1 = 12.0
+        other.Q1.freq = 5400.0
+        winning_bytes = source.read_bytes()
+        with pytest.raises(ConflictError):
+            transaction.close()
+    assert source.read_bytes() == winning_bytes
+    view.refresh()
+    assert view.Q1.freq == 5400.0
+    metadata = view.meta("Q1.freq")
+    assert metadata is not None
+    assert metadata.source == "manual"
+    assert metadata.stderr is None
+    assert view.meta("Q1.t1") is None
+
+
+@pytest.mark.parametrize("container", ["point"], indirect=True)
+def test_clone_sources_are_independent_and_reacceptance_clears_the_origin(
+    container: tuple[ResultEntry, SetupView | PointView, Path], ledger: Path
+) -> None:
+    entry, _view, _source = container
+    original = entry.new_point("original")
+    expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
+    with original.edit() as draft:
+        draft.set("Q1.t1", 12.0, provenance=expected)
+    clone = entry.new_point("clone", clone_from=original)
+    metadata = clone.meta("Q1.t1")
+    assert metadata is not None
+    origin = metadata.cloned_from
+    assert origin is not None
+    assert origin == {"entry_id": entry.entry_id, "point": "original"}
+    origin["point"] = "mutated-return"
+    assert clone.meta("Q1.t1") != metadata
+    with clone.edit() as draft:
+        draft.set("Q1.t1", 12.0, provenance=expected)
+    assert_metadata(clone.meta("Q1.t1"), expected)
+    assert_metadata(original.meta("Q1.t1"), expected)
+    clone.Q1.t1 = 12.0
+    accepted = clone.meta("Q1.t1")
+    assert accepted is not None
+    assert_metadata(accepted, Provenance("manual", None, None, accepted.at, None))
+    assert_metadata(original.meta("Q1.t1"), expected)
+
+
+@pytest.mark.parametrize("container", ["setup"], indirect=True)
+def test_setup_seed_preserves_formal_source_without_following_later_edits(
+    container: tuple[ResultEntry, SetupView | PointView, Path], ledger: Path
+) -> None:
+    entry, setup, _source = container
+    expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
+    with setup.edit() as draft:
+        draft.set("Q1.t1", 12.0, provenance=expected)
+    point = entry.new_point("seed")
+    assert_metadata(point.meta("Q1.t1"), expected)
+    setup.Q1.t1 = 15.0
+    assert point.Q1.t1 == 12.0
+    assert_metadata(point.meta("Q1.t1"), expected)
+    point.Q1.t1 = 13.0
+    assert setup.Q1.t1 == pytest.approx(15.0)
+    assert point.meta("Q1.t1") != setup.meta("Q1.t1")
+
+
+def test_failed_atomic_replace_preserves_value_source_and_file(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _entry, view, source = container
+    before = source.read_bytes()
+    previous = view.meta("Q1.freq")
+
+    def reject_replace(_source: str | Path, _destination: str | Path) -> None:
+        raise OSError("replace rejected")
+
+    monkeypatch.setattr(os, "replace", reject_replace)
+    with pytest.raises(OSError, match="replace rejected"), view.edit() as draft:
+        draft.set(
+            "Q1.freq",
+            5300.0,
+            provenance=Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2),
+        )
+    assert view.Q1.freq == 5000.0
+    assert view.meta("Q1.freq") == previous
+    assert source.read_bytes() == before
+
+
+def test_newer_minor_retains_unknown_source_fields_when_accepting_a_value(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+) -> None:
+    _entry, view, source = container
+    stored = YAML(typ="safe").load(source.read_text())
+    stored["format_version"] = "1.1"
+    stored["provenance"]["Q1.freq"]["future_quality"] = {"method": "future"}
+    with source.open("w") as stream:
+        YAML(typ="rt").dump(stored, stream)
+    view.refresh()
+    view.Q1.freq = 5300.0
+    accepted = YAML(typ="safe").load(source.read_text())
+    assert accepted["format_version"] == "1.1"
+    assert accepted["provenance"]["Q1.freq"]["future_quality"] == {"method": "future"}
+    metadata = view.meta("Q1.freq")
+    assert metadata is not None
+    assert metadata.source == "manual"

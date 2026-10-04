@@ -7,6 +7,7 @@ from .errors import (
     UnknownKindError,
 )
 from .points import PointView
+from .provenance import ClonedFrom, Provenance
 from .registry import ComponentRegistry, component_registry
 from .result_entry import ResultEntry, rename_entry
 from .schema import ComponentSchema

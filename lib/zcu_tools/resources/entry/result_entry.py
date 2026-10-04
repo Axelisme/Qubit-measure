@@ -121,6 +121,9 @@ class ResultEntry:
                         kind, source=source, component=name
                     ).items():
                         result[("components", name, *path)] = spec
+                        result[("provenance", f"{name}.{'.'.join(path)}", "stderr")] = (
+                            spec
+                        )
         return result
 
     def _validate_setup(self, document: SetupDocument) -> None:
@@ -137,7 +140,12 @@ class ResultEntry:
 
     @property
     def setup(self) -> SetupView:
-        return SetupView(self._setup_store, self._result_path / "setup.yaml")
+        return SetupView(
+            self._setup_store,
+            self._result_path / "setup.yaml",
+            ledger=self._result_path / "records/ledger.jsonl",
+            entry_id=self.entry_id,
+        )
 
     @property
     def entry_id(self) -> str:
@@ -254,7 +262,12 @@ class ResultEntry:
         module = directory / "module_cfg.yaml"
         if not module.is_file():
             raise FileNotFoundError(module)
-        return PointView(self._point_store(source), source)
+        return PointView(
+            self._point_store(source),
+            source,
+            ledger=self._result_path / "records/ledger.jsonl",
+            entry_id=self.entry_id,
+        )
 
     def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
         class EntryPointDocument(PointDocument):

@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04，setup seed 與獨立完整工作點
+**Last updated:** 2026-10-04，seed 工作點與同文件來源
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是條目身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 的 refresh 不接受另一個身分。
 
@@ -30,6 +30,14 @@ D104 的 canonical 檢查由 entry 負責。提交前與 open、refresh、交易
 
 內建 kinds 包含 resonator、fluxonium、transmon、JPA 與 current source。內建物理欄位可缺值，單位涵蓋頻率、能量、電流、時間與無因次量。引用保存元件名稱，不展開目標物件。
 
+## 值與來源
+
+值與 provenance 在同一文件、同一交易提交。普通賦值、draft set、加入元件與容器內的寫入都記錄 manual 來源和 UTC 時間。重新接受同值也更新來源，清除該欄位及子欄位的 clone 標記。失敗不發布值或來源。
+
+`meta` 只讀取快照，沒有值或來源時回傳 None。回傳的 Provenance 包含固定來源欄位；clone 記錄是獨立副本。物理 stderr 使用值的 UnitSpec，落盤為 SI，視圖為工作單位。Ext 不換算。
+
+`edit_view.set(..., provenance=...)` 先驗證來源的本地引用。非 manual source 必須是本條目 records/ledger.jsonl 中同 ID、同 entry_id 的事件。Entry 不寫 ledger，不驗證完整事件 schema，也不從其他條目補來源。這個切片不提供 producer、accept／writeback 服務或 status／stale。
+
 ## 視圖、版本與失敗
 
 EditView 的元件、wiring、ext、general 與點分 set 共用同一份 draft。欄位驗證失敗不修改 draft；身分、引用或 canonical 驗證失敗使整筆交易不提交。description 未設定時為 None。Ext 保留任意 YAML 值，不換算單位；非屬性形式的 key 可用 item access。巢狀 model 讀取投影成工作單位 YAML mapping，點分 set 可更新已存在的容器。
@@ -38,4 +46,4 @@ EditView 的元件、wiring、ext、general 與點分 set 共用同一份 draft�
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次。復原也失敗時，RenameRecoveryError 回報已移動的 Result、預定 Database 目的地、無法復原的 Result 原路徑與兩個原始 I/O 原因。這不是跨檔掉電保證。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。正式 provenance producer、完整 meta／stderr 契約、set 的 provenance 參數與角色解析由後續切片提供，不改現行 context 的責任。
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。Ledger producer、accept／writeback 服務與角色解析由後續切片提供，不改現行 context 的責任。

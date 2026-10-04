@@ -16,6 +16,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - Experiment Data File 保存一個 Experiment Result。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、roles 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic role mapping 洩漏給分析端。
 - Workflow Run Result Artifact 保存跨 node／flux 的資料與 audit。autofluxdep 的 lifecycle／`RunStore` 擁有 run-scoped artifact；node 經 observer 與 store 提交結果，不直接管理 HDF5。它不是單一 Experiment Result。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
+- 新參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突、單位邊界與原子提交，entry 擁有來源記錄與本條目 ledger 引用驗證。這些能力尚未接線到現行 MetaDict、ModuleLibrary、GUI 或 MCP，也不提供 ledger producer。
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。ModuleLibrary waveform cfg 只保存 asset key，不另存可覆寫的播放長度。program 在完整 asset duration 取樣到硬體 timing；調整時間內容須改 asset 或 recipe，而不是在 cfg 伸縮或任意裁切。
 
@@ -45,4 +46,4 @@ Asset repository 的 rename／delete 只處理資產，不掃描或改寫 Module
 
 ## 後果
 
-維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`SampleTable`](../../lib/zcu_tools/resources/sample_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md)、[main GUI](../../lib/zcu_tools/gui/app/measure/README.md) 與 [autofluxdep](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。
+維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`parameter entry`](../../lib/zcu_tools/resources/entry/README.md)、[`SampleTable`](../../lib/zcu_tools/resources/sample_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md)、[main GUI](../../lib/zcu_tools/gui/app/measure/README.md) 與 [autofluxdep](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。

@@ -51,7 +51,11 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     document["components"]["R1"]["freq"] = 6.6e9
     document["components"]["R1"]["wiring"]["time_of_flight"] = 1.5e-6
     document["general"]["description"] = "edited with the older reader"
-    assert YAML(typ="safe").load(setup_path) == document
+    stored = YAML(typ="safe").load(setup_path)
+    # Source timestamps change on acceptance; source behavior has its own seam tests.
+    stored.pop("provenance")
+    document.pop("provenance")
+    assert stored == document
     again = ResultEntry.open("entry", result_root=results, database_root=database)
     assert again.setup.R1.freq == pytest.approx(6600.0)
     assert again.setup.R1.wiring.time_of_flight == pytest.approx(1.5)

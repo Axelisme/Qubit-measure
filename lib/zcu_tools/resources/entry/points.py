@@ -8,12 +8,14 @@ from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
+from .provenance import Provenance
 from .schema import ComponentSchema, PointDocument, PointGeneral
 from .views import (
     ComponentView,
     EditView,
     GeneralView,
     add_component_to_draft,
+    document_meta,
     stage_component,
     stage_general,
 )
@@ -29,16 +31,25 @@ class PointView:
     to observe disk edits; another view does not change this view's binding.
     """
 
-    def __init__(self, store: DocumentStore[PointDocument], source: Path) -> None:
+    def __init__(
+        self,
+        store: DocumentStore[PointDocument],
+        source: Path,
+        *,
+        ledger: Path,
+        entry_id: str,
+    ) -> None:
         """Bind one validated working-unit store without I/O.
 
         source is store's point.yaml path under the owning entry's points/label.
         The store owns single-file validation, conflict checks and persistence.
-        ResultEntry supplies both dependencies; construction does not reload or
+        ResultEntry supplies these dependencies; construction does not reload or
         validate them. There are no shared setup or multi-file callbacks.
         """
         self._store = store
         self._source = source
+        self._ledger = ledger
+        self._entry_id = entry_id
         _point_origin.register(self, source)
 
     @property
@@ -47,8 +58,8 @@ class PointView:
         return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
 
     @contextmanager
-    def _edit_general(self) -> Generator[PointGeneral]:
-        with self._store.edit() as draft, stage_general(draft) as candidate:
+    def _edit_general(self, field: str) -> Generator[PointGeneral]:
+        with self._store.edit() as draft, stage_general(draft, field) as candidate:
             yield candidate
 
     @property
@@ -89,7 +100,11 @@ class PointView:
         a same-leaf conflict. No other point or setup file is read or written.
         """
         with self._store.edit() as draft:
-            yield EditView(draft)
+            yield EditView(draft, ledger=self._ledger, entry_id=self._entry_id)
+
+    def meta(self, path: str) -> Provenance | None:
+        """Return an independent cached source in working units, or None."""
+        return document_meta(self._store.snapshot(), path)
 
     def refresh(self) -> None:
         """Reload only point.yaml; invalid data keeps the cached snapshot.

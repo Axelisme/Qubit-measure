@@ -6,6 +6,8 @@ Copy incoming values before assignment: notebook models can validate assignment.
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import overload
 
@@ -14,6 +16,7 @@ from pydantic import BaseModel, TypeAdapter
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
+from .provenance import Provenance, validate_source
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
@@ -63,7 +66,63 @@ def add_component_to_draft(
         raise ValueError(f"Component {name!r} already exists")
     component = model.model_validate({"kind": kind, **fields})
     _retain_component_defaults(component)
+    sources = _sources_after_write(draft.provenance, name, component, _manual_source())
     draft.components[name] = component
+    draft.provenance = sources
+
+
+def _manual_source() -> YamlMap:
+    return {
+        "source": "manual",
+        "kind": None,
+        "run_id": None,
+        "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "stderr": None,
+    }
+
+
+def _field_value(node: object, path: str) -> object:
+    for part in path.split("."):
+        if isinstance(node, BaseModel) and part in type(node).model_fields:
+            node = getattr(node, part)
+        elif isinstance(node, dict):
+            node = node.get(part)
+        else:
+            return None
+    return node
+
+
+def _sources_after_write(
+    sources: dict[str, YamlMap], path: str, value: object, metadata: YamlMap
+) -> dict[str, YamlMap]:
+    """Prepare sources for an accepted field and its written leaves without mutation."""
+    result = deepcopy(sources)
+    if isinstance(value, BaseModel):
+        value = value.model_dump(exclude_unset=True, warnings=False)
+    tree = TypeAdapter[YamlValue](YamlValue).validate_python(value)
+
+    def include(field: str, node: YamlValue) -> None:
+        result.setdefault(field, {})
+        if isinstance(node, dict):
+            for name, child in node.items():
+                include(f"{field}.{name}", child)
+
+    include(path, tree)
+    for field, source in result.items():
+        if field == path or field.startswith(f"{path}."):
+            source.update(deepcopy(metadata))
+            source.pop("cloned_from", None)
+    return result
+
+
+def document_meta(
+    document: SetupDocument | PointDocument, path: str
+) -> Provenance | None:
+    """Project one independent source only when its cached value exists."""
+    root = document if path.split(".")[0] == "general" else document.components
+    if _field_value(root, path) is None or path not in document.provenance:
+        return None
+    return TypeAdapter(Provenance).validate_python(deepcopy(document.provenance[path]))
 
 
 @contextmanager
@@ -75,48 +134,71 @@ def stage_component(
     draft is a complete setup or point draft. name identifies an existing
     component; an unknown name raises KeyError. field is the accepted relative
     dotted path within it, such as t1 or wiring.ch, used for source bookkeeping.
-    Normal exit validates the original complete model, replaces its component, and clears
-    cloned_from on that path and descendants even for an unchanged value.
+    Normal exit validates the original complete model and accepts its value
+    with a fresh manual source, clearing cloned_from on the path and descendants
+    even for an unchanged value.
     A body exception or validation failure leaves the draft and sources intact.
     Reference and canonical checks belong to the document commit. No I/O occurs here.
     """
     candidate = draft.components[name].model_copy(deep=True)
     yield candidate
-    draft.components[name] = type(candidate).model_validate(
+    accepted = type(candidate).model_validate(
         candidate.model_dump(exclude_unset=True, warnings=False)
     )
-    path = f"{name}.{field}"
-    for key, metadata in draft.provenance.items():
-        if key == path or key.startswith(f"{path}."):
-            metadata.pop("cloned_from", None)
+    sources = _sources_after_write(
+        draft.provenance,
+        f"{name}.{field}",
+        _field_value(accepted, field),
+        _manual_source(),
+    )
+    draft.components[name] = accepted
+    draft.provenance = sources
 
 
 @overload
-def stage_general(draft: SetupDocument) -> AbstractContextManager[SetupGeneral]: ...
+def stage_general(
+    draft: SetupDocument, field: str
+) -> AbstractContextManager[SetupGeneral]: ...
 
 
 @overload
-def stage_general(draft: PointDocument) -> AbstractContextManager[PointGeneral]: ...
+def stage_general(
+    draft: PointDocument, field: str
+) -> AbstractContextManager[PointGeneral]: ...
 
 
 @contextmanager
 def stage_general(
-    draft: SetupDocument | PointDocument,
+    draft: SetupDocument | PointDocument, field: str
 ) -> Generator[SetupGeneral | PointGeneral]:
     """Yield independent metadata, accepting it into draft on normal exit.
 
     draft is a complete setup or point draft. The candidate is SetupGeneral for
-    setup, PointGeneral for a point. Successful validation replaces only
-    draft.general; a body exception or ValidationError leaves it unchanged.
+    setup, PointGeneral for a point. Successful validation accepts the field
+    with its manual source; a body exception or ValidationError leaves both unchanged.
     This does no I/O and does not enforce entry identity or document references.
     """
     candidate = draft.general.model_copy(deep=True)
     yield candidate
     fields = candidate.model_dump(exclude_unset=True, warnings=False)
     if isinstance(draft, SetupDocument):
-        draft.general = SetupGeneral.model_validate(fields)
+        general = SetupGeneral.model_validate(fields)
+        draft.provenance = _sources_after_write(
+            draft.provenance,
+            f"general.{field}",
+            _field_value(general, field),
+            _manual_source(),
+        )
+        draft.general = general
     else:
-        draft.general = PointGeneral.model_validate(fields)
+        point_general = PointGeneral.model_validate(fields)
+        draft.provenance = _sources_after_write(
+            draft.provenance,
+            f"general.{field}",
+            _field_value(point_general, field),
+            _manual_source(),
+        )
+        draft.general = point_general
 
 
 class FieldView:
@@ -180,14 +262,14 @@ class GeneralView(FieldView):
     def __init__(
         self,
         model: Callable[[], SetupGeneral | PointGeneral],
-        edit: Callable[[], AbstractContextManager[SetupGeneral | PointGeneral]],
+        edit: Callable[[str], AbstractContextManager[SetupGeneral | PointGeneral]],
     ) -> None:
-        super().__init__(model, lambda _name: edit(), "general")
+        super().__init__(model, edit, "general")
         self._general_model = model
 
         @contextmanager
-        def edit_extension(_name: str) -> Generator[YamlMap]:
-            with edit() as draft:
+        def edit_extension(name: str) -> Generator[YamlMap]:
+            with edit(f"ext.{name}") as draft:
                 yield draft.ext
                 draft.model_fields_set.add("ext")
 
@@ -278,25 +360,46 @@ class ComponentView:
 
 
 class EditView:
-    def __init__(self, draft: SetupDocument | PointDocument) -> None:
+    def __init__(
+        self, draft: SetupDocument | PointDocument, *, ledger: Path, entry_id: str
+    ) -> None:
         self._draft = draft
+        self._ledger = ledger
+        self._entry_id = entry_id
 
     @property
     def general(self) -> GeneralView:
         return GeneralView(lambda: self._draft.general, self._edit_general)
 
     @contextmanager
-    def _edit_general(self) -> Generator[SetupGeneral | PointGeneral]:
-        with stage_general(self._draft) as candidate:
+    def _edit_general(self, field: str) -> Generator[SetupGeneral | PointGeneral]:
+        with stage_general(self._draft, field) as candidate:
             yield candidate
 
-    def set(self, path: str, value: YamlValue) -> None:
+    def set(
+        self, path: str, value: YamlValue, *, provenance: Provenance | None = None
+    ) -> None:
+        """Accept a logical dotted path and working-unit value into this draft.
+
+        Omitted provenance records manual acceptance. An explicit source keeps
+        its five fixed fields and clears clone origin; non-manual event ids must
+        belong to this entry's ledger. Written containers accept their leaves
+        together. Invalid paths, schema values or source references raise before
+        acceptance. The enclosing view.edit() checks document references and
+        canonical values, then owns commit, conflict and publication.
+        """
+        metadata: YamlMap | None = None
+        if provenance is not None:
+            accepted = TypeAdapter(Provenance).validate_python(asdict(provenance))
+            validate_source(accepted, self._ledger, self._entry_id)
+            metadata = TypeAdapter[YamlMap](YamlMap).validate_python(asdict(accepted))
+            metadata.pop("cloned_from", None)
         parts = path.split(".")
         if len(parts) < 2 or not all(parts):
             raise ValueError(f"{path!r}: expected a dotted field path")
         edit_root: AbstractContextManager[BaseModel]
         if parts[0] == "general":
-            edit_root = self._edit_general()
+            edit_root = self._edit_general(".".join(parts[1:]))
         else:
             if parts[0] not in self._draft.components:
                 raise AttributeError(f"Unknown component {parts[0]!r}")
@@ -322,6 +425,11 @@ class EditView:
                 yield node
 
             FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
+        if metadata is not None:
+            root = self._draft if parts[0] == "general" else self._draft.components
+            self._draft.provenance = _sources_after_write(
+                self._draft.provenance, path, _field_value(root, path), metadata
+            )
 
     @property
     def description(self) -> str | None:
@@ -351,15 +459,20 @@ class SetupView:
         self,
         store: DocumentStore[SetupDocument],
         source: Path,
+        *,
+        ledger: Path,
+        entry_id: str,
     ) -> None:
         """Bind one complete template Store and its source path without I/O.
 
         Reads use the cached working-unit snapshot. All edits commit only this
         template; existing points neither change nor participate in validation.
-        ResultEntry supplies the validated store and its setup.yaml path.
+        ResultEntry supplies the validated store, source, identity and ledger path.
         """
         self._store = store
         self._source = source
+        self._ledger = ledger
+        self._entry_id = entry_id
         self._edit_document = store.edit
 
     @property
@@ -367,8 +480,8 @@ class SetupView:
         return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
 
     @contextmanager
-    def _edit_general(self) -> Generator[SetupGeneral]:
-        with self._edit_document() as draft, stage_general(draft) as candidate:
+    def _edit_general(self, field: str) -> Generator[SetupGeneral]:
+        with self._edit_document() as draft, stage_general(draft, field) as candidate:
             yield candidate
 
     @property
@@ -383,7 +496,11 @@ class SetupView:
     @contextmanager
     def edit(self) -> Generator[EditView]:
         with self._edit_document() as draft:
-            yield EditView(draft)
+            yield EditView(draft, ledger=self._ledger, entry_id=self._entry_id)
+
+    def meta(self, path: str) -> Provenance | None:
+        """Return an independent cached source in working units, or None."""
+        return document_meta(self._store.snapshot(), path)
 
     def refresh(self) -> None:
         self._store.refresh()

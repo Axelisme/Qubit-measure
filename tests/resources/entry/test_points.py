@@ -603,7 +603,9 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
                 )
                 draft.set(path, value)
     rewritten = yaml.load((root / "points/b/point.yaml").read_text())
-    assert rewritten["provenance"][path] == provenance
+    accepted = rewritten["provenance"][path]
+    assert accepted == {**provenance, "at": accepted["at"]}
+    assert accepted["at"] != provenance["at"]
     for untouched in set(paths) - {path}:
         assert rewritten["provenance"][untouched] == {
             **provenance,
