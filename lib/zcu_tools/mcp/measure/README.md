@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-05, single-worker recipe analysis completion
+**Last updated:** 2026-10-05, author Run capture and shared raw-save completion
 
 # `zcu_tools/mcp/measure/`
 
@@ -35,6 +35,8 @@ Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server �
 `finish_early` 對 recipe 停止採集，有可用結果就先保存 raw，再繼續分析及保存。`cancel` 優先，停止後續分析與保存；已啟動且不可取消的保存仍等真實結果。Registered analysis 的 cancel 也不再啟動新的結果讀取。GUI cancellation 回覆獨立放在 `gui_cancel`，不能拿它覆寫 execution 的既有 terminal outcome。未註冊的 `cancel(op)` 沿用直接 GUI hook。
 
 Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。關閉由 `tab_close` 明確指定。
+
+Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 集中原 Run 的保存、真正 outcome 與 confirmed prefix，現行 recipe caller 與 author handle 共用它。Generator driver 仍在準備，這些 owner 尚未取代 production recipe 路徑。
 
 ## 分析、互動與寫回
 

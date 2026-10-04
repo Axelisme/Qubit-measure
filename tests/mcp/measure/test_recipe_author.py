@@ -620,3 +620,54 @@ def test_author_accept_raises_with_confirmed_prefix_from_the_writeback_owner(tmp
             (stage["stage"], [item["id"] for item in stage["written"]])
             for stage in error.value.receipt["completed"]
         ] == [("primary", ["current"])]
+
+
+def test_author_run_derives_center_and_span_from_the_latest_resolved_range(tmp_path):
+    gui = _SweepGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.set_frequency_sweep("sweep.freq", calibration="resonator")
+        inputs = gui.publication["tree"]["children"]["sweep"]["children"]["freq"][
+            "inputs"
+        ]
+        inputs["start"]["resolved"] = 6000.0
+        inputs["stop"]["resolved"] = 6200.0
+        tab.set(
+            "rounds", 4
+        )  # Native edit returns this publication, not the earlier range.
+        capture = tab.run().snapshot()
+        assert capture is not None
+        fields = capture.actual["fields"]
+        assert fields["center_mhz"] == {"value": 6100.0, "source": "r_f"}
+        assert fields["span_mhz"] == {"value": 200.0, "source": "gui_linewidth"}
+        assert fields["sweep.freq"]["value"] == {
+            "start": 6000.0,
+            "stop": 6200.0,
+            "expts": 41,
+        }
+        assert fields["sweep.freq.expts"].get("source") == "gui_default"
+        assert fields["sweep.freq"].get("input") == inputs
+
+
+def test_author_run_captures_asserted_flux_unit_without_conversion(tmp_path):
+    gui = _SweepGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.use_flux_device(unit="A")
+        tab.set_flux_sweep("sweep.flux")
+        capture = tab.run().snapshot()
+        assert capture is not None
+        fields = capture.actual["fields"]
+        assert fields["dev.flux_dev"] == {
+            "value": "coil",
+            "source": "device.flux.name",
+            "unit": "A",
+            "input": scalar("coil")["input"],
+        }
+        assert fields["sweep.flux"]["value"] == {
+            "start": 0.005,
+            "stop": -0.001,
+            "expts": 19,
+        }
+        assert fields["sweep.flux"].get("unit") == "A"
+        assert fields["sweep.flux"].get("source") == "gui_calibration"

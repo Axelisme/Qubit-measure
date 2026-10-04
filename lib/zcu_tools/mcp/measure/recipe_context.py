@@ -22,7 +22,8 @@ from zcu_tools.mcp.measure.analysis_execution import (
 from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.operation_wait import await_operation
-from zcu_tools.mcp.measure.recipe import MissingParameter, RawSaveReceipt
+from zcu_tools.mcp.measure.raw_save import RawSaveReceipt, RawSaveRequest, save_raw_data
+from zcu_tools.mcp.measure.recipe import MissingParameter
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual, capture_actual
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -559,52 +560,21 @@ class RecipeContext:
 
     def _save_raw(self, tab: str, run_op: int) -> None:
         self._publish(phase="raw_save")
-        try:
-            started = self.tools.gui.send_gui_rpc(
-                "tab.save_data",
-                {"tab_id": tab},
-                run_operation_handle=run_op,
-                before_send=lambda: self._admit("raw_save"),
-            )
-            path = started["data_path"]
-            self._publish(
-                op=started["handle"],
-                raw_save=RawSaveReceipt("saving", reserved_path=path),
-            )
-            outcome = self._await_operation(started["handle"])
-            if outcome["status"] != "finished":
-                self._publish(
-                    raw_save=replace(
-                        self.progress.raw_save,
-                        status="failed",
-                        operation_outcome=outcome,
-                    )
-                )
-                raise GuiRpcError(
-                    str(outcome.get("error", "Raw save failed")),
-                    reason="raw_save_failed",
-                )
-            self._publish(raw_save=RawSaveReceipt("saved", path, path, outcome))
-        except _ContinuationCancelled:
-            raise
-        except Exception as error:
-            if self.progress.raw_save.status != "failed":
-                reason = getattr(error, "reason", None)
-                unknown = reason in (
-                    "gui_transport_timeout",
-                    "connection_lost",
-                    "message_too_large",
-                ) or (
-                    reason == "session_closed"
-                    and self.progress.raw_save.status == "saving"
-                )
-                self._publish(
-                    raw_save=replace(
-                        self.progress.raw_save,
-                        status="unknown" if unknown else "failed",
-                    )
-                )
-            raise
+
+        def observe(op: int | None, receipt: RawSaveReceipt) -> None:
+            if op is None:
+                self._publish(raw_save=receipt)
+            else:
+                self._publish(op=op, raw_save=receipt)
+
+        save_raw_data(
+            self.tools.gui,
+            RawSaveRequest(tab, run_op, lambda: self._admit("raw_save")),
+            closed=self._closed,
+            condition=self._condition,
+            previous=self.progress.raw_save,
+            observe=observe,
+        )
 
     def needs_parameters(self, missing: list[MissingParameter]) -> None:
         with self._condition:

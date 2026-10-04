@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Generator, Mapping, Sequence
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from math import isfinite
+from threading import Condition, Event
 from typing import Literal, NotRequired, TypedDict, TypeGuard
 
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -23,6 +25,13 @@ from zcu_tools.mcp.measure.analysis_execution import (
     ExecutionSnapshot,
 )
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
+from zcu_tools.mcp.measure.operation_wait import await_operation
+from zcu_tools.mcp.measure.raw_save import RawSaveReceipt, RawSaveRequest, save_raw_data
+from zcu_tools.mcp.measure.recipe_capture import (
+    ActualField,
+    RecipeActual,
+    capture_actual,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -91,24 +100,6 @@ class RecipeNeedsParameters(Exception):
         super().__init__(
             "; ".join(f"{item.parameter}: {item.reason}" for item in missing)
         )
-
-
-@dataclass(frozen=True)
-class RawSaveReceipt:
-    """Capture of an admitted raw save, not a promise about a reserved path.
-
-    status is not_started, saving, saved, failed or unknown. reserved_path is the
-    planned file path; path is a confirmed saved path. None means not captured.
-    operation_outcome retains the native terminal reply, or None before capture.
-    Native fields are opaque diagnostic facts, not a second operation policy.
-    """
-
-    status: Literal["not_started", "saving", "saved", "failed", "unknown"] = (
-        "not_started"
-    )
-    reserved_path: str | None = None
-    path: str | None = None
-    operation_outcome: Mapping[str, object] | None = None
 
 
 class WritebackItemReceipt(TypedDict):
@@ -201,13 +192,109 @@ class RecipeAnalysis:
     snapshot: ExecutionSnapshot
 
 
+@dataclass(frozen=True)
+class RecipeRunSnapshot:
+    """Detached Run facts for framework delivery; reading them sends no RPCs.
+
+    tab is the GUI locator. actual is the conditions captured before native start.
+    op is the opaque session Run handle, or None before its receipt. start_status
+    is not_started, unknown while dispatch is uncertain, or running after receipt.
+    start_reason captures a rejected start's reason, or None. outcome is the native
+    Run terminal reply, or None before completion. result_state is its captured
+    native data availability/provenance, or None before capture or after tab close.
+    save_op is the latest admitted raw-save handle, or None before its receipt.
+    raw_save retains the latest save receipt and any confirmed prefix.
+    """
+
+    tab: str
+    actual: RecipeActual
+    op: int | None = None
+    start_status: Literal["not_started", "unknown", "running"] = "not_started"
+    start_reason: str | None = None
+    outcome: Mapping[str, object] | None = None
+    result_state: Mapping[str, object] | None = None
+    raw_save: RawSaveReceipt = field(default_factory=RawSaveReceipt)
+    save_op: int | None = None
+
+
 class RunOperation:
     """Opaque, non-iterable Run handle created by RecipeTab.run.
 
     Yield once to receive (RecipeRun, completed/finished_early/cancelled). A
     between-yield cancel instead delivers (None, cancelled) without sending Run.
     Failure or superseded source is thrown back at the yield expression.
+    Construction is framework-only: binding is the owner-created Run state, or
+    None for one suppressed start. Authors obtain handles from RecipeTab.run.
     """
+
+    def __init__(self, binding: _RunBinding | None) -> None:
+        self._binding = binding
+
+    def snapshot(self) -> RecipeRunSnapshot | None:
+        """Read this fixed Run capture without RPCs; None means suppressed start."""
+        return self._binding.snapshot() if self._binding is not None else None
+
+    def complete_in_current_worker(self) -> tuple[RecipeRun | None, StepStatus]:
+        """Await this handle and capture its original Run result in the current worker.
+
+        A suppressed start delivers (None, cancelled). A native finished/cancelled
+        outcome delivers (RecipeRun, completed/cancelled); the driver maps its own
+        finish_early intent onto this delivery. Cancellation retains a partial handle
+        even without available data or after tab close. Native failure, lost binding
+        or a different result source raises for the driver to throw at the yield.
+        Do not create another worker or replace the original result with a newer one.
+        """
+        binding = self._binding
+        if binding is None:
+            return None, "cancelled"
+        capture = binding.capture
+        if capture.op is None:
+            raise ValueError("Run has no admitted operation handle")
+        completion = await_operation(
+            binding.tab.tools.gui,
+            capture.op,
+            closed=binding.tab.closed,
+            condition=binding.tab.condition,
+        )
+        binding.publish(replace(binding.capture, outcome=completion.native))
+        if completion.status == "failed":
+            raise GuiRpcError(
+                str(completion.native.get("error", "Run failed")), reason="run_failed"
+            )
+        try:
+            observed = binding.tab.tools.send_gui_rpc(
+                "tab.snapshot", {"tab_id": capture.tab}
+            )["tabs"]
+        except GuiRpcError as error:
+            if completion.status != "cancelled" or error.reason != "unknown_tab":
+                raise
+            observed = []
+        if not observed and completion.status == "cancelled":
+            return RecipeRun(binding), "cancelled"
+        if not isinstance(observed, list) or len(observed) != 1:
+            raise GuiRpcError("Requested tab was not found", reason="unknown_tab")
+        result = _cfg_object(_cfg_object(observed[0])["result_state"])
+        source = result["source_operation_id"]
+        binding.publish(replace(binding.capture, result_state=deepcopy(result)))
+        if source is not None:
+            if binding.tab.tools.gui.expose_operation(source) != capture.op:
+                raise GuiRpcError(
+                    "The tab no longer contains this Run's result",
+                    reason="result_superseded",
+                )
+        elif completion.status != "cancelled" or result["available"]:
+            raise GuiRpcError(
+                "The tab no longer contains this Run's result",
+                reason="result_superseded",
+            )
+        if completion.status == "finished" and not result["available"]:
+            raise GuiRpcError(
+                "Run did not publish usable data", reason="run_result_unavailable"
+            )
+        status: StepStatus = (
+            "cancelled" if completion.status == "cancelled" else "completed"
+        )
+        return RecipeRun(binding), status
 
 
 class AnalyzeOperation:
@@ -250,8 +337,35 @@ class _TabBinding:
     publication: dict[str, object]
     calibrations: dict[str, object]
     libraries: frozenset[str]
+    observe_run: Callable[[RunOperation], None]
     origins: dict[str, str] = field(default_factory=dict)
     flux_unit: str | None = None
+    frequency_sweep: str | None = None
+    flux_sweeps: set[str] = field(default_factory=set)
+    closed: Event = field(default_factory=Event)
+    condition: Condition = field(default_factory=Condition)
+    consume_cancel: Callable[[], bool] | None = None
+
+
+@dataclass
+class _RunBinding:
+    """One fixed GUI Run and its local capture; never read by another owner."""
+
+    tab: _TabBinding
+    capture: RecipeRunSnapshot
+
+    def publish(self, capture: RecipeRunSnapshot) -> None:
+        with self.tab.condition:
+            self.capture = capture
+            self.tab.condition.notify_all()
+
+    def snapshot(self) -> RecipeRunSnapshot:
+        with self.tab.condition:
+            return deepcopy(self.capture)
+
+
+class _StepCancelled(Exception):
+    """A consumed between-yield cancel, not a failed native start."""
 
 
 def _cfg_object(value: object) -> dict[str, object]:
@@ -304,8 +418,44 @@ class RecipeSession:
     available after cancellation; the recipe decides its policy.
     """
 
-    def __init__(self, tools: MeasureToolContext) -> None:
+    def __init__(
+        self,
+        tools: MeasureToolContext,
+        *,
+        closed: Event | None = None,
+        condition: Condition | None = None,
+        consume_cancel: Callable[[], bool] | None = None,
+    ) -> None:
+        """Bind tools and optional execution lifetime/admission collaborators.
+
+        closed/condition are the driver's close event and wake condition; omission
+        creates local ones. consume_cancel atomically consumes one pending cancel
+        before a Run/analysis start and returns whether to suppress it. This
+        callback runs under the RPC lock: it must not block or send RPCs. None
+        means no pending cancel. Cfg helpers and raw saves do not consume it.
+        """
         self._tools = tools.bound()
+        self._closed = closed if closed is not None else Event()
+        self._condition = condition if condition is not None else Condition()
+        self._consume_cancel = consume_cancel
+        self._run: RunOperation | None = None
+
+    def _observe_run(self, operation: RunOperation) -> None:
+        with self._condition:
+            self._run = operation
+            self._condition.notify_all()
+
+    def run_snapshot(self) -> RecipeRunSnapshot | None:
+        """Read the latest Run attempt for this execution without GUI requests.
+
+        Return detached conditions/start/completion/save facts, including an
+        uncertain or rejected start whose handle was not yielded. None means no
+        Run was attempted or the latest start was suppressed by pending cancel.
+        This framework observation does not complete Run or refresh guards.
+        """
+        with self._condition:
+            operation = self._run
+        return operation.snapshot() if operation is not None else None
 
     def open_tab(self, adapter: str, *, reuse: str | None = None) -> RecipeTab:
         """Open adapter's tab, or validate/reset the named reusable tab.
@@ -360,6 +510,10 @@ class RecipeSession:
                 _cfg_object(publication),
                 calibrations,
                 frozenset(libraries),
+                observe_run=self._observe_run,
+                closed=self._closed,
+                condition=self._condition,
+                consume_cancel=self._consume_cancel,
             )
         )
 
@@ -651,6 +805,7 @@ class RecipeTab:
             or not _finite_frequency(stop - start)
         ):
             raise GuiRpcError("Invalid resolved frequency range", reason="invalid_cfg")
+        self._binding.frequency_sweep = field
         self._binding.origins[field] = (
             "gui_calibration" if center_mhz is None and span_mhz is None else "explicit"
         )
@@ -733,6 +888,7 @@ class RecipeTab:
             or resolved_start == resolved_stop
         ):
             raise GuiRpcError("Invalid resolved flux range", reason="invalid_cfg")
+        self._binding.flux_sweeps.add(field)
         self._binding.origins[field] = (
             "gui_calibration" if start is None else "explicit"
         )
@@ -844,7 +1000,117 @@ class RecipeTab:
         cancel suppresses this one start and is consumed once. GUI rejection fails
         immediately; completion failures are thrown by the driver at the yield.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        suppressed = RunOperation(None)
+        self._binding.observe_run(suppressed)
+        if self._binding.closed.is_set():
+            raise GuiRpcError("MCP session is closed", reason="session_closed")
+        consume_cancel = self._binding.consume_cancel
+        if consume_cancel is not None and consume_cancel():
+            return suppressed
+        if self._binding.publication["status"] != "Valid":
+            raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
+        actual = capture_actual(self._binding.publication, self._actual_fields())
+        binding = _RunBinding(
+            self._binding, RecipeRunSnapshot(self._binding.tab, actual)
+        )
+        operation = RunOperation(binding)
+        self._binding.observe_run(operation)
+        tools = self._binding.tools
+        tab = self._binding.tab
+        tools.send_gui_rpc("tab.snapshot", {"tab_id": tab})
+        tools.send_gui_rpc("soc.info", {"include_cfg": True})
+        for device in tools.send_gui_rpc("device.list", {})["devices"]:
+            tools.send_gui_rpc("device.snapshot", {"name": device["name"]})
+
+        def admit() -> None:
+            if self._binding.closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+            consume_cancel = self._binding.consume_cancel
+            if consume_cancel is not None and consume_cancel():
+                raise _StepCancelled
+            binding.publish(replace(binding.capture, start_status="unknown"))
+
+        try:
+            started = tools.gui.send_gui_rpc(
+                "tab.run_start",
+                {"tab_id": tab, "expected": actual["cfg_ref"]},
+                before_send=admit,
+            )
+        except _StepCancelled:
+            self._binding.observe_run(suppressed)
+            return suppressed
+        except GuiRpcError as error:
+            if error.request_rejected:
+                binding.publish(
+                    replace(
+                        binding.capture,
+                        start_status="not_started",
+                        start_reason=error.reason or error.code,
+                    )
+                )
+            raise
+        binding.publish(
+            replace(binding.capture, op=started["handle"], start_status="running")
+        )
+        return operation
+
+    def _capture_cfg_field(self, name: str, source: str) -> ActualField:
+        """Capture one scalar, reference, sweep or sweep member from the publication."""
+        parts = _field_path(name)
+        parent = self._node(".".join(parts[:-1])) if len(parts) > 1 else None
+        if parent is not None and parent["kind"] == "sweep":
+            state = _cfg_object(_cfg_object(parent["inputs"])[parts[-1]])
+            return {"value": state["resolved"], "input": state, "source": source}
+        node = self._node(name)
+        if node["kind"] == "scalar":
+            state = _cfg_object(node["input"])
+            return {"value": state["resolved"], "input": state, "source": source}
+        if node["kind"] == "reference":
+            return {"value": node["ref"], "source": source}
+        if node["kind"] == "sweep":
+            inputs = _cfg_object(node["inputs"])
+            return {
+                "value": {
+                    key: _cfg_object(value)["resolved"] for key, value in inputs.items()
+                },
+                "input": inputs,
+                "source": source,
+            }
+        raise ValueError(f"Not a capturable cfg field: {name}")
+
+    def _actual_fields(self) -> dict[str, ActualField]:
+        fields = {
+            name: self._capture_cfg_field(name, source)
+            for name, source in self._binding.origins.items()
+            if name not in ("center_mhz", "span_mhz")
+        }
+        frequency_sweep = self._binding.frequency_sweep
+        if frequency_sweep is not None:
+            inputs = self._sweep_inputs(frequency_sweep)
+            start = _cfg_object(inputs["start"])["resolved"]
+            stop = _cfg_object(inputs["stop"])["resolved"]
+            if not _finite_frequency(start) or not _finite_frequency(stop):
+                raise GuiRpcError(
+                    "Invalid resolved frequency range", reason="invalid_cfg"
+                )
+            span = stop - start
+            if not _finite_frequency(span) or span <= 0:
+                raise GuiRpcError(
+                    "Invalid resolved frequency span", reason="invalid_cfg"
+                )
+            fields["center_mhz"] = {
+                "value": start + span / 2,
+                "source": self._binding.origins["center_mhz"],
+            }
+            fields["span_mhz"] = {
+                "value": span,
+                "source": self._binding.origins["span_mhz"],
+            }
+        if self._binding.flux_unit is not None:
+            for name in (*self._binding.flux_sweeps, "dev.flux_dev"):
+                if name in fields:
+                    fields[name]["unit"] = self._binding.flux_unit
+        return fields
 
     def accept(self, items: Sequence[str] | None = None) -> WritebackReceipt:
         """Write current draft items by stable target_name, Primary then Post.
@@ -869,7 +1135,16 @@ class RecipeRun:
 
     The framework creates this handle at a RunOperation yield. The recipe decides
     whether to save partial data; cancellation does not make raw data saveable.
+    Construction is framework-only: binding is this owner's completed Run state.
+    Authors receive the handle from a yielded RunOperation.
     """
+
+    def __init__(self, binding: _RunBinding) -> None:
+        self._binding = binding
+
+    def snapshot(self) -> RecipeRunSnapshot:
+        """Read this Run's detached conditions/save facts without GUI requests."""
+        return self._binding.snapshot()
 
     def save_raw(self) -> RawSaveReceipt:
         """Save this Run's raw data synchronously and return its actual receipt.
@@ -878,7 +1153,30 @@ class RecipeRun:
         true outcome even when cancel arrives. Failures retain confirmed prefix
         facts and propagate. A reserved path is never reported as a saved path.
         """
-        raise NotImplementedError("recipe run implementation is not prepared")
+        binding = self._binding
+        capture = binding.capture
+        if capture.op is None or not (
+            capture.result_state is not None and capture.result_state["available"]
+        ):
+            raise GuiRpcError(
+                "Run did not publish usable data", reason="run_result_unavailable"
+            )
+
+        def observe(op: int | None, receipt: RawSaveReceipt) -> None:
+            binding.publish(replace(binding.capture, raw_save=receipt, save_op=op))
+
+        def admit() -> None:
+            if binding.tab.closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+
+        return save_raw_data(
+            binding.tab.tools.gui,
+            RawSaveRequest(capture.tab, capture.op, admit),
+            closed=binding.tab.closed,
+            condition=binding.tab.condition,
+            previous=capture.raw_save,
+            observe=observe,
+        )
 
     def analyze(
         self,
