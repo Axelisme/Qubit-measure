@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -2754,6 +2754,7 @@ all = [
     { name = "ipympl" },
     { name = "ipywidgets" },
     { name = "joblib" },
+    { name = "jsonschema" },
     { name = "kaleido" },
     { name = "nbformat" },
     { name = "numba" },
@@ -2821,6 +2822,7 @@ development = [
     { name = "ipympl" },
     { name = "ipywidgets" },
     { name = "joblib" },
+    { name = "jsonschema" },
     { name = "kaleido" },
     { name = "nbformat" },
     { name = "numba" },
@@ -2858,6 +2860,7 @@ gui = [
     { name = "ipympl" },
     { name = "ipywidgets" },
     { name = "joblib" },
+    { name = "jsonschema" },
     { name = "kaleido" },
     { name = "nbformat" },
     { name = "numba" },
@@ -2912,6 +2915,7 @@ requires-dist = [
     { name = "ipywidgets", marker = "extra == 'client'" },
     { name = "ipywidgets", marker = "extra == 'design'" },
     { name = "joblib", marker = "extra == 'client'" },
+    { name = "jsonschema", marker = "extra == 'gui'", specifier = ">=4" },
     { name = "jupytext" },
     { name = "kaleido", marker = "extra == 'client'" },
     { name = "matplotlib" },

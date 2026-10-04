@@ -58,7 +58,7 @@ design = [
   "ipywidgets",
   "ipympl"
 ]
-gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
+gui = ["zcu-tools[client]", "qtpy", "PyQt6", "jsonschema>=4"]
 all = ["zcu-tools[client,gdrive,design,gui]"]
 development = ["zcu-tools[all]"]
 
