@@ -577,12 +577,12 @@ class AnalysisExecutions:
         """Bind a late receipt without creating a second completion owner."""
         with self._lock:
             op = started["handle"]
+            execution.observe_start(started)
             if op in self._by_op and self._by_op[op] is not execution:
                 raise GuiRpcError(
                     "Analysis operation already has a completion owner",
                     reason="incompatible_wire",
                 )
-            execution.observe_start(started)
             self._by_op[op] = execution
             execution.start()
 
