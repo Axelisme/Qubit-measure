@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-05, author Run capture and shared raw-save completion
+**Last updated:** 2026-10-05, author analysis capture and writeback questions
 
 # `zcu_tools/mcp/measure/`
 
@@ -36,7 +36,9 @@ Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server �
 
 Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。關閉由 `tab_close` 明確指定。
 
-Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 集中原 Run 的保存、真正 outcome 與 confirmed prefix，現行 recipe caller 與 author handle 共用它。Generator driver 仍在準備，這些 owner 尚未取代 production recipe 路徑。
+Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 集中原 Run 的保存、真正 outcome 與 confirmed prefix，現行 recipe caller 與 author handle 共用它。
+
+Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。Generator driver 仍在準備，這些 owner 尚未取代 production recipe 路徑。
 
 ## 分析、互動與寫回
 

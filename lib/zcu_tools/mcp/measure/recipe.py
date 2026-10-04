@@ -18,13 +18,16 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from math import isfinite
 from threading import Condition, Event
-from typing import Literal, NotRequired, TypedDict, TypeGuard
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, TypeGuard
 
+from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.analysis_execution import (
+    AnalysisExecution,
     AnalysisWriteback,
     ExecutionSnapshot,
 )
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
+from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.raw_save import RawSaveReceipt, RawSaveRequest, save_raw_data
 from zcu_tools.mcp.measure.recipe_capture import (
@@ -34,6 +37,9 @@ from zcu_tools.mcp.measure.recipe_capture import (
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+
+if TYPE_CHECKING:
+    from zcu_tools.mcp.measure.writeback import WritebackSelection
 
 RecipeScalar = str | int | float | bool | None
 RecipeParameter = RecipeScalar | list[RecipeScalar]
@@ -203,7 +209,9 @@ class RecipeRunSnapshot:
     Run terminal reply, or None before completion. result_state is its captured
     native data availability/provenance, or None before capture or after tab close.
     save_op is the latest admitted raw-save handle, or None before its receipt.
-    raw_save retains the latest save receipt and any confirmed prefix.
+    raw_save retains the latest save receipt and any confirmed prefix. analyses
+    maps primary/post to each stage's latest local start/completion attempt,
+    including failures and partial artifacts; a suppressed start has no entry.
     """
 
     tab: str
@@ -215,6 +223,7 @@ class RecipeRunSnapshot:
     result_state: Mapping[str, object] | None = None
     raw_save: RawSaveReceipt = field(default_factory=RawSaveReceipt)
     save_op: int | None = None
+    analyses: Mapping[AnalysisStage, ExecutionSnapshot] = field(default_factory=dict)
 
 
 class RunOperation:
@@ -303,7 +312,57 @@ class AnalyzeOperation:
     Yield once to receive (RecipeAnalysis, completed) or (None, cancelled).
     Interactive handoff does not finish the yield; GUI done resumes observation.
     Failure or superseded source is thrown back at the yield expression.
+    Construction is framework-only: execution is the registered completion owner,
+    or None for one suppressed start. Authors use RecipeRun.analyze.
     """
+
+    def __init__(self, execution: AnalysisExecution | None) -> None:
+        self._execution = execution
+
+    def snapshot(self) -> ExecutionSnapshot | None:
+        """Read detached local progress; None means a suppressed start, not unknown."""
+        return self._execution.snapshot() if self._execution is not None else None
+
+    def preview_images(self) -> tuple[PngImage, ...]:
+        """Read captured preview images without a GUI request or operation wait."""
+        return self._execution.wait(0.0).images if self._execution is not None else ()
+
+    def wake(self) -> None:
+        """Wake completion after the recipe sets its close event; no GUI request."""
+        if self._execution is not None:
+            self._execution.wake()
+
+    def cancel(self) -> ToolReply | None:
+        """Delegate cancellation to this owner; None means no start was sent.
+
+        An admitted analysis keeps its true native outcome and any captured
+        prefix. The returned reply reports the owner's separate GUI cancel facts,
+        not a delivery status. This does not consume between-yield cancellation.
+        """
+        return self._execution.cancel() if self._execution is not None else None
+
+    def complete_in_current_worker(self) -> tuple[RecipeAnalysis | None, StepStatus]:
+        """Complete on the recipe's worker without starting or joining another one.
+
+        A suppressed or cancelled analysis delivers (None, cancelled). Finished
+        analysis delivers (RecipeAnalysis, completed). Failed native operations,
+        superseded sources and continuation failures raise GuiRpcError for the
+        driver to throw at the yield. Snapshot/image reads retain confirmed prefix
+        facts. Raise ValueError if completion already started or has no receipt.
+        """
+        if self._execution is None:
+            return None, "cancelled"
+        snapshot = self._execution.complete_in_current_worker()
+        if snapshot.status == "failed":
+            error = snapshot.error
+            if error is None:
+                raise ValueError("Failed analysis has no error capture")
+            raise GuiRpcError(error.message, reason=error.reason, code=error.code)
+        if snapshot.status == "cancelled":
+            return None, "cancelled"
+        if snapshot.status != "finished":
+            raise ValueError("Analysis completion did not reach a terminal status")
+        return RecipeAnalysis(snapshot), "completed"
 
 
 class WritebackQuestion:
@@ -311,7 +370,16 @@ class WritebackQuestion:
 
     Yield once to pause until answer delivers (accepted/skipped, completed), or
     cancellation delivers (None, cancelled). Answer itself never writes data.
+    Construction is framework-only: selection is the validated captured proposal.
+    Authors obtain handles from RecipeRun.propose_writeback.
     """
+
+    def __init__(self, selection: WritebackSelection) -> None:
+        self._selection = deepcopy(selection)
+
+    def snapshot(self) -> WritebackSelection:
+        """Read detached stable names and proposals without a GUI request or write."""
+        return deepcopy(self._selection)
 
 
 class _CfgEdit(TypedDict):
@@ -338,6 +406,7 @@ class _TabBinding:
     calibrations: dict[str, object]
     libraries: frozenset[str]
     observe_run: Callable[[RunOperation], None]
+    observe_analysis: Callable[[AnalyzeOperation], None]
     origins: dict[str, str] = field(default_factory=dict)
     flux_unit: str | None = None
     frequency_sweep: str | None = None
@@ -353,15 +422,42 @@ class _RunBinding:
 
     tab: _TabBinding
     capture: RecipeRunSnapshot
+    analyses: dict[AnalysisStage, AnalyzeOperation] = field(default_factory=dict)
 
     def publish(self, capture: RecipeRunSnapshot) -> None:
         with self.tab.condition:
             self.capture = capture
             self.tab.condition.notify_all()
 
+    def analysis_source(self, stage: AnalysisStage) -> tuple[int, int | None]:
+        """Require this Run's data and return its Run/optional Primary handles."""
+        capture = self.snapshot()
+        if capture.op is None or not (
+            capture.result_state is not None and capture.result_state["available"]
+        ):
+            raise GuiRpcError(
+                "Run did not publish usable data", reason="run_result_unavailable"
+            )
+        if stage == "primary":
+            return capture.op, None
+        primary = capture.analyses.get("primary")
+        if primary is None or primary.status != "finished" or primary.op is None:
+            raise GuiRpcError(
+                "Post analysis requires this Run's completed Primary",
+                reason="primary_result_unavailable",
+            )
+        return capture.op, primary.op
+
     def snapshot(self) -> RecipeRunSnapshot:
         with self.tab.condition:
-            return deepcopy(self.capture)
+            capture = deepcopy(self.capture)
+            operations = dict(self.analyses)
+        analyses: dict[AnalysisStage, ExecutionSnapshot] = {}
+        for stage, operation in operations.items():
+            snapshot = operation.snapshot()
+            if snapshot is not None:
+                analyses[stage] = snapshot
+        return replace(capture, analyses=analyses)
 
 
 class _StepCancelled(Exception):
@@ -439,11 +535,28 @@ class RecipeSession:
         self._condition = condition if condition is not None else Condition()
         self._consume_cancel = consume_cancel
         self._run: RunOperation | None = None
+        self._analysis: AnalyzeOperation | None = None
 
     def _observe_run(self, operation: RunOperation) -> None:
         with self._condition:
             self._run = operation
             self._condition.notify_all()
+
+    def _observe_analysis(self, operation: AnalyzeOperation) -> None:
+        with self._condition:
+            self._analysis = operation
+            self._condition.notify_all()
+
+    def analysis_snapshot(self) -> ExecutionSnapshot | None:
+        """Read the latest analysis attempt, including a not-yet-yielded failure.
+
+        No GUI request or completion runs here. None means no analysis attempt or
+        one suppressed start; unknown means dispatch occurred without a receipt.
+        Completed results, artifacts and failures stay with the original owner.
+        """
+        with self._condition:
+            operation = self._analysis
+        return operation.snapshot() if operation is not None else None
 
     def run_snapshot(self) -> RecipeRunSnapshot | None:
         """Read the latest Run attempt for this execution without GUI requests.
@@ -511,6 +624,7 @@ class RecipeSession:
                 calibrations,
                 frozenset(libraries),
                 observe_run=self._observe_run,
+                observe_analysis=self._observe_analysis,
                 closed=self._closed,
                 condition=self._condition,
                 consume_cancel=self._consume_cancel,
@@ -1186,12 +1300,78 @@ class RecipeRun:
     ) -> AnalyzeOperation:
         """Immediately start primary/post analysis bound to this Run's source.
 
-        params supplies named GUI analysis parameter updates; None keeps defaults.
+        params supplies named scalar/one-level-array GUI updates; None keeps defaults.
+        Invalid stage or unsupported/non-finite parameters raise ValueError before
+        GUI dispatch. Missing Run data or completed Primary raises GuiRpcError.
         Post uses this Run's completed Primary source. Pending between-yield cancel
         suppresses this one start and is consumed once. Rejection fails immediately;
         the yielded handle delivers cancellation or throws completion failures.
         """
-        raise NotImplementedError("recipe run implementation is not prepared")
+        from zcu_tools.mcp.measure.recipe_inputs import copy_recipe_parameters
+
+        if stage not in ("primary", "post"):
+            raise ValueError("stage must be primary or post")
+        updates = copy_recipe_parameters(params if params is not None else {})
+        binding = self._binding
+        tab = binding.tab
+        suppressed = AnalyzeOperation(None)
+
+        def observe(operation: AnalyzeOperation) -> None:
+            with tab.condition:
+                binding.analyses[stage] = operation
+            tab.observe_analysis(operation)
+
+        if tab.closed.is_set():
+            raise GuiRpcError("MCP session is closed", reason="session_closed")
+        if tab.consume_cancel is not None and tab.consume_cancel():
+            observe(suppressed)
+            return suppressed
+        run_op, primary_op = binding.analysis_source(stage)
+        execution = tab.tools.session.executions.start(
+            tab.tools.gui, tab.tab, stage, start_worker=False
+        )
+        execution.bind_continuation(tab.closed)
+        operation = AnalyzeOperation(execution)
+        observe(operation)
+
+        def admit() -> None:
+            if tab.closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+            if tab.consume_cancel is not None and tab.consume_cancel():
+                raise _StepCancelled
+            execution.admit_start()
+
+        try:
+            started = tab.tools.gui.send_gui_rpc(
+                "tab.analyze" if stage == "primary" else "tab.post_analyze",
+                {"tab_id": tab.tab, "updates": updates},
+                run_operation_handle=run_op,
+                operation_handle=primary_op,
+                before_send=admit,
+            )
+            tab.tools.session.executions.accept_start(
+                execution, started, start_worker=False
+            )
+        except _StepCancelled:
+            # This registered but unsubmitted attempt is no longer active.
+            execution.fail_start(
+                GuiRpcError("Analysis start was suppressed", reason="recipe_cancelled"),
+                suppressed=True,
+            )
+            observe(suppressed)
+            return suppressed
+        except (
+            Exception
+        ) as error:  # Retain admission facts before propagating start failure.
+            execution.fail_start(error)
+            raise
+
+        def admit_handoff() -> None:
+            if tab.closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+
+        handoff_interaction(tab.tools, execution, before_send=admit_handoff)
+        return operation
 
     def propose_writeback(
         self, items: Sequence[str] | None = None
@@ -1203,7 +1383,18 @@ class RecipeRun:
         question. Yield the handle to await accepted/skipped; no timeout or write
         is implied. The recipe must call tab.accept explicitly to write anything.
         """
-        raise NotImplementedError("recipe run implementation is not prepared")
+        from zcu_tools.mcp.measure.writeback import select_writeback_items
+
+        analyses = self.snapshot().analyses
+        primary = analyses.get("primary")
+        post = analyses.get("post")
+        preview = RecipeWritebackPreview(
+            primary.writeback
+            if primary is not None and primary.status == "finished"
+            else None,
+            post.writeback if post is not None and post.status == "finished" else None,
+        )
+        return WritebackQuestion(select_writeback_items(preview, items))
 
 
 RecipeOperation = RunOperation | AnalyzeOperation | WritebackQuestion

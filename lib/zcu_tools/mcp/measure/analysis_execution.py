@@ -210,6 +210,7 @@ class AnalysisExecution:
         self._snapshot = snapshot
         self._connection = connection
         self._session = session
+        self._session_closed = closed
         self._closed = closed
         self._invalidated = invalidated
         self._condition = Condition()
@@ -218,6 +219,23 @@ class AnalysisExecution:
         self._completion_started = False
         self._gui_cancel: GuiCancel | None = None
         self._cancel_in_flight = False
+
+    def bind_continuation(self, closed: Event) -> None:
+        """Bind a recipe-local close event before native start admission.
+
+        closed is owned by the recipe driver, which sets it and calls wake before
+        joining its worker. The session close event remains effective too. Raise
+        ValueError after admission, receipt or completion start; no GUI request
+        or background worker is created. Standalone callers need not bind one.
+        """
+        with self._condition:
+            if (
+                self._completion_started
+                or self._snapshot.op is not None
+                or self._snapshot.start.status != "not_started"
+            ):
+                raise ValueError("Cannot rebind an admitted analysis lifetime")
+            self._closed = closed
 
     def snapshot(self) -> ExecutionSnapshot:
         with self._condition:
@@ -325,7 +343,7 @@ class AnalysisExecution:
     def admit_start(self) -> None:
         """Mark ambiguity at dispatch, not when the execution is registered."""
         with self._condition:
-            if self._closed.is_set():
+            if self._closed.is_set() or self._session_closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
             if self._snapshot.cancel_requested:
                 raise _ContinuationCancelled
@@ -345,9 +363,23 @@ class AnalysisExecution:
             )
             self._condition.notify_all()
 
-    def fail_start(self, exc: Exception) -> None:
-        """Keep sent requests ambiguous unless GUI explicitly rejects admission."""
-        if isinstance(exc, _ContinuationCancelled):
+    def fail_start(self, exc: Exception, *, suppressed: bool = False) -> None:
+        """Retain a failed start; suppressed=True marks an unsubmitted cancellation.
+
+        Ordinary failures retain unknown dispatch unless GUI explicitly rejects
+        admission. suppressed is only valid before admission with no op receipt;
+        otherwise raise ValueError. It settles a between-yield cancelled start
+        without calling the native cancel hook or inventing an operation outcome.
+        """
+        if suppressed:
+            with self._condition:
+                if (
+                    self._snapshot.op is not None
+                    or self._snapshot.start.status != "not_started"
+                ):
+                    raise ValueError("Cannot suppress an admitted analysis start")
+                self._snapshot = replace(self._snapshot, cancel_requested=True)
+        if suppressed or isinstance(exc, _ContinuationCancelled):
             self._finish()
             return
         with self._condition:
@@ -367,7 +399,7 @@ class AnalysisExecution:
         is retained as a failed snapshot rather than losing the admitted operation.
         """
         self._claim_completion()
-        if self._closed.is_set():
+        if self._closed.is_set() or self._session_closed.is_set():
             self._fail(GuiRpcError("MCP session is closed", reason="session_closed"))
             return
         thread = Thread(target=self._run, name=self._snapshot.execution)
@@ -403,6 +435,7 @@ class AnalysisExecution:
             self._completion_started = True
 
     def wake(self) -> None:
+        """Wake local native-wait pacing after cancellation or lifetime close."""
         with self._condition:
             self._condition.notify_all()
 
@@ -417,7 +450,7 @@ class AnalysisExecution:
 
     def _admit(self, phase: ExecutionPhase, image: str | None = None) -> None:
         with self._condition:
-            if self._closed.is_set():
+            if self._closed.is_set() or self._session_closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
             if phase != "operation" and self._snapshot.cancel_requested:
                 raise _ContinuationCancelled
@@ -636,6 +669,8 @@ class AnalysisExecutions:
         False only registers it; its recipe worker must call the returned owner's
         complete_in_current_worker and join before session PNG cleanup. Existing
         operation IDs return their existing owner without starting another worker.
+        For recipe-local close, bind_continuation before native admission; session
+        close remains effective regardless of that additional lifetime.
         """
         with self._lock:
             op = started["handle"] if started is not None else None

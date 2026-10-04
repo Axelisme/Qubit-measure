@@ -66,6 +66,29 @@ def _scalar(
     return value
 
 
+def copy_recipe_parameters(
+    parameters: Mapping[str, object],
+) -> dict[str, RecipeParameter]:
+    """Copy named scalar/one-level array parameters without GUI or schema work.
+
+    Values must be recipe scalars or lists of those scalars, with finite numbers.
+    Names are the mapping's string keys. Raise ValueError for unsupported values;
+    nested arrays/models are not accepted. Preserve scalar types, detach lists
+    and do not inject defaults. Recipe inputs and analysis updates share this
+    value contract; definition-specific normalization belongs to RecipeInputs.
+    """
+    copied: dict[str, RecipeParameter] = {}
+    for name, value in parameters.items():
+        if isinstance(value, list):
+            copied[name] = [
+                _scalar(element, f"{name}[{index}]", None)
+                for index, element in enumerate(value)
+            ]
+        else:
+            copied[name] = _scalar(value, name, None)
+    return copied
+
+
 class RecipeInputs:
     """One definition's detached handwritten schema and keyword-input codec.
 
@@ -109,7 +132,7 @@ class RecipeInputs:
         Python ints, excluding bool. Errors name the rejected parameter or rule.
         Neither arguments nor any nested array is mutated or retained.
         """
-        copied = dict(arguments)
+        copied = copy_recipe_parameters(arguments)
         try:
             self._validator.validate(copied)
         except ValidationError as error:
