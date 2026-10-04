@@ -5,21 +5,26 @@ Run, analysis and writeback questions are yielded once. The driver delivers thei
 status or throws a failure back into that yield expression. Session close closes
 the generator, so ordinary Python finally blocks still run.
 
-Method bodies are declaration stubs while the Orchestrator prepares the caller
-and formal execution tests. This module is not yet wired into tool assembly.
+Cfg preparation uses one fixed connection and the GUI's returned publications.
+The generator operation/driver integration is still being prepared; this module
+is not yet wired into tool assembly.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, NotRequired, TypedDict
+from math import isfinite
+from typing import Literal, NotRequired, TypedDict, TypeGuard
 
 from zcu_tools.mcp.measure.analysis_execution import (
     AnalysisWriteback,
     ExecutionSnapshot,
 )
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
+from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 RecipeScalar = str | int | float | bool | None
 RecipeParameter = RecipeScalar | list[RecipeScalar]
@@ -222,30 +227,182 @@ class WritebackQuestion:
     """
 
 
+class _CfgEdit(TypedDict):
+    """One wire edit: path is a public field path; value is GUI input data."""
+
+    path: list[str]
+    value: object
+
+
+@dataclass
+class _TabBinding:
+    """Cfg preparation state hidden behind an author tab handle.
+
+    tools is the execution's fixed connection. tab is the GUI locator.
+    publication is the last returned cfg observation, never refreshed on failure.
+    calibrations contains opaque md values from the declared context observation.
+    libraries contains the observed module-library names. origins records sources
+    by public/derived field name for the later Run capture; flux_unit is its asserted unit.
+    """
+
+    tools: MeasureToolContext
+    tab: str
+    publication: dict[str, object]
+    calibrations: dict[str, object]
+    libraries: frozenset[str]
+    origins: dict[str, str] = field(default_factory=dict)
+    flux_unit: str | None = None
+
+
+def _cfg_object(value: object) -> dict[str, object]:
+    """Decode an object at the GUI wire boundary without accepting bad keys."""
+    if not isinstance(value, dict):
+        raise GuiRpcError("Expected a GUI object", reason="incompatible_wire")
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise GuiRpcError("Expected GUI string keys", reason="incompatible_wire")
+        result[key] = item
+    return result
+
+
+def _field_path(name: str) -> list[str]:
+    if not name or any(not part or part != part.strip() for part in name.split(".")):
+        raise ValueError("field must be a non-empty dotted cfg field name")
+    return name.split(".")
+
+
+def _calibration_key(calibration: Literal["resonator", "qubit"]) -> str:
+    if calibration == "resonator":
+        return "r_f"
+    if calibration == "qubit":
+        return "q_f"
+    raise ValueError("calibration must be resonator or qubit")
+
+
+def _check_points(expts: object) -> None:
+    if expts is not None and (
+        not isinstance(expts, int) or isinstance(expts, bool) or expts < 2
+    ):
+        raise ValueError("expts must be an integer of at least 2")
+
+
+def _finite_frequency(value: object) -> TypeGuard[int | float]:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and isfinite(value)
+    )
+
+
 class RecipeSession:
     """One execution's fixed GUI binding, created and passed by the driver.
 
-    Helpers never reconnect, retry stale requests or synthesize GUI defaults.
-    Fast edits remain available after cancellation; the recipe decides its policy.
+    tools is the owning session's tool context. Construction captures its current
+    GUI connection (or performs the initial attach); subsequent helpers never
+    reconnect, retry stale requests or synthesize GUI defaults. Fast edits remain
+    available after cancellation; the recipe decides its policy.
     """
+
+    def __init__(self, tools: MeasureToolContext) -> None:
+        self._tools = tools.bound()
 
     def open_tab(self, adapter: str, *, reuse: str | None = None) -> RecipeTab:
         """Open adapter's tab, or validate/reset the named reusable tab.
 
-        adapter is a public GUI adapter ID. reuse=None creates a fresh tab. Busy,
-        mismatched adapters and invalid locators fail without creating a fallback.
-        Capture the cfg ref for later edits and Run; propagate GUI/connection errors.
+        adapter is a non-empty public GUI adapter ID. reuse=None creates a fresh
+        tab; otherwise reuse is a non-empty GUI locator. Busy, mismatched adapters
+        and invalid locators fail without creating a fallback. Observe context
+        sources once and capture the cfg ref for edits and Run. GUI/connection
+        errors propagate; invalid names raise ValueError before any GUI request.
         """
-        raise NotImplementedError("recipe session implementation is not prepared")
+        if not adapter or not adapter.strip():
+            raise ValueError("adapter must be a non-empty GUI adapter ID")
+        if reuse is not None and (not reuse or not reuse.strip()):
+            raise ValueError("reuse must be a non-empty GUI tab locator")
+        sources = self._tools.send_gui_rpc("context.snapshot", {})
+        calibrations = _cfg_object(sources["md"])
+        libraries = _cfg_object(_cfg_object(sources["ml"])["modules"])
+        if reuse is None:
+            created = self._tools.send_gui_rpc("tab.new", {"adapter_name": adapter})
+            tab = created["tab_id"]
+            if not isinstance(tab, str) or not tab:
+                raise GuiRpcError(
+                    "Invalid tab creation reply", reason="incompatible_wire"
+                )
+            publication = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
+        else:
+            tab = reuse
+            observed = self._tools.send_gui_rpc("tab.snapshot", {"tab_id": tab})["tabs"]
+            if not isinstance(observed, list) or len(observed) != 1:
+                raise GuiRpcError("Requested tab was not found", reason="unknown_tab")
+            snapshot = _cfg_object(observed[0])
+            if snapshot["tab_id"] != tab:
+                raise GuiRpcError("Requested tab was not found", reason="unknown_tab")
+            if snapshot["adapter_name"] != adapter:
+                raise GuiRpcError(
+                    "Tab has a different experiment", reason="wrong_experiment"
+                )
+            interaction = _cfg_object(snapshot["interaction"])
+            if any(
+                interaction[key]
+                for key in ("is_running", "is_analyzing", "is_saving_data")
+            ):
+                raise GuiRpcError("Tab is busy", reason="tab_busy")
+            observed_cfg = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
+            publication = self._tools.send_gui_rpc(
+                "tab.reset_cfg", {"tab_id": tab, "expected": observed_cfg["cfg_ref"]}
+            )
+        return RecipeTab(
+            _TabBinding(
+                self._tools,
+                tab,
+                _cfg_object(publication),
+                calibrations,
+                frozenset(libraries),
+            )
+        )
 
 
 class RecipeTab:
     """Opaque tab handle returned by RecipeSession.open_tab.
 
-    field names are public cfg fields, not wire path lists. Methods preserve the
-    observed cfg ref and record parameter sources. GUI errors propagate without
-    re-read, retry or rollback; required calibration gaps raise RecipeNeedsParameters.
+    field names are dot-separated public cfg fields (for example rounds or
+    modules.readout), not wire path lists. Methods preserve the observed cfg ref
+    and record parameter sources. GUI errors propagate without re-read, retry or
+    rollback; required calibration gaps raise RecipeNeedsParameters. Authors obtain
+    this handle from open_tab rather than constructing the private binding.
     """
+
+    def __init__(self, binding: _TabBinding) -> None:
+        self._binding = binding
+
+    def _node(self, name: str) -> dict[str, object]:
+        node = _cfg_object(self._binding.publication["tree"])
+        for part in _field_path(name):
+            children = _cfg_object(node.get("children", {}))
+            if part not in children:
+                raise ValueError(f"Unknown cfg field: {name}")
+            node = _cfg_object(children[part])
+        return node
+
+    def _edit(self, edits: list[_CfgEdit]) -> None:
+        if edits:
+            reply = self._binding.tools.send_gui_rpc(
+                "tab.edit_cfg",
+                {
+                    "tab_id": self._binding.tab,
+                    "expected": self._binding.publication["cfg_ref"],
+                    "edits": edits,
+                },
+            )
+            self._binding.publication = _cfg_object(reply)
+
+    def _reference(self, field: str) -> dict[str, object]:
+        node = self._node(field)
+        if node["kind"] != "reference":
+            raise ValueError(f"Not a module reference field: {field}")
+        return node
 
     def use_library(
         self, field: str, name: str | None, *, required: str | None = None
@@ -255,18 +412,94 @@ class RecipeTab:
         required names the missing tool parameter if no usable reference exists.
         Unknown or invalid explicit library references fail rather than fall back.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        node = self._reference(field)
+        if name is not None:
+            if not name or not name.strip():
+                raise ValueError("library name must be non-empty")
+            self._edit([{"path": _field_path(field), "value": {"__ref": name}}])
+            node = self._reference(field)
+            if node.get("error") or not node.get("valid") or node.get("ref") != name:
+                raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
+        elif required is not None and (
+            not isinstance(node.get("ref"), str)
+            or node.get("ref") not in self._binding.libraries
+            or not node.get("valid")
+            or node.get("error")
+        ):
+            raise RecipeNeedsParameters(
+                (
+                    MissingParameter(
+                        required, f"Provide a valid {field} library reference"
+                    ),
+                )
+            )
+        self._binding.origins[field] = "explicit" if name is not None else "gui_default"
 
     def disable_library(self, field: str) -> None:
         """Disable an optional module field explicitly; reject unknown fields."""
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        self._reference(field)
+        self._edit([{"path": _field_path(field), "value": {"__ref": None}}])
+        node = self._reference(field)
+        if node.get("ref") is not None or node.get("error"):
+            raise GuiRpcError(f"Cannot disable {field}", reason="invalid_cfg")
+        self._binding.origins[field] = "disabled"
 
     def set(self, field: str, value: RecipeParameter | None) -> None:
         """Set a scalar cfg field; None keeps its GUI default and records that source.
 
-        Reject unknown fields and values outside the GUI field's contract.
+        Reject unknown/non-scalar fields locally. The GUI validates supplied values;
+        a returned field error raises GuiRpcError without retrying the edit.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        node = self._node(field)
+        if node["kind"] != "scalar":
+            raise ValueError(f"Not a scalar cfg field: {field}")
+        if value is not None:
+            self._edit([{"path": _field_path(field), "value": value}])
+            node = self._node(field)
+            state = _cfg_object(node["input"])
+            if (
+                not node.get("valid")
+                or state.get("error")
+                or state.get("validation_error")
+            ):
+                raise GuiRpcError(f"Invalid {field} value", reason="invalid_cfg")
+        self._binding.origins[field] = (
+            "explicit" if value is not None else "gui_default"
+        )
+
+    def _frequency_fields(self, field: str) -> tuple[list[str], str | None]:
+        """Resolve scalar/readout-root fields and the enclosing library reference."""
+        node = self._node(field)
+        if node["kind"] == "reference":
+            children = _cfg_object(node["children"])
+            if "ro_freq" in children:
+                paths = [f"{field}.ro_freq"]
+            elif "pulse_cfg" in children and "ro_cfg" in children:
+                paths = [f"{field}.pulse_cfg.freq", f"{field}.ro_cfg.ro_freq"]
+            else:
+                raise GuiRpcError("Unsupported readout shape", reason="invalid_cfg")
+            reference = node.get("ref")
+            return paths, reference if isinstance(reference, str) else None
+        if node["kind"] != "scalar":
+            raise ValueError(f"Not a frequency field: {field}")
+        ancestors = _field_path(field)[:-1]
+        while ancestors:
+            parent = self._node(".".join(ancestors))
+            if parent["kind"] == "reference":
+                reference = parent.get("ref")
+                return [field], reference if isinstance(reference, str) else None
+            ancestors.pop()
+        return [field], None
+
+    def _usable_frequency(self, field: str) -> bool:
+        node = self._node(field)
+        state = _cfg_object(node["input"])
+        return bool(
+            node.get("valid")
+            and not state.get("error")
+            and not state.get("validation_error")
+            and _finite_frequency(state.get("resolved"))
+        )
 
     def set_frequency(
         self,
@@ -284,7 +517,80 @@ class RecipeTab:
         as a missing tool parameter. Handle pulse and single-frequency readout cfg
         in this helper; callers do not inspect the GUI's nested representation.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        key = _calibration_key(calibration)
+        if frequency_mhz is not None and not _finite_frequency(frequency_mhz):
+            raise ValueError("frequency_mhz must be finite and not boolean")
+        paths, reference = self._frequency_fields(field)
+        calibrated = self._binding.calibrations.get(key)
+        edits: list[_CfgEdit] = []
+        origins: dict[str, str] = {}
+        for path in paths:
+            if frequency_mhz is not None:
+                edits.append({"path": _field_path(path), "value": frequency_mhz})
+                origins[path] = "explicit"
+            elif (
+                prefer_library
+                and reference in self._binding.libraries
+                and self._usable_frequency(path)
+            ):
+                origins[path] = f"library:{reference}"
+            elif _finite_frequency(calibrated):
+                edits.append({"path": _field_path(path), "value": {"__expr": key}})
+                origins[path] = key
+            else:
+                raise RecipeNeedsParameters(
+                    (
+                        MissingParameter(
+                            required,
+                            f"Provide an explicit frequency, valid library, or calibrated {key}",
+                        ),
+                    )
+                )
+        self._edit(edits)
+        for path in paths:
+            if not self._usable_frequency(path):
+                raise GuiRpcError(f"Invalid {path} frequency", reason="invalid_cfg")
+        self._binding.origins.update(origins)
+
+    def _sweep_inputs(self, field: str) -> dict[str, object]:
+        node = self._node(field)
+        if node["kind"] != "sweep":
+            raise ValueError(f"Not a sweep cfg field: {field}")
+        return _cfg_object(node["inputs"])
+
+    def _write_sweep(self, field: str, values: dict[str, object]) -> None:
+        self._sweep_inputs(field)
+        if not values:
+            return
+        self._edit([{"path": _field_path(field), "value": values}])
+        inputs = self._sweep_inputs(field)
+        if not self._node(field).get("valid") or any(
+            _cfg_object(inputs[key]).get("error")
+            or _cfg_object(inputs[key]).get("validation_error")
+            for key in values
+        ):
+            raise GuiRpcError(f"Invalid {field} sweep", reason="invalid_cfg")
+
+    def _linewidth_span(
+        self, field: str, center_key: str, width_key: str
+    ) -> str | None:
+        """Preserve the GUI's width expression instead of choosing a new span."""
+        width = self._binding.calibrations.get(width_key)
+        inputs = self._sweep_inputs(field)
+        edges = [_cfg_object(inputs[key]) for key in ("start", "stop")]
+        if not _finite_frequency(width) or width <= 0:
+            return None
+        expressions: list[str] = []
+        for edge in edges:
+            raw = edge["raw"]
+            if (
+                edge["mode"] != "expression"
+                or not isinstance(raw, str)
+                or not re.search(rf"\b{width_key}\b", raw)
+            ):
+                return None
+            expressions.append(re.sub(rf"\b{center_key}\b", "0", raw))
+        return f"({expressions[1]}) - ({expressions[0]})"
 
     def set_frequency_sweep(
         self,
@@ -298,10 +604,63 @@ class RecipeTab:
         """Set MHz sweep endpoints/points, preserving omitted GUI-derived inputs.
 
         Missing center uses the named frequency calibration. Missing span retains
-        its calibrated linewidth expression. Missing calibration/linewidth raises
-        RecipeNeedsParameters; non-finite inputs or invalid points raise ValueError.
+        its calibrated linewidth expression; a supplied span must be positive.
+        expts is an integer of at least 2; None retains the GUI count. Missing
+        calibration/linewidth raises RecipeNeedsParameters. Invalid explicit
+        inputs raise ValueError; invalid resolved ranges raise GuiRpcError.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        key = _calibration_key(calibration)
+        width_key = "rf_w" if calibration == "resonator" else "qf_w"
+        _check_points(expts)
+        if center_mhz is not None and not _finite_frequency(center_mhz):
+            raise ValueError("center_mhz must be finite and not boolean")
+        if span_mhz is not None and (not _finite_frequency(span_mhz) or span_mhz <= 0):
+            raise ValueError("span_mhz must be finite and positive")
+        self._sweep_inputs(field)
+        missing: list[MissingParameter] = []
+        center: str | float = key if center_mhz is None else center_mhz
+        if center_mhz is None and not _finite_frequency(
+            self._binding.calibrations.get(key)
+        ):
+            missing.append(
+                MissingParameter("center_mhz", f"No finite {key} calibration")
+            )
+        span: str | float | None = span_mhz
+        if span_mhz is None:
+            span = self._linewidth_span(field, key, width_key)
+            if span is None:
+                missing.append(
+                    MissingParameter("span_mhz", "No GUI linewidth-derived range")
+                )
+        if missing:
+            raise RecipeNeedsParameters(tuple(missing))
+        values: dict[str, object] = {
+            "start": {"__expr": f"({center}) - ({span}) / 2"},
+            "stop": {"__expr": f"({center}) + ({span}) / 2"},
+        }
+        if expts is not None:
+            values["expts"] = expts
+        self._write_sweep(field, values)
+        inputs = self._sweep_inputs(field)
+        start = _cfg_object(inputs["start"])["resolved"]
+        stop = _cfg_object(inputs["stop"])["resolved"]
+        if (
+            not _finite_frequency(start)
+            or not _finite_frequency(stop)
+            or stop <= start
+            or not _finite_frequency(stop - start)
+        ):
+            raise GuiRpcError("Invalid resolved frequency range", reason="invalid_cfg")
+        self._binding.origins[field] = (
+            "gui_calibration" if center_mhz is None and span_mhz is None else "explicit"
+        )
+        self._binding.origins["center_mhz"] = key if center_mhz is None else "explicit"
+        self._binding.origins["span_mhz"] = (
+            "gui_linewidth" if span_mhz is None else "explicit"
+        )
+        self._binding.origins[f"{field}.expts"] = (
+            "gui_default" if expts is None else "explicit"
+        )
 
     def set_flux_sweep(
         self,
@@ -315,9 +674,104 @@ class RecipeTab:
 
         start/stop must both be finite, distinct or both omitted. Omitted endpoints
         retain valid flx_half/flx_int expressions; absent calibration raises
-        RecipeNeedsParameters. Invalid endpoints or points raise ValueError.
+        RecipeNeedsParameters. expts is an integer of at least 2; None retains
+        the GUI count. Invalid explicit inputs raise ValueError; invalid resolved
+        ranges raise GuiRpcError.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        _check_points(expts)
+        if (start is None) != (stop is None) or (
+            start is not None
+            and stop is not None
+            and (
+                not _finite_frequency(start)
+                or not _finite_frequency(stop)
+                or start == stop
+            )
+        ):
+            raise ValueError(
+                "flux endpoints must both be finite and distinct, or both omitted"
+            )
+        inputs = self._sweep_inputs(field)
+        if start is None:
+            half = self._binding.calibrations.get("flx_half")
+            integer = self._binding.calibrations.get("flx_int")
+            if (
+                not _finite_frequency(half)
+                or not _finite_frequency(integer)
+                or half == integer
+            ):
+                raise RecipeNeedsParameters(
+                    (
+                        MissingParameter(
+                            "flux_range", "No distinct calibrated flux endpoints"
+                        ),
+                    )
+                )
+            for key in ("start", "stop"):
+                state = _cfg_object(inputs[key])
+                raw = state["raw"]
+                if (
+                    state["mode"] != "expression"
+                    or not isinstance(raw, str)
+                    or set(re.findall(r"\bflx_(?:half|int)\b", raw))
+                    != {"flx_half", "flx_int"}
+                ):
+                    raise RecipeNeedsParameters(
+                        (
+                            MissingParameter(
+                                "flux_range", "No GUI calibration-derived range"
+                            ),
+                        )
+                    )
+        self.set_sweep(field, start=start, stop=stop, expts=expts)
+        inputs = self._sweep_inputs(field)
+        resolved_start = _cfg_object(inputs["start"])["resolved"]
+        resolved_stop = _cfg_object(inputs["stop"])["resolved"]
+        if (
+            not _finite_frequency(resolved_start)
+            or not _finite_frequency(resolved_stop)
+            or resolved_start == resolved_stop
+        ):
+            raise GuiRpcError("Invalid resolved flux range", reason="invalid_cfg")
+        self._binding.origins[field] = (
+            "gui_calibration" if start is None else "explicit"
+        )
+
+    def _flux_unit(
+        self, snapshot: dict[str, object], requested: str | None, *, explicit: bool
+    ) -> str:
+        unit = snapshot["unit"]
+        info = _cfg_object(snapshot.get("info", {}))
+        native = (
+            unit == "none"
+            and snapshot.get("type_name") == "FakeDevice"
+            and info.get("type") == "FakeDevice"
+            and requested == "native"
+        )
+        if native:
+            return "native"
+        if (
+            snapshot.get("type_name") == "FakeDevice"
+            or info.get("type") == "FakeDevice"
+        ):
+            raise GuiRpcError(
+                "Fake flux requires confirmed native coordinates",
+                reason="invalid_device",
+            )
+        if requested is not None and (requested != unit or requested == "native"):
+            raise GuiRpcError(
+                "Flux unit does not match the device coordinate",
+                reason="invalid_device",
+            )
+        if not isinstance(unit, str) or not unit.strip() or unit in ("none", "native"):
+            if explicit:
+                raise GuiRpcError(
+                    "Flux device has no physical unit", reason="invalid_device"
+                )
+            raise RecipeNeedsParameters(
+                (MissingParameter("flux_device", "Flux device has no physical unit"),)
+            )
+        return unit
 
     def use_flux_device(
         self, name: str | None = None, *, unit: str | None = None
@@ -328,7 +782,31 @@ class RecipeTab:
         unit mismatches fail as invalid_device. native is allowed only for a
         confirmed FakeDevice with original unit none and explicit unit="native".
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        if name is not None and (not name or not name.strip()):
+            raise ValueError("flux device name must be non-empty")
+        if unit is not None and (not unit or not unit.strip()):
+            raise ValueError("flux unit must be non-empty")
+        self._node("dev.flux_dev")
+        device: object = name
+        if name is None:
+            values = self._binding.tools.send_gui_rpc("value.list", {})["values"]
+            if any(_cfg_object(value)["key"] == "device.flux.name" for value in values):
+                device = self._binding.tools.send_gui_rpc(
+                    "value.read", {"key": "device.flux.name"}
+                )["value"]
+        if not isinstance(device, str) or not device.strip():
+            raise RecipeNeedsParameters(
+                (MissingParameter("flux_device", "No registered flux device source"),)
+            )
+        observed = self._binding.tools.send_gui_rpc("device.snapshot", {"name": device})
+        resolved_unit = self._flux_unit(
+            _cfg_object(observed["snapshot"]), unit, explicit=name is not None
+        )
+        self.set("dev.flux_dev", device)
+        self._binding.origins["dev.flux_dev"] = (
+            "device.flux.name" if name is None else "explicit"
+        )
+        self._binding.flux_unit = resolved_unit
 
     def set_sweep(
         self,
@@ -340,10 +818,24 @@ class RecipeTab:
     ) -> None:
         """Edit only supplied sweep fields in their native unit; retain omitted ones.
 
-        Supplied endpoints must be finite; expts must satisfy the GUI field's
-        valid point range. Unknown fields and invalid values fail before Run.
+        Supplied endpoints must be finite and not boolean. expts is an integer
+        of at least 2; None retains the GUI count. Invalid explicit inputs and
+        unknown fields raise ValueError. GUI field errors raise GuiRpcError.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        _check_points(expts)
+        for endpoint in (start, stop):
+            if endpoint is not None and not _finite_frequency(endpoint):
+                raise ValueError("sweep endpoints must be finite and not boolean")
+        values: dict[str, object] = {}
+        for key, value in (("start", start), ("stop", stop), ("expts", expts)):
+            if value is not None:
+                values[key] = value
+        self._write_sweep(field, values)
+        self._binding.origins[field] = "explicit" if values else "gui_default"
+        for key in ("start", "stop", "expts"):
+            self._binding.origins[f"{field}.{key}"] = (
+                "explicit" if key in values else "gui_default"
+            )
 
     def run(self) -> RunOperation:
         """Immediately send Run with captured cfg ref and return its yield handle.
@@ -363,7 +855,13 @@ class RecipeTab:
         raise WritebackError with its receipt on the first failed stage. No refresh
         of guards, rollback, retry or matching-to-question-version is performed.
         """
-        raise NotImplementedError("recipe tab implementation is not prepared")
+        # The owner imports the receipt contracts here, so resolve it at execution.
+        from zcu_tools.mcp.measure.writeback import write_current_draft
+
+        receipt = write_current_draft(self._binding.tools, self._binding.tab, items)
+        if receipt["status"] == "failed":
+            raise WritebackError(receipt)
+        return receipt
 
 
 class RecipeRun:
