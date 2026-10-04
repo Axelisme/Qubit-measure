@@ -250,5 +250,68 @@ def require_workflow_result(result: object) -> WorkflowResult:
     IO and export owners share this check; class-only declaration lookup does not
     use it because a class need not have allocated arrays.
     """
-    del result  # Orchestrator declaration seed; the assigned writer fills validation.
-    raise NotImplementedError("result validation implementation is not prepared")
+    kind: object = getattr(type(result), "result_kind", None)
+    instance_kind: object = getattr(result, "result_kind", None)
+    if (
+        not isinstance(kind, str)
+        or not isinstance(instance_kind, str)
+        or kind != instance_kind
+    ):
+        raise TypeError(
+            "unsupported autofluxdep Result type: invalid result_kind declaration"
+        )
+    if kind == "qubit_freq" and isinstance(result, FrequencySweepResult):
+        _require_axis("flux", result.flux)
+        _require_axis("detune", result.detune)
+        row_shape = result.flux.shape
+        grid_shape = (result.flux.size, result.detune.size)
+        _require_array("signal", result.signal, grid_shape)
+        _require_array("fit_curve", result.fit_curve, grid_shape)
+        _require_array("fit_freq", result.fit_freq, row_shape)
+        _require_array("predict_freq", result.predict_freq, row_shape)
+        _require_array("snr", result.snr, row_shape)
+        return result
+    if kind == "sweep1d" and isinstance(result, SweepResult1D):
+        _require_label(result.x_label)
+        _require_axis("flux", result.flux)
+        _require_axis("x", result.x)
+        row_shape = result.flux.shape
+        grid_shape = (result.flux.size, result.x.size)
+        _require_array("signal", result.signal, grid_shape)
+        _require_array("fit_curve", result.fit_curve, grid_shape)
+        _require_array("fit_value", result.fit_value, row_shape)
+        _require_array("snr", result.snr, row_shape)
+        return result
+    if kind == "sweep2d" and isinstance(result, SweepResult2D):
+        _require_axis("flux", result.flux)
+        _require_axis("freq", result.freq)
+        _require_axis("gain", result.gain)
+        row_shape = result.flux.shape
+        grid_shape = (result.flux.size, result.freq.size, result.gain.size)
+        _require_array("signal", result.signal, grid_shape)
+        _require_array("best_freq", result.best_freq, row_shape)
+        _require_array("best_gain", result.best_gain, row_shape)
+        return result
+    raise TypeError(
+        f"unsupported autofluxdep Result type {type(result).__name__}: "
+        f"kind or fields {kind!r}"
+    )
+
+
+def _require_label(label: object) -> None:
+    if not isinstance(label, str):
+        raise TypeError("Result x_label must be a str")
+
+
+def _require_axis(name: str, values: object) -> None:
+    if not isinstance(values, np.ndarray) or values.dtype != np.dtype(np.float64):
+        raise TypeError(f"Result {name} must be a float64 ndarray")
+    if values.ndim != 1:
+        raise ValueError(f"Result {name} axis must be 1D, got shape {values.shape}")
+
+
+def _require_array(name: str, values: object, shape: tuple[int, ...]) -> None:
+    if not isinstance(values, np.ndarray) or values.dtype != np.dtype(np.float64):
+        raise TypeError(f"Result {name} must be a float64 ndarray")
+    if values.shape != shape:
+        raise ValueError(f"Result {name} shape {values.shape} must match {shape}")

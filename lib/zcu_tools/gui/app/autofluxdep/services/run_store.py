@@ -22,10 +22,10 @@ from zcu_tools.datafile import (
     StreamingGroupedLabberWriter,
     open_streaming_grouped_labber_data,
 )
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
+from zcu_tools.gui.app.autofluxdep.results import require_workflow_result
 from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
     relative_to_artifact,
     safe_artifact_slug,
@@ -176,7 +176,9 @@ class RunStore:
         )
         provided_modules = _json_safe_modules(patch.modules())
         row_summary = _json_safe(
-            {} if result is None else result_row_summary(result, int(flux_idx)),
+            {}
+            if result is None
+            else result_row_summary(require_workflow_result(result), int(flux_idx)),
             subject="row summary",
             nonfinite_to_none=True,
         )
@@ -657,14 +659,17 @@ class RunStore:
         committed_masks = self._committed_node_row_masks(journal_events)
         exports: dict[str, Any] = {}
         for node_name, result in self._results.items():
-            if not isinstance(result, QubitFreqResult):
+            if result is None:
+                continue
+            checked = require_workflow_result(result)
+            if checked.result_kind != "qubit_freq":
                 continue
             committed_mask = committed_masks[node_name]
             if not committed_mask.any():
                 continue
             relpath = "exports/fluxdep/qubit_freq.hdf5"
             written = export_qubit_freq_fluxdep_spectrum(
-                result,
+                checked,
                 self.data_dir / relpath,
                 committed_mask=committed_mask,
             )
@@ -684,7 +689,10 @@ class RunStore:
             sidecars.extend(self._labber_browser_export.sidecars)
         for index, node in enumerate(self._nodes):
             result = self._results.get(node.name)
-            if not isinstance(result, QubitFreqResult):
+            if result is None:
+                continue
+            checked = require_workflow_result(result)
+            if checked.result_kind != "qubit_freq":
                 continue
             committed_mask = committed_masks[node.name]
             if not committed_mask.any():
@@ -695,7 +703,7 @@ class RunStore:
                     index=index,
                     node_name=node.name,
                     node_type=node.type_name,
-                    result=result,
+                    result=checked,
                     committed_mask=committed_mask,
                 )
             )
@@ -713,7 +721,7 @@ class RunStore:
     ) -> dict[str, np.ndarray]:
         masks: dict[str, np.ndarray] = {}
         for node_name, result in self._results.items():
-            n_flux = int(getattr(result, "n_flux"))
+            n_flux = require_workflow_result(result).flux.size
             masks[node_name] = np.zeros(n_flux, dtype=np.bool_)
         self._mark_committed_node_rows(masks, journal_events)
         return masks

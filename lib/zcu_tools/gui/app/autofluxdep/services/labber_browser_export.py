@@ -18,13 +18,12 @@ from zcu_tools.datafile import (
     open_streaming_labber_data,
     save_labber_data,
 )
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
-    QubitFreqResult,
-    Sweep1DResult,
-    Sweep2DResult,
-)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
-from zcu_tools.gui.app.autofluxdep.results import FrequencySweepResult
+from zcu_tools.gui.app.autofluxdep.results import (
+    FrequencySweepResult,
+    SweepResult1D,
+    require_workflow_result,
+)
 from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
     relative_to_artifact,
     safe_artifact_slug,
@@ -302,9 +301,11 @@ def _export_node_sidecars(
 ) -> tuple[LabberBrowserSidecar, ...]:
     if not committed_mask.any():
         return ()
-    if node_type == "ro_optimize":
-        return ()
-    if node_type == "qubit_freq":
+    checked = require_workflow_result(result)
+    if (
+        isinstance(checked, FrequencySweepResult)
+        and checked.result_kind == "qubit_freq"
+    ):
         return (
             _export_qubit_freq(
                 data_root,
@@ -312,11 +313,11 @@ def _export_node_sidecars(
                 index,
                 node_name,
                 node_type,
-                _require_result(node_name, result, QubitFreqResult),
+                checked,
                 committed_mask,
             ),
         )
-    if node_type in {"lenrabi", "mist"}:
+    if checked.result_kind == "sweep1d" and node_type in {"lenrabi", "mist"}:
         return (
             _export_sweep1d_signal(
                 data_root,
@@ -324,12 +325,12 @@ def _export_node_sidecars(
                 index,
                 node_name,
                 node_type,
-                _require_result(node_name, result, Sweep1DResult),
+                _require_sweep1d(node_name, result),
                 committed_mask,
             ),
         )
-    if node_type in _SWEEP1D_SCALAR_ROLES:
-        sweep = _require_result(node_name, result, Sweep1DResult)
+    if checked.result_kind == "sweep1d" and node_type in _SWEEP1D_SCALAR_ROLES:
+        sweep = _require_sweep1d(node_name, result)
         return (
             _export_sweep1d_signal(
                 data_root,
@@ -362,17 +363,18 @@ def _streaming_node_sidecar_specs(
     node_type: str,
     result: object,
 ) -> tuple[_StreamingSidecarSpec, ...]:
-    if node_type in {"qubit_freq", "ro_optimize"}:
+    checked = require_workflow_result(result)
+    if checked.result_kind != "sweep1d":
         return ()
-    if node_type in {"lenrabi", "mist"}:
-        sweep = _require_result(node_name, result, Sweep1DResult)
+    if checked.result_kind == "sweep1d" and node_type in {"lenrabi", "mist"}:
+        sweep = _require_sweep1d(node_name, result)
         return (
             _streaming_sweep1d_signal_spec(
                 data_root, root_path, index, node_name, node_type, sweep
             ),
         )
-    if node_type in _SWEEP1D_SCALAR_ROLES:
-        sweep = _require_result(node_name, result, Sweep1DResult)
+    if checked.result_kind == "sweep1d" and node_type in _SWEEP1D_SCALAR_ROLES:
+        sweep = _require_sweep1d(node_name, result)
         return (
             _streaming_sweep1d_signal_spec(
                 data_root, root_path, index, node_name, node_type, sweep
@@ -390,7 +392,7 @@ def _streaming_sweep1d_signal_spec(
     index: int,
     node_name: str,
     node_type: str,
-    result: Sweep1DResult,
+    result: SweepResult1D,
 ) -> _StreamingSidecarSpec:
     role = "signal"
     sidecar = _sidecar(
@@ -421,7 +423,7 @@ def _streaming_sweep1d_scalar_spec(
     index: int,
     node_name: str,
     node_type: str,
-    result: Sweep1DResult,
+    result: SweepResult1D,
 ) -> _StreamingSidecarSpec:
     role, label, unit = _SWEEP1D_SCALAR_ROLES[node_type]
     sidecar = _sidecar(
@@ -450,7 +452,11 @@ def _streaming_row_value(
     role: str,
     flux_idx: int,
 ) -> NDArray[np.float64] | float:
-    sweep = _require_result(node_name, result, Sweep1DResult)
+    sweep = _require_sweep1d(node_name, result)
+    if flux_idx < 0 or flux_idx >= sweep.flux.size:
+        raise IndexError(
+            f"flux row index {flux_idx} out of range for {sweep.flux.size} rows"
+        )
     if role == "signal":
         return sweep.signal[int(flux_idx)]
     if (
@@ -470,7 +476,7 @@ def _export_qubit_freq(
     index: int,
     node_name: str,
     node_type: str,
-    result: QubitFreqResult,
+    result: FrequencySweepResult,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
     role = "qubit_freq"
@@ -489,7 +495,7 @@ def _export_sweep1d_signal(
     index: int,
     node_name: str,
     node_type: str,
-    result: Sweep1DResult,
+    result: SweepResult1D,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
     role = "signal"
@@ -520,7 +526,7 @@ def _export_sweep1d_scalar(
     index: int,
     node_name: str,
     node_type: str,
-    result: Sweep1DResult,
+    result: SweepResult1D,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
     role, label, unit = _SWEEP1D_SCALAR_ROLES[node_type]
@@ -555,12 +561,13 @@ def _committed_mask_for(
 
 
 def _result_n_flux(result: object) -> int:
-    if isinstance(result, (QubitFreqResult, Sweep1DResult, Sweep2DResult)):
-        return int(result.n_flux)
-    raise TypeError(
-        "Labber Browser export cannot derive n_flux from unsupported result type "
-        f"{type(result).__name__}"
-    )
+    kind: object = getattr(type(result), "result_kind", None)
+    if kind not in {"qubit_freq", "sweep1d", "sweep2d"}:
+        raise TypeError(
+            "Labber Browser export cannot derive n_flux from unsupported result type "
+            f"{type(result).__name__}"
+        )
+    return require_workflow_result(result).flux.size
 
 
 def _masked_rows(
@@ -595,17 +602,11 @@ def _masked_vector(
     return exported
 
 
-def _require_result(
-    node_name: str,
-    result: object,
-    expected: type[QubitFreqResult] | type[Sweep1DResult],
-) -> Any:
-    if not isinstance(result, expected):
-        raise TypeError(
-            f"node {node_name!r} expected {expected.__name__} for Labber Browser "
-            f"export, got {type(result).__name__}"
-        )
-    return result
+def _require_sweep1d(node_name: str, result: object) -> SweepResult1D:
+    checked = require_workflow_result(result)
+    if isinstance(checked, SweepResult1D) and checked.result_kind == "sweep1d":
+        return checked
+    raise TypeError(f"node {node_name!r} requires sweep1d for Labber Browser export")
 
 
 def _filename(index: int, node_type: str, role: str) -> str:
