@@ -9,6 +9,9 @@
 實作本 app 的 Builder／Node／RunEnv 契約，不把實驗政策放進 Orchestrator。
 `results.py` 定義三種 archive representation 的 Protocol 與 typed summaries。
 Concrete Result 以 class-level result_kind 宣告表示，不用 Builder 名稱推測 archive schema。
+`services/result_io.py` 讀檔後建立 framework-owned 的資料 records，不建構 experiment Result。
+Writer、loaded record、remote summary 與 exports 共用同一 Protocol；owner 在使用前驗證
+kind、float64 dtype 與軸／資料 shape。內部 kind 不改 HDF5 的既有 metadata 拼字。
 
 ## Workflow 與執行契約
 

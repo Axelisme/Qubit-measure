@@ -33,6 +33,7 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+from zcu_tools.gui.app.autofluxdep.results import FrequencySweepResult
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
 from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_journal_events,
@@ -161,7 +162,7 @@ def _artifact_snapshot(run_dir: Path) -> dict[str, Any]:
     data_root = Path(manifest["paths"]["data_root"])
     node_file = data_root / manifest["files"]["nodes"][0]["path"]
     result = load_node_result(node_file, "qubit_freq")
-    assert isinstance(result, QubitFreqResult)
+    assert isinstance(result, FrequencySweepResult)
     export_flux, export_signal = _load_fluxdep_export(manifest)
     return {
         "manifest": manifest,

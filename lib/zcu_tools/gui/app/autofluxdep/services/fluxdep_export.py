@@ -1,4 +1,4 @@
-"""Fluxdep-compatible export sidecar derived from QubitFreqResult."""
+"""Fluxdep-compatible export sidecar from a frequency-sweep representation."""
 
 from __future__ import annotations
 
