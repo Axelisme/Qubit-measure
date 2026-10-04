@@ -3,6 +3,7 @@
 import keyword
 import math
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, ClassVar
@@ -256,8 +257,10 @@ class SetupDocument(BaseModel):
                 if isinstance(kind, str)
                 else ComponentSchema
             )
+            # Field validators may mutate mapping inputs in place. Keep the
+            # pre-validation working values for the canonical comparison.
             result[name] = model.model_validate(
-                fields, extra="ignore" if forward_minor else None
+                deepcopy(fields), extra="ignore" if forward_minor else None
             )
             errors = _canonical_errors(
                 fields, result[name], (name,), source=cls._source
