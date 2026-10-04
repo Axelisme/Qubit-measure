@@ -29,6 +29,31 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_component_draft_edits_publish_together_only_after_context_exit(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0, wiring={"ch": 1})
+    entry.setup.add_component("R2", kind="resonator", freq=6600.0)
+    before = setup_path.read_bytes()
+    with entry.setup.edit() as draft:
+        draft.R1.freq = 6550.0
+        draft.R1.wiring.ch = 2
+        draft.R1.ext.note = "shared draft"
+        draft.R2.freq = 6650.0
+        assert draft.R1.freq == pytest.approx(6550.0)
+        assert entry.setup.R1.freq == pytest.approx(6500.0)
+        assert entry.setup.R2.freq == pytest.approx(6600.0)
+        assert setup_path.read_bytes() == before
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.R1.freq == pytest.approx(6550.0)
+    assert reopened.setup.R1.wiring.ch == 2
+    assert reopened.setup.R1.ext.note == "shared draft"
+    assert reopened.setup.R2.freq == pytest.approx(6650.0)
+
+
 @pytest.mark.parametrize("kind", ["qubit/transmon", "qubit/fluxonium"])
 def test_reference_chains_survive_reopening_and_can_be_rewired(
     entry_roots: tuple[Path, Path], entry: ResultEntry, kind: str
