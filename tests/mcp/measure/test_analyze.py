@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import sys
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.stdio_server import run_stdio_loop
+from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import GuiConnection
 
 from ._support import MeasureClient, RpcResponder, make_client
@@ -216,6 +218,7 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
     "receipt, reason, step_status",
     [
         ("lost", "connection_lost", "unknown"),
+        ("closed", "session_closed", "unknown"),
         ("timeout", "gui_transport_timeout", "unknown"),
         ("handler_timeout", "gui_handler_timeout", "unknown"),
         ("internal", "injected", "unknown"),
@@ -258,11 +261,14 @@ def test_analysis_start_failure_retains_a_queryable_execution(
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         called = pool.submit(client.call, "tab_analyze", {"tab": "t", "stage": stage})
-        if receipt == "lost":
+        if receipt in {"lost", "closed"}:
             assert pending.wait(1)
-            client.transport.close()
-            assert client.transport.on_closed is not None
-            client.transport.on_closed(None)
+            if receipt == "closed":
+                client.context.session.close()
+            else:
+                client.transport.close()
+                assert client.transport.on_closed is not None
+                client.transport.on_closed(None)
         initial = called.result(timeout=2)
     assert initial.is_error is True
     key = initial.data["execution"]
@@ -357,6 +363,58 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
             else "tab.get_post_analyze_result",
         ]
     )
+
+
+@pytest.mark.parametrize("stage", ["primary", "post"])
+def test_cancelled_analysis_queued_before_dispatch_never_starts(
+    tmp_path, clients, stage
+):
+    occupied, release = Event(), Event()
+
+    def respond(method, params):
+        assert method == "tab.snapshot"
+        occupied.set()
+        assert release.wait(2)
+        return {"tabs": []}
+
+    client = _client(tmp_path, clients, respond)
+    # A captured binding lets a second public tool register while RPC is occupied.
+    client.context = client.context.bound()
+    client.tools = build_measure_tools(client.context)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        blocker = pool.submit(
+            client.call, "rpc_call", {"method": "tab.snapshot", "params": {}}
+        )
+        try:
+            assert occupied.wait(1)
+            called = pool.submit(client.call, "tab_analyze", {"tab": "t", "stage": stage})
+            deadline = time.monotonic() + 1
+            snapshots = client.context.session.executions.snapshots()
+            while not snapshots and time.monotonic() < deadline:
+                occupied.wait(0.01)
+                snapshots = client.context.session.executions.snapshots()
+            assert len(snapshots) == 1
+            key = snapshots[0].execution
+            before = len(client.transport.sent)
+            summary = client.call("status", {"execution": key})
+            assert summary["steps"]["analysis"][stage]["status"] == "not_started"
+            stopped = client.call("cancel", {"execution": key})
+            assert stopped.data["cancel_requested"] is True
+            assert len(client.transport.sent) == before
+            release.set()
+            blocker.result(timeout=2)
+            completed = called.result(timeout=2)
+        finally:
+            release.set()
+    assert completed.data["execution"] == key
+    assert completed.data["status"] == "cancelled"
+    assert completed.data["steps"]["analysis"][stage]["status"] == "not_started"
+    full = client.call("status", {"execution": key, "detail": "full"})
+    assert full["start"]["status"] == "not_started"
+    assert full["op"] is None
+    assert full["operation_outcome"] is None
+    assert full["error"] is None
+    assert _methods(client) == ["tab.snapshot"]
 
 
 def _start_reply(
