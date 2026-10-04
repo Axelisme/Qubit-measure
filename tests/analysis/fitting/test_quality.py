@@ -80,6 +80,29 @@ def test_missing_covariance_does_not_hide_negative_r2() -> None:
     ]
 
 
+@pytest.mark.parametrize("parameter", [0.0, np.nan, np.inf])
+def test_missing_covariance_takes_priority_over_parameter_value(
+    parameter: float,
+) -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.array([2.0, 1.0, 0.0]),
+        {"fit.offset": parameter, "good": 2.0},
+        None,
+    )
+    assert quality.r2 == -3.0
+    assert quality.normalized_residual_rms == pytest.approx(0.816496580927726)
+    assert quality.relative_parameter_errors == {"fit.offset": None, "good": None}
+    assert quality.to_summary_dict()["invalid"] == [
+        {
+            "path": "relative_parameter_errors.fit.offset",
+            "reason": "covariance_unavailable",
+        },
+        {"path": "relative_parameter_errors.good", "reason": "covariance_unavailable"},
+    ]
+    json.dumps(quality.to_summary_dict(), allow_nan=False)
+
+
 @pytest.mark.parametrize(
     ("observations", "fitted", "reasons"),
     [
