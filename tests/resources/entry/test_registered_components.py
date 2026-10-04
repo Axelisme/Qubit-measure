@@ -34,6 +34,10 @@ class RequiredNestedSchema(ComponentSchema):
     timing: RequiredTiming
 
 
+class OptionalNestedSchema(ComponentSchema):
+    timing: RequiredTiming | None = None
+
+
 class PairLinks(BaseModel):
     model_config = ConfigDict(extra="forbid")
     control: str
@@ -102,6 +106,33 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     results, database = tmp_path / "results", tmp_path / "Database"
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     return entry, results, database
+
+
+def test_optional_nested_setup_fields_defer_missing_values_and_round_trip_units(
+    tmp_path: Path,
+) -> None:
+    with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
+        assert entry.setup.N1.timing == {"label": "prepared"}
+        with entry.setup.edit() as draft:
+            draft.set("N1.timing.width", 10.0)
+            assert draft.N1.timing == {"label": "prepared", "width": 10.0}
+
+        setup_path = results / "entry" / "setup.yaml"
+        assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
+            "width"
+        ] == pytest.approx(1e-5)
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.N1.timing == {"label": "prepared", "width": 10.0}
+        reopened.setup.N1.timing = {"label": "updated", "width": 20.0}
+        assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
+            "width"
+        ] == pytest.approx(2e-5)
+        again = ResultEntry.open("entry", result_root=results, database_root=database)
+        assert again.setup.N1.timing == {"label": "updated", "width": 20.0}
 
 
 def test_nested_reference_path_failure_discards_the_shared_draft(
