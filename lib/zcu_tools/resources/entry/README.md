@@ -12,7 +12,7 @@
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次；復原也失敗則以 `PartialCommitError` 回報已完成、待完成與復原失敗的路徑，並保留兩個原因。這不是跨檔掉電保證。
 
-Setup 允許省略 notebook model 與巢狀 model 的必填欄位。巢狀 model 可直接宣告，也可宣告為單一 model 與 None 的 union。這兩種形狀共用單位、typo 與 reference path 判斷。未填值不落盤，讀取明確報錯；有提供的值仍經型別驗證。Explicit None 保留為 null。Registry 保留原始完整 model，必填完整性由後續疊合視圖檢查。
+Setup 允許省略 notebook model 與巢狀 model 的必填欄位。巢狀 model 可直接宣告，也可宣告為單一 model 與 None 的 union。這兩種形狀共用單位、typo 與 reference path 判斷。未填值不落盤，讀取明確報錯；有提供的值仍經型別驗證。Nullable 巢狀容器的 explicit None 保留為 null。Registry 保留原始完整 model，必填完整性由後續疊合視圖檢查。
 
 內建 kinds 包含 resonator、fluxonium、transmon、JPA 與 current source。物理值可缺省，單位宣告涵蓋頻率、能量、電流、時間與無因次量。引用保存元件名稱，不展開目標物件。載入、refresh 與提交驗證有值的引用，包含 notebook 宣告的巢狀路徑；缺少目標時回報檔案、元件、欄位與目標名稱。失敗不發布無效快照。
 

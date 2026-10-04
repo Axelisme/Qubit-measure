@@ -113,6 +113,27 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+@pytest.mark.parametrize("value", ["not a width", None])
+def test_optional_container_does_not_make_a_supplied_required_leaf_nullable(
+    tmp_path: Path, value: str | None
+) -> None:
+    with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
+        entry, results, _database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
+        setup_path = results / "entry" / "setup.yaml"
+        before = setup_path.read_bytes()
+        with pytest.raises(ValidationError, match="width"):
+            entry.setup.N1.timing = {"label": "prepared", "width": value}
+        assert setup_path.read_bytes() == before
+        assert entry.setup.N1.timing == {"label": "prepared"}
+        with entry.setup.edit() as draft:
+            with pytest.raises(ValidationError, match="width"):
+                draft.set("N1.timing.width", value)
+            assert draft.N1.timing == {"label": "prepared"}
+            draft.set("N1.timing.width", 10.0)
+        assert entry.setup.N1.timing == {"label": "prepared", "width": 10.0}
+
+
 def test_optional_nested_references_validate_supplied_targets_and_allow_null(
     tmp_path: Path,
 ) -> None:
