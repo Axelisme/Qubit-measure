@@ -157,7 +157,7 @@ def test_non_idempotent_field_conversion_rejects_add_without_publishing(
         assert "prepared!" in error["msg"] and "prepared!!" in error["msg"]
         assert source.read_bytes() == before
         assert entry.setup.R1.freq == 10.0
-        with pytest.raises(UnknownFieldError):
+        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
             _ = entry.setup.N1
 
 
