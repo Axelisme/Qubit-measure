@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
+from zcu_tools.mcp.measure.recipe_capture import RecipeActual
+
 if TYPE_CHECKING:
     from recipes import RecipeDefinition
 
@@ -67,10 +69,9 @@ def _step(status: str, outcome: dict[str, Any] | None = None) -> StepReply:
 
 
 def _actual(
-    captured: dict[str, Any] | None, definition: RecipeDefinition | None
+    captured: RecipeActual | None, definition: RecipeDefinition | None
 ) -> dict[str, Any]:
-    captured = captured or {}
-    fields = captured.get("fields", {})
+    fields = captured["fields"] if captured is not None else {}
     parameters: dict[str, ParameterReply] = {}
     modules: dict[str, ParameterReply] = {}
     for parameter in definition.summary_parameters if definition else ():
@@ -89,7 +90,7 @@ def _actual(
         else:
             parameters[parameter.name] = projected
     return {
-        "cfg_ref": captured.get("cfg_ref"),
+        "cfg_ref": captured["cfg_ref"] if captured is not None else None,
         "parameters": parameters,
         "modules": modules,
     }

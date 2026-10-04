@@ -419,14 +419,101 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         assert len(client.transport.sent) == before
 
 
+@pytest.mark.parametrize(
+    "wire_op,phase,raw_status",
+    [(71, "run", "not_started"), (82, "raw_save", "failed"), (93, "analysis", "saved")],
+)
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        {"reason": "completed", "status": "running"},
+        {"reason": "unexpected", "status": "finished"},
+        {"reason": "completed"},
+    ],
+)
+def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
+    tmp_path, wire_op, phase, raw_status, outcome
+):
+    gui = LookbackGui()
+
+    def respond(method, params):
+        if method == "operation.await" and params["operation_id"] == wire_op:
+            return outcome
+        return gui(method, params)
+
+    with recipe_client(tmp_path, respond) as client:
+        reply = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
+        assert reply.is_error
+        assert reply.data["status"] == "failed"
+        assert reply.data["error"]["reason"] == "incompatible_wire"
+        assert reply.data["error"]["phase"] == phase
+        assert reply.data["actual"]["fields"]["modules.readout.pulse_cfg.freq"] == {
+            "value": 6020.0,
+            "input": gui.publication["tree"]["children"]["modules"]["children"][
+                "readout"
+            ]["children"]["pulse_cfg"]["children"]["freq"]["input"],
+            "source": "frequency_mhz",
+        }
+        assert reply.data["raw_save"]["status"] == raw_status
+        assert reply.data["raw_save"]["path"] == (
+            "/actual/raw.h5" if wire_op == 93 else None
+        )
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == 1
+        assert methods.count("tab.save_data") == (0 if wire_op == 71 else 1)
+        assert methods.count("tab.analyze") == (1 if wire_op == 93 else 0)
+        assert "tab.get_analyze_result" not in methods
+
+
+def test_run_capture_keeps_calibrated_raw_input_after_live_cfg_changes(tmp_path):
+    gui = LookbackGui()
+    gui.md["r_f"] = 6120.0
+
+    def respond(method, params):
+        response = gui(method, params)
+        if method == "tab.run_start":
+            gui.md["r_f"] = 7000.0
+            readout = gui.publication["tree"]["children"]["modules"]["children"][
+                "readout"
+            ]
+            state = readout["children"]["pulse_cfg"]["children"]["freq"]["input"]
+            state.update(raw="another_source", resolved=7000.0)
+        return response
+
+    with recipe_client(tmp_path, respond) as client:
+        completed = client.call("lookback", {})
+        assert completed.data["status"] == "finished", completed.data
+        before = len(client.transport.sent)
+        full = client.call(
+            "status", {"execution": completed.data["execution"], "detail": "full"}
+        )
+        frequency = full["actual"]["fields"]["modules.readout.pulse_cfg.freq"]
+        assert frequency["value"] == 6120.0
+        assert frequency["source"] == "r_f"
+        assert frequency["input"]["raw"] == "r_f"
+        assert frequency["input"]["mode"] == "expression"
+        assert frequency["input"]["resolved"] == 6120.0
+        assert (
+            full["actual"]["publication"]["tree"]["children"]["modules"]["children"][
+                "readout"
+            ]["children"]["pulse_cfg"]["children"]["freq"]["input"]
+            == (frequency["input"])
+        )
+        assert len(client.transport.sent) == before
+
+
 def test_full_query_keeps_the_publication_used_before_run(tmp_path):
     gui = LookbackGui()
+    gui.publication["source_basis"] = [{"label": "sample", "revision": 3}]
     captured: dict[str, Any] = {}
 
     def respond(method, params):
         response = gui(method, params)
         if method == "tab.run_start":
             captured.update(deepcopy(gui.publication))
+            gui.publication["source_basis"][0]["revision"] = 99
             gui.publication["cfg_ref"]["revision"] = "99"
             gui.publication["tree"]["children"]["rounds"] = {
                 "kind": "scalar",
@@ -441,6 +528,9 @@ def test_full_query_keeps_the_publication_used_before_run(tmp_path):
         before = len(client.transport.sent)
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert full["actual"]["publication"] == captured
+        assert full["actual"]["source_basis"] == [{"label": "sample", "revision": 3}]
+        assert full["actual"]["fields"]["rounds"]["value"] == 7
+        assert full["actual"]["fields"]["rounds"]["source"] == "rounds"
         assert (
             full["actual"]["publication"]["tree"]["children"]["rounds"]["input"][
                 "resolved"
@@ -448,8 +538,12 @@ def test_full_query_keeps_the_publication_used_before_run(tmp_path):
             == 7
         )
         full["actual"]["publication"]["tree"]["children"].clear()
+        full["actual"]["fields"]["rounds"]["value"] = -1
+        full["actual"]["source_basis"].clear()
         repeated = client.call("status", {"execution": execution, "detail": "full"})
         assert repeated["actual"]["publication"] == captured
+        assert repeated["actual"]["fields"]["rounds"]["value"] == 7
+        assert repeated["actual"]["source_basis"] == captured["source_basis"]
         assert len(client.transport.sent) == before
 
 

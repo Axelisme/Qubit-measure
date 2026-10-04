@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import time
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
@@ -11,6 +10,7 @@ from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.images import validated_png
+from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcpSession
 
 AnalysisStage = Literal["primary", "post"]
@@ -513,39 +513,30 @@ class AnalysisExecution:
             self._condition.notify_all()
 
     def _await_operation(self) -> bool:
-        while True:
-            began = time.monotonic()
-            reply = self._rpc(
-                "operation", "operation.await", {"timeout": 0.25}, timeout=2.25
+        op = self.snapshot().op
+        if op is None:
+            raise ValueError("Analysis completion requires an operation receipt")
+        try:
+            completion = await_operation(
+                self._connection,
+                op,
+                closed=self._closed,
+                condition=self._condition,
+                before_send=lambda: self._admit("operation"),
             )
-            reason = reply.get("reason")
-            if reason == "completed":
-                status = reply.get("status")
-                if status not in ("finished", "failed", "cancelled"):
-                    raise GuiRpcError(
-                        "invalid operation outcome", reason="incompatible_wire"
-                    )
-                self._publish(operation_outcome=deepcopy(reply))
-                if status == "failed":
-                    raise GuiRpcError(
-                        str(reply.get("error", "analysis failed")),
-                        reason="analysis_failed",
-                    )
-                if status == "cancelled":
-                    self._publish(status="cancelled", phase="terminal")
-                    return False
-                self._publish(status="running", invalidated=deepcopy(self._invalidated))
-                return True
-            if reason not in ("timeout", "user_feedback"):
-                raise GuiRpcError(
-                    "invalid operation await reply", reason="incompatible_wire"
-                )
-            # A GUI can answer immediately with user feedback. Pace observation
-            # without holding the RPC lock, and let close wake the worker.
-            with self._condition:
-                self._condition.wait_for(
-                    self._closed.is_set, max(0.0, 0.25 - (time.monotonic() - began))
-                )
+        except Exception as exc:  # Translate native wait failures at this owner.
+            raise _RpcFailure("operation", exc) from exc
+        reply = dict(completion.native)
+        self._publish(operation_outcome=reply)
+        if completion.status == "failed":
+            raise GuiRpcError(
+                str(reply.get("error", "analysis failed")), reason="analysis_failed"
+            )
+        if completion.status == "cancelled":
+            self._publish(status="cancelled", phase="terminal")
+            return False
+        self._publish(status="running", invalidated=deepcopy(self._invalidated))
+        return True
 
     def _complete_analysis(self) -> None:
         snapshot = self.snapshot()

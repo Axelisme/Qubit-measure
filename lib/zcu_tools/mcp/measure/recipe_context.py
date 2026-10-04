@@ -21,7 +21,9 @@ from zcu_tools.mcp.measure.analysis_execution import (
 )
 from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.interaction import handoff_interaction
+from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.recipe import MissingParameter, RawSaveReceipt
+from zcu_tools.mcp.measure.recipe_capture import RecipeActual, capture_actual
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 if TYPE_CHECKING:
@@ -68,7 +70,7 @@ class RecipeSnapshot:
     finish_early_requested: bool = False
     run_op: int | None = None
     op: int | None = None
-    actual: dict[str, Any] | None = None
+    actual: RecipeActual | None = None
     missing: list[MissingParameter] = field(default_factory=list)
     run_outcome: dict[str, Any] | None = None
     run_start: StartReceipt = field(default_factory=StartReceipt)
@@ -365,14 +367,7 @@ class RecipeContext:
             raise RuntimeError("Prepare a tab before running")
         self._publish(
             analysis_mode=analysis_mode,
-            actual=deepcopy(
-                {
-                    "cfg_ref": publication["cfg_ref"],
-                    "fields": fields,
-                    "source_basis": publication["source_basis"],
-                    "publication": publication,
-                }
-            ),
+            actual=capture_actual(publication, fields),
         )
         self.rpc("tab.snapshot", {"tab_id": tab})
         self.rpc("soc.info", {"include_cfg": True})
@@ -557,25 +552,10 @@ class RecipeContext:
             self.cancel()
 
     def _await_operation(self, op: int) -> dict[str, Any]:
-        while True:
-            began = time.monotonic()
-            outcome = self.tools.gui.send_gui_rpc(
-                "operation.await",
-                {"timeout": 0.25},
-                2.25,
-                operation_handle=op,
-            )
-            if outcome.get("reason") == "completed":
-                if outcome.get("status") not in ("finished", "failed", "cancelled"):
-                    raise GuiRpcError(
-                        "Invalid operation outcome", reason="incompatible_wire"
-                    )
-                return outcome
-            if outcome.get("reason") not in ("timeout", "user_feedback"):
-                raise GuiRpcError(
-                    "Invalid operation wait reply", reason="incompatible_wire"
-                )
-            time.sleep(max(0.0, 0.25 - (time.monotonic() - began)))
+        completion = await_operation(
+            self.tools.gui, op, closed=self._closed, condition=self._condition
+        )
+        return dict(completion.native)
 
     def _save_raw(self, tab: str, run_op: int) -> None:
         self._publish(phase="raw_save")
