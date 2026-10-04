@@ -115,6 +115,76 @@ def _methods(client: MeasureClient) -> list[str]:
     ]
 
 
+@pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize("outcome", ["finished", "failed", "partial"])
+def test_analysis_initial_wait_and_status_share_the_same_summary(
+    tmp_path, clients, stage, outcome
+):
+    pane = "analysis" if stage == "primary" else "post_analysis"
+
+    def respond(method, params):
+        if method in {"tab.analyze", "tab.post_analyze"}:
+            return _start_reply({"gain": 2.0}, [])
+        if method == "operation.await":
+            return {
+                "reason": "completed",
+                "status": "failed" if outcome == "failed" else "finished",
+                "error": "fit failed" if outcome == "failed" else None,
+            }
+        if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
+            return _result_reply(pane, ["fit", "residual"], {"gain": 2.0})
+        if method == "tab.save_image":
+            return {"image_path": "/actual/" + params["figure_name"] + ".png"}
+        if method == "tab.get_figure":
+            return {"png_b64": base64.b64encode(_PNG).decode()}
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    if outcome == "partial":
+
+        def save(params):
+            if params["figure_name"] == "residual":
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": "precondition_failed",
+                        "reason": "save_failed",
+                        "message": "Destination unavailable",
+                    },
+                }
+            return {"ok": True, "result": respond("tab.save_image", params)}
+
+        client.transport.replies["tab.save_image"] = save
+    initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
+    execution = initial.data["execution"]
+    before = len(client.transport.sent)
+    summary = client.call("status", {"execution": execution})
+    full = client.call("status", {"execution": execution, "detail": "full"})
+    waited = client.call("wait", {"execution": execution, "timeout": 0})
+    assert initial.data == summary
+    assert {k: v for k, v in waited.data.items() if k != "elapsed_s"} == summary
+    assert len(client.transport.sent) == before
+    assert summary["recipe"] is None
+    assert summary["run_id"] is None
+    assert summary["run_op"] is None
+    assert summary["analysis"]["stage"] == stage
+    assert summary["steps"]["analysis"][stage]["status"] == (
+        "failed" if outcome == "failed" else "finished"
+    )
+    assert summary["status"] == ("finished" if outcome == "finished" else "failed")
+    if outcome != "failed":
+        assert summary["analysis"][stage]["params"] == {"gain": 2.0}
+        assert summary["analysis"][stage]["details"] == {"frequency": 5.0}
+        assert summary["artifacts"][pane]["fit"]["members"]["image"] == [
+            {"path": "/actual/fit.png", "status": "saved"}
+        ]
+    else:
+        assert summary["error"] == full["error"]
+    if outcome == "partial":
+        assert summary["steps"]["analysis_save"][stage]["status"] == "incomplete"
+        assert summary["error"]["phase"] == "image_save"
+
+
 def _start_reply(
     params: dict[str, Any], invalidated: list[str], *, interactive: bool = False
 ) -> dict[str, Any]:
