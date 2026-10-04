@@ -518,9 +518,8 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
 ):
     gui = PowerGui()
     with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(
-            client, client.call("onetone_spectrum_over_power", arguments)
-        )
+        initial = client.call("onetone_spectrum_over_power", arguments)
+        reply = full_execution_reply(client, initial)
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data
@@ -532,6 +531,21 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         assert data["preview"]["kind"] == "run_preview"
         assert Path(data["preview"]["path"]).read_bytes() == PNG
         assert reply.images[0].data == PNG
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        waited = client.call("wait", {"execution": data["execution"], "timeout": 0})
+        assert summary["previews"] == {
+            "run": [data["preview"]["path"]],
+            "primary": [],
+            "post": [],
+        }
+        assert (
+            initial.data["previews"] == waited.data["previews"] == summary["previews"]
+        )
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+            {"path": "/actual/raw.h5", "status": "saved"}
+        ]
+        assert len(client.transport.sent) == before
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.save_data") == 1
