@@ -682,8 +682,16 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         )
         execution = initial.data["execution"]
         early = client.call("finish_early", {"op": initial.data["run_op"]})
-        assert early.data["finish_early_requested"]
-        assert not early.data["cancel_requested"]
+        assert early.data == {
+            "execution": execution,
+            "op": initial.data["op"],
+            "run_op": initial.data["run_op"],
+            "status": "running",
+            "phase": "run",
+            "cancel_requested": False,
+            "finish_early_requested": True,
+            "gui_cancel": {"status": "requested", "error": None},
+        }
         client.call("finish_early", {"execution": execution})
         if cancel_after:
             client.call("cancel", {"execution": execution})
