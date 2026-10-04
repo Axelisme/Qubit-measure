@@ -9,6 +9,7 @@ from time import sleep
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.core.errors import GuiTransportTimeoutError
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
@@ -116,6 +117,77 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         assert set(candidate["changes"]) == {"gain", "waveform.length"}
         assert full["writeback"]["items"][0]["proposed"] == proposed
         assert full["writeback"]["items"][0]["current"] == current
+
+
+@pytest.mark.parametrize(
+    "receipt, reason, step_status",
+    [
+        ("lost", "connection_lost", "unknown"),
+        ("timeout", "gui_transport_timeout", "unknown"),
+        ("handler_timeout", "gui_handler_timeout", "unknown"),
+        ("internal", "injected", "unknown"),
+        ("stale", "stale_version", "not_started"),
+        ("busy", "operation_busy", "not_started"),
+    ],
+)
+def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
+    tmp_path, monkeypatch, receipt, reason, step_status
+):
+    gui = LookbackGui()
+    pending = Event()
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    with recipe_client(tmp_path, gui) as client:
+        if receipt in {"handler_timeout", "internal", "stale", "busy"}:
+            code = {
+                "handler_timeout": "timeout",
+                "internal": "internal",
+                "stale": "precondition_failed",
+                "busy": "busy",
+            }[receipt]
+            client.transport.replies["tab.run_start"] = {
+                "ok": False,
+                "error": {
+                    "code": code,
+                    "reason": None if receipt == "handler_timeout" else reason,
+                    "message": "Run start did not provide a handle",
+                },
+            }
+        else:
+            send_line = client.transport.send_line
+
+            def send(payload):
+                if payload["method"] != "tab.run_start":
+                    return send_line(payload)
+                client.transport.sent.append((payload["method"], payload["params"]))
+                gui("tab.run_start", payload["params"])
+                pending.set()
+                if receipt == "timeout":
+                    raise GuiTransportTimeoutError("tab.run_start", 0.01)
+                return None
+
+            monkeypatch.setattr(client.transport, "send_line", send)
+        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        execution = initial.data["execution"]
+        if receipt == "lost":
+            assert pending.wait(1)
+            client.transport.close()
+            assert client.transport.on_closed is not None
+            client.transport.on_closed(None)
+        completed = client.call("wait", {"execution": execution, "timeout": 2})
+        assert completed.data["status"] == "failed", completed.data
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": execution})
+        full = client.call("status", {"execution": execution, "detail": "full"})
+        assert summary["steps"]["run"]["status"] == step_status
+        assert full["run_start"]["status"] == step_status
+        assert summary["error"]["reason"] == reason
+        assert summary["run_op"] is None
+        assert summary["actual"]["cfg_ref"] == full["actual"]["publication"]["cfg_ref"]
+        assert summary["steps"]["raw_save"]["status"] == "not_started"
+        assert len(client.transport.sent) == before
+        assert [method for method, _ in client.transport.sent].count(
+            "tab.run_start"
+        ) == 1
 
 
 def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
