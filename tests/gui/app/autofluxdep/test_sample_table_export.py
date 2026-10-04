@@ -13,7 +13,6 @@ from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqRes
 from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
 from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import T2EchoBuilder
 from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
 from zcu_tools.gui.app.autofluxdep.services import (
@@ -25,6 +24,8 @@ from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
     sample_rows_from_journal,
 )
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from ._helpers import make_builder, place
 

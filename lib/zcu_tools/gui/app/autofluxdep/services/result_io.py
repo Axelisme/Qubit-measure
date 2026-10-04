@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, TypeVar, overload
 
 import numpy as np
 
@@ -20,6 +20,21 @@ from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
     QubitFreqResult,
     Sweep1DResult,
     Sweep2DResult,
+)
+from zcu_tools.gui.app.autofluxdep.results import (
+    FrequencySweepProgressSummary,
+    FrequencySweepResult,
+    FrequencySweepRowSummary,
+    ResultProgressSummary,
+    ResultRowSummary,
+    Sweep1DProgressSummary,
+    Sweep1DRowSummary,
+    Sweep2DProgressSummary,
+    Sweep2DRowSummary,
+    SweepResult1D,
+    SweepResult2D,
+    WorkflowResult,
+    require_workflow_result,
 )
 
 ROLE_SIGNAL = DatasetRole("signal")
@@ -94,10 +109,15 @@ def result_row_role_names(result: object, flux_idx: int) -> tuple[str, ...]:
     return tuple(str(role) for role in _result_row_values(result, int(flux_idx)))
 
 
-def load_node_result(
-    path: str, node_type: str
-) -> QubitFreqResult | Sweep1DResult | Sweep2DResult:
-    """Load a node HDF5 file back into its typed sweep Result."""
+def load_node_result(path: str, node_type: str) -> WorkflowResult:
+    """Load a node HDF5 path into a framework-owned sweep data record.
+
+    node_type is retained for caller context; role sets determine representation.
+    The returned record satisfies the same Protocol as the experiment's Result,
+    including NaN rows. It does not allocate or construct an experiment class.
+    Raise ValueError for unknown roles, inconsistent axes or data shapes;
+    propagate file/IO errors. No archive or input data is mutated.
+    """
     del node_type
     grouped = load_grouped_labber_data(path)
     roles = grouped.roles
@@ -124,22 +144,48 @@ def read_result_row(
 
 
 def result_declaration(result_or_type: object) -> _ResultDeclaration:
-    """Return the single Result declaration for a Result instance or class."""
+    """Return the archive declaration named by an instance/class result_kind.
+
+    Classes need only a supported literal kind; they need not allocate arrays.
+    Instances must also satisfy the corresponding Protocol, float64 dtypes and
+    axis/array shapes. TypeError rejects missing/unknown kind or invalid fields;
+    ValueError rejects inconsistent shapes. No data is modified.
+    """
     if isinstance(result_or_type, type):
-        for declaration in _RESULT_DECLARATIONS:
-            if issubclass(result_or_type, declaration.result_type):
-                return declaration
-        type_name = result_or_type.__name__
+        kind: object = getattr(result_or_type, "result_kind", None)
     else:
+        kind = require_workflow_result(result_or_type).result_kind
+    if isinstance(kind, str):
         for declaration in _RESULT_DECLARATIONS:
-            if isinstance(result_or_type, declaration.result_type):
+            if kind == declaration.kind:
                 return declaration
-        type_name = type(result_or_type).__name__
-    raise TypeError(f"unsupported autofluxdep Result type {type_name}")
+    raise TypeError(f"unsupported autofluxdep Result kind {kind!r}")
 
 
-def result_row_summary(result: object, flux_idx: int) -> dict[str, float | None]:
-    """Return the small per-row scalar summary stored in the journal."""
+@overload
+def result_row_summary(
+    result: FrequencySweepResult, flux_idx: int
+) -> FrequencySweepRowSummary: ...
+
+
+@overload
+def result_row_summary(result: SweepResult1D, flux_idx: int) -> Sweep1DRowSummary: ...
+
+
+@overload
+def result_row_summary(result: SweepResult2D, flux_idx: int) -> Sweep2DRowSummary: ...
+
+
+@overload
+def result_row_summary(result: WorkflowResult, flux_idx: int) -> ResultRowSummary: ...
+
+
+def result_row_summary(result: WorkflowResult, flux_idx: int) -> ResultRowSummary:
+    """Return this representation's journal scalars at the zero-based flux_idx.
+
+    Non-finite scalars become None. Raise IndexError for a negative or out-of-range
+    index; invalid kind/fields/dtype/shape use result_declaration's error contract.
+    """
     declaration = result_declaration(result)
     idx = int(flux_idx)
     return {
@@ -148,8 +194,28 @@ def result_row_summary(result: object, flux_idx: int) -> dict[str, float | None]
     }
 
 
-def result_progress_summary(result: object) -> dict[str, Any]:
-    """Return the remote progress summary for one node Result.
+@overload
+def result_progress_summary(
+    result: FrequencySweepResult,
+) -> FrequencySweepProgressSummary: ...
+
+
+@overload
+def result_progress_summary(result: SweepResult1D) -> Sweep1DProgressSummary: ...
+
+
+@overload
+def result_progress_summary(result: SweepResult2D) -> Sweep2DProgressSummary: ...
+
+
+@overload
+def result_progress_summary(result: WorkflowResult) -> ResultProgressSummary: ...
+
+
+def result_progress_summary(result: WorkflowResult) -> ResultProgressSummary:
+    """Return this representation's typed remote progress without mutating data.
+
+    Invalid kind/fields/dtype/shape use result_declaration's error contract.
 
     ``n_measured`` counts rows whose primary raw signal contains finite data.
     ``fit_summary.n_fitted`` counts rows whose declaration's primary fit scalar is

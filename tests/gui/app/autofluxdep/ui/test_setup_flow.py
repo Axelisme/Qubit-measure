@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication, QCheckBox, QLineEdit, QPushButton, QSpinBox
-from zcu_tools.gui.app.autofluxdep.app import AutoFluxDepGuiBehavior, build_core
+from zcu_tools.gui.app.autofluxdep.app import AutoFluxDepGuiBehavior
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.services import create_persistence_caretaker
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
@@ -21,6 +21,8 @@ from zcu_tools.gui.session.services.project_settings import (
 )
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 
 @dataclass(frozen=True)
@@ -77,7 +79,9 @@ def relaunched(qapp: QApplication, tmp_path: Path) -> Iterator[_Relaunched]:
     win = MainWindow(ctrl)
     _restore(ctrl, cache_dir)
     win.restore_workflow_view()
-    behavior = AutoFluxDepGuiBehavior(project_root=str(tmp_path))
+    behavior = AutoFluxDepGuiBehavior(
+        ctrl.experiment_catalog, project_root=str(tmp_path)
+    )
     behavior.after_show(GuiAssembly(controller=ctrl, window=win, control_adapter=None))
     qapp.processEvents()
     yield _Relaunched(ctrl, win, tmp_path, cache_dir)

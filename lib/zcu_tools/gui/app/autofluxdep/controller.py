@@ -32,7 +32,7 @@ from qtpy.QtCore import (
     Signal,  # type: ignore[attr-defined]
 )
 
-from zcu_tools.experiment.v2_gui.autofluxdep.catalog import create_placement
+from zcu_tools.gui.app.autofluxdep.catalog import ExperimentCatalog
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -196,17 +196,28 @@ class _RunEventEmitter(QObject):
 
 
 class Controller(SessionControllerMixin):
+    """Compose session services and edit/run a workflow with the supplied catalog.
+
+    state and bus belong to this app instance. catalog supplies all measurement
+    placements, including saved-workflow restore. Optional io_manager and
+    progress_transport replace their default session collaborators; project_root
+    anchors default paths (None uses cwd). Construction creates no hardware
+    connection. Call quiesce_background before releasing a controller.
+    """
+
     def __init__(
         self,
         state: AutoFluxDepState,
         bus: EventBus,
         *,
+        catalog: ExperimentCatalog,
         io_manager: IOManager | None = None,
         progress_transport: ProgressTransport | None = None,
         project_root: str | None = None,
     ) -> None:
         self._state = state
         self._bus = bus
+        self._experiment_catalog = catalog
         self._cur_idx = 0  # current flux index during a run (for POINT_DONE)
         self._run_events = _RunEventEmitter(self)
         self._active_run_token: int | None = None
@@ -288,6 +299,11 @@ class Controller(SessionControllerMixin):
         self._settings_svc = session.settings
 
     # --- read-only accessors for the UI ---
+
+    @property
+    def experiment_catalog(self) -> ExperimentCatalog:
+        """Return the injected measurement catalog for menu and restore lookup."""
+        return self._experiment_catalog
 
     @property
     def state(self) -> AutoFluxDepState:
@@ -497,7 +513,7 @@ class Controller(SessionControllerMixin):
         for index, persisted in enumerate(state.workflow.nodes):
             subject = f"node[{index}] {persisted.name!r}"
             try:
-                node = create_placement(persisted.type_name)
+                node = self._experiment_catalog.create_placement(persisted.type_name)
                 node.name = self._unique_name(persisted.name or node.name)
                 node.enabled = persisted.enabled
                 node.schema.restore_persisted_raw(persisted.cfg_raw)
@@ -721,7 +737,9 @@ class Controller(SessionControllerMixin):
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
         """
         self._require_workflow_editable()
-        node = create_placement(type_name, ctx=self._state.session_env)
+        node = self._experiment_catalog.create_placement(
+            type_name, ctx=self._state.session_env
+        )
         node.name = self._unique_name(node.name)
         self._state.append_node(node)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)

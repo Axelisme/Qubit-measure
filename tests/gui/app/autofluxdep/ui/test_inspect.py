@@ -18,11 +18,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.session.events import MdChangedPayload
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller

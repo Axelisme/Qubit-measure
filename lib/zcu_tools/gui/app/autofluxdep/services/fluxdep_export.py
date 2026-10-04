@@ -9,10 +9,11 @@ from numpy.typing import NDArray
 
 from zcu_tools.datafile import save_labber_data
 from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
+from zcu_tools.gui.app.autofluxdep.results import FrequencySweepResult
 
 
 def export_qubit_freq_fluxdep_spectrum(
-    result: QubitFreqResult,
+    result: FrequencySweepResult,
     filepath: str | Path,
     *,
     flux_unit: str = "",

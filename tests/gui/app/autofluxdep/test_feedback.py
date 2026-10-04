@@ -8,12 +8,13 @@ measured trend instead of hiding IDW inside the predictor.
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.feedback import IdwEstimator
 from zcu_tools.gui.app.autofluxdep.tools import (
     FluxoniumPredictorAdapter,
     SimplePredictor,
 )
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 # --- SimplePredictor: base fallback, no hidden residual correction ---
 

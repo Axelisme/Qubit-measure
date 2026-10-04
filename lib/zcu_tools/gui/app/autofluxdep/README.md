@@ -1,11 +1,14 @@
 # `gui/app/autofluxdep/` — Autofluxdep app
 
-**Last updated:** 2026-10-02 — run-owned named figures
+**Last updated:** 2026-10-05，顯式 catalog 注入與結果契約
 
-這個 app 擁有 autofluxdep GUI shell、workflow 編排、run lifecycle、artifact 與 UI；
-[concrete experiment、catalog 與共用量測 mechanics](../../../experiment/v2_gui/autofluxdep/README.md)
-由 `experiment/v2_gui/autofluxdep/` 擁有。兩者透過本 app 的 Builder／Node／RunEnv 契約接合，
-不把實驗政策放進 Orchestrator。
+這個 app 擁有 autofluxdep GUI shell、workflow 編排、run lifecycle、artifact 與 UI。
+`catalog.py` 提供通用 ExperimentCatalog，組合根從 `zcu_lab.autofluxdep_catalog` 取得 measurement declarations，
+再傳入 build_core 或 GUI behavior。Controller 的 restore 與 node-list 共用同一個注入 catalog。
+[Concrete experiments 與共用量測 mechanics](../../../experiment/v2_gui/autofluxdep/README.md)
+實作本 app 的 Builder／Node／RunEnv 契約，不把實驗政策放進 Orchestrator。
+`results.py` 定義三種 archive representation 的 Protocol 與 typed summaries。
+Concrete Result 以 class-level result_kind 宣告表示，不用 Builder 名稱推測 archive schema。
 
 ## Workflow 與執行契約
 

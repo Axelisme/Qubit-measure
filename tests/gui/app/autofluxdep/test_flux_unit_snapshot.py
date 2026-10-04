@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
 from zcu_tools.gui.app.autofluxdep.services.run_setup import resolve_flux_device_unit
@@ -24,6 +23,8 @@ from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
     export_sample_table_from_artifact,
 )
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from ._helpers import connect_mock, make_measurement_builder
 

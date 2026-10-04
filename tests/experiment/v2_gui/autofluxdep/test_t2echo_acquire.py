@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import T2EchoBuilder
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import SweepValue
 
@@ -23,6 +22,7 @@ from tests.gui.app.autofluxdep._helpers import (
     mock_flux_predictor,
     node_schema,
 )
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 # sweep_range overrides the schema default's 121 pts → 61 pts for test speed;
 # the production default stays at 121 in the node schema.

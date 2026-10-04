@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -26,6 +25,7 @@ from tests.gui.app.autofluxdep._helpers import (
     make_acquire_env,
     node_schema,
 )
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 # The stricter legacy feedback gate needs a clean mock fringe; high_snr_simparams
 # keeps this as a real acquire/fit test without paying extra rounds.

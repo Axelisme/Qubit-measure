@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import RoOptimizeBuilder
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import CenteredSweepValue
 
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 from tests.gui.app.autofluxdep._helpers import (
     calibrated_drive_pulse,
     connect_mock,

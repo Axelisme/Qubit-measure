@@ -56,6 +56,18 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, Notify
 
 
+def build_test_core(
+    project: ProjectInfo | None = None,
+    project_root: str | None = None,
+) -> Controller:
+    """Build a test controller with an explicitly injected production catalog."""
+    from zcu_tools.gui.app.autofluxdep.app import build_core
+
+    from zcu_lab.autofluxdep_catalog import build_catalog
+
+    return build_core(build_catalog(), project, project_root=project_root)
+
+
 def make_run_context(
     *,
     soc: Any = None,

@@ -8,8 +8,9 @@ None when no source is picked). No real acquire here — only the wiring.
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from ._helpers import connect_mock, make_builder, run_controller_to_completion
 

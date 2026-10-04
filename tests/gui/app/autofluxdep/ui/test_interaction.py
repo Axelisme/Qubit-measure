@@ -27,7 +27,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QSizePolicy,
     QWidget,
 )
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.controller import FLUX_PROGRESS_LABEL
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -55,6 +54,7 @@ from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialogState
 
 from tests.gui._dialog_fakes import DialogCall, RecordingDialogPresenter
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from .._helpers import connect_mock, make_builder, make_measurement_builder
 

@@ -13,10 +13,10 @@ from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
     QubitFreqResult,
     Sweep1DResult,
 )
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
+from zcu_tools.gui.app.autofluxdep.results import SweepResult1D
 from zcu_tools.gui.app.autofluxdep.services import run_store as run_store_module
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
 from zcu_tools.gui.app.autofluxdep.services.run_store import (
@@ -28,6 +28,8 @@ from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.cfg import ScalarSpec
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from ._helpers import (
     make_builder,
@@ -143,7 +145,7 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     loaded = load_node_result(
         store.data_dir / manifest["files"]["nodes"][0]["path"], "probe"
     )
-    assert isinstance(loaded, Sweep1DResult)
+    assert isinstance(loaded, SweepResult1D)
     np.testing.assert_allclose(loaded.signal[0], [1.0, 2.0])
     assert (store.run_dir / "report.md").is_file()
 
@@ -301,7 +303,7 @@ def test_run_store_rejects_non_json_safe_module_snapshot(tmp_path):
     loaded = load_node_result(
         store.data_dir / manifest["files"]["nodes"][0]["path"], "probe"
     )
-    assert isinstance(loaded, Sweep1DResult)
+    assert isinstance(loaded, SweepResult1D)
     assert np.isnan(loaded.signal[0]).all()
     assert load_journal_events(store.run_dir / "journal.jsonl") == []
 
@@ -474,7 +476,7 @@ def test_run_store_rejects_nonfinite_patch_value_before_hdf5_write(tmp_path):
     loaded = load_node_result(
         store.data_dir / manifest["files"]["nodes"][0]["path"], "probe"
     )
-    assert isinstance(loaded, Sweep1DResult)
+    assert isinstance(loaded, SweepResult1D)
     assert np.isnan(loaded.signal[0]).all()
     assert load_journal_events(store.run_dir / "journal.jsonl") == []
 

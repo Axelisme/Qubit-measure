@@ -24,6 +24,7 @@ from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
     Sweep2DResult,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
+from zcu_tools.gui.app.autofluxdep.results import FrequencySweepResult
 from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
     relative_to_artifact,
     safe_artifact_slug,
@@ -250,7 +251,7 @@ def export_qubit_freq_labber_browser_sidecar(
     index: int,
     node_name: str,
     node_type: str,
-    result: QubitFreqResult,
+    result: FrequencySweepResult,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
     """Write the qubit_freq Labber Browser sidecar once its frequency grid is known."""
