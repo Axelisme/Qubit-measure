@@ -23,6 +23,19 @@ from .schema import (
 )
 
 
+def _nested_model(annotation: object) -> type[BaseModel] | None:
+    if get_origin(annotation) in (Union, UnionType):
+        alternatives = tuple(
+            item for item in get_args(annotation) if item is not type(None)
+        )
+        if len(alternatives) != 1:
+            return None
+        annotation = alternatives[0]
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    return None
+
+
 def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     result: dict[FieldPath, UnitSpec] = {}
     for name, field in model.model_fields.items():
@@ -38,9 +51,9 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
                     raise TypeError(f"Unit metadata requires a numeric field: {name}")
                 metadata.validate()
                 result[(name,)] = metadata
-        annotation = field.annotation
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            for path, spec in _model_units(annotation).items():
+        nested_model = _nested_model(field.annotation)
+        if nested_model is not None:
+            for path, spec in _model_units(nested_model).items():
                 result[(name, *path)] = spec
     return result
 
@@ -49,8 +62,14 @@ def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
     fields: dict[str, tuple[object, FieldInfo]] = {}
     for name, field in model.model_fields.items():
         annotation = field.annotation
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            annotation = _partial_model(annotation)
+        nested_model = _nested_model(annotation)
+        if nested_model is not None:
+            partial_nested = _partial_model(nested_model)
+            annotation = (
+                partial_nested | None
+                if type(None) in get_args(annotation)
+                else partial_nested
+            )
         defer_required = name != "kind" and field.is_required()
         if defer_required or annotation is not field.annotation:
             partial_field = deepcopy(field)
