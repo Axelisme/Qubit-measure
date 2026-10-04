@@ -38,13 +38,17 @@ def test_draft_attribute_and_path_validation_reject_bad_values_without_tainting_
     entry.setup.add_component("R1", kind="resonator", freq=6500.0, wiring={"ch": 1})
     with entry.setup.edit() as draft:
         draft.description = "the remaining valid draft may commit"
-        with pytest.raises(ValidationError):
+
+        def perform_operation() -> None:
             if method == "path":
                 draft.set(f"R1.{field}", "invalid")
             elif field == "freq":
                 draft.R1.freq = "invalid"
             else:
                 draft.R1.wiring.ch = "invalid"
+
+        with pytest.raises(ValidationError):
+            perform_operation()
         assert draft.R1.freq == pytest.approx(6500.0)
         assert draft.R1.wiring.ch == 1
 
