@@ -1084,6 +1084,88 @@ def test_sequence_edits_conflict_as_a_whole_without_losing_future_nodes(
     assert second.snapshot().values[0].right == 20.0
 
 
+def test_duplicate_subscriptions_can_be_independently_and_idempotently_removed(
+    document_path: Path,
+) -> None:
+    store = make_store(document_path)
+    events: list[DocumentChange] = []
+    callback = events.append
+    remove_first = store.subscribe(callback)
+    remove_second = store.subscribe(callback)
+
+    with store.edit() as draft:
+        draft.values["left"] = 10.0
+    assert len(events) == 2
+    assert events[0] == events[1]
+
+    remove_first()
+    remove_first()
+    with store.edit() as draft:
+        draft.values["right"] = 20.0
+    assert len(events) == 3
+    assert events[-1].paths == (("values", "right"),)
+
+    remove_second()
+    with store.edit() as draft:
+        draft.values["left"] = 30.0
+    assert len(events) == 3
+
+
+def test_empty_edit_adopts_latest_disk_snapshot_without_commit_notification(
+    document_path: Path,
+) -> None:
+    first = make_store(document_path)
+    second = make_store(document_path)
+    events: list[DocumentChange] = []
+    first.subscribe(events.append)
+
+    with first.edit():
+        with second.edit() as draft:
+            draft.values["left"] = 10.0
+        committed = document_path.read_bytes()
+        assert first.snapshot().values["left"] == 1.0
+
+    assert first.snapshot().values["left"] == 10.0
+    assert document_path.read_bytes() == committed
+    assert events == []
+    assert first.refresh() is False
+
+
+def test_sequence_presence_survives_nested_deletion_append_and_explicit_null(
+    document_path: Path,
+) -> None:
+    document_path.write_text(
+        document_path.read_text(encoding="utf-8")
+        + "groups:\n  - ext: {old: 1.0}\n  - {}\n",
+        encoding="utf-8",
+    )
+    store = make_sequenced_groups_store(document_path)
+    with store.edit() as draft:
+        del draft.groups[0].ext["old"]
+        draft.groups[0].ext["new"] = 2.0
+        draft.groups[1].description = None
+        draft.groups[1].ext["in_place"] = 3.0
+        appended = OptionalGeneral()
+        appended.ext["appended"] = 4.0
+        draft.groups.append(appended)
+
+    expected = [
+        {"ext": {"new": 2.0}},
+        {"description": None, "ext": {"in_place": 3.0}},
+        {"ext": {"appended": 4.0}},
+    ]
+    persisted = YAML(typ="safe").load(document_path.read_text(encoding="utf-8"))
+    assert persisted["groups"] == expected
+    reopened = make_sequenced_groups_store(document_path).snapshot()
+    assert [group.ext for group in reopened.groups] == [
+        {"new": 2.0},
+        {"in_place": 3.0},
+        {"appended": 4.0},
+    ]
+    assert "description" in reopened.groups[1].model_fields_set
+    assert "description" not in reopened.groups[2].model_fields_set
+
+
 def test_unchanged_nan_extension_roundtrips_without_a_false_change(
     document_path: Path,
 ) -> None:
