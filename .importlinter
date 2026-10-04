@@ -104,3 +104,123 @@ forbidden_modules =
     zcu_tools.gui.result_scope
     zcu_tools.gui.runtime
     zcu_tools.gui.version_table
+
+# ---------------------------------------------------------------------------
+# docs/adr/draft/module-boundaries.md: package roles and dependency direction.
+# Debt baselines list exact module pairs, each group naming who removes it.
+# Wildcards appear only for legitimate exceptions marked "not debt".
+# ---------------------------------------------------------------------------
+
+[importlinter:contract:layers]
+name = C8: frontends over the experiment framework over capability modules
+type = layers
+layers =
+    zcu_tools.gui : zcu_tools.notebook : zcu_tools.mcp
+    zcu_tools.experiment
+    zcu_tools.datafile : zcu_tools.device : zcu_tools.program : zcu_tools.analysis : zcu_tools.plotting : zcu_tools.simulate : zcu_tools.resources : zcu_tools.cfg_model : zcu_tools.utils : zcu_tools.progress_bar : zcu_tools.qick_remote
+ignore_imports =
+    # Not debt until D80 moves them to zcu_lab: GUI adapters living under experiment/ (see C1).
+    zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
+    zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
+    # Debt: make_sweep is not notebook-specific; it moves into the experiment framework (backlog).
+    zcu_tools.experiment.v2.autofluxdep.lenrabi -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.ro_optimize -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.t1 -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.t2echo -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.t2ramsey -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.twotone.time_domain.cpmg -> zcu_tools.notebook.utils
+
+[importlinter:contract:top-level-acyclic]
+name = C9: top-level packages form no import cycle
+type = acyclic_siblings
+ancestors =
+    zcu_tools
+depth = 0
+ignore_imports =
+    # Not debt until D80 moves them to zcu_lab (see C1, C8).
+    zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
+    zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
+    # Debt, see C8.
+    zcu_tools.experiment.v2.autofluxdep.lenrabi -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.ro_optimize -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.t1 -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.t2echo -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.autofluxdep.t2ramsey -> zcu_tools.notebook.utils
+    zcu_tools.experiment.v2.twotone.time_domain.cpmg -> zcu_tools.notebook.utils
+    # Debt, see C10.
+    zcu_tools.resources.context.library -> zcu_tools.program.v2
+
+[importlinter:contract:stateful-independent]
+name = C10: stateful capability modules do not import each other
+type = independence
+modules =
+    zcu_tools.program
+    zcu_tools.resources
+    zcu_tools.device
+    zcu_tools.qick_remote
+ignore_imports =
+    # Debt: cfg schema moves to the cfg_model kernel; removed with storage-redesign's
+    # module library and the zcu_lab move (stage 2).
+    zcu_tools.resources.context.library -> zcu_tools.program.v2
+    # Debt: program depends on cfg_model Protocols instead (stage 1, backlog).
+    zcu_tools.program.v2.modules -> zcu_tools.resources.context
+    zcu_tools.program.v2.modules.base -> zcu_tools.resources.context
+    zcu_tools.program.v2.modules.waveform -> zcu_tools.resources.context
+    zcu_tools.program.v2.modules.waveform -> zcu_tools.resources.waveform_assets
+    zcu_tools.program.v2.sim.waveforms -> zcu_tools.resources.waveform_assets
+    # Debt, see C12.
+    zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
+
+[importlinter:contract:cfg-kernel-external-only]
+name = C11: the cfg_model kernel depends only on utils
+type = forbidden
+source_modules =
+    zcu_tools.cfg_model
+forbidden_modules =
+    zcu_tools.analysis
+    zcu_tools.datafile
+    zcu_tools.device
+    zcu_tools.experiment
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+    zcu_tools.plotting
+    zcu_tools.program
+    zcu_tools.progress_bar
+    zcu_tools.qick_remote
+    zcu_tools.resources
+    zcu_tools.simulate
+
+[importlinter:contract:tools-no-stateful]
+name = C12: stable tools do not depend on stateful capability modules
+type = forbidden
+source_modules =
+    zcu_tools.analysis
+    zcu_tools.datafile
+    zcu_tools.plotting
+    zcu_tools.progress_bar
+    zcu_tools.simulate
+    zcu_tools.utils
+forbidden_modules =
+    zcu_tools.device
+    zcu_tools.program
+    zcu_tools.qick_remote
+    zcu_tools.resources
+ignore_imports =
+    # Debt: predict takes numeric parameters from its caller (backlog).
+    zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
+
+[importlinter:contract:mcp-remote-only]
+name = C13: mcp uses only the GUI remote contract
+type = forbidden
+source_modules =
+    zcu_tools.mcp
+forbidden_modules =
+    zcu_tools.gui
+ignore_imports =
+    # Not debt: the shared remote transport and each app's wire specs (ADR-0068).
+    zcu_tools.mcp.** -> zcu_tools.gui.remote.**
+    zcu_tools.mcp.** -> zcu_tools.gui.app.*.remote.**
+    zcu_tools.mcp.** -> zcu_tools.gui.app.autofluxdep.services.remote.**
+    # Debt: logging setup is not part of the remote contract (backlog).
+    zcu_tools.mcp.measure.server -> zcu_tools.gui.logging_setup
