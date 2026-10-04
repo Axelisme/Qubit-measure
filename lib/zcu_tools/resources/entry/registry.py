@@ -12,7 +12,7 @@ from pydantic.fields import FieldInfo
 
 from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
-from .errors import UnknownFieldError, UnknownKindError
+from .errors import MissingReferenceError, UnknownFieldError, UnknownKindError
 from .schema import (
     ComponentSchema,
     CurrentSourceSchema,
@@ -160,6 +160,23 @@ class ComponentRegistry:
                 and issubclass(annotation, BaseModel)
             ):
                 self.check_fields(annotation, value, path=f"{path}.{name}")
+
+    def validate_references(
+        self, components: Mapping[str, ComponentSchema], *, source: Path
+    ) -> None:
+        """Reject supplied references that do not name a component in this document."""
+        for name, component in components.items():
+            self.get(component.kind, source=source, component=name)
+            for field in self._references[component.kind]:
+                target: object = component
+                for part in field.split("."):
+                    target = (
+                        getattr(target, part, None)
+                        if isinstance(target, BaseModel)
+                        else None
+                    )
+                if isinstance(target, str) and target not in components:
+                    raise MissingReferenceError(source, name, field, target)
 
     def units(
         self, kind: str, *, source: Path | None = None, component: str | None = None

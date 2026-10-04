@@ -104,6 +104,9 @@ class ResultEntry:
         return result
 
     def _validate_setup(self, document: SetupDocument) -> None:
+        component_registry.validate_references(
+            document.components, source=self._result_path / "setup.yaml"
+        )
         if self._entry_id is None:
             self._entry_id = document.general.entry_id
         elif document.general.entry_id != self._entry_id:
