@@ -38,7 +38,7 @@ def test_description_alias_and_general_path_validate_before_changing_the_draft(
 
         def perform_operation() -> None:
             if method == "attribute":
-                setattr(draft, "description", 123)
+                setattr(draft, "description", 123)  # noqa: B010 -- Invalid runtime input to a typed property.
             else:
                 draft.set("general.description", 123)
 
