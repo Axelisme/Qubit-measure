@@ -220,7 +220,15 @@ def _analysis_step(
     if execution is None:
         return _step(start["status"] if start else "not_started", start)
     outcome = execution.get("operation_outcome")
-    return _step(outcome["status"] if outcome else execution["status"], outcome)
+    if outcome is not None:
+        return _step(outcome["status"], outcome)
+    receipt = execution["start"]
+    return _step(
+        "interactive"
+        if execution["op"] is not None and execution["status"] == "interactive"
+        else receipt["status"],
+        receipt,
+    )
 
 
 def _analysis_save_step(execution: dict[str, Any] | None) -> StepReply:

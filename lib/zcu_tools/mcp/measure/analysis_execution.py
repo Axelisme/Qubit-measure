@@ -51,11 +51,18 @@ class ExecutionError:
 
 
 @dataclass(frozen=True)
+class AnalysisStart:
+    status: Literal["not_started", "unknown", "running"] = "not_started"
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class ExecutionSnapshot:
     execution: str
     tab: str
     stage: AnalysisStage
-    op: int
+    op: int | None
+    start: AnalysisStart = field(default_factory=AnalysisStart)
     status: ExecutionStatus = "running"
     phase: ExecutionPhase = "operation"
     cancel_requested: bool = False
@@ -255,6 +262,37 @@ class AnalysisExecution:
                 status="running" if done else self._snapshot.status,
             )
             self._condition.notify_all()
+
+    def admit_start(self) -> None:
+        """Mark ambiguity at dispatch, not when the execution is registered."""
+        with self._condition:
+            if self._closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+            self._snapshot = replace(self._snapshot, start=AnalysisStart("unknown"))
+            self._condition.notify_all()
+
+    def observe_start(self, started: dict[str, Any]) -> None:
+        """Attach a delivered receipt to the already queryable execution."""
+        with self._condition:
+            self._invalidated = deepcopy(started["invalidated_on_success"])
+            self._snapshot = replace(
+                self._snapshot,
+                op=started["handle"],
+                start=AnalysisStart("running"),
+                params=deepcopy(started["params"]),
+                status="interactive" if started.get("interactive") else "running",
+            )
+            self._condition.notify_all()
+
+    def fail_start(self, exc: Exception) -> None:
+        """Keep sent requests ambiguous unless GUI explicitly rejects admission."""
+        with self._condition:
+            if isinstance(exc, GuiRpcError) and exc.request_rejected:
+                self._snapshot = replace(
+                    self._snapshot,
+                    start=AnalysisStart("not_started", exc.reason or exc.code),
+                )
+        self._fail(exc)
 
     def start(self) -> None:
         """Called under the registry lock, so close cannot miss an admitted worker."""
@@ -484,14 +522,14 @@ class AnalysisExecutions:
         connection: GuiConnection,
         tab: str,
         stage: AnalysisStage,
-        started: dict[str, Any],
+        started: dict[str, Any] | None = None,
         *,
         interaction: dict[str, Any] | None = None,
     ) -> AnalysisExecution:
         """Retain the delivered start receipt, even when close wins admission."""
         with self._lock:
-            op = started["handle"]
-            if op in self._by_op:
+            op = started["handle"] if started is not None else None
+            if op is not None and op in self._by_op:
                 return self._by_op[op]
             execution = AnalysisExecution(
                 ExecutionSnapshot(
@@ -499,20 +537,41 @@ class AnalysisExecutions:
                     tab=tab,
                     stage=stage,
                     op=op,
-                    params=deepcopy(started["params"]),
-                    status="interactive" if started.get("interactive") else "running",
+                    start=AnalysisStart("running" if op is not None else "not_started"),
+                    params=deepcopy(started["params"]) if started is not None else None,
+                    status="interactive"
+                    if started is not None and started.get("interactive")
+                    else "running",
                     interaction=deepcopy(interaction),
                 ),
                 connection,
                 self._session,
                 self._closed,
-                deepcopy(started["invalidated_on_success"]),
+                deepcopy(started["invalidated_on_success"])
+                if started is not None
+                else None,
             )
             self._next_id += 1
-            self._by_op[op] = execution
             self._by_id[execution.snapshot().execution] = execution
-            execution.start()
+            if op is not None:
+                self._by_op[op] = execution
+                execution.start()
             return execution
+
+    def accept_start(
+        self, execution: AnalysisExecution, started: dict[str, Any]
+    ) -> None:
+        """Bind a late receipt without creating a second completion owner."""
+        with self._lock:
+            op = started["handle"]
+            if op in self._by_op and self._by_op[op] is not execution:
+                raise GuiRpcError(
+                    "Analysis operation already has a completion owner",
+                    reason="incompatible_wire",
+                )
+            execution.observe_start(started)
+            self._by_op[op] = execution
+            execution.start()
 
     def for_op(self, op: int) -> AnalysisExecution | None:
         """Find an existing completion owner without creating a new job."""
@@ -539,12 +598,12 @@ class AnalysisExecutions:
         """Permanently reject new workers and wake existing ones."""
         self._closed.set()
         with self._lock:
-            for execution in self._by_op.values():
+            for execution in self._by_id.values():
                 execution.wake()
 
     def join(self) -> None:
         """Join admitted workers after transport disconnect, before PNG cleanup."""
         with self._lock:
-            executions = list(self._by_op.values())
+            executions = list(self._by_id.values())
         for execution in executions:
             execution.join()

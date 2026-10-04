@@ -24,11 +24,18 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
         raise ValueError("params must be an object")
     method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
     ctx = ctx.bound()
-    started = ctx.send_gui_rpc(method, {"tab_id": tab, "updates": params})
-    execution = ctx.session.executions.start(ctx.gui, tab, stage, started)
-    if started["interactive"]:
-        handoff_interaction(ctx, execution)
-    reply = execution.wait(0 if started["interactive"] else 2.0)
+    execution = ctx.session.executions.start(ctx.gui, tab, stage)
+    try:
+        started = ctx.gui.send_gui_rpc(
+            method, {"tab_id": tab, "updates": params}, before_send=execution.admit_start
+        )
+        ctx.session.executions.accept_start(execution, started)
+    except Exception as exc:  # noqa: BLE001 - retain the start attempt and its partial facts
+        execution.fail_start(exc)
+    else:
+        if started["interactive"]:
+            handoff_interaction(ctx, execution)
+    reply = execution.wait(0 if execution.snapshot().status == "interactive" else 2.0)
     return ToolReply(project_execution(reply.data), reply.images, reply.is_error)
 
 
