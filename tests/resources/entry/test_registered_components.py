@@ -4,10 +4,10 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Self
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import UnitSpec
@@ -111,6 +111,47 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     results, database = tmp_path / "results", tmp_path / "Database"
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     return entry, results, database
+
+
+def test_partial_setup_defers_model_invariants_but_preserves_field_constraints(
+    tmp_path: Path,
+    registry_state_guard: None,
+) -> None:
+    class LinewidthSchema(ComponentSchema):
+        freq: Annotated[float, UnitSpec("Hz", "MHz"), Field(gt=0)]
+        kappa: Annotated[float, UnitSpec("Hz", "MHz")]
+
+        @model_validator(mode="after")
+        def check_linewidth(self) -> Self:
+            if self.kappa >= self.freq:
+                raise ValueError("linewidth must be below frequency")
+            return self
+
+    with registered_model("notebook/linewidth", LinewidthSchema) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("R1", kind=kind)
+        entry.setup.R1.freq = 5000.0
+        entry.setup.R1.kappa = 6000.0
+        with entry.setup.edit() as draft:
+            draft.set("R1.freq", 4900.0)
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        reopened.setup.refresh()
+        assert reopened.setup.R1.freq == pytest.approx(4900.0)
+        assert reopened.setup.R1.kappa == pytest.approx(6000.0)
+        source = results / "entry" / "setup.yaml"
+        persisted = YAML(typ="safe").load(source)
+        assert persisted["components"]["R1"]["freq"] == pytest.approx(4.9e9)
+        assert persisted["components"]["R1"]["kappa"] == pytest.approx(6e9)
+        before = source.read_bytes()
+        with pytest.raises(ValidationError, match="freq"):
+            reopened.setup.R1.freq = -1.0
+        assert source.read_bytes() == before
+        assert reopened.setup.R1.freq == pytest.approx(4900.0)
+        original_model = component_registry.get(kind)
+        with pytest.raises(ValidationError, match="linewidth"):
+            original_model.model_validate({"kind": kind, "freq": 4.9e9, "kappa": 6e9})
 
 
 @pytest.mark.parametrize("value", ["not a width", None])
