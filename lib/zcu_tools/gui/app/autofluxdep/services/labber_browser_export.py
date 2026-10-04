@@ -254,7 +254,16 @@ def export_qubit_freq_labber_browser_sidecar(
     result: FrequencySweepResult,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
-    """Write the qubit_freq Labber Browser sidecar once its frequency grid is known."""
+    """Write a frequency-spectrum sidecar and return its manifest entry.
+
+    data_root is the run directory whose name starts with YYYYMMDD-. index is
+    the zero-based workflow position; node_name and node_type identify the node
+    in metadata. result follows FrequencySweepResult; committed_mask selects
+    persisted rows and has shape (n_flux,). No input arrays are mutated.
+    Raise TypeError for invalid result kind/fields/dtypes and ValueError for
+    inconsistent shapes/mask, an invalid root or an unusable frequency grid.
+    File/IO errors propagate. Existing sidecar naming and axis units are retained.
+    """
     return _export_qubit_freq(
         Path(data_root),
         labber_browser_root(data_root),

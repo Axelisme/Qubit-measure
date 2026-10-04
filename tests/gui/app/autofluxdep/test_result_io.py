@@ -30,6 +30,9 @@ from zcu_tools.gui.app.autofluxdep.results import (
 from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )
+from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
+    export_qubit_freq_labber_browser_sidecar,
+)
 from zcu_tools.gui.app.autofluxdep.services.result_io import (
     ROLE_BEST_FREQ,
     ROLE_FIT_CURVE,
@@ -162,6 +165,19 @@ def test_external_tagged_result_uses_same_archive_contract(tmp_path):
     np.testing.assert_allclose(spectrum.axes[0].values, result.flux)
     np.testing.assert_allclose(spectrum.z.real[:, 1], result.signal[1])
     assert np.isnan(spectrum.z.real[:, 0]).all()
+
+    root = tmp_path / "20260705-223908_foreign"
+    sidecar = export_qubit_freq_labber_browser_sidecar(
+        data_root=root,
+        index=0,
+        node_name="foreign",
+        node_type="user_measurement",
+        result=loaded,
+        committed_mask=np.array([False, True]),
+    )
+    browser_spectrum = load_labber_data(str(root / sidecar.path))
+    np.testing.assert_allclose(browser_spectrum.z, spectrum.z, equal_nan=True)
+    np.testing.assert_allclose(browser_spectrum.axes[0].values, result.flux)
 
 
 @pytest.mark.parametrize("declaration", [object, _UnknownDeclaration])

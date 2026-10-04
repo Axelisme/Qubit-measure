@@ -19,9 +19,15 @@ def export_qubit_freq_fluxdep_spectrum(
     flux_unit: str = "",
     committed_mask: NDArray[np.bool_] | None = None,
 ) -> str:
-    """Write a fluxdep raw Labber spectrum from a qubit_freq Result.
+    """Write a frequency-sweep record to filepath and return its saved path.
 
-    ``QubitFreqResult`` stores detune-relative columns whose absolute frequency
+    result must satisfy FrequencySweepResult with float64 arrays and consistent
+    shapes. flux_unit labels the device coordinates. committed_mask selects rows
+    to export and must have shape (n_flux,); None selects every row. Input arrays
+    are not mutated. Raise TypeError for invalid kind/fields/dtypes, ValueError
+    for inconsistent shapes/mask or an unusable frequency grid; propagate IO errors.
+
+    The record stores detune-relative columns whose absolute frequency
     is row-local: ``predict_freq[row] + detune[col]``. Fluxdep raw loader accepts
     one common absolute frequency axis, so each committed row is interpolated onto
     a common MHz grid before writing. Values outside a row's measured span remain
