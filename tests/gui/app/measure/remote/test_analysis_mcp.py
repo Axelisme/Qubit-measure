@@ -239,18 +239,31 @@ def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path)
         invoke("connect", {"port": fx.service.port})
         invoke("rpc_call", {"method": "context.snapshot"})
         invoke("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}})
-        with pytest.raises(GuiRpcError, match="threshold") as error:
-            invoke("tab_analyze", {"tab": tab, "params": {"threshold": "bad"}})
-        assert error.value.code == "invalid_params"
-        assert "float" in str(error.value)
-        first = invoke("tab_analyze", {"tab": tab, "params": {"threshold": 0.3}})
+        rejected = invoke(
+            "tab_analyze", {"tab": tab, "params": {"threshold": "bad"}}
+        )
+        assert rejected["status"] == "failed"
+        assert rejected["steps"]["analysis"]["primary"]["status"] == "not_started"
+        assert rejected["error"]["code"] == "invalid_params"
+        assert "threshold" in rejected["error"]["message"]
+        assert "float" in rejected["error"]["message"]
+        assert invoke("status", {"execution": rejected["execution"]}) == rejected
+        initial = invoke("tab_analyze", {"tab": tab, "params": {"threshold": 0.3}})
+        assert initial["analysis"]["primary"]["params"] == {"threshold": 0.3}
+        first = invoke(
+            "status", {"execution": initial["execution"], "detail": "full"}
+        )
         assert first["status"] == "finished"
         assert first["params"] == {"threshold": 0.3}
         assert first["invalidated"] == []
         assert Path(first["figure"]).is_file()
         previous = fx.state.get_tab(tab).analysis.writeback_draft
         assert previous is not None and previous.is_active
-        second = invoke("tab_analyze", {"tab": tab})
+        repeated = invoke("tab_analyze", {"tab": tab})
+        assert repeated["analysis"]["primary"]["params"] == {"threshold": 0.3}
+        second = invoke(
+            "status", {"execution": repeated["execution"], "detail": "full"}
+        )
         assert second["status"] == "finished"
         assert second["params"] == {"threshold": 0.3}
         assert second["invalidated"] == ["analysis.writeback"]
