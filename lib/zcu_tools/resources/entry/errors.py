@@ -39,6 +39,14 @@ class MissingReferenceError(ValueError):
         )
 
 
+class LayerConflictError(ValueError):
+    def __init__(self, path: str, setup_file: Path, point_file: Path) -> None:
+        self.path = path
+        self.setup_file = setup_file
+        self.point_file = point_file
+        super().__init__(f"{path}: present in both {setup_file} and {point_file}")
+
+
 class PartialCommitError(OSError):
     def __init__(
         self,

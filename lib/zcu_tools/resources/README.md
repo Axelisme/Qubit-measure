@@ -1,6 +1,6 @@
 # `zcu_tools.resources` — experiment work resources
 
-**Last updated:** 2026-10-04 — unwired DocumentStore
+**Last updated:** 2026-10-04 — unwired DocumentStore and entry-coordinated commit seams
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
@@ -21,6 +21,8 @@
 - `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開。
 
 `DocumentStore` 擁有單檔交易與 SI／工作單位邊界。Caller 提供文件 model、已知物理欄位與 stderr 的結構路徑，以及整份文件的 validation。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
+
+`resources/_document_commit.py` 管理 resources 內部的 prepared file、replace 與普通失敗復原。DocumentStore 的 draft／prepare／publish 接縫只供同一 resources module 群協調多層提交，不是公開 storage 介面，也不加入 package exports。公開 `edit()` 共用此提交路徑；entry 擁有多層完整驗證與失敗處置。
 
 `zcu_tools.resources` root 不 re-export 任何名稱；caller 從各 owner 的 module 或子 package import。
 

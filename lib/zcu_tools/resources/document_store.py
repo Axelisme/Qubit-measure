@@ -16,14 +16,16 @@ with traceback, rather than reclassifying a completed commit as failed. External
 changes require ``refresh``; this module does not run a file watcher.
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable, Generator, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from enum import Enum
+from io import StringIO
 from math import isnan
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Literal, cast
 
 from filelock import FileLock, Timeout
@@ -32,7 +34,17 @@ from ruamel.yaml import YAML
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
 
-type FieldPath = tuple[str, ...]
+from ._document_commit import DocumentEdit, FieldPath, PreparedDocument, stage_content
+
+__all__ = (
+    "ConflictError",
+    "DocumentChange",
+    "DocumentStore",
+    "FieldPath",
+    "LockTimeoutError",
+    "UnitResolver",
+    "UnitSpec",
+)
 
 _SUPPORTED_VERSION = FormatVersion(1, 0)
 
@@ -304,43 +316,94 @@ class DocumentStore[T: BaseModel]:
 
     @contextmanager
     def edit(self) -> Generator[T]:
+        prepared: PreparedDocument[T] | None = None
+        with ExitStack() as stack:
+            with self.locked():
+                state = stack.enter_context(self.read_state(locked_by=self))
+            yield state.draft
+            try:
+                with self.locked():
+                    prepared = self.prepare(state, locked_by=self)
+                    prepared.replace()
+                    self.publish(prepared, locked_by=self)
+            finally:
+                if prepared is not None:
+                    prepared.discard()
+        if prepared is not None:
+            self.notify_commit(prepared)
+
+    @contextmanager
+    def read_state[_Owner: BaseModel](
+        self, *, locked_by: DocumentStore[_Owner]
+    ) -> Generator[DocumentEdit[T]]:
+        """Resources-only seam; locked_by owns the matching shared FileLock."""
+        self._require_lock(locked_by)
         if self._editing:
             raise RuntimeError(f"{self._path}: nested edits are not allowed")
         self._editing = True
         try:
-            with self.locked():
-                base_document, base = self._read()
-                draft = base.model_copy(deep=True)
-            yield draft
-            base_values, draft_values = _edit_values(base, draft)
-            patches = tuple(_changes(base_values, draft_values))
-            with self.locked():
-                document, _ = self._read()
-                for path, _ in patches:
-                    self._check_conflict(base_document, document, path)
-                for path, value in patches:
-                    merged = _patch_node(
-                        _lookup(document, path), _lookup(base_values, path), value
-                    )
-                    _apply(document, path, merged)
-                # Resolve after structural edits; changed values are still in working units.
-                for path, spec in self._unit_specs(document).items():
-                    if any(path[: len(changed)] == changed for changed, _ in patches):
-                        value = self._scale_value(
-                            _lookup(document, path), _unit_factor(spec), path
-                        )
-                        if not isinstance(value, _Missing):
-                            _apply(document, path, value)
-                snapshot = self._model_snapshot(document)
-                if patches:
-                    self._write(document)
-                self._snapshot = snapshot
-                self._document = document
+            base_document, base = self._read()
+            yield DocumentEdit(base_document, base, base.model_copy(deep=True))
         finally:
             self._editing = False
+
+    def prepare[_Owner: BaseModel](
+        self, state: DocumentEdit[T], *, locked_by: DocumentStore[_Owner]
+    ) -> PreparedDocument[T]:
+        """Resources-only preflight without replacement or publication."""
+        self._require_lock(locked_by)
+        base_values, draft_values = _edit_values(state.base, state.draft)
+        patches = tuple(_changes(base_values, draft_values))
+        document, _ = self._read()
+        original = self._path.read_bytes()
+        for path, _ in patches:
+            self._check_conflict(state.base_document, document, path)
+        for path, value in patches:
+            merged = _patch_node(
+                _lookup(document, path), _lookup(base_values, path), value
+            )
+            _apply(document, path, merged)
+        for path, spec in self._unit_specs(document).items():
+            if any(path[: len(changed)] == changed for changed, _ in patches):
+                value = self._scale_value(
+                    _lookup(document, path), _unit_factor(spec), path
+                )
+                if not isinstance(value, _Missing):
+                    _apply(document, path, value)
+        snapshot = self._model_snapshot(document)
+        temporary: Path | None = None
         if patches:
-            self._dispatch_change(
-                DocumentChange(self._path, tuple(path for path, _ in patches), "commit")
+            stream = StringIO()
+            YAML(typ="rt").dump(document, stream)
+            temporary = stage_content(self._path, stream.getvalue().encode("utf-8"))
+        return PreparedDocument(
+            self._path,
+            document,
+            snapshot,
+            tuple(path for path, _ in patches),
+            original,
+            temporary,
+        )
+
+    def publish[_Owner: BaseModel](
+        self, prepared: PreparedDocument[T], *, locked_by: DocumentStore[_Owner]
+    ) -> None:
+        self._require_lock(locked_by)
+        if prepared.source != self._path:
+            raise ValueError(
+                f"{self._path}: prepared document belongs to {prepared.source}"
+            )
+        self._snapshot = prepared.snapshot
+        self._document = prepared.document
+
+    def notify_commit(self, prepared: PreparedDocument[T]) -> None:
+        if prepared.paths:
+            self._dispatch_change(DocumentChange(self._path, prepared.paths, "commit"))
+
+    def _require_lock[_Owner: BaseModel](self, owner: DocumentStore[_Owner]) -> None:
+        if self._lock_path != owner._lock_path or not owner._lock.is_locked:
+            raise RuntimeError(
+                f"{self._path}: commit seam requires the matching held lock"
             )
 
     def _check_conflict(self, base: YamlMap, current: YamlMap, path: FieldPath) -> None:
@@ -405,24 +468,6 @@ class DocumentStore[T: BaseModel]:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{self._path}: {path!r} must be a numeric physical value")
         return value * factor
-
-    def _write(self, document: YamlMap) -> None:
-        temporary: Path | None = None
-        try:
-            with NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=self._path.parent,
-                prefix=f".{self._path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as stream:
-                temporary = Path(stream.name)
-                YAML(typ="rt").dump(document, stream)
-            temporary.replace(self._path)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
 
     def refresh(self) -> bool:
         with self.locked():

@@ -94,6 +94,29 @@ class SetupGeneral(BaseModel):
         return value
 
 
+class PointGeneral(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: str
+    description: str | None = None
+    ext: YamlMap = Field(default_factory=dict)
+
+    @field_validator("created_at")
+    @classmethod
+    def validate_created_at(cls, value: str) -> str:
+        return SetupGeneral.validate_created_at(value)
+
+
+class PointDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: str
+    format_version: str
+    general: PointGeneral
+    components: dict[str, YamlMap] = Field(default_factory=dict)
+    provenance: dict[str, YamlMap] = Field(default_factory=dict)
+
+
 class WiringSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -204,7 +227,7 @@ def _same_canonical_value(
     return before == after
 
 
-def _canonical_errors(
+def canonical_errors(
     fields: YamlMap, validated: BaseModel, path: FieldPath, *, source: Path
 ) -> list[InitErrorDetails]:
     """Compare supplied known fields in working units, not the original user input."""
@@ -220,7 +243,7 @@ def _canonical_errors(
         nested = getattr(validated, name)
         if isinstance(before, dict) and isinstance(nested, BaseModel):
             errors.extend(
-                _canonical_errors(before, nested, (*path, name), source=source)
+                canonical_errors(before, nested, (*path, name), source=source)
             )
         elif (name in fields) != (name in canonical) or not _same_canonical_value(
             before, after, field
@@ -241,6 +264,14 @@ def _canonical_errors(
                 )
             )
     return errors
+
+
+class LayeredDocument(BaseModel):
+    """Working draft only; persisted point fields remain kind-free."""
+
+    general: PointGeneral
+    components: dict[str, ComponentSchema]
+    provenance: dict[str, YamlMap] = Field(default_factory=dict)
 
 
 class SetupDocument(BaseModel):
@@ -284,9 +315,7 @@ class SetupDocument(BaseModel):
             result[name] = model.model_validate(
                 deepcopy(fields), extra="ignore" if forward_minor else None
             )
-            errors = _canonical_errors(
-                fields, result[name], (name,), source=cls._source
-            )
+            errors = canonical_errors(fields, result[name], (name,), source=cls._source)
             if errors:
                 raise ValidationError.from_exception_data(model.__name__, errors)
         return result

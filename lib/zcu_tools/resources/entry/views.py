@@ -7,6 +7,7 @@ from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from pathlib import Path
+from typing import overload
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -16,6 +17,8 @@ from zcu_tools.resources.document_store import DocumentStore
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
+    LayeredDocument,
+    PointGeneral,
     SetupDocument,
     SetupGeneral,
     WiringSchema,
@@ -26,7 +29,9 @@ type _FieldNode = BaseModel | YamlMap
 
 
 @contextmanager
-def _stage_component(draft: SetupDocument, name: str) -> Generator[ComponentSchema]:
+def stage_component(
+    draft: SetupDocument | LayeredDocument, name: str
+) -> Generator[ComponentSchema]:
     candidate = draft.components[name].model_copy(deep=True)
     yield candidate
     # The registered partial model runs field validators, not full invariants.
@@ -35,13 +40,25 @@ def _stage_component(draft: SetupDocument, name: str) -> Generator[ComponentSche
     )
 
 
+@overload
+def stage_general(draft: SetupDocument) -> AbstractContextManager[SetupGeneral]: ...
+
+
+@overload
+def stage_general(draft: LayeredDocument) -> AbstractContextManager[PointGeneral]: ...
+
+
 @contextmanager
-def _stage_general(draft: SetupDocument) -> Generator[SetupGeneral]:
+def stage_general(
+    draft: SetupDocument | LayeredDocument,
+) -> Generator[SetupGeneral | PointGeneral]:
     candidate = draft.general.model_copy(deep=True)
     yield candidate
-    draft.general = type(candidate).model_validate(
-        candidate.model_dump(exclude_unset=True, warnings=False)
-    )
+    fields = candidate.model_dump(exclude_unset=True, warnings=False)
+    if isinstance(draft, SetupDocument):
+        draft.general = SetupGeneral.model_validate(fields)
+    else:
+        draft.general = PointGeneral.model_validate(fields)
 
 
 class FieldView:
@@ -92,13 +109,13 @@ class FieldView:
 
 
 class GeneralView(FieldView):
-    _general_model: Callable[[], SetupGeneral]
+    _general_model: Callable[[], SetupGeneral | PointGeneral]
     _extension: FieldView
 
     def __init__(
         self,
-        model: Callable[[], SetupGeneral],
-        edit: Callable[[], AbstractContextManager[SetupGeneral]],
+        model: Callable[[], SetupGeneral | PointGeneral],
+        edit: Callable[[], AbstractContextManager[SetupGeneral | PointGeneral]],
     ) -> None:
         super().__init__(model, edit, "general")
         self._general_model = model
@@ -187,7 +204,7 @@ class ComponentView:
 
 
 class EditView:
-    def __init__(self, draft: SetupDocument) -> None:
+    def __init__(self, draft: SetupDocument | LayeredDocument) -> None:
         self._draft = draft
 
     @property
@@ -195,8 +212,8 @@ class EditView:
         return GeneralView(lambda: self._draft.general, self._edit_general)
 
     @contextmanager
-    def _edit_general(self) -> Generator[SetupGeneral]:
-        with _stage_general(self._draft) as candidate:
+    def _edit_general(self) -> Generator[SetupGeneral | PointGeneral]:
+        with stage_general(self._draft) as candidate:
             yield candidate
 
     def set(self, path: str, value: YamlValue) -> None:
@@ -251,14 +268,20 @@ class EditView:
 
     @contextmanager
     def _edit_component(self, name: str) -> Generator[ComponentSchema]:
-        with _stage_component(self._draft, name) as candidate:
+        with stage_component(self._draft, name) as candidate:
             yield candidate
 
 
 class SetupView:
-    def __init__(self, store: DocumentStore[SetupDocument], source: Path) -> None:
+    def __init__(
+        self,
+        store: DocumentStore[SetupDocument],
+        source: Path,
+        edit: Callable[[], AbstractContextManager[SetupDocument]],
+    ) -> None:
         self._store = store
         self._source = source
+        self._edit_document = edit
 
     @property
     def general(self) -> GeneralView:
@@ -266,7 +289,7 @@ class SetupView:
 
     @contextmanager
     def _edit_general(self) -> Generator[SetupGeneral]:
-        with self._store.edit() as draft, _stage_general(draft) as candidate:
+        with self._edit_document() as draft, stage_general(draft) as candidate:
             yield candidate
 
     @property
@@ -280,7 +303,7 @@ class SetupView:
 
     @contextmanager
     def edit(self) -> Generator[EditView]:
-        with self._store.edit() as draft:
+        with self._edit_document() as draft:
             yield EditView(draft)
 
     def refresh(self) -> None:
@@ -292,7 +315,7 @@ class SetupView:
             kind, source=self._source, component=name
         )
         component_registry.check_fields(kind, fields, path=name)
-        with self._store.edit() as draft:
+        with self._edit_document() as draft:
             if name in draft.components:
                 raise ValueError(f"Component {name!r} already exists")
             draft.components[name] = model.model_validate({"kind": kind, **fields})
@@ -308,5 +331,5 @@ class SetupView:
 
     @contextmanager
     def _edit_component(self, name: str) -> Generator[ComponentSchema]:
-        with self._store.edit() as draft, _stage_component(draft, name) as candidate:
+        with self._edit_document() as draft, stage_component(draft, name) as candidate:
             yield candidate
