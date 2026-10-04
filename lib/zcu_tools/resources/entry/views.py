@@ -92,6 +92,16 @@ class GeneralView(FieldView):
     def ext(self) -> FieldView:
         return self._extension
 
+    @property
+    def description(self) -> str | None:
+        return TypeAdapter(str | None).validate_python(
+            getattr(self._model(), "description")
+        )
+
+    @description.setter
+    def description(self, value: str | None) -> None:
+        self["description"] = value
+
 
 class ComponentView:
     _model: Callable[[], ComponentSchema]
