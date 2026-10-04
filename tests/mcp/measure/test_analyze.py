@@ -210,6 +210,11 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
         assert summary["error"] == full["error"]
     if outcome == "partial":
         assert summary["steps"]["analysis_save"][stage]["status"] == "incomplete"
+        assert summary["artifacts"][pane]["residual"] == {
+            "status": "incomplete",
+            "lifetime": "persistent",
+            "members": {"image": []},
+        }
         assert summary["error"]["phase"] == "image_save"
 
 
