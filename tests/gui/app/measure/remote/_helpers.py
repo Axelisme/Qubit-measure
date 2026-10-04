@@ -432,14 +432,14 @@ def mcp_client(
         return config.default_port if requested is None else requested
 
     session = MeasureMcpSession(
-        config, resolve_connect_port=resolver, port_is_open=lambda _: True
+        config, recipes=(), resolve_connect_port=resolver, port_is_open=lambda _: True
     )
     bridge = McpBridge(config)
     session.attach_bridge(bridge)
     if request is not None:
         request.addfinalizer(session.close)
     tools = build_measure_tools(
-        MeasureToolContext(config, session, resolve_connect_port=resolver)
+        MeasureToolContext(config, session, resolve_connect_port=resolver), recipes=()
     )
     return bridge, partial(call_mcp_with_qt, tools)
 
