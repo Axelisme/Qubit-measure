@@ -13,6 +13,7 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from ruamel.yaml import YAML
+from zcu_tools.format_version import FormatError, VersionError
 from zcu_tools.resources.document_store import ConflictError, UnitSpec
 from zcu_tools.resources.entry import (
     ComponentSchema,
@@ -306,6 +307,52 @@ def test_notebook_nested_stderr_uses_the_registered_leaf_unit(
     assert stored["provenance"]["N1.timing.width"]["stderr"] == pytest.approx(0.18e-6)
     view.refresh()
     assert_metadata(view.meta("N1.timing.width"), metadata)
+
+
+@pytest.mark.parametrize(
+    ("field", "raw_value", "error_type"),
+    [
+        ("format", "zcu.point", FormatError),
+        ("format", None, FormatError),
+        ("format_version", None, FormatError),
+        ("format_version", "invalid", FormatError),
+        ("format_version", "2.0", VersionError),
+    ],
+)
+def test_invalid_ledger_header_keeps_the_value_source_and_files_unchanged(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    field: str,
+    raw_value: str | None,
+    error_type: type[FormatError],
+) -> None:
+    _entry, view, source = container
+    event = json.loads(ledger.read_text())
+    if raw_value is None:
+        event.pop(field)
+    else:
+        event[field] = raw_value
+    ledger.write_text(json.dumps(event) + "\n")
+    ledger_before = ledger.read_bytes()
+    before = source.read_bytes()
+    previous = view.meta("Q1.freq")
+    with view.edit() as draft:
+        with pytest.raises(error_type) as error:
+            draft.set(
+                "Q1.freq",
+                5300.0,
+                provenance=Provenance(
+                    "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+                ),
+            )
+        assert error.value.source == ledger
+        assert error.value.field == field
+        assert error.value.actual == raw_value
+        assert draft.Q1.freq == 5000.0
+    assert view.Q1.freq == 5000.0
+    assert view.meta("Q1.freq") == previous
+    assert source.read_bytes() == before
+    assert ledger.read_bytes() == ledger_before
 
 
 def test_meta_is_cached_and_missing_values_or_sources_return_none(
