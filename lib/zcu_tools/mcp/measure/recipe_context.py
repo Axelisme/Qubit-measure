@@ -257,9 +257,7 @@ class RecipeContext:
         """Stop only Run, without revoking an already latched cancellation."""
         with self._condition:
             if self.progress.phase != "run":
-                return ToolReply(
-                    {**asdict(self.progress), "status": "not_applicable"}
-                )
+                return ToolReply({**asdict(self.progress), "status": "not_applicable"})
             self._publish(finish_early_requested=True)
         return self._control_reply(self._stop_run())
 

@@ -713,9 +713,9 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
             "finish_early_requested": True,
             "gui_cancel": None,
         }
-        assert client.call(
-            "status", {"execution": execution, "detail": "full"}
-        ) == frozen
+        assert (
+            client.call("status", {"execution": execution, "detail": "full"}) == frozen
+        )
         if expected == "finished":
             assert result.data["raw_save"]["path"] == "/actual/raw.h5"
             assert result.data["analysis"]["status"] == "finished"
