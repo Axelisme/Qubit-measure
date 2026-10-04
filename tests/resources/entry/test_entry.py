@@ -105,7 +105,7 @@ def test_newer_minor_keeps_unknown_fields_outside_the_public_typed_interface(
 @pytest.mark.parametrize(
     ("field", "value", "error"),
     [
-        ("freq", "not a frequency", ValidationError),
+        ("freq", "not a frequency", ValueError),
         ("wiring", {"ch": None}, ValidationError),
         ("amplifier", "absent", MissingReferenceError),
         ("kind", "future-kind", UnknownKindError),
