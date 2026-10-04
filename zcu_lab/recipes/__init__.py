@@ -7,6 +7,7 @@ from .onetone_spectrum import DEFINITION as ONETONE_SPECTRUM
 from .onetone_spectrum_over_flux import DEFINITION as ONETONE_FLUX
 from .onetone_spectrum_over_power import DEFINITION as ONETONE_POWER
 from .singleshot_ge import DEFINITION as SINGLESHOT_GE
+from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 
 RECIPES: tuple[RecipeDefinition, ...] = (
@@ -16,4 +17,5 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     ONETONE_POWER,
     SINGLESHOT_GE,
     T2RAMSEY,
+    T2ECHO,
 )

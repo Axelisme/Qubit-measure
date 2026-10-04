@@ -200,8 +200,17 @@ class CoherenceGui(LookbackGui):
         }
 
 
-def test_recipe_estimates_share_native_fit_quality_and_precise_issue_paths(tmp_path):
-    gui = CoherenceGui(pi_ref="pi")
+@pytest.mark.parametrize(
+    "recipe,estimates",
+    [
+        ("t1", (("t1", 25.0), ("t1b", 50.0))),
+        ("t2echo", (("t2e", 25.0),)),
+    ],
+)
+def test_recipe_estimates_share_native_fit_quality_and_precise_issue_paths(
+    tmp_path, recipe, estimates
+):
+    gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
     quality = {
         "fit": {
             "r2": -0.25,
@@ -220,16 +229,14 @@ def test_recipe_estimates_share_native_fit_quality_and_precise_issue_paths(tmp_p
         result = gui(method, params)
         if method == "tab.get_analyze_result":
             result["summary"] = {
-                "t1": 25.0,
-                "t1_err": None,
-                "t1b": 50.0,
-                "t1b_err": None,
+                **{name: value for name, value in estimates},
+                **{f"{name}_err": None for name, _ in estimates},
                 "fit_quality": quality,
             }
         return result
 
     with recipe_client(tmp_path, respond) as client:
-        initial = client.call("t1", {})
+        initial = skip_writeback(client, client.call(recipe, {}))
         assert initial.data["status"] == "finished", initial.data
         execution = initial.data["execution"]
         before = len(client.transport.sent)
@@ -241,7 +248,7 @@ def test_recipe_estimates_share_native_fit_quality_and_precise_issue_paths(tmp_p
         assert len(client.transport.sent) == before
         assert full["analysis"]["result"]["summary"]["fit_quality"] == quality
         expected_invalid = []
-        for name, value in (("t1", 25.0), ("t1b", 50.0)):
+        for name, value in estimates:
             estimate = summary["analysis"]["primary"]["estimates"][name]
             assert estimate["value"] == value
             assert estimate["stderr"] is None
@@ -278,6 +285,13 @@ def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
         assert sweep["value"]["stop"] == 37.0
         assert sweep["input"]["stop"]["raw"] == "calibrated_decay"
         assert sweep["input"]["stop"]["mode"] == "expression"
+        for slot, library in (("pi_pulse", "pi"), ("pi2_pulse", "pi2")):
+            if recipe == "t2ramsey" and slot == "pi_pulse":
+                continue
+            assert data["actual"]["fields"][f"modules.{slot}"] == {
+                "value": library,
+                "source": "gui_default",
+            }
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.reset_cfg") == 1
         assert methods.count("tab.run_start") == 1
@@ -410,6 +424,10 @@ def test_t2_rejects_nonfinite_or_boolean_detune_before_preparing(
         ("t2ramsey", "pi2_ref"),
         ("t2echo", "pi_ref"),
         ("t2echo", "pi2_ref"),
+        ("t2ramsey", "readout_ref"),
+        ("t2ramsey", "use_reset"),
+        ("t2echo", "readout_ref"),
+        ("t2echo", "use_reset"),
         ("t1", "readout_ref"),
         ("t1", "use_reset"),
     ],
@@ -462,7 +480,8 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         assert fields["detune_ratio"]["value"] == 0.37
         assert fields["modules.pi2_pulse"]["value"] == "pi2"
         if recipe == "t2echo":
-            assert fields["modules.pi_pulse"]["value"] == "pi"
+            assert fields["modules.pi_pulse"] == {"value": "pi", "source": "explicit"}
+            assert fields["modules.pi2_pulse"]["source"] == "explicit"
         assert fields["modules.reset"]["value"] is None
         assert fields["reps"]["value"] == 7
         assert fields["rounds"]["value"] == 5
@@ -475,16 +494,17 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         ) == 1
 
 
+@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
 @pytest.mark.parametrize("number", [1, 1.0])
-def test_t2_number_delay_and_detune_publish_floats(tmp_path, number):
-    gui = CoherenceGui(pi_ref="pi", adapter="t2ramsey", pi2_ref="pi2")
+def test_t2_number_delay_and_detune_publish_floats(tmp_path, recipe, number):
+    gui = CoherenceGui(pi_ref="pi", adapter=recipe, pi2_ref="pi2")
     with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
             client,
             skip_writeback(
                 client,
                 client.call(
-                    "t2ramsey",
+                    recipe,
                     {"max_delay_us": number, "detune_ratio": number, "points": 3},
                 ),
             ),
@@ -531,10 +551,11 @@ def test_t2_number_delay_and_detune_publish_floats(tmp_path, number):
         {"reuse_tab_id": ""},
     ],
 )
-def test_t2ramsey_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
-    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2")
+@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
+def test_t2_rejects_invalid_inputs_before_preparing(tmp_path, recipe, arguments):
+    gui = CoherenceGui(pi_ref="pi", adapter=recipe, pi2_ref="pi2")
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("t2ramsey", arguments)
+        reply = client.call(recipe, arguments)
         assert reply.is_error
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["tab"] is None
@@ -544,14 +565,17 @@ def test_t2ramsey_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
         )
 
 
+@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize("decision", ["accepted", "skipped"])
-def test_t2ramsey_primary_handoff_waits_before_question_and_actual_writes(
-    tmp_path, interactive, decision
+def test_t2_primary_handoff_waits_before_question_and_actual_writes(
+    tmp_path, recipe, interactive, decision
 ):
-    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2", interactive=interactive)
+    gui = CoherenceGui(
+        pi_ref="pi", adapter=recipe, pi2_ref="pi2", interactive=interactive
+    )
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("t2ramsey", {})
+        reply = client.call(recipe, {})
         execution = reply.data["execution"]
         if interactive:
             assert reply.data["status"] == "interactive", reply.data
@@ -598,14 +622,15 @@ def test_t2ramsey_primary_handoff_waits_before_question_and_actual_writes(
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
 
 
-def test_t2ramsey_cancelled_run_stops_before_raw_save(tmp_path):
-    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2")
+@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
+def test_t2_cancelled_run_stops_before_raw_save(tmp_path, recipe):
+    gui = CoherenceGui(pi_ref="pi", adapter=recipe, pi2_ref="pi2")
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies["operation.await"] = {
             "ok": True,
             "result": {"reason": "completed", "status": "cancelled"},
         }
-        reply = full_execution_reply(client, client.call("t2ramsey", {}))
+        reply = full_execution_reply(client, client.call(recipe, {}))
         assert reply.data["status"] == "cancelled", reply.data
         assert reply.data["run_outcome"]["status"] == "cancelled"
         assert reply.data["tab"] == "t"
@@ -616,10 +641,11 @@ def test_t2ramsey_cancelled_run_stops_before_raw_save(tmp_path):
         assert "tab.analyze" not in methods
 
 
-def test_t2ramsey_cancelled_question_stops_without_writing(tmp_path):
-    gui = CoherenceGui(adapter="t2ramsey", pi2_ref="pi2")
+@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
+def test_t2_cancelled_question_stops_without_writing(tmp_path, recipe):
+    gui = CoherenceGui(pi_ref="pi", adapter=recipe, pi2_ref="pi2")
     with recipe_client(tmp_path, gui) as client:
-        question = client.call("t2ramsey", {})
+        question = client.call(recipe, {})
         assert question.data["status"] == "awaiting_answer", question.data
         execution = question.data["execution"]
         before = list(client.transport.sent)
@@ -630,6 +656,41 @@ def test_t2ramsey_cancelled_question_stops_without_writing(tmp_path):
         assert not reply.data["writeback"]["receipts"]
         assert client.transport.sent == before
         assert not gui.writes
+
+
+@pytest.mark.parametrize(
+    "pi_ref,pi2_ref,missing",
+    [
+        (None, "pi2", {"pi_ref"}),
+        ("pi", None, {"pi2_ref"}),
+        (None, None, {"pi_ref", "pi2_ref"}),
+    ],
+)
+def test_t2echo_reports_only_missing_pulse_calibrations(
+    tmp_path, pi_ref, pi2_ref, missing
+):
+    gui = CoherenceGui(adapter="t2echo")
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("t2echo", {"pi_ref": pi_ref, "pi2_ref": pi2_ref})
+        assert reply.data["status"] == "needs_parameters", reply.data
+        assert {item["parameter"] for item in reply.data["missing"]} == missing
+        assert reply.data["tab"] == "t"
+        assert not gui.ran
+        assert not gui.writes
+
+
+@pytest.mark.parametrize("pi_ref", [" ", 7, False])
+def test_t2echo_rejects_invalid_pi_before_preparing(tmp_path, pi_ref):
+    gui = CoherenceGui(pi_ref="pi", adapter="t2echo", pi2_ref="pi2")
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("t2echo", {"pi_ref": pi_ref})
+        assert reply.is_error
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["tab"] is None
+        assert not gui.ran
+        assert not any(
+            method == "context.snapshot" for method, _ in client.transport.sent
+        )
 
 
 def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
