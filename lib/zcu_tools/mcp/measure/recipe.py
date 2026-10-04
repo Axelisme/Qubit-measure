@@ -1330,7 +1330,7 @@ class RecipeRun:
         execution = tab.tools.session.executions.start(
             tab.tools.gui, tab.tab, stage, start_worker=False
         )
-        execution.bind_continuation(tab.closed)
+        execution.bind_continuation(tab.closed, condition=tab.condition)
         operation = AnalyzeOperation(execution)
         observe(operation)
 

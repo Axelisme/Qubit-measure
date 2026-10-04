@@ -220,13 +220,17 @@ class AnalysisExecution:
         self._gui_cancel: GuiCancel | None = None
         self._cancel_in_flight = False
 
-    def bind_continuation(self, closed: Event) -> None:
+    def bind_continuation(
+        self, closed: Event, *, condition: Condition | None = None
+    ) -> None:
         """Bind a recipe-local close event before native start admission.
 
         closed is owned by the recipe driver, which sets it and calls wake before
-        joining its worker. The session close event remains effective too. Raise
-        ValueError after admission, receipt or completion start; no GUI request
-        or background worker is created. Standalone callers need not bind one.
+        joining its worker. condition optionally shares the driver's local wake
+        condition for progress and completion; None keeps this owner's condition.
+        The session close event remains effective too. Raise ValueError after
+        admission, receipt or completion start; no GUI request or background worker
+        is created. Standalone callers need not bind one.
         """
         with self._condition:
             if (
@@ -236,6 +240,8 @@ class AnalysisExecution:
             ):
                 raise ValueError("Cannot rebind an admitted analysis lifetime")
             self._closed = closed
+            if condition is not None:
+                self._condition = condition
 
     def snapshot(self) -> ExecutionSnapshot:
         with self._condition:
