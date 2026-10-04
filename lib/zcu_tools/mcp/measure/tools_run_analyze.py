@@ -27,7 +27,9 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
     execution = ctx.session.executions.start(ctx.gui, tab, stage)
     try:
         started = ctx.gui.send_gui_rpc(
-            method, {"tab_id": tab, "updates": params}, before_send=execution.admit_start
+            method,
+            {"tab_id": tab, "updates": params},
+            before_send=execution.admit_start,
         )
         ctx.session.executions.accept_start(execution, started)
     except Exception as exc:  # noqa: BLE001 - retain the start attempt and its partial facts
