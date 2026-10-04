@@ -79,6 +79,12 @@ class WrapModelSchema(ComponentSchema):
         return handler(value)
 
 
+class AfterModelSchema(ComponentSchema):
+    @model_validator(mode="after")
+    def check_model(self) -> Self:
+        return self
+
+
 class PostInitSchema(ComponentSchema):
     def model_post_init(self, context: object) -> None:
         pass
@@ -123,24 +129,30 @@ def test_conflicting_nullable_branch_units_do_not_reserve_kind() -> None:
     [
         (BeforeModelSchema, "before"),
         (WrapModelSchema, "wrap"),
+        (AfterModelSchema, "after"),
         (PostInitSchema, "model_post_init"),
     ],
 )
-@pytest.mark.parametrize("placement", ["direct", "inherited", "nested"])
+@pytest.mark.parametrize("placement", ["direct", "inherited", "nested", "nullable"])
 def test_registration_rejects_full_model_transformations_without_reserving_kind(
     model: type[ComponentSchema],
     reason: str,
-    placement: Literal["direct", "inherited", "nested"],
+    placement: Literal["direct", "inherited", "nested", "nullable"],
 ) -> None:
+    rejected_model = model.__name__
     if placement == "inherited":
         model = create_model("InheritedModel", __base__=model)
-    elif placement == "nested":
+        rejected_model = model.__name__
+    elif placement in ("nested", "nullable"):
         model = create_model(
-            "NestedModel", __base__=ComponentSchema, child=(model, ...)
+            "NestedModel",
+            __base__=ComponentSchema,
+            child=(model | None if placement == "nullable" else model, ...),
         )
     registry = ComponentRegistry()
-    with pytest.raises(ValueError, match=rf"{reason}.*partial"):
+    with pytest.raises(ValueError, match=rf"{reason}.*partial") as error:
         registry.register("notebook/transform", model)
+    assert rejected_model in str(error.value)
     registry.register("notebook/transform", PairSchema)
     assert registry.get("notebook/transform") is PairSchema
 

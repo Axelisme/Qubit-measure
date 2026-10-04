@@ -144,11 +144,12 @@ class ComponentSchema(BaseModel):
     tolerance 1e-12 with no absolute tolerance; other values compare exactly.
     Entry revalidates before commits and snapshot publication, reporting canonical
     drift as ValidationError. Registration does not trial sample inputs.
-    Model after-validators run only against
-    complete layered views and may check values but must not change them.
-    Registration rejects model before/wrap validators and custom model_post_init.
-    Cross-field constraints belong in model after-validators: field validators
-    reading info.data are unsupported in partial setup; their errors propagate.
+    Complete layered views validate required fields and field validators against
+    the original model. Registration rejects all model-level validators and custom
+    model_post_init, including inherited and direct or nullable nested models.
+    Cross-field checks are unsupported in this batch. Field validators reading
+    info.data are unsupported in partial setup; their errors propagate. Defaults
+    and default_factory retain Pydantic semantics.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -233,11 +234,10 @@ def canonical_errors(
     path: FieldPath,
     *,
     source: Path,
-    include_defaults: bool = False,
 ) -> list[InitErrorDetails]:
     """Compare supplied known fields in working units, not the original user input."""
     canonical = TypeAdapter(YamlMap).validate_python(
-        validated.model_dump(exclude_unset=not include_defaults)
+        validated.model_dump(exclude_unset=True)
     )
     errors: list[InitErrorDetails] = []
     for name, field in type(validated).model_fields.items():
@@ -253,7 +253,6 @@ def canonical_errors(
                     nested,
                     (*path, name),
                     source=source,
-                    include_defaults=include_defaults,
                 )
             )
         elif (name in fields) != (name in canonical) or not _same_canonical_value(

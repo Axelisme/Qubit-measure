@@ -5,10 +5,10 @@ from collections.abc import Generator
 from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal
 
 import pytest
-from pydantic import BaseModel, Field, ValidationError, ValidationInfo, model_validator
+from pydantic import ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import ConflictError, UnitSpec
 from zcu_tools.resources.entry import (
@@ -21,15 +21,9 @@ from zcu_tools.resources.entry import (
 )
 
 
-class RangeSchema(ComponentSchema):
+class RequiredRangeSchema(ComponentSchema):
     low: Annotated[float, UnitSpec("1", "1")]
     high: Annotated[float, UnitSpec("1", "1")]
-
-    @model_validator(mode="after")
-    def check_range(self) -> Self:
-        if self.low > self.high:
-            raise ValueError("low must not exceed high")
-        return self
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -53,7 +47,7 @@ def registry_state_guard(request: pytest.FixtureRequest) -> Generator[None]:
 @pytest.fixture
 def range_kind(registry_state_guard: None) -> Generator[str]:
     kind = "test/point-range"
-    component_registry.register(kind, RangeSchema)
+    component_registry.register(kind, RequiredRangeSchema)
     try:
         yield kind
     finally:
@@ -168,34 +162,6 @@ def test_point_reload_uses_latest_layers_and_keeps_snapshots_on_failure(
     assert entry.setup.Q1.freq == 5100.0
 
 
-def test_complete_validation_rejects_after_validator_mutating_unset_default(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    registry_state_guard: None,
-) -> None:
-    class MutatingSchema(ComponentSchema):
-        @model_validator(mode="after")
-        def mutate_default(self) -> Self:
-            self.ext["note"] = "changed by validator"
-            return self
-
-    kind = "test/point-mutating-default"
-    component_registry.register(kind, MutatingSchema)
-    try:
-        entry.setup.add_component("C1", kind=kind)
-        source = entry_roots[0] / "entry/setup.yaml"
-        before = source.read_bytes()
-        with pytest.raises(ValidationError, match="C1.ext"):
-            entry.new_point("invalid")
-        assert entry.list_points() == []
-        assert not (entry_roots[0] / "entry/points/invalid").exists()
-        assert source.read_bytes() == before
-        with pytest.raises(KeyError, match="note"):
-            entry.setup.C1.ext["note"]
-    finally:
-        component_registry.unregister(kind)
-
-
 @pytest.mark.parametrize("nested", [False, True])
 def test_move_transfers_value_and_provenance_between_layers(
     entry: ResultEntry,
@@ -277,13 +243,13 @@ def test_point_edit_rejects_invalid_reload_before_exposing_draft(
     point_source = entry_roots[0] / "entry/points/a/point.yaml"
     yaml = YAML(typ="rt")
     stored = yaml.load(setup_source.read_text())
-    stored["components"]["R1"]["low"] = 3.0
+    stored["components"]["R1"].pop("low")
     with setup_source.open("w") as stream:
         yaml.dump(stored, stream)
     before = setup_source.read_bytes(), point_source.read_bytes()
     entered: list[bool] = []
     with (
-        pytest.raises(ValidationError, match="low must not exceed high"),
+        pytest.raises(ValidationError, match="R1.low"),
         point.edit(),
     ):
         entered.append(True)
@@ -452,86 +418,6 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
         assert view.Q1.t2 == 13.0
         assert view.Q1.wiring.flux_ch == 3
         assert view.Q1.ext.nested == {"note": "accepted"}
-
-
-@pytest.mark.parametrize("nullable", [False, True])
-def test_nested_factory_runs_validators_only_on_complete_views(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    nullable: bool,
-) -> None:
-    calls: list[float] = []
-
-    class Details(BaseModel):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")] = 12.0
-
-        @model_validator(mode="after")
-        def mutate(self) -> Self:
-            calls.append(self.freq)
-            self.freq += 1.0
-            return self
-
-    class DirectSchema(ComponentSchema):
-        details: Details = Field(default_factory=Details)
-
-    class NullableSchema(ComponentSchema):
-        details: Details | None = Field(default_factory=Details)
-
-    kind = "test/nested-default-factory"
-    component_registry.register(kind, NullableSchema if nullable else DirectSchema)
-    try:
-        entry.setup.add_component("C1", kind=kind)
-        results, database = entry_roots
-        source = results / "entry/setup.yaml"
-        before = source.read_bytes()
-        entry.setup.refresh()
-        ResultEntry.open("entry", result_root=results, database_root=database)
-        assert calls == []
-        with pytest.raises(ValidationError, match="C1.details.freq") as error:
-            entry.new_point("invalid")
-        assert "point.yaml" in str(error.value)
-        assert calls == [12.0]
-        assert source.read_bytes() == before
-        assert entry.list_points() == []
-    finally:
-        component_registry.unregister(kind)
-
-
-@pytest.mark.parametrize("nullable", [False, True])
-def test_complete_nested_after_validator_reports_field_and_keeps_partial_setup(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    registry_state_guard: None,
-    nullable: bool,
-) -> None:
-    class Details(BaseModel):
-        freq: Annotated[float, UnitSpec("Hz", "MHz")]
-
-        @model_validator(mode="after")
-        def mutate(self, info: ValidationInfo) -> Self:
-            self.freq += 1.0
-            return self
-
-    class DirectSchema(ComponentSchema):
-        details: Details
-
-    class NullableSchema(ComponentSchema):
-        details: Details | None
-
-    kind = "test/point-nested-after"
-    component_registry.register(kind, NullableSchema if nullable else DirectSchema)
-    try:
-        entry.setup.add_component("C1", kind=kind, details={"freq": 12.0})
-        source = entry_roots[0] / "entry/setup.yaml"
-        before = source.read_bytes()
-        with pytest.raises(ValidationError, match="C1.details.freq") as error:
-            entry.new_point("invalid")
-        assert "point.yaml" in str(error.value)
-        assert entry.setup.C1.details == {"freq": 12.0}
-        assert source.read_bytes() == before
-        assert entry.list_points() == []
-    finally:
-        component_registry.unregister(kind)
 
 
 def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
@@ -716,70 +602,27 @@ def test_second_layer_replace_failure_restores_or_reports_actual_partial_commit(
     )
 
 
-def test_failed_complete_point_validation_preserves_clone_origin_and_snapshots(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    range_kind: str,
-) -> None:
-    entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
-    original = entry.new_point("a")
-    original.move("R1.high", to="point")
-    root = entry_roots[0] / "entry"
-    source = root / "points/a/point.yaml"
-    yaml = YAML(typ="rt")
-    stored = yaml.load(source.read_text())
-    provenance = {
-        "source": "manual",
-        "kind": None,
-        "run_id": None,
-        "at": "2026-10-04T00:00:00Z",
-        "stderr": None,
-    }
-    stored["provenance"]["R1.high"] = provenance
-    write_yaml(source, stored)
-    point = entry.new_point("b", clone_from="a")
-    setup_source = root / "setup.yaml"
-    point_source = root / "points/b/point.yaml"
-    before = setup_source.read_bytes(), point_source.read_bytes()
-
-    with (
-        pytest.raises(ValidationError, match="low must not exceed high"),
-        point.edit() as draft,
-    ):
-        draft.R1.high = 0.5
-    assert (setup_source.read_bytes(), point_source.read_bytes()) == before
-    assert point.R1.low == 1.0
-    assert point.R1.high == 2.0
-    assert entry.setup.R1.low == 1.0
-    assert yaml.load(point_source.read_text())["provenance"]["R1.high"] == {
-        **provenance,
-        "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
-    }
-
-
 def test_setup_commit_validates_complete_views_of_existing_points(
     entry: ResultEntry, entry_roots: tuple[Path, Path], range_kind: str
 ) -> None:
     entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
-    entry.new_point("a")
+    point = entry.new_point("a")
+    point.move("R1.high", to="point")
+    assert point.R1.low == 1.0
+    assert point.R1.high == 2.0
+    with pytest.raises(AttributeError, match="R1.high"):
+        _ = entry.setup.R1.high
     results, _ = entry_roots
     setup_source = results / "entry/setup.yaml"
     point_source = results / "entry/points/a/point.yaml"
     yaml = YAML(typ="rt")
-    setup = yaml.load(setup_source.read_text())
     stored = yaml.load(point_source.read_text())
-    stored["components"]["R1"] = {"high": setup["components"]["R1"].pop("high")}
-    with setup_source.open("w") as stream:
-        yaml.dump(setup, stream)
-    with point_source.open("w") as stream:
-        yaml.dump(stored, stream)
-    entry.setup.refresh()
-    point = entry.use_point("a")
-    assert point.R1.high == 2.0
+    stored["components"]["R1"].pop("high")
+    write_yaml(point_source, stored)
     before = setup_source.read_bytes(), point_source.read_bytes()
 
     with (
-        pytest.raises(ValidationError, match="low must not exceed high"),
+        pytest.raises(ValidationError, match="R1.high"),
         entry.setup.edit() as draft,
     ):
         draft.R1.low = 3.0

@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04，working-point layering checkpoint
+**Last updated:** 2026-10-04，working-point layering and D114 registration boundary
 
 `ResultEntry` 組合兩個明確傳入的根目錄。名稱是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 不接受 refresh 帶入另一個身分。
 
@@ -14,7 +14,7 @@
 
 Setup 允許省略 notebook model 與巢狀 model 的必填欄位。巢狀 model 可直接宣告，也可宣告為單一 model 與 None 的 union。這兩種形狀共用單位、typo 與 reference path 判斷。未填值不落盤，讀取明確報錯；有提供的值仍經型別驗證。Nullable 巢狀容器的 explicit None 保留為 null。Registry 保留原始完整 model，必填完整性由後續疊合視圖檢查。
 
-D101 將 notebook 驗證分為兩個階段。Setup 的 add、edit、open 與 refresh 只驗證供值欄位；field validators 的 before、after、wrap 與 plain 保留轉換，缺值不驗證 default。Registry 保留原始完整 model，並拒絕 before／wrap model validator 與自訂 model_post_init，包含繼承與支援的巢狀宣告。Field validator 讀取 info.data 在部分階段不受支援，caller 的例外照常傳出。跨欄位檢查放在 model after-validator。完整疊合階段檢查必填與 model after-validator。每個 after-validator 的完整值在執行前後必須等價，包含未供值的 default 與直接／nullable 巢狀 model；不在 partial setup 執行這些檢查。
+D101 保留部分與完整兩階段驗證。Setup 的 add、edit、open 與 refresh 只驗證供值欄位；field validators 的 before、after、wrap 與 plain 保留轉換，缺值不驗證 default。完整疊合階段使用原始 model 檢查必填與 field validators。D114 讓 register 拒絕所有 model-level validator 與自訂 model_post_init，包含繼承與支援的巢狀宣告；跨欄位檢查本批不支援。Field validator 讀取 info.data 在部分階段仍不受支援，caller 的例外照常傳出。Defaults 與 default_factory 沿用 pydantic 原語意。
 
 D104 要求 field 轉換在 canonical 值上冪等，register 不試跑樣本。Entry 在提交前與 open、refresh、交易進入的讀取中檢查驗證前後的工作單位值。差異超出等價界線時，以 ValidationError 回報欄位、前後值與來源檔案，保留原檔與既有快照。D105 只對宣告 UnitSpec、兩邊都是有限 float 的葉節點使用 math.isclose，rel_tol=1e-12、abs_tol=0.0。其他值仍嚴格比較。容差內的微小轉換視為等價，通過後發布驗證後的值。Strip、lower 與固定精度 rounding 可用，不跳過 caller 的 field validator，也不攔截其例外。DocumentStore 不負責 canonical 等價規則。
 
