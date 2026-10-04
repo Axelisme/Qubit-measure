@@ -104,6 +104,26 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+def test_nested_model_values_use_yaml_maps_and_dotted_edits_in_working_units(
+    tmp_path: Path, nested_kind: str
+) -> None:
+    entry, results, database = create_entry(tmp_path)
+    entry.setup.add_component("N1", kind=nested_kind, timing={"label": "prepared"})
+    setup_path = results / "entry" / "setup.yaml"
+    before = setup_path.read_bytes()
+    with entry.setup.edit() as draft:
+        draft.set("N1.timing.width", 10.0)
+        assert draft.N1.timing == {"width": 10.0, "label": "prepared"}
+        assert entry.setup.N1.timing == {"label": "prepared"}
+        assert setup_path.read_bytes() == before
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.N1.timing == {"width": 10.0, "label": "prepared"}
+    assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"]["width"] == (
+        pytest.approx(1e-5)
+    )
+
+
 @pytest.mark.parametrize("field", ["control", "target", "coupler"])
 @pytest.mark.parametrize("operation", ["add", "write", "open", "refresh"])
 def test_nested_references_reject_missing_targets_with_the_declared_path(
