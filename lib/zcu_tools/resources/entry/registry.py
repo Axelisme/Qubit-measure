@@ -22,6 +22,7 @@ from .schema import (
     QubitSchema,
     ResonatorSchema,
     WiringSchema,
+    field_annotations,
 )
 
 
@@ -41,20 +42,18 @@ def _nested_model(annotation: object) -> type[BaseModel] | None:
 def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     result: dict[FieldPath, UnitSpec] = {}
     for name, field in model.model_fields.items():
-        annotation = field.annotation
-        types = (
-            get_args(annotation)
-            if get_origin(annotation) in (Union, UnionType)
-            else (annotation,)
-        )
-        numeric = any(item in (float, int) for item in types)
-        for metadata in field.metadata:
+        types, field_metadata = field_annotations(field)
+        numeric = any(isinstance(item, type) and item in (float, int) for item in types)
+        for metadata in field_metadata:
             if isinstance(metadata, UnitSpec):
                 if not numeric or not all(
-                    item in (float, int, type(None)) for item in types
+                    isinstance(item, type) and item in (float, int, type(None))
+                    for item in types
                 ):
                     raise TypeError(f"Unit metadata requires a numeric field: {name}")
                 metadata.validate()
+                if (name,) in result and result[(name,)] != metadata:
+                    raise ValueError(f"Conflicting UnitSpec declarations: {name}")
                 result[(name,)] = metadata
         wiring_field = WiringSchema.model_fields.get(name)
         channel_index = (
@@ -63,7 +62,9 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
             and not any(
                 isinstance(metadata, UnitSpec) for metadata in wiring_field.metadata
             )
-            and all(item in (int, type(None)) for item in types)
+            and all(
+                isinstance(item, type) and item in (int, type(None)) for item in types
+            )
         )
         if numeric and (name,) not in result and not channel_index:
             raise ValueError(

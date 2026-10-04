@@ -150,6 +150,28 @@ def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
         assert document["components"]["N1"]["freq"] is None
 
 
+def test_nullable_branch_unit_uses_canonical_float_tolerance(tmp_path: Path) -> None:
+    class RoundedFrequency(ComponentSchema):
+        freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
+
+        @field_validator("freq")
+        @classmethod
+        def normalize_frequency(cls, value: float | None) -> float | None:
+            return round(value, 2) if value is not None else None
+
+    with registered_model("notebook/nullable-rounded", RoundedFrequency) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, freq=0.14)
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.N1.freq == 0.14
+        document = YAML(typ="safe").load(
+            (results / "entry" / "setup.yaml").read_text(encoding="utf-8")
+        )
+        assert document["components"]["N1"]["freq"] == 140_000.0
+
+
 @pytest.mark.parametrize(
     ("initial", "delta", "accepted"),
     [(1.0, 5e-13, True), (1.0, 2e-12, False), (0.0, 5e-15, False)],

@@ -84,6 +84,40 @@ class PostInitSchema(ComponentSchema):
         pass
 
 
+@pytest.mark.parametrize("units", [UnitSpec("Hz", "us"), UnitSpec("bogus", "MHz")])
+def test_nullable_branch_invalid_units_do_not_reserve_kind(units: UnitSpec) -> None:
+    class InvalidFrequency(ComponentSchema):
+        freq: Annotated[float, units] | None = None
+
+    class ValidFrequency(ComponentSchema):
+        freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
+
+    registry = ComponentRegistry()
+    kind = "notebook/nullable-unit"
+    with pytest.raises(ValueError, match="Incompatible or unsupported units"):
+        registry.register(kind, InvalidFrequency)
+    with pytest.raises(UnknownKindError):
+        registry.get(kind)
+    registry.register(kind, ValidFrequency)
+    assert registry.get(kind) is ValidFrequency
+
+
+def test_conflicting_nullable_branch_units_do_not_reserve_kind() -> None:
+    class AmbiguousFrequency(ComponentSchema):
+        freq: (
+            Annotated[float, UnitSpec("Hz", "MHz")]
+            | Annotated[int, UnitSpec("Hz", "GHz")]
+            | None
+        ) = None
+
+    registry = ComponentRegistry()
+    kind = "notebook/ambiguous-unit"
+    with pytest.raises(ValueError, match="Conflicting UnitSpec"):
+        registry.register(kind, AmbiguousFrequency)
+    with pytest.raises(UnknownKindError):
+        registry.get(kind)
+
+
 @pytest.mark.parametrize(
     ("model", "reason"),
     [

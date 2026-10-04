@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, ClassVar
+from types import UnionType
+from typing import Annotated, ClassVar, Union, get_args, get_origin
 from uuid import UUID
 
 from pydantic import (
@@ -168,6 +169,25 @@ class CurrentSourceSchema(ComponentSchema):
     current: Annotated[float | None, UnitSpec("A", "mA")] = None
 
 
+def field_annotations(
+    field: FieldInfo,
+) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    annotation = field.annotation
+    alternatives = (
+        get_args(annotation)
+        if get_origin(annotation) in (Union, UnionType)
+        else (annotation,)
+    )
+    types: list[object] = []
+    metadata: list[object] = list(field.metadata)
+    for alternative in alternatives:
+        if get_origin(alternative) is Annotated:
+            alternative, *branch_metadata = get_args(alternative)
+            metadata.extend(branch_metadata)
+        types.append(alternative)
+    return tuple(types), tuple(metadata)
+
+
 def _same_canonical_value(
     before: YamlValue, after: YamlValue, field: FieldInfo
 ) -> bool:
@@ -176,7 +196,9 @@ def _same_canonical_value(
         and isinstance(after, float)
         and math.isfinite(before)
         and math.isfinite(after)
-        and any(isinstance(metadata, UnitSpec) for metadata in field.metadata)
+        and any(
+            isinstance(metadata, UnitSpec) for metadata in field_annotations(field)[1]
+        )
     ):
         return math.isclose(before, after, rel_tol=1e-12, abs_tol=0.0)
     return before == after
