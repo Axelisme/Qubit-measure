@@ -133,6 +133,12 @@ def test_status_indexes_gui_operations_and_session_executions(
         }
         executions.append(client.call("tab_analyze", {"tab": "gui-tab"}).data)
 
+    pending = client.context.session.executions.start(
+        client.context.session.bind(), "pending-tab", "post"
+    )
+    pending_summary = client.call(
+        "status", {"execution": pending.snapshot().execution}
+    )
     assert client.call("status", {}) == {
         "project": {"chip": "chip", "qubit": "qubit", "resonator": "res"},
         "soc": {"connected": True, "mock": True},
@@ -141,7 +147,9 @@ def test_status_indexes_gui_operations_and_session_executions(
         "predictor": {"loaded": False},
         "ready": {"can_run": True, "missing": []},
         "tabs": [{"tab": "gui-tab", "experiment": "ramsey", "running": False}],
-        "executions": executions,
+        "executions": [pending_summary],
+        "terminal_count": analysis_count,
+        "query_hint": 'Use status(execution=<id>, detail="full") for completed executions.',
         "running": [
             {"op": analysis_count + 1, "tab": "gui-tab", "kind": "analyze"},
             {"op": analysis_count + 2, "tab": None, "kind": "device"},
@@ -150,7 +158,15 @@ def test_status_indexes_gui_operations_and_session_executions(
     assert ("operation.active", {}) in client.transport.sent
     changed = client.call("status", {})
     changed["executions"].clear()
-    assert client.call("status", {})["executions"] == executions
+    assert client.call("status", {})["executions"] == [pending_summary]
+    before = len(client.transport.sent)
+    for item in executions:
+        full = client.call(
+            "status", {"execution": item["execution"], "detail": "full"}
+        )
+        assert full["status"] == "finished"
+        assert full["execution"] == item["execution"]
+    assert len(client.transport.sent) == before
     client.context.session.close()
 
 
