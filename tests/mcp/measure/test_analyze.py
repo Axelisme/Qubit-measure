@@ -3,7 +3,7 @@
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event, Thread
+from threading import Event, Thread, get_ident
 from typing import Any
 
 import pytest
@@ -1136,3 +1136,64 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
         "tab.save_image",
         "tab.get_figure",
     ]
+
+
+@pytest.mark.parametrize(
+    "stage,method,result_method,pane",
+    [
+        ("primary", "tab.analyze", "tab.get_analyze_result", "analysis"),
+        ("post", "tab.post_analyze", "tab.get_post_analyze_result", "post_analysis"),
+    ],
+)
+@pytest.mark.parametrize("outcome", ["finished", "cancelled", "failed"])
+def test_analysis_can_complete_on_recipe_worker(
+    tmp_path, clients, stage, method, result_method, pane, outcome
+):
+    caller = get_ident()
+    await_callers: list[int] = []
+
+    def respond(name, params):
+        if name == method:
+            return _start_reply({"gain": 2}, [])
+        if name == "operation.await":
+            await_callers.append(get_ident())
+            assert params["operation_id"] == 71
+            return {"reason": "completed", "status": outcome, "error": "fit failed"}
+        assert name == result_method
+        return _result_reply(pane, [], {"gain": 2})
+
+    client = _client(tmp_path, clients, respond)
+    connection = client.context.bound().gui
+    started = connection.send_gui_rpc(method, {"tab_id": "t", "updates": {"gain": 2}})
+    execution = client.context.session.executions.start(
+        connection, "t", stage, started, start_worker=False
+    )
+    assert execution.snapshot().status == "running"
+    assert _methods(client) == [method]
+
+    snapshot = execution.complete_in_current_worker()
+    assert snapshot.status == outcome
+    assert snapshot.phase == "terminal"
+    assert await_callers == [caller]
+    assert (
+        client.context.session.executions.get(snapshot.execution).snapshot() == snapshot
+    )
+    if outcome == "finished":
+        assert snapshot.result is not None
+        assert snapshot.result.summary == {"frequency": 5.0}
+        assert snapshot.writeback == {
+            "has_draft": False,
+            "items": [],
+            "destination_context": {},
+        }
+        assert _methods(client) == [
+            method,
+            "operation.await",
+            result_method,
+            "tab.writeback_preview",
+        ]
+    else:
+        assert snapshot.result is None
+        assert _methods(client) == [method, "operation.await"]
+    with pytest.raises(ValueError, match="completion already started"):
+        execution.complete_in_current_worker()

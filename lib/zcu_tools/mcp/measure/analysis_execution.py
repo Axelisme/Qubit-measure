@@ -215,6 +215,7 @@ class AnalysisExecution:
         self._condition = Condition()
         self._images: tuple[PngImage, ...] = ()
         self._thread: Thread | None = None
+        self._completion_started = False
         self._gui_cancel: GuiCancel | None = None
         self._cancel_in_flight = False
 
@@ -358,7 +359,14 @@ class AnalysisExecution:
         self._fail(exc)
 
     def start(self) -> None:
-        """Called under the registry lock, so close cannot miss an admitted worker."""
+        """Start the registered completion on its own background worker.
+
+        The registry calls this under its lock, so session close cannot miss an
+        admitted worker. A known operation receipt is required. Raise ValueError
+        if completion already started or no receipt exists; worker start failure
+        is retained as a failed snapshot rather than losing the admitted operation.
+        """
+        self._claim_completion()
         if self._closed.is_set():
             self._fail(GuiRpcError("MCP session is closed", reason="session_closed"))
             return
@@ -369,6 +377,30 @@ class AnalysisExecution:
             self._fail(GuiRpcError(str(exc), reason="worker_start_failed"))
         else:
             self._thread = thread
+
+    def complete_in_current_worker(self) -> ExecutionSnapshot:
+        """Observe and capture this analysis synchronously on the calling worker.
+
+        Use only for a registry execution admitted with start_worker=False and a
+        known operation receipt. This performs the same bounded operation.await,
+        result/image/writeback capture and failure isolation as background start.
+        Return a detached terminal snapshot, including failures and cancellation.
+        The caller owns this worker's join before session PNG cleanup. Raise
+        ValueError if completion already started or no operation receipt exists.
+        Recipe drivers use this to avoid a second waiting worker; standalone
+        analyses keep their ordinary background start.
+        """
+        self._claim_completion()
+        self._run()
+        return self.snapshot()
+
+    def _claim_completion(self) -> None:
+        with self._condition:
+            if self._completion_started:
+                raise ValueError("analysis completion already started")
+            if self._snapshot.op is None:
+                raise ValueError("analysis completion needs an operation receipt")
+            self._completion_started = True
 
     def wake(self) -> None:
         with self._condition:
@@ -603,8 +635,17 @@ class AnalysisExecutions:
         started: dict[str, Any] | None = None,
         *,
         interaction: dict[str, Any] | None = None,
+        start_worker: bool = True,
     ) -> AnalysisExecution:
-        """Retain the delivered start receipt, even when close wins admission."""
+        """Register one analysis completion on the fixed connection/tab/stage.
+
+        started is the native start receipt, or None before admission. interaction
+        is an already captured handoff. Retain receipts even when close wins.
+        start_worker=True starts background observation when a receipt is known.
+        False only registers it; its recipe worker must call the returned owner's
+        complete_in_current_worker and join before session PNG cleanup. Existing
+        operation IDs return their existing owner without starting another worker.
+        """
         with self._lock:
             op = started["handle"] if started is not None else None
             if op is not None and op in self._by_op:
@@ -633,13 +674,23 @@ class AnalysisExecutions:
             self._by_id[execution.snapshot().execution] = execution
             if op is not None:
                 self._by_op[op] = execution
-                execution.start()
+                if start_worker:
+                    execution.start()
             return execution
 
     def accept_start(
-        self, execution: AnalysisExecution, started: dict[str, Any]
+        self,
+        execution: AnalysisExecution,
+        started: dict[str, Any],
+        *,
+        start_worker: bool = True,
     ) -> None:
-        """Bind a late receipt without creating a second completion owner."""
+        """Bind a late native receipt to its registered completion owner.
+
+        start_worker=False leaves observation to complete_in_current_worker;
+        otherwise start the ordinary background worker. Conflicting operation
+        ownership raises GuiRpcError. This never creates a second owner.
+        """
         with self._lock:
             op = started["handle"]
             execution.observe_start(started)
@@ -649,7 +700,8 @@ class AnalysisExecutions:
                     reason="incompatible_wire",
                 )
             self._by_op[op] = execution
-            execution.start()
+            if start_worker:
+                execution.start()
 
     def for_op(self, op: int) -> AnalysisExecution | None:
         """Find an existing completion owner without creating a new job."""
