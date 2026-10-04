@@ -243,11 +243,16 @@ def test_nested_kind_can_be_omitted_in_partial_setup(
             assert reopened.setup.N1.details is None
 
 
+@pytest.mark.parametrize("validate_assignment", [False, True])
 @pytest.mark.parametrize("write", ["set", "ext"])
 def test_caught_alias_validation_failure_preserves_shared_draft(
-    tmp_path: Path, write: str
+    tmp_path: Path, write: str, validate_assignment: bool
 ) -> None:
     class RejectMutableExt(ComponentSchema):
+        model_config = ConfigDict(
+            extra="forbid", validate_assignment=validate_assignment
+        )
+
         @field_validator("ext", mode="before")
         @classmethod
         def mutate_then_reject(cls, value: YamlMap) -> YamlMap:
