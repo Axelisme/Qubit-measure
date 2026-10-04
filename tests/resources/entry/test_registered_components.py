@@ -1,6 +1,7 @@
 """Registered notebook models in partial setup documents, with registry custody."""
 
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Annotated
@@ -9,7 +10,12 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import UnitSpec
-from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
+from zcu_tools.resources.entry import (
+    ComponentSchema,
+    MissingReferenceError,
+    ResultEntry,
+    component_registry,
+)
 
 
 class RequiredPhysicalSchema(ComponentSchema):
@@ -25,6 +31,17 @@ class RequiredTiming(BaseModel):
 
 class RequiredNestedSchema(ComponentSchema):
     timing: RequiredTiming
+
+
+class PairLinks(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    control: str
+    target: str
+    coupler: str | None = None
+
+
+class PairSchema(ComponentSchema):
+    links: PairLinks
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -47,30 +64,105 @@ def registry_state_guard(
     )
 
 
-@pytest.fixture
-def required_kind(registry_state_guard: None) -> Generator[str]:
-    kind = "notebook/required"
-    component_registry.register(kind, RequiredPhysicalSchema)
+@contextmanager
+def registered_model(
+    kind: str, model: type[ComponentSchema], *, references: Sequence[str] = ()
+) -> Generator[str]:
+    component_registry.register(kind, model, references=references)
     try:
         yield kind
     finally:
         component_registry.unregister(kind)
+
+
+@pytest.fixture
+def required_kind(registry_state_guard: None) -> Generator[str]:
+    with registered_model("notebook/required", RequiredPhysicalSchema) as kind:
+        yield kind
 
 
 @pytest.fixture
 def nested_kind(registry_state_guard: None) -> Generator[str]:
-    kind = "notebook/nested"
-    component_registry.register(kind, RequiredNestedSchema)
-    try:
+    with registered_model("notebook/nested", RequiredNestedSchema) as kind:
         yield kind
-    finally:
-        component_registry.unregister(kind)
+
+
+@pytest.fixture
+def pair_kind(registry_state_guard: None) -> Generator[str]:
+    with registered_model(
+        "notebook/pair",
+        PairSchema,
+        references=("links.control", "links.target", "links.coupler"),
+    ) as kind:
+        yield kind
 
 
 def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     results, database = tmp_path / "results", tmp_path / "Database"
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     return entry, results, database
+
+
+@pytest.mark.parametrize("field", ["control", "target", "coupler"])
+@pytest.mark.parametrize("operation", ["add", "write", "open", "refresh"])
+def test_nested_references_reject_missing_targets_with_the_declared_path(
+    tmp_path: Path, pair_kind: str, field: str, operation: str
+) -> None:
+    entry, results, database = create_entry(tmp_path)
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("Q1", kind="qubit/transmon")
+    entry.setup.add_component("Q2", kind="qubit/fluxonium")
+    valid_links: dict[str, str] = {"control": "Q1", "target": "Q2"}
+    entry.setup.add_component("P1", kind=pair_kind, links=valid_links)
+    invalid_links = {**valid_links, field: "absent"}
+    if operation in ("open", "refresh"):
+        document = YAML(typ="safe").load(setup_path)
+        document["components"]["P1"]["links"] = invalid_links
+        with setup_path.open("w", encoding="utf-8") as stream:
+            YAML(typ="rt").dump(document, stream)
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        if operation == "add":
+            entry.setup.add_component("P2", kind=pair_kind, links=invalid_links)
+        elif operation == "write":
+            entry.setup.P1.links = invalid_links
+        elif operation == "refresh":
+            entry.setup.refresh()
+        else:
+            ResultEntry.open("entry", result_root=results, database_root=database)
+
+    with pytest.raises(MissingReferenceError) as failure:
+        perform_operation()
+    assert failure.value.source == setup_path
+    assert failure.value.component == ("P2" if operation == "add" else "P1")
+    assert failure.value.field == f"links.{field}"
+    assert failure.value.target == "absent"
+    assert setup_path.read_bytes() == before
+    # A successful short transaction proves the old published handle remains usable.
+    if operation in ("add", "write"):
+        entry.setup.P1.links = valid_links
+
+
+def test_nested_required_references_can_be_filled_incrementally_and_reopened(
+    tmp_path: Path, pair_kind: str
+) -> None:
+    entry, results, database = create_entry(tmp_path)
+    entry.setup.add_component("Q1", kind="qubit/transmon")
+    entry.setup.add_component("Q2", kind="qubit/fluxonium")
+    entry.setup.add_component("P1", kind=pair_kind, links={"control": "Q1"})
+    setup_path = results / "entry" / "setup.yaml"
+    assert YAML(typ="safe").load(setup_path)["components"]["P1"]["links"] == {
+        "control": "Q1"
+    }
+    entry.setup.P1.links = {"control": "Q1", "target": "Q2", "coupler": None}
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.P1.kind == pair_kind
+    assert YAML(typ="safe").load(setup_path)["components"]["P1"]["links"] == {
+        "control": "Q1",
+        "target": "Q2",
+        "coupler": None,
+    }
 
 
 @pytest.mark.parametrize("value", [None, "not a frequency"])
