@@ -174,6 +174,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
 ) -> None:
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
+    assert entry.setup.general.description is None
     entry.setup.general.ext.temperature = 0.02
     entry.setup.general.ext["_arbitrary.key"] = {"freq": 12.3, "flags": [True, None]}
     before = setup_path.read_bytes()
@@ -181,6 +182,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
         draft.general.ext.temperature = 0.03
         draft.general.ext.note = "cooldown"
         draft.description = "physical environment is not encoded in the name"
+        assert draft.general.description == draft.description
         assert draft.general.ext.temperature == 0.03
         assert entry.setup.general.ext.temperature == 0.02
         assert setup_path.read_bytes() == before
