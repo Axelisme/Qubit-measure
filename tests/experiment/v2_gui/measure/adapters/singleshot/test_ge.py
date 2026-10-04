@@ -1,5 +1,6 @@
 """GE adapter translates FIT/post into named plots and separate proposals."""
 
+import json
 from dataclasses import replace
 from typing import Any, cast
 
@@ -48,6 +49,14 @@ def test_primary_post_and_writebacks_use_adopted_calibration_not_edited_form() -
     assert list(fit_plots) == ["fit"]
     assert primary.to_summary_dict()["init_pops"] == primary.init_pops.tolist()
     assert primary.to_summary_dict()["initial_state"] == "excited"
+    summary = json.loads(json.dumps(primary.to_summary_dict(), allow_nan=False))
+    assert set(summary["fit_quality"]) == {"joint", "ground", "excited"}
+    for stage, quality in summary["fit_quality"].items():
+        assert quality["r2"] > 0.8
+        assert quality["normalized_residual_rms"] < 0.05
+        assert len(quality["relative_parameter_errors"]) == (
+            7 if stage == "joint" else 3
+        )
 
     params.initial_state = "ground"
     post_plots = Plots(NonPresentingHost())

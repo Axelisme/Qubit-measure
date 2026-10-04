@@ -19,6 +19,9 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     SweepDefault,
     scaled_md,
 )
+from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
+    fit_quality_summary,
+)
 from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
@@ -55,6 +58,7 @@ class AmpRabiAnalyzeResult(AnalyzeResultBase):
     pi_gain_err: float
     pi2_gain: float
     pi2_gain_err: float
+    fit_quality: dict[str, dict[str, object]] | None = None
 
 
 class AmpRabiAdapter(
@@ -172,6 +176,7 @@ class AmpRabiAdapter(
             pi_gain_err=analysis.pi_amp_err,
             pi2_gain=analysis.pi2_amp,
             pi2_gain_err=analysis.pi2_amp_err,
+            fit_quality=fit_quality_summary(analysis.fit_quality),
         )
 
     def get_writeback_items(

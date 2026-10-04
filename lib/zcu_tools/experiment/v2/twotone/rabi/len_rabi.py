@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, ClassVar
@@ -7,7 +8,7 @@ from typing import Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fitting import fit_rabi
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     US_TO_S,
@@ -55,6 +56,7 @@ class LenRabiAnalysis:
     pi2_len_err: float
     rabi_f: float
     rabi_f_err: float
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -247,12 +249,31 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         lens = lens[~nan_mask]
         real_signals = real_signals[~nan_mask]
 
-        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, _ = fit_rabi(
+        (
+            pi_len,
+            pi_len_err,
+            pi2_len,
+            pi2_len_err,
+            freq,
+            freq_err,
+            y_fit,
+            (pOpt, pCov),
+        ) = fit_rabi(
             # Signed amplitude covers both zero-drive extrema when phase is fixed.
             lens,
             real_signals,
             decay=options.decay,
             init_phase=None if options.fit_phase else 0.0,
+        )
+
+        names = ("y0", "yscale", "freq", "phase") + (
+            ("decay_time",) if options.decay else ()
+        )
+        quality = compute_fit_quality(
+            real_signals,
+            y_fit,
+            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
+            pCov,
         )
 
         fig, ax = plots.subplots("fit", figsize=config.figsize)
@@ -284,4 +305,12 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         # fit_rabi computes the per-quantity fit uncertainties; surface them so the
         # GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
         # labels already show pi/pi2 errors and the title shows the freq error).
-        return LenRabiAnalysis(pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err)
+        return LenRabiAnalysis(
+            pi_len,
+            pi_len_err,
+            pi2_len,
+            pi2_len_err,
+            freq,
+            freq_err,
+            fit_quality={"fit": quality},
+        )

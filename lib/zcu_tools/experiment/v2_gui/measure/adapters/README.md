@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02 (Record-only adapters)
+**Last updated:** 2026-10-04, fit quality summaries
 
 # measure experiment adapters
 
@@ -10,6 +10,8 @@ Post-analysis adapters 以 `get_post_writeback_items()` 提出 post-owned propos
 primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Writeback 實作。
 
 ## Ownership
+
+T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned fit_quality。共用 mechanics 只投影數值與具體 summary 路徑，不重算品質。GUI 與 MCP 讀同一份結果，低 r2 不增加 accept 門檻。GE 保留 joint／ground／excited 身分，post 不產生新 fit。
 
 - `base.py` 擁有所有 adapter 共用的 framework implementation，不含特定實驗 policy。
 - `lookback.py`、`onetone/`、`twotone/`、`singleshot/`、`jpa/`、`fake/` 是 concrete experiment
@@ -38,8 +40,8 @@ FakeFrequency core 與 adapter 留在 `fake/freq.py`。Core 重用 FreqExp 的�
 OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interactive plugin 明確取該 source 的資料並捕捉成唯讀 inputs。
 GE 的 FIT／post 分別發布 `fit`／`post` 具名圖，post 使用已採用的 primary FIT；
 OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed state 呼叫 Qt-free kernel 與原生圖 builder，產生 GUI-owned 數值結果與 `pick` 圖。Qt 畫布只負責預覽。TwoTone FluxDep 的 run 也回傳 RunRecord，plugin 從 explicit source 捕捉 inputs，保留 phase 投影並共用這條終止 renderer。TwoTone Freq 的 FIT 回傳頻率與線寬及其誤差，fit 圖另交 Plots；TwoTone PowerDep 只提供 run 與 canonical records，不提供 analysis。Lookback FIT 只輸出 predict_offset scalar，具名 fit 另由 Plots 發布；GUI ratio0.1／smooth1.0 與 timeFly writeback 不變。其餘 adapters 同樣使用 explicit records，framework 不提供 pyplot 或舊簽名 fallback。
-TwoTone AmpRabi／LenRabi 的 run 回傳 RunRecord，FIT 以 explicit source 與 typed options 分析，結果只含 scalar，`fit` 圖交給 Plots。Gain／length／Rabi frequency 的 scalar writeback 不依賴 cfg；校準 pulse module writeback 只從該 source.cfg 複製 qub_pulse，缺 cfg 時略過 module items。
-T2Echo／T2Ramsey 在 build_exp_cfg 將 detune_ratio 降為 cfg.detune，run 配對 cfg／Result，FIT 只回傳 scalar 並發布具名 fit。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時只提供 t2r。
+TwoTone AmpRabi／LenRabi 的 run 回傳 RunRecord，FIT 以 explicit source 與 typed options 分析，結果包含 scalar 與 core fit_quality，`fit` 圖交給 Plots。Gain／length／Rabi frequency 的 scalar writeback 不依賴 cfg；校準 pulse module writeback 只從該 source.cfg 複製 qub_pulse，缺 cfg 時略過 module items。
+T2Echo／T2Ramsey 在 build_exp_cfg 將 detune_ratio 降為 cfg.detune，run 配對 cfg／Result，FIT 回傳 scalar 與 core fit_quality，並發布具名 fit。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時只提供 t2r。
 CKP 的 run 配對 cfg 與純 Result 為 RunRecord，兩張 measurement 熱圖分別呈現 ground／excited。FIT 只提交 chi／kappa／res_freq scalar與具名 fit 圖，保留 chi／rf_w／readout_f writeback。
 Bath reset 的 FreqGain／Length／Phase adapter 將同次 cfg／Result 配成 RunRecord，FIT 使用 explicit source 與本次 Plots，僅提交 scalar 或空數值結果。三者的 reset_bath／reset_bath_e module writeback 使用來源 cfg，缺 cfg 時略過；md 欄位與 phase gating 不變。
 Single／dual-tone reset 的五個 adapters 將同次 cfg／Result 配成 RunRecord，FIT 僅提交 scalar 或空結果，圖交本次 Plots。Dual Freq 的 GUI hard-sweep policy 在 build_exp_cfg 寫入 cfg.method，不由 run kwargs 隱藏。reset_10／reset_120 module writeback 使用來源 cfg，缺 cfg 時略過，既有 md gating 保留。

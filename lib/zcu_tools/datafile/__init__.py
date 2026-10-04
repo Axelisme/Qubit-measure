@@ -30,7 +30,6 @@ from .streaming import (
     open_streaming_grouped_labber_data,
     open_streaming_labber_data,
 )
-from .transport import download_from_server, upload_to_server
 
 __all__ = [
     "Axis",
@@ -54,6 +53,4 @@ __all__ = [
     "reserve_labber_filepath",
     "get_datafolder_path",
     "create_datafolder",
-    "upload_to_server",
-    "download_from_server",
 ]

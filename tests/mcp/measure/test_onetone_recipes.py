@@ -13,7 +13,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 
 from ._recipe_support import PNG, LookbackGui, scalar, section
-from ._support import make_client
+from ._support import full_execution_reply, make_client
 
 
 @contextmanager
@@ -36,6 +36,9 @@ def recipe_client(tmp_path, respond):
         {"gain": False},
         {"gain": "bad"},
         {"points": 2.5},
+        {"points": 1.0},
+        {"reps": 1.0},
+        {"rounds": 1.0},
         {"points": True},
         {"reps": 1.5},
         {"rounds": False},
@@ -50,6 +53,7 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert reply.data["error"]["phase"] == "preparing"
         assert not gui.ran
         assert not any(
@@ -66,7 +70,9 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         return gui(method, params)
 
     with recipe_client(tmp_path, respond) as client:
-        reply = client.call("onetone_spectrum_over_flux", {})
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_flux", {})
+        )
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {
@@ -85,8 +91,14 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         {"flux_device": ""},
         {"flux_device": False},
         {"flux_device": " "},
+        {"flux_unit": ""},
+        {"flux_unit": " "},
+        {"flux_unit": False},
+        {"flux_unit": 1},
         {"freq_points": True},
         {"freq_points": 1.5},
+        {"freq_points": 1.0},
+        {"flux_points": 1.0},
         {"flux_points": False},
         {"flux_range": [0, True]},
         {"flux_range": [0, float("inf")]},
@@ -101,10 +113,13 @@ def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(
 ):
     gui = OnetoneGui(experiment="onetone/flux_dep")
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum_over_flux", arguments)
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_flux", arguments)
+        )
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
@@ -143,7 +158,7 @@ def test_spectrum_only_delivers_finite_actual_frequency(
 ):
     gui = OnetoneGui(md)
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum", arguments)
+        reply = full_execution_reply(client, client.call("onetone_spectrum", arguments))
         assert reply.data["status"] == expected_status, reply.data
         if expected_status == "finished":
             fields = reply.data["actual"]["fields"]
@@ -186,8 +201,9 @@ def test_flux_rejects_unknown_explicit_device_without_selecting_default(tmp_path
                 "message": "No device named missing-coil",
             },
         }
-        reply = client.call(
-            "onetone_spectrum_over_flux", {"flux_device": "missing-coil"}
+        reply = full_execution_reply(
+            client,
+            client.call("onetone_spectrum_over_flux", {"flux_device": "missing-coil"}),
         )
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "device_not_found"
@@ -272,15 +288,20 @@ class OnetoneGui(LookbackGui):
         {"gain_range": [0, 1, 2]},
         {"gain_range": {"start": 0, "stop": 1}},
         {"gain_points": 1.2},
+        {"gain_points": 1.0},
+        {"freq_points": 1.0},
         {"gain_points": True},
     ],
 )
 def test_power_rejects_invalid_gain_inputs_before_preparation(tmp_path, arguments):
     with recipe_client(tmp_path, PowerGui()) as client:
-        reply = client.call("onetone_spectrum_over_power", arguments)
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_power", arguments)
+        )
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
         )
@@ -316,7 +337,9 @@ def test_power_preview_failure_retains_the_saved_raw_and_true_run(
                 raise OSError("Image destination failed")
 
             monkeypatch.setattr(client.context.session, "write_png", fail_write)
-        reply = client.call("onetone_spectrum_over_power", {})
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_power", {})
+        )
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -354,12 +377,16 @@ def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_w
 
     with recipe_client(tmp_path, respond) as client:
         try:
-            initial = client.call("onetone_spectrum_over_power", {})
+            initial = full_execution_reply(
+                client, client.call("onetone_spectrum_over_power", {})
+            )
             assert entered.wait(2)
             execution = initial.data["execution"]
             client.call("cancel", {"execution": execution})
             release.set()
-            terminal = client.call("wait", {"execution": execution, "timeout": 2})
+            terminal = full_execution_reply(
+                client, client.call("wait", {"execution": execution, "timeout": 2})
+            )
             data = terminal.data
             assert data["status"] == ("failed" if fail else "cancelled")
             assert data["cancel_requested"]
@@ -384,14 +411,14 @@ def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_w
 def test_flux_does_not_treat_unknown_units_as_physical_flux(
     tmp_path, explicit, unit, expected
 ):
-    gui = FluxGui()
+    gui = FluxGui(snapshot={"name": "coil", "unit": unit})
     with recipe_client(tmp_path, gui) as client:
-        client.transport.replies["device.snapshot"] = {
-            "ok": True,
-            "result": {"snapshot": {"name": "coil", "unit": unit}},
-        }
-        reply = client.call(
-            "onetone_spectrum_over_flux", {"flux_device": "coil"} if explicit else {}
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {"flux_device": "coil"} if explicit else {},
+            ),
         )
         assert reply.data["status"] == expected
         assert not gui.ran
@@ -426,6 +453,51 @@ class PowerGui(OnetoneGui):
         return super().__call__(method, params)
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_onetone_power_number_ranges_publish_float_endpoints_and_integer_counts(
+    tmp_path, number
+):
+    with recipe_client(tmp_path, PowerGui()) as client:
+        data = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_power",
+                {
+                    "center_mhz": number,
+                    "span_mhz": number,
+                    "gain_range": [number - 1, number],
+                    "freq_points": 3,
+                    "gain_points": 2,
+                    "reps": 2,
+                    "rounds": 1,
+                },
+            ),
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["sweep.freq"]["value"] == {"start": 0.5, "stop": 1.5, "expts": 3}
+        assert fields["sweep.gain"]["value"] == {"start": 0.0, "stop": 1.0, "expts": 2}
+        for path in ("sweep.freq", "sweep.gain"):
+            sweep = fields[path]["value"]
+            assert type(sweep["start"]) is float
+            assert type(sweep["stop"]) is float
+            assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            assert fields[name]["value"] == count
+            assert type(fields[name]["value"]) is int
+        gain_edits = [
+            edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "gain"]
+        ]
+        assert len(gain_edits) == 1
+        assert type(gain_edits[0]["start"]) is float
+        assert type(gain_edits[0]["stop"]) is float
+        assert type(gain_edits[0]["expts"]) is int
+
+
 @pytest.mark.parametrize(
     "arguments, expected_gain",
     [
@@ -446,7 +518,8 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
 ):
     gui = PowerGui()
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum_over_power", arguments)
+        initial = client.call("onetone_spectrum_over_power", arguments)
+        reply = full_execution_reply(client, initial)
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data
@@ -458,6 +531,21 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         assert data["preview"]["kind"] == "run_preview"
         assert Path(data["preview"]["path"]).read_bytes() == PNG
         assert reply.images[0].data == PNG
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        waited = client.call("wait", {"execution": data["execution"], "timeout": 0})
+        assert summary["previews"] == {
+            "run": [data["preview"]["path"]],
+            "primary": [],
+            "post": [],
+        }
+        assert (
+            initial.data["previews"] == waited.data["previews"] == summary["previews"]
+        )
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+            {"path": "/actual/raw.h5", "status": "saved"}
+        ]
+        assert len(client.transport.sent) == before
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.save_data") == 1
@@ -467,7 +555,8 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
 
 
 class FluxGui(OnetoneGui):
-    def __init__(self):
+    def __init__(self, snapshot=None):
+        self.snapshot = snapshot
         super().__init__(
             {"r_f": 6100.0, "rf_w": 4.0, "flx_half": 0.001, "flx_int": 0.003},
             experiment="onetone/flux_dep",
@@ -496,7 +585,9 @@ class FluxGui(OnetoneGui):
         if method == "device.snapshot":
             assert params["name"] in ("coil", "alternate")
             return {
-                "snapshot": {
+                "snapshot": self.snapshot
+                if self.snapshot is not None
+                else {
                     "name": params["name"],
                     "unit": "A" if params["name"] == "coil" else "V",
                 }
@@ -504,10 +595,19 @@ class FluxGui(OnetoneGui):
         return super().__call__(method, params)
 
 
-@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize(
+    "explicit_range,expected_endpoints",
+    [
+        (None, (0.005, -0.001)),
+        ([-0.003, 0.007], (-0.003, 0.007)),
+        ([0, 1], (0.0, 1.0)),
+        ([0.0, 1.0], (0.0, 1.0)),
+    ],
+)
 def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
-    tmp_path, explicit
+    tmp_path, explicit_range, expected_endpoints
 ):
+    explicit = explicit_range is not None
     gui = FluxGui()
     arguments: dict[str, Any] = {
         "readout_ref": "calibrated",
@@ -520,11 +620,13 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
         arguments.update(
             reuse_tab_id="t",
             flux_device="alternate",
-            flux_range=[-0.003, 0.007],
+            flux_range=explicit_range,
             flux_points=11,
         )
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum_over_flux", arguments)
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_flux", arguments)
+        )
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data
@@ -535,10 +637,13 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             "source": "explicit" if explicit else "device.flux.name",
         }
         assert fields["sweep.flux"]["value"] == {
-            "start": -0.003 if explicit else 0.005,
-            "stop": 0.007 if explicit else -0.001,
+            "start": expected_endpoints[0],
+            "stop": expected_endpoints[1],
             "expts": 11 if explicit else 19,
         }
+        assert type(fields["sweep.flux"]["value"]["start"]) is float
+        assert type(fields["sweep.flux"]["value"]["stop"]) is float
+        assert type(fields["sweep.flux"]["value"]["expts"]) is int
         assert fields["sweep.flux"]["source"] == (
             "explicit" if explicit else "gui_calibration"
         )
@@ -554,6 +659,128 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
         assert methods.count("tab.run_start") == 1
         assert ("tab.reset_cfg" in methods) is explicit
         assert ("value.read" in methods) is not explicit
+        if explicit:
+            flux_edits = [
+                edit["value"]
+                for method, params in client.transport.sent
+                if method == "tab.edit_cfg"
+                for edit in params["edits"]
+                if edit["path"] == ["sweep", "flux"]
+            ]
+            assert len(flux_edits) == 1
+            assert type(flux_edits[0]["start"]) is float
+            assert type(flux_edits[0]["stop"]) is float
+            assert type(flux_edits[0]["expts"]) is int
+
+
+def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path):
+    gui = FluxGui(
+        snapshot={
+            "name": "coil",
+            "type_name": "FakeDevice",
+            "unit": "none",
+            "info": {"type": "FakeDevice", "value": 0.0},
+        }
+    )
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {
+                    "flux_device": "coil",
+                    "flux_unit": "native",
+                    "flux_range": [-0.25, 1.5],
+                    "flux_points": 7,
+                },
+            ),
+        )
+        assert reply.data["status"] == "finished", reply.data
+        assert reply.data["actual"]["fields"]["dev.flux_dev"] == {
+            "value": "coil",
+            "unit": "native",
+            "source": "explicit",
+        }
+        assert reply.data["actual"]["fields"]["sweep.flux"]["value"] == {
+            "start": -0.25,
+            "stop": 1.5,
+            "expts": 7,
+        }
+        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["analysis"]["status"] == "finished"
+        assert gui.ran
+
+
+@pytest.mark.parametrize(
+    "device,requested_unit,expected",
+    [
+        ("coil", "A", "finished"),
+        ("alternate", "V", "finished"),
+        ("coil", "V", "failed"),
+        ("alternate", "A", "failed"),
+        ("coil", "native", "failed"),
+        ("alternate", "native", "failed"),
+    ],
+)
+def test_physical_flux_unit_assertion_is_checked_before_run(
+    tmp_path, device, requested_unit, expected
+):
+    gui = FluxGui()
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {"flux_device": device, "flux_unit": requested_unit},
+            ),
+        )
+        assert reply.data["status"] == expected, reply.data
+        assert gui.ran is (expected == "finished")
+        if expected == "finished":
+            assert (
+                reply.data["actual"]["fields"]["dev.flux_dev"]["unit"] == requested_unit
+            )
+        else:
+            assert reply.data["error"]["reason"] == "invalid_device"
+
+
+@pytest.mark.parametrize(
+    "type_name,info_type,unit,requested_unit",
+    [
+        ("FakeDevice", "FakeDevice", "none", None),
+        ("FakeDevice", "FakeDevice", "none", "A"),
+        ("FakeDevice", "FakeDevice", "none", "V"),
+        ("UnknownDevice", "UnknownDevice", "none", "native"),
+        ("FakeDevice", "UnknownDevice", "none", "native"),
+        ("UnknownDevice", "FakeDevice", "none", "native"),
+        ("FakeDevice", None, "none", "native"),
+        ("FakeDevice", "FakeDevice", "A", "A"),
+        ("FakeDevice", "FakeDevice", "V", "V"),
+        ("UnknownDevice", "UnknownDevice", "native", None),
+    ],
+)
+def test_native_flux_rejects_unconfirmed_or_physical_coordinates_before_run(
+    tmp_path, type_name, info_type, unit, requested_unit
+):
+    gui = FluxGui(
+        snapshot={
+            "name": "coil",
+            "type_name": type_name,
+            "unit": unit,
+            "info": {"type": info_type} if info_type is not None else None,
+        }
+    )
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {"flux_device": "coil", "flux_unit": requested_unit},
+            ),
+        )
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["reason"] == "invalid_device"
+        assert not gui.ran
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "t"])
@@ -627,7 +854,7 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
     gui = OnetoneGui(md)
     before = deepcopy(gui.publication)
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum", arguments)
+        reply = full_execution_reply(client, client.call("onetone_spectrum", arguments))
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data

@@ -26,11 +26,26 @@ class GuiRpcError(RuntimeError):
     """A GUI or MCP boundary error with a stable agent-facing reason."""
 
     def __init__(
-        self, message: str, *, reason: str | None = None, code: str | None = None
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        code: str | None = None,
+        request_rejected: bool = False,
     ) -> None:
         super().__init__(message)
         self.reason = reason
         self.code = code
+        self.request_rejected = request_rejected
+
+
+def _transport_timeout(exc: GuiTransportTimeoutError) -> GuiRpcError:
+    """Use the same uncertain transport error for public and internal reads."""
+    return GuiRpcError(
+        f"GUI Transport Timeout: {exc}. Reconnect on the next call; review before retrying.",
+        reason="gui_transport_timeout",
+        code="timeout",
+    )
 
 
 class CatalogEntry(TypedDict):
@@ -277,10 +292,17 @@ class MeasureMcpSession:
                 raise RuntimeError("MeasureMcpSession bridge is already attached")
             self._bridge = bridge
 
-    def bind(self) -> GuiConnection:
-        """Ensure once and capture the current GUI for a multi-step operation."""
+    def bind(self, *, require_connected: bool = False) -> GuiConnection:
+        """Capture a generation-bound GuiConnection for this session.
+
+        require_connected=True requires an existing open GUI transport, raising
+        GuiRpcError when disconnected instead of attaching or reconnecting.
+        False preserves lazy attach to the configured existing GUI. Either mode
+        may read the live catalog and fail on handshake/query errors. The returned
+        connection never reconnects; its RPCs reject a lost/replaced GUI.
+        """
         with self._rpc_lock:
-            self.ensure_connected()
+            self._ensure_connected(require_connected=require_connected)
             return GuiConnection(self, self._generation)
 
     def _require_generation(self, generation: int) -> None:
@@ -446,7 +468,7 @@ class MeasureMcpSession:
         with self._rpc_lock:
             self._ensure_connected()
 
-    def _ensure_connected(self) -> None:
+    def _ensure_connected(self, *, require_connected: bool = False) -> None:
         self._require_open()
         if self.bridge.is_connected and self._catalog:
             return
@@ -456,6 +478,11 @@ class MeasureMcpSession:
                 selected, launched=False, requested_port=self._requested_port
             )
             return
+        if require_connected:
+            raise GuiRpcError(
+                "GUI is not connected; call connect explicitly before setup",
+                reason="connection_lost",
+            )
         self.connect_to_gui(
             port=self._requested_port,
             launch="never",
@@ -486,7 +513,10 @@ class MeasureMcpSession:
         self._require_connection(generation)
         if operation_handle is not None:
             params = self._params_for_operation(params, operation_handle)
-        reply = self._bound_rpc(generation, method, params, 6.0)
+        try:
+            reply = self._bound_rpc(generation, method, params, 6.0)
+        except GuiTransportTimeoutError as exc:
+            raise _transport_timeout(exc) from exc
         if not reply.get("ok"):
             error = reply.get("error", {})
             raise GuiRpcError(
@@ -537,11 +567,7 @@ class MeasureMcpSession:
         try:
             resp = self._bound_rpc(generation, method, params, timeout_seconds)
         except GuiTransportTimeoutError as exc:
-            raise GuiRpcError(
-                f"GUI Transport Timeout: {exc}. Reconnect on the next call; review before retrying.",
-                reason="gui_transport_timeout",
-                code="timeout",
-            ) from exc
+            raise _transport_timeout(exc) from exc
         if not resp.get("ok", False):
             err = resp.get("error", {})
             if err.get("reason") == "stale_version":
@@ -552,13 +578,27 @@ class MeasureMcpSession:
                     f"{detail}; review then retry",
                     reason="stale_version",
                     code="precondition_failed",
+                    request_rejected=True,
                 )
             code = err.get("code")
             reason = err.get("reason")
             if code == "timeout" and reason is None:
                 reason = "gui_handler_timeout"
             raise GuiRpcError(
-                f"GUI Error ({code}): {err.get('message')}", reason=reason, code=code
+                f"GUI Error ({code}): {err.get('message')}",
+                reason=reason,
+                code=code,
+                # Only explicit admission errors prove that dispatch did not start.
+                # Handler timeout and internal failures can follow side effects.
+                request_rejected=code
+                in {
+                    "unknown_method",
+                    "invalid_params",
+                    "precondition_failed",
+                    "unauthorized",
+                    "busy",
+                    "shutting_down",
+                },
             )
         result = resp.get("result")
         if not isinstance(result, dict):

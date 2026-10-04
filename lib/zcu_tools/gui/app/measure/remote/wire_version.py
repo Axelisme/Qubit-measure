@@ -122,7 +122,9 @@ from __future__ import annotations
 # v80: Run source tokens in snapshots and optional save/analyze admission binding.
 # v81: optional analysis-operation binding for writeback previews.
 # v82: expose device units and bind Run pane previews to their original Run.
-WIRE_VERSION = 82
+# v83: analysis result summaries replace nonfinite values with null and list invalid paths.
+# v84: shared string enum schemas declare and validate interactive flux-line roles.
+WIRE_VERSION = 84
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -180,4 +182,6 @@ WIRE_VERSION = 82
 # v112: commit Run provenance and reject superseded raw save or primary analysis.
 # v113: reject superseded writeback preview sources before reading the draft.
 # v114: guard Run preview provenance and preserve partial frequency calibration.
-GUI_VERSION = 114
+# v115: project nonfinite analysis results without changing generic context serialization.
+# v116: flux-line commands derive enum choices from their domain role type.
+GUI_VERSION = 116

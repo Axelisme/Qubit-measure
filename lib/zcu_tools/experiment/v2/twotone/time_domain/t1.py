@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import ClassVar
@@ -9,7 +10,12 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 
 import zcu_tools.analysis.fitting as ft
-from zcu_tools.analysis.fitting import fit_decay, fit_dual_decay
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    fit_decay,
+    fit_dual_decay,
+)
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     US_TO_S,
@@ -84,6 +90,7 @@ class T1Analysis:
     t1_err: float
     t1b: float | None = None
     t1b_err: float | None = None
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
@@ -214,11 +221,21 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         real_signals = rotate2real(signals).real
 
         if options.dual_exp:
-            t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
+            t1, t1err, t1b, t1berr, y_fit, (pOpt, pCov) = fit_dual_decay(
+                xs, real_signals
+            )
+            names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
         else:
-            t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
+            t1, t1err, y_fit, (pOpt, pCov) = fit_decay(xs, real_signals)
+            names = ("y0", "yscale", "decay_time")
             t1b = 0.0
             t1berr = 0.0
+        quality = compute_fit_quality(
+            real_signals,
+            y_fit,
+            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
+            pCov,
+        )
 
         fig, ax = plots.subplots("fit")
 
@@ -245,6 +262,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             t1_err=float(t1err),
             t1b=float(t1b) if options.dual_exp else None,
             t1b_err=float(t1berr) if options.dual_exp else None,
+            fit_quality={"fit": quality},
         )
 
 

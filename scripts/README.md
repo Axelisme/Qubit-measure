@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-04
 
 這裡是使用者入口；repo 品質檢查在 [tools/README.md](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -20,7 +20,6 @@
 - `export_autofluxdep_sample_table.py`：工作站 Python 3.13 GUI profile，從 autofluxdep run directory、`manifest.json` 或配對的資料 root 匯出 SampleTable CSV。預設目的地在 data root 的 `exports/sample/samples.csv`，已存在時 append；`--overwrite` 改為重建。缺少有效 flux unit 的 artifact 在寫入前失敗。見 [autofluxdep](../lib/zcu_tools/gui/app/autofluxdep/README.md)。
 - `download_result.py`：工作站有 Google Drive client 依賴與 credentials 的環境。輸入 qubit folder 名稱與 `GOOGLE_DRIVE_PARENT_FOLDER_ID`，從 Drive 遞迴下載到 repo `result/<qubit>/`；本地不存在會建目錄，遠端較新會以二進位寫入覆蓋本地檔案並設定 mtime。OAuth token 讀取或更新目前工作目錄的 `token.json`，可能啟動認證流程；會存取網路及使用者資料。
 - `upload_result.py`：同上，但需要 Drive 寫入權限；從 repo `result/<qubit>/` 建立或更新 Drive 對應檔案與目錄。明確選用 `--prune-remote` 時，還會刪除遠端缺少本地對應的檔案。OAuth token 存於目前工作目錄的 `token.json`；會存取網路與修改使用者的 Drive 資料。
-- `data_server.py`：**用途待確認**。Flask HTTP server 預設監聽 `0.0.0.0:4999`，以 repo `Database/` 為預設 root。`/upload` 接收 h5/hdf5 檔案，經 `reserve_labber_filepath` 決定寫入檔名；`/download` 依所給 path 送出檔案。指定 `--root_dir` 時會將 root 存為字串，上傳與下載用 `/` 組合路徑時會失敗，目前不可用。檔名中的 `..` 未被排除，所給下載相對路徑也未受 root 範圍限制；讀寫可能超出 `Database/`。使用含 Flask 與資料檔依賴的工作站環境。此服務曝露網路與讀寫使用者資料；尚無足夠文件確認部署對象或安全邊界。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。
 
 ## 模擬資料庫產生

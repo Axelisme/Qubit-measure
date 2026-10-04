@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any, cast, get_args
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxLineRole,
@@ -97,7 +97,7 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
                 Command[FluxPickState](
                     "move_line",
                     (
-                        ParamSpec("role", JsonType.STRING),
+                        ParamSpec("role", JsonType.STRING, enum=get_args(FluxLineRole)),
                         ParamSpec("position", JsonType.NUMBER),
                     ),
                     lambda session, params: actions.move.execute(

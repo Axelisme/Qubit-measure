@@ -8,7 +8,7 @@
 # without prompting — the Codex analogue of the per-server "mcp__<server>" allow
 # rules in .claude/settings.local.json. The GUI servers additionally pass
 # through the Qt/session env vars so a GUI subprocess they launch can reach the
-# user's display; agent-memory has no GUI and needs none.
+# user's display.
 
 [mcp_servers.measure-gui]
 command = "uv"
@@ -83,16 +83,5 @@ env_vars = [
   "XDG_RUNTIME_DIR",
   "DBUS_SESSION_BUS_ADDRESS",
   "XDG_SESSION_TYPE",
-]
-default_tools_approval_mode = "approve"
-
-[mcp_servers.agent-memory]
-command = "uv"
-args = [
-  "run",
-  "--extra",
-  "client",
-  "python",
-  "lib/zcu_tools/mcp/agent_memory/server.py",
 ]
 default_tools_approval_mode = "approve"

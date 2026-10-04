@@ -8,18 +8,36 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any
 
+from recipes import RECIPES
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.execution_reply import project_control, project_execution
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Read a local execution, or GUI orientation and all session executions."""
+    """Read a local execution, or GUI orientation and nonterminal executions."""
+    detail = arguments.get("detail", "summary")
+    if detail not in ("summary", "full"):
+        raise ValueError("detail must be summary or full")
+    if detail == "full" and "execution" not in arguments:
+        raise ValueError("detail=full requires execution")
     if "execution" in arguments:
         key = _execution_id(arguments)
         if key.startswith("recipe-"):
-            return ctx.session.recipes.get(key).snapshot()
-        return asdict(ctx.session.executions.get(key).snapshot())
+            snapshot = ctx.session.recipes.get(key).snapshot()
+            definition = next(
+                item for item in RECIPES if item.name == snapshot["recipe"]
+            )
+            return project_execution(
+                snapshot,
+                definition=definition,
+                detail=detail,
+            )
+        return project_execution(
+            asdict(ctx.session.executions.get(key).snapshot()),
+            detail=detail,
+        )
     session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
@@ -54,6 +72,10 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         missing.append("soc")
     if not tabs:
         missing.append("tab")
+    execution_snapshots = [
+        asdict(item) for item in ctx.session.executions.snapshots()
+    ] + ctx.session.recipes.snapshots()
+    definitions = {definition.name: definition for definition in RECIPES}
     return {
         "project": project,
         "soc": soc,
@@ -65,8 +87,18 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "predictor": {"loaded": session.read_internal("predictor.info", {})["loaded"]},
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
-        "executions": [asdict(item) for item in ctx.session.executions.snapshots()]
-        + ctx.session.recipes.snapshots(),
+        "executions": [
+            project_execution(
+                item,
+                definition=definitions[item["recipe"]] if "recipe" in item else None,
+            )
+            for item in execution_snapshots
+            if item["phase"] != "terminal"
+        ],
+        "terminal_count": sum(
+            item["phase"] == "terminal" for item in execution_snapshots
+        ),
+        "query_hint": 'Use status(execution=<id>, detail="full") for completed executions.',
         "running": [
             {**operation, "op": session.expose_operation(operation["op"])}
             for operation in session.read_internal("operation.active", {})["operations"]
@@ -88,7 +120,8 @@ def _execution_id(arguments: dict[str, Any]) -> str:
     return execution
 
 
-def _wait_timeout(arguments: dict[str, Any]) -> float:
+def wait_timeout(arguments: dict[str, Any]) -> float:
+    """Validate the shared operation/setup waiting budget before GUI access."""
     timeout = arguments.get("timeout", 60)
     if (
         isinstance(timeout, bool)
@@ -107,7 +140,7 @@ def _wait_tool(
     if ("op" in arguments) == ("execution" in arguments):
         raise ValueError("provide exactly one of op or execution")
     if "execution" in arguments:
-        timeout = _wait_timeout(arguments)
+        timeout = wait_timeout(arguments)
         start = time.monotonic()
         key = _execution_id(arguments)
         execution = (
@@ -116,8 +149,14 @@ def _wait_tool(
             else ctx.session.executions.get(key)
         )
         reply = execution.wait(timeout)
+        definition = (
+            next(item for item in RECIPES if item.name == reply.data["recipe"])
+            if key.startswith("recipe-")
+            else None
+        )
+        data = project_execution(reply.data, definition=definition)
         return ToolReply(
-            {**reply.data, "elapsed_s": max(0.0, time.monotonic() - start)},
+            {**data, "elapsed_s": max(0.0, time.monotonic() - start)},
             reply.images,
         )
     return wait(ctx, arguments)
@@ -126,7 +165,7 @@ def _wait_tool(
 def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Wait on a GUI operation, not its downstream analysis completion."""
     op = _operation_id(arguments)
-    timeout = _wait_timeout(arguments)
+    timeout = wait_timeout(arguments)
     ctx = ctx.bound()
     start = time.monotonic()
     reply = ctx.send_gui_rpc(
@@ -166,32 +205,26 @@ def cancel(
         raise ValueError("provide exactly one of op or execution")
     if "execution" in arguments:
         key = _execution_id(arguments)
-        return (
+        execution = (
             ctx.session.recipes.get(key)
             if key.startswith("recipe-")
             else ctx.session.executions.get(key)
-        ).cancel()
-    op = _operation_id(arguments)
-    execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
+        )
+    else:
+        op = _operation_id(arguments)
+        execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
     if execution is not None:
-        return execution.cancel()
+        reply = execution.cancel()
+        return ToolReply(project_control(reply.data), is_error=reply.is_error)
+    op = _operation_id(arguments)
     ctx = ctx.bound()
     response = ctx.gui.read_internal("operation.cancel", {}, operation_handle=op)
-    if response["status"] != "cancelling":
-        return {"status": response["status"]}
-    outcome = wait(ctx, {"op": op, "timeout": 0.25})
-    if outcome["status"] == "cancelled":
-        return {"status": "cancelled"}
-    if outcome["status"] == "failed":
-        error = outcome.get("error", {})
-        raise GuiRpcError(
-            f"operation {op} failed: {error.get('message', 'unknown failure')}",
-            reason="operation_failed",
-            code="precondition_failed",
-        )
-    if outcome["status"] == "finished":
-        return {"status": "finished"}
-    return {"status": "cancelling"}
+    return {
+        "execution": None,
+        "op": op,
+        "status": response["status"],
+        "cancel_requested": True,
+    }
 
 
 def finish_early(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
@@ -207,22 +240,34 @@ def finish_early(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
             raise GuiRpcError(
                 f"No registered recipe for operation {op}", reason="unknown_operation"
             )
-    return recipe.finish_early()
+    reply = recipe.finish_early()
+    return ToolReply(project_control(reply.data), is_error=reply.is_error)
 
 
 def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read a local execution, or index the live GUI and session executions.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions. Summary previews.run/primary/post are full path lists for session-only PNGs, not persistent saved artifacts. Queries do not refresh guards or attach images.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"execution": {"type": "string", "minLength": 1}},
+                "properties": {
+                    "execution": {"type": "string", "minLength": 1},
+                    "detail": {
+                        "type": "string",
+                        "enum": ["summary", "full"],
+                        "default": "summary",
+                    },
+                },
+                "anyOf": [
+                    {"required": ["execution"]},
+                    {"properties": {"detail": {"enum": ["summary"]}}},
+                ],
             },
         },
         "wait": {
             "handler": partial(_wait_tool, ctx),
-            "description": "Wait for one operation or execution; timeout does not cancel.",
+            "description": "Wait for one operation or execution; timeout does not cancel. Execution summaries include previews.run/primary/post as full session-only PNG path lists. Confirmed persistent outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

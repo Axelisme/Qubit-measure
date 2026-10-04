@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-03, recipe-first tools
+**Last updated:** 2026-10-04, setup workflows and analysis writeback capture
 
 # `zcu_tools/mcp/measure/`
 
@@ -6,7 +6,17 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 ## 固定工具與 RPC
 
-`assembly.py` 組合固定的 23 個 tools。Recipe registry 擁有 11 個 recipe 的名稱、schema 與執行入口。其餘為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close` 與 `accept`。
+`assembly.py` 組合固定的 26 個 tools。Recipe registry 擁有 11 個 recipe 的名稱、schema 與執行入口。其餘為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close` 與 `accept`，以及 `simulation_initialize`、`device_set_value`、`recipe_guide`。
+
+## Setup 工具
+
+`recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。
+
+`device_set_value(name, value, unit)` 先讀裝置 snapshot，只送 value 更新，再等待和核對 actual native value。它不更改 output、mode 或 rampstep。實體 unit 必須與 snapshot 相同。FakeDevice unit=none 只接受明確的 native，不換算工作座標。
+
+兩個 mutation 工具保留 pre_read、start、wait、post_read、requested、before/after、native operation 及 verification。step completed 只表示該步成功。等待逾時不取消 operation，snapshot 有目標值也不代表 operation 完成。Start receipt 不確定時保留 unknown，明確 stale 拒絕時停止。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
+
+## 日常與細部操作
 
 日常量測優先 recipe，既有資料分析使用共用分析工具。細部 setup、cfg、保存、writeback 及排查由 RPC 承接。日常／排查是使用指引，不是權限模式。`rpc_call` 接受 catalog 中全部 `rpc` 與 `tool` methods；tool 名稱只提示高層入口。GUI 仍驗證每次操作。公開 method 的參數、回覆及前置條件由 `rpc_describe` 提供。
 
@@ -16,9 +26,11 @@ Raw RPC 不提供高層工具的結果聚合、PNG 解碼或 canonical analysis-
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 
+Flux recipe 的 `flux_unit` 可斷言 GUI 裝置的實體單位，不換算數字。只有已確認的 FakeDevice、unit=`none` 且 caller 明確指定 `native` 才使用 native 座標。回覆保留此單位標記。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
+
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 
-`status` 同時列出 GUI operations 與目前 MCP session 的 executions。`status(execution)` 讀本地快照，不重新連線。`wait(op)` 只觀察 GUI operation；`wait(execution)` 包含後續結果讀取、保存及預覽交付。已接受的分析失敗以 outcome data 回報，和查詢失敗分開。Execution ID 不跨 MCP server session，也不是持久恢復機制。
+全域 `status` 列出 GUI operations 與目前 MCP session 的非終態 executions，終態只給數量及按 ID 查詢提示。`status(execution)` 讀指定 execution 的本地摘要，不重新連線。`wait(op)` 只觀察 GUI operation；`wait(execution)` 包含後續結果讀取、保存及預覽交付。已接受的分析失敗以 outcome data 回報，和查詢失敗分開。Execution ID 不跨 MCP server session，也不是持久恢復機制。
 
 `finish_early` 對 recipe 停止採集，有可用結果就先保存 raw，再繼續分析及保存。`cancel` 優先，停止後續分析與保存；已啟動且不可取消的保存仍等真實結果。Registered analysis 的 cancel 也不再啟動新的結果讀取。GUI cancellation 回覆獨立放在 `gui_cancel`，不能拿它覆寫 execution 的既有 terminal outcome。未註冊的 `cancel(op)` 沿用直接 GUI hook。
 
@@ -26,13 +38,28 @@ Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` �
 
 ## 分析、互動與接受
 
-`tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 負責結果、實際參數、失效內容、canonical 圖像保存與預覽交付。互動分析立即交接 tab、op、狀態、可用命令與圖像。
+`tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 負責結果、實際參數、失效內容、canonical 圖像保存、預覽及 writeback 候選。互動分析立即交接 tab、op、狀態、可用命令與圖像。
+
+Analysis completion 等原 GUI operation 完成，保存圖像及 preview 後，以原 opaque operation 讀一次 writeback preview。沒有圖像也讀候選。Interactive handoff 不 capture，`done` 加入原 execution，完成後才 capture 定案 draft。Recipe 重用同一份 snapshot，不另讀候選。Full 的 writeback 為 null 表示尚未取得；has_draft=false／items=[] 才是已確認空 draft。Read 失敗以 writeback_read error 回報，保留已知 result、保存路徑及 preview。來源 superseded 不改讀新 pane，不 retry，也不刷新 guard。Recipe wait 在 done 後等待本地 completion 的交接，不再提早交付舊 interactive handoff。
+
+GUI 的分析投影把非有限 summary 數字換成 null，以 `invalid` 記錄欄位路徑與原因。
+Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(execution)` 不重新推導原因。
+不可估誤差不刪除有限 fit value、warning 或已確認的保存路徑，也不觸發自動 accept。
+這項表示轉換不改 operation 的 failed outcome 或 generic context 的拒絕規則。
+
+T1、T2、Rabi 與 GE 的 estimate.quality 使用 native summary 的 named fit_quality，不重算指標。GE 保留 joint、ground、excited，各階段使用自己的 optimizer covariance。每個 estimate 的 quality.invalid 與 execution.invalid 都指出回覆中的實際欄位。Full 保留同一份 native summary 與原路徑。品質不新增 accept 門檻。
+
+Analysis-only 沒有 recipe 身分。Native summary 帶 fit_quality 時，摘要使用 recipes.RECIPES 已宣告的 scalar value_key，完全相同的 name/error_key/unit 宣告可合併。Present key 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取；native full 仍可查詢。沒有品質的其他 analysis-only 結果留在 details。
 
 `tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 不加 seen guard，較晚的 owner-loop commit 生效。沒有來源鎖或自動重試。
 
-Preview PNG 是 MCP session 專屬暫存檔，同時可附 MCP image content。Server 結束後移除。`saved_images` 只列已確認的持久圖像，不把預覽路徑當成已保存產物。
+Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post estimates 和 details、warnings、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 目前為 null，execution ID 仍是 session-local。
 
-`accept(tab)` 寫入 Primary 與既有 Post 的全部當前候選，包括 GUI 未勾選項。它不改勾選，不用 preview 刷新 guard，不回滾已完成寫入。Primary 先於 Post，首錯停止並列出 confirmed completed、skipped、failed stage 與 not_started。Caller 必須先觀察 tab／context，核對提案與當前目的地。個別候選的調整、選擇與寫入使用 `tab.writeback_*` RPC。
+`status(execution, detail="full")` 保留該 execution 已捕捉的 native 資料，包括完整 cfg publication、raw expressions、source_basis、analysis results 與 writeback proposals。查詢不新增 RPC 或 guard 觀察。Artifact 依 section、名稱與 members 分層，每個 member 是完整路徑及 status 的清單；reserved 不代表已保存，後續失敗不清掉已保存的前綴。
+
+Preview PNG 是 MCP session 專屬暫存檔，同時可附 MCP image content。Server 結束後移除。摘要的 `previews` 固定有 run、primary、post 三個完整 path 字串清單，未取得為空清單。同階段去重並保留首見順序，不猜 named image 身分。摘要的 interaction 不重複 figure；full 保留 native figure、preview 與 interaction。`status` 不附圖片。持久保存路徑在摘要的 `artifacts`，full 的 `saved_images` 只列已確認持久圖像，不把 preview 當成已保存產物。
+
+`accept(tab)` 寫入 Primary 與既有 Post 的全部當前候選，包括 GUI 未勾選項。摘要列出每個候選的 target、proposal 與 current，不把 GUI 勾選狀態當作接受篩選；勾選旗標保留在 full。Destination 摘要只列 context/project 身分，native context readiness 保留在 full，不能替代新的 guard 觀察。它不改勾選，不用 preview 刷新 guard，不回滾已完成寫入。Primary 先於 Post，首錯停止並列出 confirmed completed、skipped、failed stage 與 not_started。Caller 必須先觀察 tab／context，核對提案與當前目的地。個別候選的調整、選擇與寫入使用 `tab.writeback_*` RPC。
 
 ## 連線與觀察
 

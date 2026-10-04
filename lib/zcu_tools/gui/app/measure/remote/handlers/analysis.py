@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
+from math import isfinite
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
@@ -18,6 +19,33 @@ from .tab import tab_operation_state
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+
+def _summary_to_wire(summary: object) -> dict[str, object]:
+    if not isinstance(summary, Mapping):
+        raise RemoteError(ErrorCode.INTERNAL, "analysis summary must be an object")
+    invalid: list[dict[str, str]] = []
+
+    def project(value: object, path: str) -> object:
+        if isinstance(value, float) and not isfinite(value):
+            invalid.append({"path": path, "reason": "non_finite"})
+            return None
+        if isinstance(value, Mapping):
+            projected: dict[str, object] = {}
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise RemoteError(
+                        ErrorCode.INTERNAL, "analysis summary keys must be strings"
+                    )
+                projected[key] = project(item, f"{path}.{key}")
+            return projected
+        if isinstance(value, (list, tuple)):
+            return [
+                project(item, f"{path}[{index}]") for index, item in enumerate(value)
+            ]
+        return value
+
+    return {"summary": project(summary, "summary"), "invalid": invalid}
 
 
 def _params_to_wire(params: object) -> dict[str, object] | None:
@@ -53,14 +81,14 @@ def h_tab_get_analyze_result(
         control.require_analysis_operation(tab_id, "analysis", operation_id)
     result = control.get_tab_analyze_result(tab_id)
     if result is None:
-        return {"summary": None}
+        return {"summary": None, "invalid": []}
     to_summary = getattr(result, "to_summary_dict", None)
     if not callable(to_summary):
         raise RemoteError(
             ErrorCode.INTERNAL,
             "analyze result does not implement to_summary_dict()",
         )
-    reply = {"summary": to_summary()}
+    reply = _summary_to_wire(to_summary())
     if operation_id is not None:
         pane = control.get_tab_snapshot(tab_id).analysis
         reply.update(
@@ -162,14 +190,14 @@ def h_tab_get_post_analyze_result(
         control.require_analysis_operation(tab_id, "post_analysis", operation_id)
     result = control.get_post_analyze_result(tab_id)
     if result is None:
-        return {"summary": None}
+        return {"summary": None, "invalid": []}
     to_summary = getattr(result, "to_summary_dict", None)
     if not callable(to_summary):
         raise RemoteError(
             ErrorCode.INTERNAL,
             "post-analysis result does not implement to_summary_dict()",
         )
-    reply = {"summary": to_summary()}
+    reply = _summary_to_wire(to_summary())
     if operation_id is not None:
         pane = control.get_tab_snapshot(tab_id).post_analysis
         reply.update(

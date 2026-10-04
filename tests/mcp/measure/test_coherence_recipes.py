@@ -1,5 +1,6 @@
 """Coherence behavior through shipped tools and the GUI wire boundary."""
 
+import json
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
@@ -7,7 +8,7 @@ from typing import Any
 import pytest
 
 from ._recipe_support import LookbackGui, scalar, section
-from ._support import make_client
+from ._support import full_execution_reply, make_client
 
 
 @contextmanager
@@ -93,6 +94,65 @@ class CoherenceGui(LookbackGui):
         return result
 
 
+def test_recipe_estimates_share_native_fit_quality_and_precise_issue_paths(tmp_path):
+    gui = CoherenceGui(pi_ref="pi")
+    quality = {
+        "fit": {
+            "r2": -0.25,
+            "normalized_residual_rms": 0.31,
+            "relative_parameter_errors": {"decay_time": None},
+            "invalid": [
+                {
+                    "path": "summary.fit_quality.fit.relative_parameter_errors.decay_time",
+                    "reason": "covariance_unavailable",
+                }
+            ],
+        }
+    }
+
+    def respond(method, params):
+        result = gui(method, params)
+        if method == "tab.get_analyze_result":
+            result["summary"] = {
+                "t1": 25.0,
+                "t1_err": None,
+                "t1b": 50.0,
+                "t1b_err": None,
+                "fit_quality": quality,
+            }
+        return result
+
+    with recipe_client(tmp_path, respond) as client:
+        initial = client.call("t1", {})
+        assert initial.data["status"] == "finished", initial.data
+        execution = initial.data["execution"]
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": execution})
+        full = client.call("status", {"execution": execution, "detail": "full"})
+        waited = client.call("wait", {"execution": execution, "timeout": 0}).data
+        assert {k: v for k, v in initial.data.items() if k != "elapsed_s"} == summary
+        assert {k: v for k, v in waited.items() if k != "elapsed_s"} == summary
+        assert len(client.transport.sent) == before
+        assert full["analysis"]["result"]["summary"]["fit_quality"] == quality
+        expected_invalid = []
+        for name, value in (("t1", 25.0), ("t1b", 50.0)):
+            estimate = summary["analysis"]["primary"]["estimates"][name]
+            assert estimate["value"] == value
+            assert estimate["stderr"] is None
+            assert estimate["quality"]["fit"]["r2"] == -0.25
+            assert estimate["quality"]["fit"]["normalized_residual_rms"] == 0.31
+            issue = {
+                "path": f"analysis.primary.estimates.{name}.quality.fit.relative_parameter_errors.decay_time",
+                "reason": "covariance_unavailable",
+            }
+            assert estimate["quality"]["fit"]["invalid"] == [issue]
+            expected_invalid.append(issue)
+        assert summary["invalid"] == expected_invalid
+        assert summary["analysis"]["primary"]["details"] == {}
+        json.dumps(summary, allow_nan=False)
+        json.dumps(full, allow_nan=False)
+
+
 @pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
 def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
     tmp_path, recipe
@@ -104,7 +164,9 @@ def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
         "stop"
     ] = scalar(999)["input"]
     with recipe_client(tmp_path, gui) as client:
-        data = client.call(recipe, {"reuse_tab_id": "t"}).data
+        data = full_execution_reply(
+            client, client.call(recipe, {"reuse_tab_id": "t"})
+        ).data
         assert data["status"] == "finished", data
         sweep = data["actual"]["fields"]["sweep.length"]
         assert sweep["value"]["stop"] == 37.0
@@ -121,8 +183,9 @@ def test_coherence_explicit_readout_and_reset_use_library_without_rf(tmp_path, r
     gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
     gui.md = {}
     with recipe_client(tmp_path, gui) as client:
-        data = client.call(
-            recipe, {"readout_ref": "readout", "use_reset": "reset"}
+        data = full_execution_reply(
+            client,
+            client.call(recipe, {"readout_ref": "readout", "use_reset": "reset"}),
         ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -203,7 +266,7 @@ def test_coherence_failure_retains_tab_and_already_saved_paths(tmp_path, recipe,
                 "message": "Changed",
             },
         }
-        reply = client.call(recipe, {})
+        reply = full_execution_reply(client, client.call(recipe, {}))
         assert reply.is_error
         data = reply.data
         assert data["status"] == "failed"
@@ -268,7 +331,7 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
     if recipe == "t2echo":
         arguments["pi_ref"] = "pi"
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(recipe, arguments)
+        reply = full_execution_reply(client, client.call(recipe, arguments))
         data = reply.data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -293,6 +356,37 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         ) == 1
 
 
+@pytest.mark.parametrize("number", [1, 1.0])
+def test_t2_number_delay_and_detune_publish_floats(tmp_path, number):
+    gui = CoherenceGui(pi_ref="pi", adapter="t2ramsey", pi2_ref="pi2")
+    with recipe_client(tmp_path, gui) as client:
+        data = full_execution_reply(
+            client,
+            client.call(
+                "t2ramsey",
+                {"max_delay_us": number, "detune_ratio": number, "points": 3},
+            ),
+        ).data
+        assert data["status"] == "finished", data
+        fields = data["actual"]["fields"]
+        assert fields["detune_ratio"]["value"] == 1.0
+        assert type(fields["detune_ratio"]["value"]) is float
+        sweep = fields["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        detune_edits = [
+            edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["detune_ratio"]
+        ]
+        assert detune_edits == [1.0]
+        assert type(detune_edits[0]) is float
+
+
 def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
     gui = CoherenceGui()
     client = make_client(tmp_path, gui)
@@ -309,7 +403,9 @@ def test_t1_requires_calibrated_pi_instead_of_custom_template(tmp_path):
 def test_t1_selected_library_pulse_preserves_gui_delay_defaults(tmp_path, reuse_tab_id):
     gui = CoherenceGui(pi_ref="pi")
     with recipe_client(tmp_path, gui) as client:
-        data = client.call("t1", {"reuse_tab_id": reuse_tab_id}).data
+        data = full_execution_reply(
+            client, client.call("t1", {"reuse_tab_id": reuse_tab_id})
+        ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
         assert fields["modules.pi_pulse"] == {"value": "pi", "source": "gui_default"}
@@ -351,6 +447,9 @@ def test_t1_reports_all_missing_calibration_sources(tmp_path, arguments):
         {"max_delay_us": -1},
         {"points": 1},
         {"points": 2.5},
+        {"points": 1.0},
+        {"reps": 1.0},
+        {"rounds": 1.0},
         {"points": True},
         {"reps": False},
         {"rounds": 1.5},
@@ -366,6 +465,7 @@ def test_t1_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
     try:
         data = client.call("t1", arguments).data
         assert data["status"] == "failed", data
+        assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not gui.ran
         assert not any(
             method == "context.snapshot" for method, _ in client.transport.sent
@@ -374,19 +474,65 @@ def test_t1_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
         client.context.session.close()
 
 
+@pytest.mark.parametrize("delay", [1, 1.0])
+def test_t1_number_inputs_publish_floats_and_keep_integer_counts(tmp_path, delay):
+    with recipe_client(tmp_path, CoherenceGui(pi_ref="pi")) as client:
+        data = full_execution_reply(
+            client,
+            client.call(
+                "t1", {"max_delay_us": delay, "points": 3, "reps": 2, "rounds": 1}
+            ),
+        ).data
+        assert data["status"] == "finished", data
+        sweep = data["actual"]["fields"]["sweep.length"]["value"]
+        assert sweep["stop"] == 1.0
+        assert type(sweep["stop"]) is float
+        assert sweep["expts"] == 3
+        assert type(sweep["expts"]) is int
+        for name, count in (("reps", 2), ("rounds", 1)):
+            value = data["actual"]["fields"][name]["value"]
+            assert value == count
+            assert type(value) is int
+        edits = [
+            edit
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "length"]
+        ]
+        assert len(edits) == 1
+        assert edits[0]["value"]["stop"] == 1.0
+        assert type(edits[0]["value"]["stop"]) is float
+
+
 def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
     gui = CoherenceGui()
-    client = make_client(tmp_path, gui)
+
+    def respond(method, params):
+        reply = gui(method, params)
+        if method == "tab.get_analyze_result":
+            reply["summary"] = {
+                "t1": 42.0,
+                "t1_err": None,
+                "warnings": ["singular error"],
+            }
+            reply["invalid"] = [{"path": "summary.t1_err", "reason": "non_finite"}]
+        return reply
+
+    client = make_client(tmp_path, respond)
     try:
-        reply = client.call(
-            "t1",
-            {
-                "pi_ref": "pi",
-                "max_delay_us": 80.0,
-                "points": 81,
-                "reps": 13,
-                "rounds": 9,
-            },
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "t1",
+                {
+                    "pi_ref": "pi",
+                    "max_delay_us": 80.0,
+                    "points": 81,
+                    "reps": 13,
+                    "rounds": 9,
+                },
+            ),
         )
         data = reply.data
         assert data["status"] == "finished", data
@@ -404,6 +550,26 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
         assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5100.0
         assert data["raw_save"]["path"] == "/actual/raw.h5"
         assert data["analysis"]["status"] == "finished"
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        assert len(client.transport.sent) == before
+        assert summary["analysis"]["primary"] == {
+            "params": {"threshold": 0.5},
+            "estimates": {
+                "t1": {"value": 42.0, "stderr": None, "unit": "us", "quality": None}
+            },
+            "details": {},
+            "warnings": ["singular error"],
+        }
+        assert summary["invalid"] == [
+            {"path": "analysis.primary.estimates.t1.stderr", "reason": "non_finite"}
+        ]
+        assert data["analysis"]["result"]["summary"]["t1"] == 42.0
+        assert summary["actual"]["parameters"]["delay"]["value"] == {
+            "start": 0.04,
+            "stop": 80.0,
+            "expts": 81,
+        }
         assert data["writeback"]["items"]
         assert reply.images
         methods = [method for method, _ in client.transport.sent]

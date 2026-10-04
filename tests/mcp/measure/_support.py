@@ -11,6 +11,7 @@ from zcu_tools.gui.app.measure.remote.method_entries._registry import (
 )
 from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import (
@@ -79,6 +80,16 @@ class MeasureClient:
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
         return self.tools[name]["handler"](arguments)
+
+
+def full_execution_reply(client: MeasureClient, reply: ToolReply) -> ToolReply:
+    """Read explicit full detail for tests of captured native facts."""
+    data = client.call(
+        "status", {"execution": reply.data["execution"], "detail": "full"}
+    )
+    if "elapsed_s" in reply.data:
+        data["elapsed_s"] = reply.data["elapsed_s"]
+    return ToolReply(data, reply.images, reply.is_error)
 
 
 def make_client(

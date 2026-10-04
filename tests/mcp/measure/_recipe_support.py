@@ -1,13 +1,25 @@
 """Recording GUI collaborator for public recipe contract tests."""
 
 import base64
+from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
+
+from ._support import make_client
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
     "+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
+
+
+@contextmanager
+def recipe_client(tmp_path, respond):
+    client = make_client(tmp_path, respond)
+    try:
+        yield client
+    finally:
+        client.context.session.close()
 
 
 def scalar(value: object) -> dict[str, Any]:
@@ -159,6 +171,7 @@ class LookbackGui:
             assert params == {"tab_id": "t", "operation_id": 93}
             return {
                 "summary": {"offset": 0.24},
+                "invalid": [],
                 "params": {"threshold": 0.5},
                 "operation_state": {"analysis_state": {"figure_names": ["trace"]}},
             }
