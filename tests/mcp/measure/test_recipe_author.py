@@ -662,7 +662,6 @@ def test_author_run_captures_asserted_flux_unit_without_conversion(tmp_path):
             "value": "coil",
             "source": "device.flux.name",
             "unit": "A",
-            "input": scalar("coil")["input"],
         }
         assert fields["sweep.flux"]["value"] == {
             "start": 0.005,

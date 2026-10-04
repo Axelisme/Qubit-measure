@@ -4,13 +4,16 @@ import base64
 import io
 import json
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from threading import Event
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.stdio_server import run_stdio_loop
+from zcu_tools.mcp.measure.recipe import RecipeDefinition
+
+from zcu_lab.recipes import RECIPES
 
 from ._support import MeasureClient, RpcResponder, make_client
 
@@ -36,9 +39,10 @@ def analysis_client(
     responder: RpcResponder | None = None,
     *,
     writeback: Mapping[str, object] | None = None,
+    recipes: Sequence[RecipeDefinition] = RECIPES,
 ) -> MeasureClient:
     """Build the analysis seam with a confirmed empty draft unless supplied."""
-    client = make_client(tmp_path, responder)
+    client = make_client(tmp_path, responder, recipes=recipes)
     client.transport.replies["tab.writeback_preview"] = lambda params: {
         "ok": True,
         "result": dict(writeback)

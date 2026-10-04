@@ -35,10 +35,10 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeOperation,
-    RecipeParameter,
     RecipeSession,
     RecipeWritebackPreview,
     RunOperation,
+    RunPreview,
     StepStatus,
     WritebackDecision,
     WritebackQuestion,
@@ -81,14 +81,6 @@ class RecipeError:
     reason: str
     message: str
     code: str | None = None
-
-
-@dataclass(frozen=True)
-class RunPreview:
-    """Run preview path owned by this MCP session; kind is always run_preview."""
-
-    path: str
-    kind: Literal["run_preview"] = "run_preview"
 
 
 @dataclass(frozen=True)
@@ -151,23 +143,30 @@ class RecipeSnapshot:
 class RecipeExecution:
     """One generator and its sole worker, owned by RecipeExecutions.
 
-    tools is the owning session's fixed tool context; definition and arguments
-    come from registry validation. session_closed is that registry's close event.
+    tools is the owning session's fixed tool context. definition is the validated
+    registry declaration; arguments is the caller's detached keyword mapping,
+    checked against inputs before GUI binding. session_closed is the registry's
+    close event.
     Construction starts background execution; a worker-start failure is retained
     as failed progress without sending GUI operations. Use the registry's start
-    method for schema validation and exclusion; direct construction does neither.
+    method for validated definitions and exclusion. inputs owns that definition's
+    argument codec. Keyword errors become a failed preparing capture before GUI
+    binding; direct construction does not enforce registry exclusion.
     """
 
     def __init__(
         self,
         tools: MeasureToolContext,
         definition: RecipeDefinition,
-        arguments: Mapping[str, RecipeParameter],
+        arguments: Mapping[str, object],
         session_closed: Event,
+        *,
+        inputs: RecipeInputs,
     ) -> None:
         self._tools = tools
         self._definition = definition
         self._arguments = deepcopy(dict(arguments))
+        self._inputs = inputs
         self._session_closed = session_closed
         self._closed = Event()
         self._condition = Condition()
@@ -216,6 +215,7 @@ class RecipeExecution:
                         run_outcome=run.outcome,
                         result_state=run.result_state,
                         raw_save=run.raw_save,
+                        preview=run.preview,
                         op=run.save_op if self._active is None else progress.op,
                     )
                     if (
@@ -224,6 +224,12 @@ class RecipeExecution:
                         and progress.phase == "preparing"
                     ):
                         progress = replace(progress, phase="raw_save")
+                    if (
+                        run.preview_status != "not_started"
+                        and self._active is None
+                        and progress.phase == "preparing"
+                    ):
+                        progress = replace(progress, phase="preview")
                     for stage, capture in run.analyses.items():
                         progress = self._retain_analysis(progress, stage, capture)
                 analysis = session.analysis_snapshot()
@@ -263,6 +269,10 @@ class RecipeExecution:
             )
             progress = self.snapshot()
             images = self._images
+            if not images and self._session is not None:
+                run = self._session.run_snapshot()
+                if run is not None:
+                    images = run.preview_images
             if isinstance(self._active, AnalyzeOperation):
                 images = self._active.preview_images() or images
             return ToolReply(
@@ -551,6 +561,7 @@ class RecipeExecution:
         terminal: RecipeStatus = "finished"
         try:
             self._check_open()
+            arguments = self._inputs.normalize(self._arguments)
             tools = self._tools.bound()
             session = RecipeSession(
                 tools,
@@ -561,7 +572,7 @@ class RecipeExecution:
             with self._condition:
                 self._tools = tools
                 self._session = session
-            generator = self._definition.run(session, **self._arguments)
+            generator = self._definition.run(session, **arguments)
             if not isinstance(generator, GeneratorType):
                 raise TypeError("Recipe must return a generator")
             try:
@@ -663,13 +674,13 @@ class RecipeExecutions:
         """Validate explicit keywords and start one generator, or fail before GUI work.
 
         Unknown names/closed registry/replacement sessions raise GuiRpcError.
-        Schema errors raise ValueError. A running, interactive or awaiting_answer
-        recipe blocks admission with its ID/status. Terminal records remain queryable.
+        Invalid keywords become a failed preparing execution before GUI binding.
+        A running, interactive or awaiting_answer recipe blocks admission with its
+        ID/status. Terminal records, including argument failures, remain queryable.
         """
         definition = self._definitions.get(recipe)
         if definition is None:
             raise GuiRpcError(f"Unknown recipe: {recipe!r}", reason="unknown_recipe")
-        normalized = self._inputs[recipe].normalize(arguments)
         with self._lock:
             if self._closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
@@ -686,7 +697,9 @@ class RecipeExecutions:
                         reason="recipe_busy",
                     )
             self._tools = tools
-            execution = RecipeExecution(tools, definition, normalized, self._closed)
+            execution = RecipeExecution(
+                tools, definition, arguments, self._closed, inputs=self._inputs[recipe]
+            )
             self._executions[execution.snapshot().execution] = execution
             return execution
 

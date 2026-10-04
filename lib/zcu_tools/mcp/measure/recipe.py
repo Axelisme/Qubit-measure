@@ -6,12 +6,12 @@ status or throws a failure back into that yield expression. Session close closes
 the generator, so ordinary Python finally blocks still run.
 
 Cfg preparation uses one fixed connection and the GUI's returned publications.
-The generator operation/driver integration is still being prepared; this module
-is not yet wired into tool assembly.
+The injected definitions drive these handles through the shared execution worker.
 """
 
 from __future__ import annotations
 
+import base64
 import re
 from collections.abc import Callable, Generator, Mapping, Sequence
 from copy import deepcopy
@@ -27,6 +27,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
     ExecutionSnapshot,
 )
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
+from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.raw_save import RawSaveReceipt, RawSaveRequest, save_raw_data
@@ -52,14 +53,17 @@ class RecipePropertySchema(TypedDict):
     """Handwritten JSON Schema for an existing scalar or array recipe parameter.
 
     type lists the accepted JSON types, including null when optional. minLength
-    constrains strings; items describes array elements; minItems constrains the
-    array length. No annotations-to-schema generation takes place.
+    constrains strings; items describes array elements; minItems/maxItems bound
+    the array length. description is operator-facing parameter documentation.
+    No annotations-to-schema generation takes place.
     """
 
     type: str | list[str]
     minLength: NotRequired[int]
     items: NotRequired[RecipePropertySchema]
     minItems: NotRequired[int]
+    maxItems: NotRequired[int]
+    description: NotRequired[str]
 
 
 class RecipeInputSchema(TypedDict):
@@ -199,6 +203,14 @@ class RecipeAnalysis:
 
 
 @dataclass(frozen=True)
+class RunPreview:
+    """Run preview path owned by this MCP session; kind is always run_preview."""
+
+    path: str
+    kind: Literal["run_preview"] = "run_preview"
+
+
+@dataclass(frozen=True)
 class RecipeRunSnapshot:
     """Detached Run facts for framework delivery; reading them sends no RPCs.
 
@@ -212,6 +224,9 @@ class RecipeRunSnapshot:
     raw_save retains the latest save receipt and any confirmed prefix. analyses
     maps primary/post to each stage's latest local start/completion attempt,
     including failures and partial artifacts; a suppressed start has no entry.
+    preview_status is not_started, reading (also an uncertain/failed read), or
+    captured. preview and preview_images retain the last confirmed session path
+    and validated PNG tuple; a later failure never erases that confirmed prefix.
     """
 
     tab: str
@@ -224,6 +239,9 @@ class RecipeRunSnapshot:
     raw_save: RawSaveReceipt = field(default_factory=RawSaveReceipt)
     save_op: int | None = None
     analyses: Mapping[AnalysisStage, ExecutionSnapshot] = field(default_factory=dict)
+    preview_status: Literal["not_started", "reading", "captured"] = "not_started"
+    preview: RunPreview | None = None
+    preview_images: tuple[PngImage, ...] = ()
 
 
 class RunOperation:
@@ -430,8 +448,8 @@ class _RunBinding:
             self.capture = capture
             self.tab.condition.notify_all()
 
-    def analysis_source(self, stage: AnalysisStage) -> tuple[int, int | None]:
-        """Require this Run's data and return its Run/optional Primary handles."""
+    def run_source(self) -> int:
+        """Require this Run's captured usable data and return its native handle."""
         capture = self.snapshot()
         if capture.op is None or not (
             capture.result_state is not None and capture.result_state["available"]
@@ -439,15 +457,20 @@ class _RunBinding:
             raise GuiRpcError(
                 "Run did not publish usable data", reason="run_result_unavailable"
             )
+        return capture.op
+
+    def analysis_source(self, stage: AnalysisStage) -> tuple[int, int | None]:
+        """Require this Run's data and return its Run/optional Primary handles."""
+        run_op = self.run_source()
         if stage == "primary":
-            return capture.op, None
-        primary = capture.analyses.get("primary")
+            return run_op, None
+        primary = self.snapshot().analyses.get("primary")
         if primary is None or primary.status != "finished" or primary.op is None:
             raise GuiRpcError(
                 "Post analysis requires this Run's completed Primary",
                 reason="primary_result_unavailable",
             )
-        return capture.op, primary.op
+        return run_op, primary.op
 
     def snapshot(self) -> RecipeRunSnapshot:
         with self.tab.condition:
@@ -1037,7 +1060,8 @@ class RecipeTab:
         self, snapshot: dict[str, object], requested: str | None, *, explicit: bool
     ) -> str:
         unit = snapshot["unit"]
-        info = _cfg_object(snapshot.get("info", {}))
+        info_value = snapshot.get("info")
+        info = _cfg_object(info_value) if info_value is not None else {}
         native = (
             unit == "none"
             and snapshot.get("type_name") == "FakeDevice"
@@ -1204,6 +1228,9 @@ class RecipeTab:
         node = self._node(name)
         if node["kind"] == "scalar":
             state = _cfg_object(node["input"])
+            if name == "dev.flux_dev":
+                # Device identity carries unit/source, not a numeric cfg input.
+                return {"value": state["resolved"], "source": source}
             return {"value": state["resolved"], "input": state, "source": source}
         if node["kind"] == "reference":
             return {"value": node["ref"], "source": source}
@@ -1211,7 +1238,8 @@ class RecipeTab:
             inputs = _cfg_object(node["inputs"])
             return {
                 "value": {
-                    key: _cfg_object(value)["resolved"] for key, value in inputs.items()
+                    key: _cfg_object(inputs[key])["resolved"]
+                    for key in ("start", "stop", "expts")
                 },
                 "input": inputs,
                 "source": source,
@@ -1295,13 +1323,8 @@ class RecipeRun:
         facts and propagate. A reserved path is never reported as a saved path.
         """
         binding = self._binding
-        capture = binding.capture
-        if capture.op is None or not (
-            capture.result_state is not None and capture.result_state["available"]
-        ):
-            raise GuiRpcError(
-                "Run did not publish usable data", reason="run_result_unavailable"
-            )
+        run_op = binding.run_source()
+        capture = binding.snapshot()
 
         def observe(op: int | None, receipt: RawSaveReceipt) -> None:
             binding.publish(replace(binding.capture, raw_save=receipt, save_op=op))
@@ -1312,11 +1335,48 @@ class RecipeRun:
 
         return save_raw_data(
             binding.tab.tools.gui,
-            RawSaveRequest(capture.tab, capture.op, admit),
+            RawSaveRequest(capture.tab, run_op, admit),
             closed=binding.tab.closed,
             condition=binding.tab.condition,
             previous=capture.raw_save,
             observe=observe,
+        )
+
+    def preview(self) -> None:
+        """Capture this Run's validated PNG in session storage, without analysis.
+
+        This synchronous fast step does not consume pending cancel. Missing Run
+        data, superseded source, closed session and GUI/PNG/storage failures raise
+        at this call. Failed repeated reads retain the prior confirmed path/image.
+        snapshot exposes local delivery facts; preview files live until session
+        close and are not persistent saved artifacts. No retry or guard refresh.
+        """
+        binding = self._binding
+        run_op = binding.run_source()
+        binding.publish(replace(binding.capture, preview_status="reading"))
+
+        def admit() -> None:
+            if binding.tab.closed.is_set():
+                raise GuiRpcError("MCP session is closed", reason="session_closed")
+
+        reply = binding.tab.tools.gui.send_gui_rpc(
+            "tab.get_figure",
+            {"tab_id": binding.capture.tab, "subtab_id": "run"},
+            run_operation_handle=run_op,
+            before_send=admit,
+        )
+        encoded = reply.get("png_b64")
+        if not isinstance(encoded, str):
+            raise GuiRpcError("Invalid Run preview reply", reason="incompatible_wire")
+        image = validated_png(base64.b64decode(encoded, validate=True))
+        path = binding.tab.tools.session.write_png(image.data)
+        binding.publish(
+            replace(
+                binding.capture,
+                preview_status="captured",
+                preview=RunPreview(str(path)),
+                preview_images=(image,),
+            )
         )
 
     def analyze(

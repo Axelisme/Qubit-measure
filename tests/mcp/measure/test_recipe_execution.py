@@ -383,8 +383,11 @@ def test_needs_parameters_and_invalid_keywords_fail_without_starting_run(tmp_pat
         registry(client.context, definition(sample)) as executions,
     ):
         before = list(client.transport.sent)
-        with pytest.raises(ValueError, match="extra"):
-            executions.start(client.context, "sample", {"extra": 1})
+        rejected = executions.start(client.context, "sample", {"extra": 1}).wait(5)
+        assert rejected.is_error and rejected.data["status"] == "failed"
+        assert rejected.data["error"]["phase"] == "preparing"
+        assert "extra" in rejected.data["error"]["message"]
+        assert not finally_ran.is_set()
         assert client.transport.sent == before
         execution = executions.start(client.context, "sample", {})
         reply = execution.wait(5)

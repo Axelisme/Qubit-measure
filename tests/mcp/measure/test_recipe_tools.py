@@ -370,8 +370,14 @@ def test_production_lookback_rejects_invalid_inputs_before_gui_access(
 ):
     client = make_client(tmp_path, WritebackGui())
     with closing(client.context.session):
-        with pytest.raises(ValueError, match=match):
-            client.call("lookback", arguments)
+        rejected = client.call("lookback", arguments)
+        assert rejected.is_error and rejected.data["status"] == "failed"
+        assert match in rejected.data["error"]["message"]
+        full = client.call(
+            "status", {"execution": rejected.data["execution"], "detail": "full"}
+        )
+        assert full["error"]["phase"] == "preparing"
+        assert full["status"] == "failed"
         assert client.transport.sent == []
 
 
