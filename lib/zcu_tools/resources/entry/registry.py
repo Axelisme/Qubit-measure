@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import replace
 from difflib import get_close_matches
 from pathlib import Path
 from types import UnionType
@@ -70,21 +71,25 @@ def _partial_model[_Model: BaseModel](model: type[_Model]) -> type[_Model]:
                 if type(None) in get_args(annotation)
                 else partial_nested
             )
-        defer_required = name != "kind" and field.is_required()
-        if defer_required or annotation is not field.annotation:
-            partial_field = deepcopy(field)
-            if defer_required:
-                # Missing values stay outside model_fields_set and serialized patches.
-                # Supplied values retain the original non-nullable annotation.
-                partial_field.default = None
-                partial_field.validate_default = False
-            fields[name] = (annotation, partial_field)
-    if not fields:
-        return model
+        partial_field = deepcopy(field)
+        # D101: only supplied fields run validators in a partial document.
+        partial_field.validate_default = False
+        if name != "kind" and field.is_required():
+            # Missing values stay outside model_fields_set and serialized patches.
+            # Supplied values retain the original non-nullable annotation.
+            partial_field.default = None
+        fields[name] = (annotation, partial_field)
     # Pydantic mixes field definitions and reserved options in one kwargs signature.
-    return create_model(
+    partial = create_model(
         f"{model.__name__}Partial", __base__=model, **cast(dict[str, Any], fields)
     )
+    # Keep inherited field decorators without executing full-model invariants.
+    # Replace this class's metadata only; the registry retains the original model.
+    partial.__pydantic_decorators__ = replace(
+        partial.__pydantic_decorators__, model_validators={}
+    )
+    partial.model_rebuild(force=True)
+    return partial
 
 
 def _validate_component_model(model: object) -> None:
