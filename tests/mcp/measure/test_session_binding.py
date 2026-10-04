@@ -132,20 +132,34 @@ def test_status_received_discovery_reply_survives_eof(
             id="analysis-interaction",
         ),
         pytest.param(
-            "accept",
+            "apply_writeback",
             {"tab": "t"},
             {"tab.get_analyze_result": {"summary": {"value": 1}}},
             "tab.get_analyze_result",
             id="accept-before-writes",
         ),
         pytest.param(
-            "accept",
+            "apply_writeback",
             {"tab": "t"},
             {
                 "tab.get_analyze_result": {"summary": {"value": 1}},
                 "tab.get_post_analyze_result": {"summary": {"value": 2}},
-                "tab.writeback_preview": {"has_draft": True, "items": [{"id": "x"}]},
-                "tab.writeback_write": {"written": [{"id": "x", "after": 2}]},
+                "tab.writeback_preview": {
+                    "has_draft": True,
+                    "items": [{"id": "x", "target_name": "frequency"}],
+                    "destination_context": {},
+                },
+                "tab.writeback_write": {
+                    "written": [
+                        {
+                            "id": "x",
+                            "kind": "metadict",
+                            "target": "frequency",
+                            "before": 1,
+                            "after": 2,
+                        }
+                    ]
+                },
             },
             "tab.writeback_write",
             id="accept-confirmed-primary",
@@ -165,6 +179,17 @@ def test_assembled_multistep_tools_do_not_cross_connections(
     client.transport.replies.update(
         {method: {"ok": True, "result": reply} for method, reply in replies.items()}
     )
+    if tool == "apply_writeback":
+        client.transport.replies["tab.writeback_preview"] = lambda params: {
+            "ok": True,
+            "result": {
+                "has_draft": True,
+                "items": [
+                    {"id": "x", "target_name": f"{params['subtab_id']}.frequency"}
+                ],
+                "destination_context": {},
+            },
+        }
     real_read = GuiConnection.read_internal
     real_send = GuiConnection.send_gui_rpc
     changed = False
@@ -217,7 +242,7 @@ def test_assembled_multistep_tools_do_not_cross_connections(
     # Change the GUI only after the complete public RPC (including handle conversion).
     monkeypatch.setattr(GuiConnection, "read_internal", read)
     monkeypatch.setattr(GuiConnection, "send_gui_rpc", send)
-    if tool == "accept":
+    if tool == "apply_writeback":
         result = client.call(tool, arguments)
         assert result["status"] == "failed"
         assert result["error"]["reason"] == "connection_lost"
@@ -225,7 +250,18 @@ def test_assembled_multistep_tools_do_not_cross_connections(
         assert result["failed_stage_may_have_partial_writes"] is False
         if cut_after == "tab.writeback_write":
             assert result["completed"] == [
-                {"stage": "primary", "written": [{"id": "x", "after": 2}]}
+                {
+                    "stage": "primary",
+                    "written": [
+                        {
+                            "id": "x",
+                            "kind": "metadict",
+                            "target": "frequency",
+                            "before": 1,
+                            "after": 2,
+                        }
+                    ],
+                }
             ]
             assert result["not_started"] == []
         else:

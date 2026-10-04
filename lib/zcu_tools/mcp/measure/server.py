@@ -130,10 +130,12 @@ Read tab.snapshot(tab_id), context.snapshot and soc.info(include_cfg=true)
 explicitly for their guarded resources, and device.snapshot for devices.
 Summaries, partial getters, status and bare versions do not replace these reads.
 Cfg editing and Run require the observed cfg_ref from tab.get_cfg. A new tab
-receipt certifies existence only. accept(tab) writes every current Primary and
-existing Post candidate, including unchecked ones, without refreshing guards.
-It stops on the first error and reports confirmed progress without rollback.
-Inspect proposals and the current destination before accepting.
+receipt certifies existence only. apply_writeback(tab, items) selects current
+Primary/Post candidates by stable target_name. Omit items for all; an empty array
+writes none. It ignores checkboxes and rejects unknown or ambiguous names before
+any write, using current IDs rather than proposal IDs. It does not answer recipes
+or refresh guards. It stops on the first error and reports confirmed progress
+without retry or rollback. Inspect proposals and the current destination first.
 
 tab_interact without payload reads committed state and available commands.
 Send payload={command,args} for one action. This method has no seen guard;

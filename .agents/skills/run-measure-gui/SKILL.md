@@ -40,7 +40,7 @@ Recipe、`tab_analyze` 與 `wait(execution)` 回傳同一摘要。先核對 `act
 
 `finish_early` 對 recipe 停止採集，有可用結果就保存 raw 並繼續分析。`cancel` 放棄後續分析與保存，優先於 finish_early；已啟動且不可取消的保存仍回報真實結果。控制回覆只確認請求及 GUI 回應，用 `wait` 或 `status` 核對終態、錯誤與實際保存路徑，不只看 GUI 是否停止。
 
-寫入前明確讀取相關完整 snapshot。Tab 用 `tab.snapshot`，context 用 `context.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 編輯與 Run 另需 `tab.get_cfg` 回傳的 cfg_ref。摘要與 `status` 不替代這些 guard 觀察。`accept(tab)` 接受 Primary 與既有 Post 的全部候選，包含未勾選項；先核對提案與當前目的地。個別候選的修改或寫入走 RPC。
+寫入前明確讀取相關完整 snapshot。Tab 用 `tab.snapshot`，context 用 `context.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 編輯與 Run 另需 `tab.get_cfg` 回傳的 cfg_ref。摘要與 `status` 不替代這些 guard 觀察。寫回用 `apply_writeback(tab, items=None)`。items 是 preview 的穩定 target_name，省略寫全部，空陣列寫零項，不看 GUI 勾選。先核對提案與當前目的地。未知、重複或跨 stage 同名會在任何寫入前被拒絕；寫入後核對 confirmed completed 與 failed stage 的不確定性。這個工具不回答 recipe。候選內容的修改走 RPC。
 
 來源記錄帶有 `cloned_from` 的沿用值，在用於量測或校準前至少快速驗證一次。按該值的用途選驗證，例如用短掃描核對頻率，或用 Rabi 核對 pulse 候選。讀 [Tab 生命週期的沿用值驗證](references/tab-strategy.md#沿用值驗證) 決定證據與下一步。驗證仍受當次硬體、資料及資源授權限制。
 

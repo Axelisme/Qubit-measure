@@ -1,100 +1,73 @@
-"""Agent writeback view over the GUI-owned shared draft."""
+"""Standalone writeback tool; answering a recipe never happens here."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import partial
-from typing import Any
 
-from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.mcp.core.stdio_server import ToolTable
+from zcu_tools.mcp.measure.recipe import WritebackReceipt
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.writeback import write_current_draft
 
 
-def accept(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Accept all current pane candidates without changing selection or observations."""
+def apply_writeback(
+    ctx: MeasureToolContext, arguments: Mapping[str, object]
+) -> WritebackReceipt:
+    """Write current drafts for arguments['tab'], optionally restricted by items.
+
+    tab must be a non-empty string; items must be omitted, null or a JSON array of
+    non-empty stable target_name strings. Reject other keys/invalid values before
+    GUI access. Return the confirmed progress receipt, including a failed stage's
+    uncertainty, without retry or rollback. This never answers a waiting recipe.
+    """
     tab = arguments.get("tab")
     if not isinstance(tab, str) or not tab:
         raise ValueError("tab must be a non-empty string")
-    if arguments.keys() - {"tab"}:
-        raise ValueError("accept only takes tab")
-
-    completed: list[dict[str, Any]] = []
-    skipped: list[str] = []
-    not_started = ["primary", "post"]
-    reply: dict[str, Any] = {
-        "tab": tab,
-        "status": "finished",
-        "completed": completed,
-        "skipped": skipped,
-        "not_started": not_started,
-    }
-    panes: list[tuple[str, str, bool]] = []
-    stage = "primary"
-    write_attempted = False
-    try:
-        ctx = ctx.bound()
-        # These queries and previews do not reveal resources or unlock GUI guards.
-        for stage, subtab, method in (
-            ("primary", "analysis", "tab.get_analyze_result"),
-            ("post", "post_analysis", "tab.get_post_analyze_result"),
-        ):
-            result = ctx.send_gui_rpc(method, {"tab_id": tab})
-            panes.append((stage, subtab, result["summary"] is not None))
-
-        for stage, subtab, has_result in panes:
-            write_attempted = False
-            if not has_result:
-                skipped.append(stage)
-                not_started.remove(stage)
-                continue
-            params = {"tab_id": tab, "subtab_id": subtab}
-            preview = ctx.send_gui_rpc("tab.writeback_preview", params)
-            if not preview["has_draft"] or not preview["items"]:
-                skipped.append(stage)
-                not_started.remove(stage)
-                continue
-            write = [{"id": item["id"]} for item in preview["items"]]
-            # An unsuccessful RPC does not establish that the GUI made no changes.
-            write_attempted = True
-            written = ctx.send_gui_rpc(
-                "tab.writeback_write", {**params, "write": write}
-            )["written"]
-            completed.append({"stage": stage, "written": written})
-            not_started.remove(stage)
-    except GuiRpcError as exc:
-        not_started.remove(stage)
-        reply.update(
-            status="failed",
-            failed_stage=stage,
-            error={"code": exc.code, "reason": exc.reason, "message": str(exc)},
-            failed_stage_may_have_partial_writes=write_attempted,
-        )
-    return reply
+    if arguments.keys() - {"tab", "items"}:
+        raise ValueError("apply_writeback only takes tab and items")
+    raw_items = arguments.get("items")
+    items: list[str] | None = None
+    if raw_items is not None:
+        if not isinstance(raw_items, list):
+            raise ValueError("items must be an array of non-empty stable names")
+        items = []
+        for name in raw_items:
+            if not isinstance(name, str) or not name:
+                raise ValueError("items must be an array of non-empty stable names")
+            items.append(name)
+    return write_current_draft(ctx, tab, items)
 
 
-ACCEPT_TOOL: dict[str, Any] = {
-    "handler": accept,
-    "description": (
-        "Accept every current candidate in the tab's Primary and existing Post panes, "
-        "including unchecked items. Keeps panes separate and writes Primary then Post. "
-        "Result summaries and previews do not refresh observations; GUI guards still "
-        "require prior explicit tab/context reads. Stops at the first error without "
-        "retry or rollback. Returns tab, status (finished|failed), completed "
-        "([{stage,written}]), skipped, and not_started. A failed reply also includes "
-        "failed_stage, error ({code,reason,message}), and "
-        "failed_stage_may_have_partial_writes. Only GUI-confirmed writes are completed. "
-        "The failed stage is separate from not_started; query/preview failures have "
-        "no writes in that stage, while a failed write may have partial effects."
-    ),
-    "inputSchema": {
-        "type": "object",
-        "properties": {"tab": {"type": "string", "minLength": 1}},
-        "required": ["tab"],
-        "additionalProperties": False,
-    },
-}
-
-
-def build_writeback_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
+def build_writeback_tools(ctx: MeasureToolContext) -> ToolTable:
+    """Bind standalone apply_writeback to ctx without accessing the GUI."""
     return {
-        "accept": {**ACCEPT_TOOL, "handler": partial(accept, ctx)},
+        "apply_writeback": {
+            "handler": partial(apply_writeback, ctx),
+            "description": (
+                "Write current Primary and Post draft candidates by stable target_name. "
+                "Omit items for all; an empty array writes none. Ignores checkboxes and "
+                "rejects unknown or ambiguous names before any write. Resolves current "
+                "IDs, not earlier proposal IDs. Writes Primary then Post and stops on "
+                "the first error without retry or rollback. Returns tab, status "
+                "(finished|failed), completed ([{stage,written}]), skipped and "
+                "not_started. Failed replies also include failed_stage, error "
+                "({code,reason,message}) and failed_stage_may_have_partial_writes. "
+                "Only GUI-confirmed writes count as completed. The failed stage is "
+                "separate from not_started. Reads do not refresh guards: explicitly "
+                "observe tab/context before writing. Does not answer recipe questions."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tab": {"type": "string", "minLength": 1},
+                    "items": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string", "minLength": 1},
+                    },
+                },
+                "required": ["tab"],
+                "additionalProperties": False,
+            },
+        }
     }
