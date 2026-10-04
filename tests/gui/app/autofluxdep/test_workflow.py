@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.experiment.v2_gui.autofluxdep._support.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import (
     Dependency,
@@ -27,6 +26,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import (
     ModuleFallback,
     Need,
 )
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from ._helpers import make_builder, run_controller_to_completion
 

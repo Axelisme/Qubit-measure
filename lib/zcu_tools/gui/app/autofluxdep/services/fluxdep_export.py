@@ -1,4 +1,4 @@
-"""Fluxdep-compatible export sidecar derived from QubitFreqResult."""
+"""Fluxdep-compatible export sidecar from a frequency-sweep representation."""
 
 from __future__ import annotations
 
@@ -8,30 +8,46 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.datafile import save_labber_data
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
+from zcu_tools.gui.app.autofluxdep.results import (
+    FrequencySweepResult,
+    require_workflow_result,
+)
 
 
 def export_qubit_freq_fluxdep_spectrum(
-    result: QubitFreqResult,
+    result: FrequencySweepResult,
     filepath: str | Path,
     *,
     flux_unit: str = "",
     committed_mask: NDArray[np.bool_] | None = None,
 ) -> str:
-    """Write a fluxdep raw Labber spectrum from a qubit_freq Result.
+    """Write a frequency-sweep record to filepath and return its saved path.
 
-    ``QubitFreqResult`` stores detune-relative columns whose absolute frequency
+    result must satisfy FrequencySweepResult with float64 arrays and consistent
+    shapes. flux_unit labels the device coordinates. committed_mask selects rows
+    to export and must have shape (n_flux,); None selects every row. Input arrays
+    are not mutated. Raise TypeError for invalid kind/fields/dtypes, ValueError
+    for inconsistent shapes/mask or an unusable frequency grid; propagate IO errors.
+
+    The record stores detune-relative columns whose absolute frequency
     is row-local: ``predict_freq[row] + detune[col]``. Fluxdep raw loader accepts
     one common absolute frequency axis, so each committed row is interpolated onto
     a common MHz grid before writing. Values outside a row's measured span remain
     NaN.
     """
+    checked = require_workflow_result(result)
+    if (
+        not isinstance(checked, FrequencySweepResult)
+        or checked.result_kind != "qubit_freq"
+    ):
+        raise TypeError("fluxdep spectrum export requires a frequency-sweep result")
+    result = checked
     committed = _committed_mask(result, committed_mask)
     common_freq_mhz = _common_frequency_grid(result, committed)
     exported = np.full(
-        (result.n_flux, common_freq_mhz.shape[0]), np.nan, dtype=np.complex128
+        (result.flux.size, common_freq_mhz.shape[0]), np.nan, dtype=np.complex128
     )
-    for row_idx in range(result.n_flux):
+    for row_idx in range(result.flux.size):
         if not committed[row_idx]:
             continue
         predict = result.predict_freq[row_idx]
@@ -60,20 +76,20 @@ def export_qubit_freq_fluxdep_spectrum(
 
 
 def _committed_mask(
-    result: QubitFreqResult, committed_mask: NDArray[np.bool_] | None
+    result: FrequencySweepResult, committed_mask: NDArray[np.bool_] | None
 ) -> NDArray[np.bool_]:
     if committed_mask is None:
-        return np.ones(result.n_flux, dtype=np.bool_)
+        return np.ones(result.flux.size, dtype=np.bool_)
     mask = np.asarray(committed_mask, dtype=np.bool_)
-    if mask.shape != (result.n_flux,):
+    if mask.shape != (result.flux.size,):
         raise ValueError(
-            f"committed_mask shape {mask.shape} must match n_flux {result.n_flux}"
+            f"committed_mask shape {mask.shape} must match n_flux {result.flux.size}"
         )
     return mask
 
 
 def _common_frequency_grid(
-    result: QubitFreqResult,
+    result: FrequencySweepResult,
     committed_mask: NDArray[np.bool_],
 ) -> NDArray[np.float64]:
     finite_predict = result.predict_freq[

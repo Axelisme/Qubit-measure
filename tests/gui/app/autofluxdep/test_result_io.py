@@ -2,22 +2,36 @@
 
 from __future__ import annotations
 
-from typing import cast
+from dataclasses import dataclass
+from typing import ClassVar, Literal, cast
 
 import h5py
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.datafile import (
     Axis,
     LabberPayload,
     StreamingGroupedLabberWriter,
     StreamingLabberRoleSpec,
+    load_labber_data,
     open_streaming_grouped_labber_data,
 )
 from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
     QubitFreqResult,
     Sweep1DResult,
     Sweep2DResult,
+)
+from zcu_tools.gui.app.autofluxdep.results import (
+    FrequencySweepResult,
+    SweepResult1D,
+    SweepResult2D,
+)
+from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
+    export_qubit_freq_fluxdep_spectrum,
+)
+from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
+    export_qubit_freq_labber_browser_sidecar,
 )
 from zcu_tools.gui.app.autofluxdep.services.result_io import (
     ROLE_BEST_FREQ,
@@ -36,6 +50,34 @@ from zcu_tools.gui.app.autofluxdep.services.result_io import (
     result_row_summary,
     write_result_row,
 )
+
+
+@dataclass
+class _ForeignFrequencySweep:
+    result_kind: ClassVar[Literal["qubit_freq"]] = "qubit_freq"
+    flux: NDArray[np.float64]
+    detune: NDArray[np.float64]
+    signal: NDArray[np.float64]
+    fit_curve: NDArray[np.float64]
+    fit_freq: NDArray[np.float64]
+    predict_freq: NDArray[np.float64]
+    snr: NDArray[np.float64]
+
+
+class _FrequencyDeclaration:
+    result_kind: ClassVar[Literal["qubit_freq"]] = "qubit_freq"
+
+
+class _Sweep1DDeclaration:
+    result_kind: ClassVar[Literal["sweep1d"]] = "sweep1d"
+
+
+class _Sweep2DDeclaration:
+    result_kind: ClassVar[Literal["sweep2d"]] = "sweep2d"
+
+
+class _UnknownDeclaration:
+    result_kind: ClassVar[Literal["unknown"]] = "unknown"
 
 
 def _filled_qubit_freq_result() -> QubitFreqResult:
@@ -76,6 +118,108 @@ def _filled_sweep2d_result() -> Sweep2DResult:
     return result
 
 
+@pytest.mark.parametrize(
+    ("declaration", "kind"),
+    (
+        (_FrequencyDeclaration, "qubit_freq"),
+        (_Sweep1DDeclaration, "sweep1d"),
+        (_Sweep2DDeclaration, "sweep2d"),
+    ),
+)
+def test_class_declaration_lookup_needs_no_arrays(declaration, kind):
+    assert result_declaration(declaration).kind == kind
+
+
+def test_external_tagged_result_uses_same_archive_contract(tmp_path):
+    source = _filled_qubit_freq_result()
+    result = _ForeignFrequencySweep(
+        source.flux,
+        source.detune,
+        source.signal,
+        source.fit_curve,
+        source.fit_freq,
+        source.predict_freq,
+        source.snr,
+    )
+    assert isinstance(result, FrequencySweepResult)
+
+    path = str(tmp_path / "foreign")
+    specs = result_role_specs("foreign", "user_measurement", result)
+    with open_streaming_grouped_labber_data(path, specs) as writer:
+        write_result_row(writer, "foreign", "user_measurement", result, 1)
+        writer.flush()
+    loaded = load_node_result(path, "user_measurement")
+
+    assert isinstance(loaded, FrequencySweepResult)
+    np.testing.assert_allclose(loaded.signal, result.signal, equal_nan=True)
+    np.testing.assert_allclose(loaded.fit_freq, result.fit_freq, equal_nan=True)
+    assert result_row_summary(loaded, 1) == result_row_summary(result, 1)
+    assert result_progress_summary(loaded) == result_progress_summary(result)
+
+    exported = export_qubit_freq_fluxdep_spectrum(
+        loaded,
+        tmp_path / "foreign-spectrum",
+        committed_mask=np.array([False, True]),
+    )
+    spectrum = load_labber_data(exported)
+    np.testing.assert_allclose(spectrum.axes[0].values, result.flux)
+    np.testing.assert_allclose(spectrum.z.real[:, 1], result.signal[1])
+    assert np.isnan(spectrum.z.real[:, 0]).all()
+
+    root = tmp_path / "20260705-223908_foreign"
+    sidecar = export_qubit_freq_labber_browser_sidecar(
+        data_root=root,
+        index=0,
+        node_name="foreign",
+        node_type="user_measurement",
+        result=loaded,
+        committed_mask=np.array([False, True]),
+    )
+    browser_spectrum = load_labber_data(str(root / sidecar.path))
+    np.testing.assert_allclose(browser_spectrum.z, spectrum.z, equal_nan=True)
+    np.testing.assert_allclose(browser_spectrum.axes[0].values, result.flux)
+
+
+@pytest.mark.parametrize("declaration", [object, _UnknownDeclaration])
+def test_unsupported_class_kind_fast_fails(declaration):
+    with pytest.raises(TypeError, match="unsupported autofluxdep Result"):
+        result_declaration(declaration)
+
+
+def test_tagged_instance_without_arrays_fast_fails():
+    with pytest.raises(TypeError, match="Result|Protocol|field"):
+        result_role_specs("missing", "custom", _FrequencyDeclaration())
+
+
+@pytest.mark.parametrize(
+    "result_factory",
+    [_filled_qubit_freq_result, _filled_sweep1d_result, _filled_sweep2d_result],
+)
+def test_result_io_rejects_inconsistent_signal_shape(result_factory):
+    result = result_factory()
+    result.signal = result.signal[:1]
+    with pytest.raises(ValueError, match="shape"):
+        result_role_specs("bad", "custom", result)
+
+
+@pytest.mark.parametrize(
+    "result_factory",
+    [_filled_qubit_freq_result, _filled_sweep1d_result, _filled_sweep2d_result],
+)
+def test_result_io_rejects_non_float64_signal(result_factory):
+    result = result_factory()
+    result.signal = result.signal.astype(np.float32)
+    with pytest.raises(TypeError, match="float64|dtype"):
+        result_role_specs("bad", "custom", result)
+
+
+@pytest.mark.parametrize("idx", [-1, 2])
+def test_result_row_rejects_out_of_range_index(idx):
+    result = _filled_qubit_freq_result()
+    with pytest.raises(IndexError):
+        result_row_summary(result, idx)
+
+
 def test_qubit_freq_result_role_specs_and_row_roundtrip(tmp_path):
     result = QubitFreqResult.allocate(
         np.array([0.0, 0.5], dtype=float),
@@ -110,7 +254,7 @@ def test_qubit_freq_result_role_specs_and_row_roundtrip(tmp_path):
     assert row[ROLE_PREDICT_FREQ] == 5000.0
 
     loaded = load_node_result(path, "qubit_freq")
-    assert isinstance(loaded, QubitFreqResult)
+    assert isinstance(loaded, FrequencySweepResult)
     np.testing.assert_allclose(loaded.detune, result.detune)
     np.testing.assert_allclose(loaded.signal[1], result.signal[1])
 
@@ -141,8 +285,10 @@ def test_sweep1d_result_row_roundtrip(tmp_path):
     np.testing.assert_allclose(row[ROLE_SIGNAL], [0.1, 0.2])
     assert row[ROLE_FIT_VALUE] == 12.0
     loaded = load_node_result(path, "t1")
-    assert isinstance(loaded, Sweep1DResult)
+    assert isinstance(loaded, SweepResult1D)
     assert loaded.x_label == "delay time (us)"
+    with h5py.File(path + ".hdf5", "r") as handle:
+        assert handle.attrs["zcu_tools.autofluxdep.result_kind"] == "sweep_1d"
 
 
 def test_sweep2d_result_row_roundtrip(tmp_path):
@@ -166,16 +312,18 @@ def test_sweep2d_result_row_roundtrip(tmp_path):
     np.testing.assert_allclose(row[ROLE_SIGNAL], result.signal[1])
     assert row[ROLE_BEST_FREQ] == 6001.0
     loaded = load_node_result(path, "ro_optimize")
-    assert isinstance(loaded, Sweep2DResult)
+    assert isinstance(loaded, SweepResult2D)
     np.testing.assert_allclose(loaded.gain, result.gain)
+    with h5py.File(path + ".hdf5", "r") as handle:
+        assert handle.attrs["zcu_tools.autofluxdep.result_kind"] == "sweep_2d"
 
 
 @pytest.mark.parametrize(
     ("node_type", "result_factory", "expected_type"),
     (
-        ("qubit_freq", _filled_qubit_freq_result, QubitFreqResult),
-        ("t1", _filled_sweep1d_result, Sweep1DResult),
-        ("ro_optimize", _filled_sweep2d_result, Sweep2DResult),
+        ("qubit_freq", _filled_qubit_freq_result, FrequencySweepResult),
+        ("t1", _filled_sweep1d_result, SweepResult1D),
+        ("ro_optimize", _filled_sweep2d_result, SweepResult2D),
     ),
 )
 def test_result_declaration_contract_converges_all_public_paths(
@@ -208,7 +356,7 @@ def test_result_declaration_contract_converges_all_public_paths(
     assert set(roles) == declared_roles
     loaded = load_node_result(path, node_type)
     assert isinstance(loaded, expected_type)
-    assert result_declaration(loaded).result_type is declaration.result_type
+    assert result_declaration(loaded).kind == declaration.kind
     assert {str(role) for role in read_result_row(path, node_type, row_idx)} == (
         declared_roles
     )

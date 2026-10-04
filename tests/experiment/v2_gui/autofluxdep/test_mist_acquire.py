@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.experiment.v2_gui.autofluxdep.mist import MistBuilder
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -20,6 +19,7 @@ from tests.gui.app.autofluxdep._helpers import (
     make_acquire_env,
     node_schema,
 )
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 _PARAMS = {
     "gain_sweep": SweepValue(start=0.0, stop=1.0, expts=21),

@@ -6,7 +6,6 @@ from collections.abc import Iterator
 import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.session.services.device import SetupDeviceRequest
 from zcu_tools.gui.session.services.simulated_environment import (
@@ -16,6 +15,7 @@ from zcu_tools.gui.session.services.simulated_environment import (
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import MockQickSoc
 
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 from tests.gui.app.autofluxdep._helpers import connect_mock
 
 

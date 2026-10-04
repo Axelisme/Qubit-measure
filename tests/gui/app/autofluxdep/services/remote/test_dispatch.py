@@ -19,7 +19,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.datafile import get_datafolder_path
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.services.remote import dispatch as dispatch_module
 from zcu_tools.gui.app.autofluxdep.services.remote.dispatch import (
@@ -35,6 +34,8 @@ from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.session.services.project_settings import ProjectRequest
 from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from ..._helpers import set_node_cfg_knobs
 

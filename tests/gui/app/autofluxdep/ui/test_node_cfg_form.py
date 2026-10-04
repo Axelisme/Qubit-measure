@@ -28,7 +28,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QScrollArea,
     QVBoxLayout,
 )
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePath,
@@ -60,6 +59,8 @@ from zcu_tools.gui.widgets.cfg import (
     FieldDecorationPatch,
 )
 from zcu_tools.gui.widgets.cfg.fields import ElidedLabel
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 from .._helpers import node_field, node_section, sectioned_node_schema
 
@@ -897,10 +898,11 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
 
 def test_qubit_freq_drive_gain_reference_subtree_preserves_header_and_unrelated(qapp):
     """Shipped qubit_freq: changing drive_gain.mode only rebuilds modules.qub_pulse subtree."""
-    from zcu_tools.gui.app.autofluxdep.app import build_core
     from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import NodeCfgForm
     from zcu_tools.gui.cfg import DirectValue
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+
+    from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
     ctrl = build_core()
     try:

@@ -34,10 +34,6 @@ from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.module_values import
     pulse_length,
     pulse_product,
 )
-from zcu_tools.experiment.v2_gui.autofluxdep.catalog import (
-    builders,
-    create_placement,
-)
 from zcu_tools.experiment.v2_gui.autofluxdep.lenrabi import LenRabiBuilder
 from zcu_tools.experiment.v2_gui.autofluxdep.mist import MistBuilder
 from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
@@ -83,6 +79,7 @@ from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.autofluxdep._helpers import make_run_context
+from zcu_lab.autofluxdep_catalog import build_catalog
 
 from ._helpers import (
     NodeFieldSpec,
@@ -139,7 +136,7 @@ def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> Session
     )
 
 
-_BUILDERS: tuple[Builder, ...] = builders()
+_BUILDERS: tuple[Builder, ...] = build_catalog().builders()
 
 _BUILDER_IDS = [builder.name for builder in _BUILDERS]
 
@@ -1742,7 +1739,11 @@ def test_fresh_node_defaults_seed_from_md_values():
     md.t2e = 9.0
     ctx = _ctx(md=md)
 
-    qubit = create_placement("qubit_freq", ctx=ctx).schema.lower(None, md=md)
+    qubit = (
+        build_catalog()
+        .create_placement("qubit_freq", ctx=ctx)
+        .schema.lower(None, md=md)
+    )
     assert qubit["qub_ch"] == 7
 
     lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(None, md=md)
@@ -2279,7 +2280,7 @@ def test_with_overrides_unknown_key_fast_fails():
 
 
 def test_cfg_value_commit_types_and_fast_fails():
-    from zcu_tools.gui.app.autofluxdep.app import build_core
+    from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
     ctrl = build_core()
     node = ctrl.add_node_by_type("qubit_freq")

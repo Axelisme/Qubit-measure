@@ -20,12 +20,12 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.device.fake import FakeDevice
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.gui.session.services.simulated_environment import FAKE_FLUX_DEVICE_NAME
 from zcu_tools.program.v2.mocksoc import MockQickSoc
 
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 from tests.gui.app.autofluxdep._helpers import (
     connect_mock,
     high_snr_simparams,

@@ -22,6 +22,7 @@ needs no common interface.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -55,6 +56,9 @@ class QubitFreqResult:
     "not measured", never truncated. The Plotter must tolerate a mid-acquire row
     that has ``signal`` but nan ``fit_curve`` / ``fit_freq``.
     """
+
+    result_kind: ClassVar[Literal["qubit_freq"]] = "qubit_freq"
+    """Internal frequency-sweep archive representation, available before allocate."""
 
     flux: NDArray[np.float64]
     detune: NDArray[np.float64]
@@ -117,6 +121,9 @@ class Sweep1DResult:
     - ``x_label`` — the trailing-axis label (for the Plotter's x axis).
     """
 
+    result_kind: ClassVar[Literal["sweep1d"]] = "sweep1d"
+    """Internal one-dimensional archive representation, available before allocate."""
+
     flux: NDArray[np.float64]
     x: NDArray[np.float64]
     signal: NDArray[np.float64]
@@ -164,6 +171,9 @@ class Sweep2DResult:
     - ``signal`` — (n_flux, n_freq, n_gain) the magnitude landscape per row.
     - ``best_freq`` / ``best_gain`` — (n_flux,) the argmax point per row.
     """
+
+    result_kind: ClassVar[Literal["sweep2d"]] = "sweep2d"
+    """Internal two-dimensional archive representation, available before allocate."""
 
     flux: NDArray[np.float64]
     freq: NDArray[np.float64]

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import SweepValue
 
@@ -26,6 +25,7 @@ from tests.gui.app.autofluxdep._helpers import (
     mock_flux_predictor,
     node_schema,
 )
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 _PARAMS = {
     "sweep_range": SweepValue(start=0.5, stop=60.0, expts=41),

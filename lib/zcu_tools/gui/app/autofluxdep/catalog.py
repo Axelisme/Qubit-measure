@@ -1,26 +1,24 @@
-"""Explicit ordered composition root for user-placeable experiments."""
+"""Ordered measurement catalog injected by the application composition root."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
 
-from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
+from zcu_tools.gui.session.types import SessionEnv
 
-from .lenrabi import EXPERIMENT as LENRABI
-from .mist import EXPERIMENT as MIST
-from .qubit_freq import EXPERIMENT as QUBIT_FREQ
-from .ro_optimize import EXPERIMENT as RO_OPTIMIZE
-from .t1 import EXPERIMENT as T1
-from .t2echo import EXPERIMENT as T2ECHO
-from .t2ramsey import EXPERIMENT as T2RAMSEY
+from .nodes.builder import Builder, PlacedNode
 
 
 @dataclass(frozen=True, slots=True, init=False)
 class ExperimentCatalog:
     """Immutable ordered measurement-experiment catalog.
+
+    declarations is an ordered iterable of stateless Builder instances.
+    Raise TypeError for non-Builders and ValueError for empty/duplicate names,
+    module-stem/name mismatch or duplicate dependency/output declarations.
+    Construction preserves the caller's declaration order and Builder identities.
 
     Catalog order controls only the GUI add menu. Runtime execution continues to
     use the persisted workflow's user-defined placement order.
@@ -48,8 +46,15 @@ class ExperimentCatalog:
         """Return authoritative Builder singletons in GUI menu order."""
         return self._builders
 
-    def create_placement(self, type_name: str, ctx: Any | None = None) -> PlacedNode:
-        """Create a fresh placement; unknown names preserve ``KeyError``."""
+    def create_placement(
+        self, type_name: str, ctx: SessionEnv | None = None
+    ) -> PlacedNode:
+        """Create independent placement defaults for the named measurement Builder.
+
+        type_name is a name returned by names(). ctx seeds fresh defaults only;
+        None uses context-free defaults. Unknown names raise KeyError.
+        The returned placement owns its schema; no run state is stored here.
+        """
         return PlacedNode(builder=self._by_name[type_name], default_context=ctx)
 
 
@@ -99,28 +104,3 @@ def _require_unique(builder: Builder, declaration: str, values: Iterable[str]) -
                 f"declaration: {value!r}"
             )
         seen.add(value)
-
-
-_DECLARATIONS: tuple[Builder, ...] = (
-    QUBIT_FREQ,
-    LENRABI,
-    RO_OPTIMIZE,
-    T1,
-    T2RAMSEY,
-    T2ECHO,
-    MIST,
-)
-
-CATALOG = ExperimentCatalog(_DECLARATIONS)
-
-
-def names() -> tuple[str, ...]:
-    return CATALOG.names()
-
-
-def builders() -> tuple[Builder, ...]:
-    return CATALOG.builders()
-
-
-def create_placement(type_name: str, ctx: Any | None = None) -> PlacedNode:
-    return CATALOG.create_placement(type_name, ctx)

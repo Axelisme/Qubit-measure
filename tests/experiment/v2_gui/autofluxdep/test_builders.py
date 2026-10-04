@@ -14,24 +14,6 @@ import numpy as np
 import pytest
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-# --- catalog exposes all measurement types ---
-
-
-def test_catalog_exposes_all_experiments():
-    from zcu_tools.experiment.v2_gui.autofluxdep.catalog import names
-
-    types = set(names())
-    assert types == {
-        "qubit_freq",
-        "lenrabi",
-        "ro_optimize",
-        "t1",
-        "t2ramsey",
-        "t2echo",
-        "mist",
-    }
-
-
 # --- liveplot alignment: each Builder builds the runner module's subplot layout ---
 
 
@@ -51,9 +33,10 @@ def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
     # each experiment's Plotter embeds the same LivePlot panels the runner module
     # draws, so the figure has the matching number of axes.
     from matplotlib.figure import Figure
-    from zcu_tools.experiment.v2_gui.autofluxdep.catalog import create_placement
 
-    builder = create_placement(type_name).builder
+    from zcu_lab.autofluxdep_catalog import build_catalog
+
+    builder = build_catalog().create_placement(type_name).builder
     figure = Figure()
     plots = Plots(NonPresentingHost())
     plots.adopt(type_name, figure)
