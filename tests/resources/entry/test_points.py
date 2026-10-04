@@ -196,11 +196,22 @@ def test_complete_validation_rejects_after_validator_mutating_unset_default(
         component_registry.unregister(kind)
 
 
+@pytest.mark.parametrize("nested", [False, True])
 def test_move_transfers_value_and_provenance_between_layers(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
+    nested: bool,
 ) -> None:
-    entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
+    entry.setup.add_component(
+        "Q1",
+        kind="qubit/transmon",
+        freq=5000.0,
+        wiring={"time_of_flight": 2.0, "flux_ch": 3},
+    )
+    path = "Q1.wiring.time_of_flight" if nested else "Q1.freq"
+    leaf = "time_of_flight" if nested else "freq"
+    value = 2.0 if nested else 5000.0
+    si_value = 2e-6 if nested else 5e9
     results, database = entry_roots
     setup_source = results / "entry/setup.yaml"
     point_source = results / "entry/points/a/point.yaml"
@@ -213,36 +224,46 @@ def test_move_transfers_value_and_provenance_between_layers(
         "at": "2026-10-04T00:00:00Z",
         "stderr": None,
     }
-    stored["provenance"]["Q1.freq"] = provenance
+    stored["provenance"][path] = provenance
     with setup_source.open("w") as stream:
         yaml.dump(stored, stream)
     entry.setup.refresh()
     point = entry.new_point("a")
 
-    point.move("Q1.freq", to="point")
-    assert point.Q1.freq == 5000.0
-    with pytest.raises(AttributeError, match="Q1.freq"):
-        _ = entry.setup.Q1.freq
+    point.move(path, to="point")
+    assert (point.Q1.wiring.time_of_flight if nested else point.Q1.freq) == value
+    with pytest.raises(AttributeError, match=path):
+        _ = entry.setup.Q1.wiring.time_of_flight if nested else entry.setup.Q1.freq
     setup = yaml.load(setup_source.read_text())
     stored = yaml.load(point_source.read_text())
-    assert "freq" not in setup["components"]["Q1"]
-    assert "Q1.freq" not in setup["provenance"]
-    assert stored["components"]["Q1"]["freq"] == 5e9
-    assert stored["provenance"]["Q1.freq"] == provenance
+    setup_fields = setup["components"]["Q1"]
+    point_fields = stored["components"]["Q1"]
+    assert leaf not in (setup_fields.get("wiring", {}) if nested else setup_fields)
+    assert path not in setup["provenance"]
+    assert (point_fields["wiring"] if nested else point_fields)[leaf] == si_value
+    assert stored["provenance"][path] == provenance
+    assert entry.setup.Q1.wiring.flux_ch == 3
     before = setup_source.read_bytes(), point_source.read_bytes()
-    with pytest.raises(ValueError, match="Q1.freq"):
-        point.move("Q1.freq", to="point")
+    with pytest.raises(ValueError, match=path):
+        point.move(path, to="point")
     assert (setup_source.read_bytes(), point_source.read_bytes()) == before
 
-    point.move("Q1.freq", to="setup")
+    point.move(path, to="setup")
     reloaded = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reloaded.setup.Q1.freq == 5000.0
-    assert reloaded.use_point("a").Q1.freq == 5000.0
+    reopened_point = reloaded.use_point("a")
+    assert (
+        reloaded.setup.Q1.wiring.time_of_flight if nested else reloaded.setup.Q1.freq
+    ) == value
+    assert (
+        reopened_point.Q1.wiring.time_of_flight if nested else reopened_point.Q1.freq
+    ) == value
+    assert reopened_point.Q1.wiring.flux_ch == 3
     stored = yaml.load(point_source.read_text())
     setup = yaml.load(setup_source.read_text())
-    assert "freq" not in stored["components"].get("Q1", {})
-    assert "Q1.freq" not in stored["provenance"]
-    assert setup["provenance"]["Q1.freq"] == provenance
+    point_fields = stored["components"].get("Q1", {})
+    assert leaf not in (point_fields.get("wiring", {}) if nested else point_fields)
+    assert path not in stored["provenance"]
+    assert setup["provenance"][path] == provenance
 
 
 def test_point_edit_rejects_invalid_reload_before_exposing_draft(
@@ -355,16 +376,28 @@ def test_clone_marks_only_point_provenance_with_its_direct_source(
     )
 
 
-@pytest.mark.parametrize("write", ["attribute", "edit", "set"])
+@pytest.mark.parametrize(
+    ("write", "path"),
+    [
+        ("attribute", "Q1.t1"),
+        ("edit", "Q1.t1"),
+        ("set", "Q1.t1"),
+        ("set", "Q1.wiring.flux_ch"),
+        ("set", "Q1.ext.nested.note"),
+    ],
+)
 def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
     write: str,
+    path: str,
 ) -> None:
     entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
     original = entry.new_point("a")
     original.Q1.t1 = 12.0
     original.Q1.t2 = 13.0
+    original.Q1.wiring.flux_ch = 3
+    original.Q1.ext.nested = {"note": "accepted"}
     root = entry_roots[0] / "entry"
     source = root / "points/a/point.yaml"
     yaml = YAML(typ="rt")
@@ -376,9 +409,9 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
         "at": "2026-10-04T00:00:00Z",
         "stderr": None,
     }
+    origin_paths = ["Q1.t1", "Q1.t2", "Q1.wiring.flux_ch", "Q1.ext.nested.note"]
     stored["provenance"] = {
-        "Q1.t1": deepcopy(provenance),
-        "Q1.t2": deepcopy(provenance),
+        origin_path: deepcopy(provenance) for origin_path in origin_paths
     }
     write_yaml(source, stored)
     point = entry.new_point("b", clone_from="a")
@@ -397,20 +430,28 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
             else:
                 with pytest.raises(ValidationError):
                     draft.set("Q1.t2", "not-a-number")
-                draft.set("Q1.t1", 12.0)
+                value = (
+                    "accepted"
+                    if path == "Q1.ext.nested.note"
+                    else 3
+                    if path == "Q1.wiring.flux_ch"
+                    else 12.0
+                )
+                draft.set(path, value)
 
     rewritten = yaml.load((root / "points/b/point.yaml").read_text())
-    assert rewritten["provenance"]["Q1.t1"] == provenance
-    assert rewritten["provenance"]["Q1.t2"] == {
-        **provenance,
-        "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
-    }
+    assert rewritten["provenance"][path] == provenance
+    for untouched in set(origin_paths) - {path}:
+        assert rewritten["provenance"][untouched] == {
+            **provenance,
+            "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
+        }
     assert (root / "setup.yaml").read_bytes() == setup_before
-    assert point.Q1.t1 == 12.0
-    assert point.Q1.t2 == 13.0
-    reopened = entry.use_point("b")
-    assert reopened.Q1.t1 == 12.0
-    assert reopened.Q1.t2 == 13.0
+    for view in (point, entry.use_point("b")):
+        assert view.Q1.t1 == 12.0
+        assert view.Q1.t2 == 13.0
+        assert view.Q1.wiring.flux_ch == 3
+        assert view.Q1.ext.nested == {"note": "accepted"}
 
 
 @pytest.mark.parametrize("nullable", [False, True])
