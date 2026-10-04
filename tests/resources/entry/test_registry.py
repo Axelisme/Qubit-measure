@@ -1,9 +1,15 @@
 """Notebook component declarations through the public registry interface."""
 
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal, Self, cast
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ModelWrapValidatorHandler,
+    create_model,
+    model_validator,
+)
 from zcu_tools.resources.document_store import UnitSpec
 from zcu_tools.resources.entry import (
     ComponentRegistry,
@@ -28,6 +34,54 @@ class PairLinks(BaseModel):
 
 class NestedPairSchema(ComponentSchema):
     links: PairLinks
+
+
+class BeforeModelSchema(ComponentSchema):
+    @model_validator(mode="before")
+    @classmethod
+    def prepare_input(cls, value: object) -> object:
+        return value
+
+
+class WrapModelSchema(ComponentSchema):
+    @model_validator(mode="wrap")
+    @classmethod
+    def prepare_input(
+        cls, value: object, handler: ModelWrapValidatorHandler[Self]
+    ) -> Self:
+        return handler(value)
+
+
+class PostInitSchema(ComponentSchema):
+    def model_post_init(self, context: object) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("model", "reason"),
+    [
+        (BeforeModelSchema, "before"),
+        (WrapModelSchema, "wrap"),
+        (PostInitSchema, "model_post_init"),
+    ],
+)
+@pytest.mark.parametrize("placement", ["direct", "inherited", "nested"])
+def test_registration_rejects_full_model_transformations_without_reserving_kind(
+    model: type[ComponentSchema],
+    reason: str,
+    placement: Literal["direct", "inherited", "nested"],
+) -> None:
+    if placement == "inherited":
+        model = create_model("InheritedModel", __base__=model)
+    elif placement == "nested":
+        model = create_model(
+            "NestedModel", __base__=ComponentSchema, child=(model, ...)
+        )
+    registry = ComponentRegistry()
+    with pytest.raises(ValueError, match=rf"{reason}.*partial"):
+        registry.register("notebook/transform", model)
+    registry.register("notebook/transform", PairSchema)
+    assert registry.get("notebook/transform") is PairSchema
 
 
 @pytest.mark.parametrize("extra", ["allow", "ignore"])

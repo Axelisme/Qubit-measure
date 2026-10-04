@@ -4,10 +4,18 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_validator,
+)
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import UnitSpec
@@ -111,6 +119,58 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     results, database = tmp_path / "results", tmp_path / "Database"
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     return entry, results, database
+
+
+@pytest.mark.parametrize("mode", ["before", "after", "wrap", "plain"])
+def test_partial_setup_runs_supplied_field_validators_and_skips_invalid_defaults(
+    tmp_path: Path,
+    registry_state_guard: None,
+    mode: Literal["before", "after", "wrap", "plain"],
+) -> None:
+    def normalize(value: object) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("title must contain text")
+        return value.strip().lower()
+
+    class NormalizedSchema(ComponentSchema):
+        model_config = ConfigDict(extra="forbid", validate_default=True)
+        title: str = Field(default="", validate_default=True)
+
+        if mode == "wrap":
+
+            @field_validator("title", mode="wrap")
+            @classmethod
+            def normalize_title(
+                cls, value: object, handler: ValidatorFunctionWrapHandler
+            ) -> str:
+                return normalize(handler(value))
+        else:
+
+            @field_validator("title", mode=mode)
+            @classmethod
+            def normalize_title(cls, value: object) -> str:
+                return normalize(value)
+
+    with registered_model("notebook/normalized", NormalizedSchema) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind)
+        source = results / "entry" / "setup.yaml"
+        assert "title" not in YAML(typ="safe").load(source)["components"]["N1"]
+        with entry.setup.edit() as draft:
+            draft.set("N1.title", "  Prepared  ")
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        reopened.setup.refresh()
+        assert reopened.setup.N1.title == "prepared"
+        assert YAML(typ="safe").load(source)["components"]["N1"]["title"] == "prepared"
+        before = source.read_bytes()
+        with pytest.raises(ValidationError, match="title"):
+            reopened.setup.N1.title = " "
+        assert source.read_bytes() == before
+        assert reopened.setup.N1.title == "prepared"
+        with pytest.raises(ValidationError, match="title"):
+            component_registry.get(kind).model_validate({"kind": kind})
 
 
 def test_partial_setup_defers_model_invariants_but_preserves_field_constraints(
