@@ -48,6 +48,107 @@ from ._analyze_support import (
 )
 
 
+@pytest.mark.parametrize("stage", ["primary", "post"])
+def test_analysis_captures_all_owner_writeback_without_live_queries(
+    tmp_path, clients, stage
+):
+    pane = "analysis" if stage == "primary" else "post_analysis"
+    proposal = {
+        "has_draft": True,
+        "items": [
+            {
+                "id": "candidate-t1",
+                "kind": "metadict",
+                "target_name": "t1",
+                "proposed": 27.5,
+                "current": 20.0,
+                "selected": False,
+            },
+            {
+                "id": "candidate-note",
+                "kind": "sample",
+                "target_name": "sample",
+                "proposed": {"t1": 27.5, "source": "reanalysis"},
+                "current": None,
+                "selected": True,
+            },
+        ],
+        "destination_context": {
+            "active_label": "original",
+            "chip_name": "chip",
+            "qub_name": "q1",
+            "res_name": "r1",
+            "project_loaded": True,
+        },
+    }
+
+    def respond(method, params):
+        if method in {"tab.analyze", "tab.post_analyze"}:
+            return _start_reply({"skip": 1}, [])
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
+            result = _result_reply(pane, [], {"skip": 1})
+            result["summary"] = {"t1": 27.5}
+            result["operation_state"][f"{pane}_state"]["has_writeback_draft"] = True
+            return result
+        if method == "tab.writeback_preview":
+            assert params == {"tab_id": "t", "subtab_id": pane, "operation_id": 1}
+            return proposal
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
+    assert initial.data["status"] == "finished", initial.data
+    execution = initial.data["execution"]
+    expected_candidates = [
+        {
+            "id": "candidate-t1",
+            "kind": "parameter",
+            "target": "t1",
+            "resolved_target": None,
+            "proposed": 27.5,
+            "current": 20.0,
+        },
+        {
+            "id": "candidate-note",
+            "kind": "sample",
+            "target": "sample",
+            "resolved_target": None,
+            "proposed": {"t1": 27.5, "source": "reanalysis"},
+            "current": None,
+        },
+    ]
+    assert initial.data["writeback"]["stages"][stage] == expected_candidates
+    assert (
+        initial.data["writeback"]["stages"]["post" if stage == "primary" else "primary"]
+        == []
+    )
+    assert initial.data["writeback"]["destination"] == {
+        "context": {"active_label": "original"},
+        "project": {"chip_name": "chip", "qub_name": "q1", "res_name": "r1"},
+    }
+    full = client.call("status", {"execution": execution, "detail": "full"})
+    assert full["writeback"] == proposal
+    assert full["writeback"]["items"][0]["selected"] is False
+    methods = _methods(client)
+    assert methods.count("tab.writeback_preview") == 1
+    proposal["items"][0]["proposed"] = 999.0
+    proposal["destination_context"]["active_label"] = "newer"
+    full["writeback"]["items"].clear()
+    before = list(client.transport.sent)
+    assert client.call("status", {"execution": execution}) == initial.data
+    waited = client.call("wait", {"execution": execution, "timeout": 0}).data
+    assert {k: v for k, v in waited.items() if k != "elapsed_s"} == initial.data
+    assert (
+        client.call("status", {"execution": execution, "detail": "full"})["writeback"][
+            "items"
+        ][0]["proposed"]
+        == 27.5
+    )
+    assert client.transport.sent == before
+
+
 @pytest.mark.parametrize(
     "declaration",
     [
