@@ -653,6 +653,20 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         )
         assert observed["result"] == result["result"]
         assert observed["saved_images"] == result["saved_images"]
+    summary = client.call("status", {"execution": result["execution"]})
+    assert summary["analysis"][stage]["warnings"] == (
+        ["singular error"] if has_invalid else []
+    )
+    assert summary["analysis"][stage]["details"] == (
+        {"frequency": 5.0, "frequency_error": None}
+        if has_invalid
+        else {"frequency": 5.0}
+    )
+    assert summary["invalid"] == (
+        [{"path": f"analysis.{stage}.details.frequency_error", "reason": "non_finite"}]
+        if has_invalid
+        else []
+    )
     assert result["result"]["params"] == {"gain": 2, "model": "fit"}
     assert result["params"] == result["result"]["params"]
     assert result["invalidated"] == ["post.writeback"]
@@ -1157,9 +1171,7 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
                 "status": "running",
                 "unconfirmed_image": "fit",
             }
-            pending_summary = client.call(
-                "status", {"execution": started["execution"]}
-            )
+            pending_summary = client.call("status", {"execution": started["execution"]})
             assert pending_summary["artifacts"]["analysis"]["fit"] == {
                 "status": "saving",
                 "lifetime": "persistent",
@@ -1204,7 +1216,11 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         {"path": "/actual/prefix.png", "status": "saved"}
     ]
     assert summary["artifacts"]["analysis"]["fit"] == {
-        "status": "saved" if save_outcome == "saved" else "unknown" if unknown else "incomplete",
+        "status": "saved"
+        if save_outcome == "saved"
+        else "unknown"
+        if unknown
+        else "incomplete",
         "lifetime": "persistent",
         "members": {
             "image": [{"path": "/actual/fit.png", "status": "saved"}]
