@@ -197,7 +197,9 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
         "flags": [True, None],
     }
     assert reopened.setup.general.entry_id == entry.entry_id
-    assert reopened.setup.description == "physical environment is not encoded in the name"
+    assert (
+        reopened.setup.description == "physical environment is not encoded in the name"
+    )
     document = YAML(typ="safe").load(setup_path)
     assert document["general"]["ext"]["temperature"] == 0.03
 

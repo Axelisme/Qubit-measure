@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04 — 內建 kinds 與元件引用
+**Last updated:** 2026-10-04 — shared draft 與 general 視圖
 
 `ResultEntry` 組合兩個明確傳入的根目錄。名稱是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 不接受 refresh 帶入另一個身分。
 
@@ -16,4 +16,6 @@ Setup 允許省略 notebook model 的必填欄位與直接巢狀 model 的必填
 
 內建 kinds 包含 resonator、fluxonium、transmon、JPA 與 current source。物理值可缺省，單位宣告涵蓋頻率、能量、電流、時間與無因次量。引用保存元件名稱，不展開目標物件。載入、refresh 與提交驗證有值的引用，包含 notebook 宣告的巢狀路徑；缺少目標時回報檔案、元件、欄位與目標名稱。失敗不發布無效快照。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。完整 draft 視圖、forward-minor 元件欄位與其他 notebook model 形狀仍在實作中。工作點、來源和角色解析由後續切片提供，不改現行 context 的責任。
+EditView 的元件、wiring、ext 與 general 屬性更新同一份 draft。點分 set 也更新這份 draft，不另開交易。型別或欄位驗證失敗不修改 draft；身分或引用驗證失敗使整筆交易不提交。General description 未設定時回傳 None，general.ext 保留任意 YAML 值。Notebook 的巢狀 model 讀取投影成工作單位的 YAML mapping；點分 set 可更新其已存在的容器。
+
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。Forward-minor 元件欄位、stderr 與其他 notebook model 形狀仍在實作中。工作點、來源、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。
