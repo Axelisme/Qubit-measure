@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04 — shared draft 與 general 視圖
+**Last updated:** 2026-10-04 — forward-minor typed projection
 
 `ResultEntry` 組合兩個明確傳入的根目錄。名稱是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 不接受 refresh 帶入另一個身分。
 
@@ -18,4 +18,6 @@ Setup 允許省略 notebook model 的必填欄位與直接巢狀 model 的必填
 
 EditView 的元件、wiring、ext 與 general 屬性更新同一份 draft。點分 set 也更新這份 draft，不另開交易。型別或欄位驗證失敗不修改 draft；身分或引用驗證失敗使整筆交易不提交。General description 未設定時回傳 None，general.ext 保留任意 YAML 值。Notebook 的巢狀 model 讀取投影成工作單位的 YAML mapping；點分 set 可更新其已存在的容器。
 
-本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。Forward-minor 元件欄位、stderr 與其他 notebook model 形狀仍在實作中。工作點、來源、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。
+同 major 的較新 minor 文件保留未知欄位與原版本。Typed 視圖只投影已知欄位；頻率與 wiring 時間仍使用宣告的工作單位。未知欄位留在 DocumentStore 的 YAML tree，不換算，也不開放 typed API 讀寫。已知值、kind 與引用仍驗證；當前 minor 的未知正式欄位仍報錯。
+
+本模組尚未接線到 ContextService、notebook caller、GUI 或 MCP。Stderr 接縫與其他 notebook model 形狀仍在實作中。工作點、來源、set 的 provenance 參數和角色解析由後續切片提供，不改現行 context 的責任。
