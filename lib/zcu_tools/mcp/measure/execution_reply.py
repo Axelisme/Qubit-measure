@@ -103,6 +103,7 @@ def _pane(
     result = execution.get("result") or {}
     native = result.get("summary")
     details = deepcopy(native) if isinstance(native, dict) else {"result": native}
+    warnings = details.pop("warnings", [])
     estimates: dict[str, EstimateReply] = {}
     paths = {}
     for estimate in definition.summary_estimates if definition else ():
@@ -123,7 +124,7 @@ def _pane(
         "params": result.get("params", execution.get("params")),
         "estimates": estimates,
         "details": details,
-        "warnings": result.get("warnings", []),
+        "warnings": warnings,
     }, paths
 
 
