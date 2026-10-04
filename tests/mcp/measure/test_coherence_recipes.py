@@ -288,6 +288,8 @@ def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
         for slot, library in (("pi_pulse", "pi"), ("pi2_pulse", "pi2")):
             if recipe == "t2ramsey" and slot == "pi_pulse":
                 continue
+            if recipe == "t1" and slot == "pi2_pulse":
+                continue
             assert data["actual"]["fields"][f"modules.{slot}"] == {
                 "value": library,
                 "source": "gui_default",
@@ -565,10 +567,10 @@ def test_t2_rejects_invalid_inputs_before_preparing(tmp_path, recipe, arguments)
         )
 
 
-@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
+@pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize("decision", ["accepted", "skipped"])
-def test_t2_primary_handoff_waits_before_question_and_actual_writes(
+def test_coherence_primary_handoff_waits_before_question_and_actual_writes(
     tmp_path, recipe, interactive, decision
 ):
     gui = CoherenceGui(
@@ -622,8 +624,8 @@ def test_t2_primary_handoff_waits_before_question_and_actual_writes(
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
 
 
-@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
-def test_t2_cancelled_run_stops_before_raw_save(tmp_path, recipe):
+@pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
+def test_coherence_cancelled_run_stops_before_raw_save(tmp_path, recipe):
     gui = CoherenceGui(pi_ref="pi", adapter=recipe, pi2_ref="pi2")
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies["operation.await"] = {
@@ -641,8 +643,8 @@ def test_t2_cancelled_run_stops_before_raw_save(tmp_path, recipe):
         assert "tab.analyze" not in methods
 
 
-@pytest.mark.parametrize("recipe", ["t2ramsey", "t2echo"])
-def test_t2_cancelled_question_stops_without_writing(tmp_path, recipe):
+@pytest.mark.parametrize("recipe", ["t1", "t2ramsey", "t2echo"])
+def test_coherence_cancelled_question_stops_without_writing(tmp_path, recipe):
     gui = CoherenceGui(pi_ref="pi", adapter=recipe, pi2_ref="pi2")
     with recipe_client(tmp_path, gui) as client:
         question = client.call(recipe, {})
@@ -710,7 +712,8 @@ def test_t1_selected_library_pulse_preserves_gui_delay_defaults(tmp_path, reuse_
     gui = CoherenceGui(pi_ref="pi")
     with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
-            client, client.call("t1", {"reuse_tab_id": reuse_tab_id})
+            client,
+            skip_writeback(client, client.call("t1", {"reuse_tab_id": reuse_tab_id})),
         ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -785,8 +788,11 @@ def test_t1_number_inputs_publish_floats_and_keep_integer_counts(tmp_path, delay
     with recipe_client(tmp_path, CoherenceGui(pi_ref="pi")) as client:
         data = full_execution_reply(
             client,
-            client.call(
-                "t1", {"max_delay_us": delay, "points": 3, "reps": 2, "rounds": 1}
+            skip_writeback(
+                client,
+                client.call(
+                    "t1", {"max_delay_us": delay, "points": 3, "reps": 2, "rounds": 1}
+                ),
             ),
         ).data
         assert data["status"] == "finished", data
@@ -829,15 +835,18 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
     try:
         reply = full_execution_reply(
             client,
-            client.call(
-                "t1",
-                {
-                    "pi_ref": "pi",
-                    "max_delay_us": 80.0,
-                    "points": 81,
-                    "reps": 13,
-                    "rounds": 9,
-                },
+            skip_writeback(
+                client,
+                client.call(
+                    "t1",
+                    {
+                        "pi_ref": "pi",
+                        "max_delay_us": 80.0,
+                        "points": 81,
+                        "reps": 13,
+                        "rounds": 9,
+                    },
+                ),
             ),
         )
         data = reply.data
