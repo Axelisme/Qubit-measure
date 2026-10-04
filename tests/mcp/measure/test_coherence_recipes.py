@@ -451,7 +451,11 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
     def respond(method, params):
         reply = gui(method, params)
         if method == "tab.get_analyze_result":
-            reply["summary"] = {"t1": 42.0, "t1_err": None, "warnings": ["singular error"]}
+            reply["summary"] = {
+                "t1": 42.0,
+                "t1_err": None,
+                "warnings": ["singular error"],
+            }
             reply["invalid"] = [{"path": "summary.t1_err", "reason": "non_finite"}]
         return reply
 

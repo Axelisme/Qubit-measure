@@ -674,7 +674,9 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
     def respond(method, params):
         reply = gui(method, params)
         if method == "tab.get_analyze_result":
-            reply["summary"] = {"centers": {"ground": [0.1, 0.2], "excited": [0.8, 0.9]}}
+            reply["summary"] = {
+                "centers": {"ground": [0.1, 0.2], "excited": [0.8, 0.9]}
+            }
         elif method == "tab.get_post_analyze_result":
             reply["summary"] = {
                 "fidelity": 0.98,
