@@ -110,10 +110,10 @@ def _validate_reference(model: type[BaseModel], reference: str) -> None:
             ):
                 return
             break
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            model = annotation
-        else:
+        nested_model = _nested_model(annotation)
+        if nested_model is None:
             break
+        model = nested_model
     raise ValueError(f"Invalid component reference path: {reference!r}")
 
 
