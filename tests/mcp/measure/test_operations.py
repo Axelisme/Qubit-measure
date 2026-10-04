@@ -438,6 +438,11 @@ def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
             for value in ("", None, True, 1)
         ],
         *[
+            ("status", {"execution": "analysis-1", "detail": detail}, "detail")
+            for detail in ("unknown", None, True, 1, {})
+        ],
+        ("status", {"detail": "full"}, "requires execution"),
+        *[
             ("wait", {"execution": "analysis-1", "timeout": timeout}, "timeout")
             for timeout in (-1, 301, True, float("nan"), float("inf"), "1")
         ],
