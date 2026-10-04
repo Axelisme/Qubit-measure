@@ -121,6 +121,54 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+@pytest.mark.parametrize("operation", ["open", "refresh", "edit"])
+def test_noncanonical_file_rejects_reload_with_source_and_preserves_snapshot(
+    tmp_path: Path,
+    registry_state_guard: None,
+    operation: Literal["open", "refresh", "edit"],
+) -> None:
+    class NormalizedSchema(ComponentSchema):
+        title: str
+
+        @field_validator("title")
+        @classmethod
+        def normalize_title(cls, value: str) -> str:
+            return value.strip().lower()
+
+    with registered_model("notebook/normalized", NormalizedSchema) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, title="prepared")
+        source = results / "entry" / "setup.yaml"
+        yaml = YAML(typ="rt")
+        document = yaml.load(source)
+        document["components"]["N1"]["title"] = "  Changed  "
+        yaml.dump(document, source)
+        before = source.read_bytes()
+        body_entered = False
+
+        def reload() -> None:
+            nonlocal body_entered
+            if operation == "open":
+                ResultEntry.open("entry", result_root=results, database_root=database)
+            elif operation == "refresh":
+                entry.setup.refresh()
+            else:
+                with entry.setup.edit() as draft:
+                    body_entered = True
+                    draft.description = "must not commit"
+
+        with pytest.raises(ValidationError) as failure:
+            reload()
+        error = failure.value.errors()[0]
+        assert error["loc"] == ("components", "N1", "title")
+        assert "  Changed  " in error["msg"] and "changed" in error["msg"]
+        assert str(source) in error["msg"]
+        assert not body_entered
+        assert source.read_bytes() == before
+        assert entry.setup.N1.title == "prepared"
+        assert entry.setup.description is None
+
+
 @pytest.mark.parametrize("mode", ["before", "after", "wrap", "plain"])
 def test_non_idempotent_field_conversion_rejects_add_without_publishing(
     tmp_path: Path,
