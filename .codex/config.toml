@@ -17,7 +17,7 @@ args = [
   "--extra",
   "gui",
   "python",
-  "lib/zcu_tools/mcp/measure/server.py",
+  "scripts/run_measure_mcp.py",
 ]
 env_vars = [
   "QT_QPA_PLATFORM",

@@ -407,6 +407,7 @@ class _TabBinding:
     libraries: frozenset[str]
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
+    observe_writeback: Callable[[WritebackReceipt], None]
     origins: dict[str, str] = field(default_factory=dict)
     flux_unit: str | None = None
     frequency_sweep: str | None = None
@@ -536,6 +537,7 @@ class RecipeSession:
         self._consume_cancel = consume_cancel
         self._run: RunOperation | None = None
         self._analysis: AnalyzeOperation | None = None
+        self._written: list[WritebackReceipt] = []
 
     def _observe_run(self, operation: RunOperation) -> None:
         with self._condition:
@@ -546,6 +548,20 @@ class RecipeSession:
         with self._condition:
             self._analysis = operation
             self._condition.notify_all()
+
+    def _observe_writeback(self, receipt: WritebackReceipt) -> None:
+        with self._condition:
+            self._written.append(deepcopy(receipt))
+            self._condition.notify_all()
+
+    def writeback_receipts(self) -> tuple[WritebackReceipt, ...]:
+        """Read detached actual writes in call order, including failed prefixes.
+
+        Empty means tab.accept has not returned a receipt. Answers and proposals
+        are not writes. Reading sends no GUI request and does not refresh guards.
+        """
+        with self._condition:
+            return deepcopy(tuple(self._written))
 
     def analysis_snapshot(self) -> ExecutionSnapshot | None:
         """Read the latest analysis attempt, including a not-yet-yielded failure.
@@ -625,6 +641,7 @@ class RecipeSession:
                 frozenset(libraries),
                 observe_run=self._observe_run,
                 observe_analysis=self._observe_analysis,
+                observe_writeback=self._observe_writeback,
                 closed=self._closed,
                 condition=self._condition,
                 consume_cancel=self._consume_cancel,
@@ -712,12 +729,18 @@ class RecipeTab:
             raise GuiRpcError(f"Cannot disable {field}", reason="invalid_cfg")
         self._binding.origins[field] = "disabled"
 
-    def set(self, field: str, value: RecipeParameter | None) -> None:
+    def set(
+        self, field: str, value: RecipeParameter | None, *, source: str = "explicit"
+    ) -> None:
         """Set a scalar cfg field; None keeps its GUI default and records that source.
 
         Reject unknown/non-scalar fields locally. The GUI validates supplied values;
         a returned field error raises GuiRpcError without retrying the edit.
+        source is a non-empty provenance label for supplied values (for example
+        their tool parameter name); None values always retain gui_default.
         """
+        if not source or not source.strip():
+            raise ValueError("source must be a non-empty provenance label")
         node = self._node(field)
         if node["kind"] != "scalar":
             raise ValueError(f"Not a scalar cfg field: {field}")
@@ -731,9 +754,7 @@ class RecipeTab:
                 or state.get("validation_error")
             ):
                 raise GuiRpcError(f"Invalid {field} value", reason="invalid_cfg")
-        self._binding.origins[field] = (
-            "explicit" if value is not None else "gui_default"
-        )
+        self._binding.origins[field] = source if value is not None else "gui_default"
 
     def _frequency_fields(self, field: str) -> tuple[list[str], str | None]:
         """Resolve scalar/readout-root fields and the enclosing library reference."""
@@ -777,6 +798,7 @@ class RecipeTab:
         calibration: Literal["resonator", "qubit"],
         prefer_library: bool = True,
         required: str,
+        source: str = "explicit",
     ) -> None:
         """Set a frequency scalar or readout module root in MHz.
 
@@ -784,7 +806,11 @@ class RecipeTab:
         prefer_library, then the named calibration. If none exists, report required
         as a missing tool parameter. Handle pulse and single-frequency readout cfg
         in this helper; callers do not inspect the GUI's nested representation.
+        source is the non-empty provenance label for explicit frequency_mhz;
+        calibrated and library inputs retain their original source labels.
         """
+        if not source or not source.strip():
+            raise ValueError("source must be a non-empty provenance label")
         key = _calibration_key(calibration)
         if frequency_mhz is not None and not _finite_frequency(frequency_mhz):
             raise ValueError("frequency_mhz must be finite and not boolean")
@@ -795,7 +821,7 @@ class RecipeTab:
         for path in paths:
             if frequency_mhz is not None:
                 edits.append({"path": _field_path(path), "value": frequency_mhz})
-                origins[path] = "explicit"
+                origins[path] = source
             elif (
                 prefer_library
                 and reference in self._binding.libraries
@@ -1239,6 +1265,7 @@ class RecipeTab:
         from zcu_tools.mcp.measure.writeback import write_current_draft
 
         receipt = write_current_draft(self._binding.tools, self._binding.tab, items)
+        self._binding.observe_writeback(receipt)
         if receipt["status"] == "failed":
             raise WritebackError(receipt)
         return receipt

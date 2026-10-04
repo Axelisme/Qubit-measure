@@ -1,7 +1,7 @@
 """Generator lifetime, local snapshots and single-recipe admission.
 
 Native completion and cfg ownership stay behind recipe.py's opaque handles.
-The tool assembly migration is separate; this owner has no global recipe imports.
+The session injects definitions; this owner has no global recipe imports.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from zcu_tools.mcp.measure.recipe import (
     StepStatus,
     WritebackDecision,
     WritebackQuestion,
+    WritebackReceipt,
 )
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
 from zcu_tools.mcp.measure.recipe_inputs import RecipeInputs
@@ -112,6 +113,7 @@ class RecipeSnapshot:
     writeback/post_writeback are those stages' captured proposals, or None.
     analysis_stage is the latest attempted stage; analysis_starts records receipts.
     question_items/question_preview are the active question, otherwise None.
+    written contains ordered actual write receipts, including partial failures.
     error is an uncaught generator/completion failure, otherwise None.
     """
 
@@ -142,6 +144,7 @@ class RecipeSnapshot:
     )
     question_items: tuple[str, ...] | None = None
     question_preview: RecipeWritebackPreview | None = None
+    written: tuple[WritebackReceipt, ...] = ()
     error: RecipeError | None = None
 
 
@@ -168,7 +171,7 @@ class RecipeExecution:
         self._session_closed = session_closed
         self._closed = Event()
         self._condition = Condition()
-        self._progress = RecipeSnapshot(str(uuid4()), definition.name)
+        self._progress = RecipeSnapshot(f"recipe-{uuid4()}", definition.name)
         self._session: RecipeSession | None = None
         self._active: RecipeOperation | None = None
         self._answer: WritebackDecision | None = None
@@ -201,6 +204,7 @@ class RecipeExecution:
             progress = self._progress
             session = self._session
             if session is not None:
+                progress = replace(progress, written=session.writeback_receipts())
                 run = session.run_snapshot()
                 if run is not None:
                     progress = replace(
@@ -264,7 +268,16 @@ class RecipeExecution:
             return ToolReply(
                 {**asdict(progress), "elapsed_s": time.monotonic() - began},
                 images,
-                is_error=progress.status == "failed",
+                is_error=progress.status == "failed"
+                or (
+                    progress.status == "interactive"
+                    and any(
+                        capture is not None
+                        and capture.interaction is not None
+                        and "delivery_error" in capture.interaction
+                        for capture in (progress.analysis, progress.post_analysis)
+                    )
+                ),
             )
 
     def cancel(self) -> ToolReply:
@@ -686,6 +699,28 @@ class RecipeExecutions:
                 f"Unknown execution: {execution!r}", reason="unknown_execution"
             )
         return found
+
+    def for_op(self, op: int) -> RecipeExecution | None:
+        """Find the recipe capturing this session operation, or return None.
+
+        op is a positive opaque session handle, not a native GUI ID. Includes Run,
+        current save and captured Primary/Post operations, without GUI requests.
+        Terminal owners remain discoverable; their control methods are harmless.
+        """
+        if isinstance(op, bool) or op <= 0:
+            raise ValueError("op must be a positive integer")
+        with self._lock:
+            executions = tuple(self._executions.values())
+        for execution in executions:
+            snapshot = execution.snapshot()
+            analysis_ops = tuple(
+                capture.op
+                for capture in (snapshot.analysis, snapshot.post_analysis)
+                if capture is not None
+            )
+            if op in (snapshot.run_op, snapshot.op, *analysis_ops):
+                return execution
+        return None
 
     def snapshots(self) -> tuple[RecipeSnapshot, ...]:
         """Read detached local captures in admission order, with no GUI requests."""

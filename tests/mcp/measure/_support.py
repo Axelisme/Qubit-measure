@@ -1,6 +1,6 @@
 """Recording wire adapter for public measure MCP contracts."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,12 +14,15 @@ from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
+from zcu_tools.mcp.measure.recipe import RecipeDefinition
 from zcu_tools.mcp.measure.session import (
     MeasureMcpSession,
     PortIsOpenFn,
     ResolveConnectPortFn,
 )
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+
+from zcu_lab.recipes import RECIPES
 
 RpcResponder = Callable[[str, dict[str, Any]], dict[str, Any]]
 
@@ -96,6 +99,7 @@ def make_client(
     tmp_path: Path,
     responder: RpcResponder | None = None,
     *,
+    recipes: Sequence[RecipeDefinition] = RECIPES,
     resolve_connect_port: ResolveConnectPortFn | None = None,
     port_is_open: PortIsOpenFn | None = None,
 ) -> MeasureClient:
@@ -118,6 +122,7 @@ def make_client(
     )
     session = MeasureMcpSession(
         config,
+        recipes=recipes,
         resolve_connect_port=resolver,
         port_is_open=port_is_open or (lambda port: False),
     )
@@ -134,4 +139,6 @@ def make_client(
         session,
         resolve_connect_port=resolver,
     )
-    return MeasureClient(context, transport, build_measure_tools(context))
+    return MeasureClient(
+        context, transport, build_measure_tools(context, recipes=recipes)
+    )

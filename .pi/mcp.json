@@ -9,7 +9,7 @@
         "--no-sync",
         "--",
         "python",
-        "lib/zcu_tools/mcp/measure/server.py"
+        "scripts/run_measure_mcp.py"
       ],
       "exposure": "deferred"
     },

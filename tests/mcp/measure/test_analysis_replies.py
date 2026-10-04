@@ -497,7 +497,9 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
     client = _client(tmp_path, clients, respond)
     # A captured binding lets a second public tool register while RPC is occupied.
     client.context = client.context.bound()
-    client.tools = build_measure_tools(client.context)
+    client.tools = build_measure_tools(
+        client.context, recipes=client.context.session.recipes.definitions
+    )
     register = client.context.session.executions.start
 
     def observe_registration(*args, **kwargs):

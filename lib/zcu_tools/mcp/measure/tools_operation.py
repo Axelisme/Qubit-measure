@@ -8,7 +8,6 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any
 
-from recipes import RECIPES
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.execution_reply import project_control, project_execution
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -25,17 +24,21 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     if "execution" in arguments:
         key = _execution_id(arguments)
         if key.startswith("recipe-"):
-            snapshot = ctx.session.recipes.get(key).snapshot()
+            snapshot = asdict(ctx.session.recipes.get(key).snapshot())
             definition = next(
-                item for item in RECIPES if item.name == snapshot["recipe"]
+                item
+                for item in ctx.session.recipes.definitions
+                if item.name == snapshot["recipe"]
             )
             return project_execution(
                 snapshot,
                 definition=definition,
+                recipes=ctx.session.recipes.definitions,
                 detail=detail,
             )
         return project_execution(
             asdict(ctx.session.executions.get(key).snapshot()),
+            recipes=ctx.session.recipes.definitions,
             detail=detail,
         )
     session = ctx.gui
@@ -74,8 +77,10 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         missing.append("tab")
     execution_snapshots = [
         asdict(item) for item in ctx.session.executions.snapshots()
-    ] + ctx.session.recipes.snapshots()
-    definitions = {definition.name: definition for definition in RECIPES}
+    ] + [asdict(item) for item in ctx.session.recipes.snapshots()]
+    definitions = {
+        definition.name: definition for definition in ctx.session.recipes.definitions
+    }
     return {
         "project": project,
         "soc": soc,
@@ -91,6 +96,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             project_execution(
                 item,
                 definition=definitions[item["recipe"]] if "recipe" in item else None,
+                recipes=ctx.session.recipes.definitions,
             )
             for item in execution_snapshots
             if item["phase"] != "terminal"
@@ -150,14 +156,23 @@ def _wait_tool(
         )
         reply = execution.wait(timeout)
         definition = (
-            next(item for item in RECIPES if item.name == reply.data["recipe"])
+            next(
+                item
+                for item in ctx.session.recipes.definitions
+                if item.name == reply.data["recipe"]
+            )
             if key.startswith("recipe-")
             else None
         )
-        data = project_execution(reply.data, definition=definition)
+        data = project_execution(
+            reply.data, definition=definition, recipes=ctx.session.recipes.definitions
+        )
         return ToolReply(
             {**data, "elapsed_s": max(0.0, time.monotonic() - start)},
             reply.images,
+            # Accepted failures remain outcome data; interactive delivery errors
+            # still flag the failed handoff without rewriting the native outcome.
+            is_error=reply.is_error and reply.data["status"] == "interactive",
         )
     return wait(ctx, arguments)
 

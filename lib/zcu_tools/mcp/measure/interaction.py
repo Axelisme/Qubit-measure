@@ -74,7 +74,8 @@ def interact(
                 interaction=reply,
             )
         execution.observe_interaction(ToolReply(reply), done=True)
-        return execution.wait(2.0)
+        recipe = ctx.session.recipes.for_op(reply["handle"])
+        return recipe.wait(300.0) if recipe is not None else execution.wait(2.0)
     figure = reply["figure"]
     images: tuple[PngImage, ...] = ()
     delivery_error = False

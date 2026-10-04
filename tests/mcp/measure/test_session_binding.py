@@ -528,7 +528,9 @@ def test_assembled_tools_keep_an_inherited_binding(
     arguments: dict[str, Any],
 ) -> None:
     client, second = make_restartable_client(tmp_path, monkeypatch)
-    tools = build_measure_tools(client.context.bound())
+    tools = build_measure_tools(
+        client.context.bound(), recipes=client.context.session.recipes.definitions
+    )
     client.context.session.connect_to_gui(port=9912, launch="never", clean=False)
     sent = list(second.sent)
     with pytest.raises(GuiRpcError) as error:

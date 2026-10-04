@@ -10,7 +10,6 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any, Literal, NotRequired, TypedDict
 
-from recipes import RECIPES
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -263,7 +262,10 @@ def recipe_guide(
     recipe = arguments.get("recipe")
     if not isinstance(recipe, str):
         raise ValueError("recipe must be a string")
-    definition = next((entry for entry in RECIPES if entry.name == recipe), None)
+    definition = next(
+        (entry for entry in ctx.session.recipes.definitions if entry.name == recipe),
+        None,
+    )
     if definition is None:
         raise ValueError(f"unknown recipe: {recipe!r}")
     ctx = ctx.bound(require_connected=True)

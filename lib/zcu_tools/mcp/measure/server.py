@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import logging
 import runpy
+from collections.abc import Sequence
 from pathlib import Path
 from tempfile import gettempdir
 
 logger = logging.getLogger(__name__)
 
-# Standalone entry point also works without an installed editable package.
+# Validate GUI dependencies before assembling the injected server.
 _BOOTSTRAP = runpy.run_path(str(Path(__file__).resolve().parents[1] / "_standalone.py"))
 _BOOTSTRAP["bootstrap_standalone_server"](
     __file__,
@@ -40,6 +41,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     resolve_connect_port,
 )
 from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
+from zcu_tools.mcp.measure.recipe import RecipeDefinition  # noqa: E402
 from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
@@ -61,7 +63,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v107: recipe-first fixed tools, shared analysis/control and complete public RPC.
 # v108: analysis results retain invalid paths from the GUI's wire projection.
 # v109: flux unit assertions and explicit native coordinate opt-in for FakeDevice.
-MCP_VERSION = 110
+# v111: injected generator recipes, captured questions and explicit answer/writeback.
+MCP_VERSION = 111
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -134,13 +137,19 @@ receipt certifies existence only. apply_writeback(tab, items) selects current
 Primary/Post candidates by stable target_name. Omit items for all; an empty array
 writes none. It ignores checkboxes and rejects unknown or ambiguous names before
 any write, using current IDs rather than proposal IDs. It does not answer recipes
-or refresh guards. It stops on the first error and reports confirmed progress
-without retry or rollback. Inspect proposals and the current destination first.
+or refresh guards. apply_writeback stops on the first error and reports confirmed
+progress without retry or rollback. Inspect proposals and the destination first.
+
+When a recipe is awaiting_answer, answer(recipe=<execution ID>,
+decision=accepted/skipped) resumes it. Answer is not a write or permission.
+Only the recipe's explicit tab.accept writes. writeback.receipts lists actual
+confirmed writes and failed prefixes. Only one nonterminal recipe is admitted.
 
 tab_interact without payload reads committed state and available commands.
 Send payload={command,args} for one action. This method has no seen guard;
 later owner-loop commits win. Reads preserve focus; commands follow Analysis.
-done joins the original analysis execution for result reads and image saving.
+done joins the original completion. For a recipe-owned analysis it waits for
+that recipe's next result or question; standalone analysis retains its execution.
 preview_active is a local preview, not committed state. Preview PNG paths belong
 to this MCP session. Execution summaries reference them in previews and omit the
 repeated interaction.figure; full preserves figure, preview and interaction.
@@ -181,11 +190,18 @@ def _setup_logging() -> None:
     )
 
 
-def main() -> None:
+def main(*, recipes: Sequence[RecipeDefinition]) -> None:
+    """Run the stdio server with explicitly supplied handwritten definitions.
+
+    recipes is the composition root's immutable declaration sequence. Invalid
+    definitions fail during session assembly, before GUI operations. On EOF/error,
+    disconnect and drain session workers/PNGs; do not close the GUI or hardware.
+    """
     from zcu_tools.mcp.core.stdio_server import StdioLoopHooks, run_stdio_loop
 
     session = MeasureMcpSession(
         _CONFIG,
+        recipes=recipes,
         resolve_connect_port=resolve_connect_port,
         port_is_open=port_is_open,
     )
@@ -200,13 +216,9 @@ def main() -> None:
     try:
         run_stdio_loop(
             _CONFIG,
-            build_measure_tools(context),
+            build_measure_tools(context, recipes=recipes),
             hooks=StdioLoopHooks(on_start=_setup_logging, on_error=logger.exception),
-            server_version="1.1.0",
+            server_version="1.1.1",
         )
     finally:
         session.close()
-
-
-if __name__ == "__main__":
-    main()
