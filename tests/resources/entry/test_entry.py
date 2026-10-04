@@ -28,6 +28,57 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+@pytest.mark.parametrize(
+    ("kind", "field", "working_value", "stored_value"),
+    [
+        ("resonator", "kappa", 2.5, 2.5e6),
+        ("amplifier/jpa", "freq", 6500.0, 6.5e9),
+        ("amplifier/jpa", "gain", 20.0, 20.0),
+        ("amplifier/jpa", "current", 0.2, 0.0002),
+        ("qubit/fluxonium", "freq", 500.0, 5e8),
+        ("qubit/fluxonium", "EJ", 8.0, 8e9),
+        ("qubit/fluxonium", "EC", 1.2, 1.2e9),
+        ("qubit/fluxonium", "EL", 0.5, 5e8),
+        ("qubit/fluxonium", "flux_half", -0.4, -0.0004),
+        ("qubit/fluxonium", "flux_period", 0.8, 0.0008),
+        ("qubit/fluxonium", "pi_len", 0.04, 4e-8),
+        ("qubit/fluxonium", "t1", 50.0, 5e-5),
+        ("qubit/fluxonium", "t2", 25.0, 2.5e-5),
+        ("qubit/fluxonium", "pi_gain", 0.3, 0.3),
+        ("qubit/transmon", "freq", 5000.0, 5e9),
+        ("qubit/transmon", "EJ", 20.0, 2e10),
+        ("qubit/transmon", "EC", 0.3, 3e8),
+        ("qubit/transmon", "pi_len", 0.02, 2e-8),
+        ("qubit/transmon", "t1", 40.0, 4e-5),
+        ("qubit/transmon", "t2", 20.0, 2e-5),
+        ("qubit/transmon", "pi_gain", 0.2, 0.2),
+    ],
+)
+def test_builtin_physical_fields_round_trip_through_add_write_and_reopen(
+    entry_roots: tuple[Path, Path],
+    entry: ResultEntry,
+    kind: str,
+    field: str,
+    working_value: float,
+    stored_value: float,
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("C1", kind=kind, **{field: working_value})
+    component = entry.setup.C1
+    assert getattr(component, field) == pytest.approx(working_value)
+    assert YAML(typ="safe").load(setup_path)["components"]["C1"][field] == pytest.approx(
+        stored_value
+    )
+
+    setattr(component, field, working_value * 2)
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert getattr(reopened.setup.C1, field) == pytest.approx(working_value * 2)
+    assert YAML(typ="safe").load(setup_path)["components"]["C1"][field] == pytest.approx(
+        stored_value * 2
+    )
+
+
 def test_device_current_round_trips_without_using_the_entry_name(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
