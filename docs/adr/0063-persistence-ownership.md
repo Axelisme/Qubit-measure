@@ -16,10 +16,15 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - Experiment Data File 保存一個 Experiment Result。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、roles 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic role mapping 洩漏給分析端。
 - Workflow Run Result Artifact 保存跨 node／flux 的資料與 audit。autofluxdep 的 lifecycle／`RunStore` 擁有 run-scoped artifact；node 經 observer 與 store 提交結果，不直接管理 HDF5。它不是單一 Experiment Result。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
+- 新參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。這些能力尚未接線到現行 MetaDict、ModuleLibrary、GUI 或 MCP，也不提供 ledger producer。
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。ModuleLibrary waveform cfg 只保存 asset key，不另存可覆寫的播放長度。program 在完整 asset duration 取樣到硬體 timing；調整時間內容須改 asset 或 recipe，而不是在 cfg 伸縮或任意裁切。
 
 ### 資料表示與完整性
+
+參數容器的 YAML、快照與視圖使用同一個工作單位數字，來源表的 stderr 也不換算。UnitSpec 只作欄位標註。這條規則不改 Experiment Data File 的單位契約；datafile 的格式責任仍由 datafile 擁有。
+
+參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色暫存於 `resources.entry.builtin_kinds`，由 lib 外的組合根呼叫 `register_all(registry)` 顯式注入，不在 import 時註冊。Registry、角色解析與 lib 其他模組不 import 此模組。`.importlinter` contract `entry-definitions-composition-only` 固定這個依賴方向。這讓使用者可以替換定義，不把具體名稱散入框架；不相容舊檔沿用 model 原生驗證報錯，不增加自動修復。
 
 Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Dataset Role 是結果語意，state／phase 等離散座標仍是 axis。單一 Result 的 canonical one-shot grouped file 使用共同 grid、一份 shared metadata 與明確 role-to-channel mapping；必需 roles 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 
@@ -45,4 +50,4 @@ Asset repository 的 rename／delete 只處理資產，不掃描或改寫 Module
 
 ## 後果
 
-維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`SampleTable`](../../lib/zcu_tools/resources/sample_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md)、[main GUI](../../lib/zcu_tools/gui/app/measure/README.md) 與 [autofluxdep](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。
+維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`parameter entry`](../../lib/zcu_tools/resources/entry/README.md)、[`SampleTable`](../../lib/zcu_tools/resources/sample_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md)、[main GUI](../../lib/zcu_tools/gui/app/measure/README.md) 與 [autofluxdep](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。

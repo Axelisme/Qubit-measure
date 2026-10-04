@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-04
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 從 `program.v2` 匯入 `ModuleCfgFactory`，`utils/sweep.py` 使用 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -19,6 +19,8 @@
 - `utils/` 提供實驗側的 comment JSON 編解碼、device 設定／啟用與單一 sweep 格式整理。其中 device helper 接收顯式具名 driver mapping 與 StopSignal，先驗證整批名稱，再逐一 setup。只有 helper 呼叫 driver.setup 時才取 signal.event，低層 device 不依賴 experiment。Sweep helper 使用 program/v2 的 `SweepCfg`。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
 
 ## 子模組入口
+
+Package root 保留公開 exports，只有存取對應名稱時才載入其 owner module。匯入 `cfg_editing` 不會因此載入 experiment base、device 或 datafile；直接使用 persistence exports 仍會載入其所需依賴。
 
 - [v2](v2/README.md)：使用 program/v2 的實驗家族與具體 workflow；[實驗撰寫檢查清單](v2/README.md#寫新-experiment-時的檢查清單) 說明 v2 實驗的撰寫慣例。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、ProgramBuilder 與 executor 的執行機制。
 - [v2_gui](v2_gui/README.md)：measure 與 autofluxdep 的 GUI 實驗接入家族，具體 GUI workflow／policy 留在 app。
