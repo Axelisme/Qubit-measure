@@ -154,6 +154,17 @@ def test_marginal_errors_use_only_covariance_diagonal(
     json.dumps(quality.to_summary_dict(), allow_nan=False)
 
 
+def test_integer_observations_are_rejected_before_residual_arithmetic() -> None:
+    observations = np.array([0, 16], dtype=np.uint8)
+    fitted = np.array([0, 0], dtype=np.uint8)
+    observations_before = observations.copy()
+    fitted_before = fitted.copy()
+    with pytest.raises(ValueError, match="y.*float64.*uint8"):
+        compute_fit_quality(observations, fitted, {}, None)
+    np.testing.assert_array_equal(observations, observations_before)
+    np.testing.assert_array_equal(fitted, fitted_before)
+
+
 @pytest.mark.parametrize(
     ("observations", "fitted", "parameters", "covariance", "message"),
     [
