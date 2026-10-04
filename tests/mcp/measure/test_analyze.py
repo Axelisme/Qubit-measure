@@ -1149,9 +1149,14 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             pending = client.call(
                 "status", {"execution": started["execution"], "detail": "full"}
             )
-            assert pending["cancel_requested"] is True
-            assert pending["status"] == "running"
-            assert pending["unconfirmed_image"] == "fit"
+            assert {
+                key: pending[key]
+                for key in ("cancel_requested", "status", "unconfirmed_image")
+            } == {
+                "cancel_requested": True,
+                "status": "running",
+                "unconfirmed_image": "fit",
+            }
             pending_summary = client.call(
                 "status", {"execution": started["execution"]}
             )
@@ -1172,9 +1177,15 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             {"execution": started["execution"], "timeout": 2},
         )
     )
-    assert completed["status"] == ("cancelled" if save_outcome == "saved" else "failed")
-    assert completed["operation_outcome"]["status"] == "finished"
-    assert completed["result"]["summary"] == {"frequency": 5.0}
+    assert {
+        "status": completed["status"],
+        "operation_status": completed["operation_outcome"]["status"],
+        "analysis_summary": completed["result"]["summary"],
+    } == {
+        "status": "cancelled" if save_outcome == "saved" else "failed",
+        "operation_status": "finished",
+        "analysis_summary": {"frequency": 5.0},
+    }
     confirmed = ["prefix", "fit"] if save_outcome == "saved" else ["prefix"]
     assert completed["saved_images"] == [
         {"figure_name": name, "image_path": f"/actual/{name}.png"} for name in confirmed
