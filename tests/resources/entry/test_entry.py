@@ -29,6 +29,35 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+@pytest.mark.parametrize("operation", ["direct", "draft"])
+def test_entry_identity_cannot_be_replaced_through_general_or_a_whole_draft(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
+) -> None:
+    results, _database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    original_id = entry.entry_id
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        replacement = "00000000-0000-0000-0000-000000000000"
+        if operation == "direct":
+            entry.setup.general.entry_id = replacement
+        else:
+            with entry.setup.edit() as draft:
+                draft.R1.freq = 6550.0
+                draft.description = "must be rolled back with the invalid identity"
+                draft.general.entry_id = replacement
+
+    with pytest.raises(ValueError, match="entry_id is immutable"):
+        perform_operation()
+    assert setup_path.read_bytes() == before
+    assert entry.entry_id == original_id
+    assert entry.setup.general.entry_id == original_id
+    assert entry.setup.description is None
+    assert entry.setup.R1.freq == pytest.approx(6500.0)
+
+
 def test_general_extensions_support_direct_and_shared_draft_writes_without_scaling(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
