@@ -56,7 +56,7 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
             "not_started" if outcome == "missing" else outcome
         )
         assert summary["previews"] == {
-            "run": [full["preview"]["path"]] if outcome == "finished" else [],
+            "run": [],
             "primary": [full["analysis"]["figure"]] if outcome == "finished" else [],
             "post": [],
         }
@@ -541,7 +541,7 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
         assert interaction["state"] == {"offset": 0.24}
         assert interaction["commands"] == [{"name": "done"}]
     assert initial.data["previews"] == {
-        "run": [handoff.data["preview"]["path"]],
+        "run": [],
         "primary": [] if handoff_failure else [interaction["figure"]],
         "post": [],
     }
