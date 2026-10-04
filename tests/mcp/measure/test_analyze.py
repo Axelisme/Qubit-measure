@@ -769,6 +769,29 @@ def test_interactive_start_hands_off_current_state_without_waiting(
     assert data["execution"]
     for key in ("state", "commands", "plugin", "info", "preview_active"):
         assert data["interaction"][key] == interaction[key]
+    summary = client.call("status", {"execution": data["execution"]})
+    assert summary["previews"] == {
+        "run": [],
+        "primary": [data["figure"]] if has_figure else [],
+        "post": [],
+    }
+    assert summary["interaction"] == {
+        "plugin": "picker",
+        "state": {"value": 3},
+        "commands": [{"name": "done"}],
+        "info": {"label": "fit"},
+        "preview_active": False,
+        "handle": data["op"],
+        "execution": data["execution"],
+    }
+    assert (
+        len(
+            _call_stdio(
+                monkeypatch, client, "status", {"execution": data["execution"]}
+            )["content"]
+        )
+        == 1
+    )
     _assert_figure(reply, present=has_figure)
     assert [m for m in _methods(client) if m != "operation.await"] == [
         "tab.analyze",

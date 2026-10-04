@@ -90,7 +90,12 @@ Never automatically rerun a recipe or mutation after timeout, disconnect, busy
 or stale_version. Inspect current state and confirmed files before deciding.
 
 Use status for GUI operations and this MCP session's executions.
-status(execution) reads a local snapshot without reconnecting. wait(op) observes
+status(execution) returns the shared execution summary without reconnecting.
+Use status(execution, detail="full") for captured native detail without new RPCs
+or guard observations. Summary previews.run/primary/post are full path lists for
+session-only PNGs, not persistent saved artifacts. Each stage deduplicates paths
+in first-seen order. Persistent outputs remain in artifacts. Status never
+attaches images; wait(op) observes
 only the GUI operation; wait(execution) includes downstream reads, saves and
 preview delivery. Failed outcomes are data. A wait timeout stops waiting,
 not the operation or its continuation. Operation handles belong to one GUI
@@ -120,7 +125,9 @@ Send payload={command,args} for one action. This method has no seen guard;
 later owner-loop commits win. Reads preserve focus; commands follow Analysis.
 done joins the original analysis execution for result reads and image saving.
 preview_active is a local preview, not committed state. Preview PNG paths belong
-to this MCP session; saved_images names confirmed persistent outputs.
+to this MCP session. Execution summaries reference them in previews and omit the
+repeated interaction.figure; full preserves figure, preview and interaction.
+Full saved_images names confirmed persistent outputs.
 Recipes do not automatically close tabs. Use tab_close explicitly; busy cannot
 be bypassed with discard_unsaved. app.shutdown via RPC requests graceful exit;
 its reply is not proof that the responding process has exited.

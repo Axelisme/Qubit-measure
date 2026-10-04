@@ -55,7 +55,10 @@ def build_recipe_tools(context: MeasureToolContext) -> ToolTable:
     return {
         definition.name: {
             "handler": partial(run_recipe, context, definition),
-            "description": definition.description,
+            "description": definition.description
+            + " Execution summaries include previews.run/primary/post as full "
+            "session-only PNG path lists, separate from persistent artifacts. "
+            "Use status(execution, detail=full) for captured native detail.",
             "inputSchema": definition.input_schema,
         }
         for definition in RECIPES

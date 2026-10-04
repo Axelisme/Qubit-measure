@@ -62,7 +62,7 @@ def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]
     return {
         "tab_interact": {
             "handler": partial(tab_interact, ctx),
-            "description": "Read the active interactive plugin's committed state, commands, info and figure without changing focus. Supply payload={command,args} to execute one command and follow the Analysis pane. done settles the original operation; cancel uses cancel(op). Best-effort last commit wins; no seen guard, hidden reads or retry. Figure is a session-owned absolute PNG path or null, accompanied by MCP image content when available; preview_active distinguishes local preview from committed state.",
+            "description": "Read the active interactive plugin's committed state, commands, info and figure without changing focus. Supply payload={command,args} to execute one command and follow the Analysis pane. done settles the original operation and returns the shared execution summary, with previews.run/primary/post as full session-only PNG path lists; cancel uses cancel(op). Best-effort last commit wins; no seen guard, hidden reads or retry. Figure is a session-owned absolute PNG path or null, accompanied by MCP image content when available; preview_active distinguishes local preview from committed state.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -74,7 +74,7 @@ def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]
         },
         "tab_analyze": {
             "handler": partial(tab_analyze, ctx),
-            "description": "Analyze the GUI tab with shared parameters. Wait briefly for summary, figure path with MCP image content, effective params and invalidated content; otherwise return an operation. Interactive analysis immediately reads and returns the active state, commands and available image with tab/op. No hidden pre-reads or retry.",
+            "description": "Analyze the GUI tab with shared parameters. Wait briefly for an execution summary with effective params, per-pane analysis/save steps and previews.run/primary/post full path lists for session-only PNGs with MCP image content. Persistent saved images are in artifacts. Use status(execution, detail=full) for captured native detail; otherwise wait by execution. Interactive analysis immediately reads and returns the active state, commands and available image with tab/op. No hidden pre-reads or retry.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

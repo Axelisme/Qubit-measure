@@ -55,6 +55,11 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
         assert summary["steps"]["run"]["status"] == (
             "not_started" if outcome == "missing" else outcome
         )
+        assert summary["previews"] == {
+            "run": [full["preview"]["path"]] if outcome == "finished" else [],
+            "primary": [full["analysis"]["figure"]] if outcome == "finished" else [],
+            "post": [],
+        }
         if outcome == "finished":
             assert initial.images
             assert waited.images
@@ -516,9 +521,8 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     interactive_recipe, handoff_failure
 ):
     client, writeback_read = interactive_recipe
-    handoff = full_execution_reply(
-        client, client.call("lookback", {"frequency_mhz": 6020.0})
-    )
+    initial = client.call("lookback", {"frequency_mhz": 6020.0})
+    handoff = full_execution_reply(client, initial)
     assert handoff.data["status"] == "interactive"
     assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
     assert handoff.data["analysis"]["op"] == handoff.data["op"]
@@ -536,6 +540,11 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     if handoff_failure not in ("query", "replaced"):
         assert interaction["state"] == {"offset": 0.24}
         assert interaction["commands"] == [{"name": "done"}]
+    assert initial.data["previews"] == {
+        "run": [handoff.data["preview"]["path"]],
+        "primary": [] if handoff_failure else [interaction["figure"]],
+        "post": [],
+    }
     analysis_execution = handoff.data["analysis"]["execution"]
     execution = handoff.data["execution"]
     read = client.call("tab_interact", {"tab": "t"})
