@@ -13,7 +13,14 @@ from pydantic.fields import FieldInfo
 from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
 from .errors import UnknownFieldError, UnknownKindError
-from .schema import ComponentSchema, CurrentSourceSchema, ResonatorSchema
+from .schema import (
+    ComponentSchema,
+    CurrentSourceSchema,
+    FluxoniumSchema,
+    JpaSchema,
+    QubitSchema,
+    ResonatorSchema,
+)
 
 
 def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
@@ -164,3 +171,6 @@ class ComponentRegistry:
 component_registry = ComponentRegistry()
 component_registry.register("resonator", ResonatorSchema)
 component_registry.register("device/current_source", CurrentSourceSchema)
+component_registry.register("amplifier/jpa", JpaSchema)
+component_registry.register("qubit/fluxonium", FluxoniumSchema)
+component_registry.register("qubit/transmon", QubitSchema)

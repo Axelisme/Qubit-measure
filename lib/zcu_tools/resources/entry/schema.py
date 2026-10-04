@@ -94,6 +94,29 @@ class ComponentSchema(BaseModel):
 
 class ResonatorSchema(ComponentSchema):
     freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
+    kappa: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
+
+
+class QubitSchema(ComponentSchema):
+    freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
+    EJ: Annotated[float | None, UnitSpec("Hz", "GHz")] = None
+    EC: Annotated[float | None, UnitSpec("Hz", "GHz")] = None
+    pi_len: Annotated[float | None, UnitSpec("s", "us")] = None
+    t1: Annotated[float | None, UnitSpec("s", "us")] = None
+    t2: Annotated[float | None, UnitSpec("s", "us")] = None
+    pi_gain: Annotated[float | None, UnitSpec("1", "1")] = None
+
+
+class FluxoniumSchema(QubitSchema):
+    EL: Annotated[float | None, UnitSpec("Hz", "GHz")] = None
+    flux_half: Annotated[float | None, UnitSpec("A", "mA")] = None
+    flux_period: Annotated[float | None, UnitSpec("A", "mA")] = None
+
+
+class JpaSchema(ComponentSchema):
+    freq: Annotated[float | None, UnitSpec("Hz", "MHz")] = None
+    gain: Annotated[float | None, UnitSpec("1", "1")] = None
+    current: Annotated[float | None, UnitSpec("A", "mA")] = None
 
 
 class CurrentSourceSchema(ComponentSchema):
