@@ -654,6 +654,11 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
         assert observed["result"] == result["result"]
         assert observed["saved_images"] == result["saved_images"]
     summary = client.call("status", {"execution": result["execution"]})
+    assert summary["previews"] == {
+        "run": [],
+        "primary": [result["figure"]] if stage == "primary" and has_figure else [],
+        "post": [result["figure"]] if stage == "post" and has_figure else [],
+    }
     assert summary["analysis"][stage]["warnings"] == (
         ["singular error"] if has_invalid else []
     )
