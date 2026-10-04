@@ -1,7 +1,11 @@
-"""Setup and transaction views over one typed document store."""
+"""Setup and transaction views over one typed document store.
+
+Copy incoming values before assignment: notebook models can validate assignment.
+"""
 
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
+from copy import deepcopy
 from pathlib import Path
 
 from pydantic import BaseModel, TypeAdapter
@@ -82,7 +86,7 @@ class FieldView:
                 component_registry.check_fields(
                     type(draft), {name: value}, path=self._path
                 )
-                setattr(draft, name, value)
+                setattr(draft, name, deepcopy(value))
             else:
                 draft[name] = TypeAdapter(YamlValue).validate_python(value)
 
@@ -179,7 +183,7 @@ class ComponentView:
                 component_registry.check_fields(
                     draft.kind, {name: value}, path=self._path
                 )
-                setattr(draft, name, value)
+                setattr(draft, name, deepcopy(value))
 
 
 class EditView:
