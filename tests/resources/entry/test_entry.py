@@ -35,17 +35,8 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     results, database = entry_roots
     setup_path = results / "entry" / "setup.yaml"
     entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    write_forward_setup(setup_path)
     document = YAML(typ="safe").load(setup_path)
-    document["format_version"] = "1.7"
-    document["future_top"] = {"next": [1, "two"]}
-    document["general"]["future_general"] = "next metadata"
-    document["components"]["R1"]["future_physical"] = 7.5e9
-    document["components"]["R1"]["wiring"] = {
-        "time_of_flight": 1.2e-6,
-        "future_wiring": {"channel": 3},
-    }
-    with setup_path.open("w", encoding="utf-8") as stream:
-        YAML(typ="rt").dump(document, stream)
     before = setup_path.read_bytes()
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
@@ -65,6 +56,89 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     assert again.setup.R1.freq == pytest.approx(6600.0)
     assert again.setup.R1.wiring.time_of_flight == pytest.approx(1.5)
     assert again.setup.description == "edited with the older reader"
+
+
+@pytest.mark.parametrize(
+    ("operation", "path"),
+    [
+        ("read", "R1.future_physical"),
+        ("write", "R1.future_physical"),
+        ("set", "R1.future_physical"),
+        ("wiring", "R1.wiring.future_wiring"),
+        ("general", "general.future_general"),
+        ("add", "R2.future_physical"),
+    ],
+)
+def test_newer_minor_keeps_unknown_fields_outside_the_public_typed_interface(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str, path: str
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    write_forward_setup(setup_path)
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        if operation == "read":
+            _ = reopened.setup.R1.future_physical
+        elif operation == "write":
+            reopened.setup.R1.future_physical = 1.0
+        elif operation == "set":
+            with reopened.setup.edit() as draft:
+                draft.set(path, 1.0)
+        elif operation == "wiring":
+            reopened.setup.R1.wiring.future_wiring = 1.0
+        elif operation == "general":
+            reopened.setup.general.future_general = 1.0
+        else:
+            reopened.setup.add_component("R2", kind="resonator", future_physical=1.0)
+
+    with pytest.raises(UnknownFieldError) as failure:
+        perform_operation()
+    assert failure.value.path == path
+    assert setup_path.read_bytes() == before
+    assert reopened.setup.R1.freq == pytest.approx(6500.0)
+
+
+@pytest.mark.parametrize("operation", ["open", "refresh"])
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("freq", "not a frequency", ValidationError),
+        ("wiring", {"ch": None}, ValidationError),
+        ("amplifier", "absent", MissingReferenceError),
+        ("kind", "future-kind", UnknownKindError),
+    ],
+)
+def test_newer_minor_still_validates_known_values_references_and_kinds(
+    entry_roots: tuple[Path, Path],
+    entry: ResultEntry,
+    operation: str,
+    field: str,
+    value: object,
+    error: type[Exception],
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    write_forward_setup(setup_path)
+    document = YAML(typ="safe").load(setup_path)
+    document["components"]["R1"][field] = value
+    with setup_path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(document, stream)
+    before = setup_path.read_bytes()
+
+    def perform_operation() -> None:
+        if operation == "refresh":
+            entry.setup.refresh()
+        else:
+            ResultEntry.open("entry", result_root=results, database_root=database)
+
+    with pytest.raises(error):
+        perform_operation()
+    assert setup_path.read_bytes() == before
+    assert entry.setup.R1.freq == pytest.approx(6500.0)
 
 
 @pytest.mark.parametrize("method", ["attribute", "path"])
@@ -632,6 +706,20 @@ def test_added_component_survives_reopening_with_its_declared_kind(
     assert reopened.setup.R1.kind == "resonator"
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
     assert document["components"]["R1"]["ext"]["note"] == "readout line"
+
+
+def write_forward_setup(path: Path) -> None:
+    document = YAML(typ="safe").load(path)
+    document["format_version"] = "1.7"
+    document["future_top"] = {"next": [1, "two"]}
+    document["general"]["future_general"] = "next metadata"
+    document["components"]["R1"]["future_physical"] = 7.5e9
+    document["components"]["R1"]["wiring"] = {
+        "time_of_flight": 1.2e-6,
+        "future_wiring": {"channel": 3},
+    }
+    with path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(document, stream)
 
 
 def write_setup_component(path: Path, name: str, fields: YamlMap) -> None:
