@@ -1,7 +1,8 @@
-"""Explicit setup workflows over one captured GUI connection.
+"""Explicit setup workflows over an already connected, captured GUI.
 
 Mutations are sent once. Timeout never cancels them; uncertain receipts and
-partial snapshots stay visible. They never launch a GUI or reconnect between steps.
+partial snapshots stay visible. No stage attaches, launches or reconnects a GUI.
+Native wire views retain opaque payloads and extra keys without domain conversion.
 """
 
 import math
@@ -16,8 +17,27 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_operation import wait, wait_timeout
 
+type _JsonValue = (
+    None | bool | int | float | str | list[_JsonValue] | dict[str, _JsonValue]
+)
+type _JsonObject = dict[str, _JsonValue]
+type _Stage = Literal["pre_read", "start", "wait", "post_read"]
+type _Phase = Literal["before", "after"]
+type _StepStatus = Literal["not_started", "completed", "running", "failed", "unknown"]
+type _Outcome = Literal[
+    "pending", "finished", "failed", "cancelled", "running", "unknown"
+]
+
 
 class SetupError(TypedDict, total=False):
+    """Boundary failure retaining the existing session error classification.
+
+    code is the native error code or null. reason is the native/session reason
+    code or null; no new taxonomy is introduced. message is diagnostic text.
+    request_rejected is true only when admission explicitly rejected the request;
+    false does not prove the mutation started or did not start.
+    """
+
     code: str | None
     reason: str | None
     message: str
@@ -25,40 +45,185 @@ class SetupError(TypedDict, total=False):
 
 
 class SetupStep(TypedDict):
-    status: Literal["not_started", "completed", "running", "failed", "unknown"]
+    """One workflow stage, independent of the native operation outcome.
+
+    status is not_started, completed, running, failed or unknown. completed means
+    only that this stage succeeded; unknown means its outcome was not confirmed.
+    error is present when a stage failed or became uncertain and retains the
+    session's native diagnostic/classification fields.
+    """
+
+    status: _StepStatus
     error: NotRequired[SetupError]
 
 
-class SetupResult(TypedDict):
-    tool: str
-    op: int | None
+class _Steps(TypedDict):
+    pre_read: SetupStep
+    start: SetupStep
+    wait: SetupStep
+    post_read: SetupStep
+
+
+class _SocSnapshot(TypedDict, total=False):
+    is_mock: bool
+    cfg: _JsonValue
+
+
+class _DeviceField(TypedDict, total=False):
+    name: str
+    settable: bool
+
+
+class _DeviceInfo(TypedDict, total=False):
+    value: _JsonValue
+
+
+class _DeviceSnapshot(TypedDict, total=False):
+    name: str
+    type_name: str
+    address: str
     status: str
-    steps: dict[str, SetupStep]
-    before: dict[str, Any]
-    after: dict[str, Any]
-    requested: dict[str, Any]
-    operation: dict[str, Any] | None
-    verification: dict[str, Any] | None
+    unit: str
+    error: _JsonValue
+    info: _DeviceInfo | None
+    fields: list[_DeviceField]
+
+
+class _DeviceListEntry(TypedDict):
+    name: str
+
+
+class _DeviceListReply(TypedDict):
+    devices: list[_DeviceListEntry]
+
+
+class _PredictorSnapshot(TypedDict, total=False):
+    loaded: bool
+
+
+class _SimulationFacts(TypedDict):
+    soc: _SocSnapshot | None
+    devices: list[_DeviceSnapshot] | None
+    predictor: _PredictorSnapshot | None
+
+
+class _DeviceFacts(TypedDict):
+    device: _DeviceSnapshot | None
+
+
+class _SimulationRequest(TypedDict):
+    pass
+
+
+class _DeviceRequest(TypedDict):
+    name: str
+    value: int | float
+    unit: str
+
+
+class _SimulationVerification(TypedDict):
+    ready: bool
+
+
+class _DeviceVerification(TypedDict):
+    actual: _JsonValue
+    exact_match: bool
+
+
+class _NativeOperationError(TypedDict, total=False):
+    code: str | None
+    reason: str | None
+    message: str
+    request_rejected: bool
+
+
+class _Operation(TypedDict):
+    """Native wait reply, not a second operation-completion policy."""
+
+    status: _Outcome
+    elapsed_s: float
+    error: NotRequired[_NativeOperationError | None]
+    feedback: NotRequired[_JsonValue]
+    progress: NotRequired[list[_JsonObject]]
+    eta_s: NotRequired[float]
+
+
+class _Progress(TypedDict):
+    op: int | None
+    status: _Outcome
+    steps: _Steps
+    operation: _Operation | None
     error: SetupError | None
+
+
+class _SimulationResult(_Progress):
+    tool: Literal["simulation_initialize"]
+    before: _SimulationFacts
+    after: _SimulationFacts
+    requested: _SimulationRequest
+    verification: _SimulationVerification | None
+
+
+class _DeviceResult(_Progress):
+    tool: Literal["device_set_value"]
+    before: _DeviceFacts
+    after: _DeviceFacts
+    requested: _DeviceRequest
+    verification: _DeviceVerification | None
+
+
+type SetupResult = _SimulationResult | _DeviceResult
+
+
+class _RecipeGuideResult(TypedDict):
+    recipe: str
+    adapter: str
+    guide: _JsonObject
 
 
 def simulation_initialize(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> ToolReply:
-    """Initialize once, wait, then verify mock SoC, fake_flux and predictor facts."""
+    """Initialize simulation once on ctx's existing GUI connection.
+
+    arguments may contain timeout (default 60 seconds, finite non-bool number in
+    0..300). The GUI coordinator may reuse simulation or disconnect real devices
+    during switching, so the caller needs authorization for that effect.
+    This tool does not connect hardware, apply a project or attach a GUI.
+
+    Returns a ToolReply with op, native operation, four steps, before/after
+    SoC/device/predictor facts and verification.ready. Missing facts are null.
+    Invalid arguments raise ValueError before GUI access. Connection, query and
+    mutation failures return an error reply with the known progress. Timeout
+    does not cancel; running is not ready, and failed reads do not erase op.
+    """
     timeout = wait_timeout(arguments)
-    result = _setup_result("simulation_initialize", {}, ("soc", "devices", "predictor"))
-    return _run_setup(
-        ctx,
-        result,
-        timeout,
-        _read_simulation,
-        _verify_simulation,
-    )
+    result: _SimulationResult = {
+        **_initial_progress(),
+        "tool": "simulation_initialize",
+        "before": {"soc": None, "devices": None, "predictor": None},
+        "after": {"soc": None, "devices": None, "predictor": None},
+        "requested": {},
+        "verification": None,
+    }
+    return _run_setup(ctx, result, timeout, _read_simulation, _verify_simulation)
 
 
 def device_set_value(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
-    """Set only value in the declared native unit and retain actual snapshots."""
+    """Set one device value once on ctx's existing GUI connection.
+
+    arguments requires nonempty name and unit strings and a finite non-bool
+    int/float value. Optional timeout defaults to 60 seconds and accepts finite
+    non-bool numbers in 0..300. unit must match the native snapshot; FakeDevice
+    unit=none requires native. No conversion, tolerance, or output/mode/rampstep
+    change is performed. The caller needs authorization to change that device.
+
+    Returns a ToolReply with requested value, op, native operation, four steps,
+    before/after device facts and verification.actual/exact_match. Invalid input
+    raises ValueError before GUI access. Disconnected/unsettable devices, unit
+    mismatch and native failures return an error reply retaining known facts.
+    Timeout never cancels, reconnects, retries or proves absence of side effects.
+    """
     name = arguments.get("name")
     value = arguments.get("value")
     unit = arguments.get("unit")
@@ -73,27 +238,35 @@ def device_set_value(ctx: MeasureToolContext, arguments: dict[str, Any]) -> Tool
     if not isinstance(unit, str) or not unit.strip():
         raise ValueError("unit must be a nonempty string")
     timeout = wait_timeout(arguments)
-    result = _setup_result(
-        "device_set_value", {"name": name, "value": value, "unit": unit}, ("device",)
-    )
-    return _run_setup(
-        ctx,
-        result,
-        timeout,
-        _read_device,
-        _verify_device,
-    )
+    result: _DeviceResult = {
+        **_initial_progress(),
+        "tool": "device_set_value",
+        "before": {"device": None},
+        "after": {"device": None},
+        "requested": {"name": name, "value": value, "unit": unit},
+        "verification": None,
+    }
+    return _run_setup(ctx, result, timeout, _read_device, _verify_device)
 
 
-def recipe_guide(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Query the registry-declared adapter guide without interpreting recipe names."""
+def recipe_guide(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> _RecipeGuideResult:
+    """Read the guide for arguments['recipe'] on ctx's existing GUI connection.
+
+    recipe must name an entry in the authoritative recipe registry (for example
+    t1). Returns recipe, its declared adapter name and the native guide object.
+    No mutation, operation, attach or reconnect occurs. A missing/unknown recipe
+    raises ValueError before GUI access; native query/connection errors raise
+    GuiRpcError. Guide contents and adapter mapping are not guessed or rewritten.
+    """
     recipe = arguments.get("recipe")
     if not isinstance(recipe, str):
         raise ValueError("recipe must be a string")
     definition = next((entry for entry in RECIPES if entry.name == recipe), None)
     if definition is None:
         raise ValueError(f"unknown recipe: {recipe!r}")
-    ctx = ctx.bound()
+    ctx = ctx.bound(require_connected=True)
     reply = ctx.send_gui_rpc("adapter.guide", {"adapter_name": definition.adapter_name})
     return {
         "recipe": recipe,
@@ -102,29 +275,24 @@ def recipe_guide(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     }
 
 
-def _setup_result(
-    tool: str, requested: dict[str, Any], fact_names: tuple[str, ...]
-) -> SetupResult:
+def _initial_progress() -> _Progress:
     return {
-        "tool": tool,
         "op": None,
         "status": "failed",
         "steps": {
-            step: {"status": "not_started"}
-            for step in ("pre_read", "start", "wait", "post_read")
+            "pre_read": {"status": "not_started"},
+            "start": {"status": "not_started"},
+            "wait": {"status": "not_started"},
+            "post_read": {"status": "not_started"},
         },
-        "before": dict.fromkeys(fact_names),
-        "after": dict.fromkeys(fact_names),
-        "requested": requested,
         "operation": None,
-        "verification": None,
         "error": None,
     }
 
 
 def _record_error(
     result: SetupResult,
-    step: str,
+    step: _Stage,
     exc: GuiRpcError,
     status: Literal["failed", "unknown"],
 ) -> None:
@@ -140,17 +308,15 @@ def _record_error(
         result["error"] = error
 
 
-def _run_setup(
+def _run_setup[ResultT: SetupResult](
     ctx: MeasureToolContext,
-    result: SetupResult,
+    result: ResultT,
     timeout: float,
-    read_facts: Callable[
-        [MeasureToolContext, SetupResult, Literal["before", "after"]], None
-    ],
-    verify: Callable[[SetupResult], None],
+    read_facts: Callable[[MeasureToolContext, ResultT, _Phase], None],
+    verify: Callable[[ResultT], None],
 ) -> ToolReply:
     try:
-        ctx = ctx.bound()
+        ctx = ctx.bound(require_connected=True)
         read_facts(ctx, result, "before")
     except GuiRpcError as exc:
         _record_error(result, "pre_read", exc, "failed")
@@ -176,11 +342,14 @@ def _run_setup(
             _record_error(result, "post_read", exc, "failed")
             result["status"] = "failed"
     return ToolReply(
-        data=dict(result), is_error=result["status"] not in {"finished", "running"}
+        data=dict(result),
+        is_error=result["error"] is not None
+        or result["status"] not in {"finished", "running"},
     )
 
 
 def _start_setup(ctx: MeasureToolContext, result: SetupResult) -> bool:
+    params: _JsonObject
     if result["tool"] == "simulation_initialize":
         method, params = "simulation.initialize", {}
     else:
@@ -204,7 +373,7 @@ def _start_setup(ctx: MeasureToolContext, result: SetupResult) -> bool:
 
 def _wait_setup(ctx: MeasureToolContext, result: SetupResult, timeout: float) -> None:
     try:
-        operation = wait(ctx, {"op": result["op"], "timeout": timeout})
+        operation = _Operation(**wait(ctx, {"op": result["op"], "timeout": timeout}))
     except GuiRpcError as exc:
         result["status"] = "unknown"
         _record_error(result, "wait", exc, "unknown")
@@ -214,33 +383,36 @@ def _wait_setup(ctx: MeasureToolContext, result: SetupResult, timeout: float) ->
     result["steps"]["wait"] = {
         "status": "running" if operation["status"] == "running" else "completed"
     }
-    if operation.get("error") is not None:
-        native_error = operation["error"]
-        result["error"] = {
+    native_error = operation.get("error")
+    if native_error is not None:
+        error: SetupError = {
             "code": native_error.get("code"),
             "reason": native_error.get("reason"),
             "message": native_error.get("message", "operation failed"),
             "request_rejected": native_error.get("request_rejected", False),
         }
+        result["error"] = error
 
 
 def _read_simulation(
-    ctx: MeasureToolContext, result: SetupResult, phase: Literal["before", "after"]
+    ctx: MeasureToolContext, result: _SimulationResult, phase: _Phase
 ) -> None:
     facts = result[phase]
     if ctx.gui.read_internal("state.has_soc", {})["value"]:
-        facts["soc"] = ctx.send_gui_rpc("soc.info", {"include_cfg": True})
-    devices = ctx.send_gui_rpc("device.list", {})["devices"]
+        facts["soc"] = _SocSnapshot(
+            **ctx.send_gui_rpc("soc.info", {"include_cfg": True})
+        )
+    listing = _DeviceListReply(**ctx.send_gui_rpc("device.list", {}))
     facts["devices"] = []
-    for device in devices:
-        snapshot = ctx.send_gui_rpc("device.snapshot", {"name": device["name"]})[
-            "snapshot"
-        ]
+    for device in listing["devices"]:
+        snapshot = _DeviceSnapshot(
+            **ctx.send_gui_rpc("device.snapshot", {"name": device["name"]})["snapshot"]
+        )
         facts["devices"].append(snapshot)
-    facts["predictor"] = ctx.send_gui_rpc("predictor.info", {})
+    facts["predictor"] = _PredictorSnapshot(**ctx.send_gui_rpc("predictor.info", {}))
 
 
-def _verify_simulation(result: SetupResult) -> None:
+def _verify_simulation(result: _SimulationResult) -> None:
     facts = result["after"]
     soc = facts["soc"]
     devices = facts["devices"]
@@ -264,19 +436,17 @@ def _verify_simulation(result: SetupResult) -> None:
         raise GuiRpcError("native facts do not confirm simulation readiness")
 
 
-def _read_device(
-    ctx: MeasureToolContext, result: SetupResult, phase: Literal["before", "after"]
-) -> None:
+def _read_device(ctx: MeasureToolContext, result: _DeviceResult, phase: _Phase) -> None:
     requested = result["requested"]
-    snapshot = ctx.send_gui_rpc("device.snapshot", {"name": requested["name"]})[
-        "snapshot"
-    ]
+    snapshot = _DeviceSnapshot(
+        **ctx.send_gui_rpc("device.snapshot", {"name": requested["name"]})["snapshot"]
+    )
     result[phase]["device"] = snapshot
     if phase == "before":
         _validate_device(snapshot, requested)
 
 
-def _validate_device(snapshot: dict[str, Any], requested: dict[str, Any]) -> None:
+def _validate_device(snapshot: _DeviceSnapshot, requested: _DeviceRequest) -> None:
     if (
         snapshot.get("name") != requested["name"]
         or snapshot.get("status") != "connected"
@@ -297,9 +467,11 @@ def _validate_device(snapshot: dict[str, Any], requested: dict[str, Any]) -> Non
         raise GuiRpcError("unit does not match the device's native coordinate")
 
 
-def _verify_device(result: SetupResult) -> None:
+def _verify_device(result: _DeviceResult) -> None:
     before = result["before"]["device"]
     after = result["after"]["device"]
+    if before is None or after is None:
+        raise GuiRpcError("native device facts were not acquired")
     info = after.get("info")
     actual = info.get("value") if info is not None else None
     result["verification"] = {
@@ -311,7 +483,7 @@ def _verify_device(result: SetupResult) -> None:
     if (
         after.get("status") != "connected"
         or any(
-            key not in before or key not in after or before[key] != after[key]
+            key not in before or key not in after or before.get(key) != after.get(key)
             for key in ("name", "type_name", "address", "unit")
         )
         or info is None
@@ -323,6 +495,12 @@ def _verify_device(result: SetupResult) -> None:
 
 
 def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
+    """Build three fixed setup tools over ctx, without connecting or performing setup.
+
+    ctx supplies the application's configured MCP session. Returned handlers
+    accept the simulation_initialize, device_set_value and recipe_guide argument
+    objects documented above; callers must explicitly connect before invocation.
+    """
     timeout_schema = {"type": "number", "minimum": 0, "maximum": 300, "default": 60.0}
     return {
         "simulation_initialize": {
