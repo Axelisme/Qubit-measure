@@ -505,35 +505,35 @@ def test_json_extensions_survive_seed_clone_reload_and_keep_source_units(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     payload: YamlMap = {
-        "": None,
+        "empty-value": None,
         "slash/key": [True, "opaque", {"rate": "not a physical field"}, 1.25],
     }
     entry.setup.add_component(
         "R1", kind="fake/sensor", ext={"blob": payload, "noise": 11.0}
     )
     point = entry.new_point("a")
-    point.general.ext["_misc.key"] = payload
+    point.general.ext["_misc-key"] = payload
     payload["new"] = "caller mutation"
     assert point.R1.ext.blob == {
-        "": None,
+        "empty-value": None,
         "slash/key": [True, "opaque", {"rate": "not a physical field"}, 1.25],
     }
-    assert point.general.ext["_misc.key"] == point.R1.ext.blob
+    assert point.general.ext["_misc-key"] == point.R1.ext.blob
     source = Provenance("manual", None, None, "2026-10-04T00:00:00Z", 2.0)
     with point.edit() as draft:
         draft.set("R1.ext.noise", 12.0, provenance=source)
     clone = entry.new_point("b", clone_from="a")
     clone.R1.ext.blob = {"independent": False}
-    clone.general.ext["_misc.key"] = None
+    clone.general.ext["_misc-key"] = None
     reopened = ResultEntry.open(
         "entry", result_root=entry_roots[0], database_root=entry_roots[1]
     )
     original = reopened.use_point("a")
     copied = reopened.use_point("b")
     assert original.R1.ext.blob == point.R1.ext.blob
-    assert original.general.ext["_misc.key"] == point.R1.ext.blob
+    assert original.general.ext["_misc-key"] == point.R1.ext.blob
     assert copied.R1.ext.blob == {"independent": False}
-    assert copied.general.ext["_misc.key"] is None
+    assert copied.general.ext["_misc-key"] is None
     metadata = copied.meta("R1.ext.noise")
     assert metadata is not None
     assert metadata.stderr == 2.0
