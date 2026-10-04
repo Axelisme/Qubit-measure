@@ -201,6 +201,11 @@ def route(
     setup: SetupDocument,
     point: PointDocument,
 ) -> None:
+    """Route logical value changes and accepted provenance to their owning layers.
+
+    Provenance can change without a value diff, for example a same-value rewrite
+    clearing cloned_from. Move then carries the routed value and provenance.
+    """
     point.general = after.general.model_copy(deep=True)
     for name, candidate in after.components.items():
         setup_fields = _fields(setup.components[name])
@@ -219,5 +224,11 @@ def route(
         ).model_validate(setup_fields)
         if point_fields:
             point.components[name] = point_fields
+    for path, metadata in after.provenance.items():
+        if metadata != before.provenance.get(path):
+            provenance = (
+                point.provenance if path in point.provenance else setup.provenance
+            )
+            provenance[path] = deepcopy(metadata)
     for path, destination in after.moves:
         _move(path, destination, setup, point)

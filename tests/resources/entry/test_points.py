@@ -343,6 +343,64 @@ def test_clone_marks_only_point_provenance_with_its_direct_source(
     )
 
 
+@pytest.mark.parametrize("write", ["attribute", "edit", "set"])
+def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    write: str,
+) -> None:
+    entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
+    original = entry.new_point("a")
+    original.Q1.t1 = 12.0
+    original.Q1.t2 = 13.0
+    root = entry_roots[0] / "entry"
+    source = root / "points/a/point.yaml"
+    yaml = YAML(typ="rt")
+    stored = yaml.load(source.read_text())
+    provenance = {
+        "source": "manual",
+        "kind": None,
+        "run_id": None,
+        "at": "2026-10-04T00:00:00Z",
+        "stderr": None,
+    }
+    stored["provenance"] = {
+        "Q1.t1": deepcopy(provenance),
+        "Q1.t2": deepcopy(provenance),
+    }
+    write_yaml(source, stored)
+    point = entry.new_point("b", clone_from="a")
+    setup_before = (root / "setup.yaml").read_bytes()
+
+    if write == "attribute":
+        with pytest.raises(ValidationError):
+            point.Q1.t2 = "not-a-number"
+        point.Q1.t1 = 12.0
+    else:
+        with point.edit() as draft:
+            if write == "edit":
+                with pytest.raises(ValidationError):
+                    draft.Q1.t2 = "not-a-number"
+                draft.Q1.t1 = 12.0
+            else:
+                with pytest.raises(ValidationError):
+                    draft.set("Q1.t2", "not-a-number")
+                draft.set("Q1.t1", 12.0)
+
+    rewritten = yaml.load((root / "points/b/point.yaml").read_text())
+    assert rewritten["provenance"]["Q1.t1"] == provenance
+    assert rewritten["provenance"]["Q1.t2"] == {
+        **provenance,
+        "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
+    }
+    assert (root / "setup.yaml").read_bytes() == setup_before
+    assert point.Q1.t1 == 12.0
+    assert point.Q1.t2 == 13.0
+    reopened = entry.use_point("b")
+    assert reopened.Q1.t1 == 12.0
+    assert reopened.Q1.t2 == 13.0
+
+
 @pytest.mark.parametrize("nullable", [False, True])
 def test_complete_nested_after_validator_reports_field_and_keeps_partial_setup(
     entry: ResultEntry,

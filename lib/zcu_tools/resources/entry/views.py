@@ -30,14 +30,23 @@ type _FieldNode = BaseModel | YamlMap
 
 @contextmanager
 def stage_component(
-    draft: SetupDocument | LayeredDocument, name: str
+    draft: SetupDocument | LayeredDocument, name: str, field: str
 ) -> Generator[ComponentSchema]:
+    """Validate a detached candidate, then accept its relative field path.
+
+    Only a successful stage clears cloned_from on that field and descendants.
+    The caller supplies a dotted path within the component, such as wiring.ch.
+    """
     candidate = draft.components[name].model_copy(deep=True)
     yield candidate
     # The registered partial model runs field validators, not full invariants.
     draft.components[name] = type(candidate).model_validate(
         candidate.model_dump(exclude_unset=True, warnings=False)
     )
+    path = f"{name}.{field}"
+    for key, metadata in draft.provenance.items():
+        if key == path or key.startswith(f"{path}."):
+            metadata.pop("cloned_from", None)
 
 
 @overload
@@ -63,15 +72,21 @@ def stage_general(
 
 class FieldView:
     _model: Callable[[], _FieldNode]
-    _edit: Callable[[], AbstractContextManager[_FieldNode]]
+    _edit: Callable[[str], AbstractContextManager[_FieldNode]]
     _path: str
 
     def __init__(
         self,
         model: Callable[[], _FieldNode],
-        edit: Callable[[], AbstractContextManager[_FieldNode]],
+        edit: Callable[[str], AbstractContextManager[_FieldNode]],
         path: str,
     ) -> None:
+        """Bind a field container to its snapshot and validated edit callbacks.
+
+        model returns the readable container. edit(field_name) stages one write
+        and raises on rejection without changing that snapshot. path is the
+        logical container path, such as Q1.wiring, used in errors.
+        """
         self._model = model
         self._edit = edit
         self._path = path
@@ -98,7 +113,7 @@ class FieldView:
             self[name] = value
 
     def __setitem__(self, name: str, value: object) -> None:
-        with self._edit() as draft:
+        with self._edit(name) as draft:
             if isinstance(draft, BaseModel):
                 component_registry.check_fields(
                     type(draft), {name: value}, path=self._path
@@ -117,11 +132,11 @@ class GeneralView(FieldView):
         model: Callable[[], SetupGeneral | PointGeneral],
         edit: Callable[[], AbstractContextManager[SetupGeneral | PointGeneral]],
     ) -> None:
-        super().__init__(model, edit, "general")
+        super().__init__(model, lambda _name: edit(), "general")
         self._general_model = model
 
         @contextmanager
-        def edit_extension() -> Generator[YamlMap]:
+        def edit_extension(_name: str) -> Generator[YamlMap]:
             with edit() as draft:
                 yield draft.ext
                 draft.model_fields_set.add("ext")
@@ -143,15 +158,24 @@ class GeneralView(FieldView):
 
 class ComponentView:
     _model: Callable[[], ComponentSchema]
-    _edit: Callable[[], AbstractContextManager[ComponentSchema]]
+    _edit: Callable[[str], AbstractContextManager[ComponentSchema]]
     _path: str
 
     def __init__(
         self,
         model: Callable[[], ComponentSchema],
-        edit: Callable[[], AbstractContextManager[ComponentSchema]],
+        edit: Callable[[str], AbstractContextManager[ComponentSchema]],
         path: str,
     ) -> None:
+        """Bind a component snapshot to an atomic, validated field edit.
+
+        model supplies the readable model. edit(relative_field_path) yields
+        a detached candidate, validates it on normal exit, then accepts the write
+        into its owning document. Rejection leaves the pre-write draft intact.
+        path is the component name used in logical paths, for example Q1.
+        Nested wiring/ext writes pass their relative dotted paths to edit.
+        The callback owner controls persistence and transaction boundaries.
+        """
         self._model = model
         self._edit = edit
         self._path = path
@@ -161,8 +185,8 @@ class ComponentView:
         return FieldView(lambda: self._model().ext, self._edit_ext, f"{self._path}.ext")
 
     @contextmanager
-    def _edit_ext(self) -> Generator[YamlMap]:
-        with self._edit() as draft:
+    def _edit_ext(self, field: str) -> Generator[YamlMap]:
+        with self._edit(f"ext.{field}") as draft:
             yield draft.ext
             draft.model_fields_set.add("ext")
 
@@ -173,8 +197,8 @@ class ComponentView:
         )
 
     @contextmanager
-    def _edit_wiring(self) -> Generator[WiringSchema]:
-        with self._edit() as draft:
+    def _edit_wiring(self, field: str) -> Generator[WiringSchema]:
+        with self._edit(f"wiring.{field}") as draft:
             yield draft.wiring
             draft.model_fields_set.add("wiring")
 
@@ -196,7 +220,7 @@ class ComponentView:
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
-            with self._edit() as draft:
+            with self._edit(name) as draft:
                 component_registry.check_fields(
                     draft.kind, {name: value}, path=self._path
                 )
@@ -226,7 +250,7 @@ class EditView:
         else:
             if parts[0] not in self._draft.components:
                 raise AttributeError(f"Unknown component {parts[0]!r}")
-            edit_root = self._edit_component(parts[0])
+            edit_root = self._edit_component(parts[0], ".".join(parts[1:]))
         with edit_root as root:
             node: _FieldNode = root
             for index, name in enumerate(parts[1:-1], start=1):
@@ -244,7 +268,7 @@ class EditView:
                 node = child
 
             @contextmanager
-            def edit_node() -> Generator[_FieldNode]:
+            def edit_node(_name: str) -> Generator[_FieldNode]:
                 yield node
 
             FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
@@ -262,13 +286,13 @@ class EditView:
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
             lambda: self._draft.components[name],
-            lambda: self._edit_component(name),
+            lambda field: self._edit_component(name, field),
             name,
         )
 
     @contextmanager
-    def _edit_component(self, name: str) -> Generator[ComponentSchema]:
-        with stage_component(self._draft, name) as candidate:
+    def _edit_component(self, name: str, field: str) -> Generator[ComponentSchema]:
+        with stage_component(self._draft, name, field) as candidate:
             yield candidate
 
 
@@ -325,11 +349,14 @@ class SetupView:
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
             lambda: self._store.snapshot().components[name],
-            lambda: self._edit_component(name),
+            lambda field: self._edit_component(name, field),
             name,
         )
 
     @contextmanager
-    def _edit_component(self, name: str) -> Generator[ComponentSchema]:
-        with self._edit_document() as draft, stage_component(draft, name) as candidate:
+    def _edit_component(self, name: str, field: str) -> Generator[ComponentSchema]:
+        with (
+            self._edit_document() as draft,
+            stage_component(draft, name, field) as candidate,
+        ):
             yield candidate

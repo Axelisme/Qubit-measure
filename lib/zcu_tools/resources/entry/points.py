@@ -69,13 +69,16 @@ class PointView:
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
             lambda: self._snapshot().components[name],
-            lambda: self._edit_component(name),
+            lambda field: self._edit_component(name, field),
             name,
         )
 
     @contextmanager
-    def _edit_component(self, name: str) -> Generator[ComponentSchema]:
-        with self._edit_document() as draft, stage_component(draft, name) as candidate:
+    def _edit_component(self, name: str, field: str) -> Generator[ComponentSchema]:
+        with (
+            self._edit_document() as draft,
+            stage_component(draft, name, field) as candidate,
+        ):
             yield candidate
 
     @contextmanager
