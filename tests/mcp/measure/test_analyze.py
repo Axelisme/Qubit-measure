@@ -11,6 +11,7 @@ from threading import Event, Thread
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.stdio_server import run_stdio_loop
 from zcu_tools.mcp.measure.session import GuiConnection
 
@@ -208,6 +209,79 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
     if outcome == "partial":
         assert summary["steps"]["analysis_save"][stage]["status"] == "incomplete"
         assert summary["error"]["phase"] == "image_save"
+
+
+@pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize(
+    "receipt, reason, step_status",
+    [
+        ("lost", "connection_lost", "unknown"),
+        ("timeout", "gui_transport_timeout", "unknown"),
+        ("handler_timeout", "gui_handler_timeout", "unknown"),
+        ("internal", "injected", "unknown"),
+        ("stale", "stale_version", "not_started"),
+        ("busy", "operation_busy", "not_started"),
+    ],
+)
+def test_analysis_start_failure_retains_a_queryable_execution(
+    tmp_path, clients, monkeypatch, stage, receipt, reason, step_status
+):
+    method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
+    client = _client(tmp_path, clients)
+    if receipt in {"handler_timeout", "internal", "stale", "busy"}:
+        client.transport.replies[method] = {
+            "ok": False,
+            "error": {
+                "code": {
+                    "handler_timeout": "timeout",
+                    "internal": "internal",
+                    "stale": "precondition_failed",
+                    "busy": "busy",
+                }[receipt],
+                "reason": None if receipt == "handler_timeout" else reason,
+                "message": "Analysis start did not provide a handle",
+            },
+        }
+    elif receipt == "timeout":
+        send_line = client.transport.send_line
+
+        def send(payload):
+            if payload["method"] != method:
+                return send_line(payload)
+            client.transport.sent.append((payload["method"], payload["params"]))
+            raise GuiTransportTimeoutError(method, 0.01)
+
+        monkeypatch.setattr(client.transport, "send_line", send)
+    else:
+        pending = _hold_wire_reply(client, monkeypatch, method)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        called = pool.submit(client.call, "tab_analyze", {"tab": "t", "stage": stage})
+        if receipt == "lost":
+            assert pending.wait(1)
+            client.transport.close()
+            assert client.transport.on_closed is not None
+            client.transport.on_closed(None)
+        initial = called.result(timeout=2)
+    assert initial.is_error is True
+    key = initial.data["execution"]
+    before = len(client.transport.sent)
+    summary = client.call("status", {"execution": key})
+    full = client.call("status", {"execution": key, "detail": "full"})
+    waited = client.call("wait", {"execution": key, "timeout": 0})
+    assert summary == initial.data
+    assert {k: v for k, v in waited.data.items() if k != "elapsed_s"} == summary
+    assert summary["status"] == "failed"
+    assert summary["steps"]["analysis"][stage]["status"] == step_status
+    assert summary["error"]["reason"] == reason
+    assert full["start"]["status"] == step_status
+    assert full["op"] is None
+    assert full["params"] is None
+    assert summary["steps"]["analysis_save"][stage]["status"] == "not_started"
+    assert summary["artifacts"]["analysis"] == {}
+    assert summary["artifacts"]["post_analysis"] == {}
+    assert len(client.transport.sent) == before
+    assert _methods(client) == [method]
 
 
 def _start_reply(
