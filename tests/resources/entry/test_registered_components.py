@@ -243,6 +243,39 @@ def test_nested_kind_can_be_omitted_in_partial_setup(
             assert reopened.setup.N1.details is None
 
 
+@pytest.mark.parametrize("write", ["set", "ext"])
+def test_caught_alias_validation_failure_preserves_shared_draft(
+    tmp_path: Path, write: str
+) -> None:
+    class RejectMutableExt(ComponentSchema):
+        @field_validator("ext", mode="before")
+        @classmethod
+        def mutate_then_reject(cls, value: YamlMap) -> YamlMap:
+            if value.get("fail") is True:
+                value["touched"] = True
+                raise ValueError("mutable payload rejected")
+            return value
+
+    with registered_model("notebook/reject-mutable-ext", RejectMutableExt) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, ext={"payload": {"fail": True}})
+        with entry.setup.edit() as draft:
+            payload = draft.N1.ext.payload
+            if write == "set":
+                with pytest.raises(ValidationError, match="mutable payload rejected"):
+                    draft.set("N1.ext", payload)
+            else:
+                with pytest.raises(ValidationError, match="mutable payload rejected"):
+                    setattr(draft.N1, write, payload)
+            assert draft.N1.ext.payload == {"fail": True}
+            draft.description = "keep successful edit"
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.description == "keep successful edit"
+        assert reopened.setup.N1.ext.payload == {"fail": True}
+
+
 def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
     class NullableFrequency(ComponentSchema):
         freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
