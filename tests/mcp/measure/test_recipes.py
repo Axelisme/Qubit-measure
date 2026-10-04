@@ -3,7 +3,7 @@
 import base64
 from copy import deepcopy
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Thread, current_thread
 from time import sleep
 from typing import Any
 
@@ -14,6 +14,28 @@ from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
 from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
+
+
+def test_recipe_observes_run_save_and_analysis_on_one_worker(tmp_path):
+    gui = LookbackGui()
+    waiting_workers: set[Thread] = set()
+    awaited_operations: set[object] = set()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "operation.await":
+            waiting_workers.add(current_thread())
+            awaited_operations.add(params["operation_id"])
+        return gui(method, params)
+
+    with recipe_client(tmp_path, respond) as client:
+        reply = full_execution_reply(
+            client, client.call("lookback", {"frequency_mhz": 6020.0})
+        )
+        assert reply.data["status"] == "finished", reply.data
+        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["analysis"]["result"]["summary"] == {"offset": 0.24}
+        assert awaited_operations == {71, 82, 93}
+        assert len(waiting_workers) == 1
 
 
 def test_lookback_initial_wait_returns_while_the_same_execution_continues(

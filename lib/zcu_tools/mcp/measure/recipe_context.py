@@ -493,7 +493,7 @@ class RecipeContext:
             },
         )
         execution = self.tools.session.executions.start(
-            self.tools.gui, tab, stage, started
+            self.tools.gui, tab, stage, started, start_worker=False
         )
         self._retain_analysis(execution)
         # Skip a cancelled query, but still join the already-accepted analysis.
@@ -501,8 +501,10 @@ class RecipeContext:
             handoff_interaction(
                 self.tools, execution, before_send=lambda: self._admit("analysis")
             )
-        while True:
-            reply = execution.wait(0.25)
+
+        def retain_progress() -> ToolReply:
+            # A zero-time local read projects captured facts; it never waits for op.
+            reply = execution.wait(0.0)
             with self._condition:
                 self.images = (*prior_images, *reply.images)
                 self._publish(
@@ -514,14 +516,11 @@ class RecipeContext:
                     if reply.data["status"] == "interactive"
                     else "running",
                 )
-            if reply.data["status"] == "interactive":
-                # Interactive waits return immediately. Pace local observation while
-                # the analysis owner continues to track the original operation.
-                if self._closed.wait(0.25):
-                    raise GuiRpcError("MCP session is closed", reason="session_closed")
-                continue
-            if reply.data["status"] != "running":
-                break
+            return reply
+
+        retain_progress()
+        execution.complete_in_current_worker()
+        reply = retain_progress()
         if reply.data["status"] == "failed":
             error = reply.data["error"]
             if error["phase"] == "writeback_read":
