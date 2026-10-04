@@ -1,9 +1,8 @@
 """Explicit-root parameter containers, independent of legacy context services."""
 
 from .errors import (
-    LayerConflictError,
     MissingReferenceError,
-    PartialCommitError,
+    RenameRecoveryError,
     UnknownFieldError,
     UnknownKindError,
 )

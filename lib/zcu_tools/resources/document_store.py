@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Generator, Iterator, Mapping
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from io import StringIO
 from math import isnan
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Literal, cast
 
 from filelock import FileLock, Timeout
@@ -35,7 +36,7 @@ from ruamel.yaml import YAML
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
 
-from ._document_commit import DocumentEdit, FieldPath, PreparedDocument, stage_content
+type FieldPath = tuple[str, ...]
 
 __all__ = (
     "ConflictError",
@@ -425,102 +426,62 @@ class DocumentStore[T: BaseModel]:
         or notifying. Nonempty edits notify after publication and outermost unlock;
         observer exceptions are logged, not raised as commit failures.
         """
-        prepared: PreparedDocument[T] | None = None
-        with ExitStack() as stack:
-            with self.locked():
-                state = stack.enter_context(self.read_state(locked_by=self))
-            yield state.draft
-            try:
-                with self.locked():
-                    prepared = self.prepare(state, locked_by=self)
-                    prepared.replace()
-                    self.publish(prepared, locked_by=self)
-            finally:
-                if prepared is not None:
-                    prepared.discard()
-        if prepared is not None:
-            self.notify_commit(prepared)
-
-    @contextmanager
-    def read_state[_Owner: BaseModel](
-        self, *, locked_by: DocumentStore[_Owner]
-    ) -> Generator[DocumentEdit[T]]:
-        """Yield raw SI base, typed working base and an independent working draft.
-
-        Resources-only seam: locked_by must hold the same sidecar path. Reload
-        and reject a nested edit; retain edit ownership until this context exits.
-        This method never writes or publishes, and its caller controls lock scope.
-        """
-        self._require_lock(locked_by)
         if self._editing:
             raise RuntimeError(f"{self._path}: nested edits are not allowed")
         self._editing = True
         try:
-            base_document, base = self._read()
-            yield DocumentEdit(base_document, base, base.model_copy(deep=True))
+            with self.locked():
+                base_document, base = self._read()
+            draft = base.model_copy(deep=True)
+            yield draft
+            with self.locked():
+                document, snapshot, paths = self._commit(base_document, base, draft)
+                self._snapshot = snapshot
+                self._document = document
         finally:
             self._editing = False
+        if paths:
+            self._dispatch_change(DocumentChange(self._path, paths, "commit"))
 
-    def prepare[_Owner: BaseModel](
-        self, state: DocumentEdit[T], *, locked_by: DocumentStore[_Owner]
-    ) -> PreparedDocument[T]:
-        """Prepare current SI YAML and a validated working snapshot without publishing.
+    def _commit(
+        self, base_document: YamlMap, base: T, draft: T
+    ) -> tuple[YamlMap, T, tuple[FieldPath, ...]]:
+        """Merge one edit, validate it and replace only this store's file.
 
-        Resources-only seam: locked_by must hold the same sidecar path. Compare
-        state base/draft in working units, reject raw SI conflicts, merge and
-        convert changed paths to SI, then validate. Stage a sibling temporary
-        only for nonempty patches. Caller must discard it even if replacement or
-        publication fails; no disk replacement has happened on return.
+        The caller holds this store's lock. Empty patches adopt the latest
+        validated snapshot without rewriting. Failure never publishes memory.
         """
-        self._require_lock(locked_by)
-        base_values = _projection(state.base)
-        draft_values = _draft_projection(state.base, state.draft)
+        base_values = _projection(base)
+        draft_values = _draft_projection(base, draft)
         patches = tuple(_changes(base_values, draft_values))
         document, _ = self._read()
-        original = self._path.read_bytes()
-        self._merge_patches(document, state.base_document, base_values, patches)
-        self._to_si_units(document, tuple(path for path, _ in patches))
+        self._merge_patches(document, base_document, base_values, patches)
+        paths = tuple(path for path, _ in patches)
+        self._to_si_units(document, paths)
         snapshot = self._model_snapshot(document)
-        temporary: Path | None = None
         if patches:
-            stream = StringIO()
-            YAML(typ="rt").dump(document, stream)
-            temporary = stage_content(self._path, stream.getvalue().encode("utf-8"))
-        return PreparedDocument(
-            self._path,
-            document,
-            snapshot,
-            tuple(path for path, _ in patches),
-            original,
-            temporary,
-        )
+            self._replace_document(document)
+        return document, snapshot, paths
 
-    def publish[_Owner: BaseModel](
-        self, prepared: PreparedDocument[T], *, locked_by: DocumentStore[_Owner]
-    ) -> None:
-        """Adopt prepared SI YAML/working snapshot after its successful replacement.
-
-        Resources-only seam: locked_by holds the same sidecar; reject a prepared
-        document for another source. No I/O or notification occurs here.
-        """
-        self._require_lock(locked_by)
-        if prepared.source != self._path:
-            raise ValueError(
-                f"{self._path}: prepared document belongs to {prepared.source}"
-            )
-        self._snapshot = prepared.snapshot
-        self._document = prepared.document
-
-    def notify_commit(self, prepared: PreparedDocument[T]) -> None:
-        """Dispatch a published nonempty edit; queue if an outer lock is still held."""
-        if prepared.paths:
-            self._dispatch_change(DocumentChange(self._path, prepared.paths, "commit"))
-
-    def _require_lock[_Owner: BaseModel](self, owner: DocumentStore[_Owner]) -> None:
-        if self._lock_path != owner._lock_path or not owner._lock.is_locked:
-            raise RuntimeError(
-                f"{self._path}: commit seam requires the matching held lock"
-            )
+    def _replace_document(self, document: YamlMap) -> None:
+        """Write a sibling temporary, atomically replace the file and clean up."""
+        content = StringIO()
+        YAML(typ="rt").dump(document, content)
+        temporary: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="wb",
+                dir=self._path.parent,
+                prefix=f".{self._path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(content.getvalue().encode("utf-8"))
+            temporary.replace(self._path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def _merge_patches(
         self,

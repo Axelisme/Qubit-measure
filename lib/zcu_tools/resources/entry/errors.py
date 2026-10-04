@@ -1,4 +1,4 @@
-"""Errors that identify partial entry filesystem changes."""
+"""Errors that locate invalid components and rename recovery failures."""
 
 from pathlib import Path
 
@@ -39,38 +39,33 @@ class MissingReferenceError(ValueError):
         )
 
 
-class LayerConflictError(ValueError):
-    """A component leaf is supplied by both setup and point.
+class RenameRecoveryError(OSError):
+    """The Database rename failed and the Result directory could not be restored.
 
-    path is its logical dotted field path, such as Q1.t1. setup_file and
-    point_file locate the two conflicting documents; their values are not read
-    by this exception. These three arguments are also exposed as attributes.
+    moved_result is the Result directory at its new name. pending_database is
+    the intended Database destination; that move failed. recovery_destination is
+    the original Result path, which recovery could not reach. These are filesystem
+    paths derived from rename_entry's explicit roots. cause and recovery_cause
+    are the two original I/O errors. No repair runs in this exception.
     """
 
-    def __init__(self, path: str, setup_file: Path, point_file: Path) -> None:
-        """Describe the duplicated leaf and files without changing either file."""
-        self.path = path
-        self.setup_file = setup_file
-        self.point_file = point_file
-        super().__init__(f"{path}: present in both {setup_file} and {point_file}")
-
-
-class PartialCommitError(OSError):
     def __init__(
         self,
         *,
-        completed: tuple[Path, ...],
-        pending: tuple[Path, ...],
-        recovery_failed: tuple[Path, ...],
+        moved_result: Path,
+        pending_database: Path,
+        recovery_destination: Path,
         cause: OSError,
         recovery_cause: OSError,
     ) -> None:
-        self.completed = completed
-        self.pending = pending
-        self.recovery_failed = recovery_failed
+        self.moved_result = moved_result
+        self.pending_database = pending_database
+        self.recovery_destination = recovery_destination
         self.cause = cause
         self.recovery_cause = recovery_cause
         super().__init__(
-            f"Partial commit: completed={completed!r}, pending={pending!r}, "
-            f"recovery_failed={recovery_failed!r}; cause={cause}; recovery={recovery_cause}"
+            f"Rename recovery failed: moved_result={moved_result!r}, "
+            f"pending_database={pending_database!r}, "
+            f"recovery_destination={recovery_destination!r}; "
+            f"cause={cause}; recovery={recovery_cause}"
         )

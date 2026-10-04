@@ -150,7 +150,7 @@ def test_registration_rejects_full_model_transformations_without_reserving_kind(
             child=(model | None if placement == "nullable" else model, ...),
         )
     registry = ComponentRegistry()
-    with pytest.raises(ValueError, match=rf"{reason}.*partial") as error:
+    with pytest.raises(ValueError, match=reason) as error:
         registry.register("notebook/transform", model)
     assert rejected_model in str(error.value)
     registry.register("notebook/transform", PairSchema)

@@ -1,101 +1,71 @@
-"""Working-point views over entry-coordinated layered transactions."""
+"""Working-point views over one complete parameter document."""
 
-from collections.abc import Callable, Generator
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
 
+from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
-from .layering import compose
-from .schema import (
-    ComponentSchema,
-    LayeredDocument,
-    PointDocument,
-    PointGeneral,
-    SetupDocument,
-)
+from .schema import ComponentSchema, PointDocument, PointGeneral
 from .views import (
     ComponentView,
     EditView,
     GeneralView,
+    add_component_to_draft,
     stage_component,
     stage_general,
 )
 
 
 class PointView:
-    """A bound point's working-unit values over its entry's shared setup snapshot.
+    """A bound point's cached working-unit values, independent of setup.
 
-    Obtain a view from ResultEntry.use_point or new_point. Component attributes
-    such as Q1 read point values first, then setup values, without disk I/O.
-    Unknown components or unset fields raise AttributeError. Assignments commit
-    through edit(): existing fields retain their layer and new fields go to point.
-    Successful field writes clear cloned_from even when the value is unchanged.
-    General metadata belongs only to this point. Call refresh to observe disk edits;
-    opening another view does not change which point this view addresses.
+    Obtain a view from ResultEntry.use_point or new_point. Component and general
+    reads do no I/O. Unknown components or unset fields raise AttributeError.
+    Assignments and edit() commit only this point's document. Successful field
+    writes clear cloned_from even when the value is unchanged. Call refresh()
+    to observe disk edits; another view does not change this view's binding.
     """
 
-    def __init__(
-        self,
-        store: DocumentStore[PointDocument],
-        setup: DocumentStore[SetupDocument],
-        source: Path,
-        edit: Callable[[], AbstractContextManager[LayeredDocument]],
-        refresh: Callable[[], None],
-    ) -> None:
-        """Bind entry-owned stores and transaction callbacks without I/O.
+    def __init__(self, store: DocumentStore[PointDocument], source: Path) -> None:
+        """Bind one validated working-unit store without I/O.
 
-        store and setup are validated working-unit stores for the same entry.
-        source is store's point.yaml path under that entry's points/<label>.
-        edit returns an independent layered draft context that reloads, validates
-        and commits both layers. refresh reloads both stores or raises without
-        publishing invalid snapshots. ResultEntry supplies these callbacks.
-        Construction neither calls them nor validates the supplied dependencies.
+        source is store's point.yaml path under the owning entry's points/label.
+        The store owns single-file validation, conflict checks and persistence.
+        ResultEntry supplies both dependencies; construction does not reload or
+        validate them. There are no shared setup or multi-file callbacks.
         """
         self._store = store
-        self._setup = setup
         self._source = source
         _point_origin.register(self, source)
-        self._edit_document = edit
-        self._refresh_document = refresh
-
-    def _snapshot(self) -> LayeredDocument:
-        return compose(
-            self._setup.snapshot(), self._store.snapshot(), self._source, complete=False
-        )
 
     @property
     def general(self) -> GeneralView:
-        """Return this point's created_at, optional description and YAML ext view.
-
-        Reads use the cached point snapshot. Writable fields commit through the
-        same layered transaction as edit(); metadata does not fall back to setup.
-        """
+        """Return this point's cached creation time, description and YAML ext."""
         return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
 
     @contextmanager
     def _edit_general(self) -> Generator[PointGeneral]:
-        with self._edit_document() as draft, stage_general(draft) as candidate:
+        with self._store.edit() as draft, stage_general(draft) as candidate:
             yield candidate
 
     @property
     def description(self) -> str | None:
-        """Return the cached point description, or None when it is unset."""
+        """Return the cached description, or None when it is unset."""
         return self._store.snapshot().general.description
 
     @description.setter
     def description(self, value: str | None) -> None:
-        """Commit text or None to this point through the edit() transaction."""
         with self.edit() as draft:
             draft.description = value
 
     def __getattr__(self, name: str) -> ComponentView:
-        if name not in self._setup.snapshot().components:
+        if name not in self._store.snapshot().components:
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
-            lambda: self._snapshot().components[name],
+            lambda: self._store.snapshot().components[name],
             lambda field: self._edit_component(name, field),
             name,
         )
@@ -103,46 +73,41 @@ class PointView:
     @contextmanager
     def _edit_component(self, name: str, field: str) -> Generator[ComponentSchema]:
         with (
-            self._edit_document() as draft,
+            self._store.edit() as draft,
             stage_component(draft, name, field) as candidate,
         ):
             yield candidate
 
     @contextmanager
     def edit(self) -> Generator[EditView]:
-        """Yield a working-unit draft and commit it on normal context exit.
+        """Yield a working-unit draft and commit one document on normal exit.
 
-        Reload both layers on entry. Existing component fields write to their
-        owning layer; new fields and general metadata write to point. Validate
-        required fields and references in every point's combined view before
-        committing. A body exception, invalid value or ConflictError aborts all
-        writes and keeps cached snapshots. Ordinary replace failure restores
-        completed writes; failed restoration raises PartialCommitError with the
-        affected paths. There is no multi-file power-loss guarantee.
+        Reload only point.yaml on entry. Required fields, original field
+        validators and same-document references must validate. Body, schema,
+        canonical, conflict or I/O failures keep the previous file and snapshot.
+        Independent handles merge disjoint leaves or reject the entire edit on
+        a same-leaf conflict. No other point or setup file is read or written.
         """
-        with self._edit_document() as draft:
+        with self._store.edit() as draft:
             yield EditView(draft)
 
     def refresh(self) -> None:
-        """Reload this point and the shared setup snapshot from disk.
+        """Reload only point.yaml; invalid data keeps the cached snapshot.
 
-        Validate their combined required fields, references and canonical values.
-        Missing files, incompatible headers, duplicate leaves or invalid values
-        raise without publishing either new snapshot. No parameter files are committed.
+        Missing files, incompatible headers or invalid component/reference/
+        canonical values raise without publication. No files are committed.
         """
-        self._refresh_document()
+        self._store.refresh()
 
-    def move(self, path: str, *, to: Literal["setup", "point"]) -> None:
-        """Move a dotted component field and its source metadata between layers.
+    def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
+        """Add a complete registered component to this point, not its template.
 
-        path is a logical path such as Q1.t1 or Q1.wiring.flux_ch. to names the
-        destination layer, opposite the layer holding the value. Nested mappings
-        carry descendant metadata too. kind cannot move. Invalid paths, kind or
-        an occupied destination raise ValueError; an unknown component or absent
-        source value raises AttributeError. The move commits through edit() and
-        inherits its validation, conflict and recovery behavior.
+        name is an unreserved public identifier and kind is a registered kind.
+        fields are working-unit YAML values, including all required model fields.
+        Original field validators and defaults run; references resolve only in
+        this point. Unknown names/fields, missing references, invalid values or
+        duplicate components raise the same errors as SetupView.add_component.
+        Failure keeps the file and cached snapshot; success commits one edit.
         """
-        if to not in ("setup", "point"):
-            raise ValueError(f"{to!r}: expected setup or point")
-        with self._edit_document() as draft:
-            draft.moves.append((path, to))
+        with self._store.edit() as draft:
+            add_component_to_draft(draft, name, kind, fields, self._source)

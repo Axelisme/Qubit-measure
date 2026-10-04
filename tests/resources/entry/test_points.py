@@ -1,4 +1,4 @@
-"""Working-point lifecycle and layered access through ResultEntry public views."""
+"""Complete seeded points through ResultEntry and its public document views."""
 
 import shutil
 from collections.abc import Generator
@@ -6,15 +6,15 @@ from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal
+from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import ConflictError, UnitSpec
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    LayerConflictError,
-    PartialCommitError,
+    MissingReferenceError,
     PointView,
     ResultEntry,
     component_registry,
@@ -24,6 +24,25 @@ from zcu_tools.resources.entry import (
 class RequiredRangeSchema(ComponentSchema):
     low: Annotated[float, UnitSpec("1", "1")]
     high: Annotated[float, UnitSpec("1", "1")]
+
+
+class DefaultTiming(BaseModel):
+    width: Annotated[float, UnitSpec("s", "us")]
+    note: str
+
+
+class NotebookSchema(ComponentSchema):
+    gain: Annotated[float, UnitSpec("1", "1"), Field(gt=0)]
+    title: str
+    token: str = Field(default_factory=lambda: str(uuid4()))
+    timing: DefaultTiming = Field(
+        default_factory=lambda: DefaultTiming(width=2.0, note="factory")
+    )
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -55,6 +74,16 @@ def range_kind(registry_state_guard: None) -> Generator[str]:
 
 
 @pytest.fixture
+def notebook_kind(registry_state_guard: None) -> Generator[str]:
+    kind = "test/point-notebook"
+    component_registry.register(kind, NotebookSchema)
+    try:
+        yield kind
+    finally:
+        component_registry.unregister(kind)
+
+
+@pytest.fixture
 def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
     return tmp_path / "results", tmp_path / "Database"
 
@@ -74,26 +103,49 @@ def working_point(entry: ResultEntry) -> PointView:
 
 
 def write_yaml(source: Path, document: object) -> None:
-    with source.open("w") as stream:
+    with source.open("w", encoding="utf-8") as stream:
         YAML(typ="rt").dump(document, stream)
 
 
-def test_new_point_inherits_setup_without_copying_values(
+def test_new_point_copies_complete_components_and_keeps_independent_values(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
-    entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
+    entry.setup.add_component("R1", kind="resonator", freq=6000.0)
+    entry.setup.add_component(
+        "Q1",
+        kind="qubit/transmon",
+        freq=5000.0,
+        readout="R1",
+        wiring={"flux_ch": 3},
+        ext={"nested": {"note": "seed"}},
+    )
     point = entry.new_point("stable (cold)")
     assert point.Q1.freq == 5000.0
+    assert point.Q1.readout == "R1"
     assert point.description is None
     assert entry.list_points() == ["stable (cold)"]
-    assert entry.use_point("stable (cold)").Q1.freq == 5000.0
-
-    source = entry_roots[0] / "entry/points/stable (cold)/point.yaml"
+    root = entry_roots[0] / "entry"
+    source = root / "points/stable (cold)/point.yaml"
     document = YAML(typ="safe").load(source.read_text())
-    assert document["components"] == {}
+    assert document["components"]["Q1"]["kind"] == "qubit/transmon"
+    assert document["components"]["Q1"]["freq"] == 5e9
+    assert document["components"]["R1"]["kind"] == "resonator"
     assert document["general"]["created_at"].endswith("Z")
-    source.unlink()
+
+    entry.setup.Q1.freq = 5100.0
+    entry.setup.Q1.wiring.flux_ch = 4
+    entry.setup.Q1.ext.nested = {"note": "new template"}
     assert point.Q1.freq == 5000.0
+    assert point.Q1.wiring.flux_ch == 3
+    assert point.Q1.ext.nested == {"note": "seed"}
+    point.Q1.freq = 5200.0
+    point.Q1.ext.nested = {"note": "point"}
+    assert entry.setup.Q1.freq == 5100.0
+    assert entry.setup.Q1.ext.nested == {"note": "new template"}
+    assert entry.new_point("later").Q1.freq == 5100.0
+    assert entry.use_point("stable (cold)").Q1.freq == 5200.0
+    source.unlink()
+    assert point.Q1.freq == 5200.0
 
 
 def test_list_points_sorts_complete_points_and_ignores_incomplete_directories(
@@ -104,7 +156,6 @@ def test_list_points_sorts_complete_points_and_ignores_incomplete_directories(
     partial = entry_roots[0] / "entry/points/partial"
     partial.mkdir()
     (partial / "point.yaml").touch()
-
     assert entry.list_points() == ["a (warm)", "z (cold)"]
     with pytest.raises(FileNotFoundError):
         entry.use_point("partial")
@@ -122,213 +173,229 @@ def test_point_labels_reject_unsafe_path_segments(
     assert entry.list_points() == []
 
 
-def test_new_point_rejects_missing_notebook_values_and_cleans_destination(
-    entry: ResultEntry, entry_roots: tuple[Path, Path], range_kind: str
+@pytest.mark.parametrize("target", ["setup", "point"])
+def test_add_component_requires_complete_values_and_runs_original_model(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], notebook_kind: str, target: str
 ) -> None:
-    entry.setup.add_component("R1", kind=range_kind, low=1.0)
-    root = entry_roots[0] / "entry"
-    before = (root / "setup.yaml").read_bytes()
-    with pytest.raises(ValidationError, match="R1.high"):
-        entry.new_point("invalid")
-    assert (root / "setup.yaml").read_bytes() == before
-    assert not (root / "points/invalid").exists()
-    assert entry.list_points() == []
-    assert entry.setup.R1.low == 1.0
+    view = entry.setup if target == "setup" else entry.new_point("a")
+    source = (
+        entry_roots[0]
+        / "entry"
+        / ("setup.yaml" if target == "setup" else "points/a/point.yaml")
+    )
+    before = source.read_bytes()
+    with pytest.raises(ValidationError, match="gain"):
+        view.add_component("C1", kind=notebook_kind, title=" Title ")
+    with pytest.raises(ValidationError, match="greater than"):
+        view.add_component("C1", kind=notebook_kind, gain=-1.0, title=" Title ")
+    assert source.read_bytes() == before
+    view.add_component("C1", kind=notebook_kind, gain=1.0, title=" Title ")
+    assert view.C1.gain == 1.0
+    assert view.C1.title == "title"
+    assert view.C1.timing == {"width": 2.0, "note": "factory"}
+    with pytest.raises(ValueError, match="already exists"):
+        view.add_component("C1", kind=notebook_kind, gain=2.0, title="other")
+    with view.edit() as draft:
+        draft.set("C1.timing.width", 3.0)
+    assert view.C1.timing == {"width": 3.0, "note": "factory"}
+    stored = YAML(typ="safe").load(source.read_text())
+    assert stored["components"]["C1"]["timing"]["width"] == 3e-6
 
-    entry.setup.R1.high = 2.0
-    point = entry.new_point("valid")
-    assert point.R1.low == 1.0
-    assert point.R1.high == 2.0
+
+@pytest.mark.parametrize("stored_defaults", [True, False])
+def test_seed_keeps_generated_default_values_across_independent_edits_and_reload(
+    entry: ResultEntry,
+    notebook_kind: str,
+    entry_roots: tuple[Path, Path],
+    stored_defaults: bool,
+) -> None:
+    entry.setup.add_component("C1", kind=notebook_kind, gain=1.0, title="template")
+    if not stored_defaults:
+        source = entry_roots[0] / "entry/setup.yaml"
+        template = YAML(typ="rt").load(source.read_text())
+        template["components"]["C1"].pop("token")
+        template["components"]["C1"].pop("timing")
+        write_yaml(source, template)
+    point = entry.new_point("a")
+    token = point.C1.token
+    assert token == entry.setup.C1.token
+    entry.setup.C1.title = "new template"
+    point.C1.gain = 2.0
+    point.refresh()
+    assert point.C1.token == token
+    assert point.C1.title == "template"
+    assert entry.setup.C1.gain == 1.0
+    assert entry.use_point("a").C1.token == token
+    cloned = entry.new_point("b", clone_from=point)
+    assert cloned.C1.token == token
+    assert cloned.C1.timing == point.C1.timing
+    cloned.C1.gain = 3.0
+    cloned.refresh()
+    assert cloned.C1.token == token
+    assert point.C1.gain == 2.0
 
 
-def test_point_edit_routes_existing_and_new_fields_to_their_layers(
+def test_point_add_component_validates_references_in_its_own_document(
+    entry: ResultEntry, entry_roots: tuple[Path, Path]
+) -> None:
+    point = entry.new_point("a")
+    entry.setup.add_component("R1", kind="resonator")
+    source = entry_roots[0] / "entry/points/a/point.yaml"
+    before = source.read_bytes()
+    with pytest.raises(MissingReferenceError) as error:
+        point.add_component("Q1", kind="qubit/transmon", readout="R1")
+    assert error.value.source == source
+    assert error.value.component == "Q1"
+    assert source.read_bytes() == before
+    point.add_component("R1", kind="resonator")
+    point.add_component("Q1", kind="qubit/transmon", readout="R1", freq=5000.0)
+    assert point.Q1.readout == "R1"
+    assert entry.use_point("a").Q1.freq == 5000.0
+    with pytest.raises(AttributeError):
+        _ = entry.setup.Q1
+
+
+def test_point_edit_only_changes_its_document(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
     point = entry.new_point("a")
+    setup_source = entry_roots[0] / "entry/setup.yaml"
+    before = setup_source.read_bytes()
     with point.edit() as draft:
         draft.Q1.freq = 5100.0
         draft.Q1.t1 = 12.0
         draft.description = "point note"
     assert point.Q1.freq == 5100.0
     assert point.Q1.t1 == 12.0
-    assert entry.setup.Q1.freq == 5100.0
+    assert entry.setup.Q1.freq == 5000.0
     assert point.description == "point note"
     assert entry.setup.description is None
-
+    assert setup_source.read_bytes() == before
     results, database = entry_roots
     reloaded = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reloaded.use_point("a").Q1.t1 == 12.0
-    assert reloaded.use_point("a").Q1.freq == 5100.0
-    setup = YAML(typ="safe").load((results / "entry/setup.yaml").read_text())
     stored = YAML(typ="safe").load((results / "entry/points/a/point.yaml").read_text())
-    assert setup["components"]["Q1"]["freq"] == 5.1e9
-    assert stored["components"]["Q1"] == {"t1": 12e-6}
+    assert stored["components"]["Q1"]["freq"] == 5.1e9
+    assert stored["components"]["Q1"]["t1"] == 12e-6
 
 
 @pytest.mark.parametrize("operation", ["refresh", "use_point"])
-def test_point_reload_uses_latest_layers_and_keeps_snapshots_on_failure(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    operation: Literal["refresh", "use_point"],
+def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], operation: str
 ) -> None:
     entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
     point = entry.new_point("a")
-    point.Q1.t1 = 10.0
     results, database = entry_roots
     other = ResultEntry.open("entry", result_root=results, database_root=database)
-    with other.use_point("a").edit() as draft:
-        draft.Q1.freq = 5100.0
-        draft.Q1.t1 = 12.0
+    other.use_point("a").Q1.freq = 5100.0
     assert point.Q1.freq == 5000.0
-    assert point.Q1.t1 == 10.0
-    if operation == "refresh":
-        point.refresh()
-    else:
-        point = entry.use_point("a")
-    assert point.Q1.freq == 5100.0
-    assert point.Q1.t1 == 12.0
-    assert entry.setup.Q1.freq == 5100.0
-
-    other.setup.Q1.freq = 5200.0
-    source = results / "entry/points/a/point.yaml"
-    yaml = YAML(typ="rt")
-    stored = yaml.load(source.read_text())
-    stored["components"]["Q1"]["freq"] = 5.2e9
-    with source.open("w") as stream:
-        yaml.dump(stored, stream)
+    root = results / "entry"
+    (root / "setup.yaml").write_text("invalid: [", encoding="utf-8")
     reload_point = (
         point.refresh if operation == "refresh" else lambda: entry.use_point("a")
     )
-    with pytest.raises(LayerConflictError, match="Q1.freq"):
+    loaded = reload_point()
+    if loaded is not None:
+        point = loaded
+    assert point.Q1.freq == 5100.0
+    assert entry.setup.Q1.freq == 5000.0
+    point.Q1.t1 = 12.0
+    assert point.Q1.t1 == 12.0
+    source = root / "points/a/point.yaml"
+    stored = YAML(typ="rt").load(source.read_text())
+    stored["components"]["Q1"]["freq"] = "invalid"
+    write_yaml(source, stored)
+    with pytest.raises(ValueError, match="freq"):
         reload_point()
     assert point.Q1.freq == 5100.0
     assert point.Q1.t1 == 12.0
-    assert entry.setup.Q1.freq == 5100.0
 
 
-@pytest.mark.parametrize("nested", [False, True])
-def test_move_transfers_value_and_provenance_between_layers(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    nested: bool,
+def test_point_edit_rejects_invalid_reload_before_exposing_draft(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], range_kind: str
 ) -> None:
-    entry.setup.add_component(
-        "Q1",
-        kind="qubit/transmon",
-        freq=5000.0,
-        wiring={"time_of_flight": 2.0, "flux_ch": 3},
-    )
-    path = "Q1.wiring.time_of_flight" if nested else "Q1.freq"
-    leaf = "time_of_flight" if nested else "freq"
-    value = 2.0 if nested else 5000.0
-    si_value = 2e-6 if nested else 5e9
-    results, database = entry_roots
-    setup_source = results / "entry/setup.yaml"
-    point_source = results / "entry/points/a/point.yaml"
+    entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
+    point = entry.new_point("a")
+    point_source = entry_roots[0] / "entry/points/a/point.yaml"
+    stored = YAML(typ="rt").load(point_source.read_text())
+    stored["components"]["R1"].pop("low")
+    write_yaml(point_source, stored)
+    before = point_source.read_bytes()
+    entered: list[bool] = []
+    with pytest.raises(ValidationError, match="R1.low"), point.edit():
+        entered.append(True)
+    assert entered == []
+    assert point.R1.low == 1.0
+    assert point.R1.high == 2.0
+    assert point_source.read_bytes() == before
+
+
+def test_setup_commit_does_not_validate_or_modify_existing_points(
+    working_point: PointView, entry: ResultEntry, entry_roots: tuple[Path, Path]
+) -> None:
+    point_source = entry_roots[0] / "entry/points/a/point.yaml"
+    point_source.write_text("invalid: [", encoding="utf-8")
+    before = point_source.read_bytes()
+    with entry.setup.edit() as draft:
+        draft.Q1.freq = 5300.0
+    assert point_source.read_bytes() == before
+    assert working_point.Q1.freq == 5000.0
+    assert entry.new_point("b").Q1.freq == 5300.0
+
+
+def test_seed_copies_provenance_without_clone_origin_and_keeps_it_independent(
+    entry: ResultEntry, entry_roots: tuple[Path, Path]
+) -> None:
+    entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
+    root = entry_roots[0] / "entry"
+    source = root / "setup.yaml"
     yaml = YAML(typ="rt")
-    stored = yaml.load(setup_source.read_text())
+    stored = yaml.load(source.read_text())
     provenance = {
         "source": "manual",
         "kind": None,
         "run_id": None,
         "at": "2026-10-04T00:00:00Z",
-        "stderr": None,
+        "stderr": 1e6,
     }
-    stored["provenance"][path] = provenance
-    with setup_source.open("w") as stream:
-        yaml.dump(stored, stream)
-    entry.setup.refresh()
+    stored["provenance"]["Q1.freq"] = provenance
+    write_yaml(source, stored)
     point = entry.new_point("a")
-
-    point.move(path, to="point")
-    assert (point.Q1.wiring.time_of_flight if nested else point.Q1.freq) == value
-    with pytest.raises(AttributeError, match=path):
-        _ = entry.setup.Q1.wiring.time_of_flight if nested else entry.setup.Q1.freq
-    setup = yaml.load(setup_source.read_text())
-    stored = yaml.load(point_source.read_text())
-    setup_fields = setup["components"]["Q1"]
-    point_fields = stored["components"]["Q1"]
-    assert leaf not in (setup_fields.get("wiring", {}) if nested else setup_fields)
-    assert path not in setup["provenance"]
-    assert (point_fields["wiring"] if nested else point_fields)[leaf] == si_value
-    assert stored["provenance"][path] == provenance
-    assert entry.setup.Q1.wiring.flux_ch == 3
-    before = setup_source.read_bytes(), point_source.read_bytes()
-    with pytest.raises(ValueError, match=path):
-        point.move(path, to="point")
-    assert (setup_source.read_bytes(), point_source.read_bytes()) == before
-
-    point.move(path, to="setup")
-    reloaded = ResultEntry.open("entry", result_root=results, database_root=database)
-    reopened_point = reloaded.use_point("a")
-    assert (
-        reloaded.setup.Q1.wiring.time_of_flight if nested else reloaded.setup.Q1.freq
-    ) == value
-    assert (
-        reopened_point.Q1.wiring.time_of_flight if nested else reopened_point.Q1.freq
-    ) == value
-    assert reopened_point.Q1.wiring.flux_ch == 3
-    stored = yaml.load(point_source.read_text())
-    setup = yaml.load(setup_source.read_text())
-    point_fields = stored["components"].get("Q1", {})
-    assert leaf not in (point_fields.get("wiring", {}) if nested else point_fields)
-    assert path not in stored["provenance"]
-    assert setup["provenance"][path] == provenance
-
-
-def test_point_edit_rejects_invalid_reload_before_exposing_draft(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    range_kind: str,
-) -> None:
-    entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
-    point = entry.new_point("a")
-    setup_source = entry_roots[0] / "entry/setup.yaml"
-    point_source = entry_roots[0] / "entry/points/a/point.yaml"
-    yaml = YAML(typ="rt")
-    stored = yaml.load(setup_source.read_text())
-    stored["components"]["R1"].pop("low")
-    with setup_source.open("w") as stream:
-        yaml.dump(stored, stream)
-    before = setup_source.read_bytes(), point_source.read_bytes()
-    entered: list[bool] = []
-    with (
-        pytest.raises(ValidationError, match="R1.low"),
-        point.edit(),
-    ):
-        entered.append(True)
-    assert entered == []
-    assert point.R1.low == 1.0
-    assert point.R1.high == 2.0
-    assert (setup_source.read_bytes(), point_source.read_bytes()) == before
+    destination = root / "points/a/point.yaml"
+    seeded = yaml.load(destination.read_text())
+    assert seeded["provenance"]["Q1.freq"] == provenance
+    point.Q1.freq = 5100.0
+    assert yaml.load(source.read_text())["provenance"]["Q1.freq"] == provenance
+    entry.setup.Q1.freq = 5200.0
+    assert point.Q1.freq == 5100.0
+    assert point.Q1.kind == "qubit/transmon"
 
 
 @pytest.mark.parametrize("source_mode", ["label", "view"])
-def test_clone_copies_only_point_and_module_and_rejects_existing_destination(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    source_mode: Literal["label", "view"],
+def test_clone_copies_only_complete_point_and_module_without_reading_setup(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], source_mode: str
 ) -> None:
     entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
     point = entry.new_point("source")
     with point.edit() as draft:
         draft.Q1.t1 = 12.0
         draft.description = "source environment"
-    root = entry_roots[0] / "entry/points"
-    source = root / "source"
+    root = entry_roots[0] / "entry"
+    source = root / "points/source"
     (source / "module_cfg.yaml").write_text(
         "format: zcu.module-library\nformat_version: '1.0'\nQ1: {pulse: arbitrary}\n"
     )
     (source / "data.h5").write_bytes(b"not cloned")
     (source / "image.png").write_bytes(b"not cloned")
+    (root / "setup.yaml").write_text("invalid: [", encoding="utf-8")
     source_arg = "source" if source_mode == "label" else point
     cloned = entry.new_point("target", clone_from=source_arg)
     assert cloned.Q1.freq == 5000.0
     assert cloned.Q1.t1 == 12.0
     assert cloned.description == "source environment"
-    destination = root / "target"
-    assert {path.name for path in destination.iterdir()} == {
+    destination = root / "points/target"
+    assert {path.name for path in destination.iterdir() if path.suffix != ".lock"} == {
         "point.yaml",
         "module_cfg.yaml",
     }
@@ -336,7 +403,8 @@ def test_clone_copies_only_point_and_module_and_rejects_existing_destination(
         source / "module_cfg.yaml"
     ).read_bytes()
     stored = YAML(typ="safe").load((destination / "point.yaml").read_text())
-    assert stored["components"]["Q1"] == {"t1": 12e-6}
+    assert stored["components"]["Q1"]["kind"] == "qubit/transmon"
+    assert stored["components"]["Q1"]["t1"] == 12e-6
     before = (destination / "point.yaml").read_bytes()
     with pytest.raises(FileExistsError):
         entry.new_point("target", clone_from=source_arg)
@@ -344,13 +412,11 @@ def test_clone_copies_only_point_and_module_and_rejects_existing_destination(
     assert entry.list_points() == ["source", "target"]
 
 
-def test_clone_marks_only_point_provenance_with_its_direct_source(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
+def test_clone_marks_each_copied_source_with_its_direct_point(
+    entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
-    point = entry.new_point("a")
-    point.Q1.t1 = 12.0
+    entry.new_point("a").Q1.t1 = 12.0
     root = entry_roots[0] / "entry"
     yaml = YAML(typ="rt")
     source = root / "points/a/point.yaml"
@@ -364,27 +430,18 @@ def test_clone_marks_only_point_provenance_with_its_direct_source(
     }
     stored["provenance"]["Q1.t1"] = original
     write_yaml(source, stored)
-    setup = yaml.load((root / "setup.yaml").read_text())
-    setup["provenance"]["Q1.freq"] = {**original, "stderr": None}
-    write_yaml(root / "setup.yaml", setup)
-
-    entry.new_point("b", clone_from=point)
+    entry.new_point("b", clone_from="a")
     cloned = yaml.load((root / "points/b/point.yaml").read_text())
     assert cloned["provenance"]["Q1.t1"] == {
         **original,
         "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
     }
-    assert "Q1.freq" not in cloned["provenance"]
     entry.new_point("c", clone_from="b")
     cloned_again = yaml.load((root / "points/c/point.yaml").read_text())
     assert cloned_again["provenance"]["Q1.t1"] == {
         **original,
         "cloned_from": {"entry_id": entry.entry_id, "point": "b"},
     }
-    assert (
-        "cloned_from"
-        not in yaml.load((root / "setup.yaml").read_text())["provenance"]["Q1.freq"]
-    )
 
 
 @pytest.mark.parametrize(
@@ -398,10 +455,7 @@ def test_clone_marks_only_point_provenance_with_its_direct_source(
     ],
 )
 def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    write: str,
-    path: str,
+    entry: ResultEntry, entry_roots: tuple[Path, Path], write: str, path: str
 ) -> None:
     entry.setup.add_component("Q1", kind="qubit/transmon", freq=5000.0)
     original = entry.new_point("a")
@@ -420,27 +474,22 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
         "at": "2026-10-04T00:00:00Z",
         "stderr": None,
     }
-    origin_paths = ["Q1.t1", "Q1.t2", "Q1.wiring.flux_ch", "Q1.ext.nested.note"]
-    stored["provenance"] = {
-        origin_path: deepcopy(provenance) for origin_path in origin_paths
-    }
+    paths = ["Q1.t1", "Q1.t2", "Q1.wiring.flux_ch", "Q1.ext.nested.note"]
+    stored["provenance"] = {key: deepcopy(provenance) for key in paths}
     write_yaml(source, stored)
     point = entry.new_point("b", clone_from="a")
     setup_before = (root / "setup.yaml").read_bytes()
-
     if write == "attribute":
         with pytest.raises(ValidationError):
             point.Q1.t2 = "not-a-number"
         point.Q1.t1 = 12.0
     else:
         with point.edit() as draft:
+            with pytest.raises(ValidationError):
+                draft.set("Q1.t2", "not-a-number")
             if write == "edit":
-                with pytest.raises(ValidationError):
-                    draft.Q1.t2 = "not-a-number"
                 draft.Q1.t1 = 12.0
             else:
-                with pytest.raises(ValidationError):
-                    draft.set("Q1.t2", "not-a-number")
                 value = (
                     "accepted"
                     if path == "Q1.ext.nested.note"
@@ -449,10 +498,9 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
                     else 12.0
                 )
                 draft.set(path, value)
-
     rewritten = yaml.load((root / "points/b/point.yaml").read_text())
     assert rewritten["provenance"][path] == provenance
-    for untouched in set(origin_paths) - {path}:
+    for untouched in set(paths) - {path}:
         assert rewritten["provenance"][untouched] == {
             **provenance,
             "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
@@ -491,18 +539,14 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
             entry.new_point("b", clone_from=working_point)
     assert not (root / "points/b").exists()
     assert entry.list_points() == ["a"]
-    assert {
-        name: (source / name).read_bytes() for name in ("point.yaml", "module_cfg.yaml")
-    } == before
+    assert {name: (source / name).read_bytes() for name in before} == before
     assert working_point.Q1.t1 == 12.0
     assert entry.new_point("b", clone_from="a").Q1.t1 == 12.0
 
 
 @pytest.mark.parametrize("source_mode", ["label", "view"])
 def test_cross_entry_clone_is_rejected_and_removes_new_destination(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    source_mode: Literal["label", "view"],
+    entry: ResultEntry, entry_roots: tuple[Path, Path], source_mode: str
 ) -> None:
     results, database = entry_roots
     other = ResultEntry.create("other", result_root=results, database_root=database)
@@ -520,9 +564,8 @@ def test_cross_entry_clone_is_rejected_and_removes_new_destination(
     assert foreign_source.read_bytes() == before
 
 
-def test_independent_entry_edits_merge_different_leaves_across_layers(
-    working_point: PointView,
-    entry_roots: tuple[Path, Path],
+def test_independent_handles_merge_different_leaves_in_one_point(
+    working_point: PointView, entry_roots: tuple[Path, Path]
 ) -> None:
     results, database = entry_roots
     other = ResultEntry.open("entry", result_root=results, database_root=database)
@@ -531,146 +574,37 @@ def test_independent_entry_edits_merge_different_leaves_across_layers(
         other.use_point("a").Q1.t1 = 14.0
     assert working_point.Q1.freq == 5100.0
     assert working_point.Q1.t1 == 14.0
-    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    point = reopened.use_point("a")
-    assert point.Q1.freq == 5100.0
-    assert point.Q1.t1 == 14.0
+    reopened = ResultEntry.open(
+        "entry", result_root=results, database_root=database
+    ).use_point("a")
+    assert reopened.Q1.freq == 5100.0
+    assert reopened.Q1.t1 == 14.0
 
 
-@pytest.mark.parametrize("conflict", ["setup", "point"])
-def test_multilayer_conflict_rejects_all_changes_and_keeps_snapshot(
-    working_point: PointView,
-    entry_roots: tuple[Path, Path],
-    conflict: str,
+@pytest.mark.parametrize("conflict", ["freq", "t1"])
+def test_same_leaf_conflict_rejects_whole_point_transaction(
+    working_point: PointView, entry_roots: tuple[Path, Path], conflict: str
 ) -> None:
     results, database = entry_roots
-    other = ResultEntry.open("entry", result_root=results, database_root=database)
-    other_point = other.use_point("a")
-    setup_source = results / "entry/setup.yaml"
-    point_source = results / "entry/points/a/point.yaml"
+    other = ResultEntry.open(
+        "entry", result_root=results, database_root=database
+    ).use_point("a")
+    source = results / "entry/points/a/point.yaml"
     with ExitStack() as transaction:
         draft = transaction.enter_context(working_point.edit())
         draft.Q1.freq = 5100.0
         draft.Q1.t1 = 13.0
-        if conflict == "setup":
-            other_point.Q1.freq = 5200.0
+        if conflict == "freq":
+            other.Q1.freq = 5200.0
         else:
-            other_point.Q1.t1 = 14.0
-        before = setup_source.read_bytes(), point_source.read_bytes()
-        with pytest.raises(ConflictError) as raised:
+            other.Q1.t1 = 14.0
+        before = source.read_bytes()
+        with pytest.raises(ConflictError) as error:
             transaction.close()
-    assert raised.value.source == (
-        setup_source if conflict == "setup" else point_source
-    )
-    assert (setup_source.read_bytes(), point_source.read_bytes()) == before
+    assert error.value.source == source
+    assert source.read_bytes() == before
     assert working_point.Q1.freq == 5000.0
     assert working_point.Q1.t1 == 12.0
-
     working_point.refresh()
-    assert working_point.Q1.freq == (5200.0 if conflict == "setup" else 5000.0)
-    assert working_point.Q1.t1 == (12.0 if conflict == "setup" else 14.0)
-
-
-@pytest.mark.parametrize("restore_failure", [False, True])
-def test_second_layer_replace_failure_restores_or_reports_actual_partial_commit(
-    working_point: PointView,
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-    restore_failure: bool,
-) -> None:
-    results, database = entry_roots
-    setup_source = results / "entry/setup.yaml"
-    point_source = results / "entry/points/a/point.yaml"
-    before = setup_source.read_bytes(), point_source.read_bytes()
-    replace = Path.replace
-    replaced_source: Path | None = None
-    write_failed = False
-    write_error = OSError("second replace failed")
-    recovery_error = OSError("restore failed")
-
-    def fail_second_replace(source: Path, target: str | Path) -> Path:
-        nonlocal replaced_source, write_failed
-        destination = Path(target)
-        if destination not in (setup_source, point_source):
-            return replace(source, target)
-        if replaced_source is None:
-            result = replace(source, target)
-            replaced_source = destination
-            return result
-        if not write_failed:
-            write_failed = True
-            raise write_error
-        if restore_failure:
-            raise recovery_error
-        return replace(source, target)
-
-    monkeypatch.setattr(Path, "replace", fail_second_replace)
-    with ExitStack() as transaction:
-        draft = transaction.enter_context(working_point.edit())
-        draft.Q1.freq = 5100.0
-        draft.Q1.t1 = 13.0
-        if restore_failure:
-            with pytest.raises(PartialCommitError) as raised:
-                transaction.close()
-            assert raised.value.completed == (replaced_source,)
-            assert raised.value.recovery_failed == (replaced_source,)
-            assert raised.value.pending == (
-                point_source if replaced_source == setup_source else setup_source,
-            )
-            assert raised.value.cause is write_error
-            assert raised.value.recovery_cause is recovery_error
-        else:
-            with pytest.raises(OSError, match="second replace failed"):
-                transaction.close()
-
-    assert working_point.Q1.freq == 5000.0
-    assert working_point.Q1.t1 == 12.0
-    assert entry.setup.Q1.freq == 5000.0
-    if restore_failure:
-        yaml = YAML(typ="safe")
-        assert yaml.load(setup_source.read_text())["components"]["Q1"]["freq"] == (
-            5.1e9 if replaced_source == setup_source else 5e9
-        )
-        assert yaml.load(point_source.read_text())["components"]["Q1"]["t1"] == (
-            13e-6 if replaced_source == point_source else 12e-6
-        )
-    else:
-        assert (setup_source.read_bytes(), point_source.read_bytes()) == before
-    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    observed = reopened.use_point("a")
-    assert observed.Q1.freq == (
-        5100.0 if restore_failure and replaced_source == setup_source else 5000.0
-    )
-    assert observed.Q1.t1 == (
-        13.0 if restore_failure and replaced_source == point_source else 12.0
-    )
-
-
-def test_setup_commit_validates_complete_views_of_existing_points(
-    entry: ResultEntry, entry_roots: tuple[Path, Path], range_kind: str
-) -> None:
-    entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
-    point = entry.new_point("a")
-    point.move("R1.high", to="point")
-    assert point.R1.low == 1.0
-    assert point.R1.high == 2.0
-    with pytest.raises(AttributeError, match="R1.high"):
-        _ = entry.setup.R1.high
-    results, _ = entry_roots
-    setup_source = results / "entry/setup.yaml"
-    point_source = results / "entry/points/a/point.yaml"
-    yaml = YAML(typ="rt")
-    stored = yaml.load(point_source.read_text())
-    stored["components"]["R1"].pop("high")
-    write_yaml(point_source, stored)
-    before = setup_source.read_bytes(), point_source.read_bytes()
-
-    with (
-        pytest.raises(ValidationError, match="R1.high"),
-        entry.setup.edit() as draft,
-    ):
-        draft.R1.low = 3.0
-    assert (setup_source.read_bytes(), point_source.read_bytes()) == before
-    assert point.R1.low == 1.0
-    assert point.R1.high == 2.0
+    assert working_point.Q1.freq == (5200.0 if conflict == "freq" else 5000.0)
+    assert working_point.Q1.t1 == (12.0 if conflict == "freq" else 14.0)

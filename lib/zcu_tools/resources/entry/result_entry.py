@@ -3,9 +3,8 @@
 import errno
 import os
 import shutil
-from collections.abc import Generator, Mapping
-from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from collections.abc import Mapping
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from uuid import uuid4
@@ -13,7 +12,6 @@ from uuid import uuid4
 from ruamel.yaml import YAML
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.resources._document_commit import PreparedDocument
 from zcu_tools.resources.document_store import (
     DocumentStore,
     FieldPath,
@@ -21,14 +19,12 @@ from zcu_tools.resources.document_store import (
 )
 
 from . import _point_origin
-from .errors import PartialCommitError
-from .layering import compose, point_units, route, validate_point
+from .errors import RenameRecoveryError
 from .points import PointView
 from .registry import component_registry
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
-    LayeredDocument,
     PointDocument,
     SetupDocument,
     is_forward_minor,
@@ -76,19 +72,14 @@ def rename_entry(
                 )
             result_new.rename(result_old)
         except OSError as recovery_cause:
-            raise PartialCommitError(
-                completed=(result_new,),
-                pending=(database_new,),
-                recovery_failed=(result_old,),
+            raise RenameRecoveryError(
+                moved_result=result_new,
+                pending_database=database_new,
+                recovery_destination=result_old,
                 cause=cause,
                 recovery_cause=recovery_cause,
             ) from cause
         raise
-
-
-@dataclass
-class _PointContext:
-    setup: SetupDocument
 
 
 class ResultEntry:
@@ -107,18 +98,15 @@ class ResultEntry:
             EntrySetupDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
-            units=self._setup_units,
+            units=lambda document: self._document_units(document, source=source),
             validate=self._validate_setup,
-            lock_path=result_path / ".entry.lock",
         )
 
-    def _setup_units(
-        self, document: Mapping[str, YamlValue]
+    def _document_units(
+        self, document: Mapping[str, YamlValue], *, source: Path
     ) -> Mapping[FieldPath, UnitSpec]:
         result: dict[FieldPath, UnitSpec] = {}
-        forward_minor = is_forward_minor(
-            document, source=self._result_path / "setup.yaml"
-        )
+        forward_minor = is_forward_minor(document, source=source)
         components = document.get("components")
         if isinstance(components, dict):
             for name, fields in components.items():
@@ -151,9 +139,7 @@ class ResultEntry:
 
     @property
     def setup(self) -> SetupView:
-        return SetupView(
-            self._setup_store, self._result_path / "setup.yaml", self._edit_setup
-        )
+        return SetupView(self._setup_store, self._result_path / "setup.yaml")
 
     @property
     def entry_id(self) -> str:
@@ -177,302 +163,115 @@ class ResultEntry:
     def new_point(
         self, label: str, *, clone_from: str | PointView | None = None
     ) -> PointView:
-        """Create a new point directory and return its validated bound view.
+        """Create an independent complete point and return its validated view.
 
-        label is a nonempty single path segment, not '.', '..', an absolute path
-        or a path containing separators or NUL. An escaping path raises ValueError;
-        any existing destination, including a symlink, raises FileExistsError.
-        With clone_from=None, create empty point values and a module-library
-        header; required values must already be supplied by setup.
-        clone_from is a source label or PointView from this entry. Copy only its
-        point.yaml and module_cfg.yaml, renew created_at, and tag copied sources
-        with cloned_from for that direct source. Setup values are not copied or
-        tagged. Cross-entry views raise ValueError. Missing files or invalid
-        combined values raise their loading/validation error. Creation failure
-        removes only the new point directory, never the source or shared setup.
+        label is a safe single path segment; existing destinations are rejected.
+        Without clone_from, copy the latest setup components and provenance.
+        Otherwise copy only the same-entry source point and module_cfg, renew its
+        creation time and mark sources with that direct clone origin. References
+        resolve only inside the new point. Neither path changes its source.
+        Creation failure removes only the new destination. No cross-point
+        transaction, active point selection or data/image copy is provided.
         """
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
-        if clone_from is not None:
-            destination.mkdir()
-            try:
-                self._clone_point(destination, clone_from)
-                return self.use_point(label)
-            except BaseException:
-                shutil.rmtree(destination)
-                raise
         destination.mkdir()
         try:
-            document = {
-                "format": PARAMETER_FORMAT,
-                "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
-                "general": {
-                    "created_at": datetime.now(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z")
-                },
-                "components": {},
-                "provenance": {},
-            }
-            with (destination / "point.yaml").open("x", encoding="utf-8") as stream:
-                YAML(typ="rt").dump(document, stream)
-            with (destination / "module_cfg.yaml").open(
-                "x", encoding="utf-8"
-            ) as stream:
-                YAML(typ="rt").dump(
-                    {"format": "zcu.module-library", "format_version": "1.0"}, stream
-                )
+            if clone_from is not None:
+                self._clone_point(destination, clone_from)
+            else:
+                self._seed_point(destination)
             return self.use_point(label)
         except BaseException:
             shutil.rmtree(destination)
             raise
 
+    def _seed_point(self, destination: Path) -> None:
+        # Copy SI YAML, not working-unit models, while the template lock is held.
+        with self._setup_store.locked():
+            self._setup_store.refresh()
+            components = self._setup_store.snapshot().components
+            yaml = YAML(typ="rt")
+            with (self._result_path / "setup.yaml").open(encoding="utf-8") as stream:
+                template = yaml.load(stream)
+            document = {
+                "format": template["format"],
+                "format_version": template["format_version"],
+                "general": {
+                    "created_at": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z")
+                },
+                "components": deepcopy(template["components"]),
+                "provenance": deepcopy(template.get("provenance", {})),
+            }
+            with (destination / "point.yaml").open("x", encoding="utf-8") as stream:
+                yaml.dump(document, stream)
+            # Missing YAML defaults may have been generated in the template's
+            # native model. Copy those values too, through the Store's SI boundary.
+            with self._point_store(destination / "point.yaml").edit() as draft:
+                draft.components = components
+        with (destination / "module_cfg.yaml").open("x", encoding="utf-8") as stream:
+            YAML(typ="rt").dump(
+                {"format": "zcu.module-library", "format_version": "1.0"}, stream
+            )
+
     def _clone_point(self, destination: Path, clone_from: str | PointView) -> None:
-        with ExitStack() as stack, self._setup_store.locked():
-            source = (
-                _point_origin.clone_source(clone_from, self._result_path)
-                if isinstance(clone_from, PointView)
-                else _entry_path(self._result_path / "points", clone_from)
-            )
-            setup_state = stack.enter_context(
-                self._setup_store.read_state(locked_by=self._setup_store)
-            )
-            store, _ = self._point_store(source / "point.yaml", setup_state.base)
-            compose(
-                setup_state.base,
-                store.snapshot(),
-                source / "point.yaml",
-                complete=True,
-            )
+        source = (
+            _point_origin.clone_source(clone_from, self._result_path)
+            if isinstance(clone_from, PointView)
+            else _entry_path(self._result_path / "points", clone_from)
+        )
+        store = self._point_store(source / "point.yaml")
+        with store.locked():
+            store.refresh()
+            components = store.snapshot().components
             for filename in ("point.yaml", "module_cfg.yaml"):
                 shutil.copyfile(source / filename, destination / filename)
-            cloned_store, _ = self._point_store(
-                destination / "point.yaml", setup_state.base
-            )
-            cloned_state = stack.enter_context(
-                cloned_store.read_state(locked_by=self._setup_store)
-            )
-            cloned_state.draft.general.created_at = (
+        cloned_store = self._point_store(destination / "point.yaml")
+        with cloned_store.edit() as draft:
+            draft.components = components
+            draft.general.created_at = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
-            for metadata in cloned_state.draft.provenance.values():
+            for metadata in draft.provenance.values():
                 metadata["cloned_from"] = {
-                    "entry_id": setup_state.base.general.entry_id,
+                    "entry_id": self.entry_id,
                     "point": source.name,
                 }
-            prepared = cloned_store.prepare(cloned_state, locked_by=self._setup_store)
-            try:
-                prepared.replace()
-            finally:
-                prepared.discard()
 
     def use_point(self, label: str) -> PointView:
-        """Load a point and latest setup, returning an independently bound view.
+        """Load one complete point and return an independently bound view.
 
         label follows new_point's single-segment path rules. Both point.yaml and
         module_cfg.yaml must exist; the latter is not parsed here. Invalid labels
-        raise ValueError and missing files raise FileNotFoundError. Validate point
-        fields against setup's declared kinds, reject duplicate leaves, and check
-        required fields, references and canonical values in the combined view.
-        Loading or validation failure leaves the existing setup snapshot intact.
-        Success refreshes the shared setup snapshot without changing other views'
-        point bindings. No parameter files are committed or global active point selected.
+        raise ValueError and missing files raise FileNotFoundError. Original
+        models validate required fields, field validators, canonical values and
+        same-document references. The view binds one Store and never reads setup.
+        No files are committed, other snapshots changed or active point selected.
         """
         directory = _entry_path(self._result_path / "points", label)
         source = directory / "point.yaml"
         module = directory / "module_cfg.yaml"
         if not module.is_file():
             raise FileNotFoundError(module)
-        with ExitStack() as stack, self._setup_store.locked():
-            setup_state = stack.enter_context(
-                self._setup_store.read_state(locked_by=self._setup_store)
-            )
-            setup_prepared = self._setup_store.prepare(
-                setup_state, locked_by=self._setup_store
-            )
-            store, context = self._point_store(source, setup_prepared.snapshot)
-            compose(context.setup, store.snapshot(), source, complete=True)
-            self._setup_store.publish(setup_prepared, locked_by=self._setup_store)
-        return PointView(
-            store,
-            self._setup_store,
-            source,
-            lambda: self._edit_point(store, context, source),
-            lambda: self._refresh_point(store, context, source),
-        )
+        return PointView(self._point_store(source), source)
 
-    def _refresh_point(
-        self,
-        store: DocumentStore[PointDocument],
-        context: _PointContext,
-        source: Path,
-    ) -> None:
-        with ExitStack() as stack, self._setup_store.locked():
-            setup_state = stack.enter_context(
-                self._setup_store.read_state(locked_by=self._setup_store)
-            )
-            setup_prepared = self._setup_store.prepare(
-                setup_state, locked_by=self._setup_store
-            )
-            context.setup = setup_prepared.snapshot
-            try:
-                point_state = stack.enter_context(
-                    store.read_state(locked_by=self._setup_store)
-                )
-                point_prepared = store.prepare(point_state, locked_by=self._setup_store)
-                compose(
-                    setup_prepared.snapshot,
-                    point_prepared.snapshot,
-                    source,
-                    complete=True,
-                )
-                self._setup_store.publish(setup_prepared, locked_by=self._setup_store)
-                store.publish(point_prepared, locked_by=self._setup_store)
-            finally:
-                context.setup = self._setup_store.snapshot()
+    def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
+        class EntryPointDocument(PointDocument):
+            _source = source
 
-    def _point_store(
-        self, source: Path, setup: SetupDocument
-    ) -> tuple[DocumentStore[PointDocument], _PointContext]:
-        context = _PointContext(setup)
-        store = DocumentStore[PointDocument](
+        return DocumentStore[PointDocument](
             source,
-            PointDocument,
+            EntryPointDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
-            units=lambda document: point_units(document, context.setup, source),
-            validate=lambda document: validate_point(document, context.setup, source),
-            lock_path=self._result_path / ".entry.lock",
+            units=lambda document: self._document_units(document, source=source),
+            validate=lambda document: component_registry.validate_references(
+                document.components, source=source
+            ),
         )
-        return store, context
-
-    def _validate_all_points(
-        self,
-        setup: SetupDocument,
-        *,
-        override: tuple[Path, PointDocument] | None = None,
-    ) -> None:
-        for label in self.list_points():
-            source = self._result_path / "points" / label / "point.yaml"
-            if override is not None and source == override[0]:
-                point = override[1]
-            else:
-                store, _ = self._point_store(source, setup)
-                point = store.snapshot()
-            compose(setup, point, source, complete=True)
-
-    @contextmanager
-    def _edit_setup(self) -> Generator[SetupDocument]:
-        prepared: PreparedDocument[SetupDocument] | None = None
-        with ExitStack() as stack:
-            with self._setup_store.locked():
-                state = stack.enter_context(
-                    self._setup_store.read_state(locked_by=self._setup_store)
-                )
-            yield state.draft
-            try:
-                with self._setup_store.locked():
-                    prepared = self._setup_store.prepare(
-                        state, locked_by=self._setup_store
-                    )
-                    self._validate_all_points(prepared.snapshot)
-                    prepared.replace()
-                    self._setup_store.publish(prepared, locked_by=self._setup_store)
-            finally:
-                if prepared is not None:
-                    prepared.discard()
-        if prepared is not None:
-            self._setup_store.notify_commit(prepared)
-
-    @contextmanager
-    def _edit_point(
-        self,
-        store: DocumentStore[PointDocument],
-        context: _PointContext,
-        source: Path,
-    ) -> Generator[LayeredDocument]:
-        setup_prepared: PreparedDocument[SetupDocument] | None = None
-        point_prepared: PreparedDocument[PointDocument] | None = None
-        with ExitStack() as stack:
-            with self._setup_store.locked():
-                # D109 package-internal seams; entry owns the one shared lock.
-                setup_state = stack.enter_context(
-                    self._setup_store.read_state(locked_by=self._setup_store)
-                )
-                context.setup = setup_state.base
-                point_state = stack.enter_context(
-                    store.read_state(locked_by=self._setup_store)
-                )
-            compose(setup_state.base, point_state.base, source, complete=True)
-            before = compose(setup_state.base, point_state.base, source, complete=False)
-            draft = before.model_copy(deep=True)
-            yield draft
-            route(before, draft, setup_state.draft, point_state.draft)
-            try:
-                with self._setup_store.locked():
-                    setup_prepared = self._setup_store.prepare(
-                        setup_state, locked_by=self._setup_store
-                    )
-                    context.setup = setup_prepared.snapshot
-                    point_prepared = store.prepare(
-                        point_state, locked_by=self._setup_store
-                    )
-                    self._validate_all_points(
-                        setup_prepared.snapshot,
-                        override=(source, point_prepared.snapshot),
-                    )
-                    self._replace_layers((setup_prepared, point_prepared))
-                    self._setup_store.publish(
-                        setup_prepared, locked_by=self._setup_store
-                    )
-                    store.publish(point_prepared, locked_by=self._setup_store)
-            finally:
-                if setup_prepared is not None:
-                    setup_prepared.discard()
-                if point_prepared is not None:
-                    point_prepared.discard()
-        if setup_prepared is not None:
-            self._setup_store.notify_commit(setup_prepared)
-        if point_prepared is not None:
-            store.notify_commit(point_prepared)
-
-    @staticmethod
-    def _replace_layers(
-        layers: tuple[
-            PreparedDocument[SetupDocument] | PreparedDocument[PointDocument], ...
-        ],
-    ) -> None:
-        replaced: list[
-            PreparedDocument[SetupDocument] | PreparedDocument[PointDocument]
-        ] = []
-        try:
-            for layer in layers:
-                if layer.temporary is not None:
-                    layer.replace()
-                    replaced.append(layer)
-        except OSError as cause:
-            recovery_failed: list[Path] = []
-            recovery_cause: OSError | None = None
-            for layer in reversed(replaced):
-                try:
-                    layer.restore()
-                except OSError as error:
-                    recovery_failed.append(layer.source)
-                    recovery_cause = error
-            if recovery_cause is not None:
-                raise PartialCommitError(
-                    completed=tuple(recovery_failed),
-                    pending=tuple(
-                        layer.source
-                        for layer in layers
-                        if layer.source not in recovery_failed
-                    ),
-                    recovery_failed=tuple(recovery_failed),
-                    cause=cause,
-                    recovery_cause=recovery_cause,
-                ) from recovery_cause
-            raise
 
     @classmethod
     def create(

@@ -10,7 +10,7 @@ from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     MissingReferenceError,
-    PartialCommitError,
+    RenameRecoveryError,
     ResultEntry,
     UnknownFieldError,
     UnknownKindError,
@@ -893,13 +893,13 @@ def test_failed_rename_recovery_reports_current_paths_and_both_causes(
         return original_rename(source, target)
 
     monkeypatch.setattr(Path, "rename", fail_second_and_recovery)
-    with pytest.raises(PartialCommitError, match="Partial commit") as failure:
+    with pytest.raises(RenameRecoveryError, match="Rename recovery failed") as failure:
         rename_entry("entry", "renamed", result_root=results, database_root=database)
 
     error = failure.value
-    assert error.completed == (results / "renamed",)
-    assert error.pending == (database / "renamed",)
-    assert error.recovery_failed == (results / "entry",)
+    assert error.moved_result == results / "renamed"
+    assert error.pending_database == database / "renamed"
+    assert error.recovery_destination == results / "entry"
     assert error.cause is cause
     assert error.__cause__ is cause
     if recovery_reason == "io-failure":

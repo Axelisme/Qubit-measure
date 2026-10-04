@@ -17,7 +17,7 @@ from zcu_tools.resources.document_store import DocumentStore
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
-    LayeredDocument,
+    PointDocument,
     PointGeneral,
     SetupDocument,
     SetupGeneral,
@@ -28,23 +28,60 @@ from .schema import (
 type _FieldNode = BaseModel | YamlMap
 
 
+def _retain_component_defaults(model: BaseModel) -> None:
+    """Persist generated defaults without turning absent optional leaves into null.
+
+    DocumentStore projects field presence. Capture native Pydantic defaults
+    when adding a component so reload and seed do not regenerate factory values.
+    This changes presence only, never validation or values.
+    """
+    for name, field in type(model).model_fields.items():
+        value = getattr(model, name)
+        if field.default_factory is not None or value is not None:
+            model.model_fields_set.add(name)
+        if isinstance(value, BaseModel):
+            _retain_component_defaults(value)
+
+
+def add_component_to_draft(
+    draft: SetupDocument | PointDocument,
+    name: str,
+    kind: str,
+    fields: YamlMap,
+    source: Path,
+) -> None:
+    """Add one original registered model to an independent document draft.
+
+    Internal entry helper, not a package export. Inputs are working-unit YAML
+    fields. The document commit owns canonical and reference validation.
+    Invalid names, fields, values or duplicates leave the draft unchanged.
+    """
+    validate_component_name(name, source=source)
+    model = component_registry.get(kind, source=source, component=name)
+    component_registry.check_fields(kind, fields, path=name)
+    if name in draft.components:
+        raise ValueError(f"Component {name!r} already exists")
+    component = model.model_validate({"kind": kind, **fields})
+    _retain_component_defaults(component)
+    draft.components[name] = component
+
+
 @contextmanager
 def stage_component(
-    draft: SetupDocument | LayeredDocument, name: str, field: str
+    draft: SetupDocument | PointDocument, name: str, field: str
 ) -> Generator[ComponentSchema]:
     """Yield an independent working-unit component candidate for a draft edit.
 
-    draft is a mutable setup or layered draft. name identifies an existing
+    draft is a complete setup or point draft. name identifies an existing
     component; an unknown name raises KeyError. field is the accepted relative
     dotted path within it, such as t1 or wiring.ch, used for source bookkeeping.
-    Normal exit validates supplied fields, replaces draft's component, and clears
+    Normal exit validates the original complete model, replaces its component, and clears
     cloned_from on that path and descendants even for an unchanged value.
     A body exception or validation failure leaves the draft and sources intact.
-    No complete required-field check, layer routing or disk I/O occurs here.
+    Reference and canonical checks belong to the document commit. No I/O occurs here.
     """
     candidate = draft.components[name].model_copy(deep=True)
     yield candidate
-    # The registered partial model runs field validators, not full invariants.
     draft.components[name] = type(candidate).model_validate(
         candidate.model_dump(exclude_unset=True, warnings=False)
     )
@@ -59,19 +96,19 @@ def stage_general(draft: SetupDocument) -> AbstractContextManager[SetupGeneral]:
 
 
 @overload
-def stage_general(draft: LayeredDocument) -> AbstractContextManager[PointGeneral]: ...
+def stage_general(draft: PointDocument) -> AbstractContextManager[PointGeneral]: ...
 
 
 @contextmanager
 def stage_general(
-    draft: SetupDocument | LayeredDocument,
+    draft: SetupDocument | PointDocument,
 ) -> Generator[SetupGeneral | PointGeneral]:
     """Yield independent metadata, accepting it into draft on normal exit.
 
-    draft is a mutable setup or layered draft. The candidate is SetupGeneral for
-    setup, PointGeneral for a layered point. Successful validation replaces only
+    draft is a complete setup or point draft. The candidate is SetupGeneral for
+    setup, PointGeneral for a point. Successful validation replaces only
     draft.general; a body exception or ValidationError leaves it unchanged.
-    This does no I/O and does not enforce entry identity or cross-layer rules.
+    This does no I/O and does not enforce entry identity or document references.
     """
     candidate = draft.general.model_copy(deep=True)
     yield candidate
@@ -113,9 +150,10 @@ class FieldView:
         model = self._model()
         if isinstance(model, BaseModel):
             component_registry.check_fields(type(model), {name: None}, path=self._path)
-            if name not in model.model_fields_set:
+            value = getattr(model, name)
+            if name not in model.model_fields_set and value is None:
                 raise AttributeError(f"{self._path}.{name}: field is not set")
-            return TypeAdapter(YamlValue).validate_python(getattr(model, name))
+            return TypeAdapter(YamlValue).validate_python(value)
         return model[name]
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -221,9 +259,9 @@ class ComponentView:
     def __getattr__(self, name: str) -> YamlValue:
         model = self._model()
         component_registry.check_fields(model.kind, {name: None}, path=self._path)
-        if name not in model.model_fields_set:
-            raise AttributeError(f"{self._path}.{name}: field is not set")
         value = getattr(model, name)
+        if name not in model.model_fields_set and value is None:
+            raise AttributeError(f"{self._path}.{name}: field is not set")
         if isinstance(value, BaseModel):
             value = value.model_dump(exclude_unset=True)
         return TypeAdapter(YamlValue).validate_python(value)
@@ -240,7 +278,7 @@ class ComponentView:
 
 
 class EditView:
-    def __init__(self, draft: SetupDocument | LayeredDocument) -> None:
+    def __init__(self, draft: SetupDocument | PointDocument) -> None:
         self._draft = draft
 
     @property
@@ -313,11 +351,16 @@ class SetupView:
         self,
         store: DocumentStore[SetupDocument],
         source: Path,
-        edit: Callable[[], AbstractContextManager[SetupDocument]],
     ) -> None:
+        """Bind one complete template Store and its source path without I/O.
+
+        Reads use the cached working-unit snapshot. All edits commit only this
+        template; existing points neither change nor participate in validation.
+        ResultEntry supplies the validated store and its setup.yaml path.
+        """
         self._store = store
         self._source = source
-        self._edit_document = edit
+        self._edit_document = store.edit
 
     @property
     def general(self) -> GeneralView:
@@ -346,15 +389,8 @@ class SetupView:
         self._store.refresh()
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
-        validate_component_name(name, source=self._source)
-        model = component_registry.partial_model(
-            kind, source=self._source, component=name
-        )
-        component_registry.check_fields(kind, fields, path=name)
         with self._edit_document() as draft:
-            if name in draft.components:
-                raise ValueError(f"Component {name!r} already exists")
-            draft.components[name] = model.model_validate({"kind": kind, **fields})
+            add_component_to_draft(draft, name, kind, fields, self._source)
 
     def __getattr__(self, name: str) -> ComponentView:
         if name not in self._store.snapshot().components:

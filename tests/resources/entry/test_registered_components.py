@@ -1,4 +1,4 @@
-"""Registered notebook models in partial setup documents, with registry custody."""
+"""Original registered models in complete documents, with registry custody."""
 
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
@@ -194,18 +194,20 @@ def test_path_write_runs_nested_owning_field_normalization(tmp_path: Path) -> No
 
     with registered_model("notebook/normalize-timing", NormalizeTiming) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
+        entry.setup.add_component(
+            "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
+        )
         with entry.setup.edit() as draft:
             draft.set("N1.timing.label", "  Changed  ")
-            assert draft.N1.timing == {"label": "changed"}
+            assert draft.N1.timing == {"label": "changed", "width": 1.0}
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.N1.timing == {"label": "changed"}
+        assert reopened.setup.N1.timing == {"label": "changed", "width": 1.0}
 
 
 @pytest.mark.parametrize("nullable", [False, True])
-def test_nested_kind_can_be_omitted_in_partial_setup(
+def test_nested_kind_is_required_in_complete_components(
     tmp_path: Path, nullable: bool
 ) -> None:
     class Details(BaseModel):
@@ -221,16 +223,18 @@ def test_nested_kind_can_be_omitted_in_partial_setup(
     model = NullableDetails if nullable else DirectDetails
     with registered_model("notebook/nested-kind", model) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, details={})
-        assert entry.setup.N1.details == {}
+        with pytest.raises(ValidationError, match="kind"):
+            entry.setup.add_component("N1", kind=kind, details={})
+        entry.setup.add_component("N1", kind=kind, details={"kind": "initial"})
+        assert entry.setup.N1.details == {"kind": "initial"}
         source = results / "entry" / "setup.yaml"
         document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
-        assert document["components"]["N1"]["details"] == {}
+        assert document["components"]["N1"]["details"] == {"kind": "initial"}
 
         with entry.setup.edit() as draft:
             with pytest.raises(ValidationError, match="string_type"):
                 draft.set("N1.details.kind", None)
-            assert draft.N1.details == {}
+            assert draft.N1.details == {"kind": "initial"}
             draft.set("N1.details.kind", "auxiliary")
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
@@ -524,7 +528,9 @@ def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
     with registered_model("notebook/doubled", DoubledSchema) as kind:
         entry, results, _ = create_entry(tmp_path)
         entry.setup.add_component("R1", kind="resonator", freq=10.0)
-        entry.setup.add_component("N1", kind=kind, timing={})
+        entry.setup.add_component(
+            "N1", kind=kind, timing={"width": 0.0, "label": "initial"}
+        )
         source = results / "entry" / "setup.yaml"
         before = source.read_bytes()
 
@@ -541,7 +547,7 @@ def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
         assert "20.0" in error["msg"] and "40.0" in error["msg"]
         assert source.read_bytes() == before
         assert entry.setup.R1.freq == 10.0
-        assert entry.setup.N1.timing == {}
+        assert entry.setup.N1.timing == {"width": 0.0, "label": "initial"}
         assert entry.setup.description is None
 
 
@@ -634,7 +640,7 @@ def test_non_idempotent_field_conversion_rejects_add_without_publishing(
 
 
 @pytest.mark.parametrize("mode", ["before", "after", "wrap", "plain"])
-def test_partial_setup_runs_supplied_field_validators_and_skips_invalid_defaults(
+def test_original_model_runs_field_validators_and_validates_defaults(
     tmp_path: Path,
     registry_state_guard: None,
     mode: Literal["before", "after", "wrap", "plain"],
@@ -665,9 +671,13 @@ def test_partial_setup_runs_supplied_field_validators_and_skips_invalid_defaults
 
     with registered_model("notebook/normalized", NormalizedSchema) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind)
         source = results / "entry" / "setup.yaml"
-        assert "title" not in YAML(typ="safe").load(source)["components"]["N1"]
+        before_add = source.read_bytes()
+        with pytest.raises(ValidationError, match="title"):
+            entry.setup.add_component("N1", kind=kind)
+        assert source.read_bytes() == before_add
+        entry.setup.add_component("N1", kind=kind, title="  Initial  ")
+        assert entry.setup.N1.title == "initial"
         with entry.setup.edit() as draft:
             draft.set("N1.title", "  Prepared  ")
         reopened = ResultEntry.open(
@@ -691,17 +701,19 @@ def test_optional_container_does_not_make_a_supplied_required_leaf_nullable(
 ) -> None:
     with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
         entry, results, _database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
+        entry.setup.add_component(
+            "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
+        )
         setup_path = results / "entry" / "setup.yaml"
         before = setup_path.read_bytes()
         with pytest.raises(ValidationError, match="width"):
             entry.setup.N1.timing = {"label": "prepared", "width": value}
         assert setup_path.read_bytes() == before
-        assert entry.setup.N1.timing == {"label": "prepared"}
+        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
         with entry.setup.edit() as draft:
             with pytest.raises(ValidationError, match="width"):
                 draft.set("N1.timing.width", value)
-            assert draft.N1.timing == {"label": "prepared"}
+            assert draft.N1.timing == {"label": "prepared", "width": 1.0}
             draft.set("N1.timing.width", 10.0)
         assert entry.setup.N1.timing == {"label": "prepared", "width": 10.0}
 
@@ -719,7 +731,9 @@ def test_optional_nested_references_validate_supplied_targets_and_allow_null(
         entry.setup.add_component("Q2", kind="qubit/transmon")
         entry.setup.add_component("P0", kind=kind, links=None)
         assert entry.setup.P0.links is None
-        entry.setup.add_component("P1", kind=kind, links={"control": "Q1"})
+        entry.setup.add_component(
+            "P1", kind=kind, links={"control": "Q1", "target": "Q1"}
+        )
         with entry.setup.edit() as draft:
             draft.set("P1.links.target", "Q2")
         reopened = ResultEntry.open(
@@ -746,7 +760,9 @@ def test_optional_nested_typos_keep_the_same_path_and_field_suggestion(
 ) -> None:
     with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
         entry, results, _database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
+        entry.setup.add_component(
+            "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
+        )
         setup_path = results / "entry" / "setup.yaml"
         before = setup_path.read_bytes()
 
@@ -766,16 +782,18 @@ def test_optional_nested_typos_keep_the_same_path_and_field_suggestion(
         assert failure.value.field == "widht"
         assert "width" in failure.value.suggestions
         assert setup_path.read_bytes() == before
-        assert entry.setup.N1.timing == {"label": "prepared"}
+        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
 
 
-def test_optional_nested_setup_fields_defer_missing_values_and_round_trip_units(
+def test_optional_nested_complete_values_round_trip_units(
     tmp_path: Path,
 ) -> None:
     with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
-        assert entry.setup.N1.timing == {"label": "prepared"}
+        entry.setup.add_component(
+            "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
+        )
+        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
         with entry.setup.edit() as draft:
             draft.set("N1.timing.width", 10.0)
             assert draft.N1.timing == {"label": "prepared", "width": 10.0}
@@ -824,13 +842,15 @@ def test_nested_model_values_use_yaml_maps_and_dotted_edits_in_working_units(
     tmp_path: Path, nested_kind: str
 ) -> None:
     entry, results, database = create_entry(tmp_path)
-    entry.setup.add_component("N1", kind=nested_kind, timing={"label": "prepared"})
+    entry.setup.add_component(
+        "N1", kind=nested_kind, timing={"label": "prepared", "width": 1.0}
+    )
     setup_path = results / "entry" / "setup.yaml"
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
         draft.set("N1.timing.width", 10.0)
         assert draft.N1.timing == {"width": 10.0, "label": "prepared"}
-        assert entry.setup.N1.timing == {"label": "prepared"}
+        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
         assert setup_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
@@ -881,77 +901,17 @@ def test_nested_references_reject_missing_targets_with_the_declared_path(
         entry.setup.P1.links = valid_links
 
 
-def test_nested_required_references_can_be_filled_incrementally_and_reopened(
-    tmp_path: Path, pair_kind: str
-) -> None:
-    entry, results, database = create_entry(tmp_path)
-    entry.setup.add_component("Q1", kind="qubit/transmon")
-    entry.setup.add_component("Q2", kind="qubit/fluxonium")
-    entry.setup.add_component("P1", kind=pair_kind, links={"control": "Q1"})
-    setup_path = results / "entry" / "setup.yaml"
-    assert YAML(typ="safe").load(setup_path)["components"]["P1"]["links"] == {
-        "control": "Q1"
-    }
-    entry.setup.P1.links = {"control": "Q1", "target": "Q2", "coupler": None}
-    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.P1.kind == pair_kind
-    assert YAML(typ="safe").load(setup_path)["components"]["P1"]["links"] == {
-        "control": "Q1",
-        "target": "Q2",
-        "coupler": None,
-    }
-
-
 @pytest.mark.parametrize("value", [None, "not a frequency"])
-def test_partial_setup_still_validates_supplied_required_values(
+def test_required_component_values_reject_invalid_edits(
     tmp_path: Path,
     required_kind: str,
     value: str | None,
 ) -> None:
     entry, results, _ = create_entry(tmp_path)
-    entry.setup.add_component("N1", kind=required_kind)
+    entry.setup.add_component("N1", kind=required_kind, freq=5000.0, title="initial")
     setup_file = results / "entry" / "setup.yaml"
     before = setup_file.read_bytes()
     with pytest.raises(ValidationError, match="freq"):
         entry.setup.N1.freq = value
     assert setup_file.read_bytes() == before
-    with pytest.raises(AttributeError, match="not set"):
-        _ = entry.setup.N1.freq
-
-
-def test_nested_required_fields_are_deferred_and_preserve_nested_unit_metadata(
-    tmp_path: Path,
-    nested_kind: str,
-) -> None:
-    entry, results, database = create_entry(tmp_path)
-    entry.setup.add_component("N1", kind=nested_kind, timing={"label": "prepared"})
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert "width" not in document["components"]["N1"]["timing"]
-
-    entry.setup.N1.timing = {"width": 10.0, "label": "prepared"}
-    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.N1.kind == nested_kind
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert document["components"]["N1"]["timing"]["width"] == pytest.approx(1e-5)
-
-
-def test_required_registered_fields_can_be_filled_incrementally_in_setup(
-    tmp_path: Path,
-    required_kind: str,
-) -> None:
-    entry, results, database = create_entry(tmp_path)
-    entry.setup.add_component("N1", kind=required_kind)
-    with pytest.raises(AttributeError, match="not set"):
-        _ = entry.setup.N1.freq
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert "freq" not in document["components"]["N1"]
-    assert "title" not in document["components"]["N1"]
-
-    entry.setup.N1.freq = 5000.0
-    entry.setup.N1.title = "prepared later"
-    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.N1.freq == pytest.approx(5000.0)
-    assert reopened.setup.N1.title == "prepared later"
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
-    assert document["components"]["N1"]["freq"] == pytest.approx(5e9)
-    assert component_registry.get(required_kind) is RequiredPhysicalSchema
+    assert entry.setup.N1.freq == 5000.0

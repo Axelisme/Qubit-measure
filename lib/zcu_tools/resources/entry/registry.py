@@ -1,20 +1,13 @@
 """Component model declarations, independent of experiment definitions."""
 
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 from difflib import get_close_matches
 from pathlib import Path
 from types import UnionType
-from typing import Any, Union, cast, get_args, get_origin
+from typing import Union, get_args, get_origin
 
-from pydantic import (
-    BaseModel,
-    TypeAdapter,
-    create_model,
-)
-from pydantic.fields import FieldInfo
+from pydantic import BaseModel
 
-from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import FieldPath, UnitSpec
 
 from .errors import MissingReferenceError, UnknownFieldError, UnknownKindError
@@ -81,54 +74,20 @@ def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     return result
 
 
-def _partial_model[_Model: BaseModel](
-    model: type[_Model], *, component_root: bool = False
-) -> type[_Model]:
-    """Relax missing fields while retaining supplied-field decorators and constraints.
-
-    Registered models contain no model-level validators. Defaults and factories
-    retain Pydantic semantics, but missing fields do not validate their defaults.
-    Only this derived model changes; registry.get returns the original model.
-    """
-    fields: dict[str, tuple[object, FieldInfo]] = {}
-    for name, field in model.model_fields.items():
-        annotation = field.annotation
-        nested_model = _nested_model(annotation)
-        if nested_model is not None:
-            partial_nested = _partial_model(nested_model)
-            annotation = (
-                partial_nested | None
-                if type(None) in get_args(annotation)
-                else partial_nested
-            )
-        partial_field = deepcopy(field)
-        # D101: only supplied fields run validators in a partial document.
-        partial_field.validate_default = False
-        if field.is_required() and not (component_root and name == "kind"):
-            # Missing values stay outside model_fields_set and serialized patches.
-            # Supplied values retain the original non-nullable annotation.
-            partial_field.default = None
-        fields[name] = (annotation, partial_field)
-    # Pydantic mixes field definitions and reserved options in one kwargs signature.
-    return create_model(
-        f"{model.__name__}Partial", __base__=model, **cast(dict[str, Any], fields)
-    )
-
-
-def _validate_partial_contract(model: type[BaseModel]) -> None:
+def _validate_supported_hooks(model: type[BaseModel]) -> None:
     for validator in model.__pydantic_decorators__.model_validators.values():
         raise ValueError(
             f"{model.__name__}: {validator.info.mode} model validator is unsupported "
-            "in partial setup; cross-field checks are not supported in this batch"
+            "in component models; cross-field checks are not supported in this batch"
         )
     if model.model_post_init is not ComponentSchema.model_post_init:
         raise ValueError(
-            f"{model.__name__}: custom model_post_init is unsupported in partial setup"
+            f"{model.__name__}: custom model_post_init is unsupported in component models"
         )
     for field in model.model_fields.values():
         nested_model = _nested_model(field.annotation)
         if nested_model is not None:
-            _validate_partial_contract(nested_model)
+            _validate_supported_hooks(nested_model)
 
 
 def _validate_component_model(model: object) -> None:
@@ -166,7 +125,6 @@ class ComponentRegistry:
         self._models: dict[str, type[ComponentSchema]] = {}
         self._references: dict[str, tuple[str, ...]] = {}
         self._units: dict[str, dict[FieldPath, UnitSpec]] = {}
-        self._partial_models: dict[str, type[ComponentSchema]] = {}
 
     def register(
         self, kind: str, model: type[ComponentSchema], *, references: Sequence[str] = ()
@@ -188,22 +146,19 @@ class ComponentRegistry:
         if kind in self._models:
             raise ValueError(f"Kind {kind!r} is already registered")
         _validate_component_model(model)
-        _validate_partial_contract(model)
+        _validate_supported_hooks(model)
         reference_paths = tuple(references)
         for reference in reference_paths:
             _validate_reference(model, reference)
         units = _model_units(model)
-        partial_model = _partial_model(model, component_root=True)
         self._models[kind] = model
         self._references[kind] = reference_paths
         self._units[kind] = units
-        self._partial_models[kind] = partial_model
 
     def unregister(self, kind: str) -> None:
         del self._models[kind]
         del self._references[kind]
         del self._units[kind]
-        del self._partial_models[kind]
 
     def get(
         self, kind: str, *, source: Path | None = None, component: str | None = None
@@ -214,26 +169,6 @@ class ComponentRegistry:
             raise UnknownKindError(
                 source, component, kind, tuple(get_close_matches(kind, self._models))
             ) from cause
-
-    def partial_model(
-        self, kind: str, *, source: Path | None = None, component: str | None = None
-    ) -> type[ComponentSchema]:
-        """Validate supplied setup values while deferring required-field completeness."""
-        self.get(kind, source=source, component=component)
-        return self._partial_models[kind]
-
-    def validate_complete(
-        self, kind: str, fields: YamlMap, *, source: Path, component: str
-    ) -> ComponentSchema:
-        """Validate merged working-unit fields with the original complete model.
-
-        ``component`` prefixes field errors; ``source`` locates unknown-kind
-        diagnostics. Required values and field validators use Pydantic semantics.
-        Raise ValidationError for invalid fields or missing required values.
-        """
-        model = self.get(kind, source=source, component=component)
-        adapter = TypeAdapter[dict[str, ComponentSchema]](dict[str, model])
-        return adapter.validate_python({component: fields})[component]
 
     def check_fields(
         self, kind: str | type[BaseModel], fields: Mapping[str, object], *, path: str

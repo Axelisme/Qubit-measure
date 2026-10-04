@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import UnionType
-from typing import Annotated, ClassVar, Literal, Union, get_args, get_origin
+from typing import Annotated, ClassVar, Union, get_args, get_origin
 from uuid import UUID
 
 from pydantic import (
@@ -48,7 +48,6 @@ _VIEW_NAMES = frozenset(
         "general",
         "meta",
         "set",
-        "move",
         "resolve",
         "components",
         "entry_id",
@@ -115,29 +114,6 @@ class PointGeneral(BaseModel):
         return SetupGeneral.validate_created_at(value)
 
 
-class PointDocument(BaseModel):
-    """One point's parameter document, excluding values inherited from setup.
-
-    format is the parameter-container ID, zcu.parameter-container.
-    format_version is major.minor text, initially 1.0; the store validates header
-    compatibility rather than this model constructor.
-    general contains point-local creation time, description and YAML extensions.
-    components maps setup-declared names to partial field mappings without kind.
-    Numerical fields use SI on disk and working units in DocumentStore snapshots.
-    provenance maps dotted component-field paths to source metadata YAML mappings;
-    inherited setup sources do not belong here. Both mappings default to empty.
-    Entry validation supplies kind, field and layering checks beyond this model.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    format: str
-    format_version: str
-    general: PointGeneral
-    components: dict[str, YamlMap] = Field(default_factory=dict)
-    provenance: dict[str, YamlMap] = Field(default_factory=dict)
-
-
 class WiringSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -157,20 +133,16 @@ class WiringSchema(BaseModel):
 
 
 class ComponentSchema(BaseModel):
-    """Notebook declaration with separate partial and complete validation phases.
+    """Original notebook model for complete setup and point components.
 
-    Partial setup validates supplied fields, including field-validator conversions.
-    Missing fields do not run validators. Field conversions must be idempotent
-    under canonical equality. Declared UnitSpec finite-float leaves use relative
-    tolerance 1e-12 with no absolute tolerance; other values compare exactly.
-    Entry revalidates before commits and snapshot publication, reporting canonical
-    drift as ValidationError. Registration does not trial sample inputs.
-    Complete layered views validate required fields and field validators against
-    the original model. Registration rejects all model-level validators and custom
-    model_post_init, including inherited and direct or nullable nested models.
-    Cross-field checks are unsupported in this batch. Field validators reading
-    info.data are unsupported in partial setup; their errors propagate. Defaults
-    and default_factory retain Pydantic semantics.
+    Required fields, defaults, factories and field validators use Pydantic
+    semantics. Field conversions must be idempotent under canonical equality.
+    Declared UnitSpec finite-float leaves use relative tolerance 1e-12 with no
+    absolute tolerance; other values compare exactly. Entry reports canonical
+    drift as ValidationError before commits or snapshot publication.
+    Registration does not trial sample inputs. All model-level validators and
+    custom model_post_init are rejected, including inherited and direct or
+    nullable nested models. Cross-field checks are unsupported in this batch.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -297,33 +269,14 @@ def canonical_errors(
     return errors
 
 
-class LayeredDocument(BaseModel):
-    """Independent working-unit draft of a point combined with setup.
+class _ParameterDocument(BaseModel):
+    """Shared typed component boundary for complete parameter documents."""
 
-    general is a copy of the point's local metadata.
-    components maps every setup-declared name to a registered typed model,
-    including kind, with supplied values from both layers. A partial draft may
-    omit required fields; complete validation occurs at the entry boundary.
-    provenance maps dotted component-field paths to copied source YAML mappings
-    from both layers, defaulting to empty.
-    moves is an ordered list of (dotted field path, destination layer) requests;
-    destinations are setup or point. It defaults to empty and route applies it
-    after routing ordinary edits. This draft is not a persisted document format.
-    """
-
-    general: PointGeneral
-    components: dict[str, ComponentSchema]
-    provenance: dict[str, YamlMap] = Field(default_factory=dict)
-    moves: list[tuple[str, Literal["setup", "point"]]] = Field(default_factory=list)
-
-
-class SetupDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
     _source: ClassVar[Path] = Path("setup.yaml")
 
     format: str
     format_version: str
-    general: SetupGeneral
     components: dict[str, ComponentSchema] = Field(default_factory=dict)
     provenance: dict[str, YamlMap] = Field(default_factory=dict)
 
@@ -349,16 +302,41 @@ class SetupDocument(BaseModel):
         for name, fields in components.items():
             kind = fields.get("kind")
             model = (
-                component_registry.partial_model(kind)
+                component_registry.get(kind, source=cls._source, component=name)
                 if isinstance(kind, str)
                 else ComponentSchema
             )
             # Field validators may mutate mapping inputs in place. Keep the
             # pre-validation working values for the canonical comparison.
-            result[name] = model.model_validate(
-                deepcopy(fields), extra="ignore" if forward_minor else None
-            )
+            adapter = TypeAdapter[dict[str, ComponentSchema]](dict[str, model])
+            result[name] = adapter.validate_python(
+                {name: deepcopy(fields)}, extra="ignore" if forward_minor else None
+            )[name]
             errors = canonical_errors(fields, result[name], (name,), source=cls._source)
             if errors:
                 raise ValidationError.from_exception_data(model.__name__, errors)
         return result
+
+
+class SetupDocument(_ParameterDocument):
+    """Entry identity and complete component template in working units."""
+
+    general: SetupGeneral
+
+
+class PointDocument(_ParameterDocument):
+    """One complete, independent point document in working units.
+
+    format and format_version are the parameter-container header, initially 1.0.
+    The store validates header compatibility and converts known physical leaves
+    between SI on disk and working units in snapshots. general is point-local.
+    components maps public names to original registered ComponentSchema models,
+    including kind; required fields, field validators and same-document
+    references must be valid. No value or source falls back to setup.
+    provenance maps logical component-field paths to YAML source metadata.
+    Unknown fields are rejected at the current minor version; a forward minor
+    keeps unknown YAML fields outside the typed view.
+    """
+
+    _source: ClassVar[Path] = Path("point.yaml")
+    general: PointGeneral
