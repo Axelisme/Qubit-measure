@@ -6,6 +6,7 @@ import pytest
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     ModelWrapValidatorHandler,
     create_model,
     model_validator,
@@ -16,10 +17,36 @@ from zcu_tools.resources.entry import (
     ComponentSchema,
     UnknownKindError,
 )
+from zcu_tools.resources.entry.schema import WiringSchema
 
 
 class PairSchema(ComponentSchema):
     target: str
+
+
+class ScalarWithoutUnits(ComponentSchema):
+    freq: float
+
+
+class IntegerWithoutUnits(ComponentSchema):
+    gain: int
+
+
+class NullableScalarWithoutUnits(ComponentSchema):
+    freq: float | None
+
+
+class NestedPhysicalWithoutUnits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    freq: float
+
+
+class NestedWithoutUnits(ComponentSchema):
+    physical: NestedPhysicalWithoutUnits
+
+
+class NullableNestedWithoutUnits(ComponentSchema):
+    physical: NestedPhysicalWithoutUnits | None
 
 
 class UnrelatedSchema(BaseModel):
@@ -123,6 +150,72 @@ def test_registry_lifecycle_rejects_duplicates_and_allows_explicit_replacement()
         registry.get("notebook/pair")
     registry.register("notebook/pair", NestedPairSchema, references=("links.target",))
     assert registry.get("notebook/pair") is NestedPairSchema
+
+
+@pytest.mark.parametrize(
+    "model",
+    (
+        ScalarWithoutUnits,
+        IntegerWithoutUnits,
+        NullableScalarWithoutUnits,
+        NestedWithoutUnits,
+        NullableNestedWithoutUnits,
+    ),
+)
+def test_registration_requires_units_for_physical_numbers_without_reserving_kind(
+    model: type[ComponentSchema],
+) -> None:
+    registry = ComponentRegistry()
+    with pytest.raises(ValueError, match="UnitSpec.*(freq|gain)"):
+        registry.register("notebook/physical", model)
+
+    registry.register("notebook/physical", PairSchema)
+    assert registry.get("notebook/physical") is PairSchema
+
+
+def test_registration_accepts_dimensionless_units_and_unconverted_channel_indices() -> (
+    None
+):
+    class PhysicalModel(ComponentSchema):
+        freq: Annotated[float, UnitSpec("Hz", "MHz")]
+        gain: Annotated[int, UnitSpec("1", "1")]
+
+    registry = ComponentRegistry()
+    registry.register("notebook/physical", PhysicalModel)
+    assert registry.get("notebook/physical") is PhysicalModel
+    assert registry.units("notebook/physical") == {
+        ("freq",): UnitSpec("Hz", "MHz"),
+        ("gain",): UnitSpec("1", "1"),
+        ("wiring", "time_of_flight"): UnitSpec("s", "us"),
+    }
+    model = PhysicalModel.model_validate(
+        {"kind": "notebook/physical", "freq": 5.0, "gain": 2, "wiring": {"ch": 3}}
+    )
+    assert model.wiring.ch == 3
+    assert model.gain == 2
+
+
+def test_registration_preserves_required_wiring_indices_without_physical_units() -> (
+    None
+):
+    RequiredWiring = create_model(
+        "RequiredWiring", __base__=WiringSchema, ch=(int, Field(ge=0, strict=True))
+    )
+    RequiredChannelModel = create_model(
+        "RequiredChannelModel",
+        __base__=ComponentSchema,
+        wiring=(RequiredWiring, ...),
+    )
+
+    registry = ComponentRegistry()
+    registry.register("notebook/required-channel", RequiredChannelModel)
+    assert registry.units("notebook/required-channel") == {
+        ("wiring", "time_of_flight"): UnitSpec("s", "us")
+    }
+    model = RequiredChannelModel.model_validate(
+        {"kind": "notebook/required-channel", "wiring": {"ch": 3}}
+    )
+    assert model.wiring.ch == 3
 
 
 def test_registration_rejects_unit_metadata_on_non_numeric_fields() -> None:

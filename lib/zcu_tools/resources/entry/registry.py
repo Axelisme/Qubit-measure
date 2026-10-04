@@ -21,6 +21,7 @@ from .schema import (
     JpaSchema,
     QubitSchema,
     ResonatorSchema,
+    WiringSchema,
 )
 
 
@@ -40,18 +41,34 @@ def _nested_model(annotation: object) -> type[BaseModel] | None:
 def _model_units(model: type[BaseModel]) -> dict[FieldPath, UnitSpec]:
     result: dict[FieldPath, UnitSpec] = {}
     for name, field in model.model_fields.items():
+        annotation = field.annotation
+        types = (
+            get_args(annotation)
+            if get_origin(annotation) in (Union, UnionType)
+            else (annotation,)
+        )
+        numeric = any(item in (float, int) for item in types)
         for metadata in field.metadata:
             if isinstance(metadata, UnitSpec):
-                annotation = field.annotation
-                types = (
-                    get_args(annotation)
-                    if get_origin(annotation) in (Union, UnionType)
-                    else (annotation,)
-                )
-                if not all(item in (float, int, type(None)) for item in types):
+                if not numeric or not all(
+                    item in (float, int, type(None)) for item in types
+                ):
                     raise TypeError(f"Unit metadata requires a numeric field: {name}")
                 metadata.validate()
                 result[(name,)] = metadata
+        wiring_field = WiringSchema.model_fields.get(name)
+        channel_index = (
+            issubclass(model, WiringSchema)
+            and wiring_field is not None
+            and not any(
+                isinstance(metadata, UnitSpec) for metadata in wiring_field.metadata
+            )
+            and all(item in (int, type(None)) for item in types)
+        )
+        if numeric and (name,) not in result and not channel_index:
+            raise ValueError(
+                f"UnitSpec required for numeric field: {model.__name__}.{name}"
+            )
         nested_model = _nested_model(field.annotation)
         if nested_model is not None:
             for path, spec in _model_units(nested_model).items():
