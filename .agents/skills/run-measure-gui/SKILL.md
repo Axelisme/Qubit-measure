@@ -24,7 +24,11 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 日常量測先選對應 recipe，讀其現行 schema。分析既有資料先用 `tab_analyze`，互動判讀用 `tab_interact` 取得狀態、圖與可用命令。Client 延後顯示工具時，先搜尋對應 recipe 或共用入口。這是操作指引，不是日常／排查權限模式。
 
-細部設定、保存、writeback 或排查使用 `rpc_list` → `rpc_describe` → `rpc_call`。讀 adapter guide 時查 `adapter.guide` 的 live schema。所有公開 RPC 都可用，不因已有 recipe 或共用工具而禁止直接呼叫。Raw RPC 不代為聚合結果、解碼 PNG 或完成共用分析的保存流程。
+讀 recipe 的 adapter guide 使用 `recipe_guide(recipe)`。初始化模擬環境使用 `simulation_initialize`，切換可能斷開真實裝置，先核對授權。設定已連線裝置的工作值使用 `device_set_value(name, value, unit)`，unit 必須與 snapshot 相同。只有 FakeDevice unit=none 接受明確的 native。它只改 value，output、mode 與 rampstep 另用 RPC 明確設定。
+
+Setup 回覆先看 steps、native operation、before/after 與 verification。等待逾時不代表未執行，post-read 核對失敗也不抹掉已確認的 operation outcome。保留 op，用 wait 和完整 snapshot 接手。
+
+其他細部設定、保存、writeback 或排查使用 `rpc_list` → `rpc_describe` → `rpc_call`。直接查 adapter 時讀 `adapter.guide` 的 live schema。所有公開 RPC 都可用，不因已有 recipe 或共用工具而禁止直接呼叫。Raw RPC 不代為聚合結果、解碼 PNG 或完成共用分析的保存流程。
 
 Recipe 首次呼叫最多等待 300 秒。Client deadline 必須超過 300 秒並留傳輸餘裕。首次等待期間，同一 stdio 連線的另一請求不保證立即處理。回傳仍執行中的 execution 後，用 `status(execution)` 或 `wait(execution)` 追蹤整個流程。`wait(op)` 只等待單個 GUI operation。逾時只停止等待，不取消量測，也不是重跑依據。
 

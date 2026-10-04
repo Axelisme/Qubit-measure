@@ -120,7 +120,8 @@ def _execution_id(arguments: dict[str, Any]) -> str:
     return execution
 
 
-def _wait_timeout(arguments: dict[str, Any]) -> float:
+def wait_timeout(arguments: dict[str, Any]) -> float:
+    """Validate the shared operation/setup waiting budget before GUI access."""
     timeout = arguments.get("timeout", 60)
     if (
         isinstance(timeout, bool)
@@ -139,7 +140,7 @@ def _wait_tool(
     if ("op" in arguments) == ("execution" in arguments):
         raise ValueError("provide exactly one of op or execution")
     if "execution" in arguments:
-        timeout = _wait_timeout(arguments)
+        timeout = wait_timeout(arguments)
         start = time.monotonic()
         key = _execution_id(arguments)
         execution = (
@@ -164,7 +165,7 @@ def _wait_tool(
 def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Wait on a GUI operation, not its downstream analysis completion."""
     op = _operation_id(arguments)
-    timeout = _wait_timeout(arguments)
+    timeout = wait_timeout(arguments)
     ctx = ctx.bound()
     start = time.monotonic()
     reply = ctx.send_gui_rpc(

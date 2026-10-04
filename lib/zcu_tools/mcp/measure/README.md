@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-04, fit quality in execution estimates
+**Last updated:** 2026-10-04, explicit setup workflows
 
 # `zcu_tools/mcp/measure/`
 
@@ -6,7 +6,17 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 ## 固定工具與 RPC
 
-`assembly.py` 組合固定的 23 個 tools。Recipe registry 擁有 11 個 recipe 的名稱、schema 與執行入口。其餘為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close` 與 `accept`。
+`assembly.py` 組合固定的 26 個 tools。Recipe registry 擁有 11 個 recipe 的名稱、schema 與執行入口。其餘為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close` 與 `accept`，以及 `simulation_initialize`、`device_set_value`、`recipe_guide`。
+
+## Setup 工具
+
+`recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。
+
+`device_set_value(name, value, unit)` 先讀裝置 snapshot，只送 value 更新，再等待和核對 actual native value。它不更改 output、mode 或 rampstep。實體 unit 必須與 snapshot 相同。FakeDevice unit=none 只接受明確的 native，不換算工作座標。
+
+兩個 mutation 工具保留 pre_read、start、wait、post_read、requested、before/after、native operation 及 verification。step completed 只表示該步成功。等待逾時不取消 operation，snapshot 有目標值也不代表 operation 完成。Start receipt 不確定時保留 unknown，明確 stale 拒絕時停止。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
+
+## 日常與細部操作
 
 日常量測優先 recipe，既有資料分析使用共用分析工具。細部 setup、cfg、保存、writeback 及排查由 RPC 承接。日常／排查是使用指引，不是權限模式。`rpc_call` 接受 catalog 中全部 `rpc` 與 `tool` methods；tool 名稱只提示高層入口。GUI 仍驗證每次操作。公開 method 的參數、回覆及前置條件由 `rpc_describe` 提供。
 

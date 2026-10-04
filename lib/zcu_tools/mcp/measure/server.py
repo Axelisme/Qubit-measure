@@ -61,7 +61,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v107: recipe-first fixed tools, shared analysis/control and complete public RPC.
 # v108: analysis results retain invalid paths from the GUI's wire projection.
 # v109: flux unit assertions and explicit native coordinate opt-in for FakeDevice.
-MCP_VERSION = 109
+MCP_VERSION = 110
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -71,7 +71,7 @@ also edit the GUI. Reconnection reloads its live catalog; incompatible wire
 versions fail before forwarding an action.
 
 For routine measurement, prefer the recipe matching the experimental goal.
-Read its tool schema and the adapter guide through rpc_call(adapter.guide).
+Read its tool schema and adapter guide through recipe_guide(recipe).
 For analysis of existing data, use tab_analyze and tab_interact rather than
 starting another measurement. If tools are deferred by the client, discover
 the recipe or shared analysis/control tool first. Routine work and diagnosis
@@ -80,6 +80,15 @@ writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
 rpc_call(method, params). Every listed public method remains callable even
 when a recipe or shared tool covers it. Raw RPC does not aggregate tool
 results, decode PNG replies, or run the canonical analysis-image save pipeline.
+
+For authorized setup, simulation_initialize uses the GUI coordinator and may
+switch away from real devices. It does not launch a GUI or connect real hardware.
+device_set_value changes only value on a connected device; physical unit must
+match its snapshot, while FakeDevice unit=none requires explicit native. No unit
+conversion or output/mode/rampstep changes are included. Inspect steps, native
+operation, requested/actual values and before/after snapshots. Wait timeout does
+not cancel; unknown receipt or failed verification does not prove no side effect.
+Keep op for wait and explicit snapshot handoff; no automatic reconnect or retry.
 
 A recipe call waits up to 300 seconds before returning a still-running execution;
 missing parameters, failures and interactive handoffs return earlier. Configure
