@@ -173,6 +173,28 @@ def test_explicit_source_and_stderr_round_trip_in_the_values_document(
     assert ledger.read_bytes() == before
 
 
+@pytest.mark.parametrize("version", ["1.1", "1.90"])
+def test_newer_minor_ledger_event_can_be_referenced_without_rewriting_it(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    version: str,
+) -> None:
+    _entry, view, _source = container
+    event = json.loads(ledger.read_text())
+    event["format_version"] = version
+    event["future_analysis"] = {"confidence": None, "steps": [{"new": True}]}
+    ledger.write_text(json.dumps(event) + "\n")
+    before = ledger.read_bytes()
+    metadata = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2)
+    with view.edit() as draft:
+        draft.set("Q1.freq", 5300.0, provenance=metadata)
+    assert view.Q1.freq == 5300.0
+    assert_metadata(view.meta("Q1.freq"), metadata)
+    view.refresh()
+    assert_metadata(view.meta("Q1.freq"), metadata)
+    assert ledger.read_bytes() == before
+
+
 @pytest.mark.parametrize(
     ("write", "path"),
     [

@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04，seed 工作點與同文件來源
+**Last updated:** 2026-10-04，seed 工作點與 ledger 引用的版本邊界
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是條目身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 的 refresh 不接受另一個身分。
 
@@ -36,7 +36,7 @@ D104 的 canonical 檢查由 entry 負責。提交前與 open、refresh、交易
 
 `meta` 只讀取快照，沒有值或來源時回傳 None。回傳的 Provenance 包含固定來源欄位；clone 記錄是獨立副本。物理 stderr 使用值的 UnitSpec，落盤為 SI，視圖為工作單位。Ext 不換算。
 
-`edit_view.set(..., provenance=...)` 先驗證來源的本地引用。非 manual source 必須是本條目 records/ledger.jsonl 中同 ID、同 entry_id 的事件。Entry 不寫 ledger，不驗證完整事件 schema，也不從其他條目補來源。這個切片不提供 producer、accept／writeback 服務或 status／stale。
+`edit_view.set(..., provenance=...)` 先驗證來源的本地引用。非 manual source 必須是本條目 records/ledger.jsonl 中同 ID、同 entry_id 的事件。被引用事件必須有 zcu.ledger 1.x 標頭，錯誤 format／版本指向 ledger 路徑；較新 minor 可讀且原 bytes 不變。Entry 不寫 ledger，不驗證完整事件 schema，也不從其他條目補來源。這個切片不提供 producer、accept／writeback 服務或 status／stale。
 
 ## 視圖、版本與失敗
 

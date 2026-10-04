@@ -7,6 +7,10 @@ from typing import TypedDict
 
 from pydantic import TypeAdapter
 
+from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
+
+LEDGER_VERSION = FormatVersion(1, 0)
+
 
 class ClonedFrom(TypedDict):
     entry_id: str
@@ -37,8 +41,14 @@ def validate_source(provenance: Provenance, ledger: Path, entry_id: str) -> None
         return
     with ledger.open(encoding="utf-8") as stream:
         for line in stream:
-            event = TypeAdapter(dict[str, object]).validate_python(json.loads(line))
+            event = TypeAdapter(YamlMap).validate_python(json.loads(line))
             if event.get("id") == provenance.source:
+                validate_header(
+                    event,
+                    expected_format="zcu.ledger",
+                    supported_version=LEDGER_VERSION,
+                    source=ledger,
+                )
                 if event.get("entry_id") != entry_id:
                     raise ValueError(
                         f"{ledger}: source {provenance.source!r} belongs to another entry"
