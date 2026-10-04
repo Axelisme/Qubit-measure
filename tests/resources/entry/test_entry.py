@@ -29,6 +29,27 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+@pytest.mark.parametrize("method", ["attribute", "path"])
+def test_description_alias_and_general_path_validate_before_changing_the_draft(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, method: str
+) -> None:
+    results, database = entry_roots
+    with entry.setup.edit() as draft:
+
+        def perform_operation() -> None:
+            if method == "attribute":
+                setattr(draft, "description", 123)
+            else:
+                draft.set("general.description", 123)
+
+        with pytest.raises(ValidationError):
+            perform_operation()
+        assert draft.description is None
+        draft.description = "valid after the caught error"
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.description == "valid after the caught error"
+
+
 @pytest.mark.parametrize(
     ("path", "field", "suggestion"),
     [
