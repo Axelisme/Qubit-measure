@@ -1,15 +1,37 @@
 """Typed setup document at the persistence boundary."""
 
 import keyword
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+)
 
-from zcu_tools.format_version import YamlMap
+from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
 from zcu_tools.resources.document_store import UnitSpec
+
+PARAMETER_FORMAT = "zcu.parameter-container"
+PARAMETER_VERSION = FormatVersion(1, 0)
+
+
+def is_forward_minor(document: Mapping[str, YamlValue], *, source: Path) -> bool:
+    version = validate_header(
+        document,
+        expected_format=PARAMETER_FORMAT,
+        supported_version=PARAMETER_VERSION,
+        source=source,
+    )
+    return version.minor > PARAMETER_VERSION.minor
+
 
 _VIEW_NAMES = frozenset(
     {
@@ -137,10 +159,21 @@ class SetupDocument(BaseModel):
 
     @field_validator("components", mode="before")
     @classmethod
-    def validate_components(cls, value: object) -> dict[str, ComponentSchema]:
+    def validate_components(
+        cls, value: object, info: ValidationInfo
+    ) -> dict[str, ComponentSchema]:
         # Import locally because registered models derive from ComponentSchema.
         from .registry import component_registry
 
+        # This dynamic dispatch starts a separate validation call, so propagate the
+        # document's future-field policy explicitly into each registered model.
+        forward_minor = is_forward_minor(
+            {
+                "format": info.data["format"],
+                "format_version": info.data["format_version"],
+            },
+            source=Path("setup.yaml"),
+        )
         components = TypeAdapter(dict[str, YamlMap]).validate_python(value)
         result: dict[str, ComponentSchema] = {}
         for name, fields in components.items():
@@ -150,5 +183,7 @@ class SetupDocument(BaseModel):
                 if isinstance(kind, str)
                 else ComponentSchema
             )
-            result[name] = model.model_validate(fields)
+            result[name] = model.model_validate(
+                fields, extra="ignore" if forward_minor else None
+            )
         return result

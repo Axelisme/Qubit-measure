@@ -15,7 +15,13 @@ from zcu_tools.resources.document_store import DocumentStore, FieldPath, UnitSpe
 
 from .errors import PartialCommitError
 from .registry import component_registry
-from .schema import SetupDocument, validate_component_name
+from .schema import (
+    PARAMETER_FORMAT,
+    PARAMETER_VERSION,
+    SetupDocument,
+    is_forward_minor,
+    validate_component_name,
+)
 from .views import SetupView
 
 
@@ -76,7 +82,8 @@ class ResultEntry:
         self._setup_store = DocumentStore(
             result_path / "setup.yaml",
             SetupDocument,
-            format="zcu.parameter-container",
+            format=PARAMETER_FORMAT,
+            supported_version=PARAMETER_VERSION,
             units=self._setup_units,
             validate=self._validate_setup,
             lock_path=result_path / ".entry.lock",
@@ -86,6 +93,9 @@ class ResultEntry:
         self, document: Mapping[str, YamlValue]
     ) -> Mapping[FieldPath, UnitSpec]:
         result: dict[FieldPath, UnitSpec] = {}
+        forward_minor = is_forward_minor(
+            document, source=self._result_path / "setup.yaml"
+        )
         components = document.get("components")
         if isinstance(components, dict):
             for name, fields in components.items():
@@ -96,7 +106,8 @@ class ResultEntry:
                     component_registry.get(
                         kind, source=self._result_path / "setup.yaml", component=name
                     )
-                    component_registry.check_fields(kind, fields, path=name)
+                    if not forward_minor:
+                        component_registry.check_fields(kind, fields, path=name)
                     for path, spec in component_registry.units(
                         kind, source=self._result_path / "setup.yaml", component=name
                     ).items():
