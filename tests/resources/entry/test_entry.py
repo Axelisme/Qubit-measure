@@ -29,6 +29,32 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+@pytest.mark.parametrize("kind", ["qubit/transmon", "qubit/fluxonium"])
+def test_reference_chains_survive_reopening_and_can_be_rewired(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, kind: str
+) -> None:
+    results, database = entry_roots
+    entry.setup.add_component("A1", kind="amplifier/jpa", current=0.2)
+    entry.setup.add_component("I1", kind="device/current_source", current=0.3)
+    entry.setup.add_component("I2", kind="device/current_source", current=-0.4)
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0, amplifier="A1")
+    entry.setup.add_component("R2", kind="resonator", freq=6600.0)
+    entry.setup.add_component("Q1", kind=kind, readout="R1", flux_source="I1")
+    entry.setup.Q1.readout = "R2"
+    entry.setup.Q1.flux_source = "I2"
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.Q1.readout == "R2"
+    assert reopened.setup.Q1.flux_source == "I2"
+    assert reopened.setup.R1.amplifier == "A1"
+    assert reopened.setup.R1.freq == pytest.approx(6500.0)
+    assert reopened.setup.I2.current == pytest.approx(-0.4)
+    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    assert document["components"]["Q1"]["readout"] == "R2"
+    assert document["components"]["Q1"]["flux_source"] == "I2"
+    assert document["components"]["R1"]["amplifier"] == "A1"
+
+
 @pytest.mark.parametrize(
     ("kind", "field", "target_kind"),
     [
