@@ -121,6 +121,71 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+@pytest.mark.parametrize(
+    ("initial", "delta", "accepted"),
+    [(1.0, 5e-13, True), (1.0, 2e-12, False), (0.0, 5e-15, False)],
+)
+def test_unitspec_float_drift_has_relative_tolerance_without_absolute_tolerance(
+    tmp_path: Path,
+    registry_state_guard: None,
+    initial: float,
+    delta: float,
+    accepted: bool,
+) -> None:
+    class ShiftedSchema(ComponentSchema):
+        freq: Annotated[float, UnitSpec("Hz", "MHz")]
+
+        @field_validator("freq")
+        @classmethod
+        def shift_frequency(cls, value: float) -> float:
+            return value + delta
+
+    with registered_model("notebook/shifted", ShiftedSchema) as kind:
+        entry, results, database = create_entry(tmp_path)
+        source = results / "entry" / "setup.yaml"
+        before = source.read_bytes()
+        if accepted:
+            entry.setup.add_component("N1", kind=kind, freq=initial)
+            assert entry.setup.N1.freq == pytest.approx(
+                1.000000000001, rel=1e-15, abs=0.0
+            )
+            reopened = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            )
+            assert reopened.setup.N1.freq == entry.setup.N1.freq
+        else:
+            with pytest.raises(ValidationError) as failure:
+                entry.setup.add_component("N1", kind=kind, freq=initial)
+            assert failure.value.errors()[0]["loc"] == ("components", "N1", "freq")
+            assert source.read_bytes() == before
+            with pytest.raises(AttributeError, match="Unknown component 'N1'"):
+                _ = entry.setup.N1
+
+
+def test_unitless_extension_structure_keeps_exact_canonical_comparison(
+    tmp_path: Path, registry_state_guard: None
+) -> None:
+    class ShiftedExtensionSchema(ComponentSchema):
+        @field_validator("ext")
+        @classmethod
+        def shift_gain(cls, value: YamlMap) -> YamlMap:
+            gain = value["gain"]
+            if not isinstance(gain, float):
+                raise TypeError("gain must be a float")
+            return {**value, "gain": gain + 5e-13}
+
+    with registered_model("notebook/extension", ShiftedExtensionSchema) as kind:
+        entry, results, _ = create_entry(tmp_path)
+        source = results / "entry" / "setup.yaml"
+        before = source.read_bytes()
+        with pytest.raises(ValidationError) as failure:
+            entry.setup.add_component("N1", kind=kind, ext={"gain": 1.0})
+        assert failure.value.errors()[0]["loc"] == ("components", "N1", "ext")
+        assert source.read_bytes() == before
+        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
+            _ = entry.setup.N1
+
+
 def test_idempotent_numeric_rounding_survives_si_round_trip_and_publishes_canonical(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
