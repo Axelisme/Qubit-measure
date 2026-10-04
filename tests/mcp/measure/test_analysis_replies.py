@@ -2,7 +2,6 @@
 
 import base64
 import json
-import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -274,9 +273,9 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
 def test_cancelled_analysis_queued_before_dispatch_never_starts(
-    tmp_path, clients, stage
+    tmp_path, clients, stage, monkeypatch
 ):
-    occupied, release = Event(), Event()
+    occupied, release, registered = Event(), Event(), Event()
 
     def respond(method, params):
         assert method == "tab.snapshot"
@@ -288,6 +287,17 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
     # A captured binding lets a second public tool register while RPC is occupied.
     client.context = client.context.bound()
     client.tools = build_measure_tools(client.context)
+    register = client.context.session.executions.start
+
+    def observe_registration(*args, **kwargs):
+        execution = register(*args, **kwargs)
+        registered.set()
+        return execution
+
+    # Synchronize the registry seam without replacing its admission logic.
+    monkeypatch.setattr(
+        client.context.session.executions, "start", observe_registration
+    )
     with ThreadPoolExecutor(max_workers=2) as pool:
         blocker = pool.submit(
             client.call, "rpc_call", {"method": "tab.snapshot", "params": {}}
@@ -297,11 +307,8 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
             called = pool.submit(
                 client.call, "tab_analyze", {"tab": "t", "stage": stage}
             )
-            deadline = time.monotonic() + 1
+            assert registered.wait(1)
             snapshots = client.context.session.executions.snapshots()
-            while not snapshots and time.monotonic() < deadline:
-                time.sleep(0.01)
-                snapshots = client.context.session.executions.snapshots()
             assert len(snapshots) == 1
             key = snapshots[0].execution
             before = len(client.transport.sent)

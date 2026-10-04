@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from typing import Any
 
@@ -9,6 +10,8 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.execution_reply import project_execution
 from zcu_tools.mcp.measure.interaction import handoff_interaction, interact
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+
+logger = logging.getLogger(__name__)
 
 
 def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
@@ -32,8 +35,9 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
             before_send=execution.admit_start,
         )
         ctx.session.executions.accept_start(execution, started)
-    except Exception as exc:  # noqa: BLE001 - retain the start attempt and its partial facts
+    except Exception as exc:
         execution.fail_start(exc)
+        logger.exception("Analysis start interrupted; execution receipt retained")
     else:
         if started["interactive"]:
             handoff_interaction(ctx, execution)

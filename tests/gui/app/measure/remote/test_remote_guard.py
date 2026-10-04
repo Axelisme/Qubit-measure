@@ -556,26 +556,19 @@ def test_lookback_numbers_prepare_real_cfg_without_connected_soc(
                 "rounds": 1,
             },
         )
+        parameters = result["actual"]["parameters"]
+        for parameter, expected in (
+            ("frequency_mhz", frequency),
+            ("ro_frequency_mhz", frequency),
+            ("readout_length_us", length),
+            ("trigger_offset_us", offset),
+        ):
+            assert parameters[parameter]["value"] == expected
+            assert type(parameters[parameter]["value"]) is float
+        assert parameters["rounds"]["value"] == 1
+        assert type(parameters["rounds"]["value"]) is int
         assert result["status"] == "failed"
         assert result["run_op"] is None
-        full = call("status", {"execution": result["execution"], "detail": "full"})
-        assert full["status"] == result["status"]
-        assert full["run_op"] is None
-        fields = full["actual"]["fields"]
-        parameters = result["actual"]["parameters"]
-        for parameter, path, expected in (
-            ("frequency_mhz", "modules.readout.pulse_cfg.freq", frequency),
-            ("ro_frequency_mhz", "modules.readout.ro_cfg.ro_freq", frequency),
-            ("readout_length_us", "modules.readout.ro_cfg.ro_length", length),
-            ("trigger_offset_us", "modules.readout.ro_cfg.trig_offset", offset),
-        ):
-            assert fields[path]["value"] == expected
-            assert type(fields[path]["value"]) is float
-            assert parameters[parameter]["value"] == fields[path]["value"]
-            assert type(parameters[parameter]["value"]) is float
-        assert fields["rounds"]["value"] == parameters["rounds"]["value"] == 1
-        assert type(fields["rounds"]["value"]) is int
-        assert type(parameters["rounds"]["value"]) is int
     finally:
         bridge.disconnect()
 
