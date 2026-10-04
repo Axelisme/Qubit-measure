@@ -11,10 +11,11 @@ from zcu_tools.gui.app.measure.services import app_services
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui.app.measure.remote._helpers import Fixture, mcp_client
 
-from ._support import MeasureClient, make_client
+from ._support import MeasureClient, WireTransport, make_client
 
 
 class SetupGui:
@@ -97,6 +98,160 @@ def setup_client(
     client = make_client(tmp_path, gui)
     clients.append(client)
     return client, gui
+
+
+@pytest.mark.parametrize("prior_connection", [False, True])
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("simulation_initialize", {}),
+        ("device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}),
+        ("recipe_guide", {"recipe": "t1"}),
+    ],
+)
+def test_setup_requires_existing_connection_without_attaching_replacement_gui(
+    tmp_path, clients, monkeypatch, prior_connection, tool, arguments
+):
+    gui = SetupGui()
+    client = make_client(tmp_path, gui, port_is_open=lambda port: True)
+    clients.append(client)
+    if prior_connection:
+        assert client.call("recipe_guide", {"recipe": "t1"})["recipe"] == "t1"
+    client.context.bridge.disconnect()
+    replacement = WireTransport(gui)
+    replacement.replies["rpc.catalog"] = deepcopy(
+        client.transport.replies["rpc.catalog"]
+    )
+    connects: list[int] = []
+
+    def connect(port: int, token: str | None = None) -> str:
+        connects.append(port)
+        client.context.bridge.set_transport(replacement)
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    previous_calls = list(client.transport.sent)
+    if tool == "recipe_guide":
+        with pytest.raises(GuiRpcError):
+            client.call(tool, arguments)
+    else:
+        result = client.call(tool, arguments)
+        assert result.is_error
+        assert result.data["op"] is None
+        assert result.data["steps"]["start"]["status"] == "not_started"
+    assert connects == []
+    assert replacement.sent == []
+    assert client.transport.sent == previous_calls
+
+
+def test_simulation_internal_post_read_timeout_retains_finished_operation(setup_client):
+    client, gui = setup_client
+    reads = 0
+
+    def has_soc(params):
+        nonlocal reads
+        reads += 1
+        if reads == 2:
+            raise GuiTransportTimeoutError("state.has_soc", 0.01)
+        return {"ok": True, "result": gui("state.has_soc", params)}
+
+    client.transport.replies["state.has_soc"] = has_soc
+    result = client.call("simulation_initialize", {})
+    assert result.is_error
+    assert result.data["op"] is not None
+    assert result.data["operation"]["status"] == "finished"
+    assert result.data["before"]["soc"] is None
+    assert result.data["before"]["predictor"]["loaded"] is False
+    assert result.data["steps"]["start"]["status"] == "completed"
+    assert result.data["steps"]["wait"]["status"] == "completed"
+    assert result.data["steps"]["post_read"]["status"] == "failed"
+    assert result.data["error"]["code"] == "timeout"
+    assert result.data["error"]["reason"] == "gui_transport_timeout"
+    assert [method for method, _ in client.transport.sent].count(
+        "simulation.initialize"
+    ) == 1
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "mutation"),
+    [
+        ("simulation_initialize", {}, "simulation.initialize"),
+        (
+            "device_set_value",
+            {"name": "fake_flux", "value": 1, "unit": "native"},
+            "device.setup",
+        ),
+    ],
+)
+def test_internal_progress_timeout_retains_setup_handle_and_before_facts(
+    setup_client, tool, arguments, mutation
+):
+    client, gui = setup_client
+    gui.wait_reason = "timeout"
+
+    def progress(params):
+        raise GuiTransportTimeoutError("operation.progress", 0.01)
+
+    client.transport.replies["operation.progress"] = progress
+    result = client.call(tool, {**arguments, "timeout": 0})
+    assert result.is_error
+    assert result.data["op"] is not None
+    assert result.data["status"] == "unknown"
+    assert result.data["operation"] is None
+    assert result.data["steps"]["pre_read"]["status"] == "completed"
+    assert result.data["steps"]["start"]["status"] == "completed"
+    assert result.data["steps"]["wait"]["status"] == "unknown"
+    assert result.data["error"]["code"] == "timeout"
+    assert result.data["error"]["reason"] == "gui_transport_timeout"
+    if tool == "device_set_value":
+        assert result.data["before"]["device"]["info"]["value"] == 0.25
+    else:
+        assert result.data["before"]["predictor"]["loaded"] is False
+    assert [method for method, _ in client.transport.sent].count(mutation) == 1
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "mutation", "post_read"),
+    [
+        ("simulation_initialize", {}, "simulation.initialize", "predictor.info"),
+        (
+            "device_set_value",
+            {"name": "fake_flux", "value": 1, "unit": "native"},
+            "device.setup",
+            "device.snapshot",
+        ),
+    ],
+)
+def test_running_operation_with_post_read_failure_is_an_error_reply(
+    setup_client, tool, arguments, mutation, post_read
+):
+    client, gui = setup_client
+    gui.wait_reason = "timeout"
+    reads = 0
+
+    def read(params):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return {"ok": True, "result": gui(post_read, params)}
+        return {
+            "ok": False,
+            "error": {
+                "code": "internal_error",
+                "reason": "query_failed",
+                "message": "post-read failed while operation is running",
+            },
+        }
+
+    client.transport.replies[post_read] = read
+    result = client.call(tool, {**arguments, "timeout": 0})
+    assert result.is_error
+    assert result.data["op"] is not None
+    assert result.data["operation"]["status"] == "running"
+    assert result.data["steps"]["wait"]["status"] == "running"
+    assert result.data["steps"]["post_read"]["status"] == "failed"
+    assert result.data["error"]["reason"] == "query_failed"
+    assert [method for method, _ in client.transport.sent].count(mutation) == 1
 
 
 def test_simulation_verifies_native_readiness_and_repeats_explicit_initialization(
@@ -438,6 +593,7 @@ def test_setup_workflows_use_real_gui_coordinator_and_device_owner(
     port = fixture.start()
     _, call = mcp_client(port, tmp_path, request=request)
     try:
+        call("connect", {"port": port})
         initial = call("simulation_initialize", {})
         assert initial["status"] == "finished", initial
         assert initial["verification"]["ready"] is True
