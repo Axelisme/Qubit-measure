@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` — result entry composition
 
-**Last updated:** 2026-10-04 — D101 partial validation
+**Last updated:** 2026-10-04，D105 canonical equality
 
 `ResultEntry` 組合兩個明確傳入的根目錄。名稱是安全的單一路徑段，不代表物理量或身分。`setup.yaml` 的 UUID `entry_id` 是身分，建立後不可變。載入驗證 UUID 與 UTC 建立時間；既有 handle 不接受 refresh 帶入另一個身分。
 
@@ -15,6 +15,8 @@
 Setup 允許省略 notebook model 與巢狀 model 的必填欄位。巢狀 model 可直接宣告，也可宣告為單一 model 與 None 的 union。這兩種形狀共用單位、typo 與 reference path 判斷。未填值不落盤，讀取明確報錯；有提供的值仍經型別驗證。Nullable 巢狀容器的 explicit None 保留為 null。Registry 保留原始完整 model，必填完整性由後續疊合視圖檢查。
 
 D101 將 notebook 驗證分為兩個階段。Setup 的 add、edit、open 與 refresh 只驗證供值欄位；field validators 的 before、after、wrap 與 plain 保留轉換，缺值不驗證 default。Registry 保留原始完整 model，並拒絕 before／wrap model validator 與自訂 model_post_init，包含繼承與支援的巢狀宣告。Field validator 讀取 info.data 在部分階段不受支援，caller 的例外照常傳出。跨欄位檢查放在 model after-validator。完整疊合與 after-validator 不改值的檢查由後續工作點切片提供，不在 partial setup 執行。
+
+D104 要求 field 轉換在 canonical 值上冪等，register 不試跑樣本。Entry 在提交前與 open、refresh、交易進入的讀取中檢查驗證前後的工作單位值。差異超出等價界線時，以 ValidationError 回報欄位、前後值與來源檔案，保留原檔與既有快照。D105 只對宣告 UnitSpec、兩邊都是有限 float 的葉節點使用 math.isclose，rel_tol=1e-12、abs_tol=0.0。其他值仍嚴格比較。容差內的微小轉換視為等價，通過後發布驗證後的值。Strip、lower 與固定精度 rounding 可用，不跳過 caller 的 field validator，也不攔截其例外。DocumentStore 不負責 canonical 等價規則。
 
 內建 kinds 包含 resonator、fluxonium、transmon、JPA 與 current source。物理值可缺省，單位宣告涵蓋頻率、能量、電流、時間與無因次量。引用保存元件名稱，不展開目標物件。載入、refresh 與提交驗證有值的引用，包含 notebook 宣告的巢狀路徑；缺少目標時回報檔案、元件、欄位與目標名稱。失敗不發布無效快照。
 

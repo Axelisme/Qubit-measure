@@ -114,7 +114,12 @@ class ComponentSchema(BaseModel):
     """Notebook declaration with separate partial and complete validation phases.
 
     Partial setup validates supplied fields, including field-validator conversions.
-    Missing fields do not run validators. Model after-validators run only against
+    Missing fields do not run validators. Field conversions must be idempotent
+    under canonical equality. Declared UnitSpec finite-float leaves use relative
+    tolerance 1e-12 with no absolute tolerance; other values compare exactly.
+    Entry revalidates before commits and snapshot publication, reporting canonical
+    drift as ValidationError. Registration does not trial sample inputs.
+    Model after-validators run only against
     complete layered views and may check values but must not change them.
     Registration rejects model before/wrap validators and custom model_post_init.
     Cross-field constraints belong in model after-validators: field validators

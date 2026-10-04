@@ -162,6 +162,62 @@ def test_unitspec_float_drift_has_relative_tolerance_without_absolute_tolerance(
                 _ = entry.setup.N1
 
 
+def test_unitspec_integer_output_keeps_exact_canonical_comparison(
+    tmp_path: Path, registry_state_guard: None
+) -> None:
+    class IntegerShiftedSchema(ComponentSchema):
+        freq: Annotated[int, UnitSpec("Hz", "Hz")]
+
+        @field_validator("freq")
+        @classmethod
+        def shift_frequency(cls, value: int) -> int:
+            return value + 1
+
+    with registered_model("notebook/integer-shift", IntegerShiftedSchema) as kind:
+        entry, results, _ = create_entry(tmp_path)
+        source = results / "entry" / "setup.yaml"
+        before = source.read_bytes()
+        with pytest.raises(ValidationError) as failure:
+            entry.setup.add_component("N1", kind=kind, freq=1_000_000_000_000_000)
+        assert failure.value.errors()[0]["loc"] == ("components", "N1", "freq")
+        assert source.read_bytes() == before
+        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
+            _ = entry.setup.N1
+
+
+def test_nullable_nested_rounding_publishes_working_canonical_values(
+    tmp_path: Path, registry_state_guard: None
+) -> None:
+    class RoundedTiming(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        freq: Annotated[float, UnitSpec("Hz", "MHz")]
+
+        @field_validator("freq")
+        @classmethod
+        def round_frequency(cls, value: float) -> float:
+            return round(value, 2)
+
+    class RoundedSchema(ComponentSchema):
+        timing: RoundedTiming | None = None
+
+    with registered_model("notebook/nested-rounded", RoundedSchema) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, timing={"freq": 0.143})
+        source = results / "entry" / "setup.yaml"
+        assert entry.setup.N1.timing == {"freq": 0.14}
+        assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] == {
+            "freq": 140000.0
+        }
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        reopened.setup.refresh()
+        assert reopened.setup.N1.timing == {"freq": 0.14}
+        reopened.setup.N1.timing = None
+        assert reopened.setup.N1.timing is None
+        assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] is None
+
+
 def test_unitless_extension_structure_keeps_exact_canonical_comparison(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
