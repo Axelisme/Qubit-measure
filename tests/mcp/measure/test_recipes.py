@@ -701,6 +701,20 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         )
         assert result.data["status"] == expected, result.data
         assert result.data["run_outcome"]["status"] == "cancelled"
+        later = client.call("finish_early", {"execution": execution})
+        assert later.data == {
+            "execution": execution,
+            "op": result.data["op"],
+            "run_op": initial.data["run_op"],
+            "status": "not_applicable",
+            "phase": "terminal",
+            "cancel_requested": cancel_after,
+            "finish_early_requested": True,
+            "gui_cancel": None,
+        }
+        assert client.call(
+            "status", {"execution": execution, "detail": "full"}
+        ) == result.data
         if expected == "finished":
             assert result.data["raw_save"]["path"] == "/actual/raw.h5"
             assert result.data["analysis"]["status"] == "finished"
