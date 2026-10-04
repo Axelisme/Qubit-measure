@@ -1152,6 +1152,14 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             assert pending["cancel_requested"] is True
             assert pending["status"] == "running"
             assert pending["unconfirmed_image"] == "fit"
+            pending_summary = client.call(
+                "status", {"execution": started["execution"]}
+            )
+            assert pending_summary["artifacts"]["analysis"]["fit"] == {
+                "status": "saving",
+                "lifetime": "persistent",
+                "members": {"image": []},
+            }
         finally:
             release.set()
         cancelled = request.result(timeout=3)
@@ -1180,6 +1188,19 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         else "incomplete"
     )
     assert completed["unconfirmed_image"] == ("fit" if unknown else None)
+    summary = client.call("status", {"execution": started["execution"]})
+    assert summary["artifacts"]["analysis"]["prefix"]["members"]["image"] == [
+        {"path": "/actual/prefix.png", "status": "saved"}
+    ]
+    assert summary["artifacts"]["analysis"]["fit"] == {
+        "status": "saved" if save_outcome == "saved" else "unknown" if unknown else "incomplete",
+        "lifetime": "persistent",
+        "members": {
+            "image": [{"path": "/actual/fit.png", "status": "saved"}]
+            if save_outcome == "saved"
+            else []
+        },
+    }
     assert completed["remaining_images"] == (
         ([] if save_outcome == "saved" else ["fit"])
         + (["residual"] if remaining else [])
