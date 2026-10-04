@@ -137,7 +137,10 @@ class ComponentView:
         component_registry.check_fields(model.kind, {name: None}, path=self._path)
         if name not in model.model_fields_set:
             raise AttributeError(f"{self._path}.{name}: field is not set")
-        return TypeAdapter(YamlValue).validate_python(getattr(model, name))
+        value = getattr(model, name)
+        if isinstance(value, BaseModel):
+            value = value.model_dump(exclude_unset=True)
+        return TypeAdapter(YamlValue).validate_python(value)
 
     def __setattr__(self, name: str, value: object) -> None:
         if name.startswith("_"):
