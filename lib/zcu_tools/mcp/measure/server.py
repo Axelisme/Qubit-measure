@@ -89,8 +89,18 @@ guaranteed service during the first wait. A client timeout is not cancellation.
 Never automatically rerun a recipe or mutation after timeout, disconnect, busy
 or stale_version. Inspect current state and confirmed files before deciding.
 
-Use status for GUI operations and this MCP session's executions.
-status(execution) reads a local snapshot without reconnecting. wait(op) observes
+Use global status for GUI operations, non-terminal executions and terminal count.
+Keep known execution IDs for later queries; global status does not embed history.
+status(execution) returns the shared execution summary without reconnecting.
+Read actual conditions, Primary/Post estimates, details and warnings, and every
+writeback candidate with its destination. run_id is currently null. A Run or
+analysis step marked unknown may have started even without a returned handle.
+Use status(execution, detail="full") for captured native detail without new RPCs
+or guard observations. Summary previews.run/primary/post are full path lists for
+session-only PNGs, not persistent saved artifacts. Each stage deduplicates paths
+in first-seen order. Artifacts group sections, names and member path/status lists.
+Reserved destinations are not saved files; later failures retain confirmed saved
+prefixes. Status never attaches images; wait(op) observes
 only the GUI operation; wait(execution) includes downstream reads, saves and
 preview delivery. Failed outcomes are data. A wait timeout stops waiting,
 not the operation or its continuation. Operation handles belong to one GUI
@@ -102,7 +112,8 @@ For a registered recipe, finish_early stops acquisition and continues with
 usable partial results, raw saving and analysis. cancel takes precedence and
 starts no further analysis or save. For registered analysis it also stops
 further result reads. Already admitted non-cancellable saves settle with their
-true outcomes. gui_cancel reports the separate GUI cancellation request.
+true outcomes. Control replies report request facts and the separate gui_cancel
+receipt, not terminal results; use wait or status to confirm the outcome.
 Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
 GUI hook and may report operation_failed for an already failed operation.
 
@@ -120,7 +131,9 @@ Send payload={command,args} for one action. This method has no seen guard;
 later owner-loop commits win. Reads preserve focus; commands follow Analysis.
 done joins the original analysis execution for result reads and image saving.
 preview_active is a local preview, not committed state. Preview PNG paths belong
-to this MCP session; saved_images names confirmed persistent outputs.
+to this MCP session. Execution summaries reference them in previews and omit the
+repeated interaction.figure; full preserves figure, preview and interaction.
+Full saved_images names confirmed persistent outputs.
 Recipes do not automatically close tabs. Use tab_close explicitly; busy cannot
 be bypassed with discard_unsaved. app.shutdown via RPC requests graceful exit;
 its reply is not proof that the responding process has exited.

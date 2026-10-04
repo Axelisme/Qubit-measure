@@ -556,17 +556,17 @@ def test_lookback_numbers_prepare_real_cfg_without_connected_soc(
                 "rounds": 1,
             },
         )
-        fields = result["actual"]["fields"]
-        for path, expected in (
-            ("modules.readout.pulse_cfg.freq", frequency),
-            ("modules.readout.ro_cfg.ro_freq", frequency),
-            ("modules.readout.ro_cfg.ro_length", length),
-            ("modules.readout.ro_cfg.trig_offset", offset),
+        parameters = result["actual"]["parameters"]
+        for parameter, expected in (
+            ("frequency_mhz", frequency),
+            ("ro_frequency_mhz", frequency),
+            ("readout_length_us", length),
+            ("trigger_offset_us", offset),
         ):
-            assert fields[path]["value"] == expected
-            assert type(fields[path]["value"]) is float
-        assert fields["rounds"]["value"] == 1
-        assert type(fields["rounds"]["value"]) is int
+            assert parameters[parameter]["value"] == expected
+            assert type(parameters[parameter]["value"]) is float
+        assert parameters["rounds"]["value"] == 1
+        assert type(parameters["rounds"]["value"]) is int
         assert result["status"] == "failed"
         assert result["run_op"] is None
     finally:

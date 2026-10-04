@@ -51,6 +51,12 @@ class RecipeError:
 
 
 @dataclass(frozen=True)
+class StartReceipt:
+    status: Literal["not_started", "unknown", "running"] = "not_started"
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class RawSave:
     status: Literal["not_started", "saving", "saved", "failed", "unknown"] = (
         "not_started"
@@ -80,6 +86,7 @@ class RecipeSnapshot:
     actual: dict[str, Any] | None = None
     missing: list[MissingParameter] = field(default_factory=list)
     run_outcome: dict[str, Any] | None = None
+    run_start: StartReceipt = field(default_factory=StartReceipt)
     result_state: dict[str, Any] | None = None
     raw_save: RawSave = field(default_factory=RawSave)
     analysis_mode: Literal["primary", "primary_post", "none"] = "none"
@@ -89,6 +96,9 @@ class RecipeSnapshot:
     post_analysis: dict[str, Any] | None = None
     post_writeback: dict[str, Any] | None = None
     analysis_stage: Literal["primary", "post"] | None = None
+    analysis_starts: dict[str, StartReceipt] = field(
+        default_factory=lambda: {"primary": StartReceipt(), "post": StartReceipt()}
+    )
     error: RecipeError | None = None
 
 
@@ -164,6 +174,8 @@ class RecipeContext:
         except _ContinuationCancelled:
             self._publish(status="cancelled", phase="terminal")
         except Exception as error:  # Worker boundary retains partial progress.
+            if isinstance(error, GuiRpcError) and error.request_rejected:
+                self._retain_start_rejection(error)
             logger.exception("Recipe %s failed", self.progress.recipe)
             self._publish(
                 error=RecipeError(
@@ -175,6 +187,22 @@ class RecipeContext:
                 status="failed",
                 phase="terminal",
             )
+
+    def _retain_start_rejection(self, error: GuiRpcError) -> None:
+        """Replace ambiguity only when GUI explicitly rejects the pending start."""
+        rejected = StartReceipt("not_started", error.reason or error.code)
+        if self.progress.phase == "run" and self.progress.run_start.status == "unknown":
+            self._publish(run_start=rejected)
+        elif (
+            self.progress.phase == "analysis"
+            and self.progress.analysis_stage is not None
+        ):
+            stage = self.progress.analysis_stage
+            pending = self.progress.analysis_starts.get(stage)
+            if pending is not None and pending.status == "unknown":
+                self._publish(
+                    analysis_starts={**self.progress.analysis_starts, stage: rejected}
+                )
 
     def wake(self) -> None:
         with self._condition:
@@ -229,13 +257,7 @@ class RecipeContext:
         """Stop only Run, without revoking an already latched cancellation."""
         with self._condition:
             if self.progress.phase != "run":
-                return ToolReply(
-                    {
-                        "execution": self.progress.execution,
-                        "status": "not_applicable",
-                        "phase": self.progress.phase,
-                    }
-                )
+                return ToolReply({**asdict(self.progress), "status": "not_applicable"})
             self._publish(finish_early_requested=True)
         return self._control_reply(self._stop_run())
 
@@ -345,6 +367,7 @@ class RecipeContext:
                     "cfg_ref": publication["cfg_ref"],
                     "fields": fields,
                     "source_basis": publication["source_basis"],
+                    "publication": publication,
                 }
             ),
         )
@@ -354,15 +377,16 @@ class RecipeContext:
         for device in devices:
             self.rpc("device.snapshot", {"name": device["name"]})
         self._publish(phase="run")
-        started = self.rpc(
+        started = self.tools.gui.send_gui_rpc(
             "tab.run_start",
             {
                 "tab_id": tab,
                 "expected": publication["cfg_ref"],
             },
+            before_send=self._admit_run,
         )
         run_op = started["handle"]
-        self._publish(run_op=run_op, op=run_op)
+        self._publish(run_op=run_op, op=run_op, run_start=StartReceipt("running"))
         self._stop_run()
         outcome = self._await_operation(run_op)
         self._publish(run_outcome=outcome)
@@ -406,6 +430,11 @@ class RecipeContext:
                 phase="terminal",
             )
 
+    def _admit_run(self) -> None:
+        with self._condition:
+            self._admit("run")
+            self._publish(run_start=StartReceipt("unknown"))
+
     def _preview_run(self, tab: str, run_op: int) -> None:
         self._publish(phase="preview")
         reply = self.tools.gui.send_gui_rpc(
@@ -448,9 +477,15 @@ class RecipeContext:
             {"tab_id": tab, "updates": {}},
             operation_handle=primary_op,
             run_operation_handle=run_op,
-            before_send=lambda: self._admit("analysis"),
+            before_send=lambda: self._admit_analysis(stage),
         )
-        self._publish(op=started["handle"])
+        self._publish(
+            op=started["handle"],
+            analysis_starts={
+                **self.progress.analysis_starts,
+                stage: StartReceipt("running"),
+            },
+        )
         execution = self.tools.session.executions.start(
             self.tools.gui, tab, stage, started
         )
@@ -500,6 +535,16 @@ class RecipeContext:
         )
         self._publish(**{writeback_field: writeback})
         return started["handle"]
+
+    def _admit_analysis(self, stage: Literal["primary", "post"]) -> None:
+        with self._condition:
+            self._admit("analysis")
+            self._publish(
+                analysis_starts={
+                    **self.progress.analysis_starts,
+                    stage: StartReceipt("unknown"),
+                }
+            )
 
     def _retain_analysis(self, execution: AnalysisExecution) -> None:
         """Deliver a stop that raced with the admitted analysis start receipt."""

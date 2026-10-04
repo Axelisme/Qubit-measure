@@ -13,7 +13,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 
 from ._recipe_support import PNG, LookbackGui, scalar, section
-from ._support import make_client
+from ._support import full_execution_reply, make_client
 
 
 @contextmanager
@@ -70,7 +70,9 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
         return gui(method, params)
 
     with recipe_client(tmp_path, respond) as client:
-        reply = client.call("onetone_spectrum_over_flux", {})
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_flux", {})
+        )
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {
@@ -111,7 +113,9 @@ def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(
 ):
     gui = OnetoneGui(experiment="onetone/flux_dep")
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum_over_flux", arguments)
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_flux", arguments)
+        )
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -154,7 +158,7 @@ def test_spectrum_only_delivers_finite_actual_frequency(
 ):
     gui = OnetoneGui(md)
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum", arguments)
+        reply = full_execution_reply(client, client.call("onetone_spectrum", arguments))
         assert reply.data["status"] == expected_status, reply.data
         if expected_status == "finished":
             fields = reply.data["actual"]["fields"]
@@ -197,8 +201,9 @@ def test_flux_rejects_unknown_explicit_device_without_selecting_default(tmp_path
                 "message": "No device named missing-coil",
             },
         }
-        reply = client.call(
-            "onetone_spectrum_over_flux", {"flux_device": "missing-coil"}
+        reply = full_execution_reply(
+            client,
+            client.call("onetone_spectrum_over_flux", {"flux_device": "missing-coil"}),
         )
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "device_not_found"
@@ -290,7 +295,9 @@ class OnetoneGui(LookbackGui):
 )
 def test_power_rejects_invalid_gain_inputs_before_preparation(tmp_path, arguments):
     with recipe_client(tmp_path, PowerGui()) as client:
-        reply = client.call("onetone_spectrum_over_power", arguments)
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_power", arguments)
+        )
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -330,7 +337,9 @@ def test_power_preview_failure_retains_the_saved_raw_and_true_run(
                 raise OSError("Image destination failed")
 
             monkeypatch.setattr(client.context.session, "write_png", fail_write)
-        reply = client.call("onetone_spectrum_over_power", {})
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_power", {})
+        )
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -368,12 +377,16 @@ def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_w
 
     with recipe_client(tmp_path, respond) as client:
         try:
-            initial = client.call("onetone_spectrum_over_power", {})
+            initial = full_execution_reply(
+                client, client.call("onetone_spectrum_over_power", {})
+            )
             assert entered.wait(2)
             execution = initial.data["execution"]
             client.call("cancel", {"execution": execution})
             release.set()
-            terminal = client.call("wait", {"execution": execution, "timeout": 2})
+            terminal = full_execution_reply(
+                client, client.call("wait", {"execution": execution, "timeout": 2})
+            )
             data = terminal.data
             assert data["status"] == ("failed" if fail else "cancelled")
             assert data["cancel_requested"]
@@ -400,8 +413,12 @@ def test_flux_does_not_treat_unknown_units_as_physical_flux(
 ):
     gui = FluxGui(snapshot={"name": "coil", "unit": unit})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "onetone_spectrum_over_flux", {"flux_device": "coil"} if explicit else {}
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {"flux_device": "coil"} if explicit else {},
+            ),
         )
         assert reply.data["status"] == expected
         assert not gui.ran
@@ -441,17 +458,20 @@ def test_onetone_power_number_ranges_publish_float_endpoints_and_integer_counts(
     tmp_path, number
 ):
     with recipe_client(tmp_path, PowerGui()) as client:
-        data = client.call(
-            "onetone_spectrum_over_power",
-            {
-                "center_mhz": number,
-                "span_mhz": number,
-                "gain_range": [number - 1, number],
-                "freq_points": 3,
-                "gain_points": 2,
-                "reps": 2,
-                "rounds": 1,
-            },
+        data = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_power",
+                {
+                    "center_mhz": number,
+                    "span_mhz": number,
+                    "gain_range": [number - 1, number],
+                    "freq_points": 3,
+                    "gain_points": 2,
+                    "reps": 2,
+                    "rounds": 1,
+                },
+            ),
         ).data
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
@@ -498,7 +518,8 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
 ):
     gui = PowerGui()
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum_over_power", arguments)
+        initial = client.call("onetone_spectrum_over_power", arguments)
+        reply = full_execution_reply(client, initial)
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data
@@ -510,6 +531,21 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         assert data["preview"]["kind"] == "run_preview"
         assert Path(data["preview"]["path"]).read_bytes() == PNG
         assert reply.images[0].data == PNG
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        waited = client.call("wait", {"execution": data["execution"], "timeout": 0})
+        assert summary["previews"] == {
+            "run": [data["preview"]["path"]],
+            "primary": [],
+            "post": [],
+        }
+        assert (
+            initial.data["previews"] == waited.data["previews"] == summary["previews"]
+        )
+        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
+            {"path": "/actual/raw.h5", "status": "saved"}
+        ]
+        assert len(client.transport.sent) == before
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.save_data") == 1
@@ -588,7 +624,9 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             flux_points=11,
         )
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum_over_flux", arguments)
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_flux", arguments)
+        )
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data
@@ -645,14 +683,17 @@ def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path
         }
     )
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "onetone_spectrum_over_flux",
-            {
-                "flux_device": "coil",
-                "flux_unit": "native",
-                "flux_range": [-0.25, 1.5],
-                "flux_points": 7,
-            },
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {
+                    "flux_device": "coil",
+                    "flux_unit": "native",
+                    "flux_range": [-0.25, 1.5],
+                    "flux_points": 7,
+                },
+            ),
         )
         assert reply.data["status"] == "finished", reply.data
         assert reply.data["actual"]["fields"]["dev.flux_dev"] == {
@@ -686,9 +727,12 @@ def test_physical_flux_unit_assertion_is_checked_before_run(
 ):
     gui = FluxGui()
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "onetone_spectrum_over_flux",
-            {"flux_device": device, "flux_unit": requested_unit},
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {"flux_device": device, "flux_unit": requested_unit},
+            ),
         )
         assert reply.data["status"] == expected, reply.data
         assert gui.ran is (expected == "finished")
@@ -727,9 +771,12 @@ def test_native_flux_rejects_unconfirmed_or_physical_coordinates_before_run(
         }
     )
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(
-            "onetone_spectrum_over_flux",
-            {"flux_device": "coil", "flux_unit": requested_unit},
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {"flux_device": "coil", "flux_unit": requested_unit},
+            ),
         )
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["reason"] == "invalid_device"
@@ -807,7 +854,7 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
     gui = OnetoneGui(md)
     before = deepcopy(gui.publication)
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("onetone_spectrum", arguments)
+        reply = full_execution_reply(client, client.call("onetone_spectrum", arguments))
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data

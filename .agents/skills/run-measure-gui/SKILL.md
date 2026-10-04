@@ -28,7 +28,11 @@ description: 透過 measure-gui MCP 與使用者協作量測及校準。接收�
 
 Recipe 首次呼叫最多等待 300 秒。Client deadline 必須超過 300 秒並留傳輸餘裕。首次等待期間，同一 stdio 連線的另一請求不保證立即處理。回傳仍執行中的 execution 後，用 `status(execution)` 或 `wait(execution)` 追蹤整個流程。`wait(op)` 只等待單個 GUI operation。逾時只停止等待，不取消量測，也不是重跑依據。
 
-`finish_early` 對 recipe 停止採集，有可用結果就保存 raw 並繼續分析。`cancel` 放棄後續分析與保存，優先於 finish_early；已啟動且不可取消的保存仍回報真實結果。核對操作的 terminal status、錯誤與實際保存路徑，不只看 GUI 是否停止。
+Recipe、`tab_analyze` 與 `wait(execution)` 回傳同一摘要。先核對 `actual` 的量測條件、`analysis.primary/post` 的 estimates、details、warnings，以及全部 writeback candidates 與 destination。需要原始 expressions、完整 cfg publication、proposal 或分析診斷時，用 `status(execution, detail="full")` 讀當次已捕捉的內容。這個查詢不補讀目前 GUI，也不刷新 guard。全域 `status` 只列非終態 executions 與終態數量，保存已知 execution ID 以便後續查詢。
+
+保存結果看 `artifacts` 的 section、artifact name、member 路徑清單與各路徑 status。`reserved` 是預留目的地，只有 `saved` 證明已保存。後續分析失敗時，先前確認的 raw 或 image 路徑仍有效。`previews.run/primary/post` 是完整 session 暫存路徑清單，不是持久保存產物；`status` 不附 image content。Run 或分析 step 為 `unknown` 時，沒有 handle 也不能推斷未啟動，先核對現況，不自動重送。
+
+`finish_early` 對 recipe 停止採集，有可用結果就保存 raw 並繼續分析。`cancel` 放棄後續分析與保存，優先於 finish_early；已啟動且不可取消的保存仍回報真實結果。控制回覆只確認請求及 GUI 回應，用 `wait` 或 `status` 核對終態、錯誤與實際保存路徑，不只看 GUI 是否停止。
 
 寫入前明確讀取相關完整 snapshot。Tab 用 `tab.snapshot`，context 用 `context.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 編輯與 Run 另需 `tab.get_cfg` 回傳的 cfg_ref。摘要與 `status` 不替代這些 guard 觀察。`accept(tab)` 接受 Primary 與既有 Post 的全部候選，包含未勾選項；先核對提案與當前目的地。個別候選的修改或寫入走 RPC。
 
