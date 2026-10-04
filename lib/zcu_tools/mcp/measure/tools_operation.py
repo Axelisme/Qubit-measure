@@ -67,6 +67,10 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         missing.append("soc")
     if not tabs:
         missing.append("tab")
+    execution_snapshots = [
+        asdict(item) for item in ctx.session.executions.snapshots()
+    ] + ctx.session.recipes.snapshots()
+    definitions = {definition.name: definition for definition in RECIPES}
     return {
         "project": project,
         "soc": soc,
@@ -79,20 +83,14 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
         "executions": [
-            project_execution(asdict(item))
-            for item in ctx.session.executions.snapshots()
-        ]
-        + [
-            project_execution(
-                item,
-                definition=next(
-                    definition
-                    for definition in RECIPES
-                    if definition.name == item["recipe"]
-                ),
-            )
-            for item in ctx.session.recipes.snapshots()
+            project_execution(item, definition=definitions.get(item.get("recipe")))
+            for item in execution_snapshots
+            if item["phase"] != "terminal"
         ],
+        "terminal_count": sum(
+            item["phase"] == "terminal" for item in execution_snapshots
+        ),
+        "query_hint": 'Use status(execution=<id>, detail="full") for completed executions.',
         "running": [
             {**operation, "op": session.expose_operation(operation["op"])}
             for operation in session.read_internal("operation.active", {})["operations"]
