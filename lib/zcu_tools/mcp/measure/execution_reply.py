@@ -204,7 +204,6 @@ def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str
         "resolved_target": item.get("resolved_target"),
         "proposed": deepcopy(item.get("proposed", item.get("proposed_value"))),
         "current": deepcopy(item.get("current")),
-        "selected": item.get("selected"),
     }
     if item.get("kind") == "module":
         proposed = candidate["proposed"]
@@ -225,7 +224,7 @@ def _destination(native: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     destination = {}
     for section, keys in (
-        ("context", ("active_label", "has_active_context")),
+        ("context", ("active_label",)),
         ("project", ("chip_name", "qub_name", "res_name")),
     ):
         facts = {key: native[key] for key in keys if key in native}

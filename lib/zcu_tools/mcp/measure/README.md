@@ -41,7 +41,7 @@ Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一
 
 Preview PNG 是 MCP session 專屬暫存檔，同時可附 MCP image content。Server 結束後移除。摘要的 `previews` 固定有 run、primary、post 三個完整 path 字串清單，未取得為空清單。同階段去重並保留首見順序，不猜 named image 身分。摘要的 interaction 不重複 figure；full 保留 native figure、preview 與 interaction。`status` 不附圖片。持久保存路徑在摘要的 `artifacts`，full 的 `saved_images` 只列已確認持久圖像，不把 preview 當成已保存產物。
 
-`accept(tab)` 寫入 Primary 與既有 Post 的全部當前候選，包括 GUI 未勾選項。它不改勾選，不用 preview 刷新 guard，不回滾已完成寫入。Primary 先於 Post，首錯停止並列出 confirmed completed、skipped、failed stage 與 not_started。Caller 必須先觀察 tab／context，核對提案與當前目的地。個別候選的調整、選擇與寫入使用 `tab.writeback_*` RPC。
+`accept(tab)` 寫入 Primary 與既有 Post 的全部當前候選，包括 GUI 未勾選項。摘要列出每個候選的 target、proposal 與 current，不把 GUI 勾選狀態當作接受篩選；勾選旗標保留在 full。Destination 摘要只列 context/project 身分，native context readiness 保留在 full，不能替代新的 guard 觀察。它不改勾選，不用 preview 刷新 guard，不回滾已完成寫入。Primary 先於 Post，首錯停止並列出 confirmed completed、skipped、failed stage 與 not_started。Caller 必須先觀察 tab／context，核對提案與當前目的地。個別候選的調整、選擇與寫入使用 `tab.writeback_*` RPC。
 
 ## 連線與觀察
 
