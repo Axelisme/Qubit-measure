@@ -154,15 +154,51 @@ def test_marginal_errors_use_only_covariance_diagonal(
     json.dumps(quality.to_summary_dict(), allow_nan=False)
 
 
-def test_integer_observations_are_rejected_before_residual_arithmetic() -> None:
-    observations = np.array([0, 16], dtype=np.uint8)
-    fitted = np.array([0, 0], dtype=np.uint8)
+@pytest.mark.parametrize(
+    ("observations", "fitted"),
+    [(np.array([0, 16], dtype=np.uint8), np.array([0, 0], dtype=np.uint8))],
+)
+def test_integer_observations_are_rejected_before_residual_arithmetic(
+    observations: np.ndarray, fitted: np.ndarray
+) -> None:
     observations_before = observations.copy()
     fitted_before = fitted.copy()
-    with pytest.raises(ValueError, match="y.*float64.*uint8"):
+    with pytest.raises(ValueError, match=r"^y\b.*float64.*uint8"):
         compute_fit_quality(observations, fitted, {}, None)
     np.testing.assert_array_equal(observations, observations_before)
     np.testing.assert_array_equal(fitted, fitted_before)
+
+
+@pytest.mark.parametrize(
+    ("observations", "fitted", "covariance", "name", "dtype"),
+    [
+        (
+            np.array([0, 16], dtype=dtype if name == "y" else np.float64),
+            np.array([0, 0], dtype=dtype if name == "y_fit" else np.float64),
+            np.eye(1, dtype=dtype if name == "covariance" else np.float64),
+            name,
+            dtype,
+        )
+        for name in ("y", "y_fit", "covariance")
+        for dtype in ("uint8", "bool", "complex128", "float32")
+        if (name, dtype) != ("y", "uint8")  # Covered by the original wrap reproducer.
+    ],
+)
+def test_unsupported_array_dtype_names_the_rejected_argument(
+    observations: np.ndarray,
+    fitted: np.ndarray,
+    covariance: np.ndarray,
+    name: str,
+    dtype: str,
+) -> None:
+    observations_before = observations.copy()
+    fitted_before = fitted.copy()
+    covariance_before = covariance.copy()
+    with pytest.raises(ValueError, match=rf"^{name}\b.*float64.*{dtype}"):
+        compute_fit_quality(observations, fitted, {"offset": 1.0}, covariance)
+    np.testing.assert_array_equal(observations, observations_before)
+    np.testing.assert_array_equal(fitted, fitted_before)
+    np.testing.assert_array_equal(covariance, covariance_before)
 
 
 @pytest.mark.parametrize(
@@ -171,10 +207,8 @@ def test_integer_observations_are_rejected_before_residual_arithmetic() -> None:
         (np.array([]), np.array([]), {"p": 1.0}, np.eye(1), "nonempty"),
         (np.ones((1, 2)), np.ones(2), {"p": 1.0}, np.eye(1), "one-dimensional"),
         (np.ones(2), np.ones(3), {"p": 1.0}, np.eye(1), "matching"),
-        (np.ones(2, dtype=complex), np.ones(2), {"p": 1.0}, np.eye(1), "real"),
         (np.ones(2), np.ones(2), {"": 1.0}, np.eye(1), "nonempty"),
         (np.ones(2), np.ones(2), {"p": 1.0}, np.eye(2), "covariance shape"),
-        (np.ones(2), np.ones(2), {"p": 1.0}, np.eye(1, dtype=complex), "real"),
     ],
 )
 def test_caller_shape_and_name_mistakes_fail_fast(

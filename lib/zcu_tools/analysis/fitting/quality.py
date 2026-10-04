@@ -93,13 +93,13 @@ def compute_fit_quality(
 
     Args:
         y: Nonempty 1-D real observations passed to the optimizer after any
-            skip/mask. Real integer and floating-point arrays are accepted.
+            skip/mask. Only arrays with dtype float64 are accepted.
         y_fit: Model values at exactly the same observations/coordinates as y,
-            with the same shape and also a real numeric dtype.
+            with the same shape and dtype float64.
         parameters: Parameter values keyed by nonblank string names. Mapping
             insertion order defines covariance row/column order. An empty
             mapping is allowed; dots in names remain part of the key.
-        covariance: Real square matrix of shape (len(parameters), len(parameters))
+        covariance: Float64 square matrix of shape (len(parameters), len(parameters))
             in that order, or None when unavailable. Only the diagonal is used
             for marginal errors; no symmetry or positive-semidefinite gate is
             applied to off-diagonal entries.
@@ -112,13 +112,19 @@ def compute_fit_quality(
         variances produce None plus a direct issue, rather than raising.
 
     Raises:
-        ValueError: Observation/model vectors are empty, not 1-D, mismatched in
-            shape, or complex; a parameter name is not a nonblank string; or
-            covariance has the wrong shape or is complex.
+        ValueError: y, y_fit, or non-None covariance has a dtype other than
+            float64 (the message names the parameter and received dtype);
+            observation/model vectors are empty, not 1-D, or mismatched in shape;
+            a parameter name is not a nonblank string; or covariance has the
+            wrong shape. Inputs are never converted to a supported dtype.
 
     Inputs are not modified. No optimizer, calibration, accept, or writeback
     policy is changed.
     """
+    _validate_float64_dtype("y", y)
+    _validate_float64_dtype("y_fit", y_fit)
+    if covariance is not None:
+        _validate_float64_dtype("covariance", covariance)
     _validate_observations(y, y_fit)
     _validate_parameter_names(parameters)
     if covariance is not None and covariance.shape != (
@@ -126,8 +132,6 @@ def compute_fit_quality(
         len(parameters),
     ):
         raise ValueError("covariance shape must match the named parameter order")
-    if covariance is not None and not np.isrealobj(covariance):
-        raise ValueError("covariance must be real")
 
     r2, normalized_rms, issues = _residual_metrics(y, y_fit)
     relative_errors: dict[str, float | None] = {}
@@ -138,6 +142,12 @@ def compute_fit_quality(
         if reason is not None:
             issues.append(QualityIssue(f"relative_parameter_errors.{name}", reason))
     return FitQuality(r2, normalized_rms, relative_errors, tuple(issues))
+
+
+def _validate_float64_dtype(name: str, array: NDArray[np.float64]) -> None:
+    """Reject unsupported dtype, naming the argument and received dtype."""
+    if array.dtype != np.dtype(np.float64):
+        raise ValueError(f"{name} must have dtype float64; received {array.dtype}")
 
 
 def _validate_parameter_names(names: Iterable[object]) -> None:
@@ -152,8 +162,6 @@ def _validate_observations(y: NDArray[np.float64], y_fit: NDArray[np.float64]) -
         raise ValueError("Observations and model values must be nonempty")
     if y.shape != y_fit.shape:
         raise ValueError("Observations and model values must have matching shapes")
-    if not np.isrealobj(y) or not np.isrealobj(y_fit):
-        raise ValueError("Observations and model values must be real")
 
 
 def _ratio(

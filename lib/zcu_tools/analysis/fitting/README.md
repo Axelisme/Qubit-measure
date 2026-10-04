@@ -1,10 +1,10 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-04, fit quality diagnostics
+**Last updated:** 2026-10-04, fit quality dtype contract
 
 ## fitting helpers
 
-`compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。形狀或名稱誤用直接 ValueError。它不重新 fit，也不決定 calibration 或 accept 是否有效。
+`compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數只接受 float64，缺失 covariance 可用 None，不做 dtype conversion。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。dtype、形狀或名稱誤用直接 ValueError。它不重新 fit，也不決定 calibration 或 accept 是否有效。
 
 `analysis.fitting.shared` 是多 trace shared/fixed fitting 的唯一 public authority；不提供
 positional shared-index compatibility。它的 least-squares path 讓每條
