@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-04, stable-name writeback selection
+**Last updated:** 2026-10-05, stable-name writeback selection
 
 # `zcu_tools/mcp/measure/`
 
