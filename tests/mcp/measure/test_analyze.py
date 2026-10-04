@@ -228,6 +228,7 @@ def test_analysis_start_failure_retains_a_queryable_execution(
 ):
     method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
     client = _client(tmp_path, clients)
+    pending = Event()
     if receipt in {"handler_timeout", "internal", "stale", "busy"}:
         client.transport.replies[method] = {
             "ok": False,
