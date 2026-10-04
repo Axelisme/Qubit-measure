@@ -148,6 +148,34 @@ def test_new_point_copies_complete_components_and_keeps_independent_values(
     assert point.Q1.freq == 5200.0
 
 
+def test_seed_accepts_omitted_components_without_rewriting_setup(
+    entry: ResultEntry, entry_roots: tuple[Path, Path]
+) -> None:
+    results, database = entry_roots
+    source = results / "entry/setup.yaml"
+    template = YAML(typ="rt").load(source.read_text())
+    template.pop("components")
+    write_yaml(source, template)
+    before = source.read_bytes()
+
+    reopened = ResultEntry.open(
+        "entry", result_root=results, database_root=database
+    )
+    reopened.setup.refresh()
+    point = reopened.new_point("empty")
+
+    assert point.description is None
+    assert reopened.use_point("empty").description is None
+    assert reopened.list_points() == ["empty"]
+    point_root = results / "entry/points/empty"
+    stored = YAML(typ="safe").load((point_root / "point.yaml").read_text())
+    assert stored["components"] == {}
+    module = YAML(typ="safe").load((point_root / "module_cfg.yaml").read_text())
+    assert module["format"] == "zcu.module-library"
+    assert module["format_version"] == "1.0"
+    assert source.read_bytes() == before
+
+
 def test_list_points_sorts_complete_points_and_ignores_incomplete_directories(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
