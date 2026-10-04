@@ -10,7 +10,7 @@ from typing import Any
 
 from recipes import RECIPES
 from zcu_tools.mcp.core.reply import ToolReply
-from zcu_tools.mcp.measure.execution_reply import project_execution
+from zcu_tools.mcp.measure.execution_reply import project_control, project_execution
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -204,15 +204,18 @@ def cancel(
         raise ValueError("provide exactly one of op or execution")
     if "execution" in arguments:
         key = _execution_id(arguments)
-        return (
+        execution = (
             ctx.session.recipes.get(key)
             if key.startswith("recipe-")
             else ctx.session.executions.get(key)
-        ).cancel()
-    op = _operation_id(arguments)
-    execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
+        )
+    else:
+        op = _operation_id(arguments)
+        execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
     if execution is not None:
-        return execution.cancel()
+        reply = execution.cancel()
+        return ToolReply(project_control(reply.data), is_error=reply.is_error)
+    op = _operation_id(arguments)
     ctx = ctx.bound()
     response = ctx.gui.read_internal("operation.cancel", {}, operation_handle=op)
     return {

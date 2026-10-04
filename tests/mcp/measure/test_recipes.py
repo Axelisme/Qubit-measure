@@ -739,8 +739,11 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["gui_cancel"]["status"] == "not_cancellable"
         assert cancelled.data["cancel_requested"]
-        assert cancelled.data["raw_save"]["status"] == "saving"
-        assert cancelled.data["raw_save"]["path"] is None
+        during_save = client.call(
+            "status", {"execution": execution, "detail": "full"}
+        )
+        assert during_save["raw_save"]["status"] == "saving"
+        assert during_save["raw_save"]["path"] is None
         release_save.set()
         final = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})

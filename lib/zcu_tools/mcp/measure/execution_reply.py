@@ -45,6 +45,20 @@ class EstimateReply(TypedDict):
     quality: Any
 
 
+def project_control(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Keep control intent and GUI acknowledgement apart from execution results."""
+    return {
+        "execution": snapshot["execution"],
+        "op": snapshot.get("op"),
+        "run_op": snapshot.get("run_op"),
+        "status": snapshot["status"],
+        "phase": snapshot["phase"],
+        "cancel_requested": snapshot.get("cancel_requested", False),
+        "finish_early_requested": snapshot.get("finish_early_requested", False),
+        "gui_cancel": deepcopy(snapshot.get("gui_cancel")),
+    }
+
+
 def _step(status: str, outcome: dict[str, Any] | None = None) -> StepReply:
     step: StepReply = {"status": status}
     if outcome and outcome.get("reason") is not None:
