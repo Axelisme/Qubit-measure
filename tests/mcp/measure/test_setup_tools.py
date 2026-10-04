@@ -1,10 +1,14 @@
 """Setup progress, uncertainty and native-only working values through public tools."""
 
+from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
+from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.app.measure.services import app_services
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.reply import ToolReply
 
@@ -40,33 +44,49 @@ class SetupGui:
         self.guide = {"behavior": "native guide", "recommended": "use adapter defaults"}
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        response: dict[str, Any]
         if method == "state.has_soc":
-            return {"value": self.has_soc}
-        if method == "soc.info":
-            return {"is_mock": self.is_mock, "cfg": {"board": "mock"}}
-        if method == "device.list":
-            return {
+            response = {"value": self.has_soc}
+        elif method == "soc.info":
+            response = {"is_mock": self.is_mock, "cfg": {"board": "mock"}}
+        elif method == "device.list":
+            response = {
                 "devices": [
                     {"name": self.device["name"], "status": self.device["status"]}
                 ]
             }
-        if method == "device.snapshot":
-            return {"snapshot": deepcopy(self.device)}
-        if method == "predictor.info":
-            return {"loaded": self.loaded}
-        if method == "simulation.initialize":
+        elif method == "device.snapshot":
+            response = {"snapshot": deepcopy(self.device)}
+        elif method == "predictor.info":
+            response = {"loaded": self.loaded}
+        elif method == "simulation.initialize":
             self.has_soc = self.is_mock = self.loaded = True
-            return {"operation_id": 40}
-        if method == "device.setup":
+            response = {"operation_id": 40}
+        elif method == "device.setup":
             self.device["info"].update(params["updates"])
-            return {"operation_id": 41}
-        if method == "operation.await":
-            return {"reason": self.wait_reason, "status": self.operation_status}
-        if method == "operation.progress":
-            return {"active": False}
-        if method == "adapter.guide":
-            return {"guide": self.guide}
-        raise AssertionError(f"Unexpected GUI method: {method}")
+            response = {"operation_id": 41}
+        elif method == "operation.await":
+            response = {"reason": self.wait_reason, "status": self.operation_status}
+        elif method == "operation.progress":
+            response = {"active": False}
+        elif method == "adapter.guide":
+            response = {"guide": self.guide}
+        else:
+            raise AssertionError(f"Unexpected GUI method: {method}")
+        return response
+
+
+@pytest.fixture(scope="session")
+def qapp() -> Iterator[QApplication]:
+    """Keep a headless Qt owner alive for this module's real GUI seam."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("QT_QPA_PLATFORM", "offscreen")
+        patch.setenv("QT_QPA_PLATFORMTHEME", "generic")
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication([])
+        assert isinstance(app, QApplication)
+        yield app
 
 
 @pytest.fixture
@@ -142,7 +162,7 @@ def test_physical_device_uses_exact_native_unit_without_conversion(setup_client,
 @pytest.mark.parametrize("invalid", [True, "1", float("inf"), float("nan")])
 def test_bad_value_is_rejected_before_gui_access(setup_client, invalid):
     client, _ = setup_client
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="value must be a finite number"):
         client.call(
             "device_set_value",
             {"name": "fake_flux", "value": invalid, "unit": "native"},
@@ -159,7 +179,7 @@ def test_bad_timeout_is_rejected_before_gui_access(setup_client, tool, invalid):
         if tool == "simulation_initialize"
         else {"name": "fake_flux", "value": 1, "unit": "native"}
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="timeout must be between 0 and 300 seconds"):
         client.call(tool, {**arguments, "timeout": invalid})
     assert client.transport.sent == []
 
@@ -403,8 +423,17 @@ def test_connection_loss_after_receipt_retains_handle_without_reconnecting(
 
 
 def test_setup_workflows_use_real_gui_coordinator_and_device_owner(
-    qapp, tmp_path, request
+    qapp, tmp_path, request, monkeypatch
 ):
+    owned_runners: list[BackgroundRunner] = []
+
+    def make_background_runner() -> BackgroundRunner:
+        runner = BackgroundRunner()
+        owned_runners.append(runner)
+        return runner
+
+    # Retain the real lifetime owner, without replacing its behavior or services.
+    monkeypatch.setattr(app_services, "BackgroundRunner", make_background_runner)
     fixture = Fixture(empty_project=True, headless=True)
     port = fixture.start()
     _, call = mcp_client(port, tmp_path, request=request)
@@ -426,7 +455,10 @@ def test_setup_workflows_use_real_gui_coordinator_and_device_owner(
         assert repeated["verification"]["ready"] is True
         assert repeated["after"]["devices"][0]["info"]["value"] == 0.5
     finally:
+        for runner in owned_runners:
+            runner.quiesce()
         fixture.stop()
+        qapp.processEvents()
 
 
 def test_native_finished_is_retained_when_mock_verification_fails(setup_client):
