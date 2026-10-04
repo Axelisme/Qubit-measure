@@ -86,7 +86,7 @@ package-dir = { "" = "lib", "recipes" = "recipes", "zcu_lab" = "zcu_lab" }
 [tool.setuptools.packages.find]
 where = ["lib", "."]
 include = ["zcu_tools", "zcu_tools.*", "zcu_lab", "zcu_lab.*", "recipes"]
-namespaces = false
+namespaces = true
 
 [tool.ruff.lint]
 # E402 is checked incrementally like other existing debt. Entry points with
