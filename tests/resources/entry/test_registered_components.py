@@ -205,6 +205,44 @@ def test_path_write_runs_nested_owning_field_normalization(tmp_path: Path) -> No
         assert reopened.setup.N1.timing == {"label": "changed"}
 
 
+@pytest.mark.parametrize("nullable", [False, True])
+def test_nested_kind_can_be_omitted_in_partial_setup(
+    tmp_path: Path, nullable: bool
+) -> None:
+    class Details(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        kind: str
+
+    class DirectDetails(ComponentSchema):
+        details: Details
+
+    class NullableDetails(ComponentSchema):
+        details: Details | None
+
+    model = NullableDetails if nullable else DirectDetails
+    with registered_model("notebook/nested-kind", model) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, details={})
+        assert entry.setup.N1.details == {}
+        source = results / "entry" / "setup.yaml"
+        document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
+        assert document["components"]["N1"]["details"] == {}
+
+        with entry.setup.edit() as draft:
+            with pytest.raises(ValidationError, match="string_type"):
+                draft.set("N1.details.kind", None)
+            assert draft.N1.details == {}
+            draft.set("N1.details.kind", "auxiliary")
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.N1.details == {"kind": "auxiliary"}
+        if nullable:
+            entry.setup.N1.details = None
+            reopened.setup.refresh()
+            assert reopened.setup.N1.details is None
+
+
 def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
     class NullableFrequency(ComponentSchema):
         freq: Annotated[float, UnitSpec("Hz", "MHz")] | None = None
