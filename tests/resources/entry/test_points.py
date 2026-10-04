@@ -17,6 +17,7 @@ from zcu_tools.resources.entry import (
     MissingReferenceError,
     PointView,
     ResultEntry,
+    UnknownKindError,
     component_registry,
 )
 
@@ -357,6 +358,43 @@ def test_point_edit_rejects_invalid_reload_before_exposing_draft(
     assert point.R1.low == 1.0
     assert point.R1.high == 2.0
     assert point_source.read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["use", "refresh", "edit"])
+def test_point_unknown_kind_reports_own_source_without_publishing(
+    entry: ResultEntry,
+    working_point: PointView,
+    entry_roots: tuple[Path, Path],
+    operation: str,
+) -> None:
+    source = entry_roots[0] / "entry/points/a/point.yaml"
+    setup_source = entry_roots[0] / "entry/setup.yaml"
+    stored = YAML(typ="rt").load(source.read_text())
+    stored["components"]["Q1"]["kind"] = "missing/point-kind"
+    write_yaml(source, stored)
+    before = source.read_bytes()
+    setup_before = setup_source.read_bytes()
+    entered: list[bool] = []
+
+    with pytest.raises(UnknownKindError) as error:
+        if operation == "use":
+            entry.use_point("a")
+        elif operation == "refresh":
+            working_point.refresh()
+        else:
+            with working_point.edit():
+                entered.append(True)
+
+    assert error.value.source == source
+    assert error.value.component == "Q1"
+    assert error.value.kind == "missing/point-kind"
+    assert str(source) in str(error.value)
+    assert str(setup_source) not in str(error.value)
+    assert entered == []
+    assert working_point.Q1.freq == 5000.0
+    assert working_point.Q1.t1 == 12.0
+    assert source.read_bytes() == before
+    assert setup_source.read_bytes() == setup_before
 
 
 def test_setup_commit_does_not_validate_or_modify_existing_points(
