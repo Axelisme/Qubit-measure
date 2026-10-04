@@ -121,6 +121,42 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
+def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
+    tmp_path: Path, registry_state_guard: None
+) -> None:
+    class DoubledTiming(RequiredTiming):
+        @field_validator("width")
+        @classmethod
+        def double_width(cls, value: float) -> float:
+            return value * 2
+
+    class DoubledSchema(ComponentSchema):
+        timing: DoubledTiming
+
+    with registered_model("notebook/doubled", DoubledSchema) as kind:
+        entry, results, _ = create_entry(tmp_path)
+        entry.setup.add_component("R1", kind="resonator", freq=10.0)
+        entry.setup.add_component("N1", kind=kind, timing={})
+        source = results / "entry" / "setup.yaml"
+        before = source.read_bytes()
+
+        def edit() -> None:
+            with entry.setup.edit() as draft:
+                draft.description = "must roll back"
+                draft.R1.freq = 15.0
+                draft.set("N1.timing.width", 10.0)
+
+        with pytest.raises(ValidationError) as failure:
+            edit()
+        error = failure.value.errors()[0]
+        assert error["loc"] == ("components", "N1", "timing", "width")
+        assert "20.0" in error["msg"] and "40.0" in error["msg"]
+        assert source.read_bytes() == before
+        assert entry.setup.R1.freq == 10.0
+        assert entry.setup.N1.timing == {}
+        assert entry.setup.description is None
+
+
 @pytest.mark.parametrize("operation", ["open", "refresh", "edit"])
 def test_noncanonical_file_rejects_reload_with_source_and_preserves_snapshot(
     tmp_path: Path,
