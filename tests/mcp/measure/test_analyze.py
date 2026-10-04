@@ -285,6 +285,75 @@ def test_analysis_start_failure_retains_a_queryable_execution(
     assert _methods(client) == [method]
 
 
+@pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize("cancel", [False, True])
+def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
+    tmp_path, clients, stage, cancel
+):
+    method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
+    pane = "analysis" if stage == "primary" else "post_analysis"
+    pending, release = Event(), Event()
+
+    def respond(name, params):
+        if name == method:
+            pending.set()
+            assert release.wait(2)
+            return _start_reply({"gain": 2.0}, [])
+        if name == "operation.cancel":
+            return {"status": "cancelling"}
+        if name == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if name in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
+            return _result_reply(pane, [], {"gain": 2.0})
+        raise AssertionError(name)
+
+    client = _client(tmp_path, clients, respond)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        called = pool.submit(client.call, "tab_analyze", {"tab": "t", "stage": stage})
+        try:
+            assert pending.wait(1)
+            snapshots = client.context.session.executions.snapshots()
+            assert len(snapshots) == 1
+            key = snapshots[0].execution
+            before = len(client.transport.sent)
+            summary = client.call("status", {"execution": key})
+            full = client.call("status", {"execution": key, "detail": "full"})
+            assert summary["op"] is None
+            assert summary["steps"]["analysis"][stage]["status"] == "unknown"
+            assert full["start"]["status"] == "unknown"
+            assert len(client.transport.sent) == before
+            if cancel:
+                requested = pool.submit(client.call, "cancel", {"execution": key})
+                stopped = requested.result(timeout=0.5)
+                assert stopped.data["cancel_requested"] is True
+                assert stopped.data["gui_cancel"]["status"] == "not_needed"
+                assert len(client.transport.sent) == before
+            release.set()
+            initial = called.result(timeout=2)
+            completed = client.call("wait", {"execution": key, "timeout": 2})
+        finally:
+            release.set()
+    assert initial.data["execution"] == key
+    assert completed.data["execution"] == key
+    assert completed.data["status"] == ("cancelled" if cancel else "finished")
+    assert completed.data["steps"]["analysis"][stage] == {
+        "status": "finished",
+        "reason": "completed",
+    }
+    full = client.call("status", {"execution": key, "detail": "full"})
+    assert full["op"] == 1
+    assert full["start"]["status"] == "running"
+    assert full["cancel_requested"] == cancel
+    assert full["operation_outcome"]["status"] == "finished"
+    assert len(client.context.session.executions.snapshots()) == 1
+    assert _methods(client) == (
+        [method, "operation.cancel", "operation.await"]
+        if cancel
+        else [method, "operation.await", "tab.get_analyze_result"
+              if stage == "primary" else "tab.get_post_analyze_result"]
+    )
+
+
 def _start_reply(
     params: dict[str, Any], invalidated: list[str], *, interactive: bool = False
 ) -> dict[str, Any]:
