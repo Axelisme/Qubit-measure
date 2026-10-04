@@ -169,6 +169,7 @@ class AnalysisExecution:
         self._images: tuple[PngImage, ...] = ()
         self._thread: Thread | None = None
         self._gui_cancel: GuiCancel | None = None
+        self._cancel_in_flight = False
 
     def snapshot(self) -> ExecutionSnapshot:
         with self._condition:
@@ -203,18 +204,23 @@ class AnalysisExecution:
         with self._condition:
             if self._snapshot.phase == "terminal":
                 return self._cancel_reply(GuiCancel("not_needed"))
-            if self._snapshot.cancel_requested:
-                self._condition.wait_for(lambda: self._gui_cancel is not None)
-                assert self._gui_cancel is not None
-                return self._cancel_reply(self._gui_cancel)
             self._snapshot = replace(
                 self._snapshot, cancel_requested=True, status="running"
             )
             self._condition.notify_all()
+            op = self._snapshot.op
+            if op is None:
+                # Intent is retained. A late receipt triggers the original-bound stop.
+                return self._cancel_reply(GuiCancel("not_needed"))
+            if self._cancel_in_flight:
+                self._condition.wait_for(lambda: self._gui_cancel is not None)
+                assert self._gui_cancel is not None
+                return self._cancel_reply(self._gui_cancel)
+            self._cancel_in_flight = True
         # Never hold the execution lock while waiting for RPC serialization.
         try:
             reply = self._connection.read_internal(
-                "operation.cancel", {}, operation_handle=self._snapshot.op
+                "operation.cancel", {}, operation_handle=op
             )
             status = reply.get("status")
             if status == "cancelling":
@@ -391,6 +397,8 @@ class AnalysisExecution:
     def _run(self) -> None:
         # This is the worker isolation boundary: retain partial facts for every failure.
         try:
+            if self.snapshot().cancel_requested:
+                self.cancel()
             if not self._await_operation():
                 return
             self._complete_analysis()
