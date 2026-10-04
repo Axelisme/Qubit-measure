@@ -29,6 +29,35 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_general_extensions_support_direct_and_shared_draft_writes_without_scaling(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.general.ext.temperature = 0.02
+    entry.setup.general.ext["_arbitrary.key"] = {"freq": 12.3, "flags": [True, None]}
+    before = setup_path.read_bytes()
+    with entry.setup.edit() as draft:
+        draft.general.ext.temperature = 0.03
+        draft.general.ext.note = "cooldown"
+        draft.description = "physical environment is not encoded in the name"
+        assert draft.general.ext.temperature == 0.03
+        assert entry.setup.general.ext.temperature == 0.02
+        assert setup_path.read_bytes() == before
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert reopened.setup.general.ext.temperature == 0.03
+    assert reopened.setup.general.ext.note == "cooldown"
+    assert reopened.setup.general.ext["_arbitrary.key"] == {
+        "freq": 12.3,
+        "flags": [True, None],
+    }
+    assert reopened.setup.general.entry_id == entry.entry_id
+    assert reopened.setup.description == "physical environment is not encoded in the name"
+    document = YAML(typ="safe").load(setup_path)
+    assert document["general"]["ext"]["temperature"] == 0.03
+
+
 def test_component_draft_edits_publish_together_only_after_context_exit(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
