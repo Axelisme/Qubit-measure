@@ -128,6 +128,7 @@ def test_status_indexes_gui_operations_and_session_executions(
         replies["operation.await"] = {"reason": "completed", "status": "finished"}
         replies["tab.get_analyze_result"] = {
             "summary": None,
+            "invalid": [],
             "params": {},
             "operation_state": {"analysis_state": {"figure_names": []}},
         }
