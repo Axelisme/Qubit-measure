@@ -274,6 +274,8 @@ class AnalysisExecution:
         with self._condition:
             if self._closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
+            if self._snapshot.cancel_requested:
+                raise _ContinuationCancelled
             self._snapshot = replace(self._snapshot, start=AnalysisStart("unknown"))
             self._condition.notify_all()
 
@@ -292,6 +294,9 @@ class AnalysisExecution:
 
     def fail_start(self, exc: Exception) -> None:
         """Keep sent requests ambiguous unless GUI explicitly rejects admission."""
+        if isinstance(exc, _ContinuationCancelled):
+            self._finish()
+            return
         with self._condition:
             if isinstance(exc, GuiRpcError) and exc.request_rejected:
                 self._snapshot = replace(

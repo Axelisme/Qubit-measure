@@ -391,7 +391,7 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
             deadline = time.monotonic() + 1
             snapshots = client.context.session.executions.snapshots()
             while not snapshots and time.monotonic() < deadline:
-                occupied.wait(0.01)
+                time.sleep(0.01)
                 snapshots = client.context.session.executions.snapshots()
             assert len(snapshots) == 1
             key = snapshots[0].execution
