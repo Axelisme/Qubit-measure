@@ -198,7 +198,9 @@ def test_partial_nested_setup_defers_model_after_validators(
         entry.setup.add_component("N1", kind=kind, timing={"label": "draft"})
         with entry.setup.edit() as draft:
             draft.set("N1.timing.width", -2.0)
-        reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
         reopened.setup.refresh()
         assert reopened.setup.N1.timing == {"label": "draft", "width": -2.0}
         persisted = YAML(typ="safe").load(results / "entry" / "setup.yaml")
