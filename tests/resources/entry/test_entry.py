@@ -29,6 +29,44 @@ def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
     return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
+def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_units(
+    entry_roots: tuple[Path, Path], entry: ResultEntry
+) -> None:
+    results, database = entry_roots
+    setup_path = results / "entry" / "setup.yaml"
+    entry.setup.add_component("R1", kind="resonator", freq=6500.0)
+    document = YAML(typ="safe").load(setup_path)
+    document["format_version"] = "1.7"
+    document["future_top"] = {"next": [1, "two"]}
+    document["general"]["future_general"] = "next metadata"
+    document["components"]["R1"]["future_physical"] = 7.5e9
+    document["components"]["R1"]["wiring"] = {
+        "time_of_flight": 1.2e-6,
+        "future_wiring": {"channel": 3},
+    }
+    with setup_path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(document, stream)
+    before = setup_path.read_bytes()
+
+    reopened = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert setup_path.read_bytes() == before
+    assert reopened.setup.R1.freq == pytest.approx(6500.0)
+    assert reopened.setup.R1.wiring.time_of_flight == pytest.approx(1.2)
+    reopened.setup.R1.freq = 6600.0
+    with reopened.setup.edit() as draft:
+        draft.set("R1.wiring.time_of_flight", 1.5)
+        draft.general.description = "edited with the older reader"
+
+    document["components"]["R1"]["freq"] = 6.6e9
+    document["components"]["R1"]["wiring"]["time_of_flight"] = 1.5e-6
+    document["general"]["description"] = "edited with the older reader"
+    assert YAML(typ="safe").load(setup_path) == document
+    again = ResultEntry.open("entry", result_root=results, database_root=database)
+    assert again.setup.R1.freq == pytest.approx(6600.0)
+    assert again.setup.R1.wiring.time_of_flight == pytest.approx(1.5)
+    assert again.setup.description == "edited with the older reader"
+
+
 @pytest.mark.parametrize("method", ["attribute", "path"])
 def test_description_alias_and_general_path_validate_before_changing_the_draft(
     entry_roots: tuple[Path, Path], entry: ResultEntry, method: str
