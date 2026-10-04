@@ -100,7 +100,7 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
         summary = client.call("status", {"execution": key})
         full = client.call("status", {"execution": key, "detail": "full"})
         assert summary["writeback"]["destination"] == {
-            "context": {"active_label": "sample", "has_active_context": True},
+            "context": {"active_label": "sample"},
             "project": {"chip_name": "chip", "qub_name": "q", "res_name": "r"},
         }
         assert full["writeback"]["destination_context"] == destination
@@ -151,7 +151,7 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         assert candidate["kind"] == "module"
         assert candidate["target"] == "pi_len"
         assert candidate["resolved_target"] is None
-        assert candidate["selected"] is False
+        assert full["writeback"]["items"][0]["selected"] is False
         assert candidate["cfg_ref"] == summary["actual"]["cfg_ref"]
         assert candidate["proposed"] == {
             "type": "pulse",
@@ -345,7 +345,6 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
             "resolved_target": None,
             "proposed": 0.24,
             "current": 0.1,
-            "selected": False,
         }
         assert summary["writeback"]["destination"] == {
             "context": {"active_label": "sample"}
