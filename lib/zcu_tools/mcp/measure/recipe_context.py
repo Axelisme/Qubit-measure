@@ -174,6 +174,8 @@ class RecipeContext:
         except _ContinuationCancelled:
             self._publish(status="cancelled", phase="terminal")
         except Exception as error:  # Worker boundary retains partial progress.
+            if isinstance(error, GuiRpcError) and error.request_rejected:
+                self._retain_start_rejection(error)
             logger.exception("Recipe %s failed", self.progress.recipe)
             self._publish(
                 error=RecipeError(
@@ -185,6 +187,19 @@ class RecipeContext:
                 status="failed",
                 phase="terminal",
             )
+
+    def _retain_start_rejection(self, error: GuiRpcError) -> None:
+        """Replace ambiguity only when GUI explicitly rejects the pending start."""
+        rejected = StartReceipt("not_started", error.reason or error.code)
+        if self.progress.phase == "run" and self.progress.run_start.status == "unknown":
+            self._publish(run_start=rejected)
+        elif self.progress.phase == "analysis":
+            stage = self.progress.analysis_stage
+            pending = self.progress.analysis_starts.get(stage)
+            if pending is not None and pending.status == "unknown":
+                self._publish(
+                    analysis_starts={**self.progress.analysis_starts, stage: rejected}
+                )
 
     def wake(self) -> None:
         with self._condition:

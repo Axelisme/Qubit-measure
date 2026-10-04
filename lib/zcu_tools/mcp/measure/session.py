@@ -26,11 +26,17 @@ class GuiRpcError(RuntimeError):
     """A GUI or MCP boundary error with a stable agent-facing reason."""
 
     def __init__(
-        self, message: str, *, reason: str | None = None, code: str | None = None
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        code: str | None = None,
+        request_rejected: bool = False,
     ) -> None:
         super().__init__(message)
         self.reason = reason
         self.code = code
+        self.request_rejected = request_rejected
 
 
 class CatalogEntry(TypedDict):
@@ -552,13 +558,27 @@ class MeasureMcpSession:
                     f"{detail}; review then retry",
                     reason="stale_version",
                     code="precondition_failed",
+                    request_rejected=True,
                 )
             code = err.get("code")
             reason = err.get("reason")
             if code == "timeout" and reason is None:
                 reason = "gui_handler_timeout"
             raise GuiRpcError(
-                f"GUI Error ({code}): {err.get('message')}", reason=reason, code=code
+                f"GUI Error ({code}): {err.get('message')}",
+                reason=reason,
+                code=code,
+                # Only explicit admission errors prove that dispatch did not start.
+                # Handler timeout and internal failures can follow side effects.
+                request_rejected=code
+                in {
+                    "unknown_method",
+                    "invalid_params",
+                    "precondition_failed",
+                    "unauthorized",
+                    "busy",
+                    "shutting_down",
+                },
             )
         result = resp.get("result")
         if not isinstance(result, dict):
