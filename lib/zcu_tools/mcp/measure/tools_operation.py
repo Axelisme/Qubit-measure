@@ -126,8 +126,12 @@ def _wait_tool(
             else ctx.session.executions.get(key)
         )
         reply = execution.wait(timeout)
+        data = reply.data
+        if key.startswith("recipe-"):
+            definition = next(item for item in RECIPES if item.name == data["recipe"])
+            data = project_execution(data, definition=definition)
         return ToolReply(
-            {**reply.data, "elapsed_s": max(0.0, time.monotonic() - start)},
+            {**data, "elapsed_s": max(0.0, time.monotonic() - start)},
             reply.images,
         )
     return wait(ctx, arguments)

@@ -13,7 +13,7 @@ from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.session import GuiConnection
 
 from ._recipe_support import PNG, LookbackGui, scalar
-from ._support import make_client
+from ._support import full_execution_reply, make_client
 
 
 class GeGui(LookbackGui):
@@ -181,14 +181,18 @@ def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
 
     client.transport.replies["tab.writeback_preview"] = writeback
     try:
-        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        initial = full_execution_reply(
+            client, client.call("singleshot_ge", {"pi_ref": "pi"})
+        )
         assert pending.wait(1)
         execution = initial.data["execution"]
         status = client.call("status", {"execution": execution, "detail": "full"})
         assert status["analysis_stage"] == stage
         assert client.call("cancel", {"execution": execution}).data["cancel_requested"]
         release.set()
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         data = terminal.data
         assert data["status"] == "cancelled", data
         assert data["writeback"]["items"][0]["id"] == "md-1"
@@ -242,7 +246,9 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         }
     )
     try:
-        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        initial = full_execution_reply(
+            client, client.call("singleshot_ge", {"pi_ref": "pi"})
+        )
         assert pending.wait(1)
         execution = initial.data["execution"]
         for _ in range(2):
@@ -251,7 +257,9 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
             ]
         assert not stopped.is_set()
         release.set()
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         data = terminal.data
         assert stopped.is_set()
         assert data["status"] == outcome, data
@@ -309,7 +317,9 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
         "result": {"status": "finished"},
     }
     try:
-        initial = client.call("singleshot_ge", {"pi_ref": "pi"})
+        initial = full_execution_reply(
+            client, client.call("singleshot_ge", {"pi_ref": "pi"})
+        )
         assert pending.wait(1)
         execution = initial.data["execution"]
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -323,7 +333,9 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
                 release.set()
             cancelled = request.result(timeout=2)
         assert cancelled.data["cancel_requested"]
-        terminal = client.call("wait", {"execution": execution, "timeout": 2})
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
         data = terminal.data
         assert data["status"] == ("failed" if save_failed else "cancelled"), data
         assert data["post_analysis"]["save_status"] == (
@@ -418,7 +430,7 @@ def test_ge_preserves_calibrated_library_and_gui_shots_defaults(ge_client, expli
         modules["probe_pulse"]["ref"] = "pi"
         modules["readout"]["ref"] = "readout"
     arguments = {"pi_ref": "pi", "readout_ref": "readout"} if explicit else {}
-    data = client.call("singleshot_ge", arguments).data
+    data = full_execution_reply(client, client.call("singleshot_ge", arguments)).data
     assert data["status"] == "finished", data
     fields = data["actual"]["fields"]
     assert fields["shots"]["value"] == 7000
@@ -518,7 +530,7 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
 
     client.transport.replies[result_method] = result_reply
     client.transport.replies[failing_method] = failure_reply
-    reply = client.call("singleshot_ge", {"pi_ref": "pi"})
+    reply = full_execution_reply(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
     data = reply.data
     assert data["status"] == "failed", data
     assert data["tab"] == "t"
@@ -635,7 +647,7 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
             return {"ok": True, "result": observed}
 
         client.transport.replies[method] = result
-    reply = client.call("singleshot_ge", {"pi_ref": "pi"})
+    reply = full_execution_reply(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
     data = json.loads(json.dumps(reply.data, allow_nan=False))
     assert data["status"] == "finished"
     assert data["raw_save"]["path"] == "/actual/raw.h5"
@@ -660,7 +672,9 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
     modules["init_pulse"]["ref"] = "old_init"
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call("singleshot_ge", {"pi_ref": "pi", "shots": 1234})
+        reply = full_execution_reply(
+            client, client.call("singleshot_ge", {"pi_ref": "pi", "shots": 1234})
+        )
         data = reply.data
         assert data["status"] == "finished", data
         assert data["analysis_mode"] == "primary_post"

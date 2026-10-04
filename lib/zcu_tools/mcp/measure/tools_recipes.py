@@ -7,6 +7,7 @@ from recipes import RECIPES, RecipeDefinition
 from recipes.cfg_sources import finite_number
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
+from zcu_tools.mcp.measure.execution_reply import project_execution
 from zcu_tools.mcp.measure.recipe_context import RecipeContext
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -39,7 +40,15 @@ def run_recipe(
     execution = tools.session.recipes.start(
         tools, definition.name, partial(_run_normalized_recipe, definition), arguments
     )
-    return execution.wait(INITIAL_WAIT_SECONDS)
+    reply = execution.wait(INITIAL_WAIT_SECONDS)
+    return ToolReply(
+        {
+            **project_execution(reply.data, definition=definition),
+            "elapsed_s": reply.data["elapsed_s"],
+        },
+        reply.images,
+        reply.is_error,
+    )
 
 
 def build_recipe_tools(context: MeasureToolContext) -> ToolTable:
