@@ -476,7 +476,9 @@ def interactive_recipe(tmp_path, handoff_failure):
                     "png_b64": "invalid"
                     if failure == "png"
                     else base64.b64encode(PNG).decode()
-                },
+                }
+                if params.get("include_figure", True)
+                else None,
                 "state": {"offset": 0.24},
                 "commands": [{"name": "done"}],
                 "prompt": "Confirm offset",
