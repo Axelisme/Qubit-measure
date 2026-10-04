@@ -12,11 +12,20 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    ValidationError,
     ValidationInfo,
     field_validator,
 )
 
-from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
+from pydantic_core import InitErrorDetails, PydanticCustomError
+
+from zcu_tools.format_version import (
+    FieldPath,
+    FormatVersion,
+    YamlMap,
+    YamlValue,
+    validate_header,
+)
 from zcu_tools.resources.document_store import UnitSpec
 
 PARAMETER_FORMAT = "zcu.parameter-container"
@@ -158,6 +167,37 @@ class CurrentSourceSchema(ComponentSchema):
     current: Annotated[float | None, UnitSpec("A", "mA")] = None
 
 
+def _canonical_errors(
+    fields: YamlMap, validated: BaseModel, path: FieldPath
+) -> list[InitErrorDetails]:
+    """Compare supplied known fields in working units, not the original user input."""
+    canonical = TypeAdapter(YamlMap).validate_python(
+        validated.model_dump(exclude_unset=True)
+    )
+    errors: list[InitErrorDetails] = []
+    for name in type(validated).model_fields:
+        if name not in fields and name not in canonical:
+            continue
+        before = fields.get(name, "(missing)")
+        after = canonical.get(name, "(missing)")
+        nested = getattr(validated, name)
+        if isinstance(before, dict) and isinstance(nested, BaseModel):
+            errors.extend(_canonical_errors(before, nested, (*path, name)))
+        elif (name in fields) != (name in canonical) or before != after:
+            errors.append(
+                InitErrorDetails(
+                    type=PydanticCustomError(
+                        "canonical_value",
+                        "Field validation changed canonical value from {before} to {after}",
+                        {"before": repr(before), "after": repr(after)},
+                    ),
+                    loc=(*path, name),
+                    input=before,
+                )
+            )
+    return errors
+
+
 class SetupDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -196,4 +236,7 @@ class SetupDocument(BaseModel):
             result[name] = model.model_validate(
                 fields, extra="ignore" if forward_minor else None
             )
+            errors = _canonical_errors(fields, result[name], (name,))
+            if errors:
+                raise ValidationError.from_exception_data(model.__name__, errors)
         return result
