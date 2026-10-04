@@ -244,7 +244,16 @@ def _module_summary(value: Any) -> dict[str, Any] | None:
         raise ValueError("A module proposal must be an object")
     summary = {
         key: deepcopy(value[key])
-        for key in ("type", "freq", "gain", "phase", "cloned_from")
+        for key in (
+            "type",
+            "freq",
+            "gain",
+            "phase",
+            "cloned_from",
+            "ro_freq",
+            "ro_length",
+            "trig_offset",
+        )
         if key in value
     }
     waveform = value.get("waveform")
@@ -254,6 +263,9 @@ def _module_summary(value: Any) -> dict[str, Any] | None:
             for key, item in waveform.items()
             if not isinstance(item, (dict, list))
         }
+    for key in ("pulse_cfg", "ro_cfg"):
+        if key in value:
+            summary[key] = _module_summary(value[key])
     return summary
 
 
