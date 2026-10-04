@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Self
 
 import pytest
-from pydantic import BaseModel, ValidationError, ValidationInfo, model_validator
+from pydantic import BaseModel, Field, ValidationError, ValidationInfo, model_validator
 from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import ConflictError, UnitSpec
 from zcu_tools.resources.entry import (
@@ -452,6 +452,49 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
         assert view.Q1.t2 == 13.0
         assert view.Q1.wiring.flux_ch == 3
         assert view.Q1.ext.nested == {"note": "accepted"}
+
+
+@pytest.mark.parametrize("nullable", [False, True])
+def test_nested_factory_runs_validators_only_on_complete_views(
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    nullable: bool,
+) -> None:
+    calls: list[float] = []
+
+    class Details(BaseModel):
+        freq: Annotated[float, UnitSpec("Hz", "MHz")] = 12.0
+
+        @model_validator(mode="after")
+        def mutate(self) -> Self:
+            calls.append(self.freq)
+            self.freq += 1.0
+            return self
+
+    class DirectSchema(ComponentSchema):
+        details: Details = Field(default_factory=Details)
+
+    class NullableSchema(ComponentSchema):
+        details: Details | None = Field(default_factory=Details)
+
+    kind = "test/nested-default-factory"
+    component_registry.register(kind, NullableSchema if nullable else DirectSchema)
+    try:
+        entry.setup.add_component("C1", kind=kind)
+        results, database = entry_roots
+        source = results / "entry/setup.yaml"
+        before = source.read_bytes()
+        entry.setup.refresh()
+        ResultEntry.open("entry", result_root=results, database_root=database)
+        assert calls == []
+        with pytest.raises(ValidationError, match="C1.details.freq") as error:
+            entry.new_point("invalid")
+        assert "point.yaml" in str(error.value)
+        assert calls == [12.0]
+        assert source.read_bytes() == before
+        assert entry.list_points() == []
+    finally:
+        component_registry.unregister(kind)
 
 
 @pytest.mark.parametrize("nullable", [False, True])
