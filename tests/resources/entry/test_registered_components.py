@@ -121,7 +121,9 @@ def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
     return entry, results, database
 
 
-@pytest.mark.parametrize("write", ["attribute", "set", "whole-field"])
+@pytest.mark.parametrize(
+    "write", ["automatic", "attribute", "set", pytest.param("ext", id="whole-field")]
+)
 def test_leaf_write_runs_owning_field_normalization(tmp_path: Path, write: str) -> None:
     class NormalizeExt(ComponentSchema):
         @field_validator("ext")
@@ -133,18 +135,74 @@ def test_leaf_write_runs_owning_field_normalization(tmp_path: Path, write: str) 
     with registered_model("notebook/normalize-ext", NormalizeExt) as kind:
         entry, results, database = create_entry(tmp_path)
         entry.setup.add_component("N1", kind=kind, ext={"title": "prepared"})
-        with entry.setup.edit() as draft:
-            if write == "attribute":
-                draft.N1.ext.title = "  Changed  "
-            elif write == "set":
-                draft.set("N1.ext.title", "  Changed  ")
-            else:
-                draft.N1.ext = {"title": "  Changed  "}
+        if write == "automatic":
+            entry.setup.N1.ext.title = "  Changed  "
+        else:
+            with entry.setup.edit() as draft:
+                if write == "attribute":
+                    draft.N1.ext.title = "  Changed  "
+                elif write == "set":
+                    draft.set("N1.ext.title", "  Changed  ")
+                else:
+                    setattr(draft.N1, write, {"title": "  Changed  "})
         assert entry.setup.N1.ext.title == "changed"
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
         assert reopened.setup.N1.ext.title == "changed"
+
+
+@pytest.mark.parametrize("write", ["attribute", "set"])
+def test_caught_owning_field_failure_preserves_draft(
+    tmp_path: Path, write: str
+) -> None:
+    class RejectTitle(ComponentSchema):
+        @field_validator("ext")
+        @classmethod
+        def reject_title(cls, value: YamlMap) -> YamlMap:
+            if value.get("title") == "invalid":
+                raise ValueError("title rejected")
+            return value
+
+    with registered_model("notebook/reject-title", RejectTitle) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, ext={"title": "prepared"})
+        with entry.setup.edit() as draft:
+            draft.description = "keep successful edit"
+            if write == "attribute":
+                with pytest.raises(ValidationError, match="title rejected"):
+                    draft.N1.ext.title = "invalid"
+            else:
+                with pytest.raises(ValidationError, match="title rejected"):
+                    draft.set("N1.ext.title", "invalid")
+            assert draft.N1.ext.title == "prepared"
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.description == "keep successful edit"
+        assert reopened.setup.N1.ext.title == "prepared"
+
+
+def test_path_write_runs_nested_owning_field_normalization(tmp_path: Path) -> None:
+    class NormalizeTiming(ComponentSchema):
+        timing: RequiredTiming
+
+        @field_validator("timing")
+        @classmethod
+        def normalize_label(cls, value: RequiredTiming) -> RequiredTiming:
+            value.label = value.label.strip().lower()
+            return value
+
+    with registered_model("notebook/normalize-timing", NormalizeTiming) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, timing={"label": "prepared"})
+        with entry.setup.edit() as draft:
+            draft.set("N1.timing.label", "  Changed  ")
+            assert draft.N1.timing == {"label": "changed"}
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        assert reopened.setup.N1.timing == {"label": "changed"}
 
 
 def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:

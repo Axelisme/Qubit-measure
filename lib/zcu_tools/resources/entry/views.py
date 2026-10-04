@@ -21,6 +21,25 @@ from .schema import (
 type _FieldNode = BaseModel | YamlMap
 
 
+@contextmanager
+def _stage_component(draft: SetupDocument, name: str) -> Generator[ComponentSchema]:
+    candidate = draft.components[name].model_copy(deep=True)
+    yield candidate
+    # The registered partial model runs field validators, not full invariants.
+    draft.components[name] = type(candidate).model_validate(
+        candidate.model_dump(exclude_unset=True, warnings=False)
+    )
+
+
+@contextmanager
+def _stage_general(draft: SetupDocument) -> Generator[SetupGeneral]:
+    candidate = draft.general.model_copy(deep=True)
+    yield candidate
+    draft.general = type(candidate).model_validate(
+        candidate.model_dump(exclude_unset=True, warnings=False)
+    )
+
+
 class FieldView:
     _model: Callable[[], _FieldNode]
     _edit: Callable[[], AbstractContextManager[_FieldNode]]
@@ -63,10 +82,7 @@ class FieldView:
                 component_registry.check_fields(
                     type(draft), {name: value}, path=self._path
                 )
-                values = draft.model_dump(exclude_unset=True)
-                values[name] = value
-                validated = type(draft).model_validate(values)
-                setattr(draft, name, getattr(validated, name))
+                setattr(draft, name, value)
             else:
                 draft[name] = TypeAdapter(YamlValue).validate_python(value)
 
@@ -87,6 +103,7 @@ class GeneralView(FieldView):
         def edit_extension() -> Generator[YamlMap]:
             with edit() as draft:
                 yield draft.ext
+                draft.model_fields_set.add("ext")
 
         self._extension = FieldView(lambda: model().ext, edit_extension, "general.ext")
 
@@ -126,6 +143,7 @@ class ComponentView:
     def _edit_ext(self) -> Generator[YamlMap]:
         with self._edit() as draft:
             yield draft.ext
+            draft.model_fields_set.add("ext")
 
     @property
     def wiring(self) -> FieldView:
@@ -137,6 +155,7 @@ class ComponentView:
     def _edit_wiring(self) -> Generator[WiringSchema]:
         with self._edit() as draft:
             yield draft.wiring
+            draft.model_fields_set.add("wiring")
 
     @property
     def kind(self) -> str:
@@ -160,10 +179,7 @@ class ComponentView:
                 component_registry.check_fields(
                     draft.kind, {name: value}, path=self._path
                 )
-                values = draft.model_dump(exclude_unset=True)
-                values[name] = value
-                validated = type(draft).model_validate(values)
-                setattr(draft, name, getattr(validated, name))
+                setattr(draft, name, value)
 
 
 class EditView:
@@ -176,37 +192,41 @@ class EditView:
 
     @contextmanager
     def _edit_general(self) -> Generator[SetupGeneral]:
-        yield self._draft.general
+        with _stage_general(self._draft) as candidate:
+            yield candidate
 
     def set(self, path: str, value: YamlValue) -> None:
         parts = path.split(".")
         if len(parts) < 2 or not all(parts):
             raise ValueError(f"{path!r}: expected a dotted field path")
-        node: _FieldNode
+        edit_root: AbstractContextManager[BaseModel]
         if parts[0] == "general":
-            node = self._draft.general
+            edit_root = self._edit_general()
         else:
             if parts[0] not in self._draft.components:
                 raise AttributeError(f"Unknown component {parts[0]!r}")
-            node = self._draft.components[parts[0]]
-        for index, name in enumerate(parts[1:-1], start=1):
-            parent_path = ".".join(parts[:index])
-            if isinstance(node, BaseModel):
-                component_registry.check_fields(
-                    type(node), {name: None}, path=parent_path
-                )
-                child = getattr(node, name)
-            else:
-                child = node[name]
-            if not isinstance(child, (BaseModel, dict)):
-                raise AttributeError(f"{parent_path}.{name}: not a field container")
-            node = child
+            edit_root = self._edit_component(parts[0])
+        with edit_root as root:
+            node: _FieldNode = root
+            for index, name in enumerate(parts[1:-1], start=1):
+                parent_path = ".".join(parts[:index])
+                if isinstance(node, BaseModel):
+                    component_registry.check_fields(
+                        type(node), {name: None}, path=parent_path
+                    )
+                    child = getattr(node, name)
+                    node.model_fields_set.add(name)
+                else:
+                    child = node[name]
+                if not isinstance(child, (BaseModel, dict)):
+                    raise AttributeError(f"{parent_path}.{name}: not a field container")
+                node = child
 
-        @contextmanager
-        def edit_node() -> Generator[_FieldNode]:
-            yield node
+            @contextmanager
+            def edit_node() -> Generator[_FieldNode]:
+                yield node
 
-        FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
+            FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
 
     @property
     def description(self) -> str | None:
@@ -227,7 +247,8 @@ class EditView:
 
     @contextmanager
     def _edit_component(self, name: str) -> Generator[ComponentSchema]:
-        yield self._draft.components[name]
+        with _stage_component(self._draft, name) as candidate:
+            yield candidate
 
 
 class SetupView:
@@ -241,8 +262,8 @@ class SetupView:
 
     @contextmanager
     def _edit_general(self) -> Generator[SetupGeneral]:
-        with self._store.edit() as draft:
-            yield draft.general
+        with self._store.edit() as draft, _stage_general(draft) as candidate:
+            yield candidate
 
     @property
     def description(self) -> str | None:
@@ -283,5 +304,5 @@ class SetupView:
 
     @contextmanager
     def _edit_component(self, name: str) -> Generator[ComponentSchema]:
-        with self._store.edit() as draft:
-            yield draft.components[name]
+        with self._store.edit() as draft, _stage_component(draft, name) as candidate:
+            yield candidate
