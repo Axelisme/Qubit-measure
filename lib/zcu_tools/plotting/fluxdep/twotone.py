@@ -28,14 +28,22 @@ class TwoTonePickPlot:
         self._inputs = inputs
         self._axes = figure.add_subplot(111)
         spectrum = inputs.spectrum
+        device_first = float(spectrum.dev_values[0])
+        device_last = float(spectrum.dev_values[-1])
+        frequency_first = float(spectrum.freqs[0])
+        frequency_last = float(spectrum.freqs[-1])
+        device_step = (device_last - device_first) / (spectrum.dev_values.size - 1)
+        frequency_step = (frequency_last - frequency_first) / (spectrum.freqs.size - 1)
+        # imshow extents are cell edges; signed half-steps keep sample centers aligned.
         self._extent = (
-            float(spectrum.dev_values[0]),
-            float(spectrum.dev_values[-1]),
-            float(spectrum.freqs[0]),
-            float(spectrum.freqs[-1]),
+            device_first - device_step / 2,
+            device_last + device_step / 2,
+            frequency_first - frequency_step / 2,
+            frequency_last + frequency_step / 2,
         )
-        self._x_span = abs(self._extent[1] - self._extent[0])
-        self._y_span = abs(self._extent[3] - self._extent[2])
+        # Brush radii use sample endpoint spans, not the padded image extent.
+        self._x_span = abs(device_last - device_first)
+        self._y_span = abs(frequency_last - frequency_first)
         self._image = self._axes.imshow(
             np.zeros(spectrum.signals.T.shape),
             extent=self._extent,
