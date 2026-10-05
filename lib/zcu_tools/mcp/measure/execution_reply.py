@@ -400,7 +400,8 @@ def project_execution(
     recipes supplies the owning session declarations for analysis-only estimates.
     definition selects one recipe's actual/estimate fields; None means standalone
     analysis. Conflicting present estimate keys raise ValueError. detail selects
-    the operator summary or a detached full native capture. No identity is inferred.
+    the operator summary or a detached full native capture. Summary interaction
+    comes from analysis_stage; full retains both stages. No identity is inferred.
     """
     if detail == "full":
         return deepcopy(snapshot)
@@ -409,9 +410,12 @@ def project_execution(
     primary_execution = snapshot.get("analysis")
     post_execution = snapshot.get("post_analysis")
     preview = snapshot.get("preview")
-    interaction = (primary_execution or {}).get("interaction") or (
-        post_execution or {}
-    ).get("interaction")
+    current_execution = (
+        post_execution
+        if snapshot.get("analysis_stage") == "post"
+        else primary_execution
+    )
+    interaction = (current_execution or {}).get("interaction")
     primary, primary_paths = _pane(primary_execution, definition, "primary", recipes)
     post, post_paths = _pane(post_execution, definition, "post", recipes)
     invalid = [
