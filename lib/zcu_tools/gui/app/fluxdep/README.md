@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. App-owned cross-spectrum selection
+**Last updated:** 2026-10-06. App-owned selection and search
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -117,9 +117,8 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   host、shutdown callback 與 mathtext 支援，不切換全域 Matplotlib backend。
 - `FluxDepGuiBehavior.spec` 宣告 app slug 與 default control port。`app.py` 只做
   controller/window/adapter wiring；程序入口位於 `scripts/run_fluxdep_gui.py`。
-- **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
-  worker 經 `compute_search(pbar_factory=...)` 安裝進度通知。主執行緒的成功 callback 先記錄結果，
-  再透過該 panel 的 explicit host 呈現診斷圖。
+- DB 搜尋由 app-owned `FluxDepSearchOwner` 提交到專用 `BackgroundRunner`。
+  Worker 只計算 detached snapshot。Owner 提交有效數值後，panel 才呈現診斷圖。
 
 ### 編輯區階段驅動
 MainWindow 編輯區依 active 譜的 pipeline 階段 swap widget：未定線→LinePicker；
@@ -197,20 +196,25 @@ MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `Remote
   diagnostic fan-out / CfgEditor session / render-view——這些都留在 measure 端的
   RemoteControlAdapter + mcp_server，不在共用 transport 裡。
 
-### v2 database search：State 邊界 + 兩條執行路徑
-search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 唯一的長阻塞作業。
-拆成**純計算 vs State 寫入**兩半，守住 main-thread State 不變式：
-- `FitService.compute_search`：純函式，先 snapshot State 的輸入（db 路徑/bounds/transitions/
-  選中點雲），再跑 search，不寫 State、不繪圖。直接回傳 kernel 的 `DatabaseSearchResult`，含 params 與數值診斷陣列，可在 worker 跑。
-- `FitService.record_result`：唯一寫 State 處（`set_fit_result`），只在主執行緒呼。
-- **GUI 路徑（唯一觸發路徑）**：`AnalyzePanelWidget` 經 `BackgroundRunner` 跑 `Controller.compute_search`（off-main，
-  GIL 釋放不卡 UI）。完成後，主執行緒先透過 `record_search_result` 寫 State、發出 fit fact，再畫圖。
-  數值成功不依賴診斷圖成功。**不可中斷**（單一確定性掃描，只 disable Search 鈕 + 進度條，無 Cancel）。
-  - search 是 user 在 GUI 裡按的，**沒有 RPC 觸發路徑**（remote view 只讀）。`Controller.
-    search_database` 是主執行緒上 compute + record 的便利入口，GUI worker 不用它；沒有 `fit.search` handler。compute/record
-    分拆仍是守 main-thread State 不變式的關鍵。
-- **進度注入**：`analysis.fluxdep.search` 走 `make_pbar`。GUI worker 用
-  `use_pbar_factory` 裝 `GuiProgressBar`（emit Qt signal 到主執行緒進度條，節流 50ms）。
+### Database search 的 app ownership
+`FitService.capture_search` 在 State owner capture detached `SearchInput`。
+`compute_search(inputs)` 只算數值，不讀 live State、不繪圖。
+`record_result` 在 owner 寫入 fit，Controller 發布 `FitChanged`。
+
+`Controller.search` 的 `FluxDepSearchOwner` 集中 single-flight、版本依賴與 terminal policy。
+依賴包含 project、fit、selection、spectrum 集合與全部來源，包含零點譜。
+來源改變時，成功 delivery 回 failed，不覆蓋新的 fit。Active spectrum 切換不影響 joint search。
+Cancel 只提出請求，kernel 的 `SearchCancelled` 才代表運算取消。
+普通失敗保持 failed，最後 checkpoint 後的有效成功可以 finished。
+
+App composition 注入專用 `BackgroundRunner` 與 `ProgressService`，沒有 hardware gate。
+AnalyzePanel 從同一 owner 與 progress facet 顯示 Search／Cancel／結果。
+Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
+關窗先拒絕新 search 並提出 cancel，search runner 未 drain 就拒絕關窗，保留 Qt owners 與圖。
+診斷圖失敗不改數值 outcome。
+
+`Controller.search_database` 保留 headless owner-inline capture／compute／record 便利入口，
+不取 operation token。Remote 尚無 mutation RPC；後續 RPC 使用同一 search owner。
 
 ### v2 結果存放 + 視覺化
 - `FitState`（State 上的 singleton，version key `fit`）：db 路徑/EJb/ECb/ELb/transitions/r_f/sample_f

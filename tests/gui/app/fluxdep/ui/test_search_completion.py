@@ -20,13 +20,24 @@ from zcu_tools.analysis.fluxdep.search import (
 )
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
+from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.services.progress import ProgressService
 
 
 @pytest.fixture
-def search_input(tmp_path, spectrum_hdf5):
-    ctrl = Controller(FluxDepState())
+def search_input(qapp, tmp_path, spectrum_hdf5, failure, monkeypatch):
+    runner = BackgroundRunner()
+    transport = QtProgressTransport()
+    ctrl = Controller(
+        FluxDepState(),
+        interactive_owner=QtOwnerScheduler(),
+        search_runtime=FluxDepSearchRuntime(runner, ProgressService(transport)),
+    )
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="TwoTone")
     ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     ctrl.set_points(name, np.array([0.0, 0.1]), np.array([5.0, 5.1]))
@@ -54,7 +65,16 @@ def search_input(tmp_path, spectrum_hdf5):
         predicted_freqs=np.array([5.0, 5.1]),
         bounds=bounds,
     )
-    return ctrl, result
+    if failure == "submit":
+
+        def fail_submit(*args, **kwargs):
+            raise RuntimeError("submit failed")
+
+        monkeypatch.setattr(runner, "submit", fail_submit)
+    yield ctrl, result, runner
+    ctrl.search.begin_close()
+    assert runner.quiesce()
+    ctrl.interactive.dispose()
 
 
 @pytest.fixture
@@ -62,7 +82,7 @@ def completed_search(qapp, search_input, monkeypatch, failure):
     from zcu_tools.gui.app.fluxdep.services import fit
     from zcu_tools.gui.app.fluxdep.ui import analyze_panel
 
-    ctrl, result = search_input
+    ctrl, result, runner = search_input
     facts: list[FitChangedPayload] = []
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
     calls: list[str] = []
@@ -116,23 +136,25 @@ def completed_search(qapp, search_input, monkeypatch, failure):
     buttons = {button.text(): button for button in panel.findChildren(QPushButton)}
     try:
         buttons["Search database"].click()
-        panel.quiesce()
-        yield panel, ctrl, result, facts, calls, warnings, buttons
+        assert runner.quiesce()
+        yield panel, ctrl, result, facts, calls, warnings, buttons, runner
     finally:
+        assert runner.quiesce()
         panel.quiesce()
-        panel.release_figures()
+        panel.dispose()
         panel.deleteLater()
 
 
-@pytest.mark.parametrize("failure", [None, "builder", "present", "search"])
+@pytest.mark.parametrize("failure", [None, "builder", "present", "search", "submit"])
 def test_search_button_commits_before_rendering(completed_search, failure):
-    panel, ctrl, result, facts, calls, warnings, buttons = completed_search
+    panel, ctrl, result, facts, calls, warnings, buttons, _runner = completed_search
     assert buttons["Search database"].isEnabled()
-    if failure == "search":
-        assert calls == ["search"]
+    if failure in ("search", "submit"):
+        assert calls == (["search"] if failure == "search" else [])
         assert ctrl.state.fit.params is None
         assert not any(p.has_result for p in facts)
         assert not buttons["Export params.json"].isEnabled()
+        assert len(warnings) == 1
         assert warnings[0][0] == "Search failed"
     else:
         assert ctrl.state.fit.params == result.params
@@ -160,7 +182,7 @@ def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
     import matplotlib.pyplot as plt
     from zcu_tools.gui.app.fluxdep.services import fit
 
-    panel, ctrl, _result, _facts, _calls, _warnings, buttons = completed_search
+    panel, ctrl, _result, _facts, _calls, _warnings, buttons, runner = completed_search
     retained = panel.figures
     first = retained["diagnostic"]
     before = BytesIO()
@@ -168,7 +190,7 @@ def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
     unrelated = plt.figure()
     try:
         buttons["Search database"].click()
-        panel.quiesce()
+        assert runner.quiesce()
         second = panel.figures["diagnostic"]
         assert second is not first
         assert retained["diagnostic"] is first
@@ -183,7 +205,7 @@ def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
 
         monkeypatch.setattr(fit, "search_database", fail_search)
         buttons["Search database"].click()
-        panel.quiesce()
+        assert runner.quiesce()
         assert panel.figures["diagnostic"] is second
         assert ctrl.state.fit.params is None
         assert not buttons["Export params.json"].isEnabled()

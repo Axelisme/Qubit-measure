@@ -160,7 +160,7 @@ def test_compute_search_does_not_touch_state(tiny_database):
     )
     fit_version_before = st.version.get(FIT_VERSION_KEY)
 
-    result = svc.compute_search()
+    result = svc.compute_search(svc.capture_search())
 
     # compute_search must NOT write State (no result recorded, no extra bump).
     assert isinstance(result, DatabaseSearchResult)
@@ -184,7 +184,11 @@ def test_controller_cancelled_search_keeps_published_fit(tiny_database, synchron
     version = st.version.get(FIT_VERSION_KEY)
     changes: list[FitChangedPayload] = []
     subscription = ctrl.bus.subscribe(FitChangedPayload, changes.append)
-    search = ctrl.search_database if synchronous else ctrl.compute_search
+    search = (
+        ctrl.search_database
+        if synchronous
+        else lambda **kwargs: ctrl.compute_search(ctrl.capture_search(), **kwargs)
+    )
     try:
         with pytest.raises(SearchCancelled):
             search(cancel_requested=lambda: True)
@@ -208,20 +212,20 @@ def test_record_result_writes_state(tiny_database):
         0.0,
     )
     before = st.version.get(FIT_VERSION_KEY)
-    result = svc.compute_search()
+    result = svc.compute_search(svc.capture_search())
     svc.record_result(result)
     assert st.fit.params == result.params
     assert st.fit.has_result
     assert st.version.get(FIT_VERSION_KEY) == before + 1
 
 
-def test_compute_search_fast_fails_without_database():
+def test_capture_search_fast_fails_without_database():
     st = _state_with_points()
     with pytest.raises(ValueError, match="database"):
-        FitService(st).compute_search()
+        FitService(st).capture_search()
 
 
-def test_compute_search_fast_fails_without_points(tiny_database):
+def test_capture_search_fast_fails_without_points(tiny_database):
     db_path = tiny_database[0]
     st = FluxDepState()
     st.put_spectrum(_aligned_entry_with_points("noise", [], []))
@@ -229,7 +233,7 @@ def test_compute_search_fast_fails_without_points(tiny_database):
     svc = FitService(st)
     svc.set_params(db_path, *_WIDE, TransitionDict({}), 0.0, 0.0)
     with pytest.raises(ValueError, match="selected points"):
-        svc.compute_search()
+        svc.capture_search()
 
 
 # --- export_params ---------------------------------------------------------

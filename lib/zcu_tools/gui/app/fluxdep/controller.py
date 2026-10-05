@@ -34,9 +34,10 @@ from zcu_tools.gui.app.fluxdep.interactive import (
     FluxDepInteractiveOwner,
     FluxDepInteractivePorts,
 )
+from zcu_tools.gui.app.fluxdep.search import FluxDepSearchOwner, FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
-from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory
+from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchInput
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
@@ -60,13 +61,16 @@ class Controller(BaseController[FluxDepState, EventBus]):
         *,
         interactive_owner: OwnerScheduler | None = None,
         interactive_background: BackgroundSubmitter | None = None,
+        search_runtime: FluxDepSearchRuntime | None = None,
     ) -> None:
-        """Compose services and a picker owner.
+        """Compose services and shared picker/search owners.
 
-        interactive_owner defines the state thread; omitted uses a manual owner
-        for headless callers. interactive_background delivers completion on that
-        thread; omitted rejects asynchronous alignment. Project root is the
-        optional export/path context, not an input-data location.
+        interactive_owner schedules both owners on State's constructing thread;
+        omitted uses a manual headless owner. interactive_background delivers
+        picker work there; omitted rejects asynchronous alignment. Search uses
+        its own search_runtime background/progress pair; None rejects operation
+        start but permits synchronous search_database.
+        project_root is optional export/path context, not an input-data location.
         """
         super().__init__(state, bus if bus is not None else EventBus(), project_root)
         self._load = LoadService(state)
@@ -76,12 +80,23 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self._selection = SelectionService(state)
         self._export = ExportService(state)
         self._fit = FitService(state)
+        owner = (
+            interactive_owner
+            if interactive_owner is not None
+            else ManualOwnerScheduler()
+        )
+        self._search = FluxDepSearchOwner(
+            state,
+            self.bus,
+            owner,
+            self._fit,
+            self.record_search_result,
+            runtime=search_runtime,
+        )
         self._interactive = FluxDepInteractiveOwner(
             state,
             self.bus,
-            interactive_owner
-            if interactive_owner is not None
-            else ManualOwnerScheduler(),
+            owner,
             ports=FluxDepInteractivePorts(
                 background=interactive_background,
                 publish_alignment=self.set_alignment,
@@ -95,6 +110,11 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def interactive(self) -> FluxDepInteractiveOwner:
         """Return the owner shared by GUI and command-driven line picking."""
         return self._interactive
+
+    @property
+    def search(self) -> FluxDepSearchOwner:
+        """Return the app-owned search lifecycle shared by GUI and RPC."""
+        return self._search
 
     # --- project ---------------------------------------------------------
 
@@ -200,25 +220,28 @@ class Controller(BaseController[FluxDepState, EventBus]):
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         return self._fit.selected_pointcloud()
 
+    def capture_search(self) -> SearchInput:
+        """Capture detached search inputs on State's owner; invalid inputs raise."""
+        return self._fit.capture_search()
+
     def compute_search(
         self,
+        inputs: SearchInput,
         *,
         pbar_factory: PbarFactory | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> DatabaseSearchResult:
-        """Run the search WITHOUT touching State (safe on a worker thread).
+        """Compute only from detached inputs returned by capture_search.
 
-        Pair with ``record_search_result`` on the main thread. The GUI worker
-        calls this off-main, then marshals the result to the main thread to
-        record it; the synchronous convenience ``search_database`` does both in
-        sequence on the calling thread. pbar_factory optionally supplies worker
-        progress; cancel_requested is a quick worker-safe predicate. True at a
-        kernel checkpoint raises SearchCancelled without a result or State
-        write. None disables cancellation. Other failures propagate, and an
-        in-flight HDF5/Numba call may delay the next cancellation checkpoint.
+        Safe on a worker; no live State reads/writes or publication. Use
+        record_search_result on the owner to commit. pbar_factory optionally
+        supplies progress. cancel_requested is a quick thread-safe predicate;
+        True at a kernel checkpoint raises SearchCancelled without a result.
+        None disables cancellation. Other failures propagate. In-flight
+        HDF5/Numba work may delay the next cancellation checkpoint.
         """
         return self._fit.compute_search(
-            pbar_factory=pbar_factory, cancel_requested=cancel_requested
+            inputs, pbar_factory=pbar_factory, cancel_requested=cancel_requested
         )
 
     def record_search_result(self, result: DatabaseSearchResult) -> None:
@@ -234,17 +257,18 @@ class Controller(BaseController[FluxDepState, EventBus]):
     ) -> DatabaseSearchResult:
         """Synchronous convenience: compute the search then record it.
 
-        Runs the blocking search inline on the calling thread, which must be the
-        main thread because of the State write. No remote method triggers it; the
-        GUI worker uses the split ``compute_search`` / ``record_search_result`` to
-        keep the search off-main. pbar_factory optionally supplies progress;
+        Captures inputs, computes and commits inline on State's owner thread,
+        without an operation token. GUI/RPC use search.start instead.
+        pbar_factory optionally supplies progress;
         cancel_requested is a quick worker-safe predicate. True at a kernel
         checkpoint raises SearchCancelled and does not publish a fit result or
         fact. None disables cancellation. Other failures propagate. In-flight
         HDF5/Numba work may delay cancellation observation.
         """
         result = self._fit.compute_search(
-            pbar_factory=pbar_factory, cancel_requested=cancel_requested
+            self.capture_search(),
+            pbar_factory=pbar_factory,
+            cancel_requested=cancel_requested,
         )
         self.record_search_result(result)
         return result

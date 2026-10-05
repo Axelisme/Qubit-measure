@@ -66,16 +66,26 @@ class MainWindow(QMainWindow):
     """The fluxdep analysis window shell."""
 
     def __init__(
-        self, ctrl: Controller, *, interactive_runner: BackgroundRunner | None = None
+        self,
+        ctrl: Controller,
+        *,
+        interactive_runner: BackgroundRunner | None = None,
+        search_runner: BackgroundRunner | None = None,
     ) -> None:
-        """Mount analysis views and own the optional interactive Qt runner.
+        """Mount views and retain app-owned interactive/search Qt runners.
 
-        Close invalidates interactive input before joining runner deliveries.
-        Omitted runner supports headless composition with background unavailable.
+        Both runners become child QObjects. Close requests search cancellation
+        and refuses disposal until search_runner drains. Interactive disposal
+        then precedes its runner drain. Omitted runners support headless
+        composition; a caller injecting search background must also supply its
+        lifecycle runner here so close can drain queued owner deliveries.
         """
         super().__init__()
         self._ctrl = ctrl
         self._interactive_runner = interactive_runner
+        self._search_runner = search_runner
+        if search_runner is not None:
+            search_runner.setParent(self)
         if interactive_runner is not None:
             interactive_runner.setParent(self)
         self._bus_subs = EventSubscriptions()
@@ -491,14 +501,17 @@ class MainWindow(QMainWindow):
     # --- close path --------------------------------------------------------
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Quiesce all background workers before the C++ widget tree is torn down.
+        """Refuse close while app search has not drained its worker/delivery.
 
-        ``_current_editor`` (FindPointsWidget) is handled by ``_clear_editor`` when
-        it is replaced; but if it is still mounted at close time its worker must be
-        joined here.  ``_analyze_panel`` is a singleton that lives until the window
-        closes and owns both a search runner and an embedded SelectorWidget runner —
-        both must be joined before Qt destroys the child objects.
+        begin_close permanently blocks admission and requests cancellation.
+        Keep subscriptions, figures and Qt owners alive on drain refusal.
+        A later close attempt can finish once the runner actually drains.
         """
+        self._ctrl.search.begin_close()
+        if self._search_runner is not None and not self._search_runner.quiesce():
+            if a0 is not None:
+                a0.ignore()
+            return
         self._ctrl.interactive.dispose()
         if self._interactive_runner is not None:
             self._interactive_runner.quiesce()
@@ -511,5 +524,5 @@ class MainWindow(QMainWindow):
             self._current_editor.quiesce()  # type: ignore[union-attr]
         if self._analyze_panel is not None:
             self._analyze_panel.quiesce()
-            self._analyze_panel.release_figures()
+            self._analyze_panel.dispose()
         super().closeEvent(a0)

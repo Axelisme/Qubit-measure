@@ -22,8 +22,8 @@ def _ctrl() -> Controller:
     return Controller(FluxDepState())
 
 
-def _record(ctrl: Controller, payload_type: type[Payload]) -> list:
-    seen: list = []
+def _record[P: Payload](ctrl: Controller, payload_type: type[P]) -> list[P]:
+    seen: list[P] = []
     ctrl.bus.subscribe(payload_type, lambda p: seen.append(p))
     return seen
 
@@ -270,7 +270,7 @@ def test_compute_search_does_not_emit_or_record(tmp_path):
         0.0,
     )
     seen = _record(ctrl, FitChangedPayload)
-    result = ctrl.compute_search()
+    result = ctrl.compute_search(ctrl.capture_search())
     # compute_search is pure: no event, no recorded result
     assert seen == []
     assert ctrl.state.fit.params is None

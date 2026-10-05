@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from zcu_tools.gui.event_bus import BaseEventBus, BasePayload
 
@@ -26,6 +26,7 @@ class FluxDepEvent(str, Enum):
     ACTIVE_SPECTRUM_CHANGED = "active_spectrum_changed"  # the active spectrum switched
     SELECTION_CHANGED = "selection_changed"  # cross-spectrum selection mask changed
     PROJECT_CHANGED = "project_changed"  # the project info (chip/qub/paths) changed
+    SEARCH_CHANGED = "search_changed"  # app-owned search activity changed
     FIT_CHANGED = "fit_changed"  # the database-search fit inputs or result changed
 
 
@@ -74,6 +75,18 @@ class ProjectChangedPayload(Payload):
 class FitChangedPayload(Payload):
     EVENT: ClassVar[FluxDepEvent] = FluxDepEvent.FIT_CHANGED
     has_result: bool = False
+
+
+@dataclass(frozen=True)
+class SearchChangedPayload(Payload):
+    """Search handle projection: token is its id; status is pending or terminal;
+    error is the failure reason or None. Numeric results stay with the owner.
+    """
+
+    EVENT: ClassVar[FluxDepEvent] = FluxDepEvent.SEARCH_CHANGED
+    token: int
+    status: Literal["pending", "finished", "failed", "cancelled"]
+    error: str | None = None
 
 
 EventBus = BaseEventBus

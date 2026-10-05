@@ -44,13 +44,21 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         from zcu_tools.gui.app.fluxdep.remote.service import (
             RemoteControlAdapter,
         )
+        from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
         from zcu_tools.gui.app.fluxdep.state import FluxDepState
         from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
         from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
         from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+        from zcu_tools.gui.session.adapters.qt_progress_transport import (
+            QtProgressTransport,
+        )
+        from zcu_tools.gui.session.services.progress import ProgressService
 
         owner = QtOwnerScheduler()
         runner = BackgroundRunner()
+        search_runner = BackgroundRunner()
+        search_transport = QtProgressTransport()
+        search_progress = ProgressService(search_transport)
 
         def submit_interactive(
             compute: Callable[[], object],
@@ -65,8 +73,12 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
             project_root=self._project_root,
             interactive_owner=owner,
             interactive_background=submit_interactive,
+            search_runtime=FluxDepSearchRuntime(search_runner, search_progress),
         )
-        window = MainWindow(ctrl, interactive_runner=runner)
+        window = MainWindow(
+            ctrl, interactive_runner=runner, search_runner=search_runner
+        )
+        search_transport.setParent(window)
         adapter = (
             RemoteControlAdapter(
                 ctrl,

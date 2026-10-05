@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -51,6 +53,23 @@ def default_params_path(result_dir: str) -> str:
     (``ProjectInfo`` derives it from chip/qubit eagerly).
     """
     return params_path_for_result_dir(result_dir)
+
+
+@dataclass(frozen=True)
+class SearchInput:
+    """Detached numeric input, captured on the State owner before worker use.
+
+    database_path is the HDF5 database filename. fluxs is a copied 1-D cloud
+    in Φ/Φ0; freqs is its copied GHz cloud. transitions is a deep copy with
+    optional r_f/sample_f GHz values injected. bounds holds EJ/EC/EL GHz limits.
+    The arrays and transition lists belong to this snapshot, never live State.
+    """
+
+    database_path: str
+    fluxs: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    transitions: TransitionDict
+    bounds: ParamBounds
 
 
 class FitService:
@@ -109,50 +128,54 @@ class FitService:
 
     # --- search ----------------------------------------------------------
 
+    def capture_search(self) -> SearchInput:
+        """Capture detached inputs on the State owner.
+
+        Rejects foreign threads, missing database path, empty selected cloud
+        and a selection mask inconsistent with the cloud. Kernel validation of
+        bounds, transitions and database contents happens during compute_search.
+        """
+        self._state.assert_owner_thread()
+        fit = self._state.fit
+        if not fit.database_path:
+            raise ValueError("no database path set (call set_params first)")
+        fluxs, freqs = self.selected_pointcloud()
+        if fluxs.size == 0:
+            raise ValueError("no selected points to fit (select points first)")
+        return SearchInput(
+            database_path=fit.database_path,
+            fluxs=fluxs.copy(),
+            freqs=freqs.copy(),
+            transitions=deepcopy(
+                transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
+            ),
+            bounds=ParamBounds(EJ=fit.EJb, EC=fit.ECb, EL=fit.ELb),
+        )
+
     def compute_search(
         self,
+        inputs: SearchInput,
         *,
         pbar_factory: PbarFactory | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> DatabaseSearchResult:
-        """Run the database search and return its result — WITHOUT touching State.
+        """Compute from explicit detached inputs without reading or writing State.
 
-        This is the pure, runnable-anywhere core: it snapshots the inputs and the
-        selected point cloud off State *before* doing any work (a fast read on the
-        caller's thread), then calls ``search_database``. It performs NO State
-        write, so it is safe to run on a worker thread — the result is recorded
-        separately on the main thread via ``record_result``.
-
-        The result includes numeric diagnostics, not a Figure. Rendering belongs
-        to the caller after recording the result. ``pbar_factory`` installs a
-        custom progress-bar factory for the duration; without one, tqdm is used.
-        Fast-fails when no database path is set or the selected cloud is empty.
-        cancel_requested is a quick worker-safe predicate, forwarded to the
-        kernel. True at a checkpoint raises SearchCancelled without a result
-        or State write. None disables cancellation; other failures propagate.
-        In-flight HDF5/Numba work may delay observation of the request.
+        inputs comes from capture_search on the owner. Safe on a worker thread;
+        result carries numeric diagnostics, never a Figure. pbar_factory installs
+        worker progress (None uses tqdm). cancel_requested is a quick thread-safe
+        predicate; True at a kernel checkpoint raises SearchCancelled without a
+        result. None disables cancellation. Other kernel failures propagate.
+        In-flight HDF5/Numba work may delay the next cancellation checkpoint.
         """
-        fit = self._state.fit
-        if not fit.database_path:
-            raise ValueError("no database path set (call set_params first)")
-        s_fluxs, s_freqs = self.selected_pointcloud()
-        if s_fluxs.size == 0:
-            raise ValueError("no selected points to fit (select points first)")
-
-        # Snapshot every State-derived input now (this call may run on a worker
-        # thread; reading State here is fine, writing it is not). Inject the
-        # r_f / sample_f keys the transition model needs (only when provided).
-        database_path = fit.database_path
-        transitions = transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
-        EJb, ECb, ELb = fit.EJb, fit.ECb, fit.ELb
 
         def _run() -> DatabaseSearchResult:
             return search_database(
-                s_fluxs,
-                s_freqs,
-                database_path,
-                transitions,
-                ParamBounds(EJ=EJb, EC=ECb, EL=ELb),
+                inputs.fluxs,
+                inputs.freqs,
+                inputs.database_path,
+                inputs.transitions,
+                inputs.bounds,
                 execution=SearchExecution(cancel_requested=cancel_requested),
             )
 

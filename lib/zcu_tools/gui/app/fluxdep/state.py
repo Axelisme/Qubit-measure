@@ -71,11 +71,7 @@ def transitions_need_r_f(transitions: TransitionDict) -> bool:
 
 def transitions_need_sample_f(transitions: TransitionDict) -> bool:
     """Whether any present category needs ``sample_f`` (anything with 'mirror')."""
-    return any(
-        "mirror" in name and transitions.get(name)
-        for name in transitions
-        if isinstance(name, str)
-    )
+    return any("mirror" in name and transitions.get(name) for name in transitions)
 
 
 def transitions_with_freqs(
@@ -89,12 +85,12 @@ def transitions_with_freqs(
     "unset", so only a provided frequency is injected. Callers should validate
     (via ``transitions_need_*``) that a needed frequency is present before search.
     """
-    out: dict = dict(transitions)
+    out = transitions.copy()
     if r_f is not None:
         out["r_f"] = r_f
     if sample_f is not None:
         out["sample_f"] = sample_f
-    return TransitionDict(out)  # type: ignore[arg-type]
+    return out
 
 
 def spectrum_version_key(name: str) -> str:
@@ -369,5 +365,13 @@ class FluxDepState:
         self.fit = replace(self.fit, params=params)
         self.version.bump(FIT_VERSION_KEY)
 
-    def _assert_owner(self) -> None:
+    def assert_owner_thread(self) -> None:
+        """Reject foreign-thread access to owner-only snapshots and commands.
+
+        The owner is the thread constructing this State. Raises RuntimeError
+        without reading or changing any pipeline data.
+        """
         self._owner_guard.assert_owner()
+
+    def _assert_owner(self) -> None:
+        self.assert_owner_thread()

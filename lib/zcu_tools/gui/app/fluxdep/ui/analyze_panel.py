@@ -49,10 +49,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import SearchChangedPayload
+from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
+from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
-from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
@@ -60,7 +62,6 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
-from .gui_pbar import GuiProgressBarChannel
 from .transitions_form import TransitionsForm
 
 logger = logging.getLogger(__name__)
@@ -116,15 +117,24 @@ class AnalyzePanelWidget(QWidget):
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._runner = BackgroundRunner(self)
-        self._channel = GuiProgressBarChannel()
-        self._channel.progress.connect(self._on_progress)
+        self._bus_subs = EventSubscriptions()
+        self._shown_token: int | None = None
         self._filter_widget: SelectorWidget | None = None
 
         self._build_ui()
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
         self._diagnostics = Plots(self._plot_host)
         self._load_from_state()
+        self._bus_subs.subscribe(
+            ctrl.bus, SearchChangedPayload, self._on_search_changed
+        )
+        progress = ctrl.search.progress_control
+        self._progress_dispose = (
+            progress.attach_progress(SEARCH_OWNER_ID, self._refresh_progress)
+            if progress is not None
+            else None
+        )
+        self._refresh_search()
         # MainWindow explicitly activates this singleton on every Analyze click.
 
     # --- construction ----------------------------------------------------
@@ -221,6 +231,10 @@ class AnalyzePanelWidget(QWidget):
         self._search_btn = QPushButton("Search database")
         self._search_btn.clicked.connect(self._on_search)
         form.addRow(self._search_btn)
+        self._cancel_btn = QPushButton("Cancel search")
+        self._cancel_btn.clicked.connect(self._on_cancel_search)
+        self._cancel_btn.setEnabled(False)
+        form.addRow(self._cancel_btn)
 
         self._progress = QProgressBar()
         self._progress.setVisible(False)
@@ -340,6 +354,7 @@ class AnalyzePanelWidget(QWidget):
         Retire the old view first, so hidden controls cannot Apply stale data.
         Empty cloud shows a placeholder; invalid inputs propagate to the caller.
         """
+        self._refresh_search()
         if self._tabs.tabText(self._tabs.currentIndex()) == "Filter":
             self._refresh_filter_tab()
 
@@ -450,33 +465,59 @@ class AnalyzePanelWidget(QWidget):
         except ValueError as exc:
             self._status.setText(f"Invalid parameters: {exc}")
             return
-        self._search_btn.setEnabled(False)
-        self._export_btn.setEnabled(False)
-        self._progress.setVisible(True)
-        self._progress.setRange(0, 0)
-        self._status.setText("Searching…")
+        previous = self._ctrl.search.current
+        try:
+            self._ctrl.search.start()
+        except Exception as exc:
+            logger.exception("search start failed")
+            self._refresh_search()
+            # Opened failures already published one SearchChanged warning.
+            if self._ctrl.search.current == previous:
+                self._on_search_error(exc)
 
-        pbar_factory = self._channel.factory()
-        self._runner.submit(
-            lambda: self._ctrl.compute_search(pbar_factory=pbar_factory),
-            on_done=self._on_search_done,
-            on_error=self._on_search_error,
-            run_in_pool=True,
-        )
+    def _on_cancel_search(self) -> None:
+        token = self._ctrl.search.active_token
+        if token is not None:
+            self._ctrl.search.cancel(token)
 
-    def _on_progress(self, n: float, total: float, desc: str) -> None:
-        if total > 0:
-            self._progress.setRange(0, int(total))
-            self._progress.setValue(int(n))
+    def _on_search_changed(self, payload: SearchChangedPayload) -> None:
+        self._refresh_search()
+        if payload.status == "failed":
+            self._show_message("Search failed", payload.error or "Search failed.")
+
+    def _refresh_search(self) -> None:
+        activity = self._ctrl.search.current
+        pending = activity is not None and activity.status == "pending"
+        self._search_btn.setEnabled(not pending)
+        self._cancel_btn.setEnabled(pending)
+        self._progress.setVisible(pending)
+        self._export_btn.setEnabled(self._ctrl.state.fit.has_result and not pending)
+        if pending:
+            self._status.setText("Searching…")
+            self._refresh_progress()
+        elif activity is not None:
+            if activity.status == "finished":
+                result = self._ctrl.search.result
+                if result is not None and activity.token != self._shown_token:
+                    self._shown_token = activity.token
+                    self._present_search_result(result)
+            elif activity.status == "failed":
+                self._status.setText(f"Search failed: {activity.error}")
+            else:
+                self._status.setText("Search cancelled.")
+
+    def _refresh_progress(self) -> None:
+        progress = self._ctrl.search.progress_control
+        bars = progress.progress_bars(SEARCH_OWNER_ID) if progress is not None else ()
+        if bars:
+            _bar_id, model = bars[-1]
+            self._progress.setRange(0, model.qt_maximum())
+            self._progress.setValue(model.qt_value())
+            self._progress.setFormat(model.format())
         else:
             self._progress.setRange(0, 0)
-        if desc:
-            self._status.setText(desc)
 
-    def _on_search_done(self, result: DatabaseSearchResult) -> None:
-        self._search_btn.setEnabled(True)
-        self._progress.setVisible(False)
-        self._ctrl.record_search_result(result)
+    def _present_search_result(self, result: DatabaseSearchResult) -> None:
         EJ, EC, EL = result.params
         self._status.setText(f"EJ={EJ:.3f}  EC={EC:.3f}  EL={EL:.3f}")
         self._export_btn.setEnabled(True)
@@ -497,23 +538,24 @@ class AnalyzePanelWidget(QWidget):
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
     def quiesce(self) -> None:
-        """Stop any in-flight search worker and the embedded selector's worker.
+        """Drain the embedded selector only; search belongs to the app runner.
 
-        Call from the host window's ``closeEvent`` before the C++ object tree is
-        destroyed: both ``_runner`` (search) and the embedded ``SelectorWidget._runner``
-        (filter) may have queued main-thread deliveries that must be flushed while
-        their carriers are still alive.
+        The host must drain its search runner before disposing this panel.
+        Hiding or detaching this view does not cancel app-owned search.
         """
-        # Quiesce the embedded SelectorWidget first (it has its own debounce + runner).
         if self._filter_widget is not None:
             self._filter_widget.quiesce()
-        # Then quiesce our own search runner.
-        self._runner.quiesce()
+
+    def dispose(self) -> None:
+        """Release subscriptions and presentation after app search has drained."""
+        self._bus_subs.unsubscribe_all()
+        if self._progress_dispose is not None:
+            self._progress_dispose()
+            self._progress_dispose = None
+        self.release_figures()
 
     def _on_search_error(self, exc: Exception) -> None:
         logger.exception("search worker failed", exc_info=exc)
-        self._search_btn.setEnabled(True)
-        self._progress.setVisible(False)
         self._status.setText("Search failed.")
         self._show_message("Search failed", friendly_fit_message("Search", exc))
 
