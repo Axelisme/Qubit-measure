@@ -11,6 +11,40 @@ from ._recipe_execution_support import ControlledRunGui, definition, registry
 from ._recipe_support import LookbackGui, recipe_client
 
 
+@pytest.mark.parametrize("closed", [False, True])
+def test_finish_early_rejects_terminal_pending_run(tmp_path, closed: bool):
+    def sample(session: RecipeSession) -> RecipeGenerator:
+        _, _ = yield session.open_tab("lookback").run()
+
+    gui = ControlledRunGui()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.run_start" and not closed:
+            raise GuiRpcError("lost receipt", reason="connection_lost")
+        return gui(method, params)
+
+    with (
+        recipe_client(tmp_path, respond) as client,
+        registry(client.context, definition(sample)) as executions,
+    ):
+        execution = executions.start(client.context, "sample", {})
+        if closed:
+            assert gui.awaited.wait(2)
+            execution.close()
+            execution.join()
+            assert execution.snapshot().status == "cancelled"
+        else:
+            assert execution.wait(5).data["status"] == "failed"
+            execution.join()
+        before = execution.snapshot()
+        sent = list(client.transport.sent)
+        with pytest.raises(GuiRpcError) as rejected:
+            execution.finish_early()
+        assert rejected.value.reason == "not_running"
+        assert execution.snapshot() == before
+        assert client.transport.sent == sent
+
+
 @pytest.mark.parametrize("uncertain", [False, True])
 def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertain):
     finally_calls: list[str] = []
