@@ -303,6 +303,50 @@ def test_raw_save_failure_retains_reserved_path_and_prior_confirmed_save(
         assert receipt.operation_outcome["status"] == outcome
 
 
+@pytest.mark.parametrize(
+    ("phase", "code", "reason", "expected_reason", "expected_status"),
+    [
+        ("start", "timeout", None, "gui_handler_timeout", "unknown"),
+        ("await", "timeout", None, "gui_handler_timeout", "unknown"),
+        ("start", "internal", "response_encoding_failed", "response_encoding_failed", "unknown"),
+        ("await", "internal", "response_encoding_failed", "response_encoding_failed", "unknown"),
+        ("start", "invalid_params", "invalid_params", "invalid_params", "failed"),
+    ],
+)
+def test_raw_save_wire_failure_keeps_unknown_or_explicit_rejection(
+    tmp_path, phase, code, reason, expected_reason, expected_status
+):
+    with recipe_client(tmp_path, LookbackGui()) as client:
+        operation = RecipeSession(client.context).open_tab("lookback").run()
+        run, _ = operation.complete_in_current_worker()
+        assert isinstance(run, RecipeRun)
+        assert run.save_raw().path == "/actual/raw.h5"
+        failed_method = "tab.save_data" if phase == "start" else "operation.await"
+        if phase == "await":
+            client.transport.replies["tab.save_data"] = {
+                "ok": True,
+                "result": {"operation_id": 83, "data_path": "/reserved/second.h5"},
+            }
+        client.transport.replies[failed_method] = {
+            "ok": False,
+            "error": {"code": code, "reason": reason, "message": "no save receipt"},
+        }
+        with pytest.raises(GuiRpcError) as error:
+            run.save_raw()
+        assert error.value.reason == expected_reason
+        assert error.value.request_rejected is (expected_status == "failed")
+        capture = run.snapshot()
+        receipt = capture.raw_save
+        assert receipt.status == expected_status
+        assert receipt.operation_outcome is None
+        assert receipt.path == "/actual/raw.h5"
+        assert receipt.reserved_path == (
+            "/reserved/second.h5" if phase == "await" else "/actual/raw.h5"
+        )
+        assert (capture.save_op is not None) is (phase == "await")
+        assert sum(method == "tab.save_data" for method, _ in client.transport.sent) == 2
+
+
 def test_uncertain_second_raw_save_retains_only_confirmed_prefix(tmp_path):
     gui = LookbackGui()
     attempts = 0
