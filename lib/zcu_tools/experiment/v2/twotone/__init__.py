@@ -8,7 +8,7 @@ from .ac_stark import (
     AcStarkRamseyCfg,
     AcStarkRamseyExp,
 )
-from .allxy import AllXY_Exp, AllXYAnalyzeOptions, AllXYCfg
+from .allxy import AllXY_Exp, AllXYAnalysis, AllXYAnalyzeOptions, AllXYCfg
 from .ckp import CKP_Cfg, CKP_Exp, CKPAnalysis
 from .dispersive import (
     DispersiveAnalysis,
@@ -46,6 +46,7 @@ __all__ = [
     "AllXY_Exp",
     "AllXYCfg",
     "AllXYAnalyzeOptions",
+    "AllXYAnalysis",
     # ckp
     "CKP_Exp",
     "CKP_Cfg",

@@ -1,8 +1,7 @@
 """AllXY gate-error check adapter.
 
 Runs the 21 standard AllXY gate pairs and reuses ``AllXY_Exp.analyze``, which
-fits power and detuning errors and reports them in the fit figure title. The
-core analysis returns no numbers, so the summary stays empty.
+fits power and detuning errors; the summary reports them.
 """
 
 from __future__ import annotations
@@ -45,7 +44,10 @@ class AllXYAnalyzeParams:
 
 @dataclass
 class AllXYAnalyzeResult(AnalyzeResultBase):
-    pass
+    power_param: float
+    detune_param: float
+    power_err: float
+    detune_err: float
 
 
 class AllXYAdapter(
@@ -78,9 +80,11 @@ class AllXYAdapter(
             "pulse at zero gain."
         ),
         typical_writeback=(
-            "No writeback and no summary values. The fit figure title shows "
-            "the power and detuning error; fix them with amplitude Rabi or "
-            "zig-zag (power) and Ramsey (detuning)."
+            "No writeback. The summary reports 'power_err' and 'detune_err' "
+            "(mean state deviation over the 21 pairs, also in the figure "
+            "title) and the fitted model parameters 'power_param' and "
+            "'detune_param'. Fix power errors with amplitude Rabi or zig-zag "
+            "and detuning errors with Ramsey."
         ),
         recommended=(
             "Leave 'Fit g/e levels' off to take the ground and excited levels "
@@ -116,12 +120,17 @@ class AllXYAdapter(
         *,
         plots: Plots,
     ) -> AllXYAnalyzeResult:
-        AllXY_Exp().analyze(
+        analysis = AllXY_Exp().analyze(
             req.run_result,
             AllXYAnalyzeOptions(fit_ge=req.analyze_params.fit_ge),
             plots=plots,
         )
-        return AllXYAnalyzeResult()
+        return AllXYAnalyzeResult(
+            power_param=analysis.power_param,
+            detune_param=analysis.detune_param,
+            power_err=analysis.power_err,
+            detune_err=analysis.detune_err,
+        )
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_allxy_{time.strftime('%m%d')}"

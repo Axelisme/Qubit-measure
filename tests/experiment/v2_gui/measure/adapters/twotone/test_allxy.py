@@ -60,7 +60,7 @@ def test_allxy_default_form_lowers_to_core_cfg() -> None:
 
 
 @pytest.mark.parametrize("fit_ge", [False, True])
-def test_allxy_analysis_publishes_fit_figure(fit_ge: bool) -> None:
+def test_allxy_analysis_reports_fitted_errors(fit_ge: bool) -> None:
     states = np.array(
         [predict_state_with_error(seq, 0.05, 0.0) for seq in ALLXY_SEQUENCE]
     )
@@ -83,7 +83,15 @@ def test_allxy_analysis_publishes_fit_figure(fit_ge: bool) -> None:
             ),
             plots=plots,
         )
-        assert answer.to_summary_dict() == {}
+        assert answer.power_param == pytest.approx(0.05, abs=0.005)
+        assert answer.detune_param == pytest.approx(0.0, abs=0.005)
+        assert answer.power_err > 0.0
+        assert set(answer.to_summary_dict()) == {
+            "power_param",
+            "detune_param",
+            "power_err",
+            "detune_err",
+        }
         assert tuple(plots) == ("fit",)
     finally:
         plots.finish(present=False)
