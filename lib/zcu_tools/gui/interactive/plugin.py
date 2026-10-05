@@ -33,9 +33,11 @@ class Action(Generic[S, P]):
 
     calculate receives a detached latest state and the domain payload P, and
     returns its full replacement. Validation errors propagate without commit.
+    record_undo=True replaces history; False publishes while preserving it.
     """
 
     calculate: Callable[[S, P], S]
+    record_undo: bool = True
 
     def execute(self, session: Session[S], params: P) -> S:
         """Apply params to the latest session state and return a detached result.
@@ -43,7 +45,9 @@ class Action(Generic[S, P]):
         Propagate calculate failures without publication. Session owner-loop and
         input gates apply; subscriber failures are isolated by the session.
         """
-        return session.commit(lambda state: self.calculate(state, params))
+        return session.commit(
+            lambda state: self.calculate(state, params), record_undo=self.record_undo
+        )
 
 
 @dataclass(frozen=True, slots=True)

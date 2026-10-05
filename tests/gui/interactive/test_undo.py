@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import pytest
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.interactive import Session
+from zcu_tools.gui.interactive import Action, Session
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 
@@ -51,8 +51,9 @@ def test_failed_commit_preserves_previous_history() -> None:
 
 
 @pytest.mark.parametrize("copies_remaining", [0, 1])
+@pytest.mark.parametrize("record_undo", [True, False])
 def test_candidate_or_return_copy_failure_preserves_history(
-    copies_remaining: int,
+    copies_remaining: int, record_undo: bool
 ) -> None:
     @dataclass
     class CopyBudget:
@@ -66,7 +67,9 @@ def test_candidate_or_return_copy_failure_preserves_history(
     session = Session[object](None, ManualOwnerScheduler())
     session.commit(lambda state: 2)
     with pytest.raises(ValueError, match="copy budget exhausted"):
-        session.commit(lambda state: CopyBudget(copies_remaining))
+        session.commit(
+            lambda state: CopyBudget(copies_remaining), record_undo=record_undo
+        )
     assert session.snapshot() == 2
     assert session.undo() is None
 
@@ -145,3 +148,62 @@ def test_undo_and_history_queries_require_owner_loop() -> None:
                 future.result()
     assert session.snapshot() == 2
     assert session.undo() == 1
+
+
+def test_action_flag_publishes_detached_state_without_creating_history() -> None:
+    session = Session([1], ManualOwnerScheduler())
+    observed: list[list[int]] = []
+    session.subscribe(lambda: observed.append(session.snapshot()))
+    action = Action[list[int], int](lambda state, value: [value], record_undo=False)
+    result = action.execute(session, 2)
+    result[0] = 9
+    assert session.snapshot() == [2]
+    assert observed == [[2]]
+    assert not session.can_undo()
+
+
+def test_preserved_history_survives_tool_updates_and_failed_candidates() -> None:
+    session = Session([1], ManualOwnerScheduler())
+    session.commit(lambda state: [2])
+    session.commit(lambda state: [3], record_undo=False)
+
+    def reject(candidate: list[int]) -> list[int]:
+        candidate[0] = 9
+        raise ValueError("invalid candidate")
+
+    with pytest.raises(ValueError, match="invalid candidate"):
+        session.commit(reject, record_undo=False)
+    assert session.snapshot() == [3]
+    assert session.undo() == [1]
+    assert not session.can_undo()
+
+
+def test_tools_before_analysis_are_part_of_the_undo_snapshot() -> None:
+    session = Session([1], ManualOwnerScheduler())
+    session.commit(lambda state: [2], record_undo=False)
+    session.commit(lambda state: [3])
+    assert session.undo() == [2]
+
+
+def test_nonrecording_commits_have_same_owner_terminal_and_reentrant_gates() -> None:
+    session = Session(1, ManualOwnerScheduler())
+    rejected: list[bool] = []
+
+    def listener() -> None:
+        with pytest.raises(RuntimeError):
+            session.commit(lambda state: 9, record_undo=False)
+        rejected.append(True)
+
+    session.subscribe(listener)
+    session.commit(lambda state: 2, record_undo=False)
+    assert rejected == [True]
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        future = worker.submit(
+            lambda: session.commit(lambda state: 3, record_undo=False)
+        )
+        with pytest.raises(RuntimeError):
+            future.result()
+    session.close_input()
+    with pytest.raises(FailedPreconditionError):
+        session.commit(lambda state: 4, record_undo=False)
+    assert session.snapshot() == 2

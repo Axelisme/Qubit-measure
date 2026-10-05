@@ -43,12 +43,14 @@ class Session(Generic[S]):
         self._require_live()
         return copy.deepcopy(self._state)
 
-    def commit(self, update: Callable[[S], S]) -> S:
+    def commit(self, update: Callable[[S], S], *, record_undo: bool = True) -> S:
         """Calculate a complete replacement and publish it before notifying.
 
         ``update`` receives a detached copy of the latest committed state. If it
         raises, no state or notification changes. The result and caller's input
-        never alias the stored state. Subscriber failures are logged and isolated:
+        never alias the stored state. record_undo=True replaces the single history
+        entry; False preserves it without creating one. All gates, copying and
+        notification rules apply in either mode. Subscriber failures are logged and isolated:
         a successful commit must not appear to the caller as a failed mutation.
         """
         self.ensure_input_open()
@@ -58,7 +60,8 @@ class Session(Generic[S]):
         self.ensure_input_open()
         replacement = copy.deepcopy(candidate)
         result = copy.deepcopy(replacement)
-        self._previous = [self._state]
+        if record_undo:
+            self._previous = [self._state]
         self._state = replacement
         self._notify()
         return result

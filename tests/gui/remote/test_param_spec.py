@@ -23,6 +23,65 @@ def _spec(json_type: JsonType, *, required=True, default=None) -> tuple[ParamSpe
     return (ParamSpec("x", json_type, required=required, default=default),)
 
 
+def test_number_pairs_decode_owned_finite_coordinates():
+    from zcu_tools.gui.remote.param_spec import NumberPairs
+
+    raw = [[1, 2.5], [-3.0, 4]]
+    decoded = validate_params(
+        (ParamSpec("vertices", JsonType.NUMBER_PAIRS),), {"vertices": raw}
+    )
+    pairs = decoded["vertices"]
+    assert isinstance(pairs, NumberPairs)
+    assert pairs.values == ((1.0, 2.5), (-3.0, 4.0))
+    raw[0][0] = 99
+    assert pairs.values[0] == (1.0, 2.5)
+    again = validate_params(
+        (ParamSpec("vertices", JsonType.NUMBER_PAIRS),), {"vertices": pairs}
+    )
+    assert again["vertices"] == pairs
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        [],
+        "0,1",
+        [[0]],
+        [[0, 1, 2]],
+        [(0, 1)],
+        [[True, 1]],
+        [["0", 1]],
+        [[float("nan"), 1]],
+        [[0, float("inf")]],
+        [[10**1000, 1]],
+        [0, 1],
+    ],
+)
+def test_number_pairs_reject_invalid_wire_values(value):
+    with pytest.raises(RemoteError) as error:
+        validate_params(
+            (ParamSpec("vertices", JsonType.NUMBER_PAIRS),), {"vertices": value}
+        )
+    assert error.value.code == ErrorCode.INVALID_PARAMS
+
+
+def test_number_pairs_schema_is_numeric_nested_array():
+    schema = build_input_schema((ParamSpec("vertices", JsonType.NUMBER_PAIRS),))
+    assert schema["properties"] == {
+        "vertices": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "number"},
+            },
+        }
+    }
+
+
 def test_required_string_accepts_non_empty():
     assert validate_params(_spec(JsonType.STRING), {"x": "hi"}) == {"x": "hi"}
 

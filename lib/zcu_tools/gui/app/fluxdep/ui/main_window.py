@@ -228,13 +228,11 @@ class MainWindow(QMainWindow):
 
     def _clear_editor(self) -> None:
         if self._current_editor is not None:
-            if isinstance(self._current_editor, (LinePickerWidget, OneToneWidget)):
+            if isinstance(
+                self._current_editor,
+                (LinePickerWidget, OneToneWidget, FindPointsWidget),
+            ):
                 self._current_editor.teardown()
-            # Quiesce any in-flight pool worker before scheduling C++ deletion:
-            # FindPointsWidget owns a BackgroundRunner whose queued done delivery
-            # must be flushed while the carrier is still alive (prevents segfault).
-            if hasattr(self._current_editor, "quiesce"):
-                self._current_editor.quiesce()  # type: ignore[union-attr]
             self._editor_stack.removeWidget(self._current_editor)
             self._current_editor.deleteLater()
             self._current_editor = None
@@ -293,15 +291,9 @@ class MainWindow(QMainWindow):
             one_tone.finished.connect(self._ctrl.interactive.finish_onetone_pick)
             self._mount(one_tone)
         else:
-            two_tone = FindPointsWidget(
-                entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
-            )
-
-            def _on_finish() -> None:
-                dev_values, freqs = two_tone.get_result()
-                self._ctrl.set_points(entry.name, dev_values, freqs)
-
-            two_tone.finished.connect(_on_finish)
+            context = self._ctrl.interactive.begin_twotone_pick(entry.name)
+            two_tone = FindPointsWidget(context)
+            two_tone.finished.connect(self._ctrl.interactive.finish_twotone_pick)
             self._mount(two_tone)
 
     def _on_repick_lines(self) -> None:

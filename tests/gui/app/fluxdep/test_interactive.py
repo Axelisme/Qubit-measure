@@ -145,6 +145,152 @@ def test_cancelled_worker_cannot_publish_into_replacement_context(controller):
     assert not controller.state.spectrums["sample"].aligned
 
 
+def test_twotone_reuse_kind_switch_and_terminal_publication(twotone_controller):
+    from zcu_tools.analysis.fluxdep.twotone import analyze_twotone_pick
+
+    ctrl = twotone_controller
+    owner = ctrl.interactive
+    line = owner.begin_line_pick("two")
+    context = owner.begin_twotone_pick("two")
+    assert owner.current_line_pick() is None
+    assert owner.begin_twotone_pick("two") is context
+    with pytest.raises(FailedPreconditionError):
+        line.session.undo()
+    expected = analyze_twotone_pick(context.plugin.inputs, context.session.snapshot())
+    assert expected.dev_values.size > 0
+    changes: list[str] = []
+    subscription = ctrl.bus.subscribe(
+        SpectrumChangedPayload, lambda event: changes.append(event.name)
+    )
+    try:
+        result = owner.finish_twotone_pick()
+    finally:
+        subscription.unsubscribe()
+    np.testing.assert_array_equal(result.dev_values, expected.dev_values)
+    entry = ctrl.state.spectrums["two"]
+    assert entry.points_selected
+    np.testing.assert_array_equal(entry.points["dev_values"], expected.dev_values)
+    np.testing.assert_array_equal(entry.points["freqs"], expected.freqs)
+    np.testing.assert_allclose(
+        entry.points["fluxs"],
+        (entry.points["dev_values"] - entry.flux_half) / entry.flux_period + 0.5,
+    )
+    assert changes == ["two"]
+    assert owner.current_twotone_pick() is None
+    with pytest.raises(FailedPreconditionError):
+        context.plugin.clear.execute(context.session, None)
+    with pytest.raises(FailedPreconditionError):
+        owner.finish_twotone_pick()
+
+
+def test_invalid_twotone_finish_keeps_context_editable(twotone_controller):
+    owner = twotone_controller.interactive
+    context = owner.begin_twotone_pick("two")
+    context.session.commit(
+        lambda state: replace(state, mask=np.ones((1, 1), dtype=bool))
+    )
+    with pytest.raises(ValueError, match="mask"):
+        owner.finish_twotone_pick()
+    assert owner.current_twotone_pick() is context
+    assert not twotone_controller.state.spectrums["two"].points_selected
+    context.session.undo()
+    context.plugin.clear.execute(context.session, None)
+    assert owner.finish_twotone_pick().dev_values.size == 0
+
+
+def test_line_begin_closes_previous_twotone_input(twotone_controller):
+    owner = twotone_controller.interactive
+    old = owner.begin_twotone_pick("two")
+    line = owner.begin_line_pick("two")
+    assert owner.current_line_pick() is line
+    assert owner.current_twotone_pick() is None
+    with pytest.raises(FailedPreconditionError):
+        old.plugin.clear.execute(old.session, None)
+
+
+@pytest.mark.parametrize(
+    "condition", ["missing", "inactive", "unaligned", "type", "disposed"]
+)
+def test_twotone_begin_prerequisites(twotone_controller, condition):
+    ctrl = twotone_controller
+    name = "two"
+    error = FailedPreconditionError
+    if condition == "missing":
+        name = "missing"
+        error = InvalidInputError
+    elif condition == "inactive":
+        ctrl.set_active_spectrum(None)
+    elif condition == "unaligned":
+        ctrl.state.put_spectrum(replace(ctrl.state.spectrums[name], aligned=False))
+    elif condition == "type":
+        ctrl.state.put_spectrum(
+            replace(ctrl.state.spectrums[name], spec_type="OneTone")
+        )
+    else:
+        ctrl.interactive.dispose()
+    with pytest.raises(error):
+        ctrl.interactive.begin_twotone_pick(name)
+
+
+@pytest.mark.parametrize(
+    "change", ["switch", "remove", "reload", "alignment", "cancel", "dispose"]
+)
+def test_twotone_invalidation_closes_input_without_points(twotone_controller, change):
+    from zcu_tools.gui.app.fluxdep.event_bus import SpectrumAddedPayload
+
+    ctrl = twotone_controller
+    owner = ctrl.interactive
+    context = owner.begin_twotone_pick("two")
+    if change == "switch":
+        ctrl.set_active_spectrum(None)
+    elif change == "remove":
+        ctrl.remove_spectrum("two")
+    elif change == "reload":
+        ctrl.state.put_spectrum(replace(ctrl.state.spectrums["two"]))
+        ctrl.bus.emit(SpectrumAddedPayload(name="two"))
+    elif change == "alignment":
+        ctrl.set_alignment("two", 0.1, 0.6)
+    elif change == "cancel":
+        owner.cancel()
+    else:
+        owner.dispose()
+    assert owner.current_twotone_pick() is None
+    with pytest.raises(FailedPreconditionError):
+        context.plugin.clear.execute(context.session, None)
+    if "two" in ctrl.state.spectrums:
+        assert not ctrl.state.spectrums["two"].points_selected
+
+
+def test_twotone_publication_failure_does_not_reopen_input(twotone_controller):
+    from zcu_tools.gui.app.fluxdep.interactive import FluxDepInteractiveOwner
+    from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
+        ManualOwnerScheduler,
+    )
+
+    ctrl = twotone_controller
+
+    def fail_points(name, devs, freqs):
+        raise OSError("publication unavailable")
+
+    owner = FluxDepInteractiveOwner(
+        ctrl.state,
+        ctrl.bus,
+        ManualOwnerScheduler(),
+        background=None,
+        publish_alignment=ctrl.set_alignment,
+        publish_points=fail_points,
+    )
+    try:
+        context = owner.begin_twotone_pick("two")
+        with pytest.raises(OSError, match="publication unavailable"):
+            owner.finish_twotone_pick()
+        assert owner.current_twotone_pick() is None
+        with pytest.raises(FailedPreconditionError):
+            context.plugin.clear.execute(context.session, None)
+    finally:
+        owner.dispose()
+
+
 def test_onetone_reuse_kind_switch_and_terminal_publication(onetone_controller):
     ctrl = onetone_controller
     owner = ctrl.interactive

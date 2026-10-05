@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
+from zcu_tools.analysis.fluxdep.twotone import TwoToneInputs
 from zcu_tools.datafile import save_labber_data
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
@@ -76,6 +78,46 @@ def transposed_spectrum_hdf5(tmp_path):
         ],
     )
     return filepath + ".hdf5", flux, freqs_ghz, signals
+
+
+@pytest.fixture
+def twotone_inputs() -> TwoToneInputs:
+    """Descending device rows with a sloped finite resonance in GHz."""
+    devs = np.linspace(1.0, -1.0, 24)
+    freqs = np.linspace(4.0, 6.0, 80)
+    center = 4.8 + 0.3 * devs
+    amplitude = np.exp(-(((freqs[None, :] - center[:, None]) / 0.08) ** 2))
+    signals = np.asarray(1.0 + 1j * amplitude, dtype=np.complex128)
+    return TwoToneInputs(FluxPickInputs(signals, devs, freqs))
+
+
+@pytest.fixture
+def twotone_controller(twotone_inputs: TwoToneInputs):
+    """Aligned TwoTone owner with descending axes for publication sorting."""
+    spectrum = twotone_inputs.spectrum
+    state = FluxDepState()
+    state.put_spectrum(
+        SpectrumEntry(
+            name="two",
+            spec_type="TwoTone",
+            raw={
+                "signals": spectrum.signals.copy(),
+                "dev_values": spectrum.dev_values.copy(),
+                "freqs": spectrum.freqs.copy(),
+                "fluxs": spectrum.dev_values.copy(),
+            },
+            points={
+                "dev_values": np.empty(0),
+                "freqs": np.empty(0),
+                "fluxs": np.empty(0),
+            },
+        )
+    )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("two")
+    ctrl.set_alignment("two", -0.5, 0.5)
+    yield ctrl
+    ctrl.interactive.dispose()
 
 
 @pytest.fixture

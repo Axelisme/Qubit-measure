@@ -37,6 +37,29 @@ class JsonType(str, Enum):
     OBJECT = "object"
     JSON = "json"  # any JSON-serializable value
     ARRAY = "array"  # homogeneous string list; emits {"type":"array","items":{"type":"string"}}
+    NUMBER_PAIRS = "number_pairs"  # nonempty array of finite numeric pairs
+
+
+@dataclass(frozen=True)
+class NumberPairs:
+    """Owned tuple of finite numeric pairs decoded from a nonempty JSON list.
+
+    values contains (first, second) float pairs in caller-declared units.
+    Construction validates/coerces these immutable pairs. from_wire also accepts
+    an existing validated carrier for already-decoded command dispatch. Empty or
+    malformed data, bool, nonfinite numbers and overflow raise
+    RemoteError(INVALID_PARAMS), preserving conversion causes.
+    """
+
+    values: tuple[tuple[float, float], ...]
+
+    def __post_init__(self) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def from_wire(cls, value: object) -> NumberPairs:
+        """Decode JSON list or retain validated carrier; INVALID_PARAMS rejects others."""
+        raise NotImplementedError
 
 
 def _validate_string_enum(values: tuple[object, ...]) -> None:
@@ -126,6 +149,8 @@ class ParamSpec:
                     f"'{self.name}' must be a list, got {type(value).__name__}",
                 )
             return value
+        if jt is JsonType.NUMBER_PAIRS:
+            return NumberPairs.from_wire(value)
         if jt is JsonType.JSON:
             try:
                 json.dumps(value)
@@ -181,6 +206,17 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
         # stringify the whole array (the failure mode of the old J.JSON spelling).
         prop["type"] = "array"
         prop["items"] = {"type": "string"}
+    elif spec.json_type is JsonType.NUMBER_PAIRS:
+        prop.update(
+            type="array",
+            minItems=1,
+            items={
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "number"},
+            },
+        )
     elif spec.json_type is not JsonType.JSON:
         prop["type"] = {
             JsonType.STRING: "string",
