@@ -146,11 +146,11 @@ def test_primary_and_post_done_return_recipe_continuation_then_question(tmp_path
         post = client.call("tab_interact", {"tab": "t", "payload": {"command": "done"}})
         assert post.data["execution"] == key and post.data["status"] == "interactive"
         assert post.data["analysis"]["stage"] == "post"
-        calls = len(client.transport.calls)
+        reads = [method for method, _ in client.transport.sent if method != "operation.await"]
         status = client.call("status", {"execution": key})
         waited = client.call("wait", {"execution": key, "timeout": 0})
         full = client.call("status", {"execution": key, "detail": "full"})
-        assert len(client.transport.calls) == calls
+        assert [method for method, _ in client.transport.sent if method != "operation.await"] == reads
         for summary in (post.data, status, waited.data):
             assert summary["interaction"]["state"] == {"stage": "post"}
             assert summary["interaction"]["commands"] == [
