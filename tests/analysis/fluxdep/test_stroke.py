@@ -223,11 +223,8 @@ def test_circle_arithmetic_overflow_rejected_before_mask_mutation(
     xs = np.array([0.0, 1.0])
     mask = np.array([[True, False], [False, True]])
     before = mask.copy()
-    with np.errstate(over=overflow_policy):
-        with pytest.raises(ValueError, match="finite"):
-            apply_mask_stroke(
-                xs, xs, mask, [BrushPoint(0, 0), end], 1e154, select=select
-            )
+    with np.errstate(over=overflow_policy), pytest.raises(ValueError, match="finite"):
+        apply_mask_stroke(xs, xs, mask, [BrushPoint(0, 0), end], 1e154, select=select)
     np.testing.assert_array_equal(mask, before)
 
 
@@ -240,16 +237,15 @@ def test_point_circle_arithmetic_overflow_is_request_error(
     xs = np.array([0.0, 1.0])
     ys = xs.copy()
     before_xs, before_ys = xs.copy(), ys.copy()
-    with np.errstate(over=overflow_policy):
-        with pytest.raises(ValueError, match="finite"):
-            points_in_normalized_stroke(
-                xs,
-                ys,
-                stroke=[BrushPoint(0, 0), end],
-                width=1e154,
-                x_bound=(0, 1),
-                y_bound=(0, 1),
-            )
+    with np.errstate(over=overflow_policy), pytest.raises(ValueError, match="finite"):
+        points_in_normalized_stroke(
+            xs,
+            ys,
+            stroke=[BrushPoint(0, 0), end],
+            width=1e154,
+            x_bound=(0, 1),
+            y_bound=(0, 1),
+        )
     np.testing.assert_array_equal(xs, before_xs)
     np.testing.assert_array_equal(ys, before_ys)
 
