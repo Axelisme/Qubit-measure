@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-05. Shared line picking and app-owned session lifetime
+**Last updated:** 2026-10-06. Shared line/OneTone picking and app-owned session lifetime
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -66,10 +66,11 @@ view 只暴露查詢，不暴露 mutation。
   helper；per-command façade body 仍各 app（領域動詞 + app payload），main 不繼承。
   **無 measure 概念**（run/analyze/writeback/context/device/tab）。
 - **`interactive.py`** — Qt-free `FluxDepInteractiveOwner` 持有 active spectrum 的
-  live 定線 context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
-  LinePicker 只持有 disposable preview。Finish 經 Controller 的 AlignmentService 發布；
-  active switch、reload、remove 或 external spectrum change 關閉舊輸入。Widget detach
-  不終止 session，window close 才 dispose owner 並 quiesce 背景 runner。
+  單一 live 定線／OneTone context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
+  LinePicker 只持有 disposable preview，OneTone threshold 與 indices 一起 commit／undo。
+  Finish 經 Controller 的 AlignmentService／PointsService 發布；後者擁有排序與 flux calibration。
+  Picker kind switch、active switch、reload、remove 或 external spectrum change 關閉舊輸入。
+  Widget detach 不終止 session，window close 才 dispose owner 並 quiesce 背景 runner。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。
 - **`ui/`** — `MainWindow`（左 spectrum 列表 + 右階段驅動編輯區）、互動 widget

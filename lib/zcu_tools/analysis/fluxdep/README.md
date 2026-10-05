@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-10-01 — shared terminal flux-pick analysis
+**Last updated:** 2026-10-06 — shared OneTone committed selection
 
 本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -13,7 +13,7 @@
 - `search.py`：`search_database` 讀取預先計算的 fluxonium HDF5 database，對 `(fluxs, freqs)`、transition 定義和 `ParamBounds(EJ, EC, EL)`（GHz 範圍）做 exact lower-bound-pruned 搜尋。`DatabaseSearchResult` 提供最佳 `(EJ, EC, EL)`、評分、逐 entry 距離/縮放、搜尋輸入與預測頻率，供 [診斷圖 builder](../../plotting/fluxdep/README.md) 使用。`search_models.py` 與 `search_njit.py` 保留原有 transition compilation 和數值核心；`fit_spectrum` 仍屬 Notebook。搜尋不決定 Figure 顯示、參數接受或 export。
 - `processing.py`：頻譜轉實數/正規化、2D peak detection、point downsample、mirror difference。
 - `selection.py`：brush selection 的幾何規則，供 grid mask 與 joint point cloud 使用。
-- `onetone.py`：one-tone 最大色散頻率、切面平滑、peak detection 與點位輸出。
+- `onetone.py`：one-tone 最大色散頻率、切面平滑、peak detection 與點位輸出。`OneToneInputs` 保存 captured spectrum 與唯讀預處理；`OneTonePickState` 保存完整 threshold／indices。`analyze_onetone_pick` 驗證 indices 並輸出未校準 device／GHz 點位，空選集有效；排序與 flux calibration 留在 app。
 - `line_state.py`：Qt-free `FluxPickState` 與唯讀輸入、初值折疊、移線／交換、mirror-loss 與 auto-align 候選計算。`analyze_flux_pick` 驗證終態最小間距，回傳 device-axis 單位的 FluxPickAnalysis，period 是兩線距離的兩倍。計算不改輸入；狀態不保存選線、preview 或 Figure。
 - `line_picker.py`：既有 notebook Matplotlib picker；measure Qt frontend 只用它維護本地 artists/timer，並以 `show_state()` 將 committed state 重投影到畫面。
 

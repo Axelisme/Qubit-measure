@@ -15,7 +15,11 @@ from zcu_tools.analysis.fluxdep.line_state import (
     analyze_flux_pick,
     fold_initial_lines,
 )
-from zcu_tools.analysis.fluxdep.onetone import OneTonePickResult, OneTonePickState
+from zcu_tools.analysis.fluxdep.onetone import (
+    OneToneInputs,
+    OneTonePickResult,
+    OneTonePickState,
+)
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -205,7 +209,38 @@ class FluxDepInteractiveOwner:
         disposed owner raises FailedPreconditionError. Switching picker kind
         closes old input before replacement. Off-owner use raises RuntimeError.
         """
-        raise NotImplementedError
+        self._require_owner()
+        if self._disposed:
+            raise FailedPreconditionError("interactive owner is disposed")
+        if name not in self._state.spectrums:
+            raise InvalidInputError(f"unknown spectrum {name!r}")
+        if name != self._state.active_spectrum:
+            raise FailedPreconditionError(
+                "one-tone picking requires the active spectrum"
+            )
+        entry = self._state.spectrums[name]
+        if entry.spec_type != "OneTone":
+            raise FailedPreconditionError(
+                "one-tone picking requires a OneTone spectrum"
+            )
+        if not entry.aligned:
+            raise FailedPreconditionError(
+                "one-tone picking requires an aligned spectrum"
+            )
+        current = self.current_onetone_pick()
+        if current is not None:
+            return current
+        self.cancel()
+        inputs = OneToneInputs(
+            FluxPickInputs(
+                entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
+            )
+        )
+        plugin = OneTonePickPlugin(inputs)
+        self._context = OneTonePickContext(
+            name, plugin, plugin.open(self._owner), entry.flux_half, entry.flux_int
+        )
+        return self._context
 
     def current_onetone_pick(self) -> OneTonePickContext | None:
         """Read the valid OneTone context, or None, without creating a session.
@@ -213,7 +248,20 @@ class FluxDepInteractiveOwner:
         Requires owner loop; absent, invalidated or another picker kind returns
         None. Invalid spectrum identity closes old input as for line picking.
         """
-        raise NotImplementedError
+        self._require_owner()
+        if self._context is not None and (
+            self._context.spectrum_name != self._state.active_spectrum
+            or self._context.spectrum_name not in self._state.spectrums
+        ):
+            self.cancel()
+        if not isinstance(self._context, OneTonePickContext):
+            return None
+        try:
+            self._context.session.ensure_input_open()
+        except FailedPreconditionError:
+            self.cancel()
+            return None
+        return self._context
 
     def finish_onetone_pick(self) -> OneTonePickResult:
         """Validate committed indices, close input and publish native point arrays.
@@ -222,7 +270,15 @@ class FluxDepInteractiveOwner:
         editable input. Clear ownership before Controller's publication.
         Publication failure propagates without reopening terminal input.
         """
-        raise NotImplementedError
+        self._require_owner()
+        context = self.current_onetone_pick()
+        if context is None:
+            raise FailedPreconditionError("no active one-tone picker")
+        context.plugin.can_finish(context.session.snapshot())
+        self._context = None
+        result = context.plugin.finish(context.session)
+        self._publish_points(context.spectrum_name, result.dev_values, result.freqs)
+        return result
 
     def cancel(self) -> None:
         """Close current input without publication; safe with no active context."""

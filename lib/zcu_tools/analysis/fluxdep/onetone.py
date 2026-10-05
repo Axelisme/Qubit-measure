@@ -115,7 +115,12 @@ class OneToneInputs:
     smoothed: NDArray[np.float64] = field(init=False)
 
     def __post_init__(self) -> None:
-        raise NotImplementedError
+        spectrum = self.spectrum
+        freq_index = max_dispersion_freq_index(spectrum.signals, spectrum.freqs)
+        smoothed = smoothed_slice(spectrum.signals, freq_index)
+        smoothed.setflags(write=False)
+        object.__setattr__(self, "max_freq_index", freq_index)
+        object.__setattr__(self, "smoothed", smoothed)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -132,7 +137,8 @@ class OneTonePickState:
     peak_indices: tuple[int, ...]
 
     def __post_init__(self) -> None:
-        raise NotImplementedError
+        _require_threshold(self.threshold)
+        _require_peak_indices(self.peak_indices)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +160,11 @@ def pick_onetone_state(inputs: OneToneInputs, threshold: float) -> OneTonePickSt
     Reuse captured preprocessing without writes; ValueError rejects invalid
     threshold before computation. No worker or presentation side effects.
     """
-    raise NotImplementedError
+    _require_threshold(threshold)
+    peaks = detect_peaks(inputs.smoothed, threshold)
+    return OneTonePickState(
+        threshold=threshold, peak_indices=tuple(int(index) for index in peaks)
+    )
 
 
 def analyze_onetone_pick(
@@ -165,4 +175,34 @@ def analyze_onetone_pick(
     ValueError rejects indices outside the captured device axis. Empty selection
     is valid; does not sort, calibrate flux, mutate inputs or decide publication.
     """
-    raise NotImplementedError
+    spectrum = inputs.spectrum
+    if state.peak_indices and state.peak_indices[-1] >= spectrum.dev_values.size:
+        raise ValueError("peak_indices must be within the captured device axis")
+    indices = np.asarray(state.peak_indices, dtype=np.intp)
+    dev_values = spectrum.dev_values[indices]
+    freqs = np.full(
+        dev_values.shape, spectrum.freqs[inputs.max_freq_index], dtype=np.float64
+    )
+    return OneTonePickResult(dev_values, freqs)
+
+
+def _require_peak_indices(indices: object) -> None:
+    if not isinstance(indices, tuple):
+        raise ValueError("peak_indices must be an immutable tuple")
+    previous = -1
+    for index in indices:
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("peak_indices must contain integers")
+        if index <= previous:
+            raise ValueError("peak_indices must be nonnegative and strictly increasing")
+        previous = index
+
+
+def _require_threshold(threshold: object) -> None:
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not np.isfinite(threshold)
+        or not 0 <= threshold <= 5
+    ):
+        raise ValueError("threshold must be a finite number in [0, 5]")

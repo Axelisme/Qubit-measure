@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._subscribe_events()
         self._refresh_list()
+        self._rebuild_editor()
 
     # --- construction ----------------------------------------------------
 

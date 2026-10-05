@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-05 — shared line-picking coordinate grids
+**Last updated:** 2026-10-06 — shared OneTone state projection
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
@@ -17,6 +17,12 @@ caller owns naming, presentation and release. Numerical validation stays in the
 shared analysis kernel. `pick.configure_flux_pick_axes(figure)` supplies the
 coordinate-grid presentation shared by the fluxdep Qt preview and native output,
 without changing analysis state or canvas ownership.
+
+`onetone.OneTonePickPlot` projects captured OneTone inputs and committed peak
+indices onto device/GHz and normalized-amplitude panels. The Qt OneTone view and
+`make_onetone_pick_figure` share its layout and reusable artists. The builder
+returns a separate Agg Figure; projecting onto a supplied GUI Figure does not
+change its canvas. Neither path commits threshold or selection state.
 
 This package does not own Qt canvas attachment, backend selection, interactive
 `TwoLinePicker` gestures, or analysis state. Importing the root `plotting` package
