@@ -18,6 +18,7 @@ from zcu_tools.experiment import (
     US_TO_S,
     GroupedAxesSpec,
     GroupedLoadData,
+    PersistableExperiment,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -266,7 +267,9 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class AutoOptExp:
+class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
+    AXES_SPEC = RO_AUTO_GROUPED_AXES_SPEC
+
     def run(
         self,
         cfg: AutoOptCfg,

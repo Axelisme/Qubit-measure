@@ -11,6 +11,7 @@ from zcu_tools.experiment import RunRecord, load_run, save_run
 from tests._native_support import native_metadata
 from zcu_lab.v2.jpa.auto_optimize.core import (
     JPA_AUTO_GROUPED_AXES_SPEC,
+    AutoOptimizeExp,
     JPAOptCfg,
     JPAOptimizeResult,
 )
@@ -86,8 +87,9 @@ def test_registered_grouped_spec_native_round_trip(tmp_path: Path) -> None:
     )
     spec = JPA_AUTO_GROUPED_AXES_SPEC
     path = tmp_path / "grouped.h5"
-    save_run(record, path, spec=spec, metadata=native_metadata(spec.tag))
-    loaded, snapshot = load_run(path, spec=spec)
+    experiment = AutoOptimizeExp()
+    experiment.save_run(record, path, metadata=native_metadata(spec.tag))
+    loaded, snapshot = experiment.load_run(path)
     assert loaded.cfg == cfg
     assert snapshot == native_metadata(spec.tag).snapshot
     np.testing.assert_array_equal(loaded.result.params, record.result.params)

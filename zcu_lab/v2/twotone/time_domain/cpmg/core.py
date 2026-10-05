@@ -15,6 +15,7 @@ from zcu_tools.experiment import (
     US_TO_S,
     GroupedAxesSpec,
     GroupedLoadData,
+    PersistableExperiment,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -202,7 +203,9 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class CPMG_Exp:
+class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
+    AXES_SPEC = CPMG_GROUPED_AXES_SPEC
+
     Options: ClassVar[type[CPMGAnalyzeOptions]] = CPMGAnalyzeOptions
 
     def run(
