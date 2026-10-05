@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-05，framework BaseAdapter 與 multi-source catalog loader
+**Last updated:** 2026-10-05，TemplateCatalog 與 multi-source catalog loader
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -290,7 +290,7 @@ Key ownership rules:
 `ExperimentReloadService` 擁有 RAM-only snapshot 與重載／恢復狀態，透過注入的
 `ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
 重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
-和 failure/recovery presentation。Role catalog、hardware context 與 framework 不重建。
+和 failure/recovery presentation。Template catalog、hardware context 與 framework 不重建。
 
 `catalog_loader.py` 提供通用 `SourceExperimentCatalogLoader`。組合根用 `SourcePackage`
 宣告 framework 與使用者 source 目錄，並指定 reload、preserved 與 catalog module。
@@ -507,11 +507,11 @@ measure composition在`ui/cfg_binding.py`以generic `QLineEdit -> keepalive obje
 
 ModuleLibrary reference enumeration只以`experiment.cfg_editing.program_shape_for_input`讀root discriminator；
 不normalize typed cfg或建立Spec/Value。resolve才呼main materializer façade一次。Experiment
-composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `RoleEntry`；catalog
+composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `TemplateEntry`；catalog
 registration只驗shape/kind，Controller create依序取得value與fresh shape並直接組`CfgSchema`，不從
-value sniff discriminator。role wire metadata與既有blank role順序保持不變。
+value sniff discriminator。既有 role_id／roles wire metadata 與 blank template 順序保持不變。
 
-ModuleLibrary 新建唯一走 role catalog 的 `create_from_role`；`CfgEditorService.open`
+ModuleLibrary 新建唯一走 template catalog 的 `create_from_template`；`CfgEditorService.open`
 只以 required `from_name` 開啟既有 module/waveform 的 modify session，不提供
 discriminator blank seed。
 
@@ -676,7 +676,7 @@ remote named-dialog surface delegate reference retention and `finished` /
 
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
-controller only for measure-only CfgEditor and role-catalog actions. Measure owns
+controller only for measure-only CfgEditor and template-catalog actions. Measure owns
 the dense two-column Parameters property grid and a separate Modules composition:
 the Modules tree exposes only New/Delete collection actions, while the right pane
 embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
@@ -690,7 +690,7 @@ ModuleLibrary identity and fast-fails replacement after a context switch, leavin
 that draft for explicit Revert/Discard. A pending refresh is consumed after a
 dirty selection transaction so the tree reflects the resulting names. Revert
 reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
-New remains a retained non-blocking role catalog dialog; the Modules tree Delete
+New remains a retained non-blocking template catalog dialog; the Modules tree Delete
 key is direct only at the tree focus boundary, while the button confirms.
 Autofluxdep keeps the base presentation and its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no

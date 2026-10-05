@@ -48,7 +48,6 @@ from .events.tab import (
 )
 from .registry import Registry
 from .remote.dialogs import DialogName
-from .role_catalog import RoleCatalog
 from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
@@ -61,6 +60,7 @@ from .services import (
 from .services.cfg_lowering import lower_module, lower_waveform
 from .services.ports import CfgEdit, CfgEditResult, ContextWrites
 from .state import State
+from .template_catalog import TemplateCatalog
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
 if TYPE_CHECKING:
@@ -247,7 +247,7 @@ class Controller(SessionControllerMixin):
         io_manager: IOManager,
         view: ViewProtocol | None,
         bus: EventBus,
-        role_catalog: RoleCatalog | None = None,
+        template_catalog: TemplateCatalog | None = None,
         progress_transport: ProgressTransport | None = None,
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
@@ -270,10 +270,9 @@ class Controller(SessionControllerMixin):
         if view is not None:
             self.add_view(view)
         self._bus = bus
-        # Catalog of experiment-role templates (gui interface, populated by
-        # injected user composition at startup). Optional so tests can construct a bare
-        # Controller; create_from_role fails fast when absent.
-        self._role_catalog = role_catalog
+        # User composition injects templates at startup. Bare controllers omit
+        # them; create_from_template fails fast when the catalog is absent.
+        self._template_catalog = template_catalog
 
         # Construct and wire every domain service into an immutable bundle, then
         # alias them onto self for the façade's call sites.
@@ -1056,36 +1055,37 @@ class Controller(SessionControllerMixin):
         return self._arb_waveform_svc
 
     # ------------------------------------------------------------------
-    # Role templates — one-shot "create blank ml entry from a named role"
-    # (shared by inspect UI and ml.create_from_role RPC). Editing afterwards
-    # goes through the normal modify path (inspect / editor.new(from_name)).
+    # Templates: one-shot create for Inspect UI and context.ml_create_from_role.
     # ------------------------------------------------------------------
 
-    def get_role_catalog(self) -> RoleCatalog:
-        if self._role_catalog is None:
-            raise FailedPreconditionError("No role catalog is wired up.")
-        return self._role_catalog
+    def get_template_catalog(self) -> TemplateCatalog:
+        """Return the injected catalog; raise FailedPreconditionError if absent."""
+        if self._template_catalog is None:
+            raise FailedPreconditionError("No template catalog is wired up.")
+        return self._template_catalog
 
     def get_session_env(self) -> SessionEnv:
         return self._ctx_svc.get_session_env()
 
-    def create_from_role(self, item_kind: str, role_id: str, name: str) -> None:
-        """Seed a blank ml module/waveform from a named role and register it.
+    def create_from_template(self, item_kind: str, template_id: str, name: str) -> None:
+        """Create a new ModuleLibrary entry from the catalog template ID.
 
-        The role's eval-aware factory produces md-linked defaults; lowering
-        against the live md turns those into the md's current concrete values
-        (ModuleLibrary stores concrete numbers, never md references).
+        ``item_kind`` must match the template's module/waveform store. ``name``
+        must be nonempty and unused in that store. Raise KeyError for an unknown
+        ID and FailedPreconditionError for a missing catalog, empty/colliding
+        name or kind mismatch. Factory and schema-validation failures propagate.
+
+        The template's fresh value and shape are lowered against the live md by
+        ContextService, so ModuleLibrary stores concrete numbers, not md links.
+        No library write occurs before both factories succeed.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
-        entry = self.get_role_catalog().get(role_id)
+        entry = self.get_template_catalog().get(template_id)
         if entry.item_kind != item_kind:
             raise FailedPreconditionError(
-                f"Role {role_id!r} is a {entry.item_kind}, not a {item_kind}."
+                f"Template {template_id!r} is a {entry.item_kind}, not a {item_kind}."
             )
-        # create = new entry; a name clash is an error (the user/agent meant to
-        # add, not silently overwrite an existing entry — register_module would
-        # overwrite). Editing an existing entry goes through the modify path.
         self._require_new_ml_name(item_kind, name)
 
         ctx = self.get_session_env()

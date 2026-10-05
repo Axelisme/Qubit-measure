@@ -2,7 +2,7 @@
 
 This module depends only on ``zcu_tools.gui.app.measure``; it does not know which concrete
 experiments exist. The entry script wires a populated ``Registry`` /
-``RoleCatalog`` (built from caller-owned definitions) and passes them in — so the
+``TemplateCatalog`` (built from caller-owned definitions) and passes them in — so the
 GUI framework never imports the experiment-adapter layer.
 """
 
@@ -23,13 +23,13 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
     from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.session.services.io_manager import IOManager
 
 RegistryFactory = Callable[
-    [], tuple["Registry", "RoleCatalog", "ExperimentCatalogLoader"]
+    [], tuple["Registry", "TemplateCatalog", "ExperimentCatalogLoader"]
 ]
 
 
@@ -68,7 +68,9 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         )
 
         install_global_exception_hook(show_error_dialog)
-        self._registry, self._role_catalog, self._catalog_loader = registry_factory()
+        self._registry, self._template_catalog, self._catalog_loader = (
+            registry_factory()
+        )
         self._clean = clean
         self._project_root = project_root
 
@@ -81,7 +83,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         ctrl, window = _build_window(
             state,
             self._registry,
-            self._role_catalog,
+            self._template_catalog,
             io_manager,
             self._project_root,
             catalog_loader=self._catalog_loader,
@@ -138,7 +140,7 @@ def _is_main_window(value: object) -> TypeGuard[MainWindow]:
 def _build_window(
     state: State,
     registry: Registry,
-    role_catalog: RoleCatalog,
+    template_catalog: TemplateCatalog,
     io_manager: IOManager,
     project_root: str | None = None,
     *,
@@ -155,7 +157,7 @@ def _build_window(
     ctrl = Controller(
         state=state,
         registry=registry,
-        role_catalog=role_catalog,
+        template_catalog=template_catalog,
         io_manager=io_manager,
         view=None,
         bus=bus,

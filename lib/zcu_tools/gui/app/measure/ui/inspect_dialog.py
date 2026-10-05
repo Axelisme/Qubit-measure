@@ -186,10 +186,10 @@ class _MdCreateDialog(QDialog):
 
 
 class _MlCreateDialog(QDialog):
-    """Create a new ml module/waveform from a role (the single create path).
+    """Create a new ml module/waveform from a template (the single create path).
 
-    One-shot: pick a role + a name → the role's factory seeds the value
-    (md-linked defaults for named roles, structural zeros for ``:blank`` roles)
+    One-shot: pick a template + a name → the template's factory seeds the value
+    (md-linked defaults for named templates, structural zeros for ``:blank`` templates)
     and registers it directly into ml. The embedded editor handles later edits.
     """
 
@@ -204,38 +204,38 @@ class _MlCreateDialog(QDialog):
         # create wins.
         self.created: tuple[_MlItemKind, str] | None = None
         # True once the user has typed into the name field by hand: from then on
-        # switching role must not clobber their name (least surprise). Qt only
+        # switching template must not clobber their name (least surprise). Qt only
         # fires textEdited on user keystrokes, never on programmatic setText, so
         # seeding the suggestion below does not set this flag.
         self._name_edited = False
 
         layout = QVBoxLayout(self)
         hint = QLabel(
-            "Pick a role and a name. Named roles seed md-linked defaults; "
-            "'Blank: …' roles seed an empty shape. Edit afterwards in Inspect."
+            "Pick a template and a name. Named templates seed md-linked defaults; "
+            "'Blank: …' templates seed an empty shape. Edit afterwards in Inspect."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         form = QFormLayout()
-        self._role_combo = QComboBox()
-        catalog = self._ctrl.get_role_catalog()
-        # Modules then waveforms, each labelled; role entry stashed on the item.
+        self._template_combo = QComboBox()
+        catalog = self._ctrl.get_template_catalog()
+        # Modules then waveforms, each labelled; template entry stashed on the item.
         for kind in ("module", "waveform"):
             for entry in catalog.entries_for(kind):  # type: ignore[arg-type]
-                self._role_combo.addItem(f"{entry.label}  ({kind})", userData=entry)
-        form.addRow("Role:", self._role_combo)
+                self._template_combo.addItem(f"{entry.label}  ({kind})", userData=entry)
+        form.addRow("Template:", self._template_combo)
         self._name_edit = QLineEdit()
         form.addRow("Name:", self._name_edit)
         layout.addLayout(form)
 
-        # Seed the name with the initial role's convention-based suggestion.
-        initial = self._role_combo.currentData()
+        # Seed the name with the initial template's convention-based suggestion.
+        initial = self._template_combo.currentData()
         if initial is not None:
             self._name_edit.setText(self._suggest_name(initial))
 
         self._name_edit.textEdited.connect(self._on_name_edited)
-        self._role_combo.currentIndexChanged.connect(self._on_role_changed)
+        self._template_combo.currentIndexChanged.connect(self._on_template_changed)
 
         btn_row = QHBoxLayout()
         create_btn = QPushButton("Create")
@@ -249,7 +249,7 @@ class _MlCreateDialog(QDialog):
     def _suggest_name(self, entry: Any) -> str:
         """Convention-based name suggestion for ``entry``, de-duplicated.
 
-        Blank roles carry no ``default_name`` -> empty (the user must name it).
+        Blank templates carry no ``default_name`` -> empty (the user must name it).
         Otherwise append ``_2``/``_3``/… until the name is free in the live ml.
         """
         base = entry.default_name
@@ -265,17 +265,17 @@ class _MlCreateDialog(QDialog):
     def _on_name_edited(self, _text: str) -> None:
         self._name_edited = True
 
-    def _on_role_changed(self, _index: int) -> None:
+    def _on_template_changed(self, _index: int) -> None:
         # Only re-suggest while the name is still the auto-filled one; once the
         # user has typed their own, leave it alone (least surprise).
         if self._name_edited:
             return
-        entry = self._role_combo.currentData()
+        entry = self._template_combo.currentData()
         if entry is not None:
             self._name_edit.setText(self._suggest_name(entry))
 
     def _on_create(self) -> None:
-        entry = self._role_combo.currentData()
+        entry = self._template_combo.currentData()
         if entry is None:
             return
         name = self._name_edit.text().strip()
@@ -283,7 +283,7 @@ class _MlCreateDialog(QDialog):
             QMessageBox.warning(self, "Invalid name", "Entry name must not be empty.")
             return
         try:
-            self._ctrl.create_from_role(entry.item_kind, entry.role_id, name)
+            self._ctrl.create_from_template(entry.item_kind, entry.template_id, name)
         except Exception as exc:  # noqa: BLE001 — surface any failure to the user
             QMessageBox.critical(self, "Create failed", str(exc))
             return

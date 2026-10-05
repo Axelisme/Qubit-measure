@@ -104,6 +104,11 @@ _Avoid_: lease, operation handle
 它與操作追蹤用的 handle 不同，也不代替請求前置條件檢查。
 _Avoid_: permit, operation handle
 
+**ModuleLibrary Template**:
+A named starting shape and defaults for creating a new module or waveform entry.
+Choosing a template creates an independent entry that can then be edited.
+_Avoid_: experiment role, module role catalog
+
 **SessionEnv**:
 GUI session 目前生效的實驗 context 與 live 連線資源。
 它與預填 Setup 的 Session Preference 不同。

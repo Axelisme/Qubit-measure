@@ -31,9 +31,9 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import CfgObservation, CfgResource
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -137,7 +137,7 @@ class Fixture:
         project_root: str | None = None,
         *,
         active_label: str | None = None,
-        role_catalog: RoleCatalog | None = None,
+        template_catalog: TemplateCatalog | None = None,
         empty_project: bool = False,
         headless: bool = False,
     ) -> None:
@@ -165,7 +165,7 @@ class Fixture:
             io_manager=io_manager,
             view=self.view,
             bus=self.bus,
-            role_catalog=role_catalog,
+            template_catalog=template_catalog,
             project_root=project_root,
         )
         if opts is None:

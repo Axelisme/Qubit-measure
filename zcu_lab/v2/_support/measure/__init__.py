@@ -78,7 +78,7 @@ __all__ = [
     # ctx helpers
     "md_get_float",
     "md_has_key",
-    # Role factory table (single source for RoleCatalog + MeasureCfgDefinition)
+    # Role factory table (single source for TemplateCatalog + MeasureCfgDefinition)
     "ROLE_FACTORIES",
     "RoleFactorySpec",
     # Module defaults (low-level)

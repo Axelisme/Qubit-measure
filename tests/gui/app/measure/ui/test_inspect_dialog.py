@@ -9,7 +9,7 @@ import pytest
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QApplication, QLineEdit  # type: ignore[attr-defined]
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui import inspect_dialog
 from zcu_tools.gui.app.measure.ui.inspect_dialog import (
     InspectDialog,
@@ -781,33 +781,33 @@ def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
 
 
 def _catalog():
-    from zcu_lab.roles import register_all_roles
+    from zcu_lab.templates import register_all_templates
 
-    cat = RoleCatalog()
-    register_all_roles(cat)
+    cat = TemplateCatalog()
+    register_all_templates(cat)
     return cat
 
 
 def test_create_dialog_populates_roles_and_creates(qapp):
     ctrl = _make_ctrl()
-    ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.get_template_catalog.return_value = _catalog()
     ctrl.has_ml_entry.side_effect = lambda kind, name: False
 
     dlg = _MlCreateDialog(ctrl)
-    # Combo lists role labels (md-aware + blank), not raw type strings.
-    labels = [dlg._role_combo.itemText(i) for i in range(dlg._role_combo.count())]
+    combo = dlg._template_combo
+    labels = [combo.itemText(i) for i in range(combo.count())]
     assert any("Resonator probe" in t for t in labels)  # md-aware
     assert any("Blank: reset/bath" in t for t in labels)  # blank role
     assert any("Blank: drag" in t for t in labels)  # waveform-only blank shape
 
     # Pick the first role, give a name, create.
-    dlg._role_combo.setCurrentIndex(0)
+    dlg._template_combo.setCurrentIndex(0)
     dlg._name_edit.setText("my_entry")
     dlg._on_create()
 
-    entry = dlg._role_combo.itemData(0)
-    ctrl.create_from_role.assert_called_once_with(
-        entry.item_kind, entry.role_id, "my_entry"
+    entry = dlg._template_combo.itemData(0)
+    ctrl.create_from_template.assert_called_once_with(
+        entry.item_kind, entry.template_id, "my_entry"
     )
 
 
@@ -815,17 +815,17 @@ def _ctrl_with_catalog(existing: set[tuple[str, str]] | None = None) -> MagicMoc
     """Mock controller exposing the real role catalog + a controllable ml."""
     have = existing or set()
     ctrl = _make_ctrl()
-    ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.get_template_catalog.return_value = _catalog()
     ctrl.has_ml_entry.side_effect = lambda kind, name: (kind, name) in have
     return ctrl
 
 
 def _suggested_for(dlg: _MlCreateDialog, role_id: str) -> str:
     """Drive the combo to ``role_id`` and read back the suggested name."""
-    for i in range(dlg._role_combo.count()):
-        entry = dlg._role_combo.itemData(i)
-        if entry is not None and entry.role_id == role_id:
-            dlg._role_combo.setCurrentIndex(i)
+    for i in range(dlg._template_combo.count()):
+        entry = dlg._template_combo.itemData(i)
+        if entry is not None and entry.template_id == role_id:
+            dlg._template_combo.setCurrentIndex(i)
             return dlg._name_edit.text()
     raise AssertionError(f"role {role_id!r} not in combo")
 
@@ -834,8 +834,8 @@ def test_create_dialog_prefills_default_name(qapp):
     ctrl = _ctrl_with_catalog()
     dlg = _MlCreateDialog(ctrl)
     # The first dropdown entry is res_probe -> readout_rf (see registry).
-    first = dlg._role_combo.itemData(0)
-    assert first.role_id == "res_probe"
+    first = dlg._template_combo.itemData(0)
+    assert first.template_id == "res_probe"
     assert dlg._name_edit.text() == "readout_rf"
 
 
@@ -873,7 +873,7 @@ def test_create_dialog_role_switch_keeps_user_typed_name(qapp):
 def test_create_dialog_records_created_on_success(qapp):
     ctrl = _ctrl_with_catalog()
     dlg = _MlCreateDialog(ctrl)
-    dlg._role_combo.setCurrentIndex(0)
+    dlg._template_combo.setCurrentIndex(0)
     dlg._name_edit.setText("my_entry")
     dlg._on_create()
     assert dlg.created == ("module", "my_entry")
@@ -882,7 +882,7 @@ def test_create_dialog_records_created_on_success(qapp):
 def test_inspect_create_selects_embedded_editor_without_blocking(qapp, monkeypatch):
     ml = _make_ml()
     ctrl = _make_ctrl_with_ml(ml)
-    ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.get_template_catalog.return_value = _catalog()
     ctrl.has_ml_entry.side_effect = lambda kind, name: False
     dialog = InspectDialog(ctrl, MagicMock())
 
@@ -988,14 +988,14 @@ def test_create_dialog_rejects_empty_name(qapp, monkeypatch):
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     ctrl = _make_ctrl()
-    ctrl.get_role_catalog.return_value = _catalog()
+    ctrl.get_template_catalog.return_value = _catalog()
     ctrl.has_ml_entry.side_effect = lambda kind, name: False
 
     dlg = _MlCreateDialog(ctrl)
     dlg._name_edit.setText("   ")
     dlg._on_create()
 
-    ctrl.create_from_role.assert_not_called()
+    ctrl.create_from_template.assert_not_called()
 
 
 def test_inspect_ml_toolbar_has_single_create_button(qapp):
