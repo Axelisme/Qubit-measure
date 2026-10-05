@@ -395,6 +395,28 @@ def test_wait_timeout_and_feedback_are_running_results(tmp_path: Path) -> None:
         assert result.get("feedback") == feedback
 
 
+@pytest.mark.parametrize(
+    "reason", [None, "Stop requested", "Autofluxdep run stop requested"]
+)
+def test_wait_delivers_cancelled_stop_reason(
+    tmp_path: Path, reason: str | None
+) -> None:
+    client = make_client(tmp_path)
+    op = discover_operation(client, 31)
+    wire = {"reason": "completed", "status": "cancelled"}
+    if reason is not None:
+        wire["feedback"] = reason
+    client.transport.replies["operation.await"] = {"ok": True, "result": wire}
+
+    result = client.call("wait", {"op": op, "timeout": 0})
+    elapsed = result.pop("elapsed_s")
+    assert elapsed >= 0
+    expected = {"status": "cancelled"}
+    if reason is not None:
+        expected["feedback"] = reason
+    assert result == expected
+
+
 def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
     tmp_path: Path,
 ) -> None:

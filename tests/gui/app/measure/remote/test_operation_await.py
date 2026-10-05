@@ -134,20 +134,36 @@ def test_failed_returns_status_and_error():
 # ---------------------------------------------------------------------------
 
 
-def test_cancelled_with_feedback_returns_structured():
-    # Settled-cancelled with a Stop reason (Send & Stop scenario):
-    # the feedback is folded by _make_completed and must reach the wire payload.
-    ctrl = _ctrl(
-        AwaitResult(
-            reason="completed",
-            outcome=OperationOutcome("cancelled"),
-            feedback="stop reason from user",
-        )
+@pytest.mark.parametrize("reason", [None, "", "stop reason from user"])
+@pytest.mark.parametrize("settle_in_hook", [False, True])
+def test_cancelled_stop_reason_reaches_wire(
+    reason: str | None, settle_in_hook: bool
+) -> None:
+    handles = OperationHandles()
+
+    def cancel_hook() -> None:
+        if settle_in_hook:
+            handles.settle(token, OperationOutcome("cancelled"))
+
+    token = handles.create(cancel_hook, origin=EventOrigin(kind="user"))
+    control = OperationControlFacet(
+        save=SaveOperationOwner(),
+        handles=handles,
+        progress=UnusedProgress(),
+        run_analyze=TabOperationOwner(),
+        device=DeviceOperationOwner(),
     )
-    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert out["reason"] == "completed"
-    assert out["status"] == "cancelled"
-    assert out["feedback"] == "stop reason from user"
+    handles.stop(token, reason)
+    params = {"operation_id": token, "timeout": 0}
+    if not settle_in_hook:
+        assert _HANDLER(control, params) == {"reason": "timeout"}
+        handles.settle(token, OperationOutcome("cancelled"))
+
+    expected = {"reason": "completed", "status": "cancelled"}
+    if reason:
+        expected["feedback"] = reason
+    assert _HANDLER(control, params) == expected
+    assert _HANDLER(control, params) == expected
 
 
 def test_cancelled_without_feedback_no_raise():

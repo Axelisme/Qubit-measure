@@ -723,7 +723,7 @@ def test_done_joins_original_completion_without_duplicate_saves(
                     "error": "fit failed" if outcome == "failed" else None,
                 }
                 if done.is_set()
-                else {"reason": "user_feedback", "status": "running"}
+                else {"reason": "timeout"}
             )
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"gain": 2})
