@@ -34,6 +34,47 @@ def _wait_for_alignment(plugin, qapp) -> None:
     assert not plugin.alignment_busy
 
 
+@pytest.mark.parametrize("spec_type", ["OneTone", "TwoTone"])
+def test_agent_reopens_completed_point_picker_and_gui_uses_same_session(
+    composition, spectrum_hdf5, qapp, spec_type
+):
+    import numpy as np
+    from qtpy.QtWidgets import QStackedWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
+    from zcu_tools.gui.event_bus import EventOrigin
+
+    ctrl, window = composition
+    name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type=spec_type)
+    ctrl.set_active_spectrum(name)
+    ctrl.set_alignment(name, 0.0, 1.0)
+    ctrl.set_points(name, np.array([0.0]), np.array([5.0]))
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        if spec_type == "OneTone":
+            context = ctrl.interactive.begin_onetone_pick(name)
+            context.plugin.execute_command(
+                context.session, "set_threshold", {"threshold": 0.5}
+            )
+        else:
+            context = ctrl.interactive.begin_twotone_pick(name)
+            context.plugin.execute_command(context.session, "clear", {})
+    stack = window.findChild(QStackedWidget)
+    assert stack is not None
+    widget = stack.currentWidget()
+    if spec_type == "OneTone":
+        assert isinstance(widget, OneToneWidget)
+    else:
+        assert isinstance(widget, FindPointsWidget)
+    active = ctrl.interactive.inspect()
+    assert active is not None and active.context is context
+    expected = context.plugin.build_result(context.session.snapshot())
+    devs, freqs = widget.get_result()
+    np.testing.assert_array_equal(devs, expected.dev_values)
+    np.testing.assert_array_equal(freqs, expected.freqs)
+    assert context.session.can_undo()
+    assert ctrl.state.spectrums[name].points_completed
+
+
 def test_production_twotone_preview_and_finish_advance_stage(
     composition, spectrum_hdf5, qapp
 ):

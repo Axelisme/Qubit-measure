@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -37,6 +38,8 @@ from zcu_tools.gui.app.fluxdep.cross_selection import CrossSelectionPlugin
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
+    InteractiveChangedPayload,
+    InteractiveKind,
     SelectionChangedPayload,
     SpectrumAddedPayload,
     SpectrumChangedPayload,
@@ -126,6 +129,45 @@ class CrossSelectionContext:
     selection_version: int
 
 
+InteractiveContext = (
+    LinePickContext | OneTonePickContext | TwoTonePickContext | CrossSelectionContext
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveInteractiveContext:
+    """Live owner reference, not a detached numerical snapshot.
+
+    context_id is a positive monotonic identity within one owner lifetime.
+    Reused begin preserves it; retirement never permits its reuse.
+    context contains the domain plugin and authoritative Session. Its input may
+    later close while snapshots remain readable. Access requires the owner loop.
+    """
+
+    context_id: int
+    context: InteractiveContext
+
+    @property
+    def kind(self) -> InteractiveKind:
+        """Domain picker kind: line, onetone, twotone, or joint selection."""
+        if isinstance(self.context, LinePickContext):
+            return "line"
+        if isinstance(self.context, OneTonePickContext):
+            return "onetone"
+        if isinstance(self.context, TwoTonePickContext):
+            return "twotone"
+        return "selection"
+
+    @property
+    def spectrum_name(self) -> str | None:
+        """Picker source identity, or None for the joint-cloud selection."""
+        return (
+            None
+            if isinstance(self.context, CrossSelectionContext)
+            else self.context.spectrum_name
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class FluxDepInteractivePorts:
     """Runtime collaborators for app-owned picking and joint-cloud selection.
@@ -170,6 +212,7 @@ class FluxDepInteractiveOwner:
         Off-owner construction/access raises RuntimeError. Views do not own input.
         """
         self._state = state
+        self._bus = bus
         self._owner = owner
         self._require_owner()
         self._background = ports.background
@@ -177,13 +220,10 @@ class FluxDepInteractiveOwner:
         self._publish_points = ports.publish_points
         self._derive_pointcloud = ports.derive_pointcloud
         self._publish_selection = ports.publish_selection
-        self._context: (
-            LinePickContext
-            | OneTonePickContext
-            | TwoTonePickContext
-            | CrossSelectionContext
-            | None
-        ) = None
+        self._context: InteractiveContext | None = None
+        self._context_id = 0
+        self._next_context_id = 1
+        self._context_subscriptions: tuple[Callable[[], None], ...] = ()
         self._disposed = False
         self._publishing_selection = False
         self._subscriptions: tuple[Callable[[], None], ...] = (
@@ -205,6 +245,66 @@ class FluxDepInteractiveOwner:
     def _require_owner(self) -> None:
         if not self._owner.is_owner_thread():
             raise RuntimeError("interactive owner access must run on the owner loop")
+
+    def inspect(self) -> ActiveInteractiveContext | None:
+        """Read the valid live context on the owner loop, without starting one.
+
+        Return None when absent, disposed, closed, or invalidated by source facts.
+        Source invalidation retires old input as the current_* queries do.
+        Valid reads never publish, change active spectrum, or consume Undo.
+        RuntimeError rejects access outside the supplied owner thread.
+        """
+        self._require_owner()
+        context = self._context
+        if isinstance(context, LinePickContext):
+            context = self.current_line_pick()
+        elif isinstance(context, OneTonePickContext):
+            context = self.current_onetone_pick()
+        elif isinstance(context, TwoTonePickContext):
+            context = self.current_twotone_pick()
+        elif isinstance(context, CrossSelectionContext):
+            context = self.current_cross_selection()
+        if context is None:
+            return None
+        try:
+            context.session.ensure_input_open()
+        except FailedPreconditionError:
+            self.cancel()
+            return None
+        return ActiveInteractiveContext(self._context_id, context)
+
+    def _install_context(self, context: InteractiveContext) -> None:
+        self._context = context
+        self._context_id = self._next_context_id
+        self._next_context_id += 1
+        active = ActiveInteractiveContext(self._context_id, context)
+        subscriptions = [context.session.subscribe(lambda: self._updated(active))]
+        if isinstance(context, LinePickContext):
+            subscriptions.append(
+                context.plugin.subscribe_alignment(
+                    lambda _busy, _error: self._updated(active)
+                )
+            )
+        self._context_subscriptions = tuple(subscriptions)
+        self._emit_interactive(active, "opened")
+
+    def _updated(self, active: ActiveInteractiveContext) -> None:
+        if self._context is active.context and self._context_id == active.context_id:
+            self._emit_interactive(active, "updated")
+
+    def _emit_interactive(
+        self,
+        active: ActiveInteractiveContext,
+        phase: Literal["opened", "updated", "closed"],
+    ) -> None:
+        self._bus.emit(
+            InteractiveChangedPayload(
+                context_id=active.context_id,
+                kind=active.kind,
+                spectrum_name=active.spectrum_name,
+                phase=phase,
+            )
+        )
 
     def _on_active_changed(self, event: ActiveSpectrumChangedPayload) -> None:
         if isinstance(self._context, CrossSelectionContext) or (
@@ -269,8 +369,9 @@ class FluxDepInteractiveOwner:
         )
         if self._background is not None:
             plugin.bind_background(self._background)
-        self._context = LinePickContext(name, plugin, plugin.open(self._owner))
-        return self._context
+        context = LinePickContext(name, plugin, plugin.open(self._owner))
+        self._install_context(context)
+        return context
 
     def current_line_pick(self) -> LinePickContext | None:
         """Return the valid active context or None without creating a session."""
@@ -297,10 +398,12 @@ class FluxDepInteractiveOwner:
         context = self.current_line_pick()
         if context is None:
             raise FailedPreconditionError("no active line picker")
-        # Validate while editable; clear ownership before terminal result/publication.
+        # Validate while editable; retire before publication, even if result building fails.
         context.plugin.can_finish(context.session.snapshot())
-        self._context = None
-        result = context.plugin.finish(context.session)
+        try:
+            result = context.plugin.finish(context.session)
+        finally:
+            self.cancel()
         self._publish_alignment(
             context.spectrum_name, result.flux_half, result.flux_int
         )
@@ -341,10 +444,11 @@ class FluxDepInteractiveOwner:
             )
         )
         plugin = OneTonePickPlugin(inputs)
-        self._context = OneTonePickContext(
+        context = OneTonePickContext(
             name, plugin, plugin.open(self._owner), entry.flux_half, entry.flux_int
         )
-        return self._context
+        self._install_context(context)
+        return context
 
     def current_onetone_pick(self) -> OneTonePickContext | None:
         """Read the valid OneTone context, or None, without creating a session.
@@ -383,8 +487,10 @@ class FluxDepInteractiveOwner:
         if context is None:
             raise FailedPreconditionError("no active one-tone picker")
         context.plugin.can_finish(context.session.snapshot())
-        self._context = None
-        result = context.plugin.finish(context.session)
+        try:
+            result = context.plugin.finish(context.session)
+        finally:
+            self.cancel()
         self._publish_points(context.spectrum_name, result.dev_values, result.freqs)
         return result
 
@@ -423,10 +529,11 @@ class FluxDepInteractiveOwner:
             )
         )
         plugin = TwoTonePickPlugin(inputs)
-        self._context = TwoTonePickContext(
+        context = TwoTonePickContext(
             name, plugin, plugin.open(self._owner), entry.flux_half, entry.flux_int
         )
-        return self._context
+        self._install_context(context)
+        return context
 
     def current_twotone_pick(self) -> TwoTonePickContext | None:
         """Return valid open TwoTone context, otherwise None, on the owner loop.
@@ -469,8 +576,10 @@ class FluxDepInteractiveOwner:
         if context is None:
             raise FailedPreconditionError("no active two-tone picker")
         context.plugin.can_finish(context.session.snapshot())
-        self._context = None
-        result = context.plugin.finish(context.session)
+        try:
+            result = context.plugin.finish(context.session)
+        finally:
+            self.cancel()
         self._publish_points(context.spectrum_name, result.dev_values, result.freqs)
         return result
 
@@ -494,7 +603,7 @@ class FluxDepInteractiveOwner:
             inputs, min_distance=self._state.selection.min_distance
         )
         self.cancel()
-        self._context = CrossSelectionContext(
+        context = CrossSelectionContext(
             plugin=plugin,
             session=plugin.open(self._owner),
             source_versions=tuple(
@@ -504,7 +613,8 @@ class FluxDepInteractiveOwner:
             spectrum_set_version=self._state.version.get(SPECTRUM_SET_VERSION_KEY),
             selection_version=self._state.version.get(SELECTION_VERSION_KEY),
         )
-        return self._context
+        self._install_context(context)
+        return context
 
     def _capture_cross_selection_inputs(self) -> CrossSelectionInputs:
         fluxs, freqs = self._derive_pointcloud()
@@ -581,6 +691,7 @@ class FluxDepInteractiveOwner:
         context = self.current_cross_selection()
         if context is None:
             raise FailedPreconditionError("no valid cross-selection context")
+        active = ActiveInteractiveContext(self._context_id, context)
         result = analyze_cross_selection(
             context.plugin.inputs, context.session.snapshot()
         )
@@ -592,14 +703,23 @@ class FluxDepInteractiveOwner:
             # A publisher may commit and then fail; preserve its actual version, not a rollback.
             context.selection_version = self._state.version.get(SELECTION_VERSION_KEY)
             self._publishing_selection = False
+        self._updated(active)
         return result
 
     def cancel(self) -> None:
         """Close current input without publication; safe with no active context."""
         self._require_owner()
-        if self._context is not None:
-            self._context.session.close_input()
-            self._context = None
+        context = self._context
+        if context is None:
+            return
+        active = ActiveInteractiveContext(self._context_id, context)
+        context.session.close_input()
+        self._context = None
+        self._context_id = 0
+        for unsubscribe in self._context_subscriptions:
+            unsubscribe()
+        self._context_subscriptions = ()
+        self._emit_interactive(active, "closed")
 
     def dispose(self) -> None:
         """Idempotently cancel and release subscriptions; reject future begin."""

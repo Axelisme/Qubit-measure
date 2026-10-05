@@ -8,7 +8,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.event_bus import SpectrumChangedPayload
+from zcu_tools.gui.app.fluxdep.event_bus import (
+    InteractiveChangedPayload,
+    SpectrumChangedPayload,
+)
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
@@ -42,6 +45,129 @@ def controller():
     ctrl.set_active_spectrum("sample")
     yield ctrl
     ctrl.interactive.dispose()
+
+
+def test_inspect_identity_and_facts_follow_committed_session(controller: Controller):
+    owner = controller.interactive
+    facts: list[InteractiveChangedPayload] = []
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, facts.append)
+    try:
+        assert owner.inspect() is None
+        assert not facts
+        context = owner.begin_line_pick("sample")
+        active = owner.inspect()
+        assert active is not None
+        assert active.context is context
+        assert active.kind == "line"
+        assert active.spectrum_name == "sample"
+        assert active.context_id > 0
+        assert [fact.phase for fact in facts] == ["opened"]
+
+        assert owner.begin_line_pick("sample") is context
+        assert owner.inspect() == active
+        assert [fact.phase for fact in facts] == ["opened"]
+        context.plugin.actions.swap.execute(context.session, None)
+        context.session.undo()
+        assert [fact.phase for fact in facts] == ["opened", "updated", "updated"]
+
+        with pytest.raises(InvalidInputError, match="unknown"):
+            context.plugin.execute_command(context.session, "unknown", {})
+        assert len(facts) == 3
+        owner.cancel()
+        assert owner.inspect() is None
+        assert facts[-1].phase == "closed"
+        assert {fact.context_id for fact in facts} == {active.context_id}
+        owner.cancel()
+        assert len(facts) == 4
+
+        replacement = owner.begin_line_pick("sample")
+        new = owner.inspect()
+        assert new is not None and new.context is replacement
+        assert new.context_id > active.context_id
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            context.plugin.actions.swap.execute(context.session, None)
+        assert facts[-1].phase == "opened"
+    finally:
+        subscription.unsubscribe()
+
+
+def test_inspect_exposes_onetone_and_selection_without_consuming_undo(
+    controller: Controller, cross_controller: Controller
+):
+    controller.set_alignment("sample", 0.0, 2.0)
+    one = controller.interactive.begin_onetone_pick("sample")
+    active = controller.interactive.inspect()
+    assert active is not None and active.context is one
+    assert active.kind == "onetone" and active.spectrum_name == "sample"
+    one.plugin.execute_command(one.session, "set_threshold", {"threshold": 0.5})
+    assert one.session.can_undo()
+    assert controller.interactive.inspect() == active
+    assert one.session.can_undo()
+    controller.interactive.finish_onetone_pick()
+    assert controller.interactive.inspect() is None
+
+    selection = cross_controller.interactive.begin_cross_selection()
+    joint = cross_controller.interactive.inspect()
+    assert joint is not None and joint.context is selection
+    assert joint.kind == "selection" and joint.spectrum_name is None
+    selection.plugin.clear.execute(selection.session, None)
+    cross_controller.interactive.apply_cross_selection()
+    assert cross_controller.interactive.inspect() == joint
+    assert selection.session.can_undo()
+    cross_controller.set_points("b", np.array([0.8]), np.array([4.8]))
+    assert cross_controller.interactive.inspect() is None
+
+
+def test_alignment_updates_stop_after_context_retirement(controller: Controller):
+    owner = controller.interactive
+    context = owner.begin_line_pick("sample")
+    facts: list[InteractiveChangedPayload] = []
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, facts.append)
+    deliveries: list[Callable[[], None]] = []
+
+    def submit(compute, on_done, on_error):
+        value = compute()
+        deliveries.append(lambda: on_done(value))
+
+    context.plugin.bind_background(submit)
+    try:
+        context.plugin.start_alignment(context.session)
+        assert context.plugin.alignment_busy
+        assert facts[-1].phase == "updated"
+        owner.cancel()
+        count = len(facts)
+        deliveries.pop()()
+        assert len(facts) == count
+        assert owner.inspect() is None
+    finally:
+        subscription.unsubscribe()
+
+
+def test_inspect_tracks_kind_switch_and_terminal_facts(twotone_controller):
+    owner = twotone_controller.interactive
+    line = owner.begin_line_pick("two")
+    old = owner.inspect()
+    assert old is not None
+    facts: list[InteractiveChangedPayload] = []
+    subscription = twotone_controller.bus.subscribe(
+        InteractiveChangedPayload, facts.append
+    )
+    try:
+        picked = owner.begin_twotone_pick("two")
+        active = owner.inspect()
+        assert active is not None and active.context is picked
+        assert active.kind == "twotone"
+        assert active.context_id > old.context_id
+        assert [fact.phase for fact in facts] == ["closed", "opened"]
+        with pytest.raises(FailedPreconditionError):
+            line.session.ensure_input_open()
+        owner.finish_twotone_pick()
+        assert owner.inspect() is None
+        assert facts[-1].phase == "closed"
+        assert facts[-1].context_id == active.context_id
+        assert twotone_controller.state.spectrums["two"].points_completed
+    finally:
+        subscription.unsubscribe()
 
 
 def test_begin_reuses_session_and_finish_publishes_alignment(controller: Controller):

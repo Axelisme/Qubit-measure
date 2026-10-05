@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. App-owned selection and search
+**Last updated:** 2026-10-06. App-owned interactive presentation
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -155,6 +155,18 @@ Processed restore 包含零點的完成結果，不新增持久化欄位。
 每張譜各自一份 flux_half/int/period（對齊 analysis.fluxdep.models.SpectrumResult）。新載入的譜可
 `inherit_from` 既有譜的對齊當初值（`alignment_seeded` 標記），LinePicker 才會 seed；
 fresh load 用 picker 預設。OneTone 譜的 LinePicker 鎖 magnitude-only（相位無資訊）。
+
+### Interactive context facts 與 GUI 跟隨
+Owner 的 inspect 回傳 live context reference 與 owner-lifetime identity，不建立 Session，也不消耗 Undo。
+同一有效 begin 重用 identity；退休後的新 context 使用新 identity。Identity 不代表 edit revision，
+同一 Session 的 GUI／command Actions 仍依 owner-loop 順序提交。
+
+Owner 發布 opened／updated／closed domain facts，Session commit／undo 與定線 alignment info 都更新同一 context。
+MainWindow 依 EventMeta origin 與目前 identity 顯示 agent 開啟／修改的 picker 或 Filter。
+GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 context。
+Closed 只清除旧 view，不開新 Session。純讀取與 user-origin edits 不強制切換畫面。
+AnalyzePanel 的 public show_tab 管理 Filter／Search／Show，外部不存取 Qt 私有 stack 或 tab。
+Agent-origin search pending 顯示 lazy Search 面板；terminal 更新結果，不搶回使用者已切換的畫面。
 
 ### 跨譜篩選：繼承 min_distance 不繼承 select
 App owner 建立新的跨譜 context 時全選，僅繼承已發布的 `SelectionState.min_distance`。

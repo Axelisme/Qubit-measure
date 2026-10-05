@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
@@ -49,7 +49,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.event_bus import SearchChangedPayload
+from zcu_tools.gui.app.fluxdep.event_bus import (
+    InteractiveChangedPayload,
+    SearchChangedPayload,
+)
 from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
 from zcu_tools.gui.event_bus import EventSubscriptions
@@ -65,6 +68,9 @@ from .error_messages import friendly_fit_message
 from .transitions_form import TransitionsForm
 
 logger = logging.getLogger(__name__)
+
+AnalyzeTab = Literal["filter", "search", "show"]
+_ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
 
 _N_SIM_FLUX = 1000  # simulated flux grid resolution for the visualisation
 
@@ -120,6 +126,7 @@ class AnalyzePanelWidget(QWidget):
         self._bus_subs = EventSubscriptions()
         self._shown_token: int | None = None
         self._filter_widget: SelectorWidget | None = None
+        self._filter_context_id: int | None = None
 
         self._build_ui()
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
@@ -127,6 +134,9 @@ class AnalyzePanelWidget(QWidget):
         self._load_from_state()
         self._bus_subs.subscribe(
             ctrl.bus, SearchChangedPayload, self._on_search_changed
+        )
+        self._bus_subs.subscribe(
+            ctrl.bus, InteractiveChangedPayload, self._on_interactive_changed
         )
         progress = ctrl.search.progress_control
         self._progress_dispose = (
@@ -179,6 +189,10 @@ class AnalyzePanelWidget(QWidget):
             self._filter_placeholder.setVisible(True)
             return
         context = self._ctrl.interactive.begin_cross_selection()
+        active = self._ctrl.interactive.inspect()
+        if active is None or active.context is not context:
+            raise RuntimeError("selection context changed while attaching its view")
+        self._filter_context_id = active.context_id
         self._filter_placeholder.setVisible(False)
         selector = SelectorWidget(
             context, on_apply=self._ctrl.interactive.apply_cross_selection
@@ -192,6 +206,28 @@ class AnalyzePanelWidget(QWidget):
         from qtpy.QtCore import Qt  # type: ignore[attr-defined]
         from qtpy.QtWidgets import QSplitter  # type: ignore[attr-defined]
 
+        form_box = self._build_search_form()
+
+        # Right: the search's native diagnostic figure, explicitly presented.
+        self._diag_stack = QStackedWidget()
+        diag_placeholder = QLabel("Search to see the diagnostic plot.")
+        diag_placeholder.setEnabled(False)
+        self._diag_stack.addWidget(diag_placeholder)
+        self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(form_box)
+        splitter.addWidget(self._diag_stack)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([360, 640])
+        holder = QWidget()
+        QVBoxLayout(holder).addWidget(splitter)
+        return holder
+
+    # --- Show tab --------------------------------------------------------
+
+    def _build_search_form(self) -> QGroupBox:
         form_box = QGroupBox("Search parameters")
         form = QFormLayout(form_box)
 
@@ -252,24 +288,7 @@ class AnalyzePanelWidget(QWidget):
         self._status.setWordWrap(True)
         form.addRow(self._status)
 
-        # Right: the search's native diagnostic figure, explicitly presented.
-        self._diag_stack = QStackedWidget()
-        diag_placeholder = QLabel("Search to see the diagnostic plot.")
-        diag_placeholder.setEnabled(False)
-        self._diag_stack.addWidget(diag_placeholder)
-        self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(form_box)
-        splitter.addWidget(self._diag_stack)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([360, 640])
-        holder = QWidget()
-        QVBoxLayout(holder).addWidget(splitter)
-        return holder
-
-    # --- Show tab --------------------------------------------------------
+        return form_box
 
     def _build_show_tab(self) -> QWidget:
         from qtpy.QtCore import Qt  # type: ignore[attr-defined]
@@ -347,6 +366,43 @@ class AnalyzePanelWidget(QWidget):
         self._transitions_show.set_transitions(fit.transitions)
         self._export_btn.setEnabled(fit.has_result)
 
+    @property
+    def current_tab(self) -> AnalyzeTab:
+        """Current domain tab: filter, search, or show, on the State owner."""
+        self._ctrl.state.assert_owner_thread()
+        return _ANALYZE_TABS[self._tabs.currentIndex()]
+
+    def show_tab(self, tab: AnalyzeTab) -> None:
+        """Select and refresh a domain tab on the State-owner Qt thread.
+
+        Filter reuses an attached valid context without resetting input/Undo.
+        Search/show detach Filter and cancel its live context, even if already
+        selected. Search forms/progress refresh from the app owner. Invalid tab
+        raises ValueError; foreign-thread access raises RuntimeError.
+        This does not raise or activate the top-level window.
+        """
+        self._ctrl.state.assert_owner_thread()
+        if tab not in _ANALYZE_TABS:
+            raise ValueError(f"unknown analyze tab {tab!r}")
+        index = _ANALYZE_TABS.index(tab)
+        if index != self._tabs.currentIndex():
+            self._tabs.setCurrentIndex(index)
+        elif tab == "filter":
+            active = self._ctrl.interactive.inspect()
+            if (
+                active is None
+                or active.context_id != self._filter_context_id
+                or self._filter_widget is None
+            ):
+                self._refresh_filter_tab()
+        else:
+            self._on_tab_changed(index)
+        self._refresh_search()
+
+    def _on_interactive_changed(self, payload: InteractiveChangedPayload) -> None:
+        if payload.phase == "closed" and payload.context_id == self._filter_context_id:
+            self.detach()
+
     def activate(self) -> None:
         """Activate the singleton; on Filter, reattach valid or new app context.
 
@@ -369,6 +425,7 @@ class AnalyzePanelWidget(QWidget):
             self._filter_layout.removeWidget(self._filter_widget)
             self._filter_widget.deleteLater()
             self._filter_widget = None
+        self._filter_context_id = None
 
     def _on_tab_changed(self, index: int) -> None:
         if self._tabs.tabText(index) == "Filter":

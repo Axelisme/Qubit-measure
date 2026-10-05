@@ -332,6 +332,50 @@ def test_failed_publication_releases_admission(search_case, monkeypatch):
     assert ctrl.search.start() != token
 
 
+@pytest.mark.parametrize("origin", ["user", "agent"])
+def test_search_start_reveals_only_agent_pending_without_opening_filter(
+    qapp, search_case, origin
+):
+    from qtpy import QtWidgets
+    from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
+    from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+    from zcu_tools.gui.event_bus import EventOrigin
+
+    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    window = MainWindow(ctrl)
+    window.show()
+    try:
+        stack = window.findChild(QtWidgets.QStackedWidget)
+        assert stack is not None
+        original = stack.currentWidget()
+        assert window.findChild(AnalyzePanelWidget) is None
+        with ctrl.bus.origin(EventOrigin(kind=origin)):
+            token = ctrl.search.start()
+        panel = window.findChild(AnalyzePanelWidget)
+        if origin == "agent":
+            assert panel is not None
+            assert stack.currentWidget() is panel
+            assert panel.current_tab == "search"
+        else:
+            assert panel is None
+            assert stack.currentWidget() is original
+        assert ctrl.interactive.inspect() is None
+
+        ctrl.set_active_spectrum("b")
+        user_view = stack.currentWidget()
+        bg.fail(SearchCancelled("requested"))
+        outcome = ctrl.search.outcome(token)
+        assert outcome is not None and outcome.status == "cancelled"
+        assert stack.currentWidget() is user_view
+        assert ctrl.interactive.inspect() is None
+    finally:
+        if ctrl.search.active_token is not None:
+            bg.fail(SearchCancelled("cleanup"))
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
+
+
 def test_search_panel_observes_app_start_progress_cancel_and_reopen(
     qapp, search_case, monkeypatch
 ):

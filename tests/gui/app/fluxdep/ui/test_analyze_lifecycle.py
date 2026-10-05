@@ -3,8 +3,10 @@
 import numpy as np
 from qtpy import QtWidgets
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+from zcu_tools.gui.event_bus import EventOrigin
 
 
 def apply_button(widget):
@@ -13,6 +15,105 @@ def apply_button(widget):
         for button in widget.findChildren(QtWidgets.QPushButton)
         if button.text() == "Apply"
     )
+
+
+def test_agent_picker_reveals_same_session_while_reads_and_user_edits_do_not(
+    qapp, cross_controller
+):
+    ctrl = cross_controller
+    window = MainWindow(ctrl)
+    window.show()
+    try:
+        stack = window.findChild(QtWidgets.QStackedWidget)
+        assert stack is not None
+        analyze = next(
+            button
+            for button in window.findChildren(QtWidgets.QPushButton)
+            if button.text().startswith("Analyze")
+        )
+        analyze.click()
+        panel = window.findChild(AnalyzePanelWidget)
+        assert panel is not None
+        panel.show_tab("search")
+
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            context = ctrl.interactive.begin_line_pick("a")
+        picker = stack.currentWidget()
+        assert isinstance(picker, LinePickerWidget)
+        active = ctrl.interactive.inspect()
+        assert active is not None and active.context is context
+        assert ctrl.state.spectrums["a"].points_completed
+
+        analyze.click()
+        assert stack.currentWidget() is panel
+        assert ctrl.interactive.inspect() == active
+        context.plugin.actions.swap.execute(context.session, None)
+        assert stack.currentWidget() is panel
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            assert ctrl.interactive.inspect() == active
+        assert stack.currentWidget() is panel
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            context.plugin.execute_command(context.session, "swap_lines", {})
+        shown = stack.currentWidget()
+        assert isinstance(shown, LinePickerWidget)
+        assert shown.get_result() == (
+            context.session.snapshot().flux_half,
+            context.session.snapshot().flux_int,
+        )
+        assert ctrl.interactive.inspect() == active
+        assert context.session.can_undo()
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            context.session.undo()
+        assert stack.currentWidget() is shown
+        assert not context.session.can_undo()
+
+        ctrl.interactive.cancel()
+        assert ctrl.interactive.inspect() is None
+        assert stack.currentWidget() is not shown
+    finally:
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_agent_selection_updates_reuse_filter_view_and_undo(qapp, cross_controller):
+    ctrl = cross_controller
+    window = MainWindow(ctrl)
+    window.show()
+    try:
+        assert window.findChild(AnalyzePanelWidget) is None
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            context = ctrl.interactive.begin_cross_selection()
+        panel = window.findChild(AnalyzePanelWidget)
+        stack = window.findChild(QtWidgets.QStackedWidget)
+        assert panel is not None and stack is not None
+        assert stack.currentWidget() is panel
+        assert panel.current_tab == "filter"
+        selector = panel.findChild(SelectorWidget)
+        assert selector is not None
+        active = ctrl.interactive.inspect()
+        assert active is not None and active.kind == "selection"
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            context.plugin.clear.execute(context.session, None)
+        assert ctrl.interactive.inspect() == active
+        assert panel.findChild(SelectorWidget) is selector
+        assert not context.session.snapshot().selected.any()
+        assert context.session.can_undo()
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            context.session.undo()
+        assert context.session.snapshot().selected.all()
+        assert not context.session.can_undo()
+        assert panel.findChild(SelectorWidget) is selector
+        panel.show_tab("search")
+        assert panel.current_tab == "search"
+        assert ctrl.interactive.inspect() is None
+        panel.show_tab("filter")
+        fresh = ctrl.interactive.inspect()
+        assert fresh is not None and fresh.context_id > active.context_id
+    finally:
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def test_activate_detaches_old_view_reuses_context_and_filter_search_resets(
