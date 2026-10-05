@@ -86,6 +86,28 @@ def test_invalid_typed_action_keeps_state_and_history(plugin):
     assert session.undo() == seed
 
 
+@pytest.mark.parametrize("entrypoint", ["action", "command"])
+@pytest.mark.parametrize(
+    "value",
+    [10**100, -(10**100), 10**1000, -(10**1000)],
+    ids=["positive-100", "negative-100", "positive-1000", "negative-1000"],
+)
+def test_large_integer_threshold_keeps_state_and_undo(plugin, entrypoint, value):
+    session = plugin.open(ManualOwnerScheduler())
+    seed = session.snapshot()
+    committed = plugin.set_threshold.execute(session, 0.1)
+    with pytest.raises(InvalidInputError, match="threshold|representable"):
+        if entrypoint == "action":
+            plugin.set_threshold.execute(session, value)
+        else:
+            plugin.execute_command(session, "set_threshold", {"threshold": value})
+    assert session.snapshot() == committed
+    assert session.can_undo()
+    assert session.undo() == seed
+    with pytest.raises(FailedPreconditionError):
+        session.undo()
+
+
 def test_empty_result_and_captured_inputs(plugin, onetone_controller):
     session = plugin.open(ManualOwnerScheduler())
     low = plugin.set_threshold.execute(session, 0.1)

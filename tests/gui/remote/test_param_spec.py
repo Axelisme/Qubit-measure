@@ -109,6 +109,14 @@ def test_number_rejects_bool_and_coerces_int():
     assert validate_params(_spec(JsonType.NUMBER), {"x": 3}) == {"x": 3.0}
 
 
+@pytest.mark.parametrize("value", [10**1000, -(10**1000)], ids=["positive", "negative"])
+def test_number_conversion_overflow_is_invalid_params(value):
+    with pytest.raises(RemoteError, match="representable") as error:
+        validate_params(_spec(JsonType.NUMBER), {"x": value})
+    assert error.value.code == ErrorCode.INVALID_PARAMS
+    assert isinstance(error.value.__cause__, OverflowError)
+
+
 def test_boolean_requires_bool():
     assert validate_params(_spec(JsonType.BOOLEAN), {"x": True}) == {"x": True}
     with pytest.raises(RemoteError, match="must be a boolean"):
