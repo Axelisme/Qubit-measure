@@ -1,3 +1,4 @@
+from .allxy import AllXYAdapter
 from .ckp import CKPAdapter
 from .flux_dep import FluxDepAdapter
 from .freq import FreqAdapter
@@ -15,6 +16,7 @@ from .reset import (
     SingleToneLengthAdapter,
 )
 from .time_domain import T1Adapter, T2EchoAdapter, T2RamseyAdapter
+from .zigzag import ZigZagAdapter, ZigZagScanFreqAdapter, ZigZagScanGainAdapter
 
 __all__ = [
     "CKPAdapter",
@@ -35,4 +37,8 @@ __all__ = [
     "T1Adapter",
     "T2RamseyAdapter",
     "T2EchoAdapter",
+    "ZigZagAdapter",
+    "ZigZagScanGainAdapter",
+    "ZigZagScanFreqAdapter",
+    "AllXYAdapter",
 ]

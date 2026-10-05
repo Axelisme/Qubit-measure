@@ -149,8 +149,8 @@ Each soc keeps its own copied parameters and source binding.
   nothing from the project.
 - `lowering.py` — module tree -> Bloch timeline + readout plan for one sweep
   point. Owns the single-rotating-frame detuning (plus the engine's per-node
-  `detune_offset` frame shift), shaped-pulse discretisation, deterministic Branch
-  selection, scalar `LoadValue` dmem indirection used by non-uniform T1, and
+  `detune_offset` frame shift), shaped-pulse discretisation, scalar `LoadValue`
+  dmem indirection used by non-uniform T1, and
   `LoadWord` readout frequency decoding when consumed by `PulseReadout.freq_val`
   or `PulseReadout.ro_freq_val`. Paired generator/readout words resolve the
   semantic probe frequency from the generator and validate the ADC word
@@ -158,6 +158,15 @@ Each soc keeps its own copied parameters and source binding.
   alias nearest the semantic `ro_freq` template. Arbitrary raw hardware words still fast-fail
   without an explicit consuming module contract. Does NOT compute f_qubit, acc_buf,
   noise, S21, or the detune ensemble (the engine owns that).
+- `control_flow.py` — resolves control flow at one sweep point: picks the
+  deterministic `Branch` sub-sequence, unrolls `Repeat` (int count or a
+  `LoadValue` count register), and picks the `ComputedPulse` candidate from its
+  `LoadValue` index register, padding a shorter candidate with idle time to the
+  longest candidate's length as the hardware does.
+- `dmem.py` — collects `LoadValue` / `LoadWord` tables and reads a table's value
+  at a sweep point.
+- `errors.py` — `UnsupportedModuleError`, the fast-fail for any module the
+  lowering cannot represent faithfully.
 - `waveforms.py` — shared peak-normalized envelope sampling for both lowering and
   decimated readout. `ArbWaveform` uses the asset's stored reference time axis and
   asset duration (`time[-1]`) as its playback length; config no longer supplies a
@@ -249,9 +258,16 @@ Each soc keeps its own copied parameters and source binding.
   detuning recurses into the selected branch. Measurement-conditional branches,
   nested branches, and a readout inside a branch fast-fail (control flow that
   needs shot-level feedback is out of scope).
+- **Repeat and ComputedPulse supported.** A `Repeat` unrolls its body back to
+  back, and a `ComputedPulse` plays the candidate its index register selects; the
+  frame detuning includes pulses inside both. This covers AllXY, ZigZag and the
+  ZigZag gain scan. A readout or `Branch` inside a `Repeat` fast-fails. The
+  ZigZag frequency scan fast-fails by design: its X90 pulse stays at `q_f` while
+  the repeated pulse's frequency is swept, so no single rotating frame exists.
 - **Register dmem support is consumer-specific.** The simulator can recover
-  uncompressed `LoadValue` tables when a semantic consumer such as `DelayAuto`
-  interprets the register as a scalar. `LoadWord` carries raw hardware words and is
+  uncompressed `LoadValue` tables when a semantic consumer interprets the
+  register as a scalar: a `DelayAuto` delay, a `Repeat` count, or a
+  `ComputedPulse` candidate index. `LoadWord` carries raw hardware words and is
   supported only where a consumer defines semantics; currently `PulseReadout`
   decodes frequency words through the active `soccfg`. Raw gain words and arbitrary
   raw-word consumers still fast-fail.
@@ -342,7 +358,8 @@ Each soc keeps its own copied parameters and source binding.
 
 - `tests/program/v2/sim/test_bloch.py`, `test_bloch_limits.py` — Bloch core +
   analytic limits (Rabi, Ramsey, echo refocus at the decoupled-detuning layer).
-- `test_params.py`, `test_readout.py`, `test_lowering.py` — per-layer unit tests.
+- `test_params.py`, `test_readout.py`, `test_lowering.py`,
+  `test_control_flow.py` — per-layer unit tests.
 - `test_engine.py` — engine assembly + acquire dispatch (feature *shape*: D1
   regression, peak/dip, oscillation, decay, fringes, round hook, decimated trace),
   the singleshot per-shot blobs (get_raw clusters on the |g>/|e> centres, pi/2 puts
@@ -360,3 +377,6 @@ Each soc keeps its own copied parameters and source binding.
   Ramsey faster than echo), and the singleshot `GE_Exp` recover (low snr -> blob
   centres / preparation populations / a real discrimination fidelity that improves
   with snr). The echo recovery runs at `reps=2000` to average the shot noise.
+- `test_gate_sequences.py` — AllXY reports an injected 10 % gain error, the
+  ZigZag gain scan recovers the pi gain, and the ZigZag frequency scan fails with
+  `UnsupportedModuleError` on the stop signal.

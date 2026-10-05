@@ -37,6 +37,7 @@ from .feedback_dock import FeedbackDockController
 from .main_dialog_registry import MainDialogRegistry
 from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
+from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
 
 _SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
@@ -155,8 +156,7 @@ class MainWindow(QMainWindow):
 
         # --- tab widget ---
         self._tabs = QTabWidget()
-        self._tabs.setTabsClosable(True)
-        self._tabs.setMovable(True)
+        configure_tab_bar(self._tabs)
         tab_bar = self._tabs.tabBar()
         assert tab_bar is not None
         tab_bar.tabMoved.connect(self._on_tab_moved)

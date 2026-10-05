@@ -517,7 +517,7 @@ class TestDmemIntegration:
         r.add_content(lv)
         prog = _make_prog(modules=[r])
         assert prog.binprog is not None
-        assert not lv._is_compressed
+        assert not lv.is_compressed
 
     def test_load_value_large_compressed(self):
         # 40 values → triggers auto_compress
@@ -527,7 +527,7 @@ class TestDmemIntegration:
         r.add_content(lv)
         prog = _make_prog(modules=[r])
         assert prog.binprog is not None
-        assert lv._is_compressed
+        assert lv.is_compressed
 
     def test_load_value_negative_rejected(self):
         with pytest.raises(ValueError, match=r"\[0,"):

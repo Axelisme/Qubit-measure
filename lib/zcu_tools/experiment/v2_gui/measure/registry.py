@@ -33,6 +33,7 @@ from .adapters.singleshot import (
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
 )
+from .adapters.twotone.allxy import AllXYAdapter
 from .adapters.twotone.ckp import CKPAdapter
 from .adapters.twotone.flux_dep import FluxDepAdapter
 from .adapters.twotone.freq import FreqAdapter
@@ -64,6 +65,11 @@ from .adapters.twotone.ro_optimize import (
 from .adapters.twotone.time_domain.t1 import T1Adapter
 from .adapters.twotone.time_domain.t2echo import T2EchoAdapter
 from .adapters.twotone.time_domain.t2ramsey import T2RamseyAdapter
+from .adapters.twotone.zigzag import (
+    ZigZagAdapter,
+    ZigZagScanFreqAdapter,
+    ZigZagScanGainAdapter,
+)
 
 ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "lookback": LookbackAdapter,
@@ -94,6 +100,10 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "twotone/t1": T1Adapter,
     "twotone/t2ramsey": T2RamseyAdapter,
     "twotone/t2echo": T2EchoAdapter,
+    "twotone/zigzag": ZigZagAdapter,
+    "twotone/zigzag_scan/gain": ZigZagScanGainAdapter,
+    "twotone/zigzag_scan/freq": ZigZagScanFreqAdapter,
+    "twotone/allxy": AllXYAdapter,
     "singleshot/ge": GEAdapter,
     "singleshot/check": CheckAdapter,
     "singleshot/reset_check": SsResetCheckAdapter,
