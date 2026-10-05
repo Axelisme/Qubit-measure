@@ -12,6 +12,7 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactKind,
     SaveAttempt,
 )
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
@@ -92,13 +93,32 @@ class SaveService:
         bus: EventBus,
         *,
         owner_scheduler: OwnerScheduler,
+        access: ExperimentAccess | None = None,
     ) -> None:
+        """Use tab state, operation runner and owner scheduler for save commands.
+
+        ``access`` is the shared catalog reload/shutdown gate used only by
+        driving-entry preflight. Omitting it creates an available independent
+        gate. Direct save operations retain their separate busy-only policy.
+        """
+        self._access = access if access is not None else ExperimentAccess()
         self._state = state
         self._runner = runner
         self._bus = bus
         self._owner_scheduler = owner_scheduler
         self._active_paths: dict[str, str] = {}
         self._active_operations: dict[str, int] = {}
+
+    def require_save_available(self, tab_id: str) -> None:
+        """Check driving-entry catalog availability, then same-tab exclusion.
+
+        ``tab_id`` names an existing tab, as established by SavePermit. Raise
+        FailedPreconditionError during reload/shutdown or while the tab is busy.
+        Unknown-tab errors propagate. This command changes no draft, artifact,
+        operation, path or event state; direct save commands remain busy-only.
+        """
+        self._access.require_available()
+        self._require_tab_idle(tab_id)
 
     def active_save_operations(self) -> tuple[ActiveSaveOperation, ...]:
         return tuple(
@@ -107,7 +127,7 @@ class SaveService:
         )
 
     def _start_save(
-        self, tab_id: str, req: SaveDataRequest, attempt: SaveAttempt
+        self, tab_id: str, req: SaveDataRequest[object], attempt: SaveAttempt
     ) -> int:
         """Submit non-cancellable I/O to the shared handle lifecycle, without a lease."""
         adapter = self._state.get_tab(tab_id).adapter
@@ -153,7 +173,7 @@ class SaveService:
         tracker = self._state.get_tab(tab_id).artifacts
         attempt = tracker.started(ArtifactKey(ArtifactKind.DATA))
         self._active_paths[tab_id] = data_path
-        self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
+        self._mark_saving(tab_id, TabInteractionFact.SAVE_STARTED)
         try:
             token = self._start_save(tab_id, req, attempt)
         except Exception as error:
@@ -220,7 +240,7 @@ class SaveService:
 
         # Later GUI draft edits must not be promoted by this batch's success.
         self._active_paths[tab_id] = data_path or ""
-        self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
+        self._mark_saving(tab_id, TabInteractionFact.SAVE_STARTED)
         try:
             token = self._runner.begin(
                 OperationSpec(
@@ -272,7 +292,7 @@ class SaveService:
                 attempt.fail()
         self._active_paths.pop(tab_id, None)
         self._active_operations.pop(tab_id, None)
-        self._state.set_tab_saving_data(tab_id, False)
+        self._state.set_tab_saving_data(tab_id, saving_data=False)
 
     def _emit_artifact_save_finished(self, tab_id: str, error: str | None) -> None:
         self._bus.emit(
@@ -353,7 +373,7 @@ class SaveService:
 
     def _make_save_data_request(
         self, tab_id: str, data_path: str, comment: str = ""
-    ) -> SaveDataRequest:
+    ) -> SaveDataRequest[object]:
         # Run-result presence is proven by the SavePermit; tab-busy is the
         # dynamic check that stays at the operation boundary.
         if self._state.is_tab_busy(tab_id):
@@ -361,7 +381,7 @@ class SaveService:
 
         tab = self._state.get_tab(tab_id)
         ctx = self._state.session_env
-        req = SaveDataRequest(
+        return SaveDataRequest(
             run_result=tab.run.result,
             data_path=data_path,
             md=ctx.md,
@@ -372,15 +392,13 @@ class SaveService:
             active_label=ctx.active_label,
             comment=comment,
         )
-        return req
 
     def _mark_saving(
         self,
         tab_id: str,
-        saving_data: bool,
         fact: TabInteractionFact,
     ) -> None:
-        self._state.set_tab_saving_data(tab_id, saving_data)
+        self._state.set_tab_saving_data(tab_id, saving_data=True)
         self._bus.emit(
             TabInteractionChangedPayload(tab_id=tab_id, fact=fact),
         )
@@ -399,7 +417,7 @@ class SaveService:
             )
             if attempt.pending:
                 attempt.fail()
-        self._state.set_tab_saving_data(tab_id, False)
+        self._state.set_tab_saving_data(tab_id, saving_data=False)
         return SaveDataFinishedPayload(
             tab_id=tab_id, data_path=path, error=None if error is None else str(error)
         )

@@ -6,7 +6,6 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -73,15 +72,20 @@ class SaveControlFacet:
         tab: TabService,
         save: SaveService,
         notify_info: Callable[[str], None],
-        access: ExperimentAccess | None = None,
     ) -> None:
+        """Compose save intentions without owning readiness or output state.
+
+        ``guard`` validates static save prerequisites; ``save`` owns dynamic
+        driving-entry preflight and the operations. ``tab`` and ``state`` own
+        path/comment drafts; ``bus`` publishes their changes. ``notify_info``
+        presents a successful synchronous image export message.
+        """
         self._state = state
         self._bus = bus
         self._guard = guard
         self._tab = tab
         self._save = save
         self._notify_info = notify_info
-        self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
@@ -102,7 +106,7 @@ class SaveControlFacet:
         if data_path is not None and not data_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")
         permit = self._guard.acquire_save_permit(tab_id)
-        self._require_tab_idle(tab_id)
+        self._save.require_save_available(tab_id)
         if data_path is not None:
             self._tab.update_tab_data_path_override(tab_id, data_path)
         if comment is not None:
@@ -122,7 +126,7 @@ class SaveControlFacet:
         comment: str | None = None,
     ) -> SaveArtifactsSubmission:
         permit = self._guard.acquire_save_permit(tab_id)
-        self._require_tab_idle(tab_id)
+        self._save.require_save_available(tab_id)
         available = {a.key: a for a in self._state.get_artifact_snapshots(tab_id)}
         overrides = paths if paths is not None else {}
         data_key = ArtifactKey(ArtifactKind.DATA)
@@ -193,7 +197,7 @@ class SaveControlFacet:
         if image_path is not None and not image_path.strip():
             raise FailedPreconditionError(f"Tab {tab_id!r} has an empty image path")
         permit = self._guard.acquire_save_permit(tab_id)
-        self._require_tab_idle(tab_id)
+        self._save.require_save_available(tab_id)
         artifacts = {a.key: a for a in self._state.get_artifact_snapshots(tab_id)}
         if key not in artifacts or not artifacts[key].is_saveable:
             raise FailedPreconditionError(f"Artifact {key!r} is not saveable")
@@ -215,8 +219,3 @@ class SaveControlFacet:
         self._save.save_image_sync(permit, key, resolved)
         self._notify_info(f"Image saved to {resolved}")
         return resolved
-
-    def _require_tab_idle(self, tab_id: str) -> None:
-        self._access.require_available()
-        if self._state.is_tab_busy(tab_id):
-            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")

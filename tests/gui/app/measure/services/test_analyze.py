@@ -439,7 +439,7 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
 
 def test_start_analyze_rejects_busy_tab(qapp):
     state = _make_state()
-    state.set_tab_running("tab1", True)
+    state.set_tab_running("tab1", running=True)
     svc, _ = _make_service(state, EventBus())
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
@@ -735,7 +735,7 @@ def test_concurrent_plugin_tabs_keep_independent_sessions_and_handles(qapp):
 
 def test_start_plugin_rejects_busy_tab(qapp):
     state = _make_state()
-    state.set_tab_running("tab1", True)
+    state.set_tab_running("tab1", running=True)
     svc, _ = _make_service(state, EventBus())
     plugin = PluginDefinition("pick", 0, (), lambda _state: None, lambda state: state)
 

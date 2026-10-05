@@ -232,7 +232,7 @@ class AnalyzeService(_StagedAnalyzeService):
                     logger.exception(
                         "interactive result construction failed: tab_id=%r", tab_id
                     )
-                    self._state.set_tab_analyzing(tab_id, False)
+                    self._state.set_tab_analyzing(tab_id, analyzing=False)
                     self._release(tab_id, OperationOutcome("failed", str(exc)))
                     self._bus.emit(
                         TabInteractionChangedPayload(
@@ -288,7 +288,7 @@ class AnalyzeService(_StagedAnalyzeService):
                         "cancelled interactive plot cleanup failed: tab_id=%r", tab_id
                     )
             logger.info("cancel_interactive: tab_id=%r", tab_id)
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             self._release(tab_id, OperationOutcome("cancelled"))
             self._bus.emit(
                 TabInteractionChangedPayload(
@@ -328,7 +328,7 @@ class AnalyzeService(_StagedAnalyzeService):
                 logger.exception(
                     "interactive record plot cleanup failed: tab_id=%r", tab_id
                 )
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             self._release(tab_id, OperationOutcome("failed", str(exc)))
             self._bus.emit(
                 TabInteractionChangedPayload(
@@ -344,7 +344,7 @@ class AnalyzeService(_StagedAnalyzeService):
                 )
             )
             return
-        self._state.set_tab_analyzing(tab_id, False)
+        self._state.set_tab_analyzing(tab_id, analyzing=False)
         self._release(tab_id, OperationOutcome("finished"))
         self._bus.emit(
             TabInteractionChangedPayload(

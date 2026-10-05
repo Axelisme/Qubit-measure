@@ -1530,7 +1530,7 @@ def test_tab_cfg_edit_blocked_while_owning_tab_runs(fx):
     expected = encode_ref(cfg.observe().ref)
     sock = open_client(fx.service.port)
     try:
-        fx.state.set_tab_running(tab_id, True)
+        fx.state.set_tab_running(tab_id, running=True)
         resp = call(
             sock,
             "tab.edit_cfg",

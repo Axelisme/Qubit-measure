@@ -368,7 +368,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
 
 def test_start_run_rejects_when_tab_busy():
     state, tab_id, adapter = _make_state()
-    state.set_tab_analyzing(tab_id, True)
+    state.set_tab_analyzing(tab_id, analyzing=True)
     svc, gate, bg, _ = _make_run_service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:

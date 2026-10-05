@@ -150,7 +150,7 @@ class RunService:
         return True
 
     def _clear_running(self, tab_id: str) -> None:
-        self._state.set_tab_running(tab_id, False)
+        self._state.set_tab_running(tab_id, running=False)
         self._active_token = None
 
     def _run_finished(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
@@ -198,12 +198,12 @@ class RunService:
         self._gate.ensure_can_start(OperationKind.RUN)
         # Reserve State's existing busy flag before cleanup or synchronous gate
         # notifications can reenter tab editing and closing.
-        self._state.set_tab_running(tab_id, True)
+        self._state.set_tab_running(tab_id, running=True)
         try:
             retired = self._state.clear_tab_results(tab_id)
             self._teardown_retired(retired)
         except Exception:
-            self._state.set_tab_running(tab_id, False)
+            self._state.set_tab_running(tab_id, running=False)
             raise
 
     def start_run(
@@ -278,7 +278,7 @@ class RunService:
             token = self._runner.begin(spec)
         except Exception:
             self._discard_plots(operation, "Rejected")
-            self._state.set_tab_running(tab_id, False)
+            self._state.set_tab_running(tab_id, running=False)
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id=tab_id,

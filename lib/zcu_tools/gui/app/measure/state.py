@@ -514,7 +514,7 @@ class State(SessionState):
         image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit an Analysis carrier in one State transition."""
-        retired = self.swap_analysis_pane(
+        return self.swap_analysis_pane(
             tab_id,
             AnalysisPaneState(
                 params=params,
@@ -526,7 +526,6 @@ class State(SessionState):
                 ),
             ),
         )
-        return retired
 
     def update_tab_analyze(
         self,
@@ -610,7 +609,7 @@ class State(SessionState):
         image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit a Post carrier in one State transition."""
-        retired = self.swap_post_analysis_pane(
+        return self.swap_post_analysis_pane(
             tab_id,
             PostAnalysisPaneState(
                 params=params,
@@ -622,7 +621,6 @@ class State(SessionState):
                 ),
             ),
         )
-        return retired
 
     def update_tab_post_analyze(
         self,
@@ -753,7 +751,13 @@ class State(SessionState):
         )
         self._bump_path_versions(tab_id, stage)
 
-    def set_tab_running(self, tab_id: str, running: bool) -> None:
+    def set_tab_running(self, tab_id: str, *, running: bool) -> None:
+        """Set or clear this existing tab's run ownership on the owner thread.
+
+        True claims the sole run slot; False releases it only if this tab owns
+        it. Bump this tab's version. Raise KeyError for an unknown tab and
+        RuntimeError off-owner or when claiming another tab's occupied slot.
+        """
         self._assert_owner()
         logger.debug("set_tab_running: tab_id=%r running=%s", tab_id, running)
         _ = self.tabs[tab_id]
@@ -774,12 +778,22 @@ class State(SessionState):
         # own existence/run-state resource version moves with it.
         self.version.bump(f"tab:{tab_id}")
 
-    def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None:
+    def set_tab_analyzing(self, tab_id: str, *, analyzing: bool) -> None:
+        """Set this existing tab's analysis busy flag on the owner thread.
+
+        True marks analysis active; False clears it. Raise KeyError for an
+        unknown tab and RuntimeError off-owner. Do not bump resource versions.
+        """
         self._assert_owner()
         logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)
         self.tabs[tab_id].is_analyzing = analyzing
 
-    def set_tab_saving_data(self, tab_id: str, saving_data: bool) -> None:
+    def set_tab_saving_data(self, tab_id: str, *, saving_data: bool) -> None:
+        """Set this existing tab's save busy flag on the owner thread.
+
+        True marks saving active; False clears it. Raise KeyError for an
+        unknown tab and RuntimeError off-owner. Do not bump resource versions.
+        """
         self._assert_owner()
         logger.debug(
             "set_tab_saving_data: tab_id=%r saving_data=%s", tab_id, saving_data

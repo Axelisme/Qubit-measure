@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -102,6 +104,12 @@ class RecordingTab:
 class RecordingSave:
     def __init__(self, log: CallLog) -> None:
         self._log = log
+        self.preflight_error: FailedPreconditionError | None = None
+
+    def require_save_available(self, tab_id: str) -> None:
+        self._log.add("save", "require_save_available", tab_id)
+        if self.preflight_error is not None:
+            raise self.preflight_error
 
     def start_save_data(
         self, permit: object, data_path: str, comment: str = ""
@@ -244,7 +252,11 @@ def test_save_all_previews_data_drafts_before_selecting_saved_data(
         assert state.comment == "existing draft"
         assert tab.data_path == "default.h5"
         assert not bus.payloads
-        assert not any(entry.target == "save" for entry in log.calls)
+        assert not any(
+            entry.method
+            in {"start_save_data", "start_save_artifacts", "save_image_sync"}
+            for entry in log.calls
+        )
 
 
 def test_saved_image_path_override_requires_explicit_selection() -> None:
@@ -262,7 +274,10 @@ def test_saved_image_path_override_requires_explicit_selection() -> None:
     assert tab.analysis_image_path == "analysis.out"
     assert state.comment == "existing draft"
     assert not bus.payloads
-    assert not any(entry.target == "save" for entry in log.calls)
+    assert not any(
+        entry.method in {"start_save_data", "start_save_artifacts", "save_image_sync"}
+        for entry in log.calls
+    )
 
 
 def test_explicit_save_subset_commits_paths_and_comment_before_submission() -> None:
@@ -298,7 +313,10 @@ def test_save_artifact_selection_errors_do_not_mutate_drafts(artifacts, paths) -
     assert state.comment == "existing draft"
     assert tab.data_path == "default.h5"
     assert not bus.payloads
-    assert not any(entry.target == "save" for entry in log.calls)
+    assert not any(
+        entry.method in {"start_save_data", "start_save_artifacts", "save_image_sync"}
+        for entry in log.calls
+    )
 
 
 @pytest.mark.parametrize(
@@ -330,7 +348,10 @@ def test_colliding_paths_do_not_change_shared_drafts(
     assert tab.analysis_image_path == "analysis.out"
     assert tab.post_analysis_image_path == "post_analysis.out"
     assert not bus.payloads
-    assert not any(entry.target == "save" for entry in log.calls)
+    assert not any(
+        entry.method in {"start_save_data", "start_save_artifacts", "save_image_sync"}
+        for entry in log.calls
+    )
     assert not list(tmp_path.iterdir())
 
 
@@ -435,7 +456,7 @@ def test_save_image_uses_default_path_and_notifies() -> None:
 
     assert log.calls == [
         call("guard", "acquire_save_permit", "tab-1"),
-        call("state", "is_tab_busy", "tab-1"),
+        call("save", "require_save_available", "tab-1"),
         call("save", "save_image_sync", "permit:tab-1", key, "analysis.out"),
     ]
     assert notifications == ["Image saved to analysis.out"]
@@ -449,7 +470,7 @@ def test_save_post_image_uses_default_path_and_notifies() -> None:
 
     assert log.calls == [
         call("guard", "acquire_save_permit", "tab-1"),
-        call("state", "is_tab_busy", "tab-1"),
+        call("save", "require_save_available", "tab-1"),
         call("save", "save_image_sync", "permit:tab-1", key, "post_analysis.out"),
     ]
     assert notifications == ["Image saved to post_analysis.out"]
@@ -466,7 +487,7 @@ def test_image_save_explicit_path_becomes_shared_draft_and_omission_reuses_it(
         tab.post_analysis_image_path if post else tab.analysis_image_path
     ) == "chosen.png"
     assert facet.save_image("tab-1", key) == "chosen.png"
-    calls = [entry for entry in log.calls if entry.target == "save"]
+    calls = [entry for entry in log.calls if entry.method == "save_image_sync"]
     assert (
         calls
         == [call("save", "save_image_sync", "permit:tab-1", key, "chosen.png")] * 2
@@ -538,17 +559,58 @@ def test_image_save_failure_keeps_explicit_draft_without_success_notification(
 
 
 @pytest.mark.parametrize("post", [False, True])
-def test_busy_image_save_does_not_change_shared_draft(
-    post: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    facet, log, state, tab, _save, _bus, _notifications = _facet()
-    monkeypatch.setattr(state, "is_tab_busy", lambda tab_id: True)
+def test_busy_image_save_does_not_change_shared_draft(post: bool) -> None:
+    facet, log, _state, tab, save, _bus, _notifications = _facet()
+    save.preflight_error = FailedPreconditionError("busy")
     key = _key(ArtifactKind.POST_ANALYSIS if post else ArtifactKind.ANALYSIS)
     with pytest.raises(FailedPreconditionError, match="busy"):
         facet.save_image("tab-1", key, "chosen.png")
     assert tab.analysis_image_path == "analysis.out"
     assert tab.post_analysis_image_path == "post_analysis.out"
-    assert not any(entry.target == "save" for entry in log.calls)
+    assert not any(
+        entry.method in {"start_save_data", "start_save_artifacts", "save_image_sync"}
+        for entry in log.calls
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ("data", "artifacts", "image"))
+def test_preflight_rejection_precedes_drafts_and_operation_submission(
+    entrypoint: str,
+) -> None:
+    facet, log, state, tab, save, bus, notifications = _facet()
+    before = state.artifacts
+    save.preflight_error = FailedPreconditionError("unavailable")
+
+    operation: Callable[[], object]
+    if entrypoint == "data":
+        operation = partial(facet.save_data, "tab-1", "chosen.h5", comment="new")
+    elif entrypoint == "artifacts":
+        operation = partial(
+            facet.save_artifacts,
+            "tab-1",
+            artifacts=(_key(ArtifactKind.DATA),),
+            paths={_key(ArtifactKind.DATA): "chosen.h5"},
+            comment="new",
+        )
+    else:
+        operation = partial(
+            facet.save_image, "tab-1", _key(ArtifactKind.ANALYSIS), "chosen.png"
+        )
+
+    with pytest.raises(FailedPreconditionError, match="unavailable"):
+        operation()
+
+    assert log.calls == [
+        call("guard", "acquire_save_permit", "tab-1"),
+        call("save", "require_save_available", "tab-1"),
+    ]
+    assert state.artifacts == before
+    assert state.comment == "existing draft"
+    assert tab.data_path == "default.h5"
+    assert tab.analysis_image_path == "analysis.out"
+    assert tab.post_analysis_image_path == "post_analysis.out"
+    assert bus.payloads == []
+    assert notifications == []
 
 
 def test_missing_save_paths_fast_fails() -> None:
@@ -564,6 +626,6 @@ def test_missing_save_paths_fast_fails() -> None:
 
     assert log.calls == [
         call("guard", "acquire_save_permit", "tab-1"),
-        call("state", "is_tab_busy", "tab-1"),
+        call("save", "require_save_available", "tab-1"),
     ]
     assert notifications == []

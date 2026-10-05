@@ -699,7 +699,7 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
     state.update_tab_analyze("tab", object(), _plots_for(figure))
     post_figure = _make_figure()
     state.update_tab_post_analyze("tab", object(), _plots_for(post_figure))
-    state.set_tab_analyzing("tab", True)
+    state.set_tab_analyzing("tab", analyzing=True)
     permit = SavePermit(tab_id="tab")
     data_path = str(tmp_path / "data" / "measurement")
     image_path = str(tmp_path / "images" / "plot.png")

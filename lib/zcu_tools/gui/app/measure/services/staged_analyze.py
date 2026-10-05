@@ -122,7 +122,7 @@ class _StagedAnalyzeService:
         """
         token = self._active_tokens[tab_id]
         with self._bus.origin(self._handles.event_origin(token)):
-            self._state.set_tab_analyzing(tab_id, True)
+            self._state.set_tab_analyzing(tab_id, analyzing=True)
             self._bus.emit(
                 TabInteractionChangedPayload(tab_id=tab_id, fact=self.STARTED_FACT)
             )
@@ -171,7 +171,7 @@ class _StagedAnalyzeService:
                 _fail(exc, settle)
                 return
             self._active_tokens.pop(tab_id, None)
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             # settle before facts — State visible to awaiter on wake.
             settle(OperationOutcome("finished"))
             self._bus.emit(
@@ -188,7 +188,7 @@ class _StagedAnalyzeService:
                     "Unpublished analysis plot cleanup failed: tab_id=%r", tab_id
                 )
             self._active_tokens.pop(tab_id, None)
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             # settle before facts — State visible to awaiter on wake.
             settle(OperationOutcome("failed", str(error)))
             self._bus.emit(

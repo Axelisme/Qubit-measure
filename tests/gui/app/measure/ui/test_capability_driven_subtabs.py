@@ -389,7 +389,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
             cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
         ),
     )
-    state.set_tab_analyzing("tab-1", True)
+    state.set_tab_analyzing("tab-1", analyzing=True)
     with pytest.raises(RuntimeError, match="busy"):
         state.remove_tab("tab-1")
     tab.detach()
