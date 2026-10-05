@@ -8,7 +8,7 @@ Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。
 
 ## 分層與連線
 
-`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。四個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。Measure 還擁有版本 guard、operation tracking、診斷和 editor 清理；fluxdep、dispersive 與 autofluxdep 的 remote 接口只讀。共用機制接收 app 注入的 metadata 和 owner scheduler，並不持有實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
+`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。四個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。共用 `RemoteControlServiceBase` 擁有 seen map 與 observation 演算法。App 以 `ResourceObservationPolicy` 宣告自己的依賴、完整讀取與 write tracking，並注入 owner version snapshot。Measure 另外擁有 operation tracking、診斷、writeback pane mapping 和 editor 清理；fluxdep、dispersive 與 autofluxdep 的 remote 接口仍只讀。共用機制接收 app 注入的 metadata 和 owner scheduler，不決定實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
 
 同機跨程序的 MCP 使用 socket；同機並不等於同程序呼叫。GUI 可停用 remote socket，GUI core 不依賴 MCP。MCP `connect` 可接上現有 GUI，或經明確選項啟動 GUI；MCP server 結束只斷開連線，不關閉 GUI。外部 CLI／MCP workflow 擁有 agent 的啟動。GUI 不啟動 agent terminal、不管理可恢復的 agent session，也不注入 bootstrap prompt。Connection authentication 與 method exposure 是兩道不同的邊界：有 token 時 GUI 在 method 前驗證；沒有 token 的 loopback 允許本機可連線程序控制 GUI。隱藏 method 不等於授權機制，現有連線方式不承諾任意跨機部署。
 
@@ -34,7 +34,7 @@ Measure tab cfg 使用明示的 `CfgRef`，不另加 per-connection cfg seen。`
 
 Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數字換成 null，以 `invalid` 記錄原 summary 路徑與 `non_finite` 原因。MCP execution 保存這份已讀投影，不猜測物理原因，不改 operation outcome、保存事實或 writeback policy。這項轉換不延伸到 generic context 或 framing。
 
-其他 guarded resources 仍由 GUI owner 在自己的序列中比較每條連線的 seen map。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能代替未曾觀察。成功寫入只推進先前看過且版本相符的資源。建立新 tab 的例外只認證存在性，`tab.new` 與 `tab.open_file` 成功回傳 tab ID，且存在版本由 0 變 1 時，GUI 將該資源記入該連線的 seen。Result 等其他 guarded resources 仍須明確完整讀取。Load、library commit 與 writeback 仍保留各自的 context guard。
+其他 guarded resources 由共用 GUI remote 在 owner 序列中比較每條連線的 seen map。`ResourceObservationPolicy` 擁有 guard／reveal／write tracking 欄位，measure 的 `AgentMethodPolicy` 繼承這些欄位並另加 exposure 與 operation metadata。Shared base 在組裝時拒絕不完整的 method policy mapping，以及 off-main method 的 observation 宣告。Prefix wildcard dependency 比較 current 與 seen 兩份 key 集，包含已刪除的資源。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能代替未曾觀察。成功寫入只推進先前看過且版本相符的資源。建立新 tab 的例外只認證存在性，`tab.new` 與 `tab.open_file` 成功回傳 tab ID，且存在版本由 0 變 1 時，GUI 將該資源記入該連線的 seen。Result 等其他 guarded resources 仍須明確完整讀取。Load、library commit 與 writeback 仍保留各自的 context guard。
 
 MCP 不保存第二份 seen，也不用 wire expected-version table 或隱藏預讀解鎖。其他資源的 Stale 須重讀對應完整 snapshot，再由 caller 決定是否重試；event origin 不能授權寫入。Guard 不替代 operation snapshot、互斥及後續提交檢查，生命週期歸 [[0066]]。Timeout、斷線或回覆編碼失敗不證明命令沒有副作用。Reply failure 可撤回該回覆建立的 seen observation，但不回滾 business publication。沒有明確冪等契約時不自動重送。
 

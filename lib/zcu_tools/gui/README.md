@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-05, injected experiment logging namespaces
+**Last updated:** 2026-10-06, shared remote resource observations
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -27,6 +27,17 @@ Shared endpoint 無法編碼 RPC 回覆時送有界的 `internal` error，reason
 `response_encoding_failed`。Handler 可能已執行，caller 不可因回覆失敗而盲目重送 mutation。
 若 correlated fallback 仍無法編碼，或 reply queue 拒收，就中止該連線，交 IO owner
 釋放其 app context。Push 的 drop policy 不變；shared transport 不解讀 method、guard 或 operation。
+
+## Remote resource observations
+
+`gui.remote.RemoteControlServiceBase` owns per-connection seen maps, stale
+comparison, full-read observations and successful self-write tracking. Apps inject
+owner-thread version snapshots and `ResourceObservationPolicy` declarations; they
+retain resource keys, version producers and domain effects. Guard, handler and
+observation share one owner turn. Handler failure, timeout or unsuccessful reply
+delivery cannot establish a new observation. Observation rollback never rolls
+back business effects. Read-only apps omit this optional policy binding. MCP does
+not maintain another seen map. See ADR-0068 for the app-policy split.
 
 ## Remote parameter declarations
 

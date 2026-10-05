@@ -12,42 +12,34 @@ from zcu_tools.gui.remote.method_spec import (
     MethodSpec,
     build_method_registry,
 )
+from zcu_tools.gui.remote.observation import ResourceObservationPolicy
 from zcu_tools.gui.remote.param_spec import build_input_schema
 
 AgentExposure = Literal["rpc", "tool", "internal"]
 
 
 @dataclass(frozen=True, slots=True)
-class AgentMethodPolicy:
-    """Measure-only exposure and concurrency contract for one wire method."""
+class AgentMethodPolicy(ResourceObservationPolicy):
+    """Measure exposure metadata plus the shared resource observation contract.
+
+    exposure is rpc, tool or internal. tool_names names fixed tools only for tool
+    exposure; operation_key is an agent-tracking resource key template, such as
+    tab:{tab_id}, or None when the method exposes no operation. Inherited fields declare GUI-owned observations and are
+    never exported to MCP. Invalid exposure/tool declarations raise ValueError.
+    """
 
     exposure: AgentExposure = "rpc"
     tool_names: tuple[str, ...] = ()
-    guard_deps: tuple[str, ...] = ()
-    reveals: tuple[str, ...] = ()
-    # A partial query cannot reveal the entire named resource.
-    reveals_without: tuple[str, ...] = ()
-    # Optional full reads reveal only when these named inputs are truthy.
-    reveals_when_nonempty: tuple[str, ...] = ()
-    # A successful write advances only versions previously seen by this connection.
-    refresh_after_write: bool = False
-    # A returned identity and owner-thread 0→1 change certify creation.
-    created_resource: str | None = None
     operation_key: str | None = None
 
     def __post_init__(self) -> None:
+        ResourceObservationPolicy.__post_init__(self)
         if self.exposure not in ("rpc", "tool", "internal"):
             raise ValueError(f"unknown agent exposure {self.exposure!r}")
         if (self.exposure == "tool") != bool(self.tool_names):
             raise ValueError("tool exposure requires tool_names only")
         if len(set(self.tool_names)) != len(self.tool_names):
             raise ValueError("duplicate tool names")
-        if (self.reveals_without or self.reveals_when_nonempty) and not self.reveals:
-            raise ValueError("conditional reveals require revealed resources")
-        if self.created_resource is not None and (
-            not self.created_resource or not self.refresh_after_write
-        ):
-            raise ValueError("created_resource requires owner-thread write tracking")
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,13 +103,6 @@ def build_dispatch_registry(
     specs = build_method_specs(entries)
     handlers: dict[str, Handler] = {}
     for entry in entries:
-        policy = entry.agent
-        if entry.spec.off_main_thread and (
-            policy.guard_deps or policy.reveals or policy.refresh_after_write
-        ):
-            raise ValueError(
-                "guard, reveal and write tracking require the owner thread"
-            )
         handlers[entry.method] = _resolve_handler_ref(entry.handler_ref)
     return build_method_registry(handlers, specs)
 
