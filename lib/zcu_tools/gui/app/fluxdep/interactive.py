@@ -135,6 +135,20 @@ InteractiveContext = (
 
 
 @dataclass(frozen=True, slots=True)
+class _BeginCheckpoint:
+    """Owner admission captured before the first invalidating context query.
+
+    next_context_id is the existing identity allocation frontier, not a Session
+    edit revision. active_spectrum is the displayed name or None. source_versions
+    records collection, selection and spectrum resource keys with their versions.
+    """
+
+    next_context_id: int
+    active_spectrum: str | None
+    source_versions: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ActiveInteractiveContext:
     """Live owner reference, not a detached numerical snapshot.
 
@@ -273,24 +287,36 @@ class FluxDepInteractiveOwner:
             return None
         return ActiveInteractiveContext(self._context_id, context)
 
-    def _cancel_for_begin(self) -> None:
-        """Retire input unless synchronous callbacks change admission or sources."""
+    def _capture_begin_checkpoint(self) -> _BeginCheckpoint:
+        """Capture admission before a query or retirement can notify callbacks."""
         source_keys = (
             SPECTRUM_SET_VERSION_KEY,
             SELECTION_VERSION_KEY,
             *(spectrum_version_key(name) for name in self._state.spectrums),
         )
-        versions = tuple(self._state.version.get(key) for key in source_keys)
-        active_spectrum = self._state.active_spectrum
-        self.cancel()
-        # A closed fact can replace input, dispose the owner, or mutate sources.
+        return _BeginCheckpoint(
+            self._next_context_id,
+            self._state.active_spectrum,
+            tuple((key, self._state.version.get(key)) for key in source_keys),
+        )
+
+    def _check_begin_checkpoint(self, checkpoint: _BeginCheckpoint) -> None:
+        """Reject callback-created input, disposal or changed captured sources."""
         if (
             self._disposed
-            or self._context is not None
-            or active_spectrum != self._state.active_spectrum
-            or versions != tuple(self._state.version.get(key) for key in source_keys)
+            or self._next_context_id != checkpoint.next_context_id
+            or self._state.active_spectrum != checkpoint.active_spectrum
+            or any(
+                self._state.version.get(key) != version
+                for key, version in checkpoint.source_versions
+            )
         ):
             raise FailedPreconditionError("owner changed during context retirement")
+
+    def _cancel_for_begin(self, checkpoint: _BeginCheckpoint) -> None:
+        """Retire input, then check the same admission captured before queries."""
+        self.cancel()
+        self._check_begin_checkpoint(checkpoint)
 
     def _install_context(self, context: InteractiveContext) -> None:
         self._context = context
@@ -366,10 +392,12 @@ class FluxDepInteractiveOwner:
             raise InvalidInputError(f"unknown spectrum {name!r}")
         if name != self._state.active_spectrum:
             raise FailedPreconditionError("line picking requires the active spectrum")
+        checkpoint = self._capture_begin_checkpoint()
         current = self.current_line_pick()
+        self._check_begin_checkpoint(checkpoint)
         if current is not None:
             return current
-        self._cancel_for_begin()
+        self._cancel_for_begin(checkpoint)
         entry = self._state.spectrums[name]
         inputs = FluxPickInputs(
             entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
@@ -459,10 +487,12 @@ class FluxDepInteractiveOwner:
             raise FailedPreconditionError(
                 "one-tone picking requires an aligned spectrum"
             )
+        checkpoint = self._capture_begin_checkpoint()
         current = self.current_onetone_pick()
+        self._check_begin_checkpoint(checkpoint)
         if current is not None:
             return current
-        self._cancel_for_begin()
+        self._cancel_for_begin(checkpoint)
         inputs = OneToneInputs(
             FluxPickInputs(
                 entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
@@ -547,10 +577,12 @@ class FluxDepInteractiveOwner:
             raise FailedPreconditionError(
                 "two-tone picking requires an aligned spectrum"
             )
+        checkpoint = self._capture_begin_checkpoint()
         current = self.current_twotone_pick()
+        self._check_begin_checkpoint(checkpoint)
         if current is not None:
             return current
-        self._cancel_for_begin()
+        self._cancel_for_begin(checkpoint)
         inputs = TwoToneInputs(
             FluxPickInputs(
                 entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
@@ -626,14 +658,16 @@ class FluxDepInteractiveOwner:
         self._require_owner()
         if self._disposed:
             raise FailedPreconditionError("interactive owner is disposed")
+        checkpoint = self._capture_begin_checkpoint()
         current = self.current_cross_selection()
+        self._check_begin_checkpoint(checkpoint)
         if current is not None:
             return current
         inputs = self._capture_cross_selection_inputs()
         plugin = CrossSelectionPlugin(
             inputs, min_distance=self._state.selection.min_distance
         )
-        self._cancel_for_begin()
+        self._cancel_for_begin(checkpoint)
         context = CrossSelectionContext(
             plugin=plugin,
             session=plugin.open(self._owner),
@@ -756,7 +790,8 @@ class FluxDepInteractiveOwner:
         """Reject admission before retiring input, then release subscriptions.
 
         Idempotent owner-loop call. Synchronous closed callbacks cannot begin new
-        input. Callback errors propagate after source subscriptions are released.
+        input. EventBus logs and isolates ordinary callback exceptions. Source
+        subscriptions are released even when retirement raises.
         """
         self._require_owner()
         if self._disposed:

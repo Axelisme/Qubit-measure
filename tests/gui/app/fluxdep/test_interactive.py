@@ -249,7 +249,9 @@ def test_begin_preserves_reentry_from_current_query_retirement(controller: Contr
                 errors.append(exc)
 
     subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
-    metadata = controller.bus.subscribe_with_meta(ActiveSpectrumChangedPayload, on_active)
+    metadata = controller.bus.subscribe_with_meta(
+        ActiveSpectrumChangedPayload, on_active
+    )
     try:
         controller.set_active_spectrum("second")
         assert len(errors) == 1
@@ -263,7 +265,10 @@ def test_begin_preserves_reentry_from_current_query_retirement(controller: Contr
         current.plugin.actions.swap.execute(current.session, None)
         current.session.undo()
         assert [fact.phase for fact in facts] == [
-            "closed", "opened", "updated", "updated"
+            "closed",
+            "opened",
+            "updated",
+            "updated",
         ]
         assert {fact.context_id for fact in facts[1:]} == {active.context_id}
         owner.cancel()
@@ -281,18 +286,25 @@ def test_dispose_rejects_begin_from_closed_callback(controller: Controller):
     owner = controller.interactive
     old = owner.begin_line_pick("sample")
     facts: list[InteractiveChangedPayload] = []
+    rejections: list[FailedPreconditionError] = []
+    reentered_disposals: list[int] = []
 
     def on_fact(fact: InteractiveChangedPayload) -> None:
         facts.append(fact)
         if fact.phase == "closed":
-            with pytest.raises(FailedPreconditionError, match="disposed"):
+            try:
                 owner.begin_line_pick("sample")
+            except FailedPreconditionError as exc:
+                rejections.append(exc)
             owner.dispose()
+            reentered_disposals.append(fact.context_id)
 
     subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
     try:
         owner.dispose()
         assert owner.inspect() is None
+        assert len(rejections) == 1
+        assert reentered_disposals == [facts[0].context_id]
         assert [fact.phase for fact in facts] == ["closed"]
         with pytest.raises(FailedPreconditionError, match="closed"):
             old.plugin.actions.swap.execute(old.session, None)
@@ -300,6 +312,42 @@ def test_dispose_rejects_begin_from_closed_callback(controller: Controller):
         assert len(facts) == 1
     finally:
         subscription.unsubscribe()
+
+
+def test_dispose_isolates_closed_callback_failure(
+    controller: Controller, caplog: pytest.LogCaptureFixture
+):
+    owner = controller.interactive
+    old = owner.begin_line_pick("sample")
+    active = owner.inspect()
+    assert active is not None
+    attempted: list[int] = []
+    facts: list[InteractiveChangedPayload] = []
+    failure = RuntimeError("closed subscriber failed")
+
+    def fail_closed(fact: InteractiveChangedPayload) -> None:
+        if fact.phase == "closed":
+            attempted.append(fact.context_id)
+            raise failure
+
+    faulty = controller.bus.subscribe(InteractiveChangedPayload, fail_closed)
+    healthy = controller.bus.subscribe(InteractiveChangedPayload, facts.append)
+    try:
+        owner.dispose()
+        assert owner.inspect() is None
+        assert attempted == [active.context_id]
+        assert [fact.phase for fact in facts] == ["closed"]
+        assert any(
+            record.exc_info is not None and record.exc_info[1] is failure
+            for record in caplog.records
+        )
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            old.session.ensure_input_open()
+        owner.dispose()
+        assert len(facts) == 1
+    finally:
+        healthy.unsubscribe()
+        faulty.unsubscribe()
 
 
 def test_begin_cannot_cross_disposal_in_closed_callback(controller: Controller):
