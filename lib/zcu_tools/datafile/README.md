@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-05，Data Variable 命名
 
 
 `zcu_tools.datafile` 是 Labber-style experiment data file 的 public
@@ -8,18 +8,18 @@ facade。caller 優先從 package root import model 與 function。
 
 - `Axis`、`LabberPayload`、`LabberMetadata`、`LabberData` 描述單一
   inner-first axes 的 Labber dataset。
-- `DatasetRole`、`GroupedLabberData` 描述 grouped experiment dataset：單一
-  experiment data file 內含多個 role payload，metadata 共用。
-- `save_labber_data` / `load_labber_data` 處理 single-role file。
+- `DataVariable`、`GroupedLabberData` 描述 grouped experiment dataset：單一
+  experiment data file 內含多個 variable payload，metadata 共用。
+- `save_labber_data` / `load_labber_data` 處理 single-variable file。
 - `save_grouped_labber_data` / `load_grouped_labber_data` 處理 canonical one-shot
-  grouped v2。所有 roles 必須共享完全相同的 inner-first axes、shape 與
-  timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 roles 寫成
-  root Labber log 的平行 scalar channels。ordered role-to-channel attrs 保存 domain
-  identity；experiment loader 傳 required roles，省略 required roles 只用於
+  grouped v2。所有 variables 必須共享完全相同的 inner-first axes、shape 與
+  timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 variables 寫成
+  root Labber log 的平行 scalar channels。ordered variable-to-channel attrs 保存 domain
+  identity；experiment loader 傳 required variables，省略 required variables 只用於
   diagnostic inspection。
 - unmarked grouped v1 不屬於 runtime 可載入格式；loader 明確要求 canonical
   grouped v2，不改寫 input。marker-qualified streaming grouped v1 仍走獨立 decoder。
-- `StreamingLabberRoleSpec` / `open_streaming_grouped_labber_data` 處理
+- `StreamingLabberVariableSpec` / `open_streaming_grouped_labber_data` 處理
   grouped Labber file 的 partial-write use case。它保留 marker-qualified grouped v1
   root/`Log_N` layout 與 heterogeneous axes，不共用 one-shot v2 decoder。
   `open_streaming_labber_data`
@@ -30,7 +30,7 @@ facade。caller 優先從 package root import model 與 function。
 - Streaming writer 對自己建立的 Labber `Data` layout 採 hard invariant：若
   內部 HDF5 group / dataset 結構不符合預期，立即 raise，不做靜默 fallback。
 - Experiment semantic schema 住在 `zcu_tools.experiment.axes_spec`：
-  `GroupedAxesSpec` / `RoleSpec` 把 Result/Cfg 映射到這裡的 generic grouped
+  `GroupedAxesSpec` / `VariableSpec` 把 Result/Cfg 映射到這裡的 generic grouped
   payload；`datafile` 不反向依賴 experiment Result 或 cfg。
 - Save helpers 寫入 caller 傳入的 formatted path；既有目的地 fast-fail，不自動
   suffix 或覆寫。

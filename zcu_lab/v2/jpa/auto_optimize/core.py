@@ -19,9 +19,9 @@ from zcu_tools.experiment import (
     MHZ_TO_HZ,
     GroupedAxesSpec,
     GroupedLoadData,
-    RoleAxisSpec,
-    RoleSpec,
-    RoleZSpec,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -87,17 +87,17 @@ class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
-JPA_AUTO_FLUX_ROLE = "jpa_flux"
-JPA_AUTO_FREQ_ROLE = "jpa_freq"
-JPA_AUTO_POWER_ROLE = "jpa_power"
-JPA_AUTO_PHASE_ROLE = "jpa_phase"
-JPA_AUTO_SNR_ROLE = "snr"
-JPA_AUTO_GROUPED_ROLES = (
-    JPA_AUTO_FLUX_ROLE,
-    JPA_AUTO_FREQ_ROLE,
-    JPA_AUTO_POWER_ROLE,
-    JPA_AUTO_PHASE_ROLE,
-    JPA_AUTO_SNR_ROLE,
+JPA_AUTO_FLUX_VARIABLE = "jpa_flux"
+JPA_AUTO_FREQ_VARIABLE = "jpa_freq"
+JPA_AUTO_POWER_VARIABLE = "jpa_power"
+JPA_AUTO_PHASE_VARIABLE = "jpa_phase"
+JPA_AUTO_SNR_VARIABLE = "snr"
+JPA_AUTO_GROUPED_VARIABLES = (
+    JPA_AUTO_FLUX_VARIABLE,
+    JPA_AUTO_FREQ_VARIABLE,
+    JPA_AUTO_POWER_VARIABLE,
+    JPA_AUTO_PHASE_VARIABLE,
+    JPA_AUTO_SNR_VARIABLE,
 )
 
 
@@ -170,13 +170,13 @@ def _build_jpa_auto_result(
 ) -> JPAOptimizeResult:
     params = np.column_stack(
         [
-            data.role(JPA_AUTO_FLUX_ROLE).z,
-            data.role(JPA_AUTO_FREQ_ROLE).z,
-            data.role(JPA_AUTO_POWER_ROLE).z,
+            data.variable(JPA_AUTO_FLUX_VARIABLE).z,
+            data.variable(JPA_AUTO_FREQ_VARIABLE).z,
+            data.variable(JPA_AUTO_POWER_VARIABLE).z,
         ]
     ).astype(np.float64)
-    phases = data.role(JPA_AUTO_PHASE_ROLE).z.astype(np.int32)
-    signals = data.role(JPA_AUTO_SNR_ROLE).z.astype(np.float64)
+    phases = data.variable(JPA_AUTO_PHASE_VARIABLE).z.astype(np.int32)
+    signals = data.variable(JPA_AUTO_SNR_VARIABLE).z.astype(np.float64)
     _validate_jpa_auto_arrays(params, phases, signals)
     return JPAOptimizeResult(
         params=params,
@@ -186,14 +186,14 @@ def _build_jpa_auto_result(
 
 
 _JPA_AUTO_ITERATION_AXIS = (
-    RoleAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
+    VariableAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
 )
 JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
-    roles=(
-        RoleSpec(
-            role=JPA_AUTO_FLUX_ROLE,
+    variables=(
+        VariableSpec(
+            variable=JPA_AUTO_FLUX_VARIABLE,
             axes=_JPA_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="JPA Flux",
                 # Canonical flux unit is the neutral device-native value: the
@@ -206,10 +206,10 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role=JPA_AUTO_FREQ_ROLE,
+        VariableSpec(
+            variable=JPA_AUTO_FREQ_VARIABLE,
             axes=_JPA_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="JPA Frequency",
                 unit="Hz",
@@ -219,10 +219,10 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role=JPA_AUTO_POWER_ROLE,
+        VariableSpec(
+            variable=JPA_AUTO_POWER_VARIABLE,
             axes=_JPA_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="JPA Power",
                 unit="dBm",
@@ -231,20 +231,20 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role=JPA_AUTO_PHASE_ROLE,
+        VariableSpec(
+            variable=JPA_AUTO_PHASE_VARIABLE,
             axes=_JPA_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="phases",
                 label="JPA Phase",
                 unit="index",
                 dtype=np.int32,
             ),
         ),
-        RoleSpec(
-            role=JPA_AUTO_SNR_ROLE,
+        VariableSpec(
+            variable=JPA_AUTO_SNR_VARIABLE,
             axes=_JPA_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="signals",
                 label="SNR",
                 unit="a.u.",

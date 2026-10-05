@@ -18,9 +18,9 @@ from zcu_tools.experiment import (
     US_TO_S,
     GroupedAxesSpec,
     GroupedLoadData,
-    RoleAxisSpec,
-    RoleSpec,
-    RoleZSpec,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -126,15 +126,15 @@ class AutoOptCfg(ProgramV2Cfg, ExpCfgModel):
     num_points: int = Field(gt=0)
 
 
-RO_AUTO_READOUT_FREQ_ROLE = "readout_freq"
-RO_AUTO_READOUT_GAIN_ROLE = "readout_gain"
-RO_AUTO_READOUT_LENGTH_ROLE = "readout_length"
-RO_AUTO_SNR_ROLE = "snr"
-RO_AUTO_GROUPED_ROLES = (
-    RO_AUTO_READOUT_FREQ_ROLE,
-    RO_AUTO_READOUT_GAIN_ROLE,
-    RO_AUTO_READOUT_LENGTH_ROLE,
-    RO_AUTO_SNR_ROLE,
+RO_AUTO_READOUT_FREQ_VARIABLE = "readout_freq"
+RO_AUTO_READOUT_GAIN_VARIABLE = "readout_gain"
+RO_AUTO_READOUT_LENGTH_VARIABLE = "readout_length"
+RO_AUTO_SNR_VARIABLE = "snr"
+RO_AUTO_GROUPED_VARIABLES = (
+    RO_AUTO_READOUT_FREQ_VARIABLE,
+    RO_AUTO_READOUT_GAIN_VARIABLE,
+    RO_AUTO_READOUT_LENGTH_VARIABLE,
+    RO_AUTO_SNR_VARIABLE,
 )
 
 
@@ -191,12 +191,12 @@ def _validate_auto_opt_result(result: AutoOptResult) -> None:
 def _build_auto_opt_result(data: GroupedLoadData[AutoOptCfg]) -> AutoOptResult:
     params = np.column_stack(
         [
-            data.role(RO_AUTO_READOUT_FREQ_ROLE).z,
-            data.role(RO_AUTO_READOUT_GAIN_ROLE).z,
-            data.role(RO_AUTO_READOUT_LENGTH_ROLE).z,
+            data.variable(RO_AUTO_READOUT_FREQ_VARIABLE).z,
+            data.variable(RO_AUTO_READOUT_GAIN_VARIABLE).z,
+            data.variable(RO_AUTO_READOUT_LENGTH_VARIABLE).z,
         ]
     ).astype(np.float64)
-    signals = data.role(RO_AUTO_SNR_ROLE).z.astype(np.float64)
+    signals = data.variable(RO_AUTO_SNR_VARIABLE).z.astype(np.float64)
     _validate_auto_opt_arrays(params, signals)
     return AutoOptResult(
         params=params,
@@ -205,14 +205,14 @@ def _build_auto_opt_result(data: GroupedLoadData[AutoOptCfg]) -> AutoOptResult:
 
 
 _RO_AUTO_ITERATION_AXIS = (
-    RoleAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
+    VariableAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
 )
 RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
-    roles=(
-        RoleSpec(
-            role=RO_AUTO_READOUT_FREQ_ROLE,
+    variables=(
+        VariableSpec(
+            variable=RO_AUTO_READOUT_FREQ_VARIABLE,
             axes=_RO_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="Readout Frequency",
                 unit="Hz",
@@ -222,10 +222,10 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role=RO_AUTO_READOUT_GAIN_ROLE,
+        VariableSpec(
+            variable=RO_AUTO_READOUT_GAIN_VARIABLE,
             axes=_RO_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="Readout Gain",
                 unit="a.u.",
@@ -234,10 +234,10 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role=RO_AUTO_READOUT_LENGTH_ROLE,
+        VariableSpec(
+            variable=RO_AUTO_READOUT_LENGTH_VARIABLE,
             axes=_RO_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="Readout Length",
                 unit="s",
@@ -247,10 +247,10 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role=RO_AUTO_SNR_ROLE,
+        VariableSpec(
+            variable=RO_AUTO_SNR_VARIABLE,
             axes=_RO_AUTO_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="signals",
                 label="SNR",
                 unit="a.u.",

@@ -10,7 +10,7 @@ from .labber import (
 )
 from .models import (
     Axis,
-    DatasetRole,
+    DataVariable,
     GroupedLabberData,
     LabberData,
     LabberMetadata,
@@ -25,7 +25,7 @@ from .paths import (
 )
 from .streaming import (
     StreamingGroupedLabberWriter,
-    StreamingLabberRoleSpec,
+    StreamingLabberVariableSpec,
     StreamingLabberWriter,
     open_streaming_grouped_labber_data,
     open_streaming_labber_data,
@@ -36,13 +36,13 @@ __all__ = [
     "LabberPayload",
     "LabberMetadata",
     "LabberData",
-    "DatasetRole",
+    "DataVariable",
     "GroupedLabberData",
     "save_labber_data",
     "load_labber_data",
     "save_grouped_labber_data",
     "load_grouped_labber_data",
-    "StreamingLabberRoleSpec",
+    "StreamingLabberVariableSpec",
     "StreamingGroupedLabberWriter",
     "StreamingLabberWriter",
     "open_streaming_labber_data",

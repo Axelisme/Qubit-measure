@@ -42,9 +42,9 @@ from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
     open_streaming_labber_browser_sidecars,
 )
 from zcu_tools.gui.app.autofluxdep.services.result_io import (
-    result_role_specs,
-    result_row_role_names,
     result_row_summary,
+    result_row_variable_names,
+    result_variable_specs,
     write_result_row,
 )
 from zcu_tools.gui.app.autofluxdep.services.run_report import write_markdown_report
@@ -168,9 +168,9 @@ class RunStore:
         del info
         result = self._results.get(provider_name)
         if result is None:
-            roles_written: tuple[str, ...] = ()
+            variables_written: tuple[str, ...] = ()
         else:
-            roles_written = result_row_role_names(result, flux_idx)
+            variables_written = result_row_variable_names(result, flux_idx)
         patch_values = _json_safe(
             patch.values(), subject="patch values", nonfinite_to_none=False
         )
@@ -192,7 +192,7 @@ class RunStore:
                 "node": provider_name,
                 "node_type": self._node_type_by_name.get(provider_name, provider_name),
                 "result_file": self._node_file_by_name.get(provider_name),
-                "roles_written": list(roles_written),
+                "roles_written": list(variables_written),
                 "measurement_status": "completed",
                 "provide_status": provide_status,
                 "patch": patch_values,
@@ -205,7 +205,7 @@ class RunStore:
         timestamp = time.time()
         if result is not None:
             writer = self._writers[provider_name]
-            roles_written = write_result_row(
+            variables_written = write_result_row(
                 writer,
                 provider_name,
                 self._node_type_by_name.get(provider_name, provider_name),
@@ -474,7 +474,7 @@ class RunStore:
                 f"{index:03d}-{safe_artifact_slug(node.name, fallback='node')}.hdf5"
             )
             relpath = f"nodes/{filename}"
-            specs = result_role_specs(node.name, node.type_name, result)
+            specs = result_variable_specs(node.name, node.type_name, result)
             writer = open_streaming_grouped_labber_data(
                 str(self.data_dir / relpath),
                 specs,
@@ -490,7 +490,7 @@ class RunStore:
                     "name": node.name,
                     "type": node.type_name,
                     "path": relpath,
-                    "roles": [str(spec.role) for spec in specs],
+                    "roles": [str(spec.variable) for spec in specs],
                 }
             )
         self._manifest["files"]["nodes"] = node_files

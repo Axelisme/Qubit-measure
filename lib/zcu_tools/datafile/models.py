@@ -12,7 +12,7 @@ import numpy as np
 
 Axis = namedtuple("Axis", ["name", "unit", "values"])
 
-_ROLE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+_VARIABLE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 
 def as_tag_list(tags: str | Sequence[str] | None) -> list[str]:
@@ -321,50 +321,61 @@ class LabberData:
         )
 
 
-class DatasetRole(str):
-    """Lowercase snake_case dataset role value."""
+class DataVariable(str):
+    """A named measured variable, represented as lowercase snake_case text.
 
-    def __new__(cls, value: str | DatasetRole) -> DatasetRole:
+    Construct from str or DataVariable, for example DataVariable("fit_curve").
+    Names must start with a lowercase letter; segments contain letters/digits
+    and are separated by single underscores. Invalid names raise ValueError.
+    """
+
+    def __new__(cls, value: str | DataVariable) -> DataVariable:
         text = str(value)
-        if not _ROLE_RE.fullmatch(text):
+        if not _VARIABLE_RE.fullmatch(text):
             raise ValueError(
-                f"DatasetRole must be lowercase snake_case (got {value!r})"
+                f"DataVariable must be lowercase snake_case (got {value!r})"
             )
         return str.__new__(cls, text)
 
 
 @dataclass(slots=True)
 class GroupedLabberData:
-    """Grouped experiment dataset: role payloads plus shared metadata."""
+    """Grouped experiment dataset: named variable payloads and shared metadata.
 
-    roles: dict[DatasetRole, LabberPayload]
+    variables is a nonempty identity-to-LabberPayload mapping, normalized to
+    DataVariable keys without copying the payloads. metadata is shared across
+    variables, or an empty LabberMetadata when omitted. Invalid/duplicate names
+    or an empty mapping raise ValueError; wrong payload/metadata types raise TypeError.
+    """
+
+    variables: dict[DataVariable, LabberPayload]
     metadata: LabberMetadata
 
     def __init__(
         self,
-        roles: Mapping[str | DatasetRole, LabberPayload],
+        variables: Mapping[str | DataVariable, LabberPayload],
         *,
         metadata: LabberMetadata | None = None,
     ) -> None:
-        if not roles:
-            raise ValueError("GroupedLabberData requires at least one role")
+        if not variables:
+            raise ValueError("GroupedLabberData requires at least one variable")
 
-        normalized: dict[DatasetRole, LabberPayload] = {}
-        for raw_role, payload in roles.items():
-            role = DatasetRole(raw_role)
-            if role in normalized:
-                raise ValueError(f"duplicate dataset role {role!r}")
+        normalized: dict[DataVariable, LabberPayload] = {}
+        for raw_variable, payload in variables.items():
+            variable = DataVariable(raw_variable)
+            if variable in normalized:
+                raise ValueError(f"duplicate data variable {variable!r}")
             if isinstance(payload, LabberData):
                 raise TypeError(
-                    "GroupedLabberData role values must be LabberPayload, "
+                    "GroupedLabberData variable values must be LabberPayload, "
                     "not LabberData"
                 )
             if not isinstance(payload, LabberPayload):
                 raise TypeError(
-                    "GroupedLabberData role values must be LabberPayload "
-                    f"(role {role!r} got {type(payload).__name__})"
+                    "GroupedLabberData variable values must be LabberPayload "
+                    f"(variable {variable!r} got {type(payload).__name__})"
                 )
-            normalized[role] = payload
+            normalized[variable] = payload
 
         if metadata is not None and not isinstance(metadata, LabberMetadata):
             raise TypeError(
@@ -372,5 +383,5 @@ class GroupedLabberData:
                 f"(got {type(metadata).__name__})"
             )
 
-        self.roles = normalized
+        self.variables = normalized
         self.metadata = metadata if metadata is not None else LabberMetadata()

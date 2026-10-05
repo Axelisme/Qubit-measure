@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.datafile import (
     LabberMetadata,
-    StreamingLabberRoleSpec,
+    StreamingLabberVariableSpec,
     StreamingLabberWriter,
     open_streaming_labber_data,
     save_labber_data,
@@ -40,20 +40,26 @@ _RUN_SLUG_RE = re.compile(r"^(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})-")
 
 @dataclass(frozen=True)
 class LabberBrowserSidecar:
-    """One Labber Browser single-log export entry for the manifest."""
+    """One Labber Browser single-log export entry for the manifest.
+
+    index is the placed-node index; node/node_type identify its name and type.
+    variable names the exported measured variable. path is relative to the run
+    data root. Serialization retains the existing manifest ``role`` key.
+    """
 
     index: int
     node: str
     node_type: str
-    role: str
+    variable: str
     path: str
 
     def to_manifest(self) -> dict[str, int | str]:
+        """Serialize this export using the existing manifest ``role`` key."""
         return {
             "index": self.index,
             "node": self.node,
             "node_type": self.node_type,
-            "role": self.role,
+            "role": self.variable,
             "path": self.path,
         }
 
@@ -77,7 +83,7 @@ class LabberBrowserExport:
 @dataclass(frozen=True)
 class _StreamingSidecarSpec:
     sidecar: LabberBrowserSidecar
-    spec: StreamingLabberRoleSpec
+    spec: StreamingLabberVariableSpec
 
 
 @dataclass(slots=True)
@@ -130,7 +136,7 @@ class LabberBrowserSidecarWriters:
             return
         for handle in handles:
             row = _streaming_row_value(
-                node_name, node_type, result, handle.sidecar.role, flux_idx
+                node_name, node_type, result, handle.sidecar.variable, flux_idx
             )
             handle.writer.write_outer_slice(flux_idx, row, timestamp=timestamp)
         self.flush()
@@ -329,7 +335,7 @@ def _export_node_sidecars(
                 committed_mask,
             ),
         )
-    if checked.result_kind == "sweep1d" and node_type in _SWEEP1D_SCALAR_ROLES:
+    if checked.result_kind == "sweep1d" and node_type in _SWEEP1D_SCALAR_VARIABLES:
         sweep = _require_sweep1d(node_name, result)
         return (
             _export_sweep1d_signal(
@@ -373,7 +379,7 @@ def _streaming_node_sidecar_specs(
                 data_root, root_path, index, node_name, node_type, sweep
             ),
         )
-    if checked.result_kind == "sweep1d" and node_type in _SWEEP1D_SCALAR_ROLES:
+    if checked.result_kind == "sweep1d" and node_type in _SWEEP1D_SCALAR_VARIABLES:
         sweep = _require_sweep1d(node_name, result)
         return (
             _streaming_sweep1d_signal_spec(
@@ -394,17 +400,17 @@ def _streaming_sweep1d_signal_spec(
     node_type: str,
     result: SweepResult1D,
 ) -> _StreamingSidecarSpec:
-    role = "signal"
+    variable = "signal"
     sidecar = _sidecar(
         index,
         node_name,
         node_type,
-        role,
+        variable,
         data_root,
-        root_path / _filename(index, node_type, role),
+        root_path / _filename(index, node_type, variable),
     )
-    spec = StreamingLabberRoleSpec(
-        role,
+    spec = StreamingLabberVariableSpec(
+        variable,
         "Signal",
         "a.u.",
         axes=[
@@ -412,7 +418,7 @@ def _streaming_sweep1d_signal_spec(
             ("Flux device value", "", result.flux),
         ],
         shape=result.signal.shape,
-        attrs=_streaming_attrs(node_name, node_type, role),
+        attrs=_streaming_attrs(node_name, node_type, variable),
     )
     return _StreamingSidecarSpec(sidecar, spec)
 
@@ -425,22 +431,22 @@ def _streaming_sweep1d_scalar_spec(
     node_type: str,
     result: SweepResult1D,
 ) -> _StreamingSidecarSpec:
-    role, label, unit = _SWEEP1D_SCALAR_ROLES[node_type]
+    variable, label, unit = _SWEEP1D_SCALAR_VARIABLES[node_type]
     sidecar = _sidecar(
         index,
         node_name,
         node_type,
-        role,
+        variable,
         data_root,
-        root_path / _filename(index, node_type, role),
+        root_path / _filename(index, node_type, variable),
     )
-    spec = StreamingLabberRoleSpec(
-        role,
+    spec = StreamingLabberVariableSpec(
+        variable,
         label,
         unit,
         axes=[("Flux device value", "", result.flux)],
         shape=result.fit_value.shape,
-        attrs=_streaming_attrs(node_name, node_type, role),
+        attrs=_streaming_attrs(node_name, node_type, variable),
     )
     return _StreamingSidecarSpec(sidecar, spec)
 
@@ -449,7 +455,7 @@ def _streaming_row_value(
     node_name: str,
     node_type: str,
     result: object,
-    role: str,
+    variable: str,
     flux_idx: int,
 ) -> NDArray[np.float64] | float:
     sweep = _require_sweep1d(node_name, result)
@@ -457,15 +463,15 @@ def _streaming_row_value(
         raise IndexError(
             f"flux row index {flux_idx} out of range for {sweep.flux.size} rows"
         )
-    if role == "signal":
+    if variable == "signal":
         return sweep.signal[int(flux_idx)]
     if (
-        node_type in _SWEEP1D_SCALAR_ROLES
-        and role == _SWEEP1D_SCALAR_ROLES[node_type][0]
+        node_type in _SWEEP1D_SCALAR_VARIABLES
+        and variable == _SWEEP1D_SCALAR_VARIABLES[node_type][0]
     ):
         return float(sweep.fit_value[int(flux_idx)])
     raise ValueError(
-        f"unsupported Labber Browser streaming role {role!r} for node "
+        f"unsupported Labber Browser streaming variable {variable!r} for node "
         f"{node_name!r} ({node_type})"
     )
 
@@ -479,14 +485,14 @@ def _export_qubit_freq(
     result: FrequencySweepResult,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
-    role = "qubit_freq"
-    path = root_path / _filename(index, node_type, role)
+    variable = "qubit_freq"
+    path = root_path / _filename(index, node_type, variable)
     written = export_qubit_freq_fluxdep_spectrum(
         result,
         path,
         committed_mask=committed_mask,
     )
-    return _sidecar(index, node_name, node_type, role, data_root, Path(written))
+    return _sidecar(index, node_name, node_type, variable, data_root, Path(written))
 
 
 def _export_sweep1d_signal(
@@ -498,9 +504,9 @@ def _export_sweep1d_signal(
     result: SweepResult1D,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
-    role = "signal"
+    variable = "signal"
     values = _masked_rows(result.signal, committed_mask)
-    path = root_path / _filename(index, node_type, role)
+    path = root_path / _filename(index, node_type, variable)
     path.parent.mkdir(parents=True, exist_ok=True)
     written = save_labber_data(
         str(path),
@@ -510,10 +516,10 @@ def _export_sweep1d_signal(
             ("Flux device value", "", result.flux),
         ],
     )
-    return _sidecar(index, node_name, node_type, role, data_root, Path(written))
+    return _sidecar(index, node_name, node_type, variable, data_root, Path(written))
 
 
-_SWEEP1D_SCALAR_ROLES: dict[str, tuple[str, str, str]] = {
+_SWEEP1D_SCALAR_VARIABLES: dict[str, tuple[str, str, str]] = {
     "t1": ("t1", "T1", "us"),
     "t2ramsey": ("t2r", "T2 Ramsey", "us"),
     "t2echo": ("t2e", "T2 Echo", "us"),
@@ -529,16 +535,16 @@ def _export_sweep1d_scalar(
     result: SweepResult1D,
     committed_mask: NDArray[np.bool_],
 ) -> LabberBrowserSidecar:
-    role, label, unit = _SWEEP1D_SCALAR_ROLES[node_type]
+    variable, label, unit = _SWEEP1D_SCALAR_VARIABLES[node_type]
     values = _masked_vector(result.fit_value, committed_mask)
-    path = root_path / _filename(index, node_type, role)
+    path = root_path / _filename(index, node_type, variable)
     path.parent.mkdir(parents=True, exist_ok=True)
     written = save_labber_data(
         str(path),
         z=(label, unit, values),
         axes=[("Flux device value", "", result.flux)],
     )
-    return _sidecar(index, node_name, node_type, role, data_root, Path(written))
+    return _sidecar(index, node_name, node_type, variable, data_root, Path(written))
 
 
 def _committed_mask_for(
@@ -609,17 +615,17 @@ def _require_sweep1d(node_name: str, result: object) -> SweepResult1D:
     raise TypeError(f"node {node_name!r} requires sweep1d for Labber Browser export")
 
 
-def _filename(index: int, node_type: str, role: str) -> str:
+def _filename(index: int, node_type: str, variable: str) -> str:
     node_slug = safe_artifact_slug(node_type)
-    role_slug = safe_artifact_slug(role)
-    return f"{index:03d}-{node_slug}_{role_slug}.hdf5"
+    variable_slug = safe_artifact_slug(variable)
+    return f"{index:03d}-{node_slug}_{variable_slug}.hdf5"
 
 
 def _sidecar(
     index: int,
     node_name: str,
     node_type: str,
-    role: str,
+    variable: str,
     data_root: Path,
     path: Path,
 ) -> LabberBrowserSidecar:
@@ -627,16 +633,16 @@ def _sidecar(
         index=index,
         node=node_name,
         node_type=node_type,
-        role=role,
+        variable=variable,
         path=relative_to_artifact(data_root, path),
     )
 
 
-def _streaming_attrs(node_name: str, node_type: str, role: str) -> dict[str, str]:
+def _streaming_attrs(node_name: str, node_type: str, variable: str) -> dict[str, str]:
     return {
         "zcu_tools.autofluxdep.node_name": node_name,
         "zcu_tools.autofluxdep.node_type": node_type,
-        "zcu_tools.autofluxdep.result_role": role,
+        "zcu_tools.autofluxdep.result_role": variable,
         "zcu_tools.autofluxdep.sidecar_kind": "labber_browser",
     }
 

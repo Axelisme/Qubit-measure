@@ -13,7 +13,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 ### 保存目的與 owner
 
 - App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 只提供單檔 I/O、default degradation 與 replace。measure GUI 目前在 lifecycle close 保存，autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
-- Experiment Data File 保存一個 Experiment Result。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、roles 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic role mapping 洩漏給分析端。
+- Experiment Data File 保存一個 Experiment Result。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow Run Result Artifact 保存跨 node／flux 的資料與 audit。autofluxdep 的 lifecycle／`RunStore` 擁有 run-scoped artifact；node 經 observer 與 store 提交結果，不直接管理 HDF5。它不是單一 Experiment Result。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
 - 新參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。這些能力尚未接線到現行 MetaDict、ModuleLibrary、GUI 或 MCP，也不提供 ledger producer。
@@ -26,13 +26,13 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色暫存於 `resources.entry.builtin_kinds`，由 lib 外的組合根呼叫 `register_all(registry)` 顯式注入，不在 import 時註冊。Registry、角色解析與 lib 其他模組不 import 此模組。`.importlinter` contract `entry-definitions-composition-only` 固定這個依賴方向。這讓使用者可以替換定義，不把具體名稱散入框架；不相容舊檔沿用 model 原生驗證報錯，不增加自動修復。
 
-Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Dataset Role 是結果語意，state／phase 等離散座標仍是 axis。單一 Result 的 canonical one-shot grouped file 使用共同 grid、一份 shared metadata 與明確 role-to-channel mapping；必需 roles 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
+Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。單一 Result 的 canonical one-shot grouped file 使用共同 grid、一份 shared metadata 與明確 variable-to-channel mapping；必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 
-結構完整、量測完成與持久提交不同。Complete Experiment Result 指所需 roles 齊全，不保證所有預定測點完成。Operation stopped／failed 不單獨決定已提交資料能否分析。Autofluxdep 在 node 正常返回、patch 驗證後提交 row；mid-node exception 不把半列視為 committed。已取得 measurement 而 fit／provide 失敗時，保留 raw measurement 並分別標示提供結果的狀態；skip 以 audit event 表示，不以 NaN 推斷。Node-row 與 flux-level commit 是不同進度；partial／stopped／failed run 仍可保有先前已提交的 evidence。Terminal exports／reports 取用 committed journal evidence，不能反向覆寫 canonical row。
+結構完整、量測完成與持久提交不同。Complete Experiment Result 指所需 variables 齊全，不保證所有預定測點完成。Operation stopped／failed 不單獨決定已提交資料能否分析。Autofluxdep 在 node 正常返回、patch 驗證後提交 row；mid-node exception 不把半列視為 committed。已取得 measurement 而 fit／provide 失敗時，保留 raw measurement 並分別標示提供結果的狀態；skip 以 audit event 表示，不以 NaN 推斷。Node-row 與 flux-level commit 是不同進度；partial／stopped／failed run 仍可保有先前已提交的 evidence。Terminal exports／reports 取用 committed journal evidence，不能反向覆寫 canonical row。
 
 ### 失敗、路徑與遷移邊界
 
-Memento read／decode 失敗可回 fresh default，並回報 restore outcome；restore／apply 程式錯誤仍傳播。Caretaker 不懂 cfg，也不自行決定何時保存。量測資料、參數和未知格式版本不能沿用 memento 的 whole-file default degradation：必要 role、shape 或 unit 不符時，回報可定位的錯誤而非偽造空結果。
+Memento read／decode 失敗可回 fresh default，並回報 restore outcome；restore／apply 程式錯誤仍傳播。Caretaker 不懂 cfg，也不自行決定何時保存。量測資料、參數和未知格式版本不能沿用 memento 的 whole-file default degradation：必要 variable、shape 或 unit 不符時，回報可定位的錯誤而非偽造空結果。
 
 Autofluxdep artifact 建立失敗不啟動 run；canonical row write／flush／journal 失敗會使 run 失敗，並保留此前已 flush 的證據。Terminal export／report 失敗要顯示，但不把成功量測 row 改標為 measurement failure。Stop 仍嘗試 finalize；取消請求不保證 finalize 成功，也不表示 rollback。單檔 replace、HDF5 flush 和 journal append 不是跨檔交易或掉電持久保證；不可從 manifest 的 accepted 標記推導任意 crash 後可安全 resume。跨檔失敗窗口的讀取、修復和 resume 規則尚未驗證。
 

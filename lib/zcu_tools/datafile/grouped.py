@@ -25,7 +25,7 @@ from .labber import (
 )
 from .models import (
     Axis,
-    DatasetRole,
+    DataVariable,
     GroupedLabberData,
     LabberMetadata,
     LabberPayload,
@@ -34,22 +34,29 @@ from .paths import format_ext
 
 GROUPED_DATASET_VERSION = 2
 GROUPED_VERSION_ATTR = "zcu_tools.grouped_dataset_version"
-DATASET_ROLES_ATTR = "zcu_tools.dataset_roles"
-DATASET_ROLE_CHANNELS_ATTR = "zcu_tools.dataset_role_channels"
-DATASET_ROLE_ATTR = "zcu_tools.dataset_role"
+DATA_VARIABLES_ATTR = "zcu_tools.dataset_roles"
+DATA_VARIABLE_CHANNELS_ATTR = "zcu_tools.dataset_role_channels"
+DATA_VARIABLE_ATTR = "zcu_tools.dataset_role"
 _STREAMING_VERSION_ATTR = "zcu_tools.streaming_grouped_dataset_version"
 _STREAMING_GROUPED_DATASET_VERSION = 1
 
 
 def save_grouped_labber_data(
     path: str,
-    roles: Mapping[str | DatasetRole, LabberPayload],
+    variables: Mapping[str | DataVariable, LabberPayload],
     *,
     metadata: LabberMetadata | None = None,
 ) -> str:
-    """Save common-grid role payloads as parallel channels in one Labber log."""
-    grouped = GroupedLabberData(roles, metadata=metadata)
-    _validate_v2_payloads(grouped.roles)
+    """Save named common-grid variables as parallel channels in one Labber log.
+
+    path is the destination; its filename is normalized to the Labber extension.
+    variables maps snake_case identities to payloads sharing axes, shape and
+    timestamps. metadata is shared, or empty when omitted. Return the written
+    path. Invalid variables/grid raise ValueError before creating the file;
+    invalid payload/metadata types raise TypeError. Existing paths raise FileExistsError.
+    """
+    grouped = GroupedLabberData(variables, metadata=metadata)
+    _validate_v2_payloads(grouped.variables)
 
     raw_metadata = grouped.metadata
     creation_time = (
@@ -66,21 +73,21 @@ def save_grouped_labber_data(
     )
     path = format_ext(path)
     log_name = os.path.splitext(os.path.basename(path))[0]
-    role_items = list(grouped.roles.items())
-    role_names = [str(role) for role, _payload in role_items]
-    channel_names = [payload.data.name for _role, payload in role_items]
+    variable_items = list(grouped.variables.items())
+    variable_names = [str(variable) for variable, _payload in variable_items]
+    channel_names = [payload.data.name for _variable, payload in variable_items]
 
     with h5py.File(path, "x") as f:
         _write_uniform_multi_channel_log_group(
             f,
-            [payload for _role, payload in role_items],
+            [payload for _variable, payload in variable_items],
             effective_metadata,
             log_name=log_name,
             creation_time=creation_time,
         )
         f.attrs[GROUPED_VERSION_ATTR] = GROUPED_DATASET_VERSION
-        f.attrs[DATASET_ROLES_ATTR] = _str_array(role_names)
-        f.attrs[DATASET_ROLE_CHANNELS_ATTR] = _str_array(channel_names)
+        f.attrs[DATA_VARIABLES_ATTR] = _str_array(variable_names)
+        f.attrs[DATA_VARIABLE_CHANNELS_ATTR] = _str_array(channel_names)
 
     return path
 
@@ -88,9 +95,17 @@ def save_grouped_labber_data(
 def load_grouped_labber_data(
     path: str,
     *,
-    required_roles: Sequence[str | DatasetRole] | None = None,
+    required_variables: Sequence[str | DataVariable] | None = None,
 ) -> GroupedLabberData:
-    """Load root-only grouped v2 or marker-qualified streaming grouped v1."""
+    """Load root-only grouped v2 or marker-qualified streaming grouped v1.
+
+    path identifies the local Labber file; file resolution adds its extension
+    when omitted. required_variables, when supplied, must match the stored
+    identities exactly; None accepts all stored variables for inspection.
+    Return named payloads and shared metadata without modifying the input file.
+    Invalid names, schema/version, mapping or variable set raise ValueError;
+    unreadable files propagate their I/O error. Unmarked grouped v1 is rejected.
+    """
     path = _resolve_path(path)
     with h5py.File(path, "r") as f:
         raw_version = f.attrs.get(GROUPED_VERSION_ATTR)
@@ -105,7 +120,7 @@ def load_grouped_labber_data(
                     "unsupported grouped/streaming dataset version combination "
                     f"{version!r}/{raw_streaming_version!r}"
                 )
-            return _load_grouped_v2(f, required_roles)
+            return _load_grouped_v2(f, required_variables)
 
         if version == _STREAMING_GROUPED_DATASET_VERSION:
             if raw_streaming_version is None:
@@ -121,7 +136,7 @@ def load_grouped_labber_data(
                     "unsupported grouped/streaming dataset version combination "
                     f"{version!r}/{streaming_version!r}"
                 )
-            return _load_streaming_grouped_v1(f, required_roles)
+            return _load_streaming_grouped_v1(f, required_variables)
 
         raise ValueError(f"unsupported grouped dataset version {raw_version!r}")
 
@@ -138,18 +153,18 @@ def _read_exact_version(raw_version: Any, label: str) -> int:
 
 def _load_grouped_v2(
     f: h5py.File,
-    required_roles: Sequence[str | DatasetRole] | None,
+    required_variables: Sequence[str | DataVariable] | None,
 ) -> GroupedLabberData:
-    if DATASET_ROLE_ATTR in f.attrs:
-        raise ValueError("grouped v2 must not declare a singular root dataset role")
-    declared_roles = _read_declared_roles(f)
+    if DATA_VARIABLE_ATTR in f.attrs:
+        raise ValueError("grouped v2 must not declare a singular root data variable")
+    declared_variables = _read_declared_variables(f)
     declared_channels = _read_declared_channels(f)
-    if len(declared_roles) != len(declared_channels):
-        raise ValueError("grouped v2 role-to-channel mapping lengths do not match")
+    if len(declared_variables) != len(declared_channels):
+        raise ValueError("grouped v2 variable-to-channel mapping lengths do not match")
     if len(set(declared_channels)) != len(declared_channels):
-        raise ValueError("grouped v2 role channel labels must be unique")
+        raise ValueError("grouped v2 variable channel labels must be unique")
     if any(not channel for channel in declared_channels):
-        raise ValueError("grouped v2 role channel labels must be non-empty")
+        raise ValueError("grouped v2 variable channel labels must be non-empty")
 
     logs = _all_log_refs(f)
     if len(logs) != 1 or any(
@@ -160,7 +175,7 @@ def _load_grouped_v2(
     channel_values, axes, relative_timestamps = _read_uniform_multi_channel_log(f, f)
     if list(channel_values) != declared_channels:
         raise ValueError(
-            "grouped v2 role-to-channel mapping does not match actual Labber channels"
+            "grouped v2 variable-to-channel mapping does not match actual Labber channels"
         )
 
     metadata = _read_metadata(f)
@@ -170,37 +185,38 @@ def _load_grouped_v2(
         else metadata.creation_time + np.asarray(relative_timestamps)
     )
     payloads = {
-        role: LabberPayload(
+        variable: LabberPayload(
             Axis(channel, channel_values[channel][0], channel_values[channel][1]),
             [Axis(name, unit, values) for name, unit, values in axes],
             timestamps=timestamps,
         )
-        for role, channel in zip(declared_roles, declared_channels)
+        for variable, channel in zip(declared_variables, declared_channels)
     }
     _validate_v2_payloads(payloads)
-    if required_roles is not None:
-        _validate_required_roles(payloads, required_roles)
+    if required_variables is not None:
+        _validate_required_variables(payloads, required_variables)
     return GroupedLabberData(
-        {str(role): payload for role, payload in payloads.items()}, metadata=metadata
+        {str(variable): payload for variable, payload in payloads.items()},
+        metadata=metadata,
     )
 
 
 def _load_streaming_grouped_v1(
     f: h5py.File,
-    required_roles: Sequence[str | DatasetRole] | None,
+    required_variables: Sequence[str | DataVariable] | None,
 ) -> GroupedLabberData:
-    declared_roles = _read_declared_roles(f)
+    declared_variables = _read_declared_variables(f)
     logs = _all_log_refs(f)
-    if len(declared_roles) != len(logs):
-        raise ValueError("grouped dataset role list does not match log group count")
+    if len(declared_variables) != len(logs):
+        raise ValueError("grouped data variable list does not match log group count")
 
     metadata = _read_metadata(f)
-    payloads: dict[DatasetRole, LabberPayload] = {}
-    seen_from_logs: list[DatasetRole] = []
+    payloads: dict[DataVariable, LabberPayload] = {}
+    seen_from_logs: list[DataVariable] = []
     for log in logs:
-        role = _read_log_role(log)
-        if role in payloads:
-            raise ValueError(f"duplicate dataset role {role!r}")
+        variable = _read_log_variable(log)
+        if variable in payloads:
+            raise ValueError(f"duplicate data variable {variable!r}")
         z, axes, relative_timestamps = _read_single_log(f, log)
         z_name, z_unit = _read_log_label(f, log)
         timestamps = (
@@ -208,31 +224,32 @@ def _load_streaming_grouped_v1(
             if relative_timestamps is None
             else metadata.creation_time + np.asarray(relative_timestamps)
         )
-        payloads[role] = LabberPayload(
+        payloads[variable] = LabberPayload(
             Axis(z_name, z_unit, z),
             [Axis(name, unit, values) for name, unit, values in axes],
             timestamps=timestamps,
         )
-        seen_from_logs.append(role)
+        seen_from_logs.append(variable)
 
-    if declared_roles != seen_from_logs:
-        raise ValueError("grouped dataset role list does not match log roles")
-    if required_roles is not None:
-        _validate_required_roles(payloads, required_roles)
+    if declared_variables != seen_from_logs:
+        raise ValueError("grouped data variable list does not match log variables")
+    if required_variables is not None:
+        _validate_required_variables(payloads, required_variables)
     return GroupedLabberData(
-        {str(role): payload for role, payload in payloads.items()}, metadata=metadata
+        {str(variable): payload for variable, payload in payloads.items()},
+        metadata=metadata,
     )
 
 
 @dataclass(frozen=True)
-class _V2RoleGrid:
+class _V2VariableGrid:
     shape: tuple[int, ...]
     axes: list[tuple[str, str, np.ndarray]]
     timestamps: np.ndarray | None
 
 
-def _normalize_v2_role_axes(
-    role: DatasetRole, payload: LabberPayload, shape: tuple[int, ...]
+def _normalize_v2_variable_axes(
+    variable: DataVariable, payload: LabberPayload, shape: tuple[int, ...]
 ) -> list[tuple[str, str, np.ndarray]]:
     normalized_axes: list[tuple[str, str, np.ndarray]] = []
     for index, axis in enumerate(payload.axes):
@@ -252,32 +269,34 @@ def _normalize_v2_role_axes(
         expected_length = shape[-1 - index]
         if len(axis_values) != expected_length:
             raise ValueError(
-                f"grouped v2 role {role!r} shape {shape} does not match "
+                f"grouped v2 variable {variable!r} shape {shape} does not match "
                 f"axis {axis.name!r} length {len(axis_values)}"
             )
         normalized_axes.append((axis.name, axis.unit, axis_values))
     return normalized_axes
 
 
-def _normalize_v2_role_grid(role: DatasetRole, payload: LabberPayload) -> _V2RoleGrid:
+def _normalize_v2_variable_grid(
+    variable: DataVariable, payload: LabberPayload
+) -> _V2VariableGrid:
     try:
         values = np.asarray(payload.data.values)
     except ValueError as exc:
         raise ValueError(
-            f"grouped v2 role {role!r} has ragged or vector-valued data"
+            f"grouped v2 variable {variable!r} has ragged or vector-valued data"
         ) from exc
     if values.dtype == object or not np.issubdtype(values.dtype, np.number):
-        raise ValueError(f"grouped v2 role {role!r} data must be numeric")
+        raise ValueError(f"grouped v2 variable {variable!r} data must be numeric")
     if values.ndim < 1 or values.size == 0:
         raise ValueError(
-            f"grouped v2 role {role!r} data must have at least one dimension "
+            f"grouped v2 variable {variable!r} data must have at least one dimension "
             "and one value"
         )
     if not payload.axes:
         raise ValueError("grouped v2 requires at least one step axis")
     if len(payload.axes) != values.ndim:
         raise ValueError(
-            f"grouped v2 role {role!r} shape {values.shape} requires "
+            f"grouped v2 variable {variable!r} shape {values.shape} requires "
             f"{values.ndim} axes, got {len(payload.axes)}"
         )
     if not isinstance(payload.data.name, str) or not payload.data.name:
@@ -285,7 +304,7 @@ def _normalize_v2_role_grid(role: DatasetRole, payload: LabberPayload) -> _V2Rol
     if not isinstance(payload.data.unit, str):
         raise ValueError("grouped v2 channel units must be strings")
 
-    normalized_axes = _normalize_v2_role_axes(role, payload, values.shape)
+    normalized_axes = _normalize_v2_variable_axes(variable, payload, values.shape)
     expected_timestamps = int(np.prod(values.shape[:-1])) if values.ndim > 1 else 1
     timestamps: np.ndarray | None
     if payload.timestamps is None:
@@ -294,43 +313,45 @@ def _normalize_v2_role_grid(role: DatasetRole, payload: LabberPayload) -> _V2Rol
         timestamps = np.asarray(payload.timestamps, dtype=float)
         if timestamps.ndim != 1 or len(timestamps) != expected_timestamps:
             raise ValueError(
-                f"grouped v2 role {role!r} timestamps must be a flat array of "
+                f"grouped v2 variable {variable!r} timestamps must be a flat array of "
                 f"length {expected_timestamps}"
             )
-    return _V2RoleGrid(values.shape, normalized_axes, timestamps)
+    return _V2VariableGrid(values.shape, normalized_axes, timestamps)
 
 
-def _validate_v2_common_grid(reference: _V2RoleGrid, actual: _V2RoleGrid) -> None:
+def _validate_v2_common_grid(
+    reference: _V2VariableGrid, actual: _V2VariableGrid
+) -> None:
     if actual.shape != reference.shape or len(actual.axes) != len(reference.axes):
-        raise ValueError("grouped v2 roles must share one common grid and shape")
+        raise ValueError("grouped v2 variables must share one common grid and shape")
     for expected_axis, actual_axis in zip(reference.axes, actual.axes, strict=True):
         if expected_axis[:2] != actual_axis[:2] or not np.array_equal(
             expected_axis[2], actual_axis[2], equal_nan=True
         ):
-            raise ValueError("grouped v2 roles must share one common grid")
+            raise ValueError("grouped v2 variables must share one common grid")
     if (reference.timestamps is None) != (actual.timestamps is None) or (
         reference.timestamps is not None
         and actual.timestamps is not None
         and not np.array_equal(reference.timestamps, actual.timestamps, equal_nan=True)
     ):
-        raise ValueError("grouped v2 roles must have identical timestamps")
+        raise ValueError("grouped v2 variables must have identical timestamps")
 
 
 def _validate_v2_payloads(
-    payloads: Mapping[DatasetRole, LabberPayload],
+    payloads: Mapping[DataVariable, LabberPayload],
 ) -> None:
-    reference_grid: _V2RoleGrid | None = None
+    reference_grid: _V2VariableGrid | None = None
     physical_labels: list[str] = []
 
-    for role, payload in payloads.items():
-        # Finish each role before comparing it or moving to the next role, so
+    for variable, payload in payloads.items():
+        # Finish each variable before comparing it or moving to the next variable, so
         # malformed payloads retain their first-error ordering.
-        role_grid = _normalize_v2_role_grid(role, payload)
+        variable_grid = _normalize_v2_variable_grid(variable, payload)
         if reference_grid is None:
-            reference_grid = role_grid
+            reference_grid = variable_grid
             physical_labels.extend(axis.name for axis in payload.axes)
         else:
-            _validate_v2_common_grid(reference_grid, role_grid)
+            _validate_v2_common_grid(reference_grid, variable_grid)
         physical_labels.append(payload.data.name)
 
     if len(set(physical_labels)) != len(physical_labels):
@@ -350,61 +371,61 @@ def _read_metadata(f: h5py.File) -> LabberMetadata:
     )
 
 
-def _read_declared_roles(f: h5py.File) -> list[DatasetRole]:
-    raw = _decode(f.attrs.get(DATASET_ROLES_ATTR))
+def _read_declared_variables(f: h5py.File) -> list[DataVariable]:
+    raw = _decode(f.attrs.get(DATA_VARIABLES_ATTR))
     if raw is None:
-        raise ValueError("grouped dataset is missing dataset role list")
+        raise ValueError("grouped dataset is missing data variable list")
     values: list[Any] = [raw] if isinstance(raw, str) else list(raw)
 
-    roles: list[DatasetRole] = []
-    seen: set[DatasetRole] = set()
+    variables: list[DataVariable] = []
+    seen: set[DataVariable] = set()
     for value in values:
-        role = DatasetRole(value)
-        if role in seen:
-            raise ValueError(f"duplicate dataset role {role!r}")
-        seen.add(role)
-        roles.append(role)
-    return roles
+        variable = DataVariable(value)
+        if variable in seen:
+            raise ValueError(f"duplicate data variable {variable!r}")
+        seen.add(variable)
+        variables.append(variable)
+    return variables
 
 
 def _read_declared_channels(f: h5py.File) -> list[str]:
-    raw = _decode(f.attrs.get(DATASET_ROLE_CHANNELS_ATTR))
+    raw = _decode(f.attrs.get(DATA_VARIABLE_CHANNELS_ATTR))
     if raw is None:
-        raise ValueError("grouped v2 is missing dataset role channel mapping")
+        raise ValueError("grouped v2 is missing data variable channel mapping")
     values = [raw] if isinstance(raw, str) else list(raw)
     channels: list[str] = []
     for value in values:
         decoded = _decode(value)
         if not isinstance(decoded, str):
-            raise ValueError("grouped v2 role channel mapping must contain strings")
+            raise ValueError("grouped v2 variable channel mapping must contain strings")
         channels.append(decoded)
     return channels
 
 
-def _read_log_role(log: h5py.File | h5py.Group) -> DatasetRole:
-    raw = _decode(log.attrs.get(DATASET_ROLE_ATTR))
+def _read_log_variable(log: h5py.File | h5py.Group) -> DataVariable:
+    raw = _decode(log.attrs.get(DATA_VARIABLE_ATTR))
     if raw is None:
-        raise ValueError("grouped log is missing dataset role")
-    return DatasetRole(raw)
+        raise ValueError("grouped log is missing data variable")
+    return DataVariable(raw)
 
 
-def _validate_required_roles(
-    payloads: Mapping[DatasetRole, LabberPayload],
-    required_roles: Sequence[str | DatasetRole],
+def _validate_required_variables(
+    payloads: Mapping[DataVariable, LabberPayload],
+    required_variables: Sequence[str | DataVariable],
 ) -> None:
-    required: set[DatasetRole] = set()
-    for raw_role in required_roles:
-        role = DatasetRole(raw_role)
-        if role in required:
-            raise ValueError(f"duplicate required dataset role {role!r}")
-        required.add(role)
+    required: set[DataVariable] = set()
+    for raw_variable in required_variables:
+        variable = DataVariable(raw_variable)
+        if variable in required:
+            raise ValueError(f"duplicate required data variable {variable!r}")
+        required.add(variable)
 
     present = set(payloads)
     missing = required - present
     unknown = present - required
     if missing:
         names = ", ".join(sorted(missing))
-        raise ValueError(f"missing required dataset role(s): {names}")
+        raise ValueError(f"missing required data variable(s): {names}")
     if unknown:
         names = ", ".join(sorted(unknown))
-        raise ValueError(f"unknown dataset role(s): {names}")
+        raise ValueError(f"unknown data variable(s): {names}")

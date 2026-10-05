@@ -15,9 +15,9 @@ from zcu_tools.experiment import (
     US_TO_S,
     GroupedAxesSpec,
     GroupedLoadData,
-    RoleAxisSpec,
-    RoleSpec,
-    RoleZSpec,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -95,9 +95,9 @@ class CPMGAnalysis:
     t2errs: NDArray[np.float64]
 
 
-CPMG_LENGTHS_ROLE = "lengths"
-CPMG_SIGNALS_ROLE = "signals"
-CPMG_GROUPED_ROLES = (CPMG_LENGTHS_ROLE, CPMG_SIGNALS_ROLE)
+CPMG_LENGTHS_VARIABLE = "lengths"
+CPMG_SIGNALS_VARIABLE = "signals"
+CPMG_GROUPED_VARIABLES = (CPMG_LENGTHS_VARIABLE, CPMG_SIGNALS_VARIABLE)
 
 
 def cpmg_result_to_grouped_payloads(result: CPMG_Result) -> dict[str, LabberPayload]:
@@ -153,11 +153,11 @@ def _validate_cpmg_result(result: CPMG_Result) -> None:
 
 
 def _build_cpmg_result(data: GroupedLoadData[CPMG_Cfg]) -> CPMG_Result:
-    lengths_role = data.role(CPMG_LENGTHS_ROLE)
-    signals_role = data.role(CPMG_SIGNALS_ROLE)
-    ns = lengths_role.axes[1].astype(np.int64)
-    delays = lengths_role.z.astype(np.float64)
-    signals = signals_role.z.astype(np.complex128)
+    lengths_variable = data.variable(CPMG_LENGTHS_VARIABLE)
+    signals_variable = data.variable(CPMG_SIGNALS_VARIABLE)
+    ns = lengths_variable.axes[1].astype(np.int64)
+    delays = lengths_variable.z.astype(np.float64)
+    signals = signals_variable.z.astype(np.complex128)
     _validate_cpmg_arrays(ns, delays, signals)
     return CPMG_Result(
         ns=ns,
@@ -166,16 +166,16 @@ def _build_cpmg_result(data: GroupedLoadData[CPMG_Cfg]) -> CPMG_Result:
     )
 
 
-_CPMG_ROLE_AXES = (
-    RoleAxisSpec.generated_arange("Time Index", "a.u.", dtype=np.int64),
-    RoleAxisSpec("Number of Pi", "a.u.", field_name="ns", dtype=np.int64),
+_CPMG_VARIABLE_AXES = (
+    VariableAxisSpec.generated_arange("Time Index", "a.u.", dtype=np.int64),
+    VariableAxisSpec("Number of Pi", "a.u.", field_name="ns", dtype=np.int64),
 )
 CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
-    roles=(
-        RoleSpec(
-            role=CPMG_LENGTHS_ROLE,
-            axes=_CPMG_ROLE_AXES,
-            z=RoleZSpec(
+    variables=(
+        VariableSpec(
+            variable=CPMG_LENGTHS_VARIABLE,
+            axes=_CPMG_VARIABLE_AXES,
+            z=VariableZSpec(
                 field_name="delays",
                 label="Length",
                 unit="s",
@@ -183,10 +183,10 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 dtype=np.float64,
             ),
         ),
-        RoleSpec(
-            role=CPMG_SIGNALS_ROLE,
-            axes=_CPMG_ROLE_AXES,
-            z=RoleZSpec(
+        VariableSpec(
+            variable=CPMG_SIGNALS_VARIABLE,
+            axes=_CPMG_VARIABLE_AXES,
+            z=VariableZSpec(
                 field_name="signals",
                 label="Signal",
                 unit="a.u.",
