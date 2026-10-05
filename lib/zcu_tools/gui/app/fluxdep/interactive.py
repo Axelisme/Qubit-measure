@@ -274,9 +274,22 @@ class FluxDepInteractiveOwner:
         return ActiveInteractiveContext(self._context_id, context)
 
     def _cancel_for_begin(self) -> None:
-        """Retire input, but preserve a callback's replacement or disposal."""
+        """Retire input unless synchronous callbacks change admission or sources."""
+        source_keys = (
+            SPECTRUM_SET_VERSION_KEY,
+            SELECTION_VERSION_KEY,
+            *(spectrum_version_key(name) for name in self._state.spectrums),
+        )
+        versions = tuple(self._state.version.get(key) for key in source_keys)
+        active_spectrum = self._state.active_spectrum
         self.cancel()
-        if self._disposed or self._context is not None:
+        # A closed fact can replace input, dispose the owner, or mutate sources.
+        if (
+            self._disposed
+            or self._context is not None
+            or active_spectrum != self._state.active_spectrum
+            or versions != tuple(self._state.version.get(key) for key in source_keys)
+        ):
             raise FailedPreconditionError("owner changed during context retirement")
 
     def _install_context(self, context: InteractiveContext) -> None:
@@ -342,8 +355,9 @@ class FluxDepInteractiveOwner:
         InvalidInputError rejects unknown names. FailedPreconditionError rejects
         inactive names or a disposed owner. Seed inherits meaningful alignment;
         OneTone fixes magnitude_only to True. Reentrant retirement that changes
-        the context or disposes the owner raises FailedPreconditionError and keeps
-        the callback's result. RuntimeError rejects off-owner use.
+        context, spectrum/selection publications or active name, or disposes the
+        owner raises FailedPreconditionError and keeps the callback's result.
+        RuntimeError rejects off-owner use.
         """
         self._require_owner()
         if self._disposed:
@@ -423,8 +437,9 @@ class FluxDepInteractiveOwner:
         Unknown name raises InvalidInputError. Inactive/unaligned/wrong-type or
         disposed owner raises FailedPreconditionError. Switching picker kind
         closes old input before replacement. Reentrant retirement that changes
-        the context or disposes the owner raises FailedPreconditionError and keeps
-        the callback's result. Off-owner use raises RuntimeError.
+        context, spectrum/selection publications or active name, or disposes the
+        owner raises FailedPreconditionError and keeps the callback's result.
+        Off-owner use raises RuntimeError.
         """
         self._require_owner()
         if self._disposed:
@@ -509,9 +524,10 @@ class FluxDepInteractiveOwner:
 
         Unknown name raises InvalidInputError. Inactive/unaligned/wrong-type or
         disposed owner raises FailedPreconditionError. Kind switch closes old
-        input. Reentrant retirement that changes the context or disposes the
-        owner raises FailedPreconditionError and keeps the callback's result.
-        Off-owner use raises RuntimeError. Invalid raw data raises ValueError.
+        input. Reentrant retirement that changes context, spectrum/selection
+        publications or active name, or disposes the owner raises
+        FailedPreconditionError and keeps the callback's result. Off-owner use
+        raises RuntimeError. Invalid raw data raises ValueError.
         """
         self._require_owner()
         if self._disposed:
@@ -603,8 +619,9 @@ class FluxDepInteractiveOwner:
         inherited. Cancel the previous picker on successful replacement.
         FailedPreconditionError rejects disposed owner or no usable cloud;
         invalid numeric input raises ValueError. Reentrant retirement that changes
-        the context or disposes the owner raises FailedPreconditionError and keeps
-        the callback's result. Off-owner use raises RuntimeError.
+        context, spectrum/selection publications or active name, or disposes the
+        owner raises FailedPreconditionError and keeps the callback's result.
+        Off-owner use raises RuntimeError.
         """
         self._require_owner()
         if self._disposed:

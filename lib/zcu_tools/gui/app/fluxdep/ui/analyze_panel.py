@@ -406,7 +406,7 @@ class AnalyzePanelWidget(QWidget):
     def activate(self) -> None:
         """Activate the singleton; on Filter, reattach valid or new app context.
 
-        MainWindow calls on every Analyze click, not just first construction.
+        Explicit refresh; MainWindow routes Analyze clicks through show_tab.
         Retire the old view first, so hidden controls cannot Apply stale data.
         Empty cloud shows a placeholder; invalid inputs propagate to the caller.
         """
