@@ -51,7 +51,6 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
@@ -228,7 +227,7 @@ class MainWindow(QMainWindow):
 
     def _clear_editor(self) -> None:
         if self._current_editor is not None:
-            if isinstance(self._current_editor, LinePickerWidget):
+            if isinstance(self._current_editor, (LinePickerWidget, OneToneWidget)):
                 self._current_editor.teardown()
             # Quiesce any in-flight pool worker before scheduling C++ deletion:
             # FindPointsWidget owns a BackgroundRunner whose queued done delivery
@@ -288,25 +287,21 @@ class MainWindow(QMainWindow):
 
     def _mount_point_selector(self, entry: SpectrumEntry) -> None:
         if entry.spec_type == "OneTone":
-            widget: InteractiveMplWidget = OneToneWidget(
-                entry.raw["signals"],
-                entry.raw["dev_values"],
-                entry.raw["freqs"],
-                flux_half=entry.flux_half,
-                flux_int=entry.flux_int,
-            )
+            context = self._ctrl.interactive.begin_onetone_pick(entry.name)
+            one_tone = OneToneWidget(context)
+            one_tone.finished.connect(self._ctrl.interactive.finish_onetone_pick)
+            self._mount(one_tone)
         else:
-            widget = FindPointsWidget(
+            two_tone = FindPointsWidget(
                 entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
             )
-        name = entry.name
 
-        def _on_finish() -> None:
-            dev_values, freqs = widget.get_result()  # type: ignore[attr-defined]
-            self._ctrl.set_points(name, dev_values, freqs)
+            def _on_finish() -> None:
+                dev_values, freqs = two_tone.get_result()
+                self._ctrl.set_points(entry.name, dev_values, freqs)
 
-        widget.finished.connect(_on_finish)
-        self._mount(widget)
+            two_tone.finished.connect(_on_finish)
+            self._mount(two_tone)
 
     def _on_repick_lines(self) -> None:
         """Re-open the line picker for the active spectrum (redo alignment)."""

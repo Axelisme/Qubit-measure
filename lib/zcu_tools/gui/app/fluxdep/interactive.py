@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import numpy as np
+from numpy.typing import NDArray
+
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickAnalysis,
     FluxPickInputs,
@@ -12,6 +15,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     analyze_flux_pick,
     fold_initial_lines,
 )
+from zcu_tools.analysis.fluxdep.onetone import OneTonePickResult, OneTonePickState
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -19,6 +23,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
+from zcu_tools.gui.app.fluxdep.onetone import OneTonePickPlugin
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.interactive.flux_pick import SharedFluxPickPlugin
@@ -42,6 +47,24 @@ class LinePickContext:
     session: Session[FluxPickState]
 
 
+@dataclass(frozen=True, slots=True)
+class OneTonePickContext:
+    """Live one-tone context with captured calibration references.
+
+    spectrum_name identifies the active aligned OneTone spectrum.
+    plugin supplies threshold actions/commands and native point results.
+    session owns complete committed threshold/indices and single-level undo.
+    flux_half and flux_int are captured, finite native device reference lines,
+    not editable calibration or a second analysis state.
+    """
+
+    spectrum_name: str
+    plugin: OneTonePickPlugin
+    session: Session[OneTonePickState]
+    flux_half: float
+    flux_int: float
+
+
 class FluxDepInteractiveOwner:
     """Serialize one active picker and invalidate it on spectrum facts.
 
@@ -58,18 +81,22 @@ class FluxDepInteractiveOwner:
         *,
         background: BackgroundSubmitter | None,
         publish_alignment: Callable[[str, float, float], None],
+        publish_points: Callable[[str, NDArray[np.float64], NDArray[np.float64]], None],
     ) -> None:
         """Capture state and runtime ports; publish through Controller's alignment.
 
         background must deliver callbacks on owner, or None to reject auto_align.
         publish_alignment receives name and accepted native device positions.
+        publish_points receives name and uncalibrated device/GHz point arrays;
+        Controller/PointsService owns sorting, calibration and publication.
         """
         self._state = state
         self._owner = owner
         self._require_owner()
         self._background = background
         self._publish_alignment = publish_alignment
-        self._context: LinePickContext | None = None
+        self._publish_points = publish_points
+        self._context: LinePickContext | OneTonePickContext | None = None
         self._disposed = False
         self._subscriptions: tuple[Callable[[], None], ...] = (
             bus.subscribe(
@@ -116,6 +143,7 @@ class FluxDepInteractiveOwner:
         current = self.current_line_pick()
         if current is not None:
             return current
+        self.cancel()
         entry = self._state.spectrums[name]
         inputs = FluxPickInputs(
             entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
@@ -148,7 +176,7 @@ class FluxDepInteractiveOwner:
             or self._context.spectrum_name not in self._state.spectrums
         ):
             self.cancel()
-        return self._context
+        return self._context if isinstance(self._context, LinePickContext) else None
 
     def finish_line_pick(self) -> FluxPickAnalysis:
         """Validate, close and publish alignment; return accepted numeric result.
@@ -169,6 +197,32 @@ class FluxDepInteractiveOwner:
             context.spectrum_name, result.flux_half, result.flux_int
         )
         return result
+
+    def begin_onetone_pick(self, name: str) -> OneTonePickContext:
+        """Reuse a valid context or open picking for an active aligned OneTone.
+
+        Unknown name raises InvalidInputError. Inactive/unaligned/wrong-type or
+        disposed owner raises FailedPreconditionError. Switching picker kind
+        closes old input before replacement. Off-owner use raises RuntimeError.
+        """
+        raise NotImplementedError
+
+    def current_onetone_pick(self) -> OneTonePickContext | None:
+        """Read the valid OneTone context, or None, without creating a session.
+
+        Requires owner loop; absent, invalidated or another picker kind returns
+        None. Invalid spectrum identity closes old input as for line picking.
+        """
+        raise NotImplementedError
+
+    def finish_onetone_pick(self) -> OneTonePickResult:
+        """Validate committed indices, close input and publish native point arrays.
+
+        Missing context raises FailedPreconditionError; invalid state retains
+        editable input. Clear ownership before Controller's publication.
+        Publication failure propagates without reopening terminal input.
+        """
+        raise NotImplementedError
 
     def cancel(self) -> None:
         """Close current input without publication; safe with no active context."""

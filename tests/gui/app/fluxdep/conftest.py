@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.datafile import save_labber_data
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 
 
 @pytest.fixture(autouse=True, name="_drain_qt_events")
@@ -74,3 +76,38 @@ def transposed_spectrum_hdf5(tmp_path):
         ],
     )
     return filepath + ".hdf5", flux, freqs_ghz, signals
+
+
+@pytest.fixture
+def onetone_controller():
+    """Aligned two-dip OneTone, descending devices to observe service sorting."""
+    devs = np.linspace(1.0, 0.0, 40)
+    freqs = np.linspace(5.0, 6.0, 20)
+    profile = np.exp(-((freqs - freqs[10]) ** 2) / (2 * 0.08**2))
+    depth = np.full(devs.size, 0.3)
+    for center in (0.25, 0.75):
+        depth += 0.5 * np.exp(-((devs - center) ** 2) / (2 * 0.03**2))
+    signals = np.asarray(1 - depth[:, None] * profile[None, :], dtype=np.complex128)
+    state = FluxDepState()
+    state.put_spectrum(
+        SpectrumEntry(
+            name="one",
+            spec_type="OneTone",
+            raw={
+                "signals": signals,
+                "dev_values": devs,
+                "freqs": freqs,
+                "fluxs": devs.copy(),
+            },
+            points={
+                "dev_values": np.empty(0),
+                "freqs": np.empty(0),
+                "fluxs": np.empty(0),
+            },
+        )
+    )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("one")
+    ctrl.set_alignment("one", 0.2, 0.7)
+    yield ctrl
+    ctrl.interactive.dispose()

@@ -80,6 +80,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
             else ManualOwnerScheduler(),
             background=interactive_background,
             publish_alignment=self.set_alignment,
+            publish_points=self.set_points,
         )
 
     @property
