@@ -6,7 +6,7 @@ optimistic-concurrency ``VersionTable``. Like measure-gui, every State write
 happens only on the Qt main thread; workers never mutate State directly (their
 only side effect is emitting a Qt signal whose main-thread slot writes here).
 
-``VersionTable`` is copied verbatim from measure-gui (it is pure mechanism); the
+``VersionTable`` is the shared GUI concurrency mechanism; the
 domain shape (``FluxDepState`` / ``SpectrumEntry`` / ...) is fluxdep-specific and
 replaces measure's tab/device/context model.
 """
@@ -37,7 +37,8 @@ from zcu_tools.gui.version_table import (
 
 SpecType = Literal["OneTone", "TwoTone"]
 
-# Version-table resource keys (see VersionTable docstring for the bump↔drop map).
+# Spectrum leaf keys use retire on removal so reusable names do not repeat
+# versions. Collection/global keys live for this State's lifetime.
 SPECTRUM_SET_VERSION_KEY = "spectrums:__set__"
 SELECTION_VERSION_KEY = "selection"
 PROJECT_VERSION_KEY = "project"
@@ -212,10 +213,15 @@ class FluxDepState:
         logger.debug("put_spectrum: name=%r new=%s", entry.name, is_new)
 
     def remove_spectrum(self, name: str) -> None:
-        """Remove a spectrum entry and drop its version keys."""
+        """Remove ``name`` and retire only its exact spectrum version key.
+
+        Unknown names raise KeyError without mutation. The removed key reads
+        as 0; reloading the same name continues above its previous live version.
+        The collection version advances, and an active removed name is cleared.
+        """
         self._assert_owner()
         del self.spectrums[name]
-        self.version.drop_prefix(spectrum_version_key(name))
+        self.version.retire(spectrum_version_key(name))
         self.version.bump(SPECTRUM_SET_VERSION_KEY)
         if self.active_spectrum == name:
             self.active_spectrum = None

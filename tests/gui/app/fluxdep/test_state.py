@@ -1,4 +1,4 @@
-"""Tests for fluxdep-gui state: VersionTable (copied mechanism) + FluxDepState."""
+"""Public state writes and resource versions for fluxdep-gui."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _make_entry(name: str, spec_type: SpecType = "OneTone") -> SpectrumEntry:
 
 
 # ---------------------------------------------------------------------------
-# VersionTable (copied verbatim from measure — verify mechanism intact)
+# Shared VersionTable's existing bump/forget behavior
 # ---------------------------------------------------------------------------
 
 

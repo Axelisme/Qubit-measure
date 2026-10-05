@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. App-owned interactive presentation
+**Last updated:** 2026-10-06. Spectrum retirement and app-owned presentation
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -48,7 +48,9 @@ view 只暴露查詢，不暴露 mutation。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
-  `version`(VersionTable)。`VersionTable` 原樣搬自 measure（純樂觀鎖機制）。
+  `version`(shared VersionTable)。Spectrum leaf 移除使用精確 retire，刪除期間版本為 0，
+  同名重建續增，不重用舊 observation；不影響同字首的其他譜。Collection／global keys
+  保持 State lifetime 的計數。
   **`ProjectInfo`/`default_*` 共用** `gui/project.py`（Qt-free，與 dispersive 同源）；
   `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Database path"`），並可從
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。

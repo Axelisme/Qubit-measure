@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-06, shared remote resource observations
+**Last updated:** 2026-10-06, resource retirement and shared remote observations
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -27,6 +27,16 @@ Shared endpoint 無法編碼 RPC 回覆時送有界的 `internal` error，reason
 `response_encoding_failed`。Handler 可能已執行，caller 不可因回覆失敗而盲目重送 mutation。
 若 correlated fallback 仍無法編碼，或 reply queue 拒收，就中止該連線，交 IO owner
 釋放其 app context。Push 的 drop policy 不變；shared transport 不解讀 method、guard 或 operation。
+
+## Resource version lifecycle
+
+`VersionTable` owns the shared counter mechanism; apps own keys and semantic
+writes on their owner thread. Exact `retire(key)` makes an absent resource read
+as 0 while retaining its last counter. Same-key recreation advances beyond that
+counter, so reusable names cannot match an old observation. `drop_prefix` instead
+forgets both live and retired counters, and later bumps restart at 1. Owners
+choose retirement for reusable identities and forgetting only when key reuse
+cannot revive an old baseline. Counter history lasts only for the table lifetime.
 
 ## Remote resource observations
 
