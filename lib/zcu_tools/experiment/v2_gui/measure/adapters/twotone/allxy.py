@@ -44,10 +44,11 @@ class AllXYAnalyzeParams:
 
 @dataclass
 class AllXYAnalyzeResult(AnalyzeResultBase):
-    power_param: float
+    amplitude_error: float
     detune_param: float
     power_err: float
     detune_err: float
+    residual_rms: float
 
 
 class AllXYAdapter(
@@ -80,11 +81,16 @@ class AllXYAdapter(
             "pulse at zero gain."
         ),
         typical_writeback=(
-            "No writeback. The summary reports 'power_err' and 'detune_err' "
-            "(mean state deviation over the 21 pairs, also in the figure "
-            "title) and the fitted model parameters 'power_param' and "
-            "'detune_param'. Fix power errors with amplitude Rabi or zig-zag "
-            "and detuning errors with Ramsey."
+            "No writeback. The summary reports 'amplitude_error', the "
+            "relative drive amplitude error (+0.02 means 2% too much "
+            "rotation), and 'detune_param', the dimensionless detuning "
+            "parameter of the fit model. 'power_err' and 'detune_err' are the "
+            "mean Bloch-z deviation (ground +1, excited -1) each error causes "
+            "over the 21 pairs; they are not gate infidelities. "
+            "'residual_rms' is the fit residual in the same units; a residual "
+            "comparable to those deviations means the model does not fit, "
+            "for example because T1/T2 decay matters. Fix power errors with "
+            "amplitude Rabi or zig-zag and detuning errors with Ramsey."
         ),
         recommended=(
             "Leave 'Fit g/e levels' off to take the ground and excited levels "
@@ -126,10 +132,11 @@ class AllXYAdapter(
             plots=plots,
         )
         return AllXYAnalyzeResult(
-            power_param=analysis.power_param,
+            amplitude_error=analysis.amplitude_error,
             detune_param=analysis.detune_param,
             power_err=analysis.power_err,
             detune_err=analysis.detune_err,
+            residual_rms=analysis.residual_rms,
         )
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
