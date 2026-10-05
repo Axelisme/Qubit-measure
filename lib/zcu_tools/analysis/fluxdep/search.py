@@ -196,23 +196,19 @@ def _scan_candidates(
     )
     EJb, ECb, ELb = bounds.EJ, bounds.EC, bounds.EL
     # Initialize variables
-    N = f_params.shape[0]
-    best_idx = 0
-    best_scale = 1.0
-    best_dist = np.inf
+    best_idx, best_scale, best_dist = 0, 1.0, np.inf
     best_params = np.full(3, np.nan)
     # results[i] = (mean distance, scale) per entry. The exact path fills only the
     # entries it actually searches (the prune skips provably-worse ones); the rest
     # keep their lower bound (a valid distance floor) for the diagnostic scatter.
-    results = np.full((N, 2), np.nan)  # (N, 2)
+    results = np.full((f_params.shape[0], 2), np.nan)
 
     # Ensure contiguous float64 for njit signature.
     sf_energies_c = np.ascontiguousarray(sf_energies, dtype=np.float64)
     f_params_c = np.ascontiguousarray(f_params, dtype=np.float64)
     freqs_c = np.ascontiguousarray(freqs, dtype=np.float64)
 
-    n_workers = n_jobs if n_jobs > 0 else (os.cpu_count() or 1)
-    set_num_threads(n_workers)
+    set_num_threads(n_jobs if n_jobs > 0 else (os.cpu_count() or 1))
 
     # Exact search with a lower-bound prune. The objective per entry is
     # F(a) = mean_i min_j |A_i - |a*B_ij + C_ij||; ``entry_lower_bound`` gives a
@@ -240,12 +236,16 @@ def _scan_candidates(
     _check_cancellation(cancel_requested)
     results[:, 0] = lbs  # unsearched entries keep their LB for the scatter
     order = np.argsort(lbs)
-    idx_bar = make_pbar(total=N, desc="Searching...")
+    idx_bar = make_pbar(total=f_params.shape[0], desc="Searching...")
     searched = 0
     interrupted = False
+    # Retain scan/progress interrupts, but let a predicate's interrupt propagate.
+    checking_cancellation = False
     try:
         for oi in order:
+            checking_cancellation = cancel_requested is not None
             _check_cancellation(cancel_requested)
+            checking_cancellation = False
             oi = int(oi)
             lb = lbs[oi]
             if not np.isfinite(lb) or lb > best_dist:
@@ -253,30 +253,30 @@ def _scan_candidates(
             p0, p1, p2 = f_params[oi]
             a_min = max(EJb[0] / p0, ECb[0] / p1, ELb[0] / p2)
             a_max = min(EJb[1] / p0, ECb[1] / p1, ELb[1] / p2)
-            # Only numerical/progress interruption retains Notebook partial results.
-            # A predicate failure must propagate, including KeyboardInterrupt.
-            try:
-                d, a = search_one_entry(
-                    sf_energies_c[oi],
-                    tr_pairs_reduced,
-                    tr_coeffs,
-                    tr_offsets,
-                    freqs_c,
-                    a_min,
-                    a_max,
-                )
-                results[oi] = d, a
-                searched += 1
-                if searched % 64 == 0:
-                    idx_bar.update(64)
-                if d < best_dist:
-                    best_dist, best_scale, best_idx = d, a, oi
-                    best_params = f_params[oi] * a
-            except KeyboardInterrupt:
-                interrupted = True
-                break
+            d, a = search_one_entry(
+                sf_energies_c[oi],
+                tr_pairs_reduced,
+                tr_coeffs,
+                tr_offsets,
+                freqs_c,
+                a_min,
+                a_max,
+            )
+            results[oi] = d, a
+            searched += 1
+            if searched % 64 == 0:
+                idx_bar.update(64)
+            if d < best_dist:
+                best_dist, best_scale, best_idx = d, a, oi
+                best_params = f_params[oi] * a
+            checking_cancellation = cancel_requested is not None
             _check_cancellation(cancel_requested)
+            checking_cancellation = False
         idx_bar.set_description("Done! ")
+    except KeyboardInterrupt:
+        if checking_cancellation:
+            raise
+        interrupted = True
     finally:
         idx_bar.close()
 
