@@ -85,7 +85,7 @@ print(f"g = {g}", "GHz")
 # Plot with Onetone
 
 ```python
-from zcu_tools.experiment.v2.onetone import FluxDepExp
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepExp
 
 onetone_path = r"../../Database/Q12_2D[5]/Q1/R1_flux_1.hdf5"
 

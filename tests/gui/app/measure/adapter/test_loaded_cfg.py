@@ -3,8 +3,6 @@ from copy import deepcopy
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.onetone.freq import FreqCfg, HomophasalSamplingCfg
-from zcu_tools.experiment.v2_gui.measure.adapters.onetone.freq import OneToneFreqAdapter
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
@@ -27,6 +25,9 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules.reset import BathResetCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
+from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 
 
 class Snapshot(ExpCfgModel):

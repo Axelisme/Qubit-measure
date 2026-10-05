@@ -69,8 +69,9 @@ def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
     )
     fx = Fixture(active_label="ctx001")
     fx.state.set_context(replace(fx.state.session_env, md=MetaDict(), ml=library))
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
     from zcu_tools.gui.cfg.resource import CfgEdit
+
+    from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
     tab_id = "references"
     cfg = fx.prepare_tab(tab_id, FakeAdapter(), schema)

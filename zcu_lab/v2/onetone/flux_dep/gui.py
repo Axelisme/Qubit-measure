@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
+
+from zcu_tools.analysis.fluxdep.line_state import (
+    FluxPickInputs,
+    FluxPickState,
+    fold_initial_lines,
+)
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepExp
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult
+from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
+from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickResult
+from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder
+from zcu_lab.v2._support.measure.schema_builder import MeasureCfgDefinition
+from zcu_lab.v2._support.measure.schema_builder import ModuleInit
+from zcu_lab.v2._support.measure.seeds import Seed
+from zcu_lab.v2._support.measure.seeds import custom
+from zcu_lab.v2._support.measure.seeds import flux_range
+from zcu_lab.v2._support.measure.ctx_helpers import md_get_float
+from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
+from zcu_lab.v2._support.measure.seeds import res_freq_range
+from zcu_lab.v2._support.measure.flux_pick_frontend import make_flux_pick_frontend
+from zcu_lab.v2._support.measure.flux_pick_plugin import FluxPickPlugin
+from zcu_lab.v2._support.measure.flux_pick_plugin import render_flux_pick
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AdapterGuide,
+    AnalysisMode,
+    AnalyzeRequest,
+    MetaDictWriteback,
+    RunRequest,
+    SessionEnv,
+    WritebackItem,
+    WritebackRequest,
+)
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
+from zcu_tools.gui.cfg import (
+    EvalValue,
+)
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.ui.interactive_frontend import (
+        InteractiveFrontend,
+        InteractiveFrontendEnv,
+    )
+    from zcu_tools.plotting.plots import Plots
+
+OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
+
+
+def _readout_length_default() -> Seed[float | EvalValue]:
+    def resolve(ctx: SessionEnv) -> float | EvalValue:
+        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
+        if md_has_key(ctx, "res_probe_len") and probe_len > 0.1:
+            return EvalValue(expr="res_probe_len - 0.1")
+        return probe_len - 0.1
+
+    return custom(resolve, description="one-tone flux readout length")
+
+
+class OneToneFluxDepAdapter(
+    BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult, FluxPickResult, FluxPickParams]
+):
+    exp_cls = FluxDepExp
+    ExpCfg_cls = FluxDepCfg
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        analysis=AnalysisMode.INTERACTIVE, load_data=True
+    )
+
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "One-tone resonator flux dependence: a 2D sweep of an external "
+            "flux-bias device value versus readout frequency, tracing how the "
+            "resonator frequency moves with flux. The basis for locating a "
+            "Fluxonium's flux sweet spots (half-flux and integer-flux points). "
+            "Runs on real hardware; requires a SoC connection and a configured "
+            "flux-bias device."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'r_f' — resonator "
+            "frequency, centring the frequency sweep (~4000–8000 MHz); 'rf_w' "
+            "— linewidth, span r_f ± rf_w (~5–50 MHz; falls back to ±30 MHz); "
+            "'res_probe_len' — readout probe length, from which ro_length is "
+            "derived as 'res_probe_len - 0.1' us (~0.5–5 us); 'res_ch' / "
+            "'ro_ch' — drive / ADC channels; 'timeFly' — trigger-offset cable "
+            "delay; 'flx_half' / 'flx_int' — already-calibrated half-flux / "
+            "integer-flux device values when present. First bring-up must not "
+            "assume these are known; absent values fall back to a fixed "
+            "[-4e-3, 4e-3] device sweep that the operator should adjust to a "
+            "safe, user-approved range."
+        ),
+        expects_ml=(
+            "Needs a pulse-readout module, and references a ModuleLibrary "
+            "waveform named 'ro_waveform' when present (optional)."
+        ),
+        typical_writeback=(
+            "Interactive analysis (not a fit): after the run, the user drags "
+            "two lines on the 2D map to mark the half-flux and integer-flux "
+            "sweet spots, then clicks Done. The result writes back 'flx_half', "
+            "'flx_int', and 'flx_period' (= 2·|flx_int − flx_half|) to the "
+            "MetaDict as a preview. The picking is user/agent judgement from "
+            "the measured map, not simulator truth; apply writeback only after "
+            "reviewing the figure."
+        ),
+        recommended=(
+            "Run after lookback and an initial onetone/freq, before any "
+            "twotone flux mapping, to find 'flx_int' / period from the "
+            "resonator map. Interactive flux-line pick (no fit). Also set the "
+            "'flux_dev' field — the flux-bias device reference (defaults to a "
+            "registered device named 'flux', falling back to 'flux_yoko') — "
+            "and confirm it points at a connected device. Typical sweep: "
+            "flux ~101 points "
+            "across one period (driven by flx_half/flx_int when calibrated), "
+            "frequency r_f ± one linewidth over ~101 points. Start at a low "
+            "readout gain (~0.005) to stay below punch-out so the dip tracks "
+            "cleanly; if the dip is hard to see (poor SNR), raise the gain "
+            "toward ~0.05 while keeping the frequency window tight. Survey "
+            "wide, then narrow around a sweet spot — and if the resonator's "
+            "flux dispersion (dispersive shift) looks small, narrow the "
+            "frequency window early instead of keeping a broad default span. "
+            "For consecutive flux sweeps, reverse the sweep direction (swap "
+            "start/stop) on the next run so the current source need not ramp "
+            "all the way back across the full range first. Inspect the 2D map "
+            "with gui_tab_get_figure (subtab_id='run') to judge window / SNR / shift. "
+            "After accepting 'flx_int', move the flux device there and re-run "
+            "onetone/freq at that flux before twotone/freq."
+        ),
+    )
+
+    @classmethod
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        return (
+            MeasureCfgBuilder()
+            .readout(
+                pulse_only=True,
+                init=ModuleInit.INLINE,
+                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
+                overrides={
+                    "pulse_cfg.gain": 0.05,
+                    "ro_cfg.ro_length": _readout_length_default(),
+                },
+            )
+            .device_from_value_source(
+                "flux_dev",
+                label="Flux Device",
+                source_key="device.flux.name",
+                fallback="flux_yoko",
+            )
+            .relax_delay(1.0)
+            .sweep(
+                "flux",
+                label="Flux device value",
+                default=flux_range(expts=101),
+                decimals=6,
+            )
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=res_freq_range(expts=101, span_factor=1.0),
+            )
+            .reps(1000)
+            .rounds(1)
+            .build()
+        )
+
+    def run(
+        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+    ) -> OneToneFluxDepRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FluxDepExp().run(cfg, context=context)
+        return RunRecord(cfg=cfg, result=result)
+
+    # -- interactive analysis: user picks the half/integer flux lines ----------
+
+    def make_interactive_plugin(
+        self,
+        req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams],
+        *,
+        plots: Plots,
+    ) -> FluxPickPlugin:
+        result = req.run_result.result
+        inputs = FluxPickInputs(result.signals, result.values, result.freqs)
+        half, integer = fold_initial_lines(
+            inputs.dev_values,
+            req.md.get("flx_half"),
+            req.md.get("flx_int"),
+        )
+        # One-tone resonator spectra have uninformative phase.
+        return FluxPickPlugin(
+            inputs,
+            FluxPickState(
+                flux_half=half, flux_int=integer, conjugate=False, magnitude_only=True
+            ),
+            plots=plots,
+            result_builder=render_flux_pick,
+        )
+
+    def make_interactive_frontend(
+        self,
+        plugin: PluginDefinition[Any, Any],
+        session: Session[Any],
+        env: InteractiveFrontendEnv,
+        request_finish: Callable[[], bool],
+        request_cancel: Callable[[], bool],
+        *,
+        plots: Plots,
+    ) -> InteractiveFrontend:
+        return make_flux_pick_frontend(
+            plugin, session, env, request_finish, request_cancel, plots=plots
+        )
+
+    def get_writeback_items(
+        self, req: WritebackRequest[OneToneFluxDepRunResult, FluxPickResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        return [
+            MetaDictWriteback(
+                target_name="flx_half",
+                description="Half-flux (Φ₀/2) sweet-spot device value",
+                proposed_value=result.flx_half,
+            ),
+            MetaDictWriteback(
+                target_name="flx_int",
+                description="Integer-flux sweet-spot device value",
+                proposed_value=result.flx_int,
+            ),
+            MetaDictWriteback(
+                target_name="flx_period",
+                description="Flux period (device units) = 2·|flx_int − flx_half|",
+                proposed_value=result.flx_period,
+            ),
+        ]
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FluxDepCfg:
+        cfg_raw = dict(raw_cfg)
+        dev_raw = cfg_raw.pop("dev")
+        if not isinstance(dev_raw, dict):
+            raise RuntimeError("FluxDep dev section must lower to a dict")
+        # dev_raw = {"flux_dev": "flux_yoko", ...}
+        # convert to make_cfg patch format: {"flux_yoko": {"label": "flux_dev"}}
+        dev_patch: dict[str, dict[str, str]] = {}
+        for label_key, device_name in dev_raw.items():
+            if not isinstance(device_name, str) or not device_name:
+                raise RuntimeError(
+                    f"FluxDep dev.{label_key} must be a non-empty device name"
+                )
+            dev_patch[device_name] = {"label": label_key}
+        cfg_raw["dev"] = dev_patch
+        return super().build_exp_cfg(cfg_raw, req)
+
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
+        return f"{ctx.res_name}_flux"

@@ -628,10 +628,8 @@ def make_measurement_builder(name: str) -> Builder:
     auto-follow) without a real experiment's acquire — the run path under test is
     the UI's, not the physics. Provides nothing (UI tests don't assert deps)."""
     import numpy as np
-    from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
-        QubitFreqResult,
-        Sweep1DResult,
-    )
+
+    from zcu_lab.v2._support.autofluxdep.result import QubitFreqResult, Sweep1DResult
 
     def _result_factory(schema: Any, flux: Any) -> Any:
         del schema

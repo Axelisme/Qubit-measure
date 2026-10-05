@@ -4,7 +4,7 @@ import os
 
 %autoreload 2
 from zcu_tools.notebook.utils import gc_collect
-import zcu_tools.experiment.v2 as ze
+import zcu_lab.v2 as ze
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
 from zcu_tools.resources.context import ModuleLibrary, MetaDict, ContextManager
@@ -73,10 +73,10 @@ exp_cfg = {
     },
     "relax_delay": 10.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.AllXYCfg, env, overrides={"reps": 100, "rounds": 10})
+cfg = make_cfg(exp_cfg, ze.twotone.allxy.core.AllXYCfg, env, overrides={"reps": 100, "rounds": 10})
 print(cfg)
 
-allxy_exp = nb_adapter(ze.twotone.AllXY_Exp())
+allxy_exp = nb_adapter(ze.twotone.allxy.core.AllXY_Exp())
 with open("allxy-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
         _ = allxy_exp.run(cfg)
@@ -104,12 +104,12 @@ exp_cfg = {
     "relax_delay": 0.05 * md.t1,  # us
 }
 cfg = make_cfg(
-    exp_cfg, ze.twotone.time_domain.CPMG_Cfg, env,
+    exp_cfg, ze.twotone.time_domain.cpmg.core.CPMG_Cfg, env,
     overrides={"reps": 100, "rounds": 10, "detune_ratio": 0.1, "earlystop_snr": 10.0},
 )
 print(cfg)
 
-cpmg_exp = nb_adapter(ze.twotone.time_domain.CPMG_Exp())
+cpmg_exp = nb_adapter(ze.twotone.time_domain.cpmg.core.CPMG_Exp())
 with open("cpmg-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
         _ = cpmg_exp.run(cfg)
@@ -135,10 +135,10 @@ exp_cfg = {
     "n_seeds": 5,
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.RBCfg, env, overrides={"reps": 100, "rounds": 1})
+cfg = make_cfg(exp_cfg, ze.twotone.rb.core.RBCfg, env, overrides={"reps": 100, "rounds": 1})
 print(cfg)
 
-rb_exp = nb_adapter(ze.twotone.RB_Exp())
+rb_exp = nb_adapter(ze.twotone.rb.core.RB_Exp())
 with open("rb-opt2.log", "w") as f:
     with debug_scope(zp2b, stream=f):
         _ = rb_exp.run(cfg)

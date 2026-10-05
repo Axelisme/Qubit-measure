@@ -17,30 +17,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-import zcu_tools.experiment.v2_gui.autofluxdep._support.utils.schema as node_schema_module
-from zcu_tools.experiment.v2_gui.autofluxdep._support.module_aliases import (
-    PI_PULSE_LIBRARY_ALIASES,
-)
-from zcu_tools.experiment.v2_gui.autofluxdep._support.readout_defaults import (
-    seed_readout_freq,
-    seed_readout_gain,
-)
-from zcu_tools.experiment.v2_gui.autofluxdep._support.timing_defaults import (
-    auto_relax_delay_from_t1,
-    auto_stop_sweep_range,
-)
-from zcu_tools.experiment.v2_gui.autofluxdep._support.utils import NodeSchemaBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.module_values import (
-    pulse_length,
-    pulse_product,
-)
-from zcu_tools.experiment.v2_gui.autofluxdep.lenrabi import LenRabiBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.mist import MistBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import RoOptimizeBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
-from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import T2EchoBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePath,
@@ -78,8 +54,30 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+import zcu_lab.v2._support.autofluxdep.utils.schema as node_schema_module
 from tests.gui.app.autofluxdep._helpers import make_run_context
 from zcu_lab.autofluxdep_catalog import build_catalog
+from zcu_lab.v2._support.autofluxdep.module_aliases import PI_PULSE_LIBRARY_ALIASES
+from zcu_lab.v2._support.autofluxdep.readout_defaults import (
+    seed_readout_freq,
+    seed_readout_gain,
+)
+from zcu_lab.v2._support.autofluxdep.timing_defaults import (
+    auto_relax_delay_from_t1,
+    auto_stop_sweep_range,
+)
+from zcu_lab.v2._support.autofluxdep.utils.module_values import (
+    pulse_length,
+    pulse_product,
+)
+from zcu_lab.v2._support.autofluxdep.utils.schema import NodeSchemaBuilder
+from zcu_lab.v2.autofluxdep.lenrabi.autofluxdep import LenRabiBuilder
+from zcu_lab.v2.autofluxdep.mist.autofluxdep import MistBuilder
+from zcu_lab.v2.autofluxdep.qubit_freq.autofluxdep import QubitFreqBuilder
+from zcu_lab.v2.autofluxdep.ro_optimize.autofluxdep import RoOptimizeBuilder
+from zcu_lab.v2.autofluxdep.t1.autofluxdep import T1Builder
+from zcu_lab.v2.autofluxdep.t2echo.autofluxdep import T2EchoBuilder
+from zcu_lab.v2.autofluxdep.t2ramsey.autofluxdep import T2RamseyBuilder
 
 from ._helpers import (
     NodeFieldSpec,

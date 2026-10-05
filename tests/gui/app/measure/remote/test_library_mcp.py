@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.roles import register_all_roles
 
 from ._helpers import Fixture, mcp_client
 

@@ -12,6 +12,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import zcu_tools
+from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError
 from zcu_tools.gui.app.measure.catalog_loader import (
     SourceExperimentCatalogLoader,
@@ -459,6 +461,111 @@ def test_user_catalog_reloads_without_replacing_framework_identity(
     assert domain is not user.original
     assert domain.fixed is fixed
     assert domain.Experiment().token() is fixed.TOKEN
+
+
+@pytest.fixture
+def leaf_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[CatalogFixture]:
+    """Use a core/gui leaf, fixed shared types and startup-only roles."""
+    root = tmp_path / "loader_leaf"
+    files = {
+        "__init__.py": "",
+        "v2/__init__.py": "from .family.demo.core import Experiment\n",
+        "v2/family/__init__.py": "",
+        "v2/family/demo/__init__.py": "",
+        "v2/_support/__init__.py": "",
+        "v2/_support/shared.py": "class Result:\n    pass\n",
+        "roles.py": "from .v2._support.shared import Result\nROLE_RESULT = Result()\n",
+        "v2/family/demo/core.py": """
+            from loader_leaf.v2._support.shared import Result
+            class Experiment:
+                def label(self):
+                    return "v1"
+        """,
+        "v2/family/demo/gui.py": """
+            from zcu_tools.gui.app.measure.adapter import (
+                ExpAdapterProtocol, AdapterCapabilities, AdapterGuide,
+            )
+            from .core import Experiment
+            class Adapter(ExpAdapterProtocol):
+                capabilities = AdapterCapabilities()
+                @classmethod
+                def guide(cls):
+                    return AdapterGuide(Experiment().label(), "", "", "", "")
+        """,
+        "definitions.py": """
+            from .v2.family.demo.gui import Adapter
+            def register_all(registry):
+                registry.register("demo", Adapter)
+        """,
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(content), encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        original = importlib.import_module("loader_leaf.v2.family.demo.core")
+        importlib.import_module("loader_leaf.roles")
+        importlib.import_module("loader_leaf.definitions")
+        loader = SourceExperimentCatalogLoader(
+            sources=(
+                SourcePackage("zcu_tools", Path(zcu_tools.__file__).parent),
+                SourcePackage("loader_leaf", root),
+            ),
+            reload_modules=("loader_leaf.v2", "loader_leaf.definitions"),
+            preserved_modules=("loader_leaf.v2._support", "loader_leaf.roles"),
+            catalog_module="loader_leaf.definitions",
+        )
+        yield CatalogFixture(root, loader, original)
+    finally:
+        for name in tuple(sys.modules):
+            if name == "loader_leaf" or name.startswith("loader_leaf."):
+                del sys.modules[name]
+        importlib.invalidate_caches()
+
+
+def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types(
+    leaf_catalog: CatalogFixture,
+) -> None:
+    shared = importlib.import_module("loader_leaf.v2._support.shared")
+    roles = importlib.import_module("loader_leaf.roles")
+    old_adapter = importlib.import_module("loader_leaf.v2.family.demo.gui").Adapter
+    leaf_catalog.write(
+        "v2/family/demo/core.py",
+        """
+        from loader_leaf.v2._support.shared import Result
+        class Experiment:
+            def label(self):
+                return "v2"
+        """,
+    )
+    registry = leaf_catalog.reload()
+    adapter = registry.create("demo")
+    core = importlib.import_module("loader_leaf.v2.family.demo.core")
+    assert adapter.guide().behavior == "v2"
+    assert isinstance(adapter, ExpAdapterProtocol)
+    assert type(adapter) is not old_adapter
+    assert core.Experiment is not leaf_catalog.original.Experiment
+    assert importlib.import_module("loader_leaf.v2").Experiment is core.Experiment
+    assert core.Result is shared.Result
+    assert importlib.import_module("loader_leaf.roles") is roles
+    assert isinstance(roles.ROLE_RESULT, core.Result)
+
+
+@pytest.mark.parametrize("relative", ["v2/_support/shared.py", "roles.py"])
+def test_leaf_fixed_shared_or_startup_role_change_requires_restart(
+    leaf_catalog: CatalogFixture, relative: str
+) -> None:
+    leaf_catalog.write(relative, "CHANGED = True\n")
+    with pytest.raises(CatalogReloadError, match="Fixed source") as failure:
+        leaf_catalog.loader.prepare()
+    assert failure.value.restart_required
+    assert (
+        importlib.import_module("loader_leaf.v2.family.demo.core")
+        is leaf_catalog.original
+    )
 
 
 @pytest.mark.parametrize("package", ["framework", "user"])

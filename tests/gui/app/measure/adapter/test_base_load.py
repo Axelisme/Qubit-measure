@@ -10,11 +10,6 @@ import pytest
 from zcu_tools.datafile import save_labber_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.experiment.v2_gui.measure.adapters.twotone import FluxDepAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -25,6 +20,12 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
 
 
 class _Cfg(ExpCfgModel):

@@ -6,10 +6,6 @@ from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -39,6 +35,11 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict
+
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

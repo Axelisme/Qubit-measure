@@ -8,8 +8,9 @@ lowering when a carrier holds invalid text.
 from __future__ import annotations
 
 import pytest
-from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.cfg import CenteredSweepValue, DirectValue, SweepValue
+
+from zcu_lab.v2.autofluxdep.qubit_freq.autofluxdep import QubitFreqBuilder
 
 from ._helpers import sectioned_test_schema
 

@@ -9,6 +9,7 @@ import pytest
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QApplication, QLineEdit  # type: ignore[attr-defined]
+from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 from zcu_tools.gui.app.measure.ui import inspect_dialog
 from zcu_tools.gui.app.measure.ui.inspect_dialog import (
     InspectDialog,
@@ -780,8 +781,7 @@ def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
 
 
 def _catalog():
-    from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
-    from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
+    from zcu_lab.roles import register_all_roles
 
     cat = RoleCatalog()
     register_all_roles(cat)

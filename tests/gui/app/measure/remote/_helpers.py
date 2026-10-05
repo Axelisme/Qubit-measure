@@ -21,8 +21,6 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.registry import register_all
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     ExpAdapterProtocol,
@@ -52,6 +50,9 @@ from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.definitions import register_all
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
 def make_ctx() -> SessionEnv:

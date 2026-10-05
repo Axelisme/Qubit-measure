@@ -31,12 +31,8 @@ def test_resolve_bool_field():
 
 @pytest.mark.parametrize("singleshot", [False, True])
 def test_len_rabi_phase_form_and_wire_contract(singleshot: bool) -> None:
-    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.len_rabi import (
-        SsLenRabiAnalyzeParams,
-    )
-    from zcu_tools.experiment.v2_gui.measure.adapters.twotone.rabi.len_rabi import (
-        LenRabiAnalyzeParams,
-    )
+    from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAnalyzeParams
+    from zcu_lab.v2.twotone.rabi.len_rabi.gui import LenRabiAnalyzeParams
 
     cls = SsLenRabiAnalyzeParams if singleshot else LenRabiAnalyzeParams
     spec = next(
@@ -59,15 +55,9 @@ def test_len_rabi_phase_form_and_wire_contract(singleshot: bool) -> None:
 
 @pytest.mark.parametrize("experiment", ["ge", "len_rabi", "amp_rabi"])
 def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> None:
-    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.amp_rabi import (
-        SsAmpRabiAnalyzeParams,
-    )
-    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
-        GEAnalyzeParams,
-    )
-    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.len_rabi import (
-        SsLenRabiAnalyzeParams,
-    )
+    from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAnalyzeParams
+    from zcu_lab.v2.singleshot.ge.gui import GEAnalyzeParams
+    from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAnalyzeParams
 
     cls = {
         "ge": GEAnalyzeParams,

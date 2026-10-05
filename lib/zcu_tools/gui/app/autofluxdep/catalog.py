@@ -17,7 +17,8 @@ class ExperimentCatalog:
 
     declarations is an ordered iterable of stateless Builder instances.
     Raise TypeError for non-Builders and ValueError for empty/duplicate names,
-    module-stem/name mismatch or duplicate dependency/output declarations.
+    or duplicate dependency/output declarations. Names are declared identities,
+    independent of the Builder's source module or filename.
     Construction preserves the caller's declaration order and Builder identities.
 
     Catalog order controls only the GUI add menu. Runtime execution continues to
@@ -66,13 +67,6 @@ def _validate_builder(builder: object) -> None:
         )
     if not builder.name:
         raise ValueError("experiment catalog names must be non-empty")
-
-    module_stem = builder.__class__.__module__.rsplit(".", 1)[-1]
-    if module_stem != builder.name:
-        raise ValueError(
-            "experiment module stem must match Builder.name: "
-            f"{module_stem!r} != {builder.name!r}"
-        )
 
     _require_unique(builder, "provides", builder.provides)
     _require_unique(builder, "requires", (item.key for item in builder.requires))

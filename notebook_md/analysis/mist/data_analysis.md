@@ -33,9 +33,9 @@ import plotly.graph_objects as go
 
 
 %autoreload 2
-import zcu_tools.experiment.v2 as ze
+import zcu_lab.v2 as ze
 from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.experiment.v2.mist.flux_dep import mist_signal2real
+from zcu_lab.v2.mist.flux_dep.core import mist_signal2real
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.simulate import mA2flx, flx2mA
 
@@ -75,9 +75,9 @@ if "sample_f" in allows:
 filepath = (
     r"../../../Database/Q12_2D[5]/Q1/Q1_dispersive_shift_gain0.050@-2.600mA_3.hdf5"
 )
-exp = nb_adapter(ze.twotone.dispersive.DispersiveExp())
+exp = nb_adapter(ze.twotone.dispersive.core.DispersiveExp())
 dispersive_run = exp.load(Path(filepath))
-dispersive_analysis = exp.analyze(ze.twotone.dispersive.DispersiveExp.Options())
+dispersive_analysis = exp.analyze(ze.twotone.dispersive.core.DispersiveExp.Options())
 chi, kappa = dispersive_analysis.result.chi, dispersive_analysis.result.avg_fwhm
 fig = dispersive_analysis.figures["fit"]
 fig.savefig(image_dir / "dispersive_shift.png")
@@ -89,7 +89,7 @@ Load one canonical CKP file containing the `Initial State` axis. Replace the exa
 
 ```python
 filepath = result_dir / "data" / "ckp.hdf5"
-exp = nb_adapter(ze.twotone.ckp.CKP_Exp())
+exp = nb_adapter(ze.twotone.ckp.core.CKP_Exp())
 ckp_run = exp.load(filepath)
 ckp_analysis = exp.analyze(None)
 chi, kappa, readout_f = ckp_analysis.result.chi, ckp_analysis.result.kappa, ckp_analysis.result.res_freq
@@ -104,10 +104,10 @@ filepath = (
     r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ac_stark@1.800mA_1.hdf5"
 )
 
-exp = nb_adapter(ze.twotone.ac_stark.AcStarkExp())
+exp = nb_adapter(ze.twotone.ac_stark.core.AcStarkExp())
 ac_stark_run = exp.load(Path(filepath))
 ac_stark_analysis = exp.analyze(
-    ze.twotone.ac_stark.AcStarkExp.Options(chi=chi, kappa=kappa, cutoff=0.1)
+    ze.twotone.ac_stark.core.AcStarkExp.Options(chi=chi, kappa=kappa, cutoff=0.1)
 )
 ac_coeff = ac_stark_analysis.result.ac_coeff
 fig = ac_stark_analysis.figures["fit"]
@@ -125,10 +125,10 @@ filepath = (
     # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-0.650mA_2.hdf5"
 )
 
-exp = nb_adapter(ze.singleshot.mist.PowerExp())
+exp = nb_adapter(ze.singleshot.mist.power.core.PowerExp())
 power_run = exp.load(Path(filepath))
 power_analysis = exp.analyze(
-    ze.singleshot.mist.PowerExp.Options(ac_coeff=ac_coeff, log_scale=True)
+    ze.singleshot.mist.power.core.PowerExp.Options(ac_coeff=ac_coeff, log_scale=True)
 )
 fig = power_analysis.figures["fit"]
 fig.savefig(image_dir / (filepath.split("/")[-1].split("@")[0] + ".png"))
@@ -166,7 +166,7 @@ from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from plotly.subplots import make_subplots
 
-exp = ze.mist.flux_dep.FluxDepExp()
+exp = ze.mist.flux_dep.core.FluxDepExp()
 
 # The notebook owns this Plotly composition; the core returns numerical records.
 fig = make_subplots(rows=2, cols=1, vertical_spacing=0.1)

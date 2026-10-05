@@ -8,7 +8,9 @@
 # ignore_imports is the ratchet baseline. It may shrink. It may not grow.
 
 [importlinter]
-root_package = zcu_tools
+root_packages =
+    zcu_tools
+    zcu_lab
 
 # ADR-0063: only an external composition root bootstraps concrete entry definitions.
 [importlinter:contract:entry-definitions-composition-only]
@@ -26,11 +28,7 @@ source_modules =
     zcu_tools.experiment
 forbidden_modules =
     zcu_tools.gui
-# zcu_tools.experiment.v2_gui is a GUI adapter that happens to live under
-# experiment/. It is expected to import zcu_tools.gui; the domain modules beside
-# it are not. Its 517 edges are excluded here rather than treated as debt.
 ignore_imports =
-    zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
 
 # D1: cfg_editing is experiment-side editing support; gui.cfg is a Qt-free
@@ -128,8 +126,6 @@ layers =
     zcu_tools.experiment
     zcu_tools.datafile : zcu_tools.device : zcu_tools.program : zcu_tools.analysis : zcu_tools.plotting : zcu_tools.simulate : zcu_tools.resources : zcu_tools.cfg_model : zcu_tools.utils : zcu_tools.progress_bar : zcu_tools.qick_remote
 ignore_imports =
-    # Not debt until D80 moves them to zcu_lab: GUI adapters living under experiment/ (see C1).
-    zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
 
 [importlinter:contract:top-level-acyclic]
@@ -139,8 +135,6 @@ ancestors =
     zcu_tools
 depth = 0
 ignore_imports =
-    # Not debt until D80 moves them to zcu_lab (see C1, C8).
-    zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
     # Debt, see C10.
     zcu_tools.resources.context.library -> zcu_tools.program.v2
@@ -219,3 +213,12 @@ ignore_imports =
     zcu_tools.mcp.** -> zcu_tools.gui.app.autofluxdep.services.remote.**
     # Debt: logging setup is not part of the remote contract (backlog).
     zcu_tools.mcp.measure.server -> zcu_tools.gui.logging_setup
+
+# D75: experiment cores remain independent of all GUI attachments and helpers.
+[importlinter:contract:user-core-no-gui]
+name = C15: user experiment cores do not depend on the GUI
+type = forbidden
+source_modules =
+    zcu_lab.v2.**.core
+forbidden_modules =
+    zcu_tools.gui

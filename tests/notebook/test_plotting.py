@@ -10,15 +10,16 @@ from ipympl.backend_nbagg import Canvas, FigureManager, Toolbar
 from ipywidgets import Widget
 from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.notebook.plotting import NotebookPlotHost
+from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1AnalyzeOptions,
     T1Cfg,
     T1Exp,
     T1Result,
 )
-from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.notebook.plotting import NotebookPlotHost
-from zcu_tools.plotting.plots import Plots
 
 
 def widget_ids() -> set[str]:

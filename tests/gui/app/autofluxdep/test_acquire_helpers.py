@@ -9,9 +9,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.runtime import ScheduleOutcome
-from zcu_tools.experiment.v2_gui.autofluxdep._support import acquire as acquire_mod
-from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
+from zcu_tools.experiment.v2.runtime.schedule import ScheduleOutcome
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     RunCfgSnapshot,
@@ -20,7 +18,9 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.program.v2 import SweepCfg
 
+import zcu_lab.v2._support.autofluxdep.acquire as acquire_mod
 from tests.gui.app.autofluxdep._helpers import make_run_context
+from zcu_lab.v2.autofluxdep.qubit_freq.autofluxdep import QubitFreqBuilder
 
 
 def test_run_env_knob_reads_run_start_snapshot() -> None:

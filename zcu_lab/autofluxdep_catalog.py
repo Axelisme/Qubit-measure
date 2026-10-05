@@ -1,14 +1,12 @@
 """Explicit user measurement declarations for the Autofluxdep composition root."""
 
-from zcu_tools.experiment.v2_gui.autofluxdep.lenrabi import EXPERIMENT as LENRABI
-from zcu_tools.experiment.v2_gui.autofluxdep.mist import EXPERIMENT as MIST
-from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import EXPERIMENT as QUBIT_FREQ
-from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import (
-    EXPERIMENT as RO_OPTIMIZE,
-)
-from zcu_tools.experiment.v2_gui.autofluxdep.t1 import EXPERIMENT as T1
-from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import EXPERIMENT as T2ECHO
-from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import EXPERIMENT as T2RAMSEY
+from zcu_lab.v2.autofluxdep.lenrabi.autofluxdep import EXPERIMENT as LENRABI
+from zcu_lab.v2.autofluxdep.mist.autofluxdep import EXPERIMENT as MIST
+from zcu_lab.v2.autofluxdep.qubit_freq.autofluxdep import EXPERIMENT as QUBIT_FREQ
+from zcu_lab.v2.autofluxdep.ro_optimize.autofluxdep import EXPERIMENT as RO_OPTIMIZE
+from zcu_lab.v2.autofluxdep.t1.autofluxdep import EXPERIMENT as T1
+from zcu_lab.v2.autofluxdep.t2echo.autofluxdep import EXPERIMENT as T2ECHO
+from zcu_lab.v2.autofluxdep.t2ramsey.autofluxdep import EXPERIMENT as T2RAMSEY
 from zcu_tools.gui.app.autofluxdep.catalog import ExperimentCatalog
 
 

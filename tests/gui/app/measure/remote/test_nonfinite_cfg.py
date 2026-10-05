@@ -5,10 +5,11 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QLineEdit, QWidget
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.cfg import CfgSchema, DirectValue, ScalarSpec
 from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
+
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 

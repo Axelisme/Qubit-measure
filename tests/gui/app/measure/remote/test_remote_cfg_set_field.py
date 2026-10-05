@@ -45,7 +45,7 @@ class _LiveFixture(Fixture):
 
     def __init__(self) -> None:
         super().__init__()
-        from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+        from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
         cfg = FakeAdapter().make_default_cfg(self.state.session_env)
         self._tab_id = "tab-live"
@@ -645,9 +645,10 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
 
 
 def _fakefreq_root():
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
     ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     cfg = FakeFreqAdapter().make_default_cfg(ctx)
@@ -705,11 +706,10 @@ def test_moduleref_tagged_key_passes_through(qapp):
 
 
 def _fluxdep_root(device_names: list[str]):
-    from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
-        OneToneFluxDepAdapter,
-    )
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+    from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 
     ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)

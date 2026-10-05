@@ -4,7 +4,7 @@
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
-view 與 GUI-side remote handler。實驗領域知識住在 `experiment/v2_gui/measure/` adapter；
+view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
 framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/base.py`。它透過 `AdapterCfgDefinition.instantiate(ctx)` 產生 fresh cfg，不依賴具體 builder 或 Seed。
 
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
@@ -204,8 +204,8 @@ Setup dialog through `MainWindow.open_dialog`, so a toolbar click focuses that
 instance instead of building another.
 
 The launcher still owns the experiment-adapter composition boundary by passing a
-registry factory into `MeasureGuiBehavior`; the factory imports
-`experiment.v2_gui` only after `gui.runtime` has configured logging and the
+registry factory into `MeasureGuiBehavior`. The factory imports the injected
+user catalog only after `gui.runtime` has configured logging and the
 pre-Qt plotting policy.
 
 `build_app_services()` constructs the app-local services and injects their driven
@@ -300,7 +300,7 @@ import 新的固定 dependency 要求重啟。Loader 在所有來源保留固定
 prepare plan 只能使用一次。它在重載失敗時清除部分 owned modules，不回滾任意 import side effect。
 
 依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
-確切限制見 `experiment/v2_gui/measure/README.md`。此取捨不放寬資料丟棄確認或 lifecycle 保護。
+可重載 code 的 import 不得操作硬體或啟動背景工作。此取捨不放寬資料丟棄確認或 lifecycle 保護。
 
 Retry 的 prepare/load 皆保留 typed error disposition；要求 restart 後不再提供可 retry 狀態。
 Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消，MainWindow 呼叫
@@ -531,7 +531,7 @@ re-adding the same key relinks it, while persistence can still serialize the sna
 retain their overridden inline input without depending on the old key. Nested linked
 references keep their own dependencies; explicit relink restores this layer's dependency.
 
-Adapter cfg authoring lives in `experiment/v2_gui` as a context-free
+Adapter cfg authoring lives in the user experiment package as a context-free
 `MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
 field order, role, lock and deferred typed Seed; fresh `instantiate(ctx)` only resolves
 value defaults, then `BaseAdapter.make_default_cfg` validates the finished schema.
@@ -795,8 +795,8 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   calling the stage-agnostic service. Remote/MCP writeback operations use the same
   required pane locator; no tab-level draft adapter or wire editor identity exists.
 
-Import direction stays one-way: `experiment/v2_gui -> gui.app.measure`, never the
-reverse.
+User experiment adapters import `gui.app.measure` contracts. The framework
+receives their catalogs by injection and never imports the user package.
 
 ## Maintenance Checks
 

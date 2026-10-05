@@ -16,22 +16,21 @@ from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepResult
-from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxResult
-from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
-from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend import (
-    FluxPickFrontend,
-)
-from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
-    make_flux_pick_plugin,
-    render_flux_pick,
-)
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_lab.v2._support.measure.flux_pick_plugin import (
+    make_flux_pick_plugin,
+    render_flux_pick,
+)
+from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult
+from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
 from ._helpers import Fixture, mcp_client, open_client, recv_response, send
 

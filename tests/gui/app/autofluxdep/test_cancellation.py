@@ -18,8 +18,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.events.run import (
     PointDonePayload,
     RunContinuedPayload,
@@ -45,6 +44,7 @@ from zcu_tools.gui.cfg import ScalarSpec
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
+from zcu_lab.v2._support.autofluxdep.result import QubitFreqResult
 
 from ._helpers import (
     ensure_test_project,

@@ -8,14 +8,15 @@ import numpy as np
 import pytest
 from zcu_tools.datafile import LabberData
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.plotting.plots import NonPresentingHost
+
+from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1AnalyzeOptions,
     T1Cfg,
     T1Exp,
     T1Result,
 )
-from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.plotting.plots import NonPresentingHost
 
 
 @pytest.fixture

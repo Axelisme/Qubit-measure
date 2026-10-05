@@ -6,11 +6,6 @@ import pytest
 from zcu_tools.device import DeviceManager, FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
-    OneToneFluxDepAdapter,
-)
-from zcu_tools.experiment.v2_gui.measure.adapters.onetone.freq import OneToneFreqAdapter
-from zcu_tools.experiment.v2_gui.measure.adapters.twotone.flux_dep import FluxDepAdapter
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
@@ -30,6 +25,10 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
+from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
 
 _PULSE = {
     "type": "pulse",

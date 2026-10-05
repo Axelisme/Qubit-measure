@@ -22,6 +22,5 @@
 
 Package root 保留公開 exports，只有存取對應名稱時才載入其 owner module。匯入 `cfg_editing` 不會因此載入 experiment base、device 或 datafile；直接使用 persistence exports 仍會載入其所需依賴。
 
-- [v2](v2/README.md)：使用 program/v2 的實驗家族與具體 workflow；[實驗撰寫檢查清單](v2/README.md#寫新-experiment-時的檢查清單) 說明 v2 實驗的撰寫慣例。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、ProgramBuilder 與 executor 的執行機制。
-- [v2_gui](v2_gui/README.md)：measure 與 autofluxdep 的 GUI 實驗接入家族，具體 GUI workflow／policy 留在 app。
+- [v2](v2/README.md)：program/v2 的通用 runtime 與量化、SNR、tracker 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、ProgramBuilder 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。
 - [cfg_editing](cfg_editing/README.md)：Qt-free 的實驗側 program cfg 編輯支援；與執行前 cfg 組裝分工。

@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import ClassVar, TypeAlias
+
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import AutoOptCfg
+from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import AutoOptExp
+from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import AutoOptResult
+from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder
+from zcu_lab.v2._support.measure.schema_builder import MeasureCfgDefinition
+from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
+from zcu_lab.v2._support.measure.seeds import res_freq_range
+from zcu_lab.v2._support.measure.seeds import scaled_md
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterGuide,
+    AnalyzeRequest,
+    AnalyzeResultBase,
+    MetaDictWriteback,
+    RunRequest,
+    SessionEnv,
+    WritebackItem,
+    WritebackRequest,
+)
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    SweepValue,
+)
+from zcu_tools.plotting.plots import Plots
+
+RoOptAutoRunResult: TypeAlias = RunRecord[AutoOptCfg, AutoOptResult]
+
+
+@dataclass
+class RoOptAutoAnalyzeParams:
+    # analyze() takes no tuning knobs — it reads off the best of the optimized
+    # points. No form fields.
+    pass
+
+
+@dataclass
+class RoOptAutoAnalyzeResult(AnalyzeResultBase):
+    best_freq: float
+    best_gain: float
+    best_length: float
+
+
+class RoOptAutoAdapter(
+    BaseAdapter[
+        AutoOptCfg,
+        RoOptAutoRunResult,
+        RoOptAutoAnalyzeResult,
+        RoOptAutoAnalyzeParams,
+    ]
+):
+    exp_cls = AutoOptExp
+    ExpCfg_cls = AutoOptCfg
+
+    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
+        behavior=(
+            "Automatic readout optimization: a Bayesian optimizer (skopt) "
+            "searches readout frequency, gain and length jointly to maximize "
+            "the g/e signal-to-noise ratio (SNR), with the qubit toggled "
+            "between g and e by a pi pulse. Runs on real hardware. Use it to "
+            "find a good readout in one shot instead of tuning freq / power / "
+            "length one axis at a time."
+        ),
+        expects_md=(
+            "Reads from the MetaDict (all optional): 'r_f' / 'best_ro_freq' — "
+            "resonator / chosen readout frequency centring the freq search "
+            "(~4000–8000 MHz); 'rf_w' — linewidth, scaling the freq search "
+            "range (~5–50 MHz); 'res_ch' / 'ro_ch' — drive / ADC channels; "
+            "'timeFly' — trigger-offset cable delay; 'q_f' / 'qub_ch' — qubit "
+            "frequency / channel for the g↔e pi pulse."
+        ),
+        expects_ml=(
+            "Needs a qubit-probe pulse module (typically a calibrated pi "
+            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
+            "'readout_rf'); references a ModuleLibrary waveform 'ro_waveform' "
+            "when present. Optionally references a reset module."
+        ),
+        typical_writeback=(
+            "Proposes the optimizer's best readout frequency, gain and length "
+            "into MetaDict 'best_ro_freq' (MHz), 'best_ro_gain' (a.u.) and "
+            "'best_ro_length' (us). When a cfg snapshot with pulse readout is "
+            "available, also proposes ModuleLibrary 'readout_dpm'."
+        ),
+        recommended=(
+            "The three sweep axes define the optimizer's SEARCH BOUNDS (min / "
+            "max), not a grid — keep them reasonably tight (e.g. freq within a "
+            "fraction of a linewidth, gain and length in a sensible band) so "
+            "the search converges. 'Optimizer points' (~1000) sets how many "
+            "evaluations to spend; raise it for wider bounds, lower it for a "
+            "quick search. No analysis knobs — it reports the best evaluated "
+            "point."
+        ),
+    )
+
+    @classmethod
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        sweep_label = "Search bounds (min–max)"
+        return (
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("qub_pulse", role_id="pi_pulse")
+            .readout(
+                pulse_only=True,
+                locked={
+                    "pulse_cfg.freq": 0.0,
+                    "ro_cfg.ro_freq": 0.0,
+                    "pulse_cfg.gain": 0.0,
+                },
+            )
+            .relax_delay(scaled_md("t1", factor=3.0, fallback_value=30.5))
+            .sweep(
+                "freq",
+                label="Readout freq (MHz)",
+                default=res_freq_range(expts=51, span_factor=0.2),
+                section_label=sweep_label,
+            )
+            .sweep(
+                "gain",
+                label="Readout gain (a.u.)",
+                default=SweepValue(start=0.1, stop=0.25, expts=51),
+                section_label=sweep_label,
+            )
+            .sweep(
+                "length",
+                label="Readout length (us)",
+                default=SweepValue(start=5.0, stop=10.0, expts=51),
+                section_label=sweep_label,
+            )
+            .int("num_points", label="Optimizer points", default=1001)
+            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
+            .reps(1000)
+            .rounds(10)
+            .build()
+        )
+
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: dict[str, object],
+        *,
+        context: RunContext,
+    ) -> RoOptAutoRunResult:
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return RunRecord(cfg, AutoOptExp().run(cfg, context=context))
+
+    def analyze(
+        self,
+        req: AnalyzeRequest[RoOptAutoRunResult, RoOptAutoAnalyzeParams],
+        *,
+        plots: Plots,
+    ) -> RoOptAutoAnalyzeResult:
+        result = AutoOptExp().analyze(req.run_result, None, plots=plots)
+        return RoOptAutoAnalyzeResult(
+            best_freq=result.best_freq,
+            best_gain=result.best_gain,
+            best_length=result.best_length,
+        )
+
+    def get_writeback_items(
+        self, req: WritebackRequest[RoOptAutoRunResult, RoOptAutoAnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        items: list[WritebackItem] = [
+            MetaDictWriteback(
+                target_name="best_ro_freq",
+                description="Optimal readout frequency (MHz)",
+                proposed_value=result.best_freq,
+            ),
+            MetaDictWriteback(
+                target_name="best_ro_gain",
+                description="Optimal readout gain (a.u.)",
+                proposed_value=result.best_gain,
+            ),
+            MetaDictWriteback(
+                target_name="best_ro_length",
+                description="Optimal readout length (us)",
+                proposed_value=result.best_length,
+            ),
+        ]
+        items.extend(
+            readout_dpm_writeback_items(
+                req.ctx,
+                req.run_result.cfg,
+                proposed={
+                    "best_ro_freq": result.best_freq,
+                    "best_ro_gain": result.best_gain,
+                    "best_ro_length": result.best_length,
+                },
+            )
+        )
+        return items
+
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
+        return f"{ctx.qub_name}_ro_opt_auto_{time.strftime('%m%d')}"

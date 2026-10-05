@@ -18,7 +18,6 @@ from typing import Any
 
 import pytest
 from qick.asm_v2 import QickParam
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
@@ -35,6 +34,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from zcu_lab.recipes import RECIPES
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 from ._helpers import call as _raw_call
 from ._helpers import make_png, observe_run_inputs

@@ -24,7 +24,7 @@ State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由
 
 Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 明示 SoC 需求、analysis、post-analysis 與 load 的支援範圍。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 依 `requires_soc` 檢查連線；load permit 與 LoadService 依 `load_data` 拒絕不支援的 load。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。Analyze permit 目前只查 context／run result，非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。
 
-Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，run guard 呼叫 adapter 的 preflight；preflight 不代替 execution guard 或硬體操作。精確 flags、conditional hooks 和 import-time 驗證見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../lib/zcu_tools/experiment/v2_gui/measure/adapters/README.md)。
+Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，run guard 呼叫 adapter 的 preflight；preflight 不代替 execution guard 或硬體操作。精確 flags、conditional hooks 和 import-time 驗證見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../zcu_lab/v2/gui-contracts.md)。
 
 Domain 模組定義事件 enum、payload 和已提交的 fact。Producer 不傳 widget 名稱、刷新旗標或重畫遮罩。App 組裝 bus 訂閱與對外投影；GUI coordinator 把 fact 轉為畫面動作。例如 measure 的 tab content fact 在完整 pane state commit 後發布，operation terminal fact 與 content commit 是不同事件，避免成功時畫兩次。具體的保留 figure 恢復順序由 [measure app](../../lib/zcu_tools/gui/app/measure/README.md) 管理。Remote 以自己的投影呈現相同事實；這不規定 wire payload 或診斷通道。
 

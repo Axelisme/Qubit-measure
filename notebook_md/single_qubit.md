@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 %autoreload 2
-import zcu_tools.experiment.v2 as ze
+import zcu_lab.v2 as ze
 import zcu_tools.program.v2 as zp
 from zcu_tools.resources.context import (
     ContextManager,
@@ -244,16 +244,16 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, ze.LookbackCfg, env, overrides={'rounds': 500})
+cfg = make_cfg(exp_cfg, ze.lookback.core.LookbackCfg, env, overrides={'rounds': 500})
 
 
-lookback_exp = nb_adapter(ze.LookbackExp())
+lookback_exp = nb_adapter(ze.lookback.core.LookbackExp())
 _ = lookback_exp.run(cfg)
 ```
 
 ```python
 lookback_analysis = lookback_exp.analyze(
-    ze.LookbackExp.Options(ratio=0.1, smooth=1.0)
+    ze.lookback.core.LookbackExp.Options(ratio=0.1, smooth=1.0)
 )
 predict_offset = lookback_analysis.result.predict_offset
 fig = lookback_analysis.figures["fit"]
@@ -316,16 +316,16 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, 301),
     "relax_delay": 1.0,  # us
 }
-cfg = make_cfg(exp_cfg, ze.onetone.FreqCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.onetone.freq.core.FreqCfg, env, overrides={'reps': 100, 'rounds': 100})
 
 
-res_freq_exp = nb_adapter(ze.onetone.FreqExp())
+res_freq_exp = nb_adapter(ze.onetone.freq.core.FreqExp())
 _ = res_freq_exp.run(cfg)
 ```
 
 ```python
 res_freq_analysis = res_freq_exp.analyze(
-    ze.onetone.FreqExp.Options(model_type="hm", fit_bg_amp_slope=True)
+    ze.onetone.freq.core.FreqExp.Options(model_type="hm", fit_bg_amp_slope=True)
 )
 f = res_freq_analysis.result.freq
 kappa = res_freq_analysis.result.fwhm
@@ -379,11 +379,11 @@ exp_cfg = {
     "relax_delay": 10.0,  # us
 }
 cfg = make_cfg(
-    exp_cfg, ze.onetone.PowerDepCfg, env,
+    exp_cfg, ze.onetone.power_dep.core.PowerDepCfg, env,
     overrides={"reps": 100, "rounds": 10, "earlystop_snr": 100.0},
 )
 
-res_gain_exp = nb_adapter(ze.onetone.PowerDepExp())
+res_gain_exp = nb_adapter(ze.onetone.power_dep.core.PowerDepExp())
 _ = res_gain_exp.run(cfg)
 ```
 
@@ -435,11 +435,11 @@ exp_cfg = {
     },
     "relax_delay": 1.0,  # us
 }
-cfg = make_cfg(exp_cfg, ze.onetone.FluxDepCfg, env, overrides={'reps': 1000, 'rounds': 1})
+cfg = make_cfg(exp_cfg, ze.onetone.flux_dep.core.FluxDepCfg, env, overrides={'reps': 1000, 'rounds': 1})
 
-from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepExp
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepExp
 from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.notebook.experiments import FluxDepAnalyzer, FluxDepPickerOptions
+from zcu_lab.v2._support.notebook.flux_dep import FluxDepAnalyzer, FluxDepPickerOptions
 
 res_flux_exp = nb_adapter(FluxDepExp())
 flux_run = res_flux_exp.run(cfg)
@@ -529,10 +529,10 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.jpa.OneToneFluxCfg, env, overrides={'reps': 100, 'rounds': 10})
+cfg = make_cfg(exp_cfg, ze.jpa.flux_onetone.core.OneToneFluxCfg, env, overrides={'reps': 100, 'rounds': 10})
 
 
-jpa_flux_onetone_exp = nb_adapter(ze.jpa.OneToneFluxExp())
+jpa_flux_onetone_exp = nb_adapter(ze.jpa.flux_onetone.core.OneToneFluxExp())
 _ = jpa_flux_onetone_exp.run(cfg)
 ```
 
@@ -558,9 +558,9 @@ exp_cfg = {
     "sweep": make_sweep(11750, 11800, 501),
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.jpa.FreqCfg, env, overrides={'reps': 10000, 'rounds': 1})
+cfg = make_cfg(exp_cfg, ze.jpa.freq.core.FreqCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-jpa_freq_exp = nb_adapter(ze.jpa.FreqExp())
+jpa_freq_exp = nb_adapter(ze.jpa.freq.core.FreqExp())
 _ = jpa_freq_exp.run(cfg)
 ```
 
@@ -610,9 +610,9 @@ exp_cfg = {
     "sweep": make_sweep(-5.0e-3, 5.0e-3, 1001),
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.jpa.FluxCfg, env, overrides={'reps': 10000, 'rounds': 1})
+cfg = make_cfg(exp_cfg, ze.jpa.flux.core.FluxCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-jpa_flux_exp = nb_adapter(ze.jpa.FluxExp())
+jpa_flux_exp = nb_adapter(ze.jpa.flux.core.FluxExp())
 _ = jpa_flux_exp.run(cfg)
 ```
 
@@ -654,9 +654,9 @@ exp_cfg = {
     "sweep": make_sweep(-20, 1, 501),
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.jpa.PowerCfg, env, overrides={'reps': 10000, 'rounds': 1})
+cfg = make_cfg(exp_cfg, ze.jpa.power.core.PowerCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-jpa_pdr_exp = nb_adapter(ze.jpa.PowerExp())
+jpa_pdr_exp = nb_adapter(ze.jpa.power.core.PowerExp())
 _ = jpa_pdr_exp.run(cfg)
 ```
 
@@ -705,9 +705,9 @@ exp_cfg = {
     },
     "relax_delay": 30.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.jpa.JPAOptCfg, env, overrides={'reps': 1000, 'rounds': 1, 'num_points': 10000})
+cfg = make_cfg(exp_cfg, ze.jpa.auto_optimize.core.JPAOptCfg, env, overrides={'reps': 1000, 'rounds': 1, 'num_points': 10000})
 
-jpa_opt_exp = nb_adapter(ze.jpa.AutoOptimizeExp())
+jpa_opt_exp = nb_adapter(ze.jpa.auto_optimize.core.AutoOptimizeExp())
 _ = jpa_opt_exp.run(cfg)
 ```
 
@@ -756,9 +756,9 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 20, md.r_f + 20, 101),
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.jpa.CheckCfg, env, overrides={'reps': 1000, 'rounds': 5})
+cfg = make_cfg(exp_cfg, ze.jpa.check.core.CheckCfg, env, overrides={'reps': 1000, 'rounds': 5})
 
-jpa_check_exp = nb_adapter(ze.jpa.CheckExp())
+jpa_check_exp = nb_adapter(ze.jpa.check.core.CheckExp())
 _ = jpa_check_exp.run(cfg)
 ```
 
@@ -857,16 +857,16 @@ exp_cfg = {
     # "sweep": make_sweep(4000, 6000, step=1.00),
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.freq.core.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-qub_freq_exp = nb_adapter(ze.twotone.FreqExp())
+qub_freq_exp = nb_adapter(ze.twotone.freq.core.FreqExp())
 _ = qub_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-qub_freq_analysis = qub_freq_exp.analyze(ze.twotone.FreqExp.Options())
+qub_freq_analysis = qub_freq_exp.analyze(ze.twotone.freq.core.FreqExp.Options())
 f = qub_freq_analysis.result.freq
 kappa = qub_freq_analysis.result.fwhm
 fig = qub_freq_analysis.figures["fit"]
@@ -934,16 +934,16 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.3, 101),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.rabi.len_rabi.core.LenRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-qub_lenrabi_exp = nb_adapter(ze.twotone.rabi.LenRabiExp())
+qub_lenrabi_exp = nb_adapter(ze.twotone.rabi.len_rabi.core.LenRabiExp())
 _ = qub_lenrabi_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-qub_lenrabi_analysis = qub_lenrabi_exp.analyze(ze.twotone.rabi.LenRabiExp.Options(decay=True))
+qub_lenrabi_analysis = qub_lenrabi_exp.analyze(ze.twotone.rabi.len_rabi.core.LenRabiExp.Options(decay=True))
 md.pi_len = qub_lenrabi_analysis.result.pi_len
 md.pi2_len = qub_lenrabi_analysis.result.pi2_len
 md.rabi_f = qub_lenrabi_analysis.result.rabi_f
@@ -1009,16 +1009,16 @@ exp_cfg = {
     "sweep": make_sweep(-0.3, 0.6, 51),
     # "sweep": make_sweep(0.0, max_gain, 51),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.rabi.AmpRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.rabi.amp_rabi.core.AmpRabiCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-qub_amprabi_exp = nb_adapter(ze.twotone.rabi.AmpRabiExp())
+qub_amprabi_exp = nb_adapter(ze.twotone.rabi.amp_rabi.core.AmpRabiExp())
 _ = qub_amprabi_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-qub_amprabi_analysis = qub_amprabi_exp.analyze(ze.twotone.rabi.AmpRabiExp.Options(skip=1))
+qub_amprabi_analysis = qub_amprabi_exp.analyze(ze.twotone.rabi.amp_rabi.core.AmpRabiExp.Options(skip=1))
 md.pi_gain = qub_amprabi_analysis.result.pi_amp
 md.pi2_gain = qub_amprabi_analysis.result.pi2_amp
 fig = qub_amprabi_analysis.figures["fit"]
@@ -1099,9 +1099,9 @@ exp_cfg = {
     # "relax_delay": 0.1,  # us
     "relax_delay": 1.0 * md.t1,
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.freq.core.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-single_reset_freq_exp = nb_adapter(ze.twotone.reset.single_tone.FreqExp())
+single_reset_freq_exp = nb_adapter(ze.twotone.reset.single_tone.freq.core.FreqExp())
 _ = single_reset_freq_exp.run(cfg)
 ```
 
@@ -1156,9 +1156,9 @@ exp_cfg = {
     "sweep": make_sweep(0.1, 20.0, 50),
     "relax_delay": 30.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.LengthCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.single_tone.length.core.LengthCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-single_reset_length_exp = nb_adapter(ze.twotone.reset.single_tone.LengthExp())
+single_reset_length_exp = nb_adapter(ze.twotone.reset.single_tone.length.core.LengthExp())
 _ = single_reset_length_exp.run(cfg)
 ```
 
@@ -1216,9 +1216,9 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 70.0,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.rabi_check.core.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
-single_reset_check_exp = nb_adapter(ze.twotone.reset.RabiCheckExp())
+single_reset_check_exp = nb_adapter(ze.twotone.reset.rabi_check.core.RabiCheckExp())
 _ = single_reset_check_exp.run(cfg)
 ```
 
@@ -1278,15 +1278,15 @@ exp_cfg = {
     # "sweep": make_sweep(4680, 4710, step=0.1),
     "relax_delay": 30.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.FreqCfg, env, overrides={'reps': 1000, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.twotone.freq.core.FreqCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-dualreset_freq1_exp = nb_adapter(ze.twotone.FreqExp())
+dualreset_freq1_exp = nb_adapter(ze.twotone.freq.core.FreqExp())
 _ = dualreset_freq1_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-dualreset_freq1_analysis = dualreset_freq1_exp.analyze(ze.twotone.FreqExp.Options())
+dualreset_freq1_analysis = dualreset_freq1_exp.analyze(ze.twotone.freq.core.FreqExp.Options())
 f = dualreset_freq1_analysis.result.freq
 kappa = dualreset_freq1_analysis.result.fwhm
 fig = dualreset_freq1_analysis.figures["fit"]
@@ -1369,9 +1369,9 @@ exp_cfg = {
     # "relax_delay": 5 / rf_w,  # us
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000, 'method': 'hard'})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.freq.core.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000, 'method': 'hard'})
 
-dualreset_freq2_exp = nb_adapter(ze.twotone.reset.dual_tone.FreqExp())
+dualreset_freq2_exp = nb_adapter(ze.twotone.reset.dual_tone.freq.core.FreqExp())
 _ = dualreset_freq2_exp.run(cfg)
 ```
 
@@ -1380,7 +1380,7 @@ _ = dualreset_freq2_exp.run(cfg)
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
 
-dualreset_freq2_analysis = dualreset_freq2_exp.analyze(ze.twotone.reset.dual_tone.FreqExp.Options(smooth=0.5, xname=xlabal, yname=ylabal))
+dualreset_freq2_analysis = dualreset_freq2_exp.analyze(ze.twotone.reset.dual_tone.freq.core.FreqExp.Options(smooth=0.5, xname=xlabal, yname=ylabal))
 f1 = dualreset_freq2_analysis.result.freq1
 f2 = dualreset_freq2_analysis.result.freq2
 fig = dualreset_freq2_analysis.figures["fit"]
@@ -1456,9 +1456,9 @@ exp_cfg = {
     "relax_delay": 0.5,  # us
     # "relax_delay": 3 * t1,
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.power.core.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-dualreset_gain_exp = nb_adapter(ze.twotone.reset.dual_tone.PowerExp())
+dualreset_gain_exp = nb_adapter(ze.twotone.reset.dual_tone.power.core.PowerExp())
 _ = dualreset_gain_exp.run(cfg)
 ```
 
@@ -1467,7 +1467,7 @@ _ = dualreset_gain_exp.run(cfg)
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
 
-dualreset_gain_analysis = dualreset_gain_exp.analyze(ze.twotone.reset.dual_tone.PowerExp.Options(xname=xlabal, yname=ylabal))
+dualreset_gain_analysis = dualreset_gain_exp.analyze(ze.twotone.reset.dual_tone.power.core.PowerExp.Options(xname=xlabal, yname=ylabal))
 gain1 = dualreset_gain_analysis.result.gain1
 gain2 = dualreset_gain_analysis.result.gain2
 fig = dualreset_gain_analysis.figures["fit"]
@@ -1511,9 +1511,9 @@ exp_cfg = {
     "sweep": make_sweep(0.05, 40.0, 51),
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.LengthCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.dual_tone.length.core.LengthCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-dualreset_len_exp = nb_adapter(ze.twotone.reset.dual_tone.LengthExp())
+dualreset_len_exp = nb_adapter(ze.twotone.reset.dual_tone.length.core.LengthExp())
 _ = dualreset_len_exp.run(cfg)
 ```
 
@@ -1551,9 +1551,9 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.rabi_check.core.RabiCheckCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
-dualreset_check_exp = nb_adapter(ze.twotone.reset.RabiCheckExp())
+dualreset_check_exp = nb_adapter(ze.twotone.reset.rabi_check.core.RabiCheckExp())
 _ = dualreset_check_exp.run(cfg)
 ```
 
@@ -1594,15 +1594,15 @@ exp_cfg = {
     # "relax_delay": 3 * md.t1,  # us
     "sweep": make_sweep(0.03, 2 / md.rf_w, 151),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.rabi.len_rabi.core.LenRabiCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-rabifreq_exp = nb_adapter(ze.twotone.rabi.LenRabiExp())
+rabifreq_exp = nb_adapter(ze.twotone.rabi.len_rabi.core.LenRabiExp())
 _ = rabifreq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
-rabifreq_analysis = rabifreq_exp.analyze(ze.twotone.rabi.LenRabiExp.Options(decay=True))
+rabifreq_analysis = rabifreq_exp.analyze(ze.twotone.rabi.len_rabi.core.LenRabiExp.Options(decay=True))
 md.rabi_f = rabifreq_analysis.result.rabi_f
 fig = rabifreq_analysis.figures["fit"]
 ```
@@ -1669,16 +1669,16 @@ exp_cfg = {
     "relax_delay": 10.5,  # us
     # "relax_delay": 3 * md.t1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.FreqGainCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.freq.core.FreqGainCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-bathreset_freq_exp = nb_adapter(ze.twotone.reset.bath.FreqGainExp())
+bathreset_freq_exp = nb_adapter(ze.twotone.reset.bath.freq.core.FreqGainExp())
 _ = bathreset_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-bathreset_freq_analysis = bathreset_freq_exp.analyze(ze.twotone.reset.bath.FreqGainExp.Options(smooth=1))
+bathreset_freq_analysis = bathreset_freq_exp.analyze(ze.twotone.reset.bath.freq.core.FreqGainExp.Options(smooth=1))
 md.bathreset_gain = bathreset_freq_analysis.result.gain
 md.bathreset_freq = bathreset_freq_analysis.result.freq
 fig = bathreset_freq_analysis.figures["fit"]
@@ -1738,9 +1738,9 @@ exp_cfg = {
     "relax_delay": 10.5,  # us
     # "relax_delay": 3 * md.t1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.LengthCfg, env, overrides={'reps': 100, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.length.core.LengthCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-bathreset_len_exp = nb_adapter(ze.twotone.reset.bath.LengthExp())
+bathreset_len_exp = nb_adapter(ze.twotone.reset.bath.length.core.LengthExp())
 _ = bathreset_len_exp.run(cfg)
 ```
 
@@ -1799,9 +1799,9 @@ exp_cfg = {
     # "relax_delay": 10.5,  # us
     "relax_delay": 3 * md.t1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.PhaseCfg, env, overrides={'reps': 100, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.bath.phase.core.PhaseCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-bathreset_phase_exp = nb_adapter(ze.twotone.reset.bath.PhaseExp())
+bathreset_phase_exp = nb_adapter(ze.twotone.reset.bath.phase.core.PhaseExp())
 _ = bathreset_phase_exp.run(cfg)
 ```
 
@@ -1868,9 +1868,9 @@ exp_cfg = {
     # "relax_delay": 0.5,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.reset.rabi_check.core.RabiCheckCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-bathreset_rabicheck_exp = nb_adapter(ze.twotone.reset.RabiCheckExp())
+bathreset_rabicheck_exp = nb_adapter(ze.twotone.reset.rabi_check.core.RabiCheckExp())
 _ = bathreset_rabicheck_exp.run(cfg)
 ```
 
@@ -1931,9 +1931,9 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, env, overrides={'reps': 2000, 'rounds': 40, 'fail_retry': 3})
+cfg = make_cfg(exp_cfg, ze.twotone.fluxdep.core.FreqFluxCfg, env, overrides={'reps': 2000, 'rounds': 40, 'fail_retry': 3})
 
-qub_flux_exp = nb_adapter(ze.twotone.FreqFluxExp())
+qub_flux_exp = nb_adapter(ze.twotone.fluxdep.core.FreqFluxExp())
 qub_flux_run = qub_flux_exp.run(cfg)
 ```
 
@@ -1944,7 +1944,7 @@ qub_flux_exp.save(Path(database_path) / filename, unique=True)
 
 ```python
 %matplotlib widget
-from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxCfg, FreqFluxResult
+from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxResult
 
 qub_flux_analyzer = FluxDepAnalyzer[FreqFluxCfg, FreqFluxResult]()
 qub_flux_picker = qub_flux_analyzer.start(
@@ -1999,9 +1999,9 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.power_dep.core.PowerCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-qub_pdr_exp = nb_adapter(ze.twotone.PowerExp())
+qub_pdr_exp = nb_adapter(ze.twotone.power_dep.core.PowerExp())
 _ = qub_pdr_exp.run(cfg)
 ```
 
@@ -2049,9 +2049,9 @@ exp_cfg = {
     },
     "relax_delay": 10.1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.CKP_Cfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.ckp.core.CKP_Cfg, env, overrides={'reps': 100, 'rounds': 100})
 
-ckp_exp = nb_adapter(ze.twotone.CKP_Exp())
+ckp_exp = nb_adapter(ze.twotone.ckp.core.CKP_Exp())
 _ = ckp_exp.run(cfg)
 ```
 
@@ -2106,16 +2106,16 @@ exp_cfg = {
     "relax_delay": 30.5,  # us
     # "relax_delay": 2 * t1, # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.DispersiveCfg, env, overrides={'reps': 1000, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.twotone.dispersive.core.DispersiveCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-dispersive_shift_exp = nb_adapter(ze.twotone.DispersiveExp())
+dispersive_shift_exp = nb_adapter(ze.twotone.dispersive.core.DispersiveExp())
 _ = dispersive_shift_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-dispersive_shift_analysis = dispersive_shift_exp.analyze(ze.twotone.DispersiveExp.Options())
+dispersive_shift_analysis = dispersive_shift_exp.analyze(ze.twotone.dispersive.core.DispersiveExp.Options())
 md.chi = dispersive_shift_analysis.result.chi
 rf_w = dispersive_shift_analysis.result.avg_fwhm
 fig = dispersive_shift_analysis.figures["fit"]
@@ -2173,16 +2173,16 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 10, 'earlystop_snr': 50})
+cfg = make_cfg(exp_cfg, ze.twotone.ac_stark.core.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 10, 'earlystop_snr': 50})
 
-ac_stark_exp = nb_adapter(ze.twotone.AcStarkExp())
+ac_stark_exp = nb_adapter(ze.twotone.ac_stark.core.AcStarkExp())
 _ = ac_stark_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-ac_stark_analysis = ac_stark_exp.analyze(ze.twotone.AcStarkExp.Options(chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.01))
+ac_stark_analysis = ac_stark_exp.analyze(ze.twotone.ac_stark.core.AcStarkExp.Options(chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.01))
 md.ac_stark_coeff = ac_stark_analysis.result.ac_coeff
 fig = ac_stark_analysis.figures["fit"]
 ```
@@ -2219,16 +2219,16 @@ exp_cfg = {
     },
     "relax_delay": 10.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.AllXYCfg, env, overrides={'reps': 1000, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.twotone.allxy.core.AllXYCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-allxy_exp = nb_adapter(ze.twotone.AllXY_Exp())
+allxy_exp = nb_adapter(ze.twotone.allxy.core.AllXY_Exp())
 _ = allxy_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-allxy_analysis = allxy_exp.analyze(ze.twotone.AllXY_Exp.Options())
+allxy_analysis = allxy_exp.analyze(ze.twotone.allxy.core.AllXY_Exp.Options())
 fig = allxy_analysis.figures["fit"]
 ```
 
@@ -2263,9 +2263,9 @@ exp_cfg = {
     "n_seeds": 100,
     "relax_delay": 10.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.RBCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.rb.core.RBCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-rb_exp = nb_adapter(ze.twotone.RB_Exp())
+rb_exp = nb_adapter(ze.twotone.rb.core.RB_Exp())
 _ = rb_exp.run(cfg)
 ```
 
@@ -2302,9 +2302,9 @@ exp_cfg = {
     "relax_delay": 30.5,  # us
 }
 repeat_on = "X90_pulse"
-cfg = make_cfg(exp_cfg, ze.twotone.ZigZagCfg, env, overrides={'reps': 1000, 'rounds': 100, 'repeat_on': repeat_on})
+cfg = make_cfg(exp_cfg, ze.twotone.zigzag.core.ZigZagCfg, env, overrides={'reps': 1000, 'rounds': 100, 'repeat_on': repeat_on})
 
-zigzag_exp = nb_adapter(ze.twotone.ZigZagExp())
+zigzag_exp = nb_adapter(ze.twotone.zigzag.core.ZigZagExp())
 _ = zigzag_exp.run(cfg)
 ```
 
@@ -2357,17 +2357,17 @@ elif repeat_on == "X180_pulse":
     exp_cfg["sweep"].update(gain=make_sweep(md.pi_gain * 0.8, md.pi_gain * 1.2, 101))
 else:
     raise ValueError(f"Invalid repeat_on: {repeat_on}")
-cfg = make_cfg(exp_cfg, ze.twotone.ZigZagScanCfg, env, overrides={'reps': 100, 'rounds': 100, 'repeat_on': repeat_on})
+cfg = make_cfg(exp_cfg, ze.twotone.zigzag_sweep.core.ZigZagScanCfg, env, overrides={'reps': 100, 'rounds': 100, 'repeat_on': repeat_on})
 
 
-zigzag_scan_exp = nb_adapter(ze.twotone.ZigZagScanExp())
+zigzag_scan_exp = nb_adapter(ze.twotone.zigzag_sweep.core.ZigZagScanExp())
 _ = zigzag_scan_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-zigzag_scan_analysis = zigzag_scan_exp.analyze(ze.twotone.ZigZagScanExp.Options(find_range=(None, None)))
+zigzag_scan_analysis = zigzag_scan_exp.analyze(ze.twotone.zigzag_sweep.core.ZigZagScanExp.Options(find_range=(None, None)))
 best_x = zigzag_scan_analysis.result.min_value
 fig = zigzag_scan_analysis.figures["fit"]
 ```
@@ -2450,16 +2450,16 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, step=0.1),
     # "sweep": make_sweep(5450, 5460, step=0.1),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.freq.core.FreqCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-opt_ro_freq_exp = nb_adapter(ze.twotone.ro_optimize.FreqExp())
+opt_ro_freq_exp = nb_adapter(ze.twotone.ro_optimize.freq.core.FreqExp())
 _ = opt_ro_freq_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-opt_ro_freq_analysis = opt_ro_freq_exp.analyze(ze.twotone.ro_optimize.FreqExp.Options(smooth=2))
+opt_ro_freq_analysis = opt_ro_freq_exp.analyze(ze.twotone.ro_optimize.freq.core.FreqExp.Options(smooth=2))
 best_freq = opt_ro_freq_analysis.result.best_freq
 fig = opt_ro_freq_analysis.figures["fit"]
 best_freq
@@ -2515,16 +2515,16 @@ exp_cfg = {
     "relax_delay": 5 * md.t1,  # us
     "sweep": make_sweep(0.001, 0.2, 101),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.power.core.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
-opt_ro_pdr_exp = nb_adapter(ze.twotone.ro_optimize.PowerExp())
+opt_ro_pdr_exp = nb_adapter(ze.twotone.ro_optimize.power.core.PowerExp())
 _ = opt_ro_pdr_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-opt_ro_pdr_analysis = opt_ro_pdr_exp.analyze(ze.twotone.ro_optimize.PowerExp.Options(penalty_ratio=0.5))
+opt_ro_pdr_analysis = opt_ro_pdr_exp.analyze(ze.twotone.ro_optimize.power.core.PowerExp.Options(penalty_ratio=0.5))
 best_gain = opt_ro_pdr_analysis.result.best_gain
 fig = opt_ro_pdr_analysis.figures["fit"]
 best_gain
@@ -2579,16 +2579,16 @@ exp_cfg = {
         "gain": make_sweep(0.0, 0.2, 31),
     },
 }
-cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqGainCfg, env, overrides={'reps': 100, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.freq_gain.core.FreqGainCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-opt_ro_freq_pdr_exp = nb_adapter(ze.twotone.ro_optimize.FreqGainExp())
+opt_ro_freq_pdr_exp = nb_adapter(ze.twotone.ro_optimize.freq_gain.core.FreqGainExp())
 _ = opt_ro_freq_pdr_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-opt_ro_freq_pdr_analysis = opt_ro_freq_pdr_exp.analyze(ze.twotone.ro_optimize.FreqGainExp.Options())
+opt_ro_freq_pdr_analysis = opt_ro_freq_pdr_exp.analyze(ze.twotone.ro_optimize.freq_gain.core.FreqGainExp.Options())
 best_freq = opt_ro_freq_pdr_analysis.result.best_freq
 best_gain = opt_ro_freq_pdr_analysis.result.best_gain
 fig = opt_ro_freq_pdr_analysis.figures["fit"]
@@ -2638,16 +2638,16 @@ exp_cfg = {
     "relax_delay": 5 * md.t1,  # us
     "sweep": make_sweep(0.01, 3.5, 51),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.LengthCfg, env, overrides={'reps': 10000, 'rounds': 1})
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.length.core.LengthCfg, env, overrides={'reps': 10000, 'rounds': 1})
 
-opt_ro_len_exp = nb_adapter(ze.twotone.ro_optimize.LengthExp())
+opt_ro_len_exp = nb_adapter(ze.twotone.ro_optimize.length.core.LengthExp())
 _ = opt_ro_len_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-opt_ro_len_analysis = opt_ro_len_exp.analyze(ze.twotone.ro_optimize.LengthExp.Options(t0=5.0))
+opt_ro_len_analysis = opt_ro_len_exp.analyze(ze.twotone.ro_optimize.length.core.LengthExp.Options(t0=5.0))
 best_length = opt_ro_len_analysis.result.best_length
 fig = opt_ro_len_analysis.figures["fit"]
 best_length
@@ -2711,9 +2711,9 @@ exp_cfg = {
         "length": make_sweep(5.0, 10.0, 51),
     },
 }
-cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.AutoOptCfg, env, overrides={'reps': 1000, 'rounds': 10, 'num_points': 1001})
+cfg = make_cfg(exp_cfg, ze.twotone.ro_optimize.auto_optimize.core.AutoOptCfg, env, overrides={'reps': 1000, 'rounds': 10, 'num_points': 1001})
 
-auto_opt_ro_exp = nb_adapter(ze.twotone.ro_optimize.AutoOptExp())
+auto_opt_ro_exp = nb_adapter(ze.twotone.ro_optimize.auto_optimize.core.AutoOptExp())
 _ = auto_opt_ro_exp.run(cfg)
 ```
 
@@ -2783,13 +2783,13 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 0.4, 101),  # us
     # "sweep": make_sweep(0.0, 1.5 * md.t2r, 101),  # us
 }
-cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T2RamseyCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.t2ramsey.core.T2RamseyCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 activate_detune = 0.05 / cfg.sweep.length.step
 
 cfg = cfg.with_updates(detune=activate_detune)
 
-t2ramsey_exp = nb_adapter(ze.twotone.time_domain.T2RamseyExp())
+t2ramsey_exp = nb_adapter(ze.twotone.time_domain.t2ramsey.core.T2RamseyExp())
 t2ramsey_run = t2ramsey_exp.run(cfg)
 true_detune = t2ramsey_run.result.true_activate_detune
 if true_detune is None:
@@ -2799,7 +2799,7 @@ if true_detune is None:
 ```python
 %matplotlib inline
 
-t2ramsey_analysis = t2ramsey_exp.analyze(ze.twotone.time_domain.T2RamseyExp.Options(fit_fringe=True))
+t2ramsey_analysis = t2ramsey_exp.analyze(ze.twotone.time_domain.t2ramsey.core.T2RamseyExp.Options(fit_fringe=True))
 md.t2r = t2ramsey_analysis.result.t2r
 md.t2r_err = t2ramsey_analysis.result.t2r_err
 detune = t2ramsey_analysis.result.detune
@@ -2829,7 +2829,7 @@ md.q_f
 調整等待時間的範圍與點數後執行量測，再選擇擬合要略過的資料點。以下分別示範一般 T1、With Tone 與 With Sweep Tone。
 
 ```python
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Exp
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_tools.notebook import NotebookAdapter
 
 exp_cfg = {
@@ -2853,7 +2853,7 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 5 * md.t1, 51),
     "uniform": False,
 }
-cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T1Cfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.t1.core.T1Cfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 t1_exp = nb_adapter(T1Exp())
 _ = t1_exp.run(cfg)
@@ -2895,16 +2895,16 @@ exp_cfg = {
     "sweep": make_sweep(1.0, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10})
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.t1.core.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10})
 
-t1_with_tone_exp = nb_adapter(ze.twotone.time_domain.T1WithToneExp())
+t1_with_tone_exp = nb_adapter(ze.twotone.time_domain.t1.core.T1WithToneExp())
 _ = t1_with_tone_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-t1_with_tone_analysis = t1_with_tone_exp.analyze(ze.twotone.time_domain.T1WithToneExp.Options(dual_exp=False))
+t1_with_tone_analysis = t1_with_tone_exp.analyze(ze.twotone.time_domain.t1.core.T1WithToneExp.Options(dual_exp=False))
 md.t1_with_tone = t1_with_tone_analysis.result.t1
 fig = t1_with_tone_analysis.figures["fit"]
 md.t1_with_tone
@@ -2948,9 +2948,9 @@ exp_cfg = {
         "length": make_sweep(1.0, 30, 501),
     },
 }
-cfg = make_cfg(exp_cfg, ze.twotone.time_domain.ScanT1WithToneCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.t1.core.ScanT1WithToneCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-t1_with_tone_sweep_exp = nb_adapter(ze.twotone.time_domain.ScanT1WithToneExp())
+t1_with_tone_sweep_exp = nb_adapter(ze.twotone.time_domain.t1.core.ScanT1WithToneExp())
 _ = t1_with_tone_sweep_exp.run(cfg)
 ```
 
@@ -2988,13 +2988,13 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.5 * md.t2e, 101),
     # "sweep": make_sweep(0.01, 5.0, 101),
 }
-cfg = make_cfg(exp_cfg, ze.twotone.time_domain.T2EchoCfg, env, overrides={'reps': 1000, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.t2echo.core.T2EchoCfg, env, overrides={'reps': 1000, 'rounds': 100})
 
 activate_detune = 0.1 / cfg.sweep.length.step
 
 cfg = cfg.with_updates(detune=activate_detune)
 
-t2echo_exp = nb_adapter(ze.twotone.time_domain.T2EchoExp())
+t2echo_exp = nb_adapter(ze.twotone.time_domain.t2echo.core.T2EchoExp())
 t2echo_run = t2echo_exp.run(cfg)
 true_detune = t2echo_run.result.true_activate_detune
 if true_detune is None:
@@ -3004,7 +3004,7 @@ if true_detune is None:
 ```python
 %matplotlib inline
 
-t2echo_analysis = t2echo_exp.analyze(ze.twotone.time_domain.T2EchoExp.Options(fit_method="fringe"))
+t2echo_analysis = t2echo_exp.analyze(ze.twotone.time_domain.t2echo.core.T2EchoExp.Options(fit_method="fringe"))
 md.t2e = t2echo_analysis.result.t2e
 md.t2e_err = t2echo_analysis.result.t2e_err
 detune = t2echo_analysis.result.detune
@@ -3047,15 +3047,15 @@ exp_cfg = {
     "relax_delay": 5 * md.t1,  # us
 }
 detune_ratio = 0.1
-cfg = make_cfg(exp_cfg, ze.twotone.time_domain.CPMG_Cfg, env, overrides={'reps': 1000, 'rounds': 100, 'detune_ratio': detune_ratio})
+cfg = make_cfg(exp_cfg, ze.twotone.time_domain.cpmg.core.CPMG_Cfg, env, overrides={'reps': 1000, 'rounds': 100, 'detune_ratio': detune_ratio})
 
-cpmg_exp = nb_adapter(ze.twotone.time_domain.CPMG_Exp())
+cpmg_exp = nb_adapter(ze.twotone.time_domain.cpmg.core.CPMG_Exp())
 _ = cpmg_exp.run(cfg)
 ```
 
 ```python
 
-cpmg_analysis = cpmg_exp.analyze(ze.twotone.time_domain.CPMG_Exp.Options(fit_fringe=True))
+cpmg_analysis = cpmg_exp.analyze(ze.twotone.time_domain.cpmg.core.CPMG_Exp.Options(fit_fringe=True))
 fig = cpmg_analysis.figures["fit"]
 ```
 
@@ -3124,9 +3124,9 @@ jpa_sgs.get_info()
 先執行 GE 量測與 FIT，再執行 post analysis。Post analysis 使用前一格得到的校準結果，不需要重跑量測。
 
 ```python
-from zcu_tools.experiment.v2.singleshot.ge import GE_Exp
+from zcu_lab.v2.singleshot.ge.core import GE_Exp
 from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.notebook.experiments import GEPostAnalyzer
+from zcu_lab.v2.singleshot.ge.notebook import GEPostAnalyzer
 
 exp_cfg = {
     "modules": {
@@ -3155,7 +3155,7 @@ exp_cfg = {
     # "relax_delay": 70.5,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.GE_Cfg, env, overrides={'shots': 100000})
+cfg = make_cfg(exp_cfg, ze.singleshot.ge.core.GE_Cfg, env, overrides={'shots': 100000})
 print("readout length: ", cfg.modules.readout.ro_cfg.ro_length)
 
 ge_core = GE_Exp()
@@ -3247,16 +3247,16 @@ exp_cfg = {
     },
     "relax_delay": 70.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.CheckCfg, env, overrides={'shots': 10000})
+cfg = make_cfg(exp_cfg, ze.singleshot.check.core.CheckCfg, env, overrides={'shots': 10000})
 
-sh_exp = nb_adapter(ze.singleshot.CheckExp())
+sh_exp = nb_adapter(ze.singleshot.check.core.CheckExp())
 _ = sh_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-sh_analysis = sh_exp.analyze(ze.singleshot.CheckExp.Options(md.g_center, md.e_center, md.ge_radius, max_point=10000))
+sh_analysis = sh_exp.analyze(ze.singleshot.check.core.CheckExp.Options(md.g_center, md.e_center, md.ge_radius, max_point=10000))
 fig = sh_analysis.figures["fit"]
 ```
 
@@ -3297,16 +3297,16 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 0.2, 51),
 }
 # Retain 1000 * 100 acquisitions as raw IQ shots for the joint fit.
-cfg = make_cfg(exp_cfg, ze.singleshot.LenRabiCfg, env, overrides={'shots': 100000, 'reps': 100000, 'rounds': 1, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
+cfg = make_cfg(exp_cfg, ze.singleshot.len_rabi.core.LenRabiCfg, env, overrides={'shots': 100000, 'reps': 100000, 'rounds': 1, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_lenrabi_exp = nb_adapter(ze.singleshot.LenRabiExp())
+sh_lenrabi_exp = nb_adapter(ze.singleshot.len_rabi.core.LenRabiExp())
 _ = sh_lenrabi_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-sh_lenrabi_analysis = sh_lenrabi_exp.analyze(ze.singleshot.LenRabiExp.Options())
+sh_lenrabi_analysis = sh_lenrabi_exp.analyze(ze.singleshot.len_rabi.core.LenRabiExp.Options())
 fig = sh_lenrabi_analysis.figures["fit"]
 ```
 
@@ -3343,16 +3343,16 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 50.1, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1Cfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius, 'uniform': True})
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.t1.core.T1Cfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius, 'uniform': True})
 
-sh_t1_exp = nb_adapter(ze.singleshot.t1.T1Exp())
+sh_t1_exp = nb_adapter(ze.singleshot.t1.t1.core.T1Exp())
 _ = sh_t1_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-sh_t1_analysis = sh_t1_exp.analyze(ze.singleshot.t1.T1Exp.Options(confusion_matrix=md.confusion_matrix, skip=1))
+sh_t1_analysis = sh_t1_exp.analyze(ze.singleshot.t1.t1.core.T1Exp.Options(confusion_matrix=md.confusion_matrix, skip=1))
 fig = sh_t1_analysis.figures["fit"]
 ```
 
@@ -3391,16 +3391,16 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius, 'uniform': True})
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.t1_with_tone.core.T1WithToneCfg, env, overrides={'reps': 1000, 'rounds': 10, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius, 'uniform': True})
 
-sh_t1_with_tone_exp = nb_adapter(ze.singleshot.t1.T1WithToneExp())
+sh_t1_with_tone_exp = nb_adapter(ze.singleshot.t1.t1_with_tone.core.T1WithToneExp())
 _ = sh_t1_with_tone_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-sh_t1_with_tone_analysis = sh_t1_with_tone_exp.analyze(ze.singleshot.t1.T1WithToneExp.Options(confusion_matrix=md.confusion_matrix, skip=2))
+sh_t1_with_tone_analysis = sh_t1_with_tone_exp.analyze(ze.singleshot.t1.t1_with_tone.core.T1WithToneExp.Options(confusion_matrix=md.confusion_matrix, skip=2))
 t1 = sh_t1_with_tone_analysis.result.t1
 t1_b = sh_t1_with_tone_analysis.result.t1_b
 fig = sh_t1_with_tone_analysis.figures["fit"]
@@ -3453,16 +3453,16 @@ exp_cfg = {
         "length": make_sweep(0.01, 15, 501),
     },
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneSweepCfg, env, overrides={'reps': 1000, 'rounds': 1, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
+cfg = make_cfg(exp_cfg, ze.singleshot.t1.t1_with_tone_sweep.core.T1WithToneSweepCfg, env, overrides={'reps': 1000, 'rounds': 1, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_t1_with_tone_sweep_exp = nb_adapter(ze.singleshot.t1.T1WithToneSweepExp())
+sh_t1_with_tone_sweep_exp = nb_adapter(ze.singleshot.t1.t1_with_tone_sweep.core.T1WithToneSweepExp())
 _ = sh_t1_with_tone_sweep_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-sh_t1_with_tone_sweep_analysis = sh_t1_with_tone_sweep_exp.analyze(ze.singleshot.t1.T1WithToneSweepExp.Options(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix))
+sh_t1_with_tone_sweep_analysis = sh_t1_with_tone_sweep_exp.analyze(ze.singleshot.t1.t1_with_tone_sweep.core.T1WithToneSweepExp.Options(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix))
 fig = sh_t1_with_tone_sweep_analysis.figures["fit"]
 ```
 
@@ -3514,9 +3514,9 @@ exp_cfg = {
     },
     "relax_delay": 20.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.mist.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
+cfg = make_cfg(exp_cfg, ze.singleshot.mist.power.core.PowerCfg, env, overrides={'reps': 1000, 'rounds': 100, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_mist_exp = nb_adapter(ze.singleshot.mist.PowerExp())
+sh_mist_exp = nb_adapter(ze.singleshot.mist.power.core.PowerExp())
 _ = sh_mist_exp.run(cfg)
 ```
 
@@ -3524,7 +3524,7 @@ _ = sh_mist_exp.run(cfg)
 %matplotlib inline
 
 sh_mist_analysis = sh_mist_exp.analyze(
-    ze.singleshot.mist.PowerExp.Options(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix),
+    ze.singleshot.mist.power.core.PowerExp.Options(ac_coeff=md.ac_stark_coeff, confusion_matrix=md.confusion_matrix),
 )
 fig = sh_mist_analysis.figures["fit"]
 ```
@@ -3575,16 +3575,16 @@ exp_cfg = {
     },
     "relax_delay": 50.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.CheckCfg, env, overrides={'shots': 1000000})
+cfg = make_cfg(exp_cfg, ze.singleshot.check.core.CheckCfg, env, overrides={'shots': 1000000})
 
-sh_mist_check_exp = nb_adapter(ze.singleshot.CheckExp())
+sh_mist_check_exp = nb_adapter(ze.singleshot.check.core.CheckExp())
 _ = sh_mist_check_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 sh_mist_check_analysis = sh_mist_check_exp.analyze(
-    ze.singleshot.CheckExp.Options(md.g_center, md.e_center, md.ge_radius),
+    ze.singleshot.check.core.CheckExp.Options(md.g_center, md.e_center, md.ge_radius),
 )
 fig = sh_mist_check_analysis.figures["fit"]
 ```
@@ -3641,16 +3641,16 @@ exp_cfg = {
     },
     "relax_delay": 5.5,  # us
 }
-cfg = make_cfg(exp_cfg, ze.singleshot.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 2, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
+cfg = make_cfg(exp_cfg, ze.singleshot.ac_stark.core.AcStarkCfg, env, overrides={'reps': 1000, 'rounds': 2, 'g_center': md.g_center, 'e_center': md.e_center, 'radius': md.ge_radius})
 
-sh_ac_stark_exp = nb_adapter(ze.singleshot.AcStarkExp())
+sh_ac_stark_exp = nb_adapter(ze.singleshot.ac_stark.core.AcStarkExp())
 _ = sh_ac_stark_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-sh_ac_stark_analysis = sh_ac_stark_exp.analyze(ze.singleshot.AcStarkExp.Options(chi=md.chi, kappa=md.rf_w, confusion_matrix=md.confusion_matrix, cutoff=0.05))
+sh_ac_stark_analysis = sh_ac_stark_exp.analyze(ze.singleshot.ac_stark.core.AcStarkExp.Options(chi=md.chi, kappa=md.rf_w, confusion_matrix=md.confusion_matrix, cutoff=0.05))
 ac_stark_coeff = sh_ac_stark_analysis.result.ac_stark_coeff
 fig = sh_ac_stark_analysis.figures["fit"]
 ```
@@ -3726,16 +3726,16 @@ exp_cfg = {
     },
     "relax_delay": 50.0,  # us
 }
-cfg = make_cfg(exp_cfg, ze.mist.PowerDepCfg, env, overrides={'reps': 100, 'rounds': 100})
+cfg = make_cfg(exp_cfg, ze.mist.power_dep.single_trace.core.PowerDepCfg, env, overrides={'reps': 100, 'rounds': 100})
 
-mist_exp = nb_adapter(ze.mist.PowerDepExp())
+mist_exp = nb_adapter(ze.mist.power_dep.single_trace.core.PowerDepExp())
 _ = mist_exp.run(cfg)
 ```
 
 ```python
 %matplotlib inline
 
-mist_analysis = mist_exp.analyze(ze.mist.PowerDepExp.Options(ac_coeff=md.ac_stark_coeff))
+mist_analysis = mist_exp.analyze(ze.mist.power_dep.single_trace.core.PowerDepExp.Options(ac_coeff=md.ac_stark_coeff))
 fig = mist_analysis.figures["fit"]
 ```
 
@@ -3794,9 +3794,9 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.fastflux.TwotoneCfg, env, overrides={'reps': 100, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.fastflux.twotone.core.TwotoneCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-lf_twotone_exp = nb_adapter(ze.fastflux.TwoToneExp())
+lf_twotone_exp = nb_adapter(ze.fastflux.twotone.core.TwoToneExp())
 _ = lf_twotone_exp.run(cfg)
 ```
 
@@ -3855,9 +3855,9 @@ exp_cfg = {
     "readout_t": 1.05,
     "relax_delay": 10.1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.fastflux.distortion.AccPhaseCfg, env, overrides={'reps': 100, 'rounds': 500})
+cfg = make_cfg(exp_cfg, ze.fastflux.distortion.acc_phase.core.AccPhaseCfg, env, overrides={'reps': 100, 'rounds': 500})
 
-lf_dt_ap_exp = nb_adapter(ze.fastflux.distortion.AccPhaseExp())
+lf_dt_ap_exp = nb_adapter(ze.fastflux.distortion.acc_phase.core.AccPhaseExp())
 _ = lf_dt_ap_exp.run(cfg)
 ```
 
@@ -3909,9 +3909,9 @@ exp_cfg = {
     "readout_t": 0.95,
     "relax_delay": 0.1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.fastflux.distortion.PhaseCfg, env, overrides={'reps': 1000, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.fastflux.distortion.phase.core.PhaseCfg, env, overrides={'reps': 1000, 'rounds': 1000})
 
-lf_dt_p_exp = nb_adapter(ze.fastflux.distortion.PhaseExp())
+lf_dt_p_exp = nb_adapter(ze.fastflux.distortion.phase.core.PhaseExp())
 _ = lf_dt_p_exp.run(cfg)
 ```
 
@@ -3971,9 +3971,9 @@ exp_cfg = {
     "readout_t": 1.25,
     "relax_delay": 0.1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.fastflux.distortion.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.fastflux.distortion.freq.core.FreqCfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-lf_dt_freq_exp = nb_adapter(ze.fastflux.distortion.FreqExp())
+lf_dt_freq_exp = nb_adapter(ze.fastflux.distortion.freq.core.FreqExp())
 _ = lf_dt_freq_exp.run(cfg)
 ```
 
@@ -4026,9 +4026,9 @@ exp_cfg = {
     },
     "relax_delay": 10.1,  # us
 }
-cfg = make_cfg(exp_cfg, ze.fastflux.T1Cfg, env, overrides={'reps': 100, 'rounds': 1000})
+cfg = make_cfg(exp_cfg, ze.fastflux.t1.core.T1Cfg, env, overrides={'reps': 100, 'rounds': 1000})
 
-lf_t1_exp = nb_adapter(ze.fastflux.T1Exp())
+lf_t1_exp = nb_adapter(ze.fastflux.t1.core.T1Exp())
 _ = lf_t1_exp.run(cfg)
 ```
 

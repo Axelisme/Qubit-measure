@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.registry import register_all
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.program.v2 import ModuleCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.definitions import register_all
 
 
 def _registry() -> Registry:

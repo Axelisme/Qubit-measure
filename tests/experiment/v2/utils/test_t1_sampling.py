@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from scipy.integrate import quad
-from zcu_tools.experiment.v2.utils import (
+from zcu_tools.experiment.v2.utils.t1_sampling import (
     materialize_nonuniform_t1_delays,
     t1_delay_axis,
 )

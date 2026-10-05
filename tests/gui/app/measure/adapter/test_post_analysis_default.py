@@ -12,16 +12,17 @@ from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 
 
 class _FakeAdapter(BaseAdapter[Any, Any, Any, Any]):

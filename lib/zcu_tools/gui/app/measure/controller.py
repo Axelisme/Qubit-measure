@@ -271,7 +271,7 @@ class Controller(SessionControllerMixin):
             self.add_view(view)
         self._bus = bus
         # Catalog of experiment-role templates (gui interface, populated by
-        # experiment/v2_gui at startup). Optional so tests can construct a bare
+        # injected user composition at startup). Optional so tests can construct a bare
         # Controller; create_from_role fails fast when absent.
         self._role_catalog = role_catalog
 

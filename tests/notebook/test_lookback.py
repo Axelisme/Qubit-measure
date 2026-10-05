@@ -5,16 +5,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.lookback import (
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.plotting.plots import NonPresentingHost
+
+from tests.zcu_lab.v2.lookback._lookback_support import make_lookback_cfg
+from zcu_lab.v2.lookback.core import (
     LookbackAnalyzeOptions,
     LookbackCfg,
     LookbackExp,
     LookbackResult,
 )
-from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.plotting.plots import NonPresentingHost
-
-from tests.experiment.v2._lookback_support import make_lookback_cfg
 
 
 def make_source(

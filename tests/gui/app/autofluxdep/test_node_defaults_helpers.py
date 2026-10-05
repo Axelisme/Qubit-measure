@@ -1,38 +1,39 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.experiment.v2_gui.autofluxdep._support.dependency_defaults import (
+from zcu_tools.gui.app.autofluxdep.cfg import module_leaf_patches
+from zcu_tools.gui.cfg import SweepValue
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.v2._support.autofluxdep.dependency_defaults import (
     is_lowerable_pulse_module,
     missing_info_value,
     missing_module_value,
 )
-from zcu_tools.experiment.v2_gui.autofluxdep._support.readout_defaults import (
+from zcu_lab.v2._support.autofluxdep.readout_defaults import (
     seed_readout_freq,
     seed_readout_gain,
 )
-from zcu_tools.experiment.v2_gui.autofluxdep._support.timing_defaults import (
+from zcu_lab.v2._support.autofluxdep.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
     fixed_sweep_range,
     seed_md_float,
     snapshot_float,
 )
-from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.override_plan import (
+from zcu_lab.v2._support.autofluxdep.utils.override_plan import (
     PULSE_MODULE_LEAF_PATHS,
     READOUT_FALLBACK_LEAF_PATHS,
     NodeOverridePlan,
     pulse_module_patches,
     readout_module_patches,
 )
-from zcu_tools.experiment.v2_gui.autofluxdep._support.utils.timing import (
+from zcu_lab.v2._support.autofluxdep.utils.timing import (
     pop_sweep_range,
     pop_sweep_ranges,
 )
-from zcu_tools.gui.app.autofluxdep.cfg import module_leaf_patches
-from zcu_tools.gui.cfg import SweepValue
-from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _pulse_module() -> dict[str, object]:

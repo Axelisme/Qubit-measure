@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     return launch_gui_runtime(
         AutoFluxDepGuiBehavior,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
+        extra_logging_namespaces=("zcu_lab",),
         catalog=build_catalog(),
         project_root=project_root,
     )

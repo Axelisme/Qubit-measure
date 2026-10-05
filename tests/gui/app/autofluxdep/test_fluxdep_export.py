@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+
+from zcu_lab.v2._support.autofluxdep.result import QubitFreqResult
 
 
 def test_qubit_freq_export_loads_as_fluxdep_spectrum(tmp_path):

@@ -5,10 +5,6 @@ from inspect import signature
 from typing import Any, ClassVar
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -19,6 +15,11 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 
 
 class _MinimalNoAnalysisAdapter(
@@ -292,7 +293,7 @@ def test_intermediate_base_forbidden_implementation_is_detected() -> None:
 
 
 def test_registered_adapters_import_with_capability_validation() -> None:
-    from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS
+    from zcu_lab.definitions import ADAPTERS
 
     assert "singleshot/t1_tone_sweep_gain" in ADAPTERS
     assert "singleshot/t1_tone_sweep_freq" in ADAPTERS
@@ -313,7 +314,7 @@ def test_base_run_preflight_default_is_noop() -> None:
 
 
 def test_registered_adapters_satisfy_framework_protocol() -> None:
-    from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS
+    from zcu_lab.definitions import ADAPTERS
 
     for name, adapter_cls in ADAPTERS.items():
         adapter = adapter_cls()

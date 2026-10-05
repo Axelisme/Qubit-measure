@@ -24,12 +24,7 @@ from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import (
-    FakeResult,
-    FakeRunResult,
-)
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -72,6 +67,8 @@ from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import make_cfg
+from zcu_lab.v2.fake.stub.core import FakeResult, FakeRunResult
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
 def _empty_schema() -> CfgSchema:

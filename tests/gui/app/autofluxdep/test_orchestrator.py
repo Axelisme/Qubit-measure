@@ -12,12 +12,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from zcu_tools.experiment.v2_gui.autofluxdep.lenrabi import LenRabiBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.mist import MistBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.ro_optimize import RoOptimizeBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
-from zcu_tools.experiment.v2_gui.autofluxdep.t2echo import T2EchoBuilder
-from zcu_tools.experiment.v2_gui.autofluxdep.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
@@ -40,6 +34,12 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
 from zcu_tools.gui.cfg import FloatSpec
 
 from tests.gui.app.autofluxdep._helpers import make_run_context
+from zcu_lab.v2.autofluxdep.lenrabi.autofluxdep import LenRabiBuilder
+from zcu_lab.v2.autofluxdep.mist.autofluxdep import MistBuilder
+from zcu_lab.v2.autofluxdep.ro_optimize.autofluxdep import RoOptimizeBuilder
+from zcu_lab.v2.autofluxdep.t1.autofluxdep import T1Builder
+from zcu_lab.v2.autofluxdep.t2echo.autofluxdep import T2EchoBuilder
+from zcu_lab.v2.autofluxdep.t2ramsey.autofluxdep import T2RamseyBuilder
 
 from ._helpers import make_builder, place
 

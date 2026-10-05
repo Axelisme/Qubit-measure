@@ -5,7 +5,6 @@ from __future__ import annotations
 from threading import Event
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.remote import ControlOptions
 from zcu_tools.gui.cfg import (
@@ -21,6 +20,8 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import CfgEdit, CfgStaleError
 from zcu_tools.mcp.measure.session import GuiRpcError
+
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 

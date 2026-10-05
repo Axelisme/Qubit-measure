@@ -7,11 +7,6 @@ from unittest.mock import MagicMock
 import numpy as np
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import (
-    FakeAdapter,
-    FakeAnalyzeParams,
-)
-from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS, register_all
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     RunRequest,
@@ -21,6 +16,9 @@ from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import DirectValue
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from zcu_lab.definitions import ADAPTERS, register_all
+from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
 
 
 def _make_ctx():
@@ -93,7 +91,7 @@ def test_registry_register_all_and_create():
     register_all(reg)
     assert reg.has("fake/freq")
     adapter = reg.create("fake/freq")
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
+    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
     assert isinstance(adapter, FakeFreqAdapter)
 

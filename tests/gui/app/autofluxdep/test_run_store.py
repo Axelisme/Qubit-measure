@@ -9,10 +9,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
-    QubitFreqResult,
-    Sweep1DResult,
-)
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
@@ -30,6 +26,7 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.cfg import ScalarSpec
 
 from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
+from zcu_lab.v2._support.autofluxdep.result import QubitFreqResult, Sweep1DResult
 
 from ._helpers import (
     make_builder,

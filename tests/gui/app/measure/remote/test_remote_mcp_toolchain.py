@@ -15,10 +15,6 @@ from matplotlib.figure import Figure
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import (
-    FakeAdapter,
-    FakeAnalyzeParams,
-)
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactKey,
     ArtifactKind,
@@ -46,6 +42,8 @@ from zcu_tools.gui.session.services.device import (
     SetupDeviceRequest,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
 
 from ._helpers import Fixture, call, open_client, recv_push
 
@@ -248,8 +246,7 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
 ) -> None:
     import threading
 
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeAnalyzeParams
+    from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
 
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
@@ -1517,7 +1514,7 @@ def test_post_analysis_uses_requested_sources_before_following_the_pane(
 
 def _add_fake_tab(fx, tab_id: str) -> None:
     """Register a minimal Session so has_tab(tab_id) is True."""
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+    from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
     adapter = FakeAdapter()
     cfg = adapter.make_default_cfg(fx.state.session_env)
@@ -1709,7 +1706,7 @@ def test_base_adapter_guide_default_is_honest():
     # Every registered adapter defines local guide_text, so the honest default is
     # tested directly on BaseAdapter: an adapter with no guide says so plainly
     # rather than faking content.
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeAdapter
+    from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
     guide = FakeAdapter.guide()
     assert guide.behavior == "(no guide written yet)"
@@ -1721,7 +1718,7 @@ def test_every_registered_adapter_has_a_written_guide():
     # A new adapter that forgets guide_text falls back to the honest
     # "(no guide written yet)" default — this test flags that so the gap is
     # caught at review time rather than shipping a blank Guide tab to users.
-    from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS
+    from zcu_lab.definitions import ADAPTERS
 
     missing = [
         name

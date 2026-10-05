@@ -8,7 +8,13 @@ import numpy as np
 import pytest
 from zcu_tools.datafile import LabberData
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.singleshot.ge import (
+from zcu_tools.notebook import NotebookAdapter
+from zcu_tools.plotting.plots import NonPresentingHost
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
     GE_Result,
@@ -16,12 +22,7 @@ from zcu_tools.experiment.v2.singleshot.ge import (
     GEModuleCfg,
     GEPostAnalyzeOptions,
 )
-from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.notebook.experiments import GEPostAnalyzer
-from zcu_tools.plotting.plots import NonPresentingHost
-from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_lab.v2.singleshot.ge.notebook import GEPostAnalyzer
 
 
 def make_source() -> RunRecord[GE_Cfg, GE_Result]:

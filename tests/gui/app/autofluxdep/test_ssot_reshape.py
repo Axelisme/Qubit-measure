@@ -19,11 +19,11 @@ values.
 from __future__ import annotations
 
 import pytest
-from zcu_tools.experiment.v2_gui.autofluxdep.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.cfg import CenteredSweepValue
 
 from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
+from zcu_lab.v2.autofluxdep.qubit_freq.autofluxdep import QubitFreqBuilder
 
 from ._helpers import set_node_cfg_knobs
 

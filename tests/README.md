@@ -86,8 +86,8 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 ## 現有 owner 導覽
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
-`tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/measure/adapters/`
-擁有 adapter 對設定與寫回的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
+`tests/experiment/v2/` 擁有通用 runtime 與工具；`tests/zcu_lab/v2/` 擁有實驗核心、
+adapter 設定與寫回契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
@@ -147,12 +147,12 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 `tests/experiment/v2/runtime/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
-`tests/experiment/v2/onetone/` 放 onetone domain-level pure behavior tests；例如 `freq`
+`tests/zcu_lab/v2/onetone/` 放 onetone domain-level pure behavior tests；例如 `freq`
 的 homophasal helper 測端點保留與 resonator-circle phase 等距，不碰 GUI 或硬體。
 
 ### Autofluxdep typed context tests
 
-`tests/experiment/v2/autofluxdep/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
+`tests/zcu_lab/v2/autofluxdep/_support/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
 
 ### Device manager tests
 
@@ -205,7 +205,7 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 
 ### Experiment v2 GUI adapter tests
 
-`tests/experiment/v2_gui/measure/adapters/_support/test_schema_builder.py`鎖定context-free
+`tests/zcu_lab/v2/_support/measure/test_schema_builder.py`鎖定context-free
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
 `tests/gui/app/measure/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的

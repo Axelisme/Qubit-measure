@@ -18,17 +18,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QStackedWidget,
     QWidget,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend import (
-    FluxPickFrontend,
-)
-from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
-    make_flux_pick_plugin,
-    render_flux_pick,
-)
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_lab.v2._support.measure.flux_pick_plugin import (
+    make_flux_pick_plugin,
+    render_flux_pick,
+)
 
 
 class _DeferredEnv:

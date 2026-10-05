@@ -19,11 +19,7 @@ from tests.gui.app.autofluxdep._helpers import ProduceFn, make_builder
 def _builder(
     name: str, *, provides: tuple[str, ...] = (), produce_fn: ProduceFn | None = None
 ) -> Builder:
-    builder = make_builder(name, provides=provides, produce_fn=produce_fn)
-    # The existing declaration contract relates module stem to the Builder name.
-    # make_builder creates a fresh class per call, so this mutates no shared state.
-    type(builder).__module__ = f"catalog_test.{name or 'empty'}"
-    return builder
+    return make_builder(name, provides=provides, produce_fn=produce_fn)
 
 
 @pytest.fixture
@@ -163,13 +159,6 @@ def test_catalog_rejects_duplicate_names() -> None:
     declaration = _builder("measurement")
     with pytest.raises(ValueError, match="duplicate experiment name"):
         ExperimentCatalog((declaration, declaration))
-
-
-def test_catalog_rejects_mismatched_module_stem() -> None:
-    declaration = _builder("declared")
-    type(declaration).__module__ = "catalog_test.actual"
-    with pytest.raises(ValueError, match="module stem"):
-        ExperimentCatalog((declaration,))
 
 
 def test_catalog_rejects_duplicate_output_declarations() -> None:

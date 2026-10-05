@@ -1342,7 +1342,6 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
     from typing import Any, cast
 
     from qtpy.QtWidgets import QComboBox, QWidget
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
     from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.app.measure.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
@@ -1356,6 +1355,7 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from tests.gui.app.measure.remote._helpers import Fixture
+    from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
     fx = Fixture(headless=True)
     ml = ModuleLibrary(None)

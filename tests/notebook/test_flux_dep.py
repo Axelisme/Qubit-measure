@@ -10,11 +10,11 @@ import numpy as np
 import pytest
 from zcu_tools.datafile import LabberData
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepExp, FluxDepResult
 from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.notebook.experiments import FluxDepAnalyzer, FluxDepPickerOptions
 
-from tests.experiment.v2.onetone.flux_dep_support import make_cfg, make_result
+from tests.zcu_lab.v2.onetone.flux_dep.flux_dep_support import make_cfg, make_result
+from zcu_lab.v2._support.notebook.flux_dep import FluxDepAnalyzer, FluxDepPickerOptions
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepExp, FluxDepResult
 
 
 @pytest.fixture(autouse=True)

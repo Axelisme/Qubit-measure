@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import savgol_filter
 
-from zcu_tools.experiment.v2.utils.tracker import MomentTracker
+from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 
 DEFAULT_SKEW_PENALTY = 0.0
 

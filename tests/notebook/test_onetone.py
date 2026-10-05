@@ -5,16 +5,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.onetone.freq import FreqAnalyzeOptions, FreqExp
-from zcu_tools.experiment.v2.onetone.sa import SA_FreqExp, SA_FreqResult
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.plotting.plots import NonPresentingHost
 
-from tests.experiment.v2.onetone._support import (
+from tests.zcu_lab.v2.onetone._support import (
     make_freq_cfg,
     make_freq_result,
     make_sa_cfg,
 )
+from zcu_lab.v2.onetone.freq.core import FreqAnalyzeOptions, FreqExp
+from zcu_lab.v2.onetone.sa.core import SA_FreqExp, SA_FreqResult
 
 
 def test_load_b_then_analyze_save_a_retains_explicit_source_and_native_figure(
