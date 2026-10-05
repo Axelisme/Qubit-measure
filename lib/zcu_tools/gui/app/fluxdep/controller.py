@@ -29,6 +29,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
+from zcu_tools.gui.app.fluxdep.interactive import FluxDepInteractiveOwner
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory
@@ -36,7 +37,10 @@ from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
 from zcu_tools.gui.controller_base import BaseController
+from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.project import ProjectInfo
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.ports import OwnerScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,17 @@ class Controller(BaseController[FluxDepState, EventBus]):
         state: FluxDepState,
         bus: EventBus | None = None,
         project_root: str | None = None,
+        *,
+        interactive_owner: OwnerScheduler | None = None,
+        interactive_background: BackgroundSubmitter | None = None,
     ) -> None:
+        """Compose services and a picker owner.
+
+        interactive_owner defines the state thread; omitted uses a manual owner
+        for headless callers. interactive_background delivers completion on that
+        thread; omitted rejects asynchronous alignment. Project root is the
+        optional export/path context, not an input-data location.
+        """
         super().__init__(state, bus if bus is not None else EventBus(), project_root)
         self._load = LoadService(state)
         self._alignment = AlignmentService(state)
@@ -58,6 +72,20 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self._selection = SelectionService(state)
         self._export = ExportService(state)
         self._fit = FitService(state)
+        self._interactive = FluxDepInteractiveOwner(
+            state,
+            self.bus,
+            interactive_owner
+            if interactive_owner is not None
+            else ManualOwnerScheduler(),
+            background=interactive_background,
+            publish_alignment=self.set_alignment,
+        )
+
+    @property
+    def interactive(self) -> FluxDepInteractiveOwner:
+        """Return the owner shared by GUI and command-driven line picking."""
+        return self._interactive
 
     # --- project ---------------------------------------------------------
 

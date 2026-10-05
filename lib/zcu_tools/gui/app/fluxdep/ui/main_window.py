@@ -57,6 +57,8 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
 from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +66,19 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """The fluxdep analysis window shell."""
 
-    def __init__(self, ctrl: Controller) -> None:
+    def __init__(
+        self, ctrl: Controller, *, interactive_runner: BackgroundRunner | None = None
+    ) -> None:
+        """Mount analysis views and own the optional interactive Qt runner.
+
+        Close invalidates interactive input before joining runner deliveries.
+        Omitted runner supports headless composition with background unavailable.
+        """
         super().__init__()
         self._ctrl = ctrl
+        self._interactive_runner = interactive_runner
+        if interactive_runner is not None:
+            interactive_runner.setParent(self)
         self._bus_subs = EventSubscriptions()
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
@@ -216,6 +228,8 @@ class MainWindow(QMainWindow):
 
     def _clear_editor(self) -> None:
         if self._current_editor is not None:
+            if isinstance(self._current_editor, LinePickerWidget):
+                self._current_editor.teardown()
             # Quiesce any in-flight pool worker before scheduling C++ deletion:
             # FindPointsWidget owns a BackgroundRunner whose queued done delivery
             # must be flushed while the carrier is still alive (prevents segfault).
@@ -261,22 +275,13 @@ class MainWindow(QMainWindow):
         self._editor_stack.setCurrentWidget(widget)
 
     def _mount_line_picker(self, entry: SpectrumEntry) -> None:
-        # Seed the picker from the entry's alignment only when it is meaningful
-        # (inherited or already aligned); a fresh load uses the picker defaults.
-        seed = entry.alignment_seeded or entry.aligned
-        widget = LinePickerWidget(
-            entry.raw["signals"],
-            entry.raw["dev_values"],
-            entry.raw["freqs"],
-            flux_half=entry.flux_half if seed else None,
-            flux_int=entry.flux_int if seed else None,
-            force_magnitude=entry.spec_type == "OneTone",
-        )
-        name = entry.name
+        widget = LinePickerWidget(self._ctrl.interactive.begin_line_pick(entry.name))
 
         def _on_finish() -> None:
-            half, integer = widget.get_result()
-            self._ctrl.set_alignment(name, half, integer)
+            try:
+                self._ctrl.interactive.finish_line_pick()
+            except (FailedPreconditionError, ValueError, RuntimeError) as exc:
+                self._show_error("Alignment failed", str(exc))
 
         widget.finished.connect(_on_finish)
         self._mount(widget)
@@ -505,7 +510,12 @@ class MainWindow(QMainWindow):
         closes and owns both a search runner and an embedded SelectorWidget runner —
         both must be joined before Qt destroys the child objects.
         """
+        self._ctrl.interactive.dispose()
+        if self._interactive_runner is not None:
+            self._interactive_runner.quiesce()
         self._bus_subs.unsubscribe_all()
+        if isinstance(self._current_editor, LinePickerWidget):
+            self._current_editor.teardown()
         if self._current_editor is not None and hasattr(
             self._current_editor, "quiesce"
         ):

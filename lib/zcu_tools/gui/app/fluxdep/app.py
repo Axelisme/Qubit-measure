@@ -9,6 +9,7 @@ the only persisted artifacts).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.runtime import (
@@ -45,19 +46,32 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         )
         from zcu_tools.gui.app.fluxdep.state import FluxDepState
         from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+        from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
         from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+
+        owner = QtOwnerScheduler()
+        runner = BackgroundRunner()
+
+        def submit_interactive(
+            compute: Callable[[], object],
+            on_done: Callable[[object], None],
+            on_error: Callable[[Exception], None],
+        ) -> None:
+            runner.submit(compute, on_done=on_done, on_error=on_error)
 
         ctrl = Controller(
             FluxDepState(self._project),
             EventBus(),
             project_root=self._project_root,
+            interactive_owner=owner,
+            interactive_background=submit_interactive,
         )
-        window = MainWindow(ctrl)
+        window = MainWindow(ctrl, interactive_runner=runner)
         adapter = (
             RemoteControlAdapter(
                 ctrl,
                 control,
-                owner_scheduler=QtOwnerScheduler(),
+                owner_scheduler=owner,
             )
             if control is not None
             else None
