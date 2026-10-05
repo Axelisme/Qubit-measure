@@ -353,6 +353,14 @@ class RecipeExecution:
         The recipe receives finished_early after a successful native stop.
         """
         with self._condition:
+            if (
+                self._progress.status in TERMINAL_STATUSES
+                or self._closed.is_set()
+                or self._session_closed.is_set()
+            ):
+                raise GuiRpcError(
+                    "finish_early requires an active Run", reason="not_running"
+                )
             active = self._active
             if active is None and self._session is not None:
                 active = self._session.pending_operation()
