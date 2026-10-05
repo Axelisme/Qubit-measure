@@ -44,7 +44,7 @@ def controller():
     ctrl.interactive.dispose()
 
 
-def test_begin_reuses_session_and_finish_publishes_alignment(controller):
+def test_begin_reuses_session_and_finish_publishes_alignment(controller: Controller):
     owner = controller.interactive
     ctx = owner.begin_line_pick("sample")
     assert owner.begin_line_pick("sample") is ctx
@@ -56,11 +56,11 @@ def test_begin_reuses_session_and_finish_publishes_alignment(controller):
         ctx.session, "move_line", {"role": "integer", "position": 2.0}
     )
     changes: list[str] = []
-    unsubscribe = controller.bus.subscribe(
+    subscription = controller.bus.subscribe(
         SpectrumChangedPayload, lambda event: changes.append(event.name)
     )
     result = owner.finish_line_pick()
-    unsubscribe()
+    subscription.unsubscribe()
     assert result.flux_period == 3.0
     entry = controller.state.spectrums["sample"]
     assert entry.aligned
