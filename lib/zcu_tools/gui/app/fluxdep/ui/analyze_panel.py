@@ -125,10 +125,7 @@ class AnalyzePanelWidget(QWidget):
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
         self._diagnostics = Plots(self._plot_host)
         self._load_from_state()
-        # Filter is the initially-current tab, but currentChanged does NOT fire
-        # for the already-selected tab — so build its selector now, else it stayed
-        # a placeholder until the user switched away and back.
-        self._refresh_filter_tab()
+        # MainWindow explicitly activates this singleton on every Analyze click.
 
     # --- construction ----------------------------------------------------
 
@@ -164,54 +161,18 @@ class AnalyzePanelWidget(QWidget):
         return holder
 
     def _refresh_filter_tab(self) -> None:
-        """(Re)build the cross-spectrum selector for the current spectra."""
-        from zcu_tools.analysis.fluxdep.models import SpectrumResult
+        """Attach current valid app context, after retiring the prior view."""
         from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
-        if self._filter_widget is not None:
-            # Quiesce before deleteLater: the SelectorWidget may have a pooled
-            # worker in flight whose queued done delivery must be flushed now,
-            # while the carrier is still alive (prevents segfault on next pump).
-            self._filter_widget.quiesce()
-            self._filter_layout.removeWidget(self._filter_widget)
-            self._filter_widget.deleteLater()
-            self._filter_widget = None
-
-        spectrums: dict[str, SpectrumResult] = {
-            n: SpectrumResult(
-                type=e.spec_type,
-                flux_half=e.flux_half,
-                flux_int=e.flux_int,
-                flux_period=e.flux_period,
-                spectrum=e.raw,
-                points=e.points,
-            )
-            for n, e in self._ctrl.state.spectrums.items()
-            if e.point_count > 0
-        }
-        if not spectrums:
+        self.detach()
+        if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
             self._filter_placeholder.setVisible(True)
             return
+        context = self._ctrl.interactive.begin_cross_selection()
         self._filter_placeholder.setVisible(False)
-        import time as _time
-
-        _t0 = _time.perf_counter()
         selector = SelectorWidget(
-            spectrums, min_distance=self._ctrl.state.selection.min_distance
+            context, on_apply=self._ctrl.interactive.apply_cross_selection
         )
-        logger.debug(
-            "filter tab: built SelectorWidget for %d spectra in %.0fms",
-            len(spectrums),
-            (_time.perf_counter() - _t0) * 1000,
-        )
-
-        def _on_finish() -> None:
-            _fluxs, _freqs, selected = selector.get_result()
-            self._ctrl.set_selection(selected, selector.min_distance())
-            n, total = int(selected.sum()), int(selected.size)
-            selector.status_label.setText(f"Applied: {n}/{total} points selected")
-
-        selector.finished.connect(_on_finish)
         self._filter_widget = selector
         self._filter_layout.addWidget(selector)
 
@@ -372,9 +333,35 @@ class AnalyzePanelWidget(QWidget):
         self._transitions_show.set_transitions(fit.transitions)
         self._export_btn.setEnabled(fit.has_result)
 
+    def activate(self) -> None:
+        """Activate the singleton; on Filter, reattach valid or new app context.
+
+        MainWindow calls on every Analyze click, not just first construction.
+        Retire the old view first, so hidden controls cannot Apply stale data.
+        Empty cloud shows a placeholder; invalid inputs propagate to the caller.
+        """
+        if self._tabs.tabText(self._tabs.currentIndex()) == "Filter":
+            self._refresh_filter_tab()
+
+    def detach(self) -> None:
+        """Retire Filter's view without cancelling the app context.
+
+        Call when switching to a spectrum editor. Other tabs/forms remain intact.
+        The app owns context invalidation on active/source/picker switches.
+        """
+        if self._filter_widget is not None:
+            self._filter_widget.teardown()
+            self._filter_layout.removeWidget(self._filter_widget)
+            self._filter_widget.deleteLater()
+            self._filter_widget = None
+
     def _on_tab_changed(self, index: int) -> None:
         if self._tabs.tabText(index) == "Filter":
             self._refresh_filter_tab()
+        else:
+            self.detach()
+            if self._ctrl.interactive.current_cross_selection() is not None:
+                self._ctrl.interactive.cancel()
 
     # --- Search actions --------------------------------------------------
 

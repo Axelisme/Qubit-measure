@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,9 +12,7 @@ from zcu_tools.utils.process import SmoothMethod
 
 from .line_state import FluxPickInputs
 from .processing import cast2real_and_norm, spectrum2d_findpoint
-from .stroke import BrushPoint, apply_mask_stroke
-
-BrushMode = Literal["select", "erase"]
+from .stroke import BrushMode, BrushPoint, BrushStroke, BrushTool, apply_mask_stroke
 
 
 @dataclass(frozen=True)
@@ -54,32 +51,6 @@ class TwoToneSettings:
     threshold: float | None = None
     sigma: float | None = None
     smooth_method: SmoothMethod | None = None
-
-
-@dataclass(frozen=True)
-class TwoToneTool:
-    """Partial tool update; None retains the committed value.
-
-    width is finite normalized radius [0,0.1]; mode is select or erase.
-    At least one non-None field is required by transitions.
-    """
-
-    width: float | None = None
-    mode: BrushMode | None = None
-
-
-@dataclass(frozen=True)
-class TwoToneStroke:
-    """One complete gesture in native device/GHz coordinates.
-
-    vertices is nonempty and finite. width is normalized radius [0,0.1].
-    mode is select or erase. The kernel enforces its 10,000-sample limit;
-    zero width is valid only for a stationary stroke.
-    """
-
-    vertices: tuple[BrushPoint, ...]
-    width: float
-    mode: BrushMode
 
 
 @dataclass(frozen=True)
@@ -205,7 +176,7 @@ def set_twotone_settings(
 
 
 def set_twotone_tool(
-    inputs: TwoToneInputs, state: TwoTonePickState, params: TwoToneTool
+    inputs: TwoToneInputs, state: TwoTonePickState, params: BrushTool
 ) -> TwoTonePickState:
     """Return detached tools while retaining last_change; ValueError rejects invalid input."""
     _validate_state(inputs, state)
@@ -221,7 +192,7 @@ def set_twotone_tool(
 
 
 def stroke_twotone_state(
-    inputs: TwoToneInputs, state: TwoTonePickState, params: TwoToneStroke
+    inputs: TwoToneInputs, state: TwoTonePickState, params: BrushStroke
 ) -> TwoTonePickState:
     """Paint once via apply_mask_stroke, update tools and record the before-image.
 
@@ -231,7 +202,7 @@ def stroke_twotone_state(
     _number(params.width, "width", 0, 0.1)
     if params.mode not in ("select", "erase"):
         raise ValueError("mode must be select or erase")
-    candidate = set_twotone_tool(inputs, state, TwoToneTool(params.width, params.mode))
+    candidate = set_twotone_tool(inputs, state, BrushTool(params.width, params.mode))
     _validate_vertices(params.vertices)
     spectrum = inputs.spectrum
     apply_mask_stroke(

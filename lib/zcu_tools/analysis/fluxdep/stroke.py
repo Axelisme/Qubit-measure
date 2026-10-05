@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from math import ceil, hypot, isfinite
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,6 +23,37 @@ class BrushPoint:
 
     x: float
     y: float
+
+
+BrushMode = Literal["select", "erase"]
+
+
+@dataclass(frozen=True)
+class BrushTool:
+    """Partial brush tool update in the caller's native coordinate system.
+
+    width is finite normalized radius [0,0.1]; mode is select or erase.
+    None retains the committed value; transitions require at least one field.
+    Both grid picking and joint-cloud filtering use this payload.
+    """
+
+    width: float | None = None
+    mode: BrushMode | None = None
+
+
+@dataclass(frozen=True)
+class BrushStroke:
+    """One complete gesture in native device-or-flux/GHz coordinates.
+
+    vertices is a nonempty finite tuple in the caller's native axes.
+    width is normalized radius [0,0.1]; mode is select or erase.
+    The numerical kernel enforces its 10,000-sample limit. Zero width is
+    valid only for a stationary stroke. Both brush plugins use this payload.
+    """
+
+    vertices: tuple[BrushPoint, ...]
+    width: float
+    mode: BrushMode
 
 
 def apply_mask_stroke(

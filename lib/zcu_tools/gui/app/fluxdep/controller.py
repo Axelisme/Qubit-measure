@@ -29,7 +29,10 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
-from zcu_tools.gui.app.fluxdep.interactive import FluxDepInteractiveOwner
+from zcu_tools.gui.app.fluxdep.interactive import (
+    FluxDepInteractiveOwner,
+    FluxDepInteractivePorts,
+)
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory
@@ -78,9 +81,13 @@ class Controller(BaseController[FluxDepState, EventBus]):
             interactive_owner
             if interactive_owner is not None
             else ManualOwnerScheduler(),
-            background=interactive_background,
-            publish_alignment=self.set_alignment,
-            publish_points=self.set_points,
+            ports=FluxDepInteractivePorts(
+                background=interactive_background,
+                publish_alignment=self.set_alignment,
+                publish_points=self.set_points,
+                derive_pointcloud=self.derive_pointcloud,
+                publish_selection=self.set_selection,
+            ),
         )
 
     @property

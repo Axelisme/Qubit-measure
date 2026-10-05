@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Empty picking completion and native-point preservation on realignment
+**Last updated:** 2026-10-06. App-owned cross-spectrum selection
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -66,12 +66,14 @@ view 只暴露查詢，不暴露 mutation。
   helper；per-command façade body 仍各 app（領域動詞 + app payload），main 不繼承。
   **無 measure 概念**（run/analyze/writeback/context/device/tab）。
 - **`interactive.py`** — Qt-free `FluxDepInteractiveOwner` 持有 active spectrum 的
-  單一 live 定線／OneTone／TwoTone context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
+  單一 live 定線／OneTone／TwoTone／跨譜篩選 context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
   LinePicker 只持有 disposable preview，OneTone threshold 與 indices 一起 commit／undo。
   TwoTone Session 保存 mask、detector 與 tools；工具設定保留單層 Undo，完整 stroke 一次 commit。
   Background projection 只提供 derived view；Finish 重新計算 committed snapshot，不等待 preview。
   Finish 經 Controller 的 AlignmentService／PointsService 發布；後者擁有排序與 flux calibration。
   Picker kind switch、active switch、reload、remove 或 external spectrum change 關閉舊輸入。
+  跨譜 context capture 全部來源版本，包含零點譜；任何來源變更或外部 selection publication 都關閉舊輸入。
+  Apply 同步計算最新 snapshot、經 Controller 發布一次 selection，保留 input 與 Undo，不是 picking Finish。
   Widget detach 不終止 session，window close 才 dispose owner 並 quiesce 背景 runner。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。
@@ -156,8 +158,10 @@ Processed restore 包含零點的完成結果，不新增持久化欄位。
 fresh load 用 picker 預設。OneTone 譜的 LinePicker 鎖 magnitude-only（相位無資訊）。
 
 ### 跨譜篩選：繼承 min_distance 不繼承 select
-Selector 每次開**全選重置**（不繼承 brush 選擇，否則移除的點難加回），但**繼承**
-穩定的 downsample threshold(`SelectionState.min_distance`)。
+App owner 建立新的跨譜 context 時全選，僅繼承已發布的 `SelectionState.min_distance`。
+Analyze singleton 每次啟用 Filter 都重新 attach 有效 context；離開 Filter 取消 context，切走 Analyze 則只 detach view。
+Selector controls／完整 stroke 透過共用 Actions 修改 Session。Preview 使用 80ms debounce 與 generation guard；
+Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 delivery。
 
 ### 配色
 互動圖背景一律 `gray_r`（白底、高值=黑），紅點落在高值共振線上對比最強

@@ -262,7 +262,10 @@ def test_twotone_invalidation_closes_input_without_points(twotone_controller, ch
 
 
 def test_twotone_publication_failure_does_not_reopen_input(twotone_controller):
-    from zcu_tools.gui.app.fluxdep.interactive import FluxDepInteractiveOwner
+    from zcu_tools.gui.app.fluxdep.interactive import (
+        FluxDepInteractiveOwner,
+        FluxDepInteractivePorts,
+    )
     from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
         ManualOwnerScheduler,
     )
@@ -276,9 +279,13 @@ def test_twotone_publication_failure_does_not_reopen_input(twotone_controller):
         ctrl.state,
         ctrl.bus,
         ManualOwnerScheduler(),
-        background=None,
-        publish_alignment=ctrl.set_alignment,
-        publish_points=fail_points,
+        ports=FluxDepInteractivePorts(
+            background=None,
+            publish_alignment=ctrl.set_alignment,
+            publish_points=fail_points,
+            derive_pointcloud=ctrl.derive_pointcloud,
+            publish_selection=ctrl.set_selection,
+        ),
     )
     try:
         context = owner.begin_twotone_pick("two")
@@ -420,7 +427,10 @@ def test_onetone_invalidation_closes_input_without_points(onetone_controller, ch
 
 
 def test_onetone_publication_failure_does_not_reopen_input(onetone_controller):
-    from zcu_tools.gui.app.fluxdep.interactive import FluxDepInteractiveOwner
+    from zcu_tools.gui.app.fluxdep.interactive import (
+        FluxDepInteractiveOwner,
+        FluxDepInteractivePorts,
+    )
     from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
         ManualOwnerScheduler,
     )
@@ -434,9 +444,13 @@ def test_onetone_publication_failure_does_not_reopen_input(onetone_controller):
         ctrl.state,
         ctrl.bus,
         ManualOwnerScheduler(),
-        background=None,
-        publish_alignment=ctrl.set_alignment,
-        publish_points=fail_points,
+        ports=FluxDepInteractivePorts(
+            background=None,
+            publish_alignment=ctrl.set_alignment,
+            publish_points=fail_points,
+            derive_pointcloud=ctrl.derive_pointcloud,
+            publish_selection=ctrl.set_selection,
+        ),
     )
     try:
         context = owner.begin_onetone_pick("one")

@@ -11,9 +11,9 @@ import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSlider
+from zcu_tools.analysis.fluxdep.stroke import BrushTool
 from zcu_tools.analysis.fluxdep.twotone import (
     TwoTonePickView,
-    TwoToneTool,
     analyze_twotone_pick,
 )
 from zcu_tools.gui.app.fluxdep.controller import Controller
@@ -196,7 +196,7 @@ def test_drag_collects_preview_then_one_release_matches_vertices_command(
     widget, _queue, ctrl = presented
     context = ctrl.interactive.current_twotone_pick()
     assert context is not None
-    context.plugin.set_tool.execute(context.session, TwoToneTool(0.03, "erase"))
+    context.plugin.set_tool.execute(context.session, BrushTool(0.03, "erase"))
     widget.canvas.draw()
     before = context.session.snapshot()
     observed: list[bool] = []
@@ -238,7 +238,7 @@ def test_outside_release_finishes_once_and_tool_is_captured_on_press(presented) 
     widget, _queue, ctrl = presented
     context = ctrl.interactive.current_twotone_pick()
     assert context is not None
-    context.plugin.set_tool.execute(context.session, TwoToneTool(0.02, "erase"))
+    context.plugin.set_tool.execute(context.session, BrushTool(0.02, "erase"))
     widget.canvas.draw()
     # Center on a device row so the captured radius reaches actual mask cells.
     press_x = float(context.plugin.inputs.spectrum.dev_values[12])

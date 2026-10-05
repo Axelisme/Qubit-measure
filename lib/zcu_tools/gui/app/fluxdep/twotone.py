@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from zcu_tools.analysis.fluxdep.stroke import BrushPoint
+from zcu_tools.analysis.fluxdep.stroke import BrushStroke, BrushTool
 from zcu_tools.analysis.fluxdep.twotone import (
     TwoToneInputs,
     TwoTonePickResult,
     TwoTonePickState,
     TwoToneSettings,
-    TwoToneStroke,
-    TwoToneTool,
     analyze_twotone_pick,
     fill_twotone_state,
     make_twotone_state,
@@ -19,15 +17,16 @@ from zcu_tools.analysis.fluxdep.twotone import (
     set_twotone_tool,
     stroke_twotone_state,
 )
+from zcu_tools.gui.app.fluxdep.brush_commands import (
+    STROKE_PARAMS,
+    TOOL_PARAMS,
+    decode_brush_stroke,
+    decode_brush_tool,
+    decode_parameters,
+)
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import Action, Command, PluginDefinition, Session
-from zcu_tools.gui.remote.errors import RemoteError
-from zcu_tools.gui.remote.param_spec import (
-    JsonType,
-    NumberPairs,
-    ParamSpec,
-    validate_params,
-)
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 
 class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
@@ -41,8 +40,8 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
 
     inputs: TwoToneInputs
     set_settings: Action[TwoTonePickState, TwoToneSettings]
-    set_tool: Action[TwoTonePickState, TwoToneTool]
-    stroke: Action[TwoTonePickState, TwoToneStroke]
+    set_tool: Action[TwoTonePickState, BrushTool]
+    stroke: Action[TwoTonePickState, BrushStroke]
     perform_on_all: Action[TwoTonePickState, None]
     clear: Action[TwoTonePickState, None]
 
@@ -70,29 +69,18 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
                 enum=("wavelet", "gaussian"),
             ),
         )
-        tool_params = (
-            ParamSpec("width", JsonType.NUMBER, required=False),
-            ParamSpec(
-                "mode", JsonType.STRING, required=False, enum=("select", "erase")
-            ),
-        )
-        stroke_params = (
-            ParamSpec("vertices", JsonType.NUMBER_PAIRS),
-            ParamSpec("width", JsonType.NUMBER),
-            ParamSpec("mode", JsonType.STRING, enum=("select", "erase")),
-        )
         settings: Action[TwoTonePickState, TwoToneSettings] = Action(
             lambda state, params: _transition(
                 lambda: set_twotone_settings(inputs, state, params)
             )
         )
-        tool: Action[TwoTonePickState, TwoToneTool] = Action(
+        tool: Action[TwoTonePickState, BrushTool] = Action(
             lambda state, params: _transition(
                 lambda: set_twotone_tool(inputs, state, params)
             ),
             record_undo=False,
         )
-        stroke: Action[TwoTonePickState, TwoToneStroke] = Action(
+        stroke: Action[TwoTonePickState, BrushStroke] = Action(
             lambda state, params: _transition(
                 lambda: stroke_twotone_state(inputs, state, params)
             )
@@ -112,31 +100,29 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
             session: Session[TwoTonePickState], params: Mapping[str, object]
         ) -> TwoTonePickState:
             return settings.execute(
-                session, _settings_payload(_decode(settings_params, params))
+                session, _settings_payload(decode_parameters(settings_params, params))
             )
 
         def set_tool_command(
             session: Session[TwoTonePickState], params: Mapping[str, object]
         ) -> TwoTonePickState:
-            return tool.execute(session, _tool_payload(_decode(tool_params, params)))
+            return tool.execute(session, decode_brush_tool(params))
 
         def stroke_command(
             session: Session[TwoTonePickState], params: Mapping[str, object]
         ) -> TwoTonePickState:
-            return stroke.execute(
-                session, _stroke_payload(_decode(stroke_params, params))
-            )
+            return stroke.execute(session, decode_brush_stroke(params))
 
         def perform_command(
             session: Session[TwoTonePickState], params: Mapping[str, object]
         ) -> TwoTonePickState:
-            _decode((), params)
+            decode_parameters((), params)
             return perform.execute(session, None)
 
         def clear_command(
             session: Session[TwoTonePickState], params: Mapping[str, object]
         ) -> TwoTonePickState:
-            _decode((), params)
+            decode_parameters((), params)
             return clear.execute(session, None)
 
         def can_finish(state: TwoTonePickState) -> None:
@@ -148,8 +134,8 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
             seed=seed,
             commands=(
                 Command("set_settings", settings_params, set_settings_command),
-                Command("set_tool", tool_params, set_tool_command),
-                Command("stroke", stroke_params, stroke_command),
+                Command("set_tool", TOOL_PARAMS, set_tool_command),
+                Command("stroke", STROKE_PARAMS, stroke_command),
                 Command("perform_on_all", (), perform_command),
                 Command("clear", (), clear_command),
             ),
@@ -162,18 +148,6 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
         object.__setattr__(self, "stroke", stroke)
         object.__setattr__(self, "perform_on_all", perform)
         object.__setattr__(self, "clear", clear)
-
-
-def _decode(
-    specs: tuple[ParamSpec, ...], params: Mapping[str, object]
-) -> dict[str, object]:
-    unknown = params.keys() - {spec.name for spec in specs}
-    if unknown:
-        raise InvalidInputError(f"unknown parameters: {sorted(unknown)!r}")
-    try:
-        return validate_params(specs, params)
-    except RemoteError as exc:
-        raise InvalidInputError(str(exc)) from exc
 
 
 def _transition(compute: Callable[[], TwoTonePickState]) -> TwoTonePickState:
@@ -203,26 +177,4 @@ def _settings_payload(values: Mapping[str, object]) -> TwoToneSettings:
         else "gaussian"
         if method == "gaussian"
         else None,
-    )
-
-
-def _tool_payload(values: Mapping[str, object]) -> TwoToneTool:
-    width, mode = values["width"], values["mode"]
-    if width is not None and not isinstance(width, float):
-        raise InvalidInputError("width must be numeric")
-    if mode is not None and mode not in ("select", "erase"):
-        raise InvalidInputError("mode must be select or erase")
-    return TwoToneTool(
-        width, "select" if mode == "select" else "erase" if mode == "erase" else None
-    )
-
-
-def _stroke_payload(values: Mapping[str, object]) -> TwoToneStroke:
-    vertices, width, mode = values["vertices"], values["width"], values["mode"]
-    if not isinstance(vertices, NumberPairs) or not isinstance(width, float):
-        raise InvalidInputError("stroke requires vertices and width")
-    if not isinstance(mode, str) or (mode != "select" and mode != "erase"):
-        raise InvalidInputError("mode must be select or erase")
-    return TwoToneStroke(
-        tuple(BrushPoint(x, y) for x, y in vertices.values), width, mode
     )

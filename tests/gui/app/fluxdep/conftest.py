@@ -153,3 +153,39 @@ def onetone_controller():
     ctrl.set_alignment("one", 0.2, 0.7)
     yield ctrl
     ctrl.interactive.dispose()
+
+
+@pytest.fixture
+def cross_controller():
+    """Joint cloud with duplicate identities and an intervening empty source."""
+    state = FluxDepState()
+    for name, cloud_fluxs, cloud_freqs in (
+        ("a", [0.0, 0.5, 1.0], [4.0, 4.5, 5.0]),
+        ("empty", [], []),
+        ("b", [0.5], [4.5]),
+    ):
+        axis = np.array([0.0, 0.2, 0.4, 0.7, 1.0])
+        fluxs = np.array(cloud_fluxs, dtype=np.float64)
+        freqs = np.array(cloud_freqs, dtype=np.float64)
+        state.put_spectrum(
+            SpectrumEntry(
+                name=name,
+                spec_type="TwoTone",
+                raw={
+                    "dev_values": axis.copy(),
+                    "fluxs": axis,
+                    "freqs": np.array([4.0, 4.3, 5.0]),
+                    "signals": np.ones((5, 3), dtype=np.complex128),
+                },
+                points={"dev_values": fluxs.copy(), "fluxs": fluxs, "freqs": freqs},
+                flux_half=0.5,
+                flux_int=1.0,
+                flux_period=1.0,
+                aligned=True,
+                points_completed=True,
+            )
+        )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("a")
+    yield ctrl
+    ctrl.interactive.dispose()

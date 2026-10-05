@@ -142,19 +142,20 @@ def test_filter_skips_completed_empty_spectra(qapp, spectrum_hdf5, usable):
         ctrl.set_points(other, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
     w = AnalyzePanelWidget(ctrl)
     try:
+        w.activate()
         selectors = w.findChildren(SelectorWidget)
         assert len(selectors) == (1 if usable else 0)
         if usable:
-            _, freqs, selected = selectors[0].get_result()
-            np.testing.assert_array_equal(freqs, [5.0, 5.1])
-            assert selected.all() and selected.size == 2
+            result = selectors[0].get_result()
+            np.testing.assert_array_equal(result.freqs, [5.0, 5.1])
+            assert result.selected.all() and result.selected.size == 2
     finally:
         w.quiesce()
         w.deleteLater()
         qapp.processEvents()
 
 
-def test_filter_selector_built_eagerly_when_points_exist(qapp):
+def test_activate_attaches_selector_when_points_exist(qapp):
     import numpy as np
     from zcu_tools.analysis.fluxdep.models import PointsData
     from zcu_tools.analysis.spectrum import SpectrumData
@@ -180,8 +181,15 @@ def test_filter_selector_built_eagerly_when_points_exist(qapp):
             points_completed=True,
         )
     )
-    w = AnalyzePanelWidget(Controller(st))
-    # selector exists right after construction (Filter tab is current but
-    # currentChanged doesn't fire for it) — no tab switch needed
-    assert isinstance(w._filter_widget, SelectorWidget)
-    w.deleteLater()
+    ctrl = Controller(st)
+    w = AnalyzePanelWidget(ctrl)
+    try:
+        w.activate()
+        selector = w.findChild(SelectorWidget)
+        assert selector is not None
+        assert selector.get_result().selected.all()
+    finally:
+        w.quiesce()
+        ctrl.interactive.dispose()
+        w.deleteLater()
+        qapp.processEvents()

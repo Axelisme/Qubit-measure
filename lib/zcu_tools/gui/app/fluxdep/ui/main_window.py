@@ -268,6 +268,8 @@ class MainWindow(QMainWindow):
             )
 
     def _mount(self, widget: QWidget) -> None:
+        if self._analyze_panel is not None:
+            self._analyze_panel.detach()
         self._current_editor = widget
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
@@ -338,6 +340,7 @@ class MainWindow(QMainWindow):
         if self._analyze_panel is None:
             self._analyze_panel = AnalyzePanelWidget(self._ctrl)
             self._editor_stack.addWidget(self._analyze_panel)
+        self._analyze_panel.activate()
         self._editor_stack.setCurrentWidget(self._analyze_panel)
 
     def _on_load_clicked(self) -> None:

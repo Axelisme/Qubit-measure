@@ -8,6 +8,13 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fluxdep.cross_selection import (
+    CrossSelectionBackground,
+    CrossSelectionInputs,
+    CrossSelectionResult,
+    CrossSelectionState,
+    analyze_cross_selection,
+)
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickAnalysis,
     FluxPickInputs,
@@ -20,20 +27,28 @@ from zcu_tools.analysis.fluxdep.onetone import (
     OneTonePickResult,
     OneTonePickState,
 )
+from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
 from zcu_tools.analysis.fluxdep.twotone import (
     TwoToneInputs,
     TwoTonePickResult,
     TwoTonePickState,
 )
+from zcu_tools.gui.app.fluxdep.cross_selection import CrossSelectionPlugin
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
+    SelectionChangedPayload,
     SpectrumAddedPayload,
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.onetone import OneTonePickPlugin
-from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.app.fluxdep.state import (
+    SELECTION_VERSION_KEY,
+    SPECTRUM_SET_VERSION_KEY,
+    FluxDepState,
+    spectrum_version_key,
+)
 from zcu_tools.gui.app.fluxdep.twotone import TwoTonePickPlugin
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.interactive.flux_pick import SharedFluxPickPlugin
@@ -92,6 +107,45 @@ class TwoTonePickContext:
     flux_int: float
 
 
+@dataclass(slots=True)
+class CrossSelectionContext:
+    """Live full-cloud selection owned by the app, never a fake spectrum.
+
+    plugin owns captured numerical inputs and Actions; session is the sole
+    committed mask/distance/tool with single Undo. source_versions contains all
+    insertion-ordered (name, version) facts, including zero-point entries.
+    spectrum_set_version captures the collection identity. selection_version is
+    the captured publication version, updated only after this context's Apply.
+    Views may detach; closed old sessions reject writes but retain snapshots.
+    """
+
+    plugin: CrossSelectionPlugin
+    session: Session[CrossSelectionState]
+    source_versions: tuple[tuple[str, int], ...]
+    spectrum_set_version: int
+    selection_version: int
+
+
+@dataclass(frozen=True, slots=True)
+class FluxDepInteractivePorts:
+    """Runtime collaborators for app-owned picking and joint-cloud selection.
+
+    background delivers computation on the owner loop; None rejects auto-align.
+    publish_alignment receives spectrum name and native device half/integer lines.
+    publish_points receives name and native device/GHz arrays; PointsService owns
+    sorting/calibration. derive_pointcloud queries the complete calibrated
+    flux/GHz cloud in spectrum insertion order. publish_selection receives that
+    cloud's full bool kept mask and normalized distance; Controller owns its
+    single version bump/fact. Publication errors propagate without rollback.
+    """
+
+    background: BackgroundSubmitter | None
+    publish_alignment: Callable[[str, float, float], None]
+    publish_points: Callable[[str, NDArray[np.float64], NDArray[np.float64]], None]
+    derive_pointcloud: Callable[[], tuple[NDArray[np.float64], NDArray[np.float64]]]
+    publish_selection: Callable[[NDArray[np.bool_], float], None]
+
+
 class FluxDepInteractiveOwner:
     """Serialize one active picker and invalidate it on spectrum facts.
 
@@ -106,32 +160,40 @@ class FluxDepInteractiveOwner:
         bus: EventBus,
         owner: OwnerScheduler,
         *,
-        background: BackgroundSubmitter | None,
-        publish_alignment: Callable[[str, float, float], None],
-        publish_points: Callable[[str, NDArray[np.float64], NDArray[np.float64]], None],
+        ports: FluxDepInteractivePorts,
     ) -> None:
-        """Capture state and runtime ports; publish through Controller's alignment.
+        """Capture State, bus and typed runtime ports on the supplied owner loop.
 
-        background must deliver callbacks on owner, or None to reject auto_align.
-        publish_alignment receives name and accepted native device positions.
-        publish_points receives name and uncalibrated device/GHz point arrays;
-        Controller/PointsService owns sorting, calibration and publication.
+        ports defines background delivery, read ordering and Controller-owned
+        publication contracts. See FluxDepInteractivePorts for units/array shapes.
+        State is not copied; captured analysis inputs are copied when beginning.
+        Off-owner construction/access raises RuntimeError. Views do not own input.
         """
         self._state = state
         self._owner = owner
         self._require_owner()
-        self._background = background
-        self._publish_alignment = publish_alignment
-        self._publish_points = publish_points
+        self._background = ports.background
+        self._publish_alignment = ports.publish_alignment
+        self._publish_points = ports.publish_points
+        self._derive_pointcloud = ports.derive_pointcloud
+        self._publish_selection = ports.publish_selection
         self._context: (
-            LinePickContext | OneTonePickContext | TwoTonePickContext | None
+            LinePickContext
+            | OneTonePickContext
+            | TwoTonePickContext
+            | CrossSelectionContext
+            | None
         ) = None
         self._disposed = False
+        self._publishing_selection = False
         self._subscriptions: tuple[Callable[[], None], ...] = (
             bus.subscribe(
                 ActiveSpectrumChangedPayload, self._on_active_changed
             ).unsubscribe,
             bus.subscribe(SpectrumAddedPayload, self._on_spectrum_changed).unsubscribe,
+            bus.subscribe(
+                SelectionChangedPayload, self._on_selection_changed
+            ).unsubscribe,
             bus.subscribe(
                 SpectrumRemovedPayload, self._on_spectrum_changed
             ).unsubscribe,
@@ -145,15 +207,28 @@ class FluxDepInteractiveOwner:
             raise RuntimeError("interactive owner access must run on the owner loop")
 
     def _on_active_changed(self, event: ActiveSpectrumChangedPayload) -> None:
-        if self._context is not None and event.name != self._context.spectrum_name:
+        if isinstance(self._context, CrossSelectionContext) or (
+            self._context is not None and event.name != self._context.spectrum_name
+        ):
             self.cancel()
 
     def _on_spectrum_changed(
         self,
         event: SpectrumAddedPayload | SpectrumRemovedPayload | SpectrumChangedPayload,
     ) -> None:
-        if self._context is not None and event.name == self._context.spectrum_name:
+        if isinstance(self._context, CrossSelectionContext) or (
+            self._context is not None and event.name == self._context.spectrum_name
+        ):
             self.cancel()
+
+    def _on_selection_changed(self, _event: SelectionChangedPayload) -> None:
+        if isinstance(self._context, CrossSelectionContext):
+            if self._publishing_selection:
+                self._context.selection_version = self._state.version.get(
+                    SELECTION_VERSION_KEY
+                )
+            else:
+                self.cancel()
 
     def begin_line_pick(self, name: str) -> LinePickContext:
         """Reuse valid active context or open captured-input device-axis picking.
@@ -200,9 +275,13 @@ class FluxDepInteractiveOwner:
     def current_line_pick(self) -> LinePickContext | None:
         """Return the valid active context or None without creating a session."""
         self._require_owner()
-        if self._context is not None and (
-            self._context.spectrum_name != self._state.active_spectrum
-            or self._context.spectrum_name not in self._state.spectrums
+        if (
+            self._context is not None
+            and not isinstance(self._context, CrossSelectionContext)
+            and (
+                self._context.spectrum_name != self._state.active_spectrum
+                or self._context.spectrum_name not in self._state.spectrums
+            )
         ):
             self.cancel()
         return self._context if isinstance(self._context, LinePickContext) else None
@@ -274,9 +353,13 @@ class FluxDepInteractiveOwner:
         None. Invalid spectrum identity closes old input as for line picking.
         """
         self._require_owner()
-        if self._context is not None and (
-            self._context.spectrum_name != self._state.active_spectrum
-            or self._context.spectrum_name not in self._state.spectrums
+        if (
+            self._context is not None
+            and not isinstance(self._context, CrossSelectionContext)
+            and (
+                self._context.spectrum_name != self._state.active_spectrum
+                or self._context.spectrum_name not in self._state.spectrums
+            )
         ):
             self.cancel()
         if not isinstance(self._context, OneTonePickContext):
@@ -352,9 +435,13 @@ class FluxDepInteractiveOwner:
         This query does not create a Session or compute a preview.
         """
         self._require_owner()
-        if self._context is not None and (
-            self._context.spectrum_name != self._state.active_spectrum
-            or self._context.spectrum_name not in self._state.spectrums
+        if (
+            self._context is not None
+            and not isinstance(self._context, CrossSelectionContext)
+            and (
+                self._context.spectrum_name != self._state.active_spectrum
+                or self._context.spectrum_name not in self._state.spectrums
+            )
         ):
             self.cancel()
         if not isinstance(self._context, TwoTonePickContext):
@@ -385,6 +472,125 @@ class FluxDepInteractiveOwner:
         self._context = None
         result = context.plugin.finish(context.session)
         self._publish_points(context.spectrum_name, result.dev_values, result.freqs)
+        return result
+
+    def begin_cross_selection(self) -> CrossSelectionContext:
+        """Reuse valid open cross context or capture an all-selected cloud seed.
+
+        Capture every source version, including zero-point entries, and bounds
+        from the usable spectra's raw axes and points. Only published distance is
+        inherited. Cancel the previous picker on successful replacement.
+        FailedPreconditionError rejects disposed owner or no usable cloud;
+        invalid numeric input raises ValueError. Off-owner use raises RuntimeError.
+        """
+        self._require_owner()
+        if self._disposed:
+            raise FailedPreconditionError("interactive owner is disposed")
+        current = self.current_cross_selection()
+        if current is not None:
+            return current
+        inputs = self._capture_cross_selection_inputs()
+        plugin = CrossSelectionPlugin(
+            inputs, min_distance=self._state.selection.min_distance
+        )
+        self.cancel()
+        self._context = CrossSelectionContext(
+            plugin=plugin,
+            session=plugin.open(self._owner),
+            source_versions=tuple(
+                (name, self._state.version.get(spectrum_version_key(name)))
+                for name in self._state.spectrums
+            ),
+            spectrum_set_version=self._state.version.get(SPECTRUM_SET_VERSION_KEY),
+            selection_version=self._state.version.get(SELECTION_VERSION_KEY),
+        )
+        return self._context
+
+    def _capture_cross_selection_inputs(self) -> CrossSelectionInputs:
+        fluxs, freqs = self._derive_pointcloud()
+        if fluxs.size == 0:
+            raise FailedPreconditionError(
+                "cross-selection requires a usable point cloud"
+            )
+        backgrounds = tuple(
+            CrossSelectionBackground(
+                entry.name,
+                entry.raw["fluxs"],
+                entry.raw["freqs"],
+                cast2real_and_norm(
+                    entry.raw["signals"], use_phase=entry.spec_type == "TwoTone"
+                ),
+            )
+            for entry in self._state.spectrums.values()
+            if entry.point_count > 0
+        )
+        flux_bound = (
+            min(float(fluxs.min()), *(float(bg.fluxs.min()) for bg in backgrounds)),
+            max(float(fluxs.max()), *(float(bg.fluxs.max()) for bg in backgrounds)),
+        )
+        freq_bound = (
+            min(float(freqs.min()), *(float(bg.freqs.min()) for bg in backgrounds)),
+            max(float(freqs.max()), *(float(bg.freqs.max()) for bg in backgrounds)),
+        )
+        return CrossSelectionInputs(fluxs, freqs, backgrounds, flux_bound, freq_bound)
+
+    def current_cross_selection(self) -> CrossSelectionContext | None:
+        """Return valid open context or None on owner loop, without starting one.
+
+        Verify collection version, all source names/versions and selection version.
+        Invalid context closes input; same-length reload cannot reuse its cloud.
+        Off-owner use raises RuntimeError. Reads never consume Undo.
+        """
+        self._require_owner()
+        context = self._context
+        if not isinstance(context, CrossSelectionContext):
+            return None
+        source_versions = tuple(
+            (name, self._state.version.get(spectrum_version_key(name)))
+            for name in self._state.spectrums
+        )
+        if (
+            self._disposed
+            or context.source_versions != source_versions
+            or context.spectrum_set_version
+            != self._state.version.get(SPECTRUM_SET_VERSION_KEY)
+            or context.selection_version
+            != self._state.version.get(SELECTION_VERSION_KEY)
+        ):
+            self.cancel()
+            return None
+        try:
+            context.session.ensure_input_open()
+        except FailedPreconditionError:
+            self.cancel()
+            return None
+        return context
+
+    def apply_cross_selection(self) -> CrossSelectionResult:
+        """Synchronously publish the latest complete kept mask once, nonterminally.
+
+        Validate current context and analyze its snapshot, never pending preview.
+        Missing/invalid context raises FailedPreconditionError. Publish errors
+        propagate and input/Undo remain editable; no rollback is claimed.
+        Self-produced SelectionChanged updates the captured version rather than
+        cancelling this context; external publication invalidates it.
+        Release the self-publication guard in finally, also on failure.
+        Off-owner use raises RuntimeError.
+        """
+        self._require_owner()
+        context = self.current_cross_selection()
+        if context is None:
+            raise FailedPreconditionError("no valid cross-selection context")
+        result = analyze_cross_selection(
+            context.plugin.inputs, context.session.snapshot()
+        )
+        self._publishing_selection = True
+        try:
+            self._publish_selection(result.selected, result.min_distance)
+        finally:
+            # A publisher may commit and then fail; preserve its actual version, not a rollback.
+            context.selection_version = self._state.version.get(SELECTION_VERSION_KEY)
+            self._publishing_selection = False
         return result
 
     def cancel(self) -> None:

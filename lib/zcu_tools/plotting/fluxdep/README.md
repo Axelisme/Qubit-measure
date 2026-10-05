@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-06 — shared OneTone and TwoTone state projection
+**Last updated:** 2026-10-06 — cross-spectrum Qt/native projection
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
@@ -30,6 +30,12 @@ added/removed changes share the Qt/native renderer. Stroke endpoint outlines use
 normalized radius scaled by each axis span. `make_twotone_pick_figure` computes
 the projection and returns a separate Agg Figure, with optional previous-snapshot
 feedback for Undo. Neither renderer commits state or owns a Qt canvas.
+
+`cross_selection.CrossSelectionPlot` shares calibrated flux/GHz rendering between
+Qt and `make_cross_selection_figure`. Background cells follow sample centers,
+including descending/nonuniform axes. Kept/dropped points, optional index-based
+changes and normalized-radius stroke outlines use the captured joint bounds.
+Native output owns a separate Agg canvas; rendering preserves the supplied canvas.
 
 This package does not own Qt canvas attachment, backend selection, interactive
 `TwoLinePicker` gestures, or analysis state. Importing the root `plotting` package

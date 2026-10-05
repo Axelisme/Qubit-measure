@@ -11,15 +11,17 @@ from matplotlib.backend_bases import MouseButton, MouseEvent
 from numpy.typing import NDArray
 from qtpy import QtCore, QtWidgets
 
-from zcu_tools.analysis.fluxdep.stroke import BrushPoint
-from zcu_tools.analysis.fluxdep.twotone import (
+from zcu_tools.analysis.fluxdep.stroke import (
     BrushMode,
+    BrushPoint,
+    BrushStroke,
+    BrushTool,
+)
+from zcu_tools.analysis.fluxdep.twotone import (
     TwoTonePickResult,
     TwoTonePickState,
     TwoTonePickView,
     TwoToneSettings,
-    TwoToneStroke,
-    TwoToneTool,
     analyze_twotone_pick,
     project_twotone_pick,
 )
@@ -112,7 +114,7 @@ class FindPointsWidget(InteractiveMplWidget):
         self._width.valueChanged.connect(
             lambda value: self._execute(
                 lambda: context.plugin.set_tool.execute(
-                    context.session, TwoToneTool(width=value / 1000)
+                    context.session, BrushTool(width=value / 1000)
                 )
             )
         )
@@ -130,7 +132,7 @@ class FindPointsWidget(InteractiveMplWidget):
             lambda text: self._execute(
                 lambda: context.plugin.set_tool.execute(
                     context.session,
-                    TwoToneTool(mode="select" if text == "Select" else "erase"),
+                    BrushTool(mode="select" if text == "Select" else "erase"),
                 )
             )
         )
@@ -213,7 +215,7 @@ class FindPointsWidget(InteractiveMplWidget):
         point = self._point(event)
         if point is not None:
             self._vertices.append(point)
-        payload = TwoToneStroke(
+        payload = BrushStroke(
             tuple(self._vertices), self._gesture_width, self._gesture_mode
         )
         self._vertices.clear()

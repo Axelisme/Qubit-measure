@@ -10,14 +10,17 @@ from zcu_tools.analysis.fluxdep.processing import (
     cast2real_and_norm,
     spectrum2d_findpoint,
 )
-from zcu_tools.analysis.fluxdep.stroke import BrushPoint, apply_mask_stroke
-from zcu_tools.analysis.fluxdep.twotone import (
+from zcu_tools.analysis.fluxdep.stroke import (
     BrushMode,
+    BrushPoint,
+    BrushStroke,
+    BrushTool,
+    apply_mask_stroke,
+)
+from zcu_tools.analysis.fluxdep.twotone import (
     TwoToneInputs,
     TwoTonePickState,
     TwoToneSettings,
-    TwoToneStroke,
-    TwoToneTool,
     analyze_twotone_pick,
     project_twotone_pick,
 )
@@ -78,7 +81,7 @@ def test_command_and_typed_stroke_share_kernel_and_single_commit(
         plugin.clear.execute(action_session, None)
         plugin.clear.execute(command_session, None)
     vertices = (BrushPoint(-0.8, 4.6), BrushPoint(0.8, 5.0))
-    payload = TwoToneStroke(vertices, 0.03, mode)
+    payload = BrushStroke(vertices, 0.03, mode)
     before = action_session.snapshot()
     expected_mask = before.mask.copy()
     spectrum = twotone_inputs.spectrum
@@ -123,11 +126,9 @@ def test_tool_update_preserves_undo_snapshot(
     plugin = TwoTonePickPlugin(twotone_inputs)
     session = plugin.open(ManualOwnerScheduler())
     seed = session.snapshot()
-    plugin.set_tool.execute(session, TwoToneTool(0.004, "erase"))
+    plugin.set_tool.execute(session, BrushTool(0.004, "erase"))
     assert not session.can_undo()
-    plugin.stroke.execute(
-        session, TwoToneStroke((BrushPoint(0.0, 4.8),), 0.02, "erase")
-    )
+    plugin.stroke.execute(session, BrushStroke((BrushPoint(0.0, 4.8),), 0.02, "erase"))
     if not tool_before_stroke:
         plugin.execute_command(session, "set_tool", {"width": 0.05, "mode": "select"})
     restored = session.undo()
