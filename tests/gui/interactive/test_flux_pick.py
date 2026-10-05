@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -84,9 +85,11 @@ def test_single_flight_owner_delivery_and_terminal_late_result(plugin):
     owner = ManualOwnerScheduler()
     session = plugin.open(owner)
     deliveries: list[Callable[[], None]] = []
+    computed_values: list[object] = []
 
     def submit(compute, on_done, on_error):
         value = compute()
+        computed_values.append(value)
         deliveries.append(lambda: on_done(value))
 
     plugin.bind_background(submit)
@@ -96,12 +99,28 @@ def test_single_flight_owner_delivery_and_terminal_late_result(plugin):
         plugin.start_alignment(session)
     start = session.snapshot()
     assert start == plugin.seed
+    calculated = computed_values.pop()
+    assert isinstance(calculated, FluxPickState)
+    calculated_positions = (calculated.flux_half, calculated.flux_int)
+    assert calculated_positions != (start.flux_half, start.flux_int)
+
+    plugin.actions.move.execute(session, ("half", 1.0))
+    plugin.execute_command(session, "set_conjugate", {"enabled": True})
+    session.commit(lambda state: replace(state, magnitude_only=True))
+    latest = session.snapshot()
+    assert latest == FluxPickState(
+        flux_half=1.0, flux_int=2.0, conjugate=True, magnitude_only=True
+    )
+    assert plugin.alignment_busy
     owner.post(deliveries.pop())
-    assert session.snapshot() == start
+    assert session.snapshot() == latest
     owner.pump_all()
+    aligned = session.snapshot()
+    assert (aligned.flux_half, aligned.flux_int) == calculated_positions
+    assert aligned.conjugate is latest.conjugate
+    assert aligned.magnitude_only is latest.magnitude_only
     assert not plugin.alignment_busy
-    assert session.can_undo()
-    session.undo()
+    assert session.undo() == latest
     plugin.start_alignment(session)
     plugin.finish(session)
     committed = session.snapshot()
