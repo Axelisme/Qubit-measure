@@ -212,8 +212,10 @@ def test_delivery_error_is_scoped_to_the_current_interactive_stage(
         full = client.call("status", {"execution": key, "detail": "full"})
         pane = "analysis" if failed_stage == "primary" else "post_analysis"
         assert "delivery_error" in full[pane]["interaction"]
-        gui.done["post"].set()
-        question = client.call("wait", {"execution": key, "timeout": 5})
+        client.transport.responder = gui
+        question = client.call(
+            "tab_interact", {"tab": "t", "payload": {"command": "done"}}
+        )
         assert question.data["status"] == "awaiting_answer" and not question.is_error
         client.call("answer", {"recipe": key, "decision": "skipped"})
 
