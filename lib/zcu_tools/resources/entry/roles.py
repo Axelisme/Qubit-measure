@@ -41,7 +41,11 @@ def _reference_target(component: ComponentSchema, path: str) -> str | None:
     node: object = component
     for part in path.split("."):
         if isinstance(node, BaseModel):
-            node = getattr(node, part, None)
+            node = (
+                getattr(node, part)
+                if part in type(node).model_fields
+                else (node.model_extra or {}).get(part)
+            )
         elif isinstance(node, Mapping):
             node = node.get(part)
         else:

@@ -222,8 +222,11 @@ def _prepare_draft_presence(base: object, draft: object) -> None:
                 )
             ):
                 draft.model_fields_set.add(name)
+        base_extras = (
+            base.model_extra or {} if isinstance(base, BaseModel) and same_model else {}
+        )
         for name, child in (draft.model_extra or {}).items():
-            _prepare_draft_presence(getattr(base, name, _Missing.VALUE), child)
+            _prepare_draft_presence(base_extras.get(name, _Missing.VALUE), child)
     elif isinstance(draft, Mapping):
         original = base if isinstance(base, Mapping) else {}
         for key, child in draft.items():
