@@ -96,10 +96,11 @@ def test_large_integer_threshold_keeps_state_and_undo(plugin, entrypoint, value)
     session = plugin.open(ManualOwnerScheduler())
     seed = session.snapshot()
     committed = plugin.set_threshold.execute(session, 0.1)
-    with pytest.raises(InvalidInputError, match="threshold|representable"):
-        if entrypoint == "action":
+    if entrypoint == "action":
+        with pytest.raises(InvalidInputError, match="threshold"):
             plugin.set_threshold.execute(session, value)
-        else:
+    else:
+        with pytest.raises(InvalidInputError, match="threshold|representable"):
             plugin.execute_command(session, "set_threshold", {"threshold": value})
     assert session.snapshot() == committed
     assert session.can_undo()

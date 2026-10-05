@@ -202,7 +202,7 @@ def _require_threshold(threshold: object) -> None:
     if (
         isinstance(threshold, bool)
         or not isinstance(threshold, (int, float))
-        or not np.isfinite(threshold)
         or not 0 <= threshold <= 5
+        or not np.isfinite(threshold)
     ):
         raise ValueError("threshold must be a finite number in [0, 5]")

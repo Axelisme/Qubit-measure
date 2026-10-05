@@ -98,7 +98,13 @@ class ParamSpec:
                     ErrorCode.INVALID_PARAMS,
                     f"'{self.name}' must be a number, got {type(value).__name__}",
                 )
-            return float(value)
+            try:
+                return float(value)
+            except OverflowError as exc:
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    f"'{self.name}' must be representable as a float",
+                ) from exc
         if jt is JsonType.BOOLEAN:
             if not isinstance(value, bool):
                 raise RemoteError(
@@ -140,8 +146,10 @@ def validate_params(
     """Validate ``params`` against ``specs``; return a name -> typed-value dict.
 
     Only declared params are surfaced. Required-but-missing or type-mismatched
-    params raise ``RemoteError(INVALID_PARAMS)``. Extra undeclared params are
-    ignored (the wire stays forward-compatible).
+    params raise ``RemoteError(INVALID_PARAMS)``. NUMBER values outside the
+    float conversion range also raise INVALID_PARAMS, preserving the conversion
+    error as the cause. Extra undeclared params are ignored (the wire stays
+    forward-compatible).
     """
     out: dict[str, object] = {}
     for spec in specs:
