@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-04, shared string enum contracts
+**Last updated:** 2026-10-05, injected experiment logging namespaces
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -346,8 +346,8 @@ rolling their own handler set.
 Key invariants:
 
 - **The file handler is attached at the whole `zcu_tools.gui` namespace** (plus
-  any `extra_namespaces` an entry point needs — measure adds
-  `zcu_tools.experiment.v2_gui`; the MCP server adds `zcu_tools.mcp`). Attaching
+  any `extra_namespaces` an entry point injects for its experiment package;
+  the MCP server adds `zcu_tools.mcp`). Attaching
   at the package root, not an app sub-namespace, is deliberate: cross-cutting
   subpackages (`event_bus`, `plotting`, `remote`, `session`) are siblings of the
   app namespace, and a handler scoped to one app would silently miss them. That

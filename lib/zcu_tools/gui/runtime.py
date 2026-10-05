@@ -116,16 +116,24 @@ def launch_gui_runtime(
     behavior_cls: type[BehaviorT],
     options: GuiLaunchOptions,
     *args: Any,
+    extra_logging_namespaces: tuple[str, ...] = (),
     **kwargs: Any,
 ) -> int:
-    """Configure process-level policy, instantiate behavior, and run the GUI."""
+    """Configure process policy, instantiate behavior, and return its exit code.
+
+    behavior_cls declares the app's fixed runtime spec. options supplies CLI
+    process settings; args and kwargs go to the behavior constructor. The
+    caller-provided extra_logging_namespaces are appended to the app's fixed
+    logging namespaces before construction, without changing the shared spec.
+    Logging, construction and runtime failures propagate to the caller.
+    """
     spec = behavior_cls.spec
     setup_gui_logging(
         app_name=spec.app_name,
         log_root=options.log_root,
         to_file=options.to_file,
         log_file=options.log_file,
-        extra_namespaces=spec.logging_extra_namespaces,
+        extra_namespaces=spec.logging_extra_namespaces + extra_logging_namespaces,
         group=spec.logging_group,
     )
     control = build_control_options(spec, options)

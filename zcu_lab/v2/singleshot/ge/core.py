@@ -1,0 +1,531 @@
+from __future__ import annotations
+
+import warnings
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import ClassVar, Literal, cast
+
+import numpy as np
+from matplotlib.axes import Axes
+from numpy.typing import NDArray
+from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment import (
+    IDENTITY,
+    AxesSpec,
+    Axis,
+    PersistableExperiment,
+    RunRecord,
+    ZSpec,
+)
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    Pulse,
+    PulseCfg,
+    PulseReadout,
+    PulseReadoutCfg,
+    Reset,
+    ResetCfg,
+)
+from zcu_tools.utils.shot_classification import gaussian_region_probability
+
+from zcu_lab.v2._support.singleshot.util import (
+    classify_result,
+    plot_with_classified,
+    raw_shots_to_signal,
+)
+
+# ------------------------------------------------------------
+# Helper Functions
+# ------------------------------------------------------------
+
+
+def make_init_matrix(init_pops: NDArray[np.float64]) -> NDArray[np.float64]:
+    # Each acquisition has its own refined preparation populations. Retaining
+    # both rows makes the diagnostic equivariant under g/e relabeling.
+    if (
+        init_pops.shape != (2, 2)
+        or not np.isfinite(init_pops).all()
+        or np.any(init_pops < 0)
+        or np.any(init_pops.sum(axis=1) > 1 + 1e-12)
+    ):
+        raise ValueError("GE initial populations must be a valid 2x2 probability array")
+    p_gg_init, p_ge_init = init_pops[0]
+    p_eg_init, p_ee_init = init_pops[1]
+    p_go_init = max(0.0, 1.0 - p_gg_init - p_ge_init)
+    p_eo_init = max(0.0, 1.0 - p_eg_init - p_ee_init)
+
+    return np.array(
+        [
+            [p_gg_init, p_ge_init, p_go_init],
+            [p_eg_init, p_ee_init, p_eo_init],
+            [0.0, 0.0, 1.0],  # assume all initial to O
+        ]
+    )
+
+
+def make_result_matrix(
+    n_gg: float,
+    n_ge: float,
+    n_go: float,
+    n_eg: float,
+    n_ee: float,
+    n_eo: float,
+    n_og: float = 0.0,
+    n_oe: float = 0.0,
+    n_oo: float = 1.0,  # Other-state classification is modeled as perfectly isolated.
+) -> NDArray[np.float64]:
+    return np.array(
+        [
+            [n_gg, n_ge, n_go],
+            [n_eg, n_ee, n_eo],
+            [n_og, n_oe, n_oo],
+        ]
+    )
+
+
+def solve_confusion_matrix(
+    A_init: NDArray[np.float64],
+    Q: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    confusion_matrix = np.linalg.solve(A_init, Q)
+    confusion_matrix = np.clip(confusion_matrix, 0.0, None)
+    confusion_matrix /= confusion_matrix.sum(axis=1, keepdims=True)
+
+    return confusion_matrix
+
+
+def optimize_ge_radius(
+    g_signals: NDArray[np.complex128],
+    e_signals: NDArray[np.complex128],
+    g_center: complex,
+    e_center: complex,
+    init_pops: NDArray[np.float64],
+    sigma: float,
+    consider_other: bool = True,
+) -> float:
+    from scipy.optimize import OptimizeResult, minimize_scalar
+
+    # Validate geometry even before the optimizer evaluates its first candidate.
+    classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, 0.0)
+    ge_dist = abs(g_center - e_center)
+    A_init = make_init_matrix(init_pops)
+
+    def loss_fn(radius: float) -> float:
+
+        gg_mask, ge_mask, go_mask = classify_result(
+            g_signals, g_center, e_center, radius
+        )
+        n_gg = gg_mask.sum() / gg_mask.shape[0]
+        n_ge = ge_mask.sum() / ge_mask.shape[0]
+        n_go = go_mask.sum() / go_mask.shape[0]
+
+        eg_mask, ee_mask, eo_mask = classify_result(
+            e_signals, g_center, e_center, radius
+        )
+        n_eg = eg_mask.sum() / eg_mask.shape[0]
+        n_ee = ee_mask.sum() / ee_mask.shape[0]
+        n_eo = eo_mask.sum() / eo_mask.shape[0]
+
+        # Radius-selection penalty only: model other at the midpoint.
+        # The returned calibration retains the isolated-other row.
+        n_og = (
+            float(
+                gaussian_region_probability(
+                    np.array([ge_dist / 2]), sigma, radius, ge_dist
+                )[0]
+            )
+            if consider_other
+            else 0.0
+        )
+        n_oe = n_og
+        n_oo = 1.0 - n_og - n_oe
+
+        Q = make_result_matrix(n_gg, n_ge, n_go, n_eg, n_ee, n_eo, n_og, n_oe, n_oo)
+        confusion_matrix = solve_confusion_matrix(A_init, Q)
+
+        # calculate condision number of confusion matrix as loss
+        condition = float(np.linalg.cond(confusion_matrix))
+        return condition if np.isfinite(condition) else 1e12
+
+    result = minimize_scalar(loss_fn, bounds=(0.0, ge_dist), method="bounded")
+    if not isinstance(result, OptimizeResult):
+        raise TypeError("classification-radius optimizer must return OptimizeResult")
+    if not result.success or not np.isfinite(result.x):
+        raise RuntimeError("classification-radius optimization failed")
+    # The optimum can be the upper bound; bounded minimization excludes endpoints.
+    return min((float(result.x), ge_dist), key=loss_fn)
+
+
+# ------------------------------------------------------------
+# Experiment
+# ------------------------------------------------------------
+
+
+def _default_prepared_states() -> NDArray[np.int64]:
+    return np.array([0, 1], dtype=np.int64)
+
+
+def ge_signals_by_state(
+    signals: NDArray[np.complex128],
+    initial_state: Literal["ground", "excited"],
+) -> NDArray[np.complex128]:
+    """Map acquisition rows (probe off/on) to predominantly ground/excited."""
+    if initial_state == "ground":
+        return signals
+    if initial_state == "excited":
+        return signals[::-1]
+    raise ValueError(f"Unknown initial state: {initial_state!r}")
+
+
+@dataclass(frozen=True)
+class GE_Result:
+    """Raw probe-off/on rows; prepared_states=[0, 1] records that acquisition order."""
+
+    signals: NDArray[np.complex128]
+    shot_indices: NDArray[np.int64]
+    prepared_states: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class GEAnalyzeOptions:
+    initial_state: Literal["ground", "excited"] = "ground"
+    backend: Literal["pca", "center"] = "pca"
+    logscale: bool = False
+    align_t1: bool = True
+    length_ratio: float | None = None
+    angle: float | None = None
+
+
+@dataclass(frozen=True)
+class GEAnalysis:
+    initial_state: Literal["ground", "excited"]
+    fidelity: float
+    theta: float
+    threshold: float
+    ge_s: float
+    g_center: complex
+    e_center: complex
+    init_pops: NDArray[np.float64]
+    fit_quality: Mapping[str, FitQuality] | None = None
+
+    def validate_calibration(self) -> None:
+        populations = np.asarray(self.init_pops, dtype=np.float64)
+        scalars = [
+            self.fidelity,
+            self.theta,
+            self.threshold,
+            self.ge_s,
+            self.g_center,
+            self.e_center,
+        ]
+        if (
+            not np.isfinite(scalars).all()
+            or not 0.0 <= self.fidelity <= 1.0
+            or self.ge_s <= 0
+            or np.isclose(self.g_center, self.e_center)
+            or populations.shape != (2, 2)
+            or not np.isfinite(populations).all()
+            or np.any(populations < 0)
+            or np.any(populations.sum(axis=1) > 1 + 1e-12)
+        ):
+            raise ValueError(
+                "Invalid GE calibration: check centers, width and populations"
+            )
+
+
+@dataclass(frozen=True)
+class GEPostAnalyzeOptions:
+    radius: float | None = None
+    consider_other: bool = False
+
+
+@dataclass(frozen=True)
+class GEConfusionResult:
+    radius: float
+    matrix: NDArray[np.float64]
+    init_matrix: NDArray[np.float64]
+    g_classification: tuple[float, float, float]
+    e_classification: tuple[float, float, float]
+    condition_number: float
+
+
+@dataclass(frozen=True)
+class GEPostAnalysis:
+    confusion: GEConfusionResult
+
+
+class GEModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    probe_pulse: PulseCfg
+    readout: PulseReadoutCfg
+
+
+class GE_Cfg(ProgramV2Cfg, ExpCfgModel):
+    modules: GEModuleCfg
+    shots: int
+
+
+class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
+    Options: ClassVar[type[GEAnalyzeOptions]] = GEAnalyzeOptions
+    PostOptions: ClassVar[type[GEPostAnalyzeOptions]] = GEPostAnalyzeOptions
+
+    AXES_SPEC = AxesSpec(
+        axes=(
+            Axis(
+                "shot_indices",
+                "Shot Index",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+            Axis(
+                "prepared_states",
+                "Prepared State",
+                "None",
+                scale=IDENTITY,
+                dtype=np.int64,
+            ),
+        ),
+        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        result_type=GE_Result,
+        cfg_type=GE_Cfg,
+        tag="singleshot/ge",
+    )
+
+    def run(self, config: GE_Cfg, *, context: RunContext) -> GE_Result:
+        soc, soccfg = context.soc, context.soccfg
+        cfg = deepcopy(config)
+        setup_devices(
+            cfg,
+            context.devices,
+            progress=True,
+            cancel_signal=context.cancel_signal,
+        )
+
+        # Validate and setup configuration
+        if cfg.rounds != 1:
+            warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
+            cfg.rounds = 1
+
+        if cfg.reps != 1:
+            warnings.warn("reps will be overwritten by singleshot measurement shots")
+        cfg.reps = cfg.shots
+
+        signals_buffer = SignalBuffer((2, cfg.shots))
+        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
+                modules = step.cfg.modules
+                probe_cfg = modules.probe_pulse if with_probe else None
+                program = (
+                    step.prog_builder(soc, soccfg)
+                    .add(
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        Pulse("probe_pulse", probe_cfg),
+                        PulseReadout("readout", modules.readout),
+                    )
+                    .build()
+                )
+                try:
+                    program.acquire(soc, progress=True, cancel_flag=step.stop)
+                except StoppedPartialAcquireError:
+                    step.set_stop()
+                    break
+                signals_buffer[step].set(raw_shots_to_signal(program))
+            signals = signals_buffer.array
+
+        return GE_Result(
+            signals=signals,
+            shot_indices=np.arange(signals.shape[1], dtype=np.int64),
+            prepared_states=_default_prepared_states(),
+        )
+
+    def analyze(
+        self,
+        source: RunRecord[GE_Cfg, GE_Result],
+        options: GEAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> GEAnalysis:
+        """Fit probe-off/on shots, recording a named fit figure in this operation."""
+        # Acquisition order is always probe off/on; fit in physical g/e order.
+        signals = ge_signals_by_state(source.result.signals, options.initial_state)
+        if options.backend not in ("pca", "center"):
+            raise ValueError(f"Unknown backend: {options.backend}")
+        fidelity, init_pops, fit = singleshot_ge_analysis(
+            signals,
+            angle=options.angle,
+            backend=options.backend,
+            logscale=options.logscale,
+            align_t1=options.align_t1,
+            length_ratio=options.length_ratio,
+            plots=plots,
+        )
+        analysis = GEAnalysis(
+            initial_state=options.initial_state,
+            fidelity=fidelity,
+            theta=fit["theta"],
+            threshold=fit["threshold"],
+            ge_s=fit["s"],
+            g_center=fit["g_center"],
+            e_center=fit["e_center"],
+            init_pops=init_pops,
+            fit_quality=fit["fit_quality"],
+        )
+        analysis.validate_calibration()
+        return analysis
+
+    def post_analyze(
+        self,
+        source: RunRecord[GE_Cfg, GE_Result],
+        primary: GEAnalysis,
+        options: GEPostAnalyzeOptions,
+        *,
+        plots: Plots,
+    ) -> GEPostAnalysis:
+        """Classify shots with the adopted primary calibration; do not refit."""
+        primary.validate_calibration()
+        g_signals, e_signals = ge_signals_by_state(
+            source.result.signals, primary.initial_state
+        )
+        signals = (g_signals, e_signals)
+        confusion = self._calc_confusion_matrix(signals, primary, options)
+        self._plot_confusion_matrix(confusion, signals, primary, plots)
+        return GEPostAnalysis(confusion=confusion)
+
+    def _calc_confusion_matrix(
+        self,
+        signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+        primary: GEAnalysis,
+        options: GEPostAnalyzeOptions,
+    ) -> GEConfusionResult:
+        g_signals, e_signals = signals
+        g_center, e_center = primary.g_center, primary.e_center
+        init_matrix = make_init_matrix(primary.init_pops)
+
+        radius = options.radius
+        if radius is None:
+            radius = optimize_ge_radius(
+                g_signals,
+                e_signals,
+                g_center,
+                e_center,
+                primary.init_pops,
+                primary.ge_s,
+                consider_other=options.consider_other,
+            )
+
+        gg_mask, ge_mask, go_mask = classify_result(
+            g_signals, g_center, e_center, radius
+        )
+        g_classification = (
+            float(gg_mask.mean()),
+            float(ge_mask.mean()),
+            float(go_mask.mean()),
+        )
+
+        eg_mask, ee_mask, eo_mask = classify_result(
+            e_signals, g_center, e_center, radius
+        )
+        e_classification = (
+            float(eg_mask.mean()),
+            float(ee_mask.mean()),
+            float(eo_mask.mean()),
+        )
+
+        matrix = solve_confusion_matrix(
+            init_matrix,
+            make_result_matrix(*g_classification, *e_classification),
+        )
+        return GEConfusionResult(
+            radius=radius,
+            matrix=matrix,
+            init_matrix=init_matrix,
+            g_classification=g_classification,
+            e_classification=e_classification,
+            condition_number=float(np.linalg.cond(matrix)),
+        )
+
+    def _plot_confusion_matrix(
+        self,
+        confusion: GEConfusionResult,
+        signals: tuple[NDArray[np.complex128], NDArray[np.complex128]],
+        primary: GEAnalysis,
+        plots: Plots,
+    ) -> None:
+        g_signals, e_signals = signals
+        g_center, e_center = primary.g_center, primary.e_center
+        fig, raw_axes = plots.subplots("post", nrows=2, ncols=2, figsize=(8, 8))
+        ((ax1, ax4), (ax2, ax3)) = cast(
+            "tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes
+        )
+
+        g_label = r"$|0\rangle$"
+        e_label = r"$|1\rangle$"
+        l_label = r"$|L\rangle$"
+        plot_with_classified(ax1, g_signals, g_center, e_center, confusion.radius)
+        plot_with_classified(ax2, e_signals, g_center, e_center, confusion.radius)
+
+        n_gg, n_ge, n_go = confusion.g_classification
+        n_eg, n_ee, n_eo = confusion.e_classification
+        ax1.set_title(
+            f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}"
+        )
+        ax2.set_title(
+            f"{g_label}: {n_eg:.1%}, {e_label}: {n_ee:.1%}, {l_label}: {n_eo:.1%}"
+        )
+        ax1.set_xlabel("")
+
+        im = ax4.imshow(confusion.init_matrix, cmap="Blues", vmin=0, vmax=1)
+        fig.colorbar(im, cax=ax4.inset_axes((1.04, 0, 0.06, 1)))
+        for i in range(confusion.init_matrix.shape[0]):
+            for j in range(confusion.init_matrix.shape[1]):
+                val = confusion.init_matrix[i, j]
+                ax4.text(
+                    j,
+                    i,
+                    f"{val:.2%}",
+                    ha="center",
+                    va="center",
+                    color="white" if val > 0.5 else "black",
+                )
+
+        ax4.set_xticks([0, 1, 2])
+        ax4.set_yticks([0, 1, 2])
+        ax4.set_xticklabels([g_label, e_label, l_label])
+        ax4.set_yticklabels([g_label, e_label, l_label])
+        ax4.set_xlabel("Actual State")
+        ax4.set_ylabel("Prepared State")
+        ax4.set_title("Initial Populations")
+
+        im = ax3.imshow(confusion.matrix, cmap="Blues", vmin=0, vmax=1)
+        fig.colorbar(im, cax=ax3.inset_axes((1.04, 0, 0.06, 1)))
+        for i in range(confusion.matrix.shape[0]):
+            for j in range(confusion.matrix.shape[1]):
+                val = confusion.matrix[i, j]
+                ax3.text(
+                    j,
+                    i,
+                    f"{val:.2%}",
+                    ha="center",
+                    va="center",
+                    color="white" if val > 0.5 else "black",
+                )
+
+        ax3.set_xticks([0, 1, 2])
+        ax3.set_yticks([0, 1, 2])
+        ax3.set_xticklabels([g_label, e_label, l_label])
+        ax3.set_yticklabels([g_label, e_label, l_label])
+        ax3.set_xlabel("Measured State")
+        ax3.set_ylabel("Actual State")
+        ax3.set_title(f"Confusion Matrix (cond: {confusion.condition_number:.1f})")

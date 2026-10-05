@@ -1,8 +1,8 @@
-**Last updated:** 2026-10-01 — Fake public owners
+**Last updated:** 2026-10-05 — Framework BaseAdapter tests owner
 
 # measure adapter tests
 
-本目錄驗證 adapter 的公開 run／analyze／writeback 契約。核心數值演算法由 `tests/experiment/v2/` 擁有，硬體程式行為由 `tests/program/v2/` 擁有。不要直接測 private helpers 或 Notebook／腳本內容。
+本目錄驗證 concrete adapter 的公開 run／analyze／writeback 契約。通用 BaseAdapter 的 capability、canonical load 與 post defaults tests 住在 `tests/gui/app/measure/adapter/`。核心數值演算法由 `tests/experiment/v2/` 擁有，硬體程式行為由 `tests/program/v2/` 擁有。不要直接測 private helpers 或 Notebook／腳本內容。
 
 測試目錄對應 `lib/zcu_tools/experiment/v2_gui/measure/adapters/`：concrete experiment behavior放在
 相同 domain path，跨 adapter mechanics放在 `_support/`。測試以 adapter/definition的observable

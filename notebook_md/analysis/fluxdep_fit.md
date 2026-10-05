@@ -39,7 +39,7 @@ from zcu_tools.analysis.fluxdep.io import dump_spectrums, load_spectrums
 from zcu_tools.analysis.fluxdep.models import SpectrumResult, TransitionDict
 from zcu_tools.notebook.utils import savefig
 from zcu_tools.simulate import value2flux, flux2value
-import zcu_tools.experiment.v2 as ze
+import zcu_lab.v2 as ze
 ```
 
 ```python
@@ -78,9 +78,9 @@ type = "OneTone"  # or "TwoTone"
 # type = "TwoTone"  # or "OneTone"
 
 if type == "OneTone":
-    spectrum_run = ze.onetone.FluxDepExp().load(Path(spect_path))
+    spectrum_run = ze.onetone.flux_dep.core.FluxDepExp().load(Path(spect_path))
 else:
-    spectrum_run = ze.twotone.FreqFluxExp().load(Path(spect_path))
+    spectrum_run = ze.twotone.fluxdep.core.FreqFluxExp().load(Path(spect_path))
 spectrum = spectrum_run.result
 dev_values, freqs, signals = spectrum.values, spectrum.freqs, spectrum.signals
 freqs = freqs * 1e-3  # MHz -> GHz; leave the loaded spectrum unchanged.

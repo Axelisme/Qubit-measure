@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, cast
 
 %autoreload 2
-import zcu_tools.experiment.v2 as ze
+import zcu_lab.v2 as ze
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.simulate import value2flux, flux2value
 from zcu_tools.resources.qubit_params import QubitParams
@@ -64,9 +64,9 @@ sim_flxs = np.linspace(-0.05, 0.55, 200)
 %matplotlib widget
 filepath = r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\R4_flux_1.hdf5"
 
-from zcu_tools.notebook.experiments import FluxDepAnalyzer
+from zcu_lab.v2._support.notebook.flux_dep import FluxDepAnalyzer
 
-flux_run = ze.onetone.FluxDepExp().load(Path(filepath))
+flux_run = ze.onetone.flux_dep.core.FluxDepExp().load(Path(filepath))
 spectrum = flux_run.result
 flxs, fpts, signals = spectrum.values, spectrum.freqs, spectrum.signals
 flux_analyzer = FluxDepAnalyzer()
@@ -87,10 +87,10 @@ period = selection.result.flux_period
 filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
 )
-exp = nb_adapter(ze.twotone.dispersive.DispersiveExp())
+exp = nb_adapter(ze.twotone.dispersive.core.DispersiveExp())
 dispersive_run = exp.load(Path(filepath))
 fpts, signals = dispersive_run.result.freqs, dispersive_run.result.signals
-dispersive_analysis = exp.analyze(ze.twotone.dispersive.DispersiveExp.Options())
+dispersive_analysis = exp.analyze(ze.twotone.dispersive.core.DispersiveExp.Options())
 chi, kappa = dispersive_analysis.result.chi, dispersive_analysis.result.avg_fwhm
 fig = dispersive_analysis.figures["fit"]
 ```
@@ -100,18 +100,18 @@ filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
 )
 
-exp = nb_adapter(ze.twotone.ac_stark.AcStarkExp())
+exp = nb_adapter(ze.twotone.ac_stark.core.AcStarkExp())
 ac_stark_run = exp.load(Path(filepath))
 pdrs, fpts, signals = ac_stark_run.result.gains, ac_stark_run.result.freqs, ac_stark_run.result.signals
 ac_stark_analysis = exp.analyze(
-    ze.twotone.ac_stark.AcStarkExp.Options(chi=chi, kappa=kappa, cutoff=0.04)
+    ze.twotone.ac_stark.core.AcStarkExp.Options(chi=chi, kappa=kappa, cutoff=0.04)
 )
 ac_coeff = ac_stark_analysis.result.ac_coeff
 fig = ac_stark_analysis.figures["fit"]
 ```
 
 ```python
-from zcu_tools.experiment.v2.mist.flux_dep import mist_signal2real
+from zcu_lab.v2.mist.flux_dep.core import mist_signal2real
 
 filepaths = [
     # r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1116\Q4_mist_flux_bare@-4.990mA_1.hdf5",
@@ -123,7 +123,7 @@ ac_coeff = 1e3
 fig = go.Figure()
 
 for filepath in filepaths:
-    mist_run = ze.mist.flux_dep.FluxDepExp().load(Path(filepath))
+    mist_run = ze.mist.flux_dep.core.FluxDepExp().load(Path(filepath))
     signals, As, pdrs = mist_run.result.signals, mist_run.result.values, mist_run.result.gains
 
     flxs = value2flux(As, mA_c, period)
@@ -192,10 +192,10 @@ map_flxs = 1 - sim_flxs
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True)
 fig.update_layout(height=600, margin=dict(t=10, b=20, l=20))
 
-from zcu_tools.experiment.v2.mist.flux_dep import mist_signal2real
+from zcu_lab.v2.mist.flux_dep.core import mist_signal2real
 
 for filepath in filepaths:
-    mist_run = ze.mist.flux_dep.FluxDepExp().load(Path(filepath))
+    mist_run = ze.mist.flux_dep.core.FluxDepExp().load(Path(filepath))
     signals, As, pdrs = mist_run.result.signals, mist_run.result.values, mist_run.result.gains
 
     flxs = value2flux(As, mA_c, period)

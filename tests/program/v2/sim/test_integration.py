@@ -68,66 +68,8 @@ from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.lookback import (
-    LookbackAnalyzeOptions,
-    LookbackCfg,
-    LookbackExp,
-    LookbackModuleCfg,
-)
-from zcu_tools.experiment.v2.singleshot.ge import (
-    GE_Cfg,
-    GE_Exp,
-    GEAnalyzeOptions,
-    GEModuleCfg,
-)
-from zcu_tools.experiment.v2.singleshot.t1 import t1 as singleshot_t1
-from zcu_tools.experiment.v2.singleshot.t1 import t1_with_tone as singleshot_t1_tone
-from zcu_tools.experiment.v2.singleshot.t1 import (
-    t1_with_tone_sweep as singleshot_t1_tone_sweep,
-)
-from zcu_tools.experiment.v2.twotone.freq import (
-    FreqAnalyzeOptions,
-    FreqCfg,
-    FreqExp,
-    FreqModuleCfg,
-    FreqSweepCfg,
-)
-from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
-    AmpRabiAnalyzeOptions,
-    AmpRabiCfg,
-    AmpRabiExp,
-    AmpRabiModuleCfg,
-    AmpRabiSweepCfg,
-)
-from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
-    LenRabiAnalyzeOptions,
-    LenRabiCfg,
-    LenRabiExp,
-    LenRabiModuleCfg,
-    LenRabiSweepCfg,
-)
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
-    T1AnalyzeOptions,
-    T1Cfg,
-    T1Exp,
-    T1ModuleCfg,
-    T1SweepCfg,
-)
-from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
-    T2EchoAnalyzeOptions,
-    T2EchoCfg,
-    T2EchoExp,
-    T2EchoModuleCfg,
-    T2EchoSweepCfg,
-)
-from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
-    T2RamseyAnalyzeOptions,
-    T2RamseyCfg,
-    T2RamseyExp,
-    T2RamseyModuleCfg,
-    T2RamseySweepCfg,
-)
-from zcu_tools.experiment.v2.utils import sweep2array, t1_delay_axis
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.t1_sampling import t1_delay_axis
 from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -146,6 +88,59 @@ from zcu_tools.program.v2.sim.readout import (
 )
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+import zcu_lab.v2.singleshot.t1.t1.core as singleshot_t1
+import zcu_lab.v2.singleshot.t1.t1_with_tone.core as singleshot_t1_tone
+import zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.core as singleshot_t1_tone_sweep
+from zcu_lab.v2.lookback.core import (
+    LookbackAnalyzeOptions,
+    LookbackCfg,
+    LookbackExp,
+    LookbackModuleCfg,
+)
+from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Exp, GEAnalyzeOptions, GEModuleCfg
+from zcu_lab.v2.twotone.freq.core import (
+    FreqAnalyzeOptions,
+    FreqCfg,
+    FreqExp,
+    FreqModuleCfg,
+    FreqSweepCfg,
+)
+from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
+    AmpRabiAnalyzeOptions,
+    AmpRabiCfg,
+    AmpRabiExp,
+    AmpRabiModuleCfg,
+    AmpRabiSweepCfg,
+)
+from zcu_lab.v2.twotone.rabi.len_rabi.core import (
+    LenRabiAnalyzeOptions,
+    LenRabiCfg,
+    LenRabiExp,
+    LenRabiModuleCfg,
+    LenRabiSweepCfg,
+)
+from zcu_lab.v2.twotone.time_domain.t1.core import (
+    T1AnalyzeOptions,
+    T1Cfg,
+    T1Exp,
+    T1ModuleCfg,
+    T1SweepCfg,
+)
+from zcu_lab.v2.twotone.time_domain.t2echo.core import (
+    T2EchoAnalyzeOptions,
+    T2EchoCfg,
+    T2EchoExp,
+    T2EchoModuleCfg,
+    T2EchoSweepCfg,
+)
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
+    T2RamseyAnalyzeOptions,
+    T2RamseyCfg,
+    T2RamseyExp,
+    T2RamseyModuleCfg,
+    T2RamseySweepCfg,
+)
 
 # Fixed operating point: reduced flux = 1.0 (R-3, matches the engine constant).
 # T1/T2 are a few µs so decay/dephasing are resolvable over modest sweeps; snr is
@@ -526,7 +521,7 @@ def test_t1_setup_failure_leaves_caller_config_unchanged(
         raise RuntimeError("setup failed")
 
     monkeypatch.setattr(
-        "zcu_tools.experiment.v2.twotone.time_domain.t1.setup_devices", fail_setup
+        "zcu_lab.v2.twotone.time_domain.t1.core.setup_devices", fail_setup
     )
     with pytest.raises(RuntimeError, match="setup failed"):
         T1Exp().run(

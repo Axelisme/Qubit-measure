@@ -14,7 +14,7 @@ from zcu_tools.gui.session.types import (
 
 from .analyze_params import ParamMeta, describe_analyze_params, reconstruct_params
 from .interactive import InteractivePluginProvider
-from .protocol import ExpAdapterProtocol
+from .protocol import AdapterCfgDefinition, ExpAdapterProtocol
 from .types import (
     AdapterCapabilities,
     AdapterGuide,

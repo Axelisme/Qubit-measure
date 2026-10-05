@@ -52,9 +52,13 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.app.autofluxdep.app import AutoFluxDepGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
+    from zcu_lab.autofluxdep_catalog import build_catalog
+
     return launch_gui_runtime(
         AutoFluxDepGuiBehavior,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
+        extra_logging_namespaces=("zcu_lab",),
+        catalog=build_catalog(),
         project_root=project_root,
     )
 

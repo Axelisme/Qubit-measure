@@ -24,9 +24,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Final
 
-# Where repository Python lives. `scripts` and `tools` sit at the root; everything
-# else the checks care about is under lib/ or tests/.
-CHECKED_ROOTS: Final = ("lib", "tests", "scripts", "tools")
+# Repository Python includes the framework and the root user package.
+CHECKED_ROOTS: Final = ("lib", "zcu_lab", "tests", "scripts", "tools")
 
 # Generated or vendored trees. Nothing here is written by hand, so no check has
 # an opinion about it.

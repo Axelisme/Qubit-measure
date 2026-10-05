@@ -13,15 +13,15 @@ from numpy.typing import NDArray
 from typing_extensions import TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.result_tree import ResultTree, ResultUpdateEvent
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     ScheduleOutcome,
     ScheduleStep,
-    StopSignal,
 )
 from zcu_tools.experiment.v2.runtime.task import MeasurementBundle, TaskLivePlot
-from zcu_tools.experiment.v2.utils import Result
+from zcu_tools.experiment.v2.utils.helper import Result
 from zcu_tools.plotting.plots import MovieRecording, Plots
 from zcu_tools.utils.debug import log_current_exception
 

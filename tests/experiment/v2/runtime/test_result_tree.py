@@ -7,8 +7,9 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime import ResultTree, ResultUpdateEvent, Schedule
-from zcu_tools.experiment.v2.utils import Result
+from zcu_tools.experiment.v2.runtime.result_tree import ResultTree, ResultUpdateEvent
+from zcu_tools.experiment.v2.runtime.schedule import Schedule
+from zcu_tools.experiment.v2.utils.helper import Result
 
 LeafResult: TypeAlias = dict[str, NDArray[np.float64]]
 TreeRow: TypeAlias = dict[str, LeafResult]
@@ -160,7 +161,7 @@ def test_result_tree_invalidates_only_updated_measurement_cache() -> None:
 
 
 def test_signal_buffer_flush_keeps_public_update_shape() -> None:
-    from zcu_tools.experiment.v2.runtime import SignalBuffer
+    from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
 
     updates: list[np.ndarray] = []
     buffer = SignalBuffer(

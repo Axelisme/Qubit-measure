@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.catalog import (
     ExperimentCatalogLoader,
@@ -19,6 +18,8 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import DirectValue
+
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
 @pytest.fixture

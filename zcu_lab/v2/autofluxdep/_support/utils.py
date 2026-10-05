@@ -1,0 +1,41 @@
+import warnings
+from typing import TypeVar
+
+import numpy as np
+from numpy.typing import NDArray
+from zcu_tools.program.v2 import PulseCfg
+from zcu_tools.resources.context import ModuleLibrary
+
+T_Gains = TypeVar("T_Gains", float, NDArray[np.float64])
+
+
+def check_gains(gains: T_Gains, name: str) -> T_Gains:
+    if np.any(gains > 1.0):
+        warnings.warn(
+            f"Some {name} gains are larger than 1.0, force clip to 1.0, which may cause distortion."
+        )
+        if isinstance(gains, np.ndarray):
+            return np.clip(gains, 0.0, 1.0)
+        return min(max(gains, 0.0), 1.0)
+    return gains
+
+
+def make_pulse(
+    ml: ModuleLibrary,
+    pulse_name: str,
+    freq: float | None = None,
+    gain: float | None = None,
+    length: float | None = None,
+) -> PulseCfg:
+    pulse_cfg = ml.get_module(pulse_name)
+    if not isinstance(pulse_cfg, PulseCfg):
+        raise ValueError(f"Expected PulseCfg, got {type(pulse_cfg)}")
+
+    if freq is not None:
+        pulse_cfg.set_param("freq", freq)
+    if gain is not None:
+        pulse_cfg.set_param("gain", gain)
+    if length is not None:
+        pulse_cfg.set_param("length", length)
+
+    return pulse_cfg

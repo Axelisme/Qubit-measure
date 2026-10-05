@@ -2,7 +2,7 @@
 
 A ``RoleEntry`` pairs a human-facing role (e.g. "Resonator probe readout") with
 its eval-aware value factory — the existing ``make_<role>_default`` builders.
-The GUI defines this interface; ``experiment/v2_gui`` populates it at startup
+The GUI defines this interface; injected user composition populates it at startup
 (mirroring ``Registry`` / ``register_all``), keeping the dependency direction
 correct (gui must not import the adapters package).
 

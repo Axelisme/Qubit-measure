@@ -25,7 +25,7 @@ from typing_extensions import cast
 from pydantic import TypeAdapter
 
 %autoreload 2
-import zcu_tools.experiment.v2.autofluxdep as zefd
+import zcu_lab.v2.autofluxdep as zefd
 from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
@@ -35,8 +35,8 @@ import zcu_tools.program.v2 as zp
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.resources.context import ContextManager
 from zcu_tools.datafile import create_datafolder
+from zcu_tools.experiment.utils import make_sweep
 from zcu_tools.notebook.utils import (
-    make_sweep,
     reconnect_devices,
     dump_device_info,
     gc_collect,
@@ -133,10 +133,10 @@ readout_gain = float(readout_cfg.pulse_cfg.gain)
 
 
 executor = (
-    zefd.FluxDepExecutor(flux_values=flux_values)
+    zefd.core.FluxDepExecutor(flux_values=flux_values)
     .add_measurements(
         OrderedDict(
-            qubit_freq=zefd.QubitFreqTask(
+            qubit_freq=zefd.qubit_freq.core.QubitFreqTask(
                 detune_sweep=make_sweep(-20, 50, step=0.5),
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env.info)
@@ -165,7 +165,7 @@ executor = (
                             "reps": 1000,
                             "rounds": 100,
                         },
-                        zefd.QubitFreqCfgTemplate,
+                        zefd.qubit_freq.core.QubitFreqCfgTemplate,
                         CfgEnv(md=md, ml=ml, device_manager=device_manager),
                     )
                 ),

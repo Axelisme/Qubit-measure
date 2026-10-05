@@ -313,12 +313,12 @@ def test_measure_connect_authenticates_and_reconnects_to_token_gated_gui(
         return config.default_port if requested is None else requested
 
     session = MeasureMcpSession(
-        config, resolve_connect_port=resolver, port_is_open=lambda _: True
+        config, recipes=(), resolve_connect_port=resolver, port_is_open=lambda _: True
     )
     bridge = McpBridge(config)
     session.attach_bridge(bridge)
     tools = build_measure_tools(
-        MeasureToolContext(config, session, resolve_connect_port=resolver)
+        MeasureToolContext(config, session, resolve_connect_port=resolver), recipes=()
     )
     call = partial(_call_mcp_with_qt, tools)
 

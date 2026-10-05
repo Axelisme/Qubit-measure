@@ -6,17 +6,21 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication, QPushButton
-from zcu_tools.gui.app.autofluxdep.app import AutoFluxDepGuiBehavior, build_core
+from zcu_tools.gui.app.autofluxdep.app import AutoFluxDepGuiBehavior
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 
 @pytest.fixture
 def launched(qapp: QApplication, tmp_path: Path):
     ctrl = build_core(project_root=str(tmp_path))
     win = MainWindow(ctrl)
-    behavior = AutoFluxDepGuiBehavior(project_root=str(tmp_path))
+    behavior = AutoFluxDepGuiBehavior(
+        ctrl.experiment_catalog, project_root=str(tmp_path)
+    )
     yield ctrl, win, behavior
     ctrl.quiesce_background()
     win.close()

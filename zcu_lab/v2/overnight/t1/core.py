@@ -1,0 +1,359 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Generic, TypeVar, cast
+
+import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import (
+    TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
+)
+from zcu_tools.analysis.fitting import fit_decay
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.datafile import (
+    format_ext,
+    load_labber_data,
+    reserve_labber_filepath,
+    save_labber_data,
+)
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.v2.runtime.result_tree import ResultUpdateEvent
+from zcu_tools.experiment.v2.runtime.schedule import ScheduleStep
+from zcu_tools.experiment.v2.runtime.task import MeasurementTask
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import HeatmapLinePlot, Plots
+from zcu_tools.program.v2 import (
+    Delay,
+    ProgramV2Cfg,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
+from zcu_tools.utils.process import rotate2real
+
+from zcu_lab.v2.overnight._support.env import OvernightEnv
+from zcu_lab.v2.overnight.core import OvernightCfg
+
+
+def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    if np.any(np.isnan(signals)):
+        return signals.real
+
+    real_signals = rotate2real(signals).real
+    max_val = np.max(real_signals)
+    min_val = np.min(real_signals)
+    init_val = real_signals[0]
+    real_signals = (real_signals - min_val) / (max_val - min_val + 1e-12)
+    if init_val < 0.5 * (max_val + min_val):
+        real_signals = 1.0 - real_signals
+    return real_signals
+
+
+def t1_overnight_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    return np.array(list(map(t1_signal2real, signals)), dtype=np.float64)
+
+
+class T1Result(TypedDict, closed=True):
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+
+
+class T1PlotDict(TypedDict, closed=True):
+    t1: HeatmapLinePlot
+
+
+T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
+
+
+class T1PlotAndSaveMixin(Generic[T_Cfg]):
+    def __init__(self, cfg: T_Cfg, cfg_model: type[T_Cfg]) -> None:
+        self.cfg: T_Cfg = cfg.model_copy(deep=True)
+        self.cfg_model = cfg_model
+
+    def num_axes(self) -> dict[str, int]:
+        return dict(t1=2)
+
+    def make_plotter(
+        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
+    ) -> T1PlotDict:
+        return T1PlotDict(
+            t1=plots.liveplot_2d_with_line(
+                figure_name,
+                "Iteration",
+                "Time (us)",
+                num_lines=5,
+                title=name,
+                axes=(axs["t1"][0], axs["t1"][1]),
+            ),
+        )
+
+    def update_plotter(
+        self,
+        plotters: T1PlotDict,
+        event: ResultUpdateEvent[OvernightEnv, T1Result],
+        results: T1Result,
+    ) -> None:
+        iters = event.env.iters.astype(np.float64)
+
+        lengths = results["lengths"][0]
+        real_signals = t1_overnight_signal2real(results["signals"])
+
+        plotters["t1"].update(iters, lengths, real_signals, refresh=False)
+
+    def save(self, filepath, iters, result, comment, prefix_tag) -> None:
+        filepath = Path(filepath)
+
+        comment = make_comment(self.cfg, comment)
+
+        lengths = result["lengths"][0]
+
+        # signals: z stored native (Ny, Nx) = (Time, Iteration), inner axis last
+        save_labber_data(
+            reserve_labber_filepath(
+                str(filepath.with_name(filepath.name + "_signals"))
+            ),
+            z=("Signal", "a.u.", result["signals"].T),
+            axes=[
+                ("Iteration", "a.u.", iters),
+                ("Time", "s", 1e-6 * lengths),
+            ],
+            comment=comment,
+            tags=prefix_tag + "/signals",
+        )
+
+    def load(self, filepath: str) -> T1Result:
+        d = load_labber_data(format_ext(filepath))
+        signals = np.asarray(d.z)
+        lengths = np.asarray(d.axes[0].values)
+        comment = d.comment
+
+        assert len(lengths.shape) == 1 and len(signals.shape) == 1
+        assert lengths.shape == signals.shape
+
+        lengths = lengths * 1e-6  # s -> us
+
+        if comment:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.cfg = cast(
+                    T_Cfg, self.cfg_model.validate_or_warn(cfg, source=filepath)
+                )
+
+        return T1Result(lengths=lengths, signals=signals)
+
+    def analyze(
+        self, _name: str, iters: NDArray[np.int64], result: T1Result, fig: Figure
+    ) -> None:
+        Ts = result["lengths"][0]  # (Ts, )
+        signals = result["signals"]  # (iters, Ts)
+
+        real_signals = t1_overnight_signal2real(signals)
+
+        t1s = np.zeros((len(iters),), dtype=np.float64)
+        t1errs = np.zeros((len(iters),), dtype=np.float64)
+        for i, sig in enumerate(real_signals):
+            t1, t1err, *_ = fit_decay(Ts, sig)
+            t1s[i] = t1
+            t1errs[i] = t1err
+
+        ax1 = fig.add_subplot(1, 2, 1)
+        ax1.imshow(
+            real_signals.T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+        ax1.set_xlabel("Iteration")
+        ax1.set_ylabel("Time (us)")
+
+        ax2 = fig.add_subplot(1, 2, 2)
+        ax2.errorbar(iters, t1s, yerr=t1errs, fmt="o")
+        ax2.set_xlabel("Iteration")
+        ax2.set_ylabel("T1 (us)")
+
+        fig.tight_layout()
+
+
+class T1ModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T1SweepCfg(ConfigBase):
+    length: SweepCfg
+
+
+class T1Cfg(ProgramV2Cfg, ExpCfgModel):
+    modules: T1ModuleCfg
+    sweep: T1SweepCfg
+
+
+class T1Task(
+    T1PlotAndSaveMixin[T1Cfg],
+    MeasurementTask[
+        OvernightCfg, OvernightEnv, T1Result, T1PlotDict, NDArray[np.int64]
+    ],
+):
+    def __init__(
+        self, cfg: T1Cfg, *, acquire_kwargs: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(cfg, T1Cfg)
+
+        # initial values, may be rounded later
+        self.lengths = sweep2array(self.cfg.sweep.length)
+        self.acquire_kwargs = acquire_kwargs or {}
+
+    def init(self, dynamic_pbar=False) -> None:
+        pass
+
+    def run(
+        self,
+        state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
+    ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop,
+        )
+        self.lengths = sweep2array(
+            self.cfg.sweep.length, "time", {"soccfg": state.env.context.soccfg}
+        )
+        self.last_cfg = self.cfg
+
+        signals_step = state.child("signals", cfg=self.cfg)
+        _ = signals_step.buffer(len(self.lengths))
+        cfg = signals_step.cfg
+        modules = cfg.modules
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
+
+        _ = (
+            signals_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi_pulse", modules.pi_pulse),
+                Delay("t1_delay", delay=length_param),
+                Readout("readout", modules.readout),
+            )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(**self.acquire_kwargs)
+        )
+
+        state.set_data(
+            T1Result(
+                lengths=self.lengths,
+                signals=signals_step.array_data,
+            ),
+            flush=True,
+        )
+
+    def get_default_result(self) -> T1Result:
+        return T1Result(
+            lengths=self.lengths,
+            signals=np.full((len(self.lengths),), np.nan, dtype=np.complex128),
+        )
+
+    def cleanup(self) -> None:
+        pass
+
+
+class T1WithToneModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    pi_pulse: PulseCfg
+    probe_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T1WithToneSweepCfg(ConfigBase):
+    length: SweepCfg
+
+
+class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: T1WithToneModuleCfg
+    sweep: T1WithToneSweepCfg
+
+
+class T1WithToneTask(
+    T1PlotAndSaveMixin[T1WithToneCfg],
+    MeasurementTask[
+        OvernightCfg, OvernightEnv, T1Result, T1PlotDict, NDArray[np.int64]
+    ],
+):
+    def __init__(
+        self, cfg: T1WithToneCfg, *, acquire_kwargs: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(cfg, T1WithToneCfg)
+
+        # initial values, may be rounded later
+        self.lengths = sweep2array(self.cfg.sweep.length)
+        self.acquire_kwargs = acquire_kwargs or {}
+
+    def init(self, dynamic_pbar=False) -> None:
+        pass
+
+    def run(
+        self,
+        state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
+    ) -> None:
+        setup_devices(
+            self.cfg,
+            state.env.context.devices,
+            progress=True,
+            cancel_signal=state.stop,
+        )
+        self.lengths = sweep2array(
+            self.cfg.sweep.length,
+            "time",
+            {
+                "soccfg": state.env.context.soccfg,
+                "gen_ch": self.cfg.modules.probe_pulse.ch,
+            },
+        )
+        self.last_cfg = self.cfg
+
+        signals_step = state.child("signals", cfg=self.cfg)
+        _ = signals_step.buffer(len(self.lengths))
+        cfg = signals_step.cfg
+        modules = cfg.modules
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
+        modules.probe_pulse.set_param("length", length_param)
+
+        _ = (
+            signals_step.prog_builder(state.env.context.soc, state.env.context.soccfg)
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi_pulse", modules.pi_pulse),
+                Pulse("probe_pulse", modules.probe_pulse),
+                Readout("readout", modules.readout),
+            )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire(**self.acquire_kwargs)
+        )
+
+        state.set_data(
+            T1Result(
+                lengths=self.lengths,
+                signals=signals_step.array_data,
+            ),
+            flush=True,
+        )
+
+    def get_default_result(self) -> T1Result:
+        return T1Result(
+            lengths=self.lengths,
+            signals=np.full((len(self.lengths),), np.nan, dtype=np.complex128),
+        )
+
+    def cleanup(self) -> None:
+        pass

@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-05
 
 這裡是使用者入口；repo 品質檢查在 [tools/README.md](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -9,6 +9,8 @@
 下表只列主要用途；實際參數請用各腳本的說明或閱讀程式確認。
 
 ## GUI 與板端 server
+
+- `run_measure_mcp.py`：把 `zcu_lab.recipes.RECIPES` 注入 measure MCP stdio server。入口不自行連接儀器；`connect` 與後續工具呼叫仍須遵守當次授權。MCP 的 session、worker 與寫回交接見 [measure MCP README](../lib/zcu_tools/mcp/measure/README.md)。
 
 - `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。讀取可恢復的 session 與實驗設定；正常關閉會寫回 GUI state，預設在 repo `logs/gui/measure/` 建立 session log。預設啟動 loopback remote-control socket；允許外部連線的選項會改變網路曝露範圍。`--clean` 不恢復先前 session，但不阻止關閉時寫回。量測 GUI 可透過 QICK 連接硬體；啟動器本身只組合 GUI 與 runtime。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
 - `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑；傳入的 project 與 repo root 交給 GUI runtime。預設各開 remote-control TCP socket（預設 port 8766、8767，未指定時占用會回退到臨時 port）；GUI 的分析或存檔由各自 app 負責，啟動器不直接改寫原始資料。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。

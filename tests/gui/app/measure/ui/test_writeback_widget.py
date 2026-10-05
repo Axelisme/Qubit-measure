@@ -15,11 +15,6 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import (
-    FakeFreqAdapter,
-    FakeFreqAnalyzeParams,
-    FakeFreqRunResult,
-)
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     MetaDictWriteback,
@@ -30,6 +25,9 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.v2.fake.freq.core import FakeFreqRunResult
+from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter, FakeFreqAnalyzeParams
 
 
 def _make_ctx() -> SessionEnv:

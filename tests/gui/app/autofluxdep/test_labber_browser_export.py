@@ -10,11 +10,6 @@ import h5py
 import numpy as np
 import pytest
 from zcu_tools.datafile import load_labber_data
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
-    QubitFreqResult,
-    Sweep1DResult,
-    Sweep2DResult,
-)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
 from zcu_tools.gui.app.autofluxdep.services import run_store as run_store_module
@@ -27,6 +22,12 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_manifest,
 )
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
+
+from zcu_lab.v2._support.autofluxdep.result import (
+    QubitFreqResult,
+    Sweep1DResult,
+    Sweep2DResult,
+)
 
 from ._helpers import make_builder, place
 

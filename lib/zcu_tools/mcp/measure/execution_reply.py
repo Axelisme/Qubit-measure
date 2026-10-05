@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
+from zcu_tools.mcp.measure.recipe_capture import RecipeActual
+
 if TYPE_CHECKING:
-    from recipes import RecipeDefinition
+    from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 ReplyDetail = Literal["summary", "full"]
 
@@ -67,10 +70,9 @@ def _step(status: str, outcome: dict[str, Any] | None = None) -> StepReply:
 
 
 def _actual(
-    captured: dict[str, Any] | None, definition: RecipeDefinition | None
+    captured: RecipeActual | None, definition: RecipeDefinition | None
 ) -> dict[str, Any]:
-    captured = captured or {}
-    fields = captured.get("fields", {})
+    fields = captured["fields"] if captured is not None else {}
     parameters: dict[str, ParameterReply] = {}
     modules: dict[str, ParameterReply] = {}
     for parameter in definition.summary_parameters if definition else ():
@@ -89,25 +91,25 @@ def _actual(
         else:
             parameters[parameter.name] = projected
     return {
-        "cfg_ref": captured.get("cfg_ref"),
+        "cfg_ref": captured["cfg_ref"] if captured is not None else None,
         "parameters": parameters,
         "modules": modules,
     }
 
 
 def _summary_estimates(
-    details: dict[str, Any], definition: RecipeDefinition | None
+    details: dict[str, Any],
+    definition: RecipeDefinition | None,
+    recipes: Sequence[RecipeDefinition],
 ) -> tuple[SummaryEstimate, ...]:
     if definition is not None:
         return definition.summary_estimates
     if details.get("fit_quality") is None:
         return ()
-    from recipes import RECIPES
-
     # Analysis-only carries no recipe identity. Only unambiguous declarations
     # may project present scalar keys; never infer an experiment or read the GUI.
     by_key: dict[str, SummaryEstimate] = {}
-    for recipe in RECIPES:
+    for recipe in recipes:
         for estimate in recipe.summary_estimates:
             if estimate.value_key not in details:
                 continue
@@ -134,7 +136,10 @@ def _estimate_quality(
 
 
 def _pane(
-    execution: dict[str, Any] | None, definition: RecipeDefinition | None, stage: str
+    execution: dict[str, Any] | None,
+    definition: RecipeDefinition | None,
+    stage: str,
+    recipes: Sequence[RecipeDefinition],
 ) -> tuple[dict[str, Any] | None, dict[str, list[str]]]:
     if execution is None:
         return None, {}
@@ -145,7 +150,7 @@ def _pane(
     qualities = details.get("fit_quality")
     estimates: dict[str, EstimateReply] = {}
     paths: dict[str, list[str]] = {}
-    for estimate in _summary_estimates(details, definition):
+    for estimate in _summary_estimates(details, definition, recipes):
         if estimate.value_key not in details:
             continue
         estimates[estimate.name] = {
@@ -333,6 +338,7 @@ def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
             "post": [_candidate(item, cfg_ref) for item in post.get("items", [])],
         },
         "requires": primary.get("requires", []) + post.get("requires", []),
+        "receipts": snapshot.get("written", ()),
     }
 
 
@@ -385,10 +391,18 @@ def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
 def project_execution(
     snapshot: dict[str, Any],
     *,
+    recipes: Sequence[RecipeDefinition],
     definition: RecipeDefinition | None = None,
     detail: ReplyDetail = "summary",
 ) -> dict[str, Any]:
-    """Project captured execution facts without refreshing observations."""
+    """Project local captures using injected declarations, without any GUI read.
+
+    recipes supplies the owning session declarations for analysis-only estimates.
+    definition selects one recipe's actual/estimate fields; None means standalone
+    analysis. Conflicting present estimate keys raise ValueError. detail selects
+    the operator summary or a detached full native capture. Summary interaction
+    comes from analysis_stage; full retains both stages. No identity is inferred.
+    """
     if detail == "full":
         return deepcopy(snapshot)
     if "recipe" not in snapshot:
@@ -396,11 +410,14 @@ def project_execution(
     primary_execution = snapshot.get("analysis")
     post_execution = snapshot.get("post_analysis")
     preview = snapshot.get("preview")
-    interaction = (primary_execution or {}).get("interaction") or (
-        post_execution or {}
-    ).get("interaction")
-    primary, primary_paths = _pane(primary_execution, definition, "primary")
-    post, post_paths = _pane(post_execution, definition, "post")
+    current_execution = (
+        post_execution
+        if snapshot.get("analysis_stage") == "post"
+        else primary_execution
+    )
+    interaction = (current_execution or {}).get("interaction")
+    primary, primary_paths = _pane(primary_execution, definition, "primary", recipes)
+    post, post_paths = _pane(post_execution, definition, "post", recipes)
     invalid = [
         *_pane_invalid(primary_execution, primary_paths, "primary"),
         *_pane_invalid(post_execution, post_paths, "post"),
@@ -477,6 +494,8 @@ def project_execution(
             }
             if interaction is not None
             else None,
+            "question_items": snapshot.get("question_items"),
+            "question_preview": snapshot.get("question_preview"),
             "missing": snapshot["missing"],
             "invalid": invalid,
             "error": snapshot["error"],

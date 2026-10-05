@@ -13,7 +13,6 @@ from matplotlib.figure import Figure
 from zcu_tools.device import DeviceInfo, DeviceManager
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
 from zcu_tools.device.yoko import YOKOGS200
-from zcu_tools.program.v2 import SweepCfg
 
 if TYPE_CHECKING:
     try:
@@ -29,71 +28,6 @@ def gc_collect(verbose: bool = True) -> None:
     gc_num = gc.collect()
     if verbose:
         print(f"Garbage collection done. Collected {gc_num} objects.")
-
-
-def make_sweep(
-    start: int | float,
-    stop: int | float | None = None,
-    expts: int | None = None,
-    step: int | float | None = None,
-    force_int: bool = False,
-) -> SweepCfg:
-    """
-    建立一個掃描參數的字典，包含起始值、結束值、步長與實驗次數。
-
-    Args:
-        start (Union[int, float]): 掃描的起始值。
-        stop (Optional[Union[int, float]], optional): 掃描的結束值。
-        expts (Optional[int], optional): 掃描的實驗次數。
-        step (Optional[Union[int, float]], optional): 掃描的步長。
-        force_int (bool, optional): 是否將所有值強制轉為整數。預設為 False。
-
-    Raises:
-        AssertionError: 當參數不足以定義掃描時拋出。
-        AssertionError: 當 `expts` 小於等於 0 或 `step` 為 0 時拋出。
-
-    Returns:
-        SweepCfg: 包含掃描參數的設定物件，欄位為 start、stop、expts、step。
-    """
-    err_str = "Not enough information to define a sweep."
-    if expts is None:
-        assert stop is not None, err_str
-        assert step is not None, err_str
-
-        if step == 0:
-            assert stop == start, (
-                f"stop must equal start when step is 0, got start={start}, stop={stop}"
-            )
-            expts = 1
-        else:
-            expts = int((stop - start) / step + 1)
-    elif step is None:
-        assert expts is not None, err_str
-        if expts == 1:
-            if stop is None:
-                stop = start
-            assert stop == start, (
-                f"for expts == 1, stop must equal start, got start={start}, stop={stop}"
-            )
-            step = 0
-        else:
-            assert stop is not None, err_str
-            step = (stop - start) / (expts - 1)
-
-    if force_int:
-        start = int(start)
-        step = int(step)
-        expts = int(expts)
-
-    stop = start + step * (expts - 1)
-
-    assert expts > 0, f"expts must be greater than 0, but got {expts}"
-    if expts == 1:
-        assert step == 0, f"for expts == 1, step must be 0, but got {step}"
-    else:
-        assert step != 0, f"step must not be zero when expts > 1, but got {step}"
-
-    return SweepCfg(start=start, stop=stop, expts=expts, step=step)
 
 
 def get_ip_address(iface: str) -> str:

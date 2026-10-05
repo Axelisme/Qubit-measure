@@ -11,9 +11,8 @@ from qick import QickConfig
 from scipy.integrate import quad
 from scipy.optimize import brentq
 
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import SweepCfg
-
-from .round_zcu import sweep2array
 
 _DOMAIN_ERROR = "invalid non-uniform T1 sampling domain"
 _ANALYTIC_LAMBDA_MIN = 1e-4

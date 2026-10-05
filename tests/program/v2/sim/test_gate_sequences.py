@@ -16,25 +16,26 @@ import pytest
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.twotone.allxy import (
-    AllXY_Exp,
-    AllXYAnalyzeOptions,
-    AllXYCfg,
-    AllXYModuleCfg,
-)
-from zcu_tools.experiment.v2.twotone.zigzag_sweep import (
-    ZigZagScanAnalyzeOptions,
-    ZigZagScanCfg,
-    ZigZagScanExp,
-    ZigZagScanModuleCfg,
-    ZigZagScanSweepCfg,
-)
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from zcu_lab.v2.twotone.allxy.core import (
+    AllXY_Exp,
+    AllXYAnalyzeOptions,
+    AllXYCfg,
+    AllXYModuleCfg,
+)
+from zcu_lab.v2.twotone.zigzag_sweep.core import (
+    ZigZagScanAnalyzeOptions,
+    ZigZagScanCfg,
+    ZigZagScanExp,
+    ZigZagScanModuleCfg,
+    ZigZagScanSweepCfg,
+)
 
 from ._engine_support import (
     RESET_RELAX_DELAY,

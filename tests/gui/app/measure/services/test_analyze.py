@@ -24,20 +24,6 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickState,
 )
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepResult
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Result
-from zcu_tools.experiment.v2_gui.measure.adapters._support import (
-    FluxPickParams,
-    FluxPickResult,
-)
-from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
-    OneToneFluxDepAdapter,
-)
-from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain.t1 import (
-    T1Adapter,
-    T1AnalyzeParams,
-    T1AnalyzeResult,
-)
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, ContextReadiness
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactKey,
@@ -67,6 +53,18 @@ from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
+from zcu_lab.v2._support.measure.interactive_flux_pick import (
+    FluxPickParams,
+    FluxPickResult,
+)
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepResult
+from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Result
+from zcu_lab.v2.twotone.time_domain.t1.gui import (
+    T1Adapter,
+    T1AnalyzeParams,
+    T1AnalyzeResult,
+)
 
 
 def _plots() -> Plots:
@@ -421,7 +419,7 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
         raise RuntimeError("frontend analysis failed")
 
     monkeypatch.setattr(
-        "zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin.analyze_flux_pick",
+        "zcu_lab.v2._support.measure.flux_pick_plugin.analyze_flux_pick",
         fail_kernel,
     )
     handles = OperationHandles()

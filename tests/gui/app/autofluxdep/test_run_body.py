@@ -20,8 +20,6 @@ import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2_gui.autofluxdep.t1 import T1Builder
-from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
@@ -35,6 +33,9 @@ from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.cfg import FloatSpec
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
+from zcu_lab.v2.autofluxdep.t1.autofluxdep import T1Builder
 
 from ._helpers import (
     connect_mock,

@@ -8,12 +8,17 @@ measured trend instead of hiding IDW inside the predictor.
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.autofluxdep.app import build_core
+import pytest
 from zcu_tools.gui.app.autofluxdep.feedback import IdwEstimator
 from zcu_tools.gui.app.autofluxdep.tools import (
+    FluxoniumModelSnapshot,
     FluxoniumPredictorAdapter,
     SimplePredictor,
+    Tools,
 )
+from zcu_tools.simulate.fluxonium import FluxoniumPredictor
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
 
 # --- SimplePredictor: base fallback, no hidden residual correction ---
 
@@ -79,9 +84,35 @@ def test_adapter_calibrate_runs_physical_loop():
     assert abs(adapter.predict_freq(0.5) - 5060.0) < 1e-6
 
 
-# Note: qubit_freq's real-acquire feedback trigger (a good fit feeds predictor
-# calibration and residual estimator; a poor fit skips both) is exercised
-# end-to-end against the flux-aware MockSoc in test_qubit_freq_acquire.py.
+def test_fluxonium_predictor_adapter_overlay_does_not_mutate_raw_predictor():
+    raw = FluxoniumPredictor((8.0, 1.0, 1.0), 0.0, 1.0, 0.0)
+    adapter = FluxoniumPredictorAdapter(raw)
+
+    overlay = adapter.overlay_physical(
+        FluxoniumModelSnapshot((8.2, 1.1, 0.9), 0.0, 1.0, 0.25)
+    )
+
+    assert tuple(float(value) for value in raw.params) == pytest.approx((8.0, 1.0, 1.0))
+    assert raw.flux_bias == pytest.approx(0.0)
+    assert adapter.physical_snapshot().flux_bias == pytest.approx(0.0)
+    assert overlay.physical_snapshot().params == pytest.approx((8.2, 1.1, 0.9))
+    assert overlay.physical_snapshot().flux_bias == pytest.approx(0.25)
+
+
+def test_tools_recovery_state_fast_fails_wrong_existing_type():
+    class RecoveryState:
+        """State initially stored for this placement."""
+
+    class OtherRecoveryState:
+        """Incompatible state requested for the same placement."""
+
+    tools = Tools()
+    original = tools.recovery_state("placement", RecoveryState)
+
+    with pytest.raises(TypeError, match="expected OtherRecoveryState"):
+        tools.recovery_state("placement", OtherRecoveryState)
+
+    assert tools.recovery_state("placement", RecoveryState) is original
 
 
 # --- predictor selection: no raw FluxoniumPredictor → SimplePredictor stand-in ---

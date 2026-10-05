@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-02 — explicit workflow figures
+**Last updated:** 2026-10-05，通用 executor 範例
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -144,10 +144,10 @@ presentation owner 停止 producer 後完成並釋放呈現。Concrete executor 
 典型 executor 格式：
 
 ```python
-def run_loop(root_sched: Schedule[FluxDepCfg, FluxDepEnv]) -> None:
-    for i, (flux, flux_step) in enumerate(root_sched.scan("flux", flux_values)):
-        update_flux_context(i, flux_step, flux)
-        self._run_measurement_batch(flux_step, retry_time)
+def run_loop(root_sched: Schedule[WorkflowCfg, WorkflowEnv]) -> None:
+    for i, (value, step) in enumerate(root_sched.scan("outer", outer_values)):
+        update_context(i, step, value)
+        self._run_measurement_batch(step, retry_time)
 ```
 
 leaf measurement 取得 `ScheduleStep` 後，通常用

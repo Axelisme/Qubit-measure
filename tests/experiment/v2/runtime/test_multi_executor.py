@@ -11,19 +11,17 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime import (
+from zcu_tools.experiment.v2.runtime.multi_executor import MultiMeasurementExecutor
+from zcu_tools.experiment.v2.runtime.result_tree import ResultTree, ResultUpdateEvent
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, ScheduleStep
+from zcu_tools.experiment.v2.runtime.task import (
     Acquirer,
     ComposedMeasurementBundle,
     MeasurementTask,
-    MultiMeasurementExecutor,
-    ResultTree,
-    ResultUpdateEvent,
-    Schedule,
-    ScheduleStep,
     TaskPersister,
     TaskPlotter,
 )
-from zcu_tools.experiment.v2.utils import Result
+from zcu_tools.experiment.v2.utils.helper import Result
 from zcu_tools.plotting.plots import LinePlot, NonPresentingHost, Plots
 
 FakeResult: TypeAlias = dict[str, NDArray[np.float64]]

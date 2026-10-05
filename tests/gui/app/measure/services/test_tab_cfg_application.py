@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.cfg.model import (
     CfgSchema,
@@ -32,6 +31,7 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 from tests.gui.app.measure.remote._helpers import Fixture
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
 class SchemaAdapter(FakeAdapter):

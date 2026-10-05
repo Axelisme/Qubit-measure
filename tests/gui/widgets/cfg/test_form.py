@@ -907,7 +907,7 @@ def test_literal_decoration_reveals_read_only_value(qapp, ctrl):
 
 def test_populate_full_fake_freq_schema(qapp, ctrl):
     """The adapter's bound schema survives form attachment and readback."""
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
+    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
     schema = FakeFreqAdapter().make_default_cfg(_make_ctx())
     draft = MeasureCfgBindings(ctrl).new_draft(schema)

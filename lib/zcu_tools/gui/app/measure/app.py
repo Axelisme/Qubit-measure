@@ -2,7 +2,7 @@
 
 This module depends only on ``zcu_tools.gui.app.measure``; it does not know which concrete
 experiments exist. The entry script wires a populated ``Registry`` /
-``RoleCatalog`` (built from ``experiment.v2_gui``) and passes them in — so the
+``RoleCatalog`` (built from caller-owned definitions) and passes them in — so the
 GUI framework never imports the experiment-adapter layer.
 """
 
@@ -53,7 +53,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         app_name="measure",
         app_slug="measure",
         default_control_port=8765,
-        logging_extra_namespaces=("zcu_tools.experiment.v2_gui",),
     )
 
     def __init__(

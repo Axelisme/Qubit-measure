@@ -22,7 +22,7 @@ from datetime import datetime
 import numpy as np
 
 %autoreload 2
-import zcu_tools.experiment.v2.overnight as zeo
+import zcu_lab.v2.overnight as zeo
 from pydantic import TypeAdapter
 from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg
 from zcu_tools.experiment.context import RunContext
@@ -31,7 +31,8 @@ from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.context import ContextManager
 from zcu_tools.datafile import create_datafolder
-from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
+from zcu_tools.experiment.utils import make_sweep
+from zcu_tools.notebook.utils import reconnect_devices, dump_device_info
 ```
 
 ```python
@@ -83,9 +84,9 @@ filename = f"{qub_name}_overnight"
 # snapshot of execution code
 measure_code: str = In[-1]  # noqa: F821 # type: ignore
 
-executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
+executor = zeo.core.OvernightExecutor(num_times=300, interval=120).add_measurements(
     dict(
-        mist_g=zeo.singleshot.MistTask(
+        mist_g=zeo.singleshot.mist.core.MistTask(
             make_cfg(
                 {
                     "modules": {
@@ -105,7 +106,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     "sweep": {"gain": make_sweep(0.0, 0.22, 101)},
                     "relax_delay": 50.5,  # us
                 },
-                zeo.singleshot.MistCfg,
+                zeo.singleshot.mist.core.MistCfg,
                 env,
                 overrides={"reps": 3000, "rounds": 1},
             ),
@@ -113,7 +114,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
             md.e_center,
             md.ge_radius,
         ),
-        mist_e=zeo.singleshot.MistTask(
+        mist_e=zeo.singleshot.mist.core.MistTask(
             make_cfg(
                 {
                     "modules": {
@@ -136,7 +137,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     },
                     "relax_delay": 50.5,  # us
                 },
-                zeo.singleshot.MistCfg,
+                zeo.singleshot.mist.core.MistCfg,
                 env,
                 overrides={"reps": 3000, "rounds": 1},
             ),
@@ -144,7 +145,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
             md.e_center,
             md.ge_radius,
         ),
-        mist_steady=zeo.singleshot.MistTask(
+        mist_steady=zeo.singleshot.mist.core.MistTask(
             make_cfg(
                 {
                     "modules": {
@@ -165,7 +166,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     },
                     "relax_delay": 50.5,  # us
                 },
-                zeo.singleshot.MistCfg,
+                zeo.singleshot.mist.core.MistCfg,
                 env,
                 overrides={"reps": 3000, "rounds": 1},
             ),

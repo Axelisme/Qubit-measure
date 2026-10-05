@@ -16,10 +16,6 @@ import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxResult
-from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.registry import register_all
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,
@@ -63,6 +59,10 @@ from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )
+from zcu_lab.definitions import register_all
+from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

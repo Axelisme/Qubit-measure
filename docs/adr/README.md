@@ -34,7 +34,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：四個 app 的共用傳輸和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog，以及 analysis-only JSON 投影。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：四個 app 的共用傳輸和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回，以及 analysis-only JSON 投影。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
@@ -61,7 +61,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模組定位與依賴邊界](draft/module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、`cfg_model` 共享核心與債務清單。分層與無循環規則已由 `.importlinter` C8–C13 生效；債務尚未清除。
+- [模組定位與依賴邊界](draft/module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、`cfg_model` 共享核心與債務清單。分層與無循環規則由 `.importlinter` C8–C13 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；其餘債務尚未清除。
 - [實驗核心、前端包裝與具名圖形產物](draft/experiment-interface-redesign.md)：全實驗與 caller 已在 task 分支遷移，舊自訂 pyplot routing backend 已退場。修正候選已完成軟體驗證及雙軸審查；正式接受以 task 的逐列證據與裁決紀錄為準，landing 另需使用者授權。草案不代表持久分支已採用。包含 records、具名原生圖、RunContext／CfgEnv、instance DeviceManager 與模擬環境 coordinator 的分工。
 
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
@@ -98,7 +98,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [0027 — Experiment data persistence](retired/0027-experiment-data-persistence-native-labber-axes-list.md)：資料責任由 0063 接替，細節在 datafile 與 experiment owner 文件。
 - [0032 — Waveform reference time axis](retired/0032-arbitrary-waveform-reference-time-axis.md)：時間權威由 0063 接替。
 - [0033 — Waveform reference lifecycle](retired/0033-arbitrary-waveform-delete-no-reference-scan.md)：不級聯更新由 0063 接替。
-- [0038 — Executor ResultTree](retired/0038-executor-result-tree.md)：共用 ResultTree 與執行骨架見 `lib/zcu_tools/experiment/v2/runtime/README.md`；autofluxdep executor 與 flux tracker 契約見 `lib/zcu_tools/experiment/v2/README.md`，workflow collection 邊界見 0062。
+- [0038 — Executor ResultTree](retired/0038-executor-result-tree.md)：共用 ResultTree 與執行骨架見 `lib/zcu_tools/experiment/v2/runtime/README.md`；autofluxdep executor 與 flux tracker 契約見 `zcu_lab/v2/experiment-authoring.md`，workflow collection 邊界見 0062。
 - [0039 — QubitParams JSON owner](retired/0039-qubit-params-json-owner.md)：typed handoff 由 0063 接替。
 - [0040 — Autofluxdep run artifact](retired/0040-autofluxdep-run-result-artifact.md)：保存邊界由 0063 接替，workflow lifecycle 見 0062。
 - [0057 — SampleTable v2](retired/0057-flat-sampletable-v2-coordinate-contract.md)：座標保存契約由 0063 接替，schema 細節由 sample_table owner 維護。

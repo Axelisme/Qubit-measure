@@ -14,7 +14,7 @@ Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。
 
 ## Method 與一致性
 
-Measure GUI 的 `RemoteMethodEntry` 同時宣告 method schema、agent exposure、guard dependencies、成功讀取所揭露的資源及 operation key。GUI 的 `rpc.catalog` 只投影非 internal method 呼叫所需的名稱、描述、參數 schema、timeout、exposure、tool 路由與 operation key，不把 guard／reveal policy 複製到 MCP。MCP 每次連線重新讀 catalog。MCP 固定提供 26 個 tools，由 11 個 recipes、共用分析／控制／關閉／接受工具、`rpc_list`、`rpc_describe`、`rpc_call`，以及 `simulation_initialize`、`device_set_value`、`recipe_guide` 組成。日常量測優先 recipe，既有資料分析使用 `tab_analyze` 與 `tab_interact`，細部操作及排查使用 RPC。這是指引，不是權限模式。固定工具不從 catalog 動態生成。`rpc_call` 接受 catalog 中的 `rpc` 與 `tool` method，tool 路由只提示可用的高層工具。`internal` 不列入 catalog。`project.info` 與 `context.labels` 是公開查詢，分別提供已套用 project 的身份及目錄、全部 context labels。每個入口最終仍經 GUI 驗證，不提供任意程式碼執行。載入、cfg、保存及個別 writeback 由公開 RPC 承接。`tab.save_artifacts` 回傳的 MCP handle 由 `wait(op)` 觀察，但 raw RPC 不接管 recipe 或共用分析的後續保存。Recipe 與共用分析的 execution 由 MCP session 持有，`wait(execution)` 觀察完整接續；`cancel` 記錄停止接續的意圖，GUI cancellation 的結果另外回報。Recipe 的 `finish_early` 停止採集後繼續處理可用結果，`cancel` 則不啟動新的分析或保存。固定的 `tab_interact` 對應 GUI `tab.interact`，讀取不切焦點、command 跟隨 Analysis pane；此 method 不用 seen guard。工具的個別輸入、畫面跟隨與 operation 結果見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md)。
+Measure GUI 的 `RemoteMethodEntry` 同時宣告 method schema、agent exposure、guard dependencies、成功讀取所揭露的資源及 operation key。GUI 的 `rpc.catalog` 只投影非 internal method 呼叫所需的名稱、描述、參數 schema、timeout、exposure、tool 路由與 operation key，不把 guard／reveal policy 複製到 MCP。MCP 每次連線重新讀 catalog。MCP 組合根 `scripts/run_measure_mcp.py` 將 `zcu_lab` 的 generator recipe definitions 注入 framework。共用工具固定包含分析／控制／關閉、`answer`、`apply_writeback`、`rpc_list`、`rpc_describe`、`rpc_call`，以及 `simulation_initialize`、`device_set_value`、`recipe_guide`。日常量測優先 recipe，既有資料分析使用 `tab_analyze` 與 `tab_interact`，細部操作及排查使用 RPC。這是指引，不是權限模式。固定工具不從 catalog 動態生成。`rpc_call` 接受 catalog 中的 `rpc` 與 `tool` method，tool 路由只提示可用的高層工具。`internal` 不列入 catalog。`project.info` 與 `context.labels` 是公開查詢，分別提供已套用 project 的身份及目錄、全部 context labels。每個入口最終仍經 GUI 驗證，不提供任意程式碼執行。載入、cfg、保存及個別 writeback 由公開 RPC 承接。`tab.save_artifacts` 回傳的 MCP handle 由 `wait(op)` 觀察，但 raw RPC 不接管 recipe 或共用分析的後續保存。Recipe 與共用分析的 execution 由 MCP session 持有，`wait(execution)` 觀察完整接續；`cancel` 記錄停止接續的意圖，GUI cancellation 的結果另外回報。Recipe 的 `finish_early` 停止採集後繼續處理可用結果，`cancel` 則不啟動新的分析或保存。固定的 `tab_interact` 對應 GUI `tab.interact`，讀取不切焦點、command 跟隨 Analysis pane；此 method 不用 seen guard。工具的個別輸入、畫面跟隨與 operation 結果見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md)。
 
 Setup 工具只編排既有 GUI owners。`simulation_initialize` 走現行 coordinator，切換時可能斷開真實裝置。`device_set_value` 宣告完整 pre-read，只送 value，不改 output 或 rampstep。Unit 不換算。兩者保留 native operation、階段與前後 snapshot。等待逾時不取消，工具不自動重連、retry 或 rollback。`recipe_guide` 從 authoritative recipe registry 的 adapter mapping 讀 native guide。這些流程不改 GUI method policy，也不授權 raw RPC 隱藏讀取。
 
@@ -22,13 +22,17 @@ Recipe、`tab_analyze`、`wait(execution)` 與互動完成回覆使用同一 exe
 
 Artifact 依 section、名稱與 members 分層，每個 member 保留完整路徑及保存狀態。預留目的地不代表保存成功，後續失敗也不清掉已保存的前綴。Session preview 路徑獨立放在 `previews.run/primary/post`，不列為持久 artifact。
 
-Execution ID 只屬於 MCP session，`run_id` 目前為 null。全域 status 列非終態 executions 與終態數量，完整歷史按已知 ID 查詢。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。這個表示層不改 GUI facts、保存、guard 或 accept owner。
+Execution ID 只屬於 MCP session，`run_id` 目前為 null。全域 status 列非終態 executions 與終態數量，完整歷史按已知 ID 查詢。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。這個表示層不改 GUI facts、保存、guard 或 writeback owner。
+
+Recipe-owned done 回該 recipe 的後續 handoff，standalone analysis 保留原 execution。`answer(recipe, decision)` 只回答已 capture 的寫回提問，普通 `tab.accept(items)` 才寫當前 draft。Recipe 摘要的 writeback.receipts 保留實際寫入與失敗前綴，不從回答 accepted 推斷成功。
+
+Standalone `apply_writeback(tab, items=None)` 按穩定 `target_name` 選擇當前 Primary／Post draft，不看 GUI 勾選，也不回答 recipe。省略 items 寫全部，空序列寫零項。MCP 在任何寫入前讀完兩個 pane 的當前 preview，拒絕未知、重複及跨 stage 同名，再解析當前 session ID。這些讀取不刷新 guard。寫入維持 Primary 先、Post 後，首錯停止。收據只列 GUI-confirmed writes，保留失敗 stage 的不確定性，不 retry 或 rollback。
 
 Measure tab cfg 使用明示的 `CfgRef`，不另加 per-connection cfg seen。`tab.get_cfg` 回完整 publication，`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 必須帶 caller 觀察到的 identity／revision。Reset 由既有 cfg resource 取得目前 adapter defaults，不複製預設值或新增 unsaved guard。另一條連線讀到的 ref 也可用，但不能代替 authentication 或請求連線的 tab、SoC、device guards。Stale 回 expected／actual，不換成最新版本。直接 RPC 保留完整 publication，edit／reset／Run 只轉送 supplied ref 一次，不隱藏重讀、refresh 或 retry。Recipe 在其已宣告流程內觀察 cfg，重用 tab 時 reset，再套本次參數與 Run；這不授權 RPC 自動修補 stale。Cfg source publication 與固定 Run acceptance 見 [[0065]]。
 
 共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。MCP flux recipe 的 native 座標只允許已確認的 FakeDevice、unit=none 與 caller 明確 opt-in，不延伸到共用 device 或 cfg 安全規則。
 
-Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數字換成 null，以 `invalid` 記錄原 summary 路徑與 `non_finite` 原因。MCP execution 保存這份已讀投影，不猜測物理原因，不改 operation outcome、保存事實或 accept policy。這項轉換不延伸到 generic context 或 framing。
+Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數字換成 null，以 `invalid` 記錄原 summary 路徑與 `non_finite` 原因。MCP execution 保存這份已讀投影，不猜測物理原因，不改 operation outcome、保存事實或 writeback policy。這項轉換不延伸到 generic context 或 framing。
 
 其他 guarded resources 仍由 GUI owner 在自己的序列中比較每條連線的 seen map。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能代替未曾觀察。成功寫入只推進先前看過且版本相符的資源。建立新 tab 的例外只認證存在性，`tab.new` 與 `tab.open_file` 成功回傳 tab ID，且存在版本由 0 變 1 時，GUI 將該資源記入該連線的 seen。Result 等其他 guarded resources 仍須明確完整讀取。Load、library commit 與 writeback 仍保留各自的 context guard。
 

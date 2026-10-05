@@ -1,11 +1,11 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-03, operation-bound Run and Post consumption
+**Last updated:** 2026-10-05，framework BaseAdapter 與 multi-source catalog loader
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
-view 與 GUI-side remote handler。實驗領域知識住在 `experiment/v2_gui/measure/` adapter；
-framework 只看 `ExpAdapterProtocol`。
+view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
+framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/base.py`。它透過 `AdapterCfgDefinition.instantiate(ctx)` 產生 fresh cfg，不依賴具體 builder 或 Seed。
 
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
@@ -204,8 +204,8 @@ Setup dialog through `MainWindow.open_dialog`, so a toolbar click focuses that
 instance instead of building another.
 
 The launcher still owns the experiment-adapter composition boundary by passing a
-registry factory into `MeasureGuiBehavior`; the factory imports
-`experiment.v2_gui` only after `gui.runtime` has configured logging and the
+registry factory into `MeasureGuiBehavior`. The factory imports the injected
+user catalog only after `gui.runtime` has configured logging and the
 pre-Qt plotting policy.
 
 `build_app_services()` constructs the app-local services and injects their driven
@@ -291,8 +291,16 @@ Key ownership rules:
 `ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
 重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
 和 failure/recovery presentation。Role catalog、hardware context 與 framework 不重建。
+
+`catalog_loader.py` 提供通用 `SourceExperimentCatalogLoader`。組合根用 `SourcePackage`
+宣告 framework 與使用者 source 目錄，並指定 reload、preserved 與 catalog module。
+Loader 不猜 namespace 或套件位置。Preserved prefix 優先於 reload prefix，其餘 source 也固定。
+固定 source 的內容變更或刪除要求重啟。新增尚未 import 的固定檔案不阻擋重載，但重載中
+import 新的固定 dependency 要求重啟。Loader 在所有來源保留固定 module identity，且每個
+prepare plan 只能使用一次。它在重載失敗時清除部分 owned modules，不回滾任意 import side effect。
+
 依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
-確切限制見 `experiment/v2_gui/measure/README.md`。此取捨不放寬資料丟棄確認或 lifecycle 保護。
+可重載 code 的 import 不得操作硬體或啟動背景工作。此取捨不放寬資料丟棄確認或 lifecycle 保護。
 
 Retry 的 prepare/load 皆保留 typed error disposition；要求 restart 後不再提供可 retry 狀態。
 Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消，MainWindow 呼叫
@@ -523,7 +531,7 @@ re-adding the same key relinks it, while persistence can still serialize the sna
 retain their overridden inline input without depending on the old key. Nested linked
 references keep their own dependencies; explicit relink restores this layer's dependency.
 
-Adapter cfg authoring lives in `experiment/v2_gui` as a context-free
+Adapter cfg authoring lives in the user experiment package as a context-free
 `MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
 field order, role, lock and deferred typed Seed; fresh `instantiate(ctx)` only resolves
 value defaults, then `BaseAdapter.make_default_cfg` validates the finished schema.
@@ -764,7 +772,7 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   所有 application 入口的保證；補齊目標見
   [GUI capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
   `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
-  [experiment adapter README](../../../experiment/v2_gui/measure/adapters/README.md)；
+  [framework BaseAdapter](adapter/base.py)；
   capability 判斷不用 method presence 推測。
 - Adapter `cfg_definition()` is context-free authoring; only fresh
   `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.
@@ -787,8 +795,8 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   calling the stage-agnostic service. Remote/MCP writeback operations use the same
   required pane locator; no tab-level draft adapter or wire editor identity exists.
 
-Import direction stays one-way: `experiment/v2_gui -> gui.app.measure`, never the
-reverse.
+User experiment adapters import `gui.app.measure` contracts. The framework
+receives their catalogs by injection and never imports the user package.
 
 ## Maintenance Checks
 

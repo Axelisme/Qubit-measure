@@ -8,13 +8,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Result
-from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
-    GEAdapter,
-    GEAnalyzeParams,
-    GEAnalyzeResult,
-    GEPostAnalyzeResult,
-)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -47,6 +40,13 @@ from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import cfg_resources, make_cfg
+from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Result
+from zcu_lab.v2.singleshot.ge.gui import (
+    GEAdapter,
+    GEAnalyzeParams,
+    GEAnalyzeResult,
+    GEPostAnalyzeResult,
+)
 
 
 @dataclass

@@ -5,13 +5,13 @@ from __future__ import annotations
 import math
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock, RLock
 from types import MappingProxyType
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.bridge import (
     GuiAuthenticationError,
@@ -20,6 +20,9 @@ from zcu_tools.mcp.core.bridge import (
     MCPBridgeConfig,
 )
 from zcu_tools.mcp.measure.session_policy import describe_stale_keys
+
+if TYPE_CHECKING:
+    from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 
 class GuiRpcError(RuntimeError):
@@ -193,12 +196,20 @@ class MeasureMcpSession:
         self,
         config: MCPBridgeConfig,
         *,
+        recipes: Sequence[RecipeDefinition],
         bridge: McpBridge | None = None,
         resolve_connect_port: ResolveConnectPortFn,
         port_is_open: PortIsOpenFn,
     ) -> None:
+        """Own injected recipes, analysis workers and one GUI connection lifetime.
+
+        recipes is an explicit sequence, possibly empty, validated before GUI
+        operations. Invalid/duplicate definitions raise ValueError. bridge may be
+        attached now or later; resolver/probe supply the existing connection policy.
+        close drains workers and PNGs, never closes the GUI or stops hardware.
+        """
         from zcu_tools.mcp.measure.analysis_execution import AnalysisExecutions
-        from zcu_tools.mcp.measure.recipe_context import RecipeExecutions
+        from zcu_tools.mcp.measure.recipe_execution import RecipeExecutions
 
         self._config = config
         self._rpc_lock = RLock()
@@ -206,7 +217,7 @@ class MeasureMcpSession:
         self._close_lock = Lock()
         self._closed = Event()
         self.executions = AnalysisExecutions(self, self._closed)
-        self.recipes = RecipeExecutions(self._closed)
+        self.recipes = RecipeExecutions(self._closed, recipes=recipes)
         self._generation = 0
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port

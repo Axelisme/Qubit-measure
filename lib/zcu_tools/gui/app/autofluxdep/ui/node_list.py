@@ -26,9 +26,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.experiment.v2_gui.autofluxdep.catalog import (
-    names as experiment_names,
-)
 from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.cfg import DirectValue, EvalValue, ScalarSpec
@@ -322,7 +319,7 @@ class NodeListPane(QWidget):
     # --- workflow editing ---
 
     def _on_add(self) -> None:
-        types = experiment_names()
+        types = self._ctrl.experiment_catalog.names()
         name, ok = QInputDialog.getItem(self, "Add Node", "Node type:", types, 0, False)
         if ok and name:
             self._ctrl.add_node_by_type(name)

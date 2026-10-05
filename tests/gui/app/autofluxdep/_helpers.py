@@ -56,6 +56,18 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, Notify
 
 
+def build_test_core(
+    project: ProjectInfo | None = None,
+    project_root: str | None = None,
+) -> Controller:
+    """Build a test controller with an explicitly injected production catalog."""
+    from zcu_tools.gui.app.autofluxdep.app import build_core
+
+    from zcu_lab.autofluxdep_catalog import build_catalog
+
+    return build_core(build_catalog(), project, project_root=project_root)
+
+
 def make_run_context(
     *,
     soc: Any = None,
@@ -616,10 +628,8 @@ def make_measurement_builder(name: str) -> Builder:
     auto-follow) without a real experiment's acquire — the run path under test is
     the UI's, not the physics. Provides nothing (UI tests don't assert deps)."""
     import numpy as np
-    from zcu_tools.experiment.v2_gui.autofluxdep._support.result import (
-        QubitFreqResult,
-        Sweep1DResult,
-    )
+
+    from zcu_lab.v2._support.autofluxdep.result import QubitFreqResult, Sweep1DResult
 
     def _result_factory(schema: Any, flux: Any) -> Any:
         del schema

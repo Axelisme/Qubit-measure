@@ -7,8 +7,7 @@ namespace is never silently left out of the log again.
 Design decisions baked in here:
 
 - The file handler is attached at the whole ``zcu_tools.gui`` namespace (plus any
-  ``extra_namespaces`` an entry point needs, e.g. measure adds
-  ``zcu_tools.experiment.v2_gui``). Attaching at the package root — not each app
+  caller-provided ``extra_namespaces`` an entry point needs). Attaching at the package root — not each app
   sub-namespace — means cross-cutting subpackages (``event_bus``, ``plotting``,
   ``remote``, ``session``) always reach the file. The root cause of the event
   this phase addresses was an app sub-namespace handler that missed a sibling.

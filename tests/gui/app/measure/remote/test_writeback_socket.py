@@ -4,8 +4,6 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeAnalyzeParams
 from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
@@ -18,6 +16,8 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
 
 from ._helpers import Fixture, call, open_client
 

@@ -28,7 +28,7 @@ status: draft
 | `cfg_model` | 共享核心，見下節 | 執行行為與 I/O |
 | `utils` | 無法歸入任何其他類別的雜項 | 任何能歸入其他類別的東西 |
 | `progress_bar`、`qick_remote` | 照字面 | — |
-| `experiment` | 實驗框架：實驗介面、AxesSpec、RunRecord、RunContext、runtime 與註冊機制。舊格式的具體實驗暫留於此 | 檔案格式；具體實驗的新格式（在 `zcu_lab`） |
+| `experiment` | 實驗框架：實驗介面、AxesSpec、RunRecord、RunContext、runtime 與註冊機制 | 檔案格式；具體實驗 |
 | `gui` | 各 GUI app 的框架 | 具體實驗的 adapter（D75） |
 | `notebook` | Notebook 特化的工具集合 | 通用分析；具體實驗 |
 | `mcp` | 各 MCP 的框架 | 具體 recipe（D72、D80） |
@@ -76,7 +76,7 @@ status: draft
 
 ### 可執行投影
 
-`.importlinter` 的 C8–C13 投影本篇規則：
+`.importlinter` 的 C8–C13、C15 與 C16 投影本篇規則：
 
 | contract | 類型 | 內容 |
 |---|---|---|
@@ -86,10 +86,12 @@ status: draft
 | C11 | `forbidden` | `cfg_model` 只依賴 `utils` |
 | C12 | `forbidden` | 穩定工具不依賴有狀態模組 |
 | C13 | `forbidden` | `mcp` 只使用 `gui.remote` 與各 app 的 wire spec |
+| C15 | `forbidden` | 使用者實驗的 core 不依賴 GUI framework |
+| C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
 
-尚未建立的投影：`zcu_tools` 不 import `zcu_lab`，等 `zcu_lab` 存在後加入 root packages 再建立。
+兩個套件都是 import-linter 的 root packages。組合根顯式注入 measure registry、Autofluxdep catalog 與 MCP recipes，framework 不反向載入使用者定義。
 
-債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。萬用字元只用於合法例外，例如 C1 的 `v2_gui`，註解寫明「不是債務」。`ignore_imports` 只減不增。
+債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。萬用字元只用於合法例外，例如 C1 的 `cfg_editing → gui.cfg`，註解寫明「不是債務」。`ignore_imports` 只減不增。
 
 ## 債務
 
@@ -99,12 +101,10 @@ status: draft
 | `resources → program` | cfg schema 抽到核心，`build()` 改為 program 端 builder（第 2 階段） | storage-redesign 的 module library；`zcu_lab` 搬家 |
 | `simulate → resources` | `predict` 改由呼叫端傳入數值 | backlog |
 | `experiment/base.py` 的格式處理 | 移入 `datafile` 的 reader／writer | storage-redesign（D53、#15） |
-| `experiment → notebook`（`make_sweep`） | `make_sweep` 移到 `experiment` 框架 | backlog |
-| `notebook/analysis`、`notebook/experiments` | 通用分析移到 `analysis`；具體實驗移到 `zcu_lab` 附件 | `zcu_lab` 搬家 |
+| `notebook/analysis` | 通用分析移到 `analysis`；實驗專屬 helpers 已由 `zcu_lab` 附件擁有 | backlog |
 | `utils` 的 `shot_classification`、`tomography` | 移到 `analysis` | backlog |
 | `utils/datasaver/` | 空目錄，刪除 | backlog |
 | `analysis/fluxdep/io.py`、`search.py` 直接用 h5py | 檔案讀寫移到 `datafile` | backlog |
-| `experiment/v2`、`v2_gui` | 移到 `zcu_lab`（D80） | `zcu_lab` 搬家 |
 | `mcp → gui.logging_setup` | logging 設定改由 `mcp` 自己或共用的非 GUI 模組提供 | backlog |
 
 ## 後果

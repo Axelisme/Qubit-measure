@@ -13,7 +13,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 
 from ._recipe_support import PNG, LookbackGui, scalar, section
-from ._support import full_execution_reply, make_client
+from ._support import MeasureClient, full_execution_reply, make_client
 
 
 @contextmanager
@@ -23,6 +23,19 @@ def recipe_client(tmp_path, respond):
         yield client
     finally:
         client.context.session.close()
+
+
+def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
+    """Answer an observed production question without any draft writes."""
+    assert question.data["status"] == "awaiting_answer", question.data
+    assert tuple(question.data["question_items"]) == ("predict_offset",)
+    before = list(client.transport.sent)
+    reply = client.call(
+        "answer", {"recipe": question.data["execution"], "decision": "skipped"}
+    )
+    assert isinstance(reply, ToolReply) and reply.data["status"] == "finished"
+    assert client.transport.sent == before
+    return reply
 
 
 @pytest.mark.parametrize(
@@ -62,7 +75,8 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
 
 
 def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
-    gui = OnetoneGui(experiment="onetone/flux_dep")
+    gui = FluxGui()
+    gui.md.clear()
 
     def respond(method, params):
         if method == "value.list":
@@ -158,7 +172,10 @@ def test_spectrum_only_delivers_finite_actual_frequency(
 ):
     gui = OnetoneGui(md)
     with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(client, client.call("onetone_spectrum", arguments))
+        initial = client.call("onetone_spectrum", arguments)
+        if expected_status == "finished":
+            initial = skip_writeback(client, initial)
+        reply = full_execution_reply(client, initial)
         assert reply.data["status"] == expected_status, reply.data
         if expected_status == "finished":
             fields = reply.data["actual"]["fields"]
@@ -277,6 +294,8 @@ class OnetoneGui(LookbackGui):
         reply = super().__call__(method, params)
         if method == "tab.snapshot":
             reply["tabs"][0]["adapter_name"] = self.experiment
+        if method == "tab.writeback_preview":
+            reply["items"][0].update(kind="metadict", target_name="predict_offset")
         return reply
 
 
@@ -355,7 +374,7 @@ def test_power_preview_failure_retains_the_saved_raw_and_true_run(
 @pytest.mark.parametrize(
     "phase, fail", [("raw_save", False), ("preview", False), ("preview", True)]
 )
-def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_work(
+def test_power_cancel_does_not_suppress_fast_save_or_preview_after_completed_run(
     tmp_path, monkeypatch, phase, fail
 ):
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
@@ -388,14 +407,14 @@ def test_power_cancel_preserves_admitted_preview_outcome_and_blocks_unadmitted_w
                 client, client.call("wait", {"execution": execution, "timeout": 2})
             )
             data = terminal.data
-            assert data["status"] == ("failed" if fail else "cancelled")
+            assert data["status"] == ("failed" if fail else "finished")
             assert data["cancel_requested"]
             assert data["raw_save"]["path"] == "/actual/raw.h5"
-            assert (data["preview"] is not None) is (phase == "preview" and not fail)
+            assert (data["preview"] is not None) is (not fail)
             if fail:
                 assert data["error"]["phase"] == "preview"
             methods = [method for method, _ in client.transport.sent]
-            assert ("tab.get_figure" in methods) is (phase == "preview")
+            assert "tab.get_figure" in methods
             assert "tab.analyze" not in methods
         finally:
             release.set()
@@ -527,6 +546,9 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         assert data["analysis"] is None
         assert data["writeback"] is None
         assert data["actual"]["fields"]["sweep.gain"]["value"] == expected_gain
+        scalar_gain = data["actual"]["fields"]["modules.readout.pulse_cfg.gain"]
+        assert scalar_gain["value"] == 0.21
+        assert scalar_gain["source"] == "gui_default"
         assert data["raw_save"]["path"] == "/actual/raw.h5"
         assert data["preview"]["kind"] == "run_preview"
         assert Path(data["preview"]["path"]).read_bytes() == PNG
@@ -541,6 +563,14 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         }
         assert (
             initial.data["previews"] == waited.data["previews"] == summary["previews"]
+        )
+        assert summary["actual"]["parameters"]["gain"] == {
+            "value": 0.21,
+            "source": "gui_default",
+        }
+        assert (
+            waited.data["actual"]["parameters"]["gain"]
+            == summary["actual"]["parameters"]["gain"]
         )
         assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
             {"path": "/actual/raw.h5", "status": "saved"}
@@ -624,9 +654,8 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             flux_points=11,
         )
     with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(
-            client, client.call("onetone_spectrum_over_flux", arguments)
-        )
+        question = client.call("onetone_spectrum_over_flux", arguments)
+        reply = full_execution_reply(client, skip_writeback(client, question))
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data
@@ -695,6 +724,7 @@ def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path
                 },
             ),
         )
+        reply = full_execution_reply(client, skip_writeback(client, reply))
         assert reply.data["status"] == "finished", reply.data
         assert reply.data["actual"]["fields"]["dev.flux_dev"] == {
             "value": "coil",
@@ -734,6 +764,8 @@ def test_physical_flux_unit_assertion_is_checked_before_run(
                 {"flux_device": device, "flux_unit": requested_unit},
             ),
         )
+        if expected == "finished":
+            reply = full_execution_reply(client, skip_writeback(client, reply))
         assert reply.data["status"] == expected, reply.data
         assert gui.ran is (expected == "finished")
         if expected == "finished":
@@ -854,7 +886,8 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
     gui = OnetoneGui(md)
     before = deepcopy(gui.publication)
     with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(client, client.call("onetone_spectrum", arguments))
+        question = client.call("onetone_spectrum", arguments)
+        reply = full_execution_reply(client, skip_writeback(client, question))
         assert isinstance(reply, ToolReply)
         data = reply.data
         assert data["status"] == "finished", data

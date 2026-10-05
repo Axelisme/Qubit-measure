@@ -5,9 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.adapters.onetone.freq import (
-    OneToneFreqAnalyzeParams,
-)
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     h_tab_analyze,
@@ -15,6 +12,8 @@ from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     h_tab_post_analyze,
 )
 from zcu_tools.gui.remote.errors import RemoteError
+
+from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
 
 
 def _adapter_with_params(params: OneToneFreqAnalyzeParams) -> MagicMock:

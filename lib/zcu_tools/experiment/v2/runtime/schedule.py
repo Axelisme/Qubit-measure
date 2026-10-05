@@ -21,6 +21,7 @@ from numpy.typing import DTypeLike, NDArray
 from typing_extensions import TypeVar
 
 from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
 from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -36,8 +37,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
-
-from ._path import get_path, set_target, writable_view
 
 T_Cfg = TypeVar("T_Cfg")
 T_ChildCfg = TypeVar("T_ChildCfg")

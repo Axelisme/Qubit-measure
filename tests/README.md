@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-03，test trust cleanup
+**Last updated:** 2026-10-05，registry-wide 契約與使用者測試處置
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -9,8 +9,8 @@
 1. 先找同一個可觀察行為或契約的既有測試檔。新增 regression 優先放在該檔；同一 owner
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
    `T1` 等名稱也可能是真實物理量，依情境判讀，不靠字面判為 ticket 名。
-2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/` 和
-   `tests/tools/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
+2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/`、
+   `tests/tools/` 和 `tests/zcu_lab/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
    Notebook 專用且已抽離的 helper 仍在其模組路徑驗證介面，不必提升為通用工具。
@@ -86,8 +86,8 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 ## 現有 owner 導覽
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
-`tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/measure/adapters/`
-擁有 adapter 對設定與寫回的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
+`tests/experiment/v2/` 擁有通用 runtime 與工具；`tests/zcu_lab/` 擁有 registry-wide adapter 契約，
+`tests/zcu_lab/v2/` 保留共用 helpers、role defaults 與使用者要求的 D142 特例。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
@@ -147,12 +147,13 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 `tests/experiment/v2/runtime/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
-`tests/experiment/v2/onetone/` 放 onetone domain-level pure behavior tests；例如 `freq`
-的 homophasal helper 測端點保留與 resonator-circle phase 等距，不碰 GUI 或硬體。
+`tests/zcu_lab/test_adapter_definition.py` 逐一走過 registry，驗證 adapter conformance、
+empty／rich context 的成品 cfg validation、context-free spec 與 fresh schema。
+`test_definitions.py` 驗證 startup／reload 註冊結果非空且符合框架契約。
 
 ### Autofluxdep typed context tests
 
-`tests/experiment/v2/autofluxdep/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
+`tests/zcu_lab/v2/autofluxdep/_support/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
 
 ### Device manager tests
 
@@ -203,30 +204,21 @@ Import 規則由直接 review 相關檔案確認，對外行為由接縫測試�
 path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
 caller alias隔離與one-shot build。domain role、Seed與app section policy不得進入這組shared tests。
 
-### Experiment v2 GUI adapter tests
+### User adapter 與共用 helper tests
 
-`tests/experiment/v2_gui/measure/adapters/_support/test_schema_builder.py`鎖定context-free
-`MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
-resolution/path errors、module override/lock transactionality與definition isolation。
-`tests/gui/app/measure/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
-adapter definition 可重複 instantiate；registry 數量與 static spec 宣告直接審閱。
+`tests/zcu_lab/v2/_support/measure/test_schema_builder.py` 驗證 context-free
+`MeasureCfgBuilder`／`MeasureCfgDefinition`、ModuleInit、Seed、override 與 definition isolation。
+Role defaults 與 startup policy 有各自的接縫測試。Singleshot joint-fit、classification、
+Notebook flux picker 與 Autofluxdep plotters 也由共用 helper owner 驗證。
 
-Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷史 Phase 切檔。
-例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep 描述的是領域責任，
-不是 ticket 命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，
-但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
+個別實驗不另寫 cfg、fit 或 writeback 行為測試，除非使用者要求特殊邏輯。
+目前保留 AllXY、ZigZag 與 ZigZagScan 的四檔 D142 案例。新增或刪除其他 registry entry
+會自動改變通用契約的選集，不需要修改測試。
 
-onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering 與 writeback contract。
-`tests/gui/app/measure/adapter/test_lowering_adapter.py` 擁有 homophasal 正式 optional cfg
-到 domain assembly 的接縫，校正不從 live md 注入；runtime 取樣公式由 domain-level tests
-擁有。Guard tests 驗證 cached-only cfg 與 device snapshot 凍結；RunService tests 驗證
-worker delivery 與既有 operation cleanup。`onetone/freq` writeback tests 覆蓋 MetaDict
-`r_f` / `rf_w` / `theta0` 與 `readout_rf` ModuleLibrary writeback 的 no-snapshot gate、
-pulse-readout schema、non-pulse skip，以及 default 仍不 adopt library readout。
-
-twotone `ro_optimize` adapter tests 覆蓋 pulse-readout-only spec、GUI analyze-param
-命名、MetaDict scalar writeback 與 `readout_dpm` ModuleLibrary writeback gate /
-schema fields：no-snapshot md-only、current result 與 MetaDict 合併、缺值 skip。
+`tests/gui/app/measure/adapter/` 保留 BaseAdapter 的 capability、canonical load、
+post defaults、lowering 與 writeback framework 契約。
+`tests/notebook/test_adapter.py` 與 `test_plotting.py` 使用共用 recording core，驗證
+source retention、nullable options、失敗隔離與 widget lifecycle，不使用具體實驗數值。
 
 ### GUI remote/control tests
 
@@ -412,7 +404,7 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 ### measure-gui canonical result load 測試
 
 load-result feature 的 targeted tests 分散在對應 ownership：
-`tests/experiment/v2_gui/measure/adapters/test_base_load.py` 鎖 adapter default load contract；
+`tests/gui/app/measure/adapter/test_base_load.py` 鎖 adapter default load contract；
 `tests/gui/app/measure/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/app/measure/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
 `tests/gui/app/measure/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。

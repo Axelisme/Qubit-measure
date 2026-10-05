@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
-from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.context import RunContext
@@ -28,10 +28,34 @@ from .types import (
 )
 
 __all__ = [
+    "AdapterCfgDefinition",
     "ExpAdapterProtocol",
     "NoAnalysisResult",
     "NoAnalyzeParams",
 ]
+
+
+class AdapterCfgDefinition(Protocol):
+    """Context-free cfg authoring contract consumed by ``BaseAdapter``.
+
+    Implementations own field policy and deferred defaults. The framework does
+    not inspect declarations or seeds and validates the instantiated schema
+    through its existing finished-cfg validator.
+    """
+
+    @property
+    def spec(self) -> CfgSectionSpec:
+        """Return an isolated copy of the static field shape, labels and locks."""
+        ...
+
+    def instantiate(self, ctx: SessionEnv) -> CfgSchema:
+        """Resolve fresh defaults from ``ctx`` without changing the static spec.
+
+        ``ctx`` supplies metadata, module-library and value-source lookups.
+        Return an independently mutable schema. Propagate default-resolution
+        failures; do not change this definition or the supplied context.
+        """
+        ...
 
 
 @runtime_checkable
@@ -41,7 +65,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     This Protocol lists *only* the members the framework actually calls; it
     carries no generics and no implementation. The shared default behaviour
     (build_exp_cfg delegation, save-path policy, no-op analysis, …) lives in
-    ``zcu_tools.experiment.v2_gui.measure.adapters.base.BaseAdapter``, which adapters
+    ``zcu_tools.gui.app.measure.adapter.base.BaseAdapter``, which adapters
     inherit and which satisfies this Protocol structurally.
 
     Keeping the framework side generic-free is deliberate: the GUI handles

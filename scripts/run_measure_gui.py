@@ -60,22 +60,39 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def _build_measure_catalogs():
     """Build measure-gui's experiment catalogs after runtime pre-Qt setup."""
-    from zcu_tools.experiment.v2_gui.measure.catalog_loader import make_catalog_loader
-    from zcu_tools.experiment.v2_gui.measure.registry import register_all
-    from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
+    from zcu_tools.gui.app.measure.catalog_loader import (
+        SourceExperimentCatalogLoader,
+        SourcePackage,
+    )
 
-    # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
+    # Composition root: wire the user-owned experiment attachments
     # into the GUI framework. The behavior receives a factory, so these imports
     # happen after runtime logging and matplotlib policy setup.
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 
-    registry = Registry()
-    register_all(registry)
+    from zcu_lab.definitions import register_all
 
+    registry = Registry()
     role_catalog = RoleCatalog()
-    register_all_roles(role_catalog)
-    return registry, role_catalog, make_catalog_loader()
+    register_all(registry, roles=role_catalog)
+    loader = SourceExperimentCatalogLoader(
+        sources=(
+            SourcePackage("zcu_tools", PROJECT_ROOT / "lib" / "zcu_tools"),
+            SourcePackage("zcu_lab", PROJECT_ROOT / "zcu_lab"),
+        ),
+        reload_modules=("zcu_lab.v2", "zcu_lab.definitions"),
+        preserved_modules=(
+            "zcu_lab.roles",
+            "zcu_lab.v2._support.measure",
+            "zcu_lab.v2._support.autofluxdep",
+            "zcu_lab.v2._support.singleshot",
+            "zcu_lab.v2.autofluxdep._support",
+            "zcu_lab.v2.overnight._support",
+        ),
+        catalog_module="zcu_lab.definitions",
+    )
+    return registry, role_catalog, loader
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     return launch_gui_runtime(
         MeasureGuiBehavior,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
+        extra_logging_namespaces=("zcu_lab",),
         registry_factory=_build_measure_catalogs,
         clean=args.clean,
         project_root=project_root,

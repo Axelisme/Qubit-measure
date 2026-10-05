@@ -23,6 +23,7 @@ from zcu_tools.gui.runtime import (
 )
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.catalog import ExperimentCatalog
     from zcu_tools.gui.app.autofluxdep.controller import Controller
     from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
     from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
@@ -37,10 +38,14 @@ def _make_empty_ctx():
 
 
 def build_core(
+    catalog: ExperimentCatalog,
     project: ProjectInfo | None = None,
     project_root: str | None = None,
 ) -> Controller:
-    """Wire State + EventBus + Controller — the testable domain core.
+    """Wire State + EventBus + Controller using the caller-owned catalog.
+
+    catalog supplies all user-placeable measurement Builders; no default catalog
+    is imported. project optionally seeds the shared project/session setup.
 
     ``project_root`` is the base directory default result/database paths anchor
     under (the setup dialog derives defaults against it). None falls back to cwd —
@@ -52,28 +57,33 @@ def build_core(
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     state = AutoFluxDepState(_make_empty_ctx(), project=project)
-    return Controller(state, EventBus(), project_root=project_root)
+    return Controller(state, EventBus(), catalog=catalog, project_root=project_root)
 
 
 class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
-    """autofluxdep-gui app wiring behind the shared GUI runtime."""
+    """Autofluxdep GUI wiring for a caller-provided measurement catalog.
+
+    catalog defines the add menu and restore lookup. project seeds session setup;
+    project_root anchors default paths (None uses the repository root).
+    assemble creates the controller, window and optional remote adapter on the
+    GUI thread; it propagates catalog/restore/setup failures to the runtime.
+    """
 
     spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
         app_name="autofluxdep",
         app_slug="autofluxdep",
         default_control_port=8768,
-        logging_extra_namespaces=(
-            "zcu_tools.program.v2",
-            "zcu_tools.experiment.v2_gui.autofluxdep",
-        ),
+        logging_extra_namespaces=("zcu_tools.program.v2",),
     )
 
     def __init__(
         self,
+        catalog: ExperimentCatalog,
         project: ProjectInfo | None = None,
         *,
         project_root: str | None = None,
     ) -> None:
+        self._catalog = catalog
         self._project = project
         self._project_root = project_root or _repo_root()
 
@@ -85,7 +95,7 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
         from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
         from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
-        ctrl = build_core(self._project, project_root=self._project_root)
+        ctrl = build_core(self._catalog, self._project, project_root=self._project_root)
         window = MainWindow(ctrl)
 
         caretaker = create_persistence_caretaker(ctrl)

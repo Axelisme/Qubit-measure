@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import time
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
@@ -11,6 +10,7 @@ from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.images import validated_png
+from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcpSession
 
 AnalysisStage = Literal["primary", "post"]
@@ -210,13 +210,38 @@ class AnalysisExecution:
         self._snapshot = snapshot
         self._connection = connection
         self._session = session
+        self._session_closed = closed
         self._closed = closed
         self._invalidated = invalidated
         self._condition = Condition()
         self._images: tuple[PngImage, ...] = ()
         self._thread: Thread | None = None
+        self._completion_started = False
         self._gui_cancel: GuiCancel | None = None
         self._cancel_in_flight = False
+
+    def bind_continuation(
+        self, closed: Event, *, condition: Condition | None = None
+    ) -> None:
+        """Bind a recipe-local close event before native start admission.
+
+        closed is owned by the recipe driver, which sets it and calls wake before
+        joining its worker. condition optionally shares the driver's local wake
+        condition for progress and completion; None keeps this owner's condition.
+        The session close event remains effective too. Raise ValueError after
+        admission, receipt or completion start; no GUI request or background worker
+        is created. Standalone callers need not bind one.
+        """
+        with self._condition:
+            if (
+                self._completion_started
+                or self._snapshot.op is not None
+                or self._snapshot.start.status != "not_started"
+            ):
+                raise ValueError("Cannot rebind an admitted analysis lifetime")
+            self._closed = closed
+            if condition is not None:
+                self._condition = condition
 
     def snapshot(self) -> ExecutionSnapshot:
         with self._condition:
@@ -324,7 +349,7 @@ class AnalysisExecution:
     def admit_start(self) -> None:
         """Mark ambiguity at dispatch, not when the execution is registered."""
         with self._condition:
-            if self._closed.is_set():
+            if self._closed.is_set() or self._session_closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
             if self._snapshot.cancel_requested:
                 raise _ContinuationCancelled
@@ -344,9 +369,23 @@ class AnalysisExecution:
             )
             self._condition.notify_all()
 
-    def fail_start(self, exc: Exception) -> None:
-        """Keep sent requests ambiguous unless GUI explicitly rejects admission."""
-        if isinstance(exc, _ContinuationCancelled):
+    def fail_start(self, exc: Exception, *, suppressed: bool = False) -> None:
+        """Retain a failed start; suppressed=True marks an unsubmitted cancellation.
+
+        Ordinary failures retain unknown dispatch unless GUI explicitly rejects
+        admission. suppressed is only valid before admission with no op receipt;
+        otherwise raise ValueError. It settles a between-yield cancelled start
+        without calling the native cancel hook or inventing an operation outcome.
+        """
+        if suppressed:
+            with self._condition:
+                if (
+                    self._snapshot.op is not None
+                    or self._snapshot.start.status != "not_started"
+                ):
+                    raise ValueError("Cannot suppress an admitted analysis start")
+                self._snapshot = replace(self._snapshot, cancel_requested=True)
+        if suppressed or isinstance(exc, _ContinuationCancelled):
             self._finish()
             return
         with self._condition:
@@ -358,8 +397,15 @@ class AnalysisExecution:
         self._fail(exc)
 
     def start(self) -> None:
-        """Called under the registry lock, so close cannot miss an admitted worker."""
-        if self._closed.is_set():
+        """Start the registered completion on its own background worker.
+
+        The registry calls this under its lock, so session close cannot miss an
+        admitted worker. A known operation receipt is required. Raise ValueError
+        if completion already started or no receipt exists; worker start failure
+        is retained as a failed snapshot rather than losing the admitted operation.
+        """
+        self._claim_completion()
+        if self._closed.is_set() or self._session_closed.is_set():
             self._fail(GuiRpcError("MCP session is closed", reason="session_closed"))
             return
         thread = Thread(target=self._run, name=self._snapshot.execution)
@@ -370,7 +416,32 @@ class AnalysisExecution:
         else:
             self._thread = thread
 
+    def complete_in_current_worker(self) -> ExecutionSnapshot:
+        """Observe and capture this analysis synchronously on the calling worker.
+
+        Use only for a registry execution admitted with start_worker=False and a
+        known operation receipt. This performs the same bounded operation.await,
+        result/image/writeback capture and failure isolation as background start.
+        Return a detached terminal snapshot, including failures and cancellation.
+        The caller owns this worker's join before session PNG cleanup. Raise
+        ValueError if completion already started or no operation receipt exists.
+        Recipe drivers use this to avoid a second waiting worker; standalone
+        analyses keep their ordinary background start.
+        """
+        self._claim_completion()
+        self._run()
+        return self.snapshot()
+
+    def _claim_completion(self) -> None:
+        with self._condition:
+            if self._completion_started:
+                raise ValueError("analysis completion already started")
+            if self._snapshot.op is None:
+                raise ValueError("analysis completion needs an operation receipt")
+            self._completion_started = True
+
     def wake(self) -> None:
+        """Wake local native-wait pacing after cancellation or lifetime close."""
         with self._condition:
             self._condition.notify_all()
 
@@ -385,7 +456,7 @@ class AnalysisExecution:
 
     def _admit(self, phase: ExecutionPhase, image: str | None = None) -> None:
         with self._condition:
-            if self._closed.is_set():
+            if self._closed.is_set() or self._session_closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
             if phase != "operation" and self._snapshot.cancel_requested:
                 raise _ContinuationCancelled
@@ -481,39 +552,30 @@ class AnalysisExecution:
             self._condition.notify_all()
 
     def _await_operation(self) -> bool:
-        while True:
-            began = time.monotonic()
-            reply = self._rpc(
-                "operation", "operation.await", {"timeout": 0.25}, timeout=2.25
+        op = self.snapshot().op
+        if op is None:
+            raise ValueError("Analysis completion requires an operation receipt")
+        try:
+            completion = await_operation(
+                self._connection,
+                op,
+                closed=self._closed,
+                condition=self._condition,
+                before_send=lambda: self._admit("operation"),
             )
-            reason = reply.get("reason")
-            if reason == "completed":
-                status = reply.get("status")
-                if status not in ("finished", "failed", "cancelled"):
-                    raise GuiRpcError(
-                        "invalid operation outcome", reason="incompatible_wire"
-                    )
-                self._publish(operation_outcome=deepcopy(reply))
-                if status == "failed":
-                    raise GuiRpcError(
-                        str(reply.get("error", "analysis failed")),
-                        reason="analysis_failed",
-                    )
-                if status == "cancelled":
-                    self._publish(status="cancelled", phase="terminal")
-                    return False
-                self._publish(status="running", invalidated=deepcopy(self._invalidated))
-                return True
-            if reason not in ("timeout", "user_feedback"):
-                raise GuiRpcError(
-                    "invalid operation await reply", reason="incompatible_wire"
-                )
-            # A GUI can answer immediately with user feedback. Pace observation
-            # without holding the RPC lock, and let close wake the worker.
-            with self._condition:
-                self._condition.wait_for(
-                    self._closed.is_set, max(0.0, 0.25 - (time.monotonic() - began))
-                )
+        except Exception as exc:  # Translate native wait failures at this owner.
+            raise _RpcFailure("operation", exc) from exc
+        reply = dict(completion.native)
+        self._publish(operation_outcome=reply)
+        if completion.status == "failed":
+            raise GuiRpcError(
+                str(reply.get("error", "analysis failed")), reason="analysis_failed"
+            )
+        if completion.status == "cancelled":
+            self._publish(status="cancelled", phase="terminal")
+            return False
+        self._publish(status="running", invalidated=deepcopy(self._invalidated))
+        return True
 
     def _complete_analysis(self) -> None:
         snapshot = self.snapshot()
@@ -603,8 +665,19 @@ class AnalysisExecutions:
         started: dict[str, Any] | None = None,
         *,
         interaction: dict[str, Any] | None = None,
+        start_worker: bool = True,
     ) -> AnalysisExecution:
-        """Retain the delivered start receipt, even when close wins admission."""
+        """Register one analysis completion on the fixed connection/tab/stage.
+
+        started is the native start receipt, or None before admission. interaction
+        is an already captured handoff. Retain receipts even when close wins.
+        start_worker=True starts background observation when a receipt is known.
+        False only registers it; its recipe worker must call the returned owner's
+        complete_in_current_worker and join before session PNG cleanup. Existing
+        operation IDs return their existing owner without starting another worker.
+        For recipe-local close, bind_continuation before native admission; session
+        close remains effective regardless of that additional lifetime.
+        """
         with self._lock:
             op = started["handle"] if started is not None else None
             if op is not None and op in self._by_op:
@@ -633,13 +706,23 @@ class AnalysisExecutions:
             self._by_id[execution.snapshot().execution] = execution
             if op is not None:
                 self._by_op[op] = execution
-                execution.start()
+                if start_worker:
+                    execution.start()
             return execution
 
     def accept_start(
-        self, execution: AnalysisExecution, started: dict[str, Any]
+        self,
+        execution: AnalysisExecution,
+        started: dict[str, Any],
+        *,
+        start_worker: bool = True,
     ) -> None:
-        """Bind a late receipt without creating a second completion owner."""
+        """Bind a late native receipt to its registered completion owner.
+
+        start_worker=False leaves observation to complete_in_current_worker;
+        otherwise start the ordinary background worker. Conflicting operation
+        ownership raises GuiRpcError. This never creates a second owner.
+        """
         with self._lock:
             op = started["handle"]
             execution.observe_start(started)
@@ -649,7 +732,8 @@ class AnalysisExecutions:
                     reason="incompatible_wire",
                 )
             self._by_op[op] = execution
-            execution.start()
+            if start_worker:
+                execution.start()
 
     def for_op(self, op: int) -> AnalysisExecution | None:
         """Find an existing completion owner without creating a new job."""

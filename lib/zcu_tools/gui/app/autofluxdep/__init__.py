@@ -10,8 +10,8 @@ sweeps flux × the user-ordered providers, replacing the old ``cfg_maker`` lambd
 
 - ``nodes.builder``    — Builder / Node / PlacedNode + the RunEnv curried in
 - ``nodes.spec``       — Dependency / ModuleDep declaration vocabulary
-- ``zcu_tools.experiment.v2_gui.autofluxdep`` — the concrete measurement Builders,
-  ordered catalog and their ``_support`` (outside this app; composed in here)
+- ``catalog``         — ordered, caller-injected measurement declarations
+  (concrete Builders and acquisition mechanics remain outside this app)
 - ``nodes.predictor``  — a Service Builder (pure-compute Node)
 - ``orchestrator``     — runner-free flux × provider sweep + requirement resolution
 - ``state`` / ``event_bus`` / ``controller`` / ``app`` — composition root + façade

@@ -10,7 +10,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -25,6 +24,8 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from zcu_lab.roles import register_all_roles
 
 
 def _make_ctrl(

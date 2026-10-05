@@ -8,12 +8,11 @@ import numpy as np
 import pytest
 from pydantic import ConfigDict
 from zcu_tools.experiment import ExpCfgModel
-from zcu_tools.experiment.v2.runtime import (
+from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
-    ScheduleOutcomeError,
     ScheduleStep,
     SignalBuffer,
-    StopSignal,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Module, ProgramV2Cfg

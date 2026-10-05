@@ -3,12 +3,7 @@ from copy import deepcopy
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.onetone.freq import FreqCfg, HomophasalSamplingCfg
-from zcu_tools.experiment.v2_gui.measure.adapters.onetone.freq import OneToneFreqAdapter
-from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.app.measure.adapter.types import RunRequest
 from zcu_tools.gui.app.measure.specs import make_bath_reset_spec, make_pulse_spec
 from zcu_tools.gui.cfg import (
     CfgSchema,
@@ -26,7 +21,12 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules.reset import BathResetCfg
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from tests.gui.app.measure.adapter._cfg_fakes import (
+    CalibrationAdapter,
+    CalibrationCfg,
+    CalibrationInput,
+)
 
 
 class Snapshot(ExpCfgModel):
@@ -240,39 +240,44 @@ def test_multi_axis_sweep_preserves_run_only_uniform():
     assert result.value.fields["uniform"] == DirectValue(False)
 
 
-def test_onetone_freq_runtime_mode_and_readout_are_restored():
-    adapter = OneToneFreqAdapter()
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-    current = adapter.make_default_cfg(ctx)
-    raw = schema_to_raw_dict(current, ctx.md, ctx.ml)
-    runtime = adapter.build_exp_cfg(
-        raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
-    )
-    snapshot = FreqCfg.model_validate(
-        {
-            **runtime.model_dump(),
-            "sampling_mode": "homophasal",
-            "homophasal": HomophasalSamplingCfg(r_f=6000.0, rf_w=10.0, theta0=0.1),
+def test_runtime_mode_and_nested_module_are_restored():
+    definition = CalibrationAdapter.cfg_definition()
+    spec = definition.spec
+    spec.fields["modules"] = CfgSectionSpec(
+        fields={
+            "pulse": ReferenceSpec(kind="module", allowed=[make_pulse_spec()]),
         }
+    )
+    current = CfgSchema(spec=spec, value=make_default_value(spec))
+    pulse = PulseCfg.model_validate(
+        {
+            "ch": 0,
+            "nqz": 1,
+            "freq": 5000.0,
+            "gain": 0.2,
+            "waveform": {"style": "const", "length": 0.1},
+        }
+    )
+    snapshot = CalibrationInput(
+        mode="calibrated",
+        calibration=CalibrationCfg(frequency=6000.0, width=10.0, phase=0.1),
+        modules={"pulse": pulse},
     )
     result = project_loaded_cfg(current, snapshot)
     assert result is not None
-    assert result.value.fields["sampling_mode"] == DirectValue("homophasal")
-    calibration = result.value.fields["homophasal"]
+    assert result.value.fields["mode"] == DirectValue(snapshot.mode)
+    calibration = result.value.fields["calibration"]
     assert isinstance(calibration, CfgSectionValue)
     assert calibration.fields == {
-        "r_f": DirectValue(6000.0),
-        "rf_w": DirectValue(10.0),
-        "theta0": DirectValue(0.1),
+        key: DirectValue(value)
+        for key, value in snapshot.calibration.model_dump().items()
     }
     modules = result.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
-    readout = modules.fields["readout"]
-    assert isinstance(readout, ReferenceValue)
-    assert is_custom_reference_key(readout.chosen_key)
-    pulse = readout.value.fields["pulse_cfg"]
-    assert isinstance(pulse, CfgSectionValue)
-    waveform = pulse.fields["waveform"]
+    projected = modules.fields["pulse"]
+    assert isinstance(projected, ReferenceValue)
+    assert is_custom_reference_key(projected.chosen_key)
+    waveform = projected.value.fields["waveform"]
     assert isinstance(waveform, ReferenceValue)
     assert is_custom_reference_key(waveform.chosen_key)
 

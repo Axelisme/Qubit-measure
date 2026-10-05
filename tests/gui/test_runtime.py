@@ -61,6 +61,66 @@ def test_build_control_options_explicit_port_is_pinned() -> None:
     assert control.app_slug == "dispersive"
 
 
+@pytest.mark.parametrize(
+    "extra_namespaces", [(), ("user_experiments",)], ids=["default", "injected"]
+)
+def test_launch_configures_logging_before_constructing_behavior(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra_namespaces: tuple[str, ...]
+) -> None:
+    events: list[str] = []
+    namespaces: list[tuple[str, ...]] = []
+    fixed_namespaces = ("runtime_capability",)
+
+    def configure_logging(
+        *,
+        app_name: str,
+        log_root: Path,
+        to_file: bool,
+        log_file: Path | None,
+        extra_namespaces: tuple[str, ...],
+        group: str,
+    ) -> Path | None:
+        del app_name, log_root, to_file, log_file, group
+        namespaces.append(extra_namespaces)
+        events.append("logging")
+        return None
+
+    class LaunchBehavior(_Behavior):
+        spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
+            app_name="launch",
+            app_slug="launch",
+            default_control_port=9999,
+            logging_extra_namespaces=fixed_namespaces,
+        )
+
+        def __init__(self, received_events: list[str]) -> None:
+            assert namespaces == [fixed_namespaces + extra_namespaces]
+            events.append("construct")
+            super().__init__(received_events)
+
+    def run_behavior(
+        behavior: GuiRuntimeBehavior, control: ControlOptions | None
+    ) -> int:
+        assert isinstance(behavior, LaunchBehavior)
+        assert control is None
+        events.append("run")
+        return 17
+
+    monkeypatch.setattr(runtime, "setup_gui_logging", configure_logging)
+    monkeypatch.setattr(runtime, "run_gui_runtime", run_behavior)
+
+    result = runtime.launch_gui_runtime(
+        LaunchBehavior,
+        GuiLaunchOptions(log_root=tmp_path, no_control=True),
+        events,
+        extra_logging_namespaces=extra_namespaces,
+    )
+
+    assert result == 17
+    assert events == ["logging", "construct", "run"]
+    assert LaunchBehavior.spec.logging_extra_namespaces == fixed_namespaces
+
+
 class _Signal:
     def __init__(self, events: list[str]) -> None:
         self._events = events

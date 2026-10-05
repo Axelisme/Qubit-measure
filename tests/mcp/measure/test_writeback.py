@@ -1,4 +1,4 @@
-"""Accept applies the current GUI-owned candidates without changing observations."""
+"""Standalone apply_writeback selects current drafts without changing observations."""
 
 import pytest
 
@@ -6,18 +6,23 @@ from ._support import make_client
 
 
 @pytest.fixture
-def accept_client(tmp_path):
+def apply_writeback_client(tmp_path):
     client = make_client(tmp_path)
     for method in ("tab.get_analyze_result", "tab.get_post_analyze_result"):
         client.transport.replies[method] = {"ok": True, "result": {"summary": {}}}
-    client.transport.replies["tab.writeback_preview"] = {
+    client.transport.replies["tab.writeback_preview"] = lambda params: {
         "ok": True,
         "result": {
             "has_draft": True,
             "items": [
-                {"id": "md-1", "selected": False},
-                {"id": "wf-1", "selected": True},
+                {
+                    "id": item_id,
+                    "target_name": f"{params['subtab_id']}.{item_id}",
+                    "selected": selected,
+                }
+                for item_id, selected in (("md-1", False), ("wf-1", True))
             ],
+            "destination_context": {},
         },
     }
     client.transport.replies["tab.writeback_write"] = lambda params: {
@@ -39,9 +44,11 @@ def accept_client(tmp_path):
 
 
 @pytest.mark.parametrize("r2", [-0.25, 0.0])
-def test_accept_writes_whole_drafts_despite_low_fit_quality(accept_client, r2):
+def test_apply_writeback_writes_whole_drafts_despite_low_fit_quality(
+    apply_writeback_client, r2
+):
     for method in ("tab.get_analyze_result", "tab.get_post_analyze_result"):
-        accept_client.transport.replies[method] = {
+        apply_writeback_client.transport.replies[method] = {
             "ok": True,
             "result": {
                 "summary": {
@@ -63,7 +70,7 @@ def test_accept_writes_whole_drafts_despite_low_fit_quality(accept_client, r2):
                 "invalid": [],
             },
         }
-    result = accept_client.call("accept", {"tab": "t"})
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
     assert result["status"] == "finished"
     assert result["skipped"] == result["not_started"] == []
     assert [
@@ -72,8 +79,10 @@ def test_accept_writes_whole_drafts_despite_low_fit_quality(accept_client, r2):
     ] == [("primary", ["md-1", "wf-1"]), ("post", ["md-1", "wf-1"])]
 
 
-def test_accept_writes_all_ids_in_each_pane_without_hidden_reads(accept_client):
-    result = accept_client.call("accept", {"tab": "t"})
+def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
+    apply_writeback_client,
+):
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
     assert result == {
         "tab": "t",
         "status": "finished",
@@ -98,13 +107,14 @@ def test_accept_writes_all_ids_in_each_pane_without_hidden_reads(accept_client):
     }
     domain_calls = [
         entry
-        for entry in accept_client.transport.sent
+        for entry in apply_writeback_client.transport.sent
         if entry[0] not in ("wire.version", "rpc.catalog", "resources.versions")
     ]
     assert domain_calls == [
         ("tab.get_analyze_result", {"tab_id": "t"}),
         ("tab.get_post_analyze_result", {"tab_id": "t"}),
         ("tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}),
+        ("tab.writeback_preview", {"tab_id": "t", "subtab_id": "post_analysis"}),
         (
             "tab.writeback_write",
             {
@@ -113,7 +123,6 @@ def test_accept_writes_all_ids_in_each_pane_without_hidden_reads(accept_client):
                 "write": [{"id": "md-1"}, {"id": "wf-1"}],
             },
         ),
-        ("tab.writeback_preview", {"tab_id": "t", "subtab_id": "post_analysis"}),
         (
             "tab.writeback_write",
             {
@@ -128,12 +137,14 @@ def test_accept_writes_all_ids_in_each_pane_without_hidden_reads(accept_client):
 @pytest.mark.parametrize(
     "primary_exists,post_exists", [(True, False), (False, True), (False, False)]
 )
-def test_accept_skips_missing_results(accept_client, primary_exists, post_exists):
-    accept_client.transport.replies["tab.get_analyze_result"] = {
+def test_apply_writeback_skips_missing_results(
+    apply_writeback_client, primary_exists, post_exists
+):
+    apply_writeback_client.transport.replies["tab.get_analyze_result"] = {
         "ok": True,
         "result": {"summary": {} if primary_exists else None},
     }
-    accept_client.transport.replies["tab.get_post_analyze_result"] = {
+    apply_writeback_client.transport.replies["tab.get_post_analyze_result"] = {
         "ok": True,
         "result": {"summary": {} if post_exists else None},
     }
@@ -145,7 +156,7 @@ def test_accept_skips_missing_results(accept_client, primary_exists, post_exists
         )
         if exists
     ]
-    result = accept_client.call("accept", {"tab": "t"})
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
     assert result["status"] == "finished"
     assert result["skipped"] == [
         stage
@@ -158,24 +169,24 @@ def test_accept_skips_missing_results(accept_client, primary_exists, post_exists
     assert result["not_started"] == []
     assert [
         params["subtab_id"]
-        for method, params in accept_client.transport.sent
+        for method, params in apply_writeback_client.transport.sent
         if method.startswith("tab.writeback_")
-    ] == [pane for _, pane in present for _ in range(2)]
+    ] == [pane for _ in range(2) for _, pane in present]
 
 
 @pytest.mark.parametrize(
     "preview",
     [
-        {"has_draft": False, "items": []},
-        {"has_draft": True, "items": []},
+        {"has_draft": False, "items": [], "destination_context": {}},
+        {"has_draft": True, "items": [], "destination_context": {}},
     ],
 )
-def test_accept_skips_absent_or_empty_drafts(accept_client, preview):
-    accept_client.transport.replies["tab.writeback_preview"] = {
+def test_apply_writeback_skips_absent_or_empty_drafts(apply_writeback_client, preview):
+    apply_writeback_client.transport.replies["tab.writeback_preview"] = {
         "ok": True,
         "result": preview,
     }
-    assert accept_client.call("accept", {"tab": "t"}) == {
+    assert apply_writeback_client.call("apply_writeback", {"tab": "t"}) == {
         "tab": "t",
         "status": "finished",
         "completed": [],
@@ -183,7 +194,8 @@ def test_accept_skips_absent_or_empty_drafts(accept_client, preview):
         "not_started": [],
     }
     assert all(
-        method != "tab.writeback_write" for method, _ in accept_client.transport.sent
+        method != "tab.writeback_write"
+        for method, _ in apply_writeback_client.transport.sent
     )
 
 
@@ -194,15 +206,15 @@ def test_accept_skips_absent_or_empty_drafts(accept_client, preview):
         ("tab.get_analyze_result", "primary", 1),
         ("tab.get_post_analyze_result", "post", 2),
         ("tab.writeback_preview", "primary", 3),
-        ("tab.writeback_write", "primary", 4),
-        ("tab.writeback_preview", "post", 5),
+        ("tab.writeback_write", "primary", 5),
+        ("tab.writeback_preview", "post", 4),
         ("tab.writeback_write", "post", 6),
     ],
 )
-def test_accept_stops_at_first_rpc_error_with_confirmed_progress(
-    accept_client, method, stage, expected_calls, reason
+def test_apply_writeback_stops_at_first_rpc_error_with_confirmed_progress(
+    apply_writeback_client, method, stage, expected_calls, reason
 ):
-    previous_reply = accept_client.transport.replies[method]
+    previous_reply = apply_writeback_client.transport.replies[method]
     failed_pane = "analysis" if stage == "primary" else "post_analysis"
 
     def reply(params):
@@ -217,8 +229,8 @@ def test_accept_stops_at_first_rpc_error_with_confirmed_progress(
             }
         return previous_reply(params) if callable(previous_reply) else previous_reply
 
-    accept_client.transport.replies[method] = reply
-    result = accept_client.call("accept", {"tab": "t"})
+    apply_writeback_client.transport.replies[method] = reply
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
     assert result["status"] == "failed"
     assert result["failed_stage"] == stage
     assert result["error"]["code"] == "precondition_failed"
@@ -234,28 +246,32 @@ def test_accept_stops_at_first_rpc_error_with_confirmed_progress(
     )
     assert result["skipped"] == []
     assert [pane["stage"] for pane in result["completed"]] == (
-        ["primary"] if expected_calls >= 5 else []
+        ["primary"] if method == "tab.writeback_write" and stage == "post" else []
     )
     assert result["not_started"] == (
-        [] if expected_calls >= 5 else ["post" if stage == "primary" else "primary"]
+        []
+        if method == "tab.writeback_write" and stage == "post"
+        else ["post" if stage == "primary" else "primary"]
     )
     expected_sequence = [
         "tab.get_analyze_result",
         "tab.get_post_analyze_result",
         "tab.writeback_preview",
-        "tab.writeback_write",
         "tab.writeback_preview",
+        "tab.writeback_write",
         "tab.writeback_write",
     ]
     assert [
         method
-        for method, _ in accept_client.transport.sent
+        for method, _ in apply_writeback_client.transport.sent
         if method not in ("wire.version", "rpc.catalog", "resources.versions")
     ] == expected_sequence[:expected_calls]
 
 
-def test_accept_reports_partial_write_after_skipped_primary(accept_client):
-    accept_client.transport.replies["tab.get_analyze_result"] = {
+def test_apply_writeback_reports_partial_write_after_skipped_primary(
+    apply_writeback_client,
+):
+    apply_writeback_client.transport.replies["tab.get_analyze_result"] = {
         "ok": True,
         "result": {"summary": None},
     }
@@ -268,8 +284,8 @@ def test_accept_reports_partial_write_after_skipped_primary(accept_client):
             "error": {"code": "internal_error", "message": "context apply interrupted"},
         }
 
-    accept_client.transport.replies["tab.writeback_write"] = write_then_fail
-    result = accept_client.call("accept", {"tab": "t"})
+    apply_writeback_client.transport.replies["tab.writeback_write"] = write_then_fail
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
     assert result == {
         "tab": "t",
         "status": "failed",
@@ -288,40 +304,46 @@ def test_accept_reports_partial_write_after_skipped_primary(accept_client):
     assert (
         sum(
             method == "tab.writeback_write"
-            for method, _ in accept_client.transport.sent
+            for method, _ in apply_writeback_client.transport.sent
         )
         == 1
     )
 
 
-def test_accept_uses_current_results_and_drafts_on_each_call(accept_client):
-    accept_client.call("accept", {"tab": "t"})
-    accept_client.transport.sent.clear()
-    accept_client.transport.replies["tab.get_post_analyze_result"] = {
+def test_apply_writeback_uses_current_results_and_drafts_on_each_call(
+    apply_writeback_client,
+):
+    apply_writeback_client.call("apply_writeback", {"tab": "t"})
+    apply_writeback_client.transport.sent.clear()
+    apply_writeback_client.transport.replies["tab.get_post_analyze_result"] = {
         "ok": True,
         "result": {"summary": None},
     }
-    accept_client.transport.replies["tab.writeback_preview"] = {
+    apply_writeback_client.transport.replies["tab.writeback_preview"] = {
         "ok": True,
-        "result": {"has_draft": True, "items": [{"id": "md-new"}]},
+        "result": {
+            "has_draft": True,
+            "items": [{"id": "md-new", "target_name": "new_frequency"}],
+            "destination_context": {},
+        },
     }
-    result = accept_client.call("accept", {"tab": "t"})
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
     assert result["skipped"] == ["post"]
     assert [
         (params["subtab_id"], params["write"])
-        for method, params in accept_client.transport.sent
+        for method, params in apply_writeback_client.transport.sent
         if method == "tab.writeback_write"
     ] == [("analysis", [{"id": "md-new"}])]
     assert result["completed"][0]["written"][0]["id"] == "md-new"
 
 
-def test_accept_does_not_swallow_unexpected_errors(accept_client):
-    accept_client.transport.replies["tab.get_analyze_result"] = {
+def test_apply_writeback_does_not_swallow_unexpected_errors(apply_writeback_client):
+    apply_writeback_client.transport.replies["tab.get_analyze_result"] = {
         "ok": True,
         "result": {},
     }
     with pytest.raises(KeyError, match="summary"):
-        accept_client.call("accept", {"tab": "t"})
+        apply_writeback_client.call("apply_writeback", {"tab": "t"})
 
 
 @pytest.mark.parametrize(
@@ -331,10 +353,188 @@ def test_accept_does_not_swallow_unexpected_errors(accept_client):
         {"tab": ""},
         {"tab": 1},
         {"tab": "t", "stage": "post"},
-        {"tab": "t", "items": []},
+        {"tab": "t", "items": "frequency"},
+        {"tab": "t", "items": [1]},
+        {"tab": "t", "items": [""]},
+        {"tab": "t", "items": ["duplicate", "duplicate"]},
     ],
 )
-def test_accept_rejects_invalid_arguments_before_transport(accept_client, arguments):
-    with pytest.raises(ValueError, match="tab"):
-        accept_client.call("accept", arguments)
-    assert accept_client.transport.sent == []
+def test_apply_writeback_rejects_invalid_arguments_before_transport(
+    apply_writeback_client, arguments
+):
+    with pytest.raises(ValueError, match="tab|items|Duplicate"):
+        apply_writeback_client.call("apply_writeback", arguments)
+    assert apply_writeback_client.transport.sent == []
+
+
+@pytest.mark.parametrize(
+    "items", [None, [], ["analysis.md-1"], ["post_analysis.wf-1", "analysis.md-1"]]
+)
+def test_apply_writeback_selects_stable_names_in_pane_order(
+    apply_writeback_client, items
+):
+    result = apply_writeback_client.call(
+        "apply_writeback", {"tab": "t", "items": items}
+    )
+    expected = {
+        "primary": ["md-1", "wf-1"]
+        if items is None
+        else [item for item in ("md-1", "wf-1") if f"analysis.{item}" in items],
+        "post": ["md-1", "wf-1"]
+        if items is None
+        else [item for item in ("md-1", "wf-1") if f"post_analysis.{item}" in items],
+    }
+    assert result["status"] == "finished"
+    assert result["not_started"] == []
+    assert result["skipped"] == [stage for stage, ids in expected.items() if not ids]
+    assert [
+        (stage["stage"], [item["id"] for item in stage["written"]])
+        for stage in result["completed"]
+    ] == [(stage, ids) for stage, ids in expected.items() if ids]
+
+
+@pytest.mark.parametrize("ambiguity", ["unknown", "across_panes", "within_pane"])
+def test_apply_writeback_rejects_names_before_any_write(
+    apply_writeback_client, ambiguity
+):
+    arguments = {"tab": "t", "items": ["absent"]}
+    if ambiguity != "unknown":
+        arguments = {"tab": "t"}
+        apply_writeback_client.transport.replies["tab.writeback_preview"] = {
+            "ok": True,
+            "result": {
+                "has_draft": True,
+                "destination_context": {},
+                "items": [{"id": "x", "target_name": "same"}]
+                * (2 if ambiguity == "within_pane" else 1),
+            },
+        }
+    with pytest.raises(ValueError, match="Unknown|Ambiguous"):
+        apply_writeback_client.call("apply_writeback", arguments)
+    assert not any(
+        method == "tab.writeback_write"
+        for method, _ in apply_writeback_client.transport.sent
+    )
+
+
+def test_apply_writeback_keeps_selected_confirmed_prefix_on_post_failure(
+    apply_writeback_client,
+):
+    original_write = apply_writeback_client.transport.replies["tab.writeback_write"]
+    uncertain_effects = []
+
+    def write(params):
+        if params["subtab_id"] == "post_analysis":
+            uncertain_effects.extend(params["write"])
+            return {
+                "ok": False,
+                "error": {
+                    "code": "internal_error",
+                    "message": "write interrupted",
+                },
+            }
+        return original_write(params)
+
+    apply_writeback_client.transport.replies["tab.writeback_write"] = write
+    result = apply_writeback_client.call(
+        "apply_writeback",
+        {
+            "tab": "t",
+            "items": ["analysis.md-1", "post_analysis.wf-1"],
+        },
+    )
+    assert result["status"] == "failed"
+    assert result["failed_stage"] == "post"
+    assert result["failed_stage_may_have_partial_writes"] is True
+    assert result["not_started"] == []
+    assert result["skipped"] == []
+    assert [
+        (stage["stage"], [item["id"] for item in stage["written"]])
+        for stage in result["completed"]
+    ] == [("primary", ["md-1"])]
+    assert uncertain_effects == [{"id": "wf-1"}]
+    assert [
+        (params["subtab_id"], params["write"])
+        for method, params in apply_writeback_client.transport.sent
+        if method == "tab.writeback_write"
+    ] == [
+        ("analysis", [{"id": "md-1"}]),
+        ("post_analysis", [{"id": "wf-1"}]),
+    ]
+
+
+@pytest.mark.parametrize("empty_stage", ["primary", "post"])
+def test_apply_writeback_retains_confirmed_empty_stage_on_later_failure(
+    apply_writeback_client, empty_stage
+):
+    preview = apply_writeback_client.transport.replies["tab.writeback_preview"]
+
+    def read(params):
+        if params["subtab_id"] == "analysis" and empty_stage == "primary":
+            return {
+                "ok": True,
+                "result": {
+                    "has_draft": True,
+                    "items": [],
+                    "destination_context": {},
+                },
+            }
+        if params["subtab_id"] == "post_analysis":
+            if empty_stage == "post":
+                return {
+                    "ok": True,
+                    "result": {
+                        "has_draft": False,
+                        "items": [],
+                        "destination_context": {},
+                    },
+                }
+            return {
+                "ok": False,
+                "error": {
+                    "code": "internal_error",
+                    "message": "preview failed",
+                },
+            }
+        return preview(params)
+
+    apply_writeback_client.transport.replies["tab.writeback_preview"] = read
+    if empty_stage == "post":
+        apply_writeback_client.transport.replies["tab.writeback_write"] = {
+            "ok": False,
+            "error": {"code": "internal_error", "message": "write failed"},
+        }
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
+    assert result["status"] == "failed"
+    assert result["completed"] == []
+    assert result["skipped"] == [empty_stage]
+    assert result["not_started"] == []
+    assert result["failed_stage"] == ("post" if empty_stage == "primary" else "primary")
+    assert result["failed_stage_may_have_partial_writes"] is (empty_stage == "post")
+
+
+@pytest.mark.parametrize(
+    "pane,stage", [("analysis", "primary"), ("post_analysis", "post")]
+)
+def test_apply_writeback_reports_invalid_native_name_at_its_stage(
+    apply_writeback_client, pane, stage
+):
+    preview = apply_writeback_client.transport.replies["tab.writeback_preview"]
+
+    def read(params):
+        result = preview(params)
+        if params["subtab_id"] == pane:
+            result["result"]["items"][0]["target_name"] = ""
+        return result
+
+    apply_writeback_client.transport.replies["tab.writeback_preview"] = read
+    result = apply_writeback_client.call("apply_writeback", {"tab": "t"})
+    assert result["status"] == "failed"
+    assert result["failed_stage"] == stage
+    assert result["error"]["reason"] == "incompatible_wire"
+    assert result["failed_stage_may_have_partial_writes"] is False
+    assert result["completed"] == []
+    assert not any(
+        method == "tab.writeback_write"
+        for method, _ in apply_writeback_client.transport.sent
+    )

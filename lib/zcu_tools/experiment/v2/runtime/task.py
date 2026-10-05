@@ -9,11 +9,10 @@ from numpy.typing import NDArray
 from typing_extensions import TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.utils import Result
+from zcu_tools.experiment.v2.runtime.result_tree import ResultUpdateEvent
+from zcu_tools.experiment.v2.runtime.schedule import ScheduleStep
+from zcu_tools.experiment.v2.utils.helper import Result
 from zcu_tools.plotting.plots import HeatmapLinePlot, HeatmapPlot, LinePlot, Plots
-
-from .result_tree import ResultUpdateEvent
-from .schedule import ScheduleStep
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
 T_Env = TypeVar("T_Env")

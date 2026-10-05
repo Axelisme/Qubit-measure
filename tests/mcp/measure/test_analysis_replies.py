@@ -12,8 +12,7 @@ from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure.analysis_execution import AnalysisWriteback
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate
-
-import recipes
+from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeSession
 
 from ._analyze_support import (
     PNG as _PNG,
@@ -47,6 +46,19 @@ from ._analyze_support import (
 )
 from ._analyze_support import (
     stdio_data as _data,
+)
+from ._recipe_execution_support import definition
+
+
+def forbidden_recipe(_session: RecipeSession) -> RecipeGenerator:
+    """Fail if an analysis-only tool tries to start any recipe."""
+    raise AssertionError("Analysis-only must not execute a recipe")
+    yield from ()  # The callback must be a generator even though advancing it fails.
+
+
+T1_DEFINITION = replace(
+    definition(forbidden_recipe),
+    summary_estimates=(SummaryEstimate("t1", "t1", "t1_err", "us"),),
 )
 
 
@@ -158,15 +170,13 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
     ],
 )
 def test_analysis_only_rejects_conflicting_estimate_declarations(
-    tmp_path, clients, monkeypatch, declaration
+    tmp_path, clients, declaration
 ):
-    t1 = next(recipe for recipe in recipes.RECIPES if recipe.name == "t1")
     conflict = replace(
-        t1,
+        T1_DEFINITION,
         name="conflicting-t1",
         summary_estimates=(declaration,),
     )
-    monkeypatch.setattr(recipes, "RECIPES", (*recipes.RECIPES, conflict))
 
     def respond(method, params):
         if method == "tab.analyze":
@@ -189,18 +199,16 @@ def test_analysis_only_rejects_conflicting_estimate_declarations(
             return result
         raise AssertionError(method)
 
-    client = _client(tmp_path, clients, respond)
+    client = _client(tmp_path, clients, respond, recipes=(T1_DEFINITION, conflict))
     with pytest.raises(ValueError, match="Ambiguous analysis estimate 't1'"):
         client.call("tab_analyze", {"tab": "t"})
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
 def test_analysis_only_uses_unambiguous_native_quality_without_live_reads(
-    tmp_path, clients, monkeypatch, stage
+    tmp_path, clients, stage
 ):
-    t1 = next(recipe for recipe in recipes.RECIPES if recipe.name == "t1")
-    identical = replace(t1, name="identical-t1")
-    monkeypatch.setattr(recipes, "RECIPES", (*recipes.RECIPES, identical))
+    identical = replace(T1_DEFINITION, name="identical-t1")
     native_issue = {
         "path": "summary.fit_quality.fit.relative_parameter_errors.decay_time",
         "reason": "covariance_unavailable",
@@ -226,7 +234,7 @@ def test_analysis_only_uses_unambiguous_native_quality_without_live_reads(
             return result
         raise AssertionError(method)
 
-    client = _client(tmp_path, clients, respond)
+    client = _client(tmp_path, clients, respond, recipes=(T1_DEFINITION, identical))
     initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
     assert initial.data["status"] == "finished", initial.data
     execution = initial.data["execution"]
@@ -497,7 +505,9 @@ def test_cancelled_analysis_queued_before_dispatch_never_starts(
     client = _client(tmp_path, clients, respond)
     # A captured binding lets a second public tool register while RPC is occupied.
     client.context = client.context.bound()
-    client.tools = build_measure_tools(client.context)
+    client.tools = build_measure_tools(
+        client.context, recipes=client.context.session.recipes.definitions
+    )
     register = client.context.session.executions.start
 
     def observe_registration(*args, **kwargs):

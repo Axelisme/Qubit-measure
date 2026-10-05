@@ -12,8 +12,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.measure.registry import register_all
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -31,6 +29,9 @@ from zcu_tools.gui.remote.errors import (
 )
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.session.services.io_manager import IOManager
+
+from zcu_lab.definitions import register_all
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
 def _make_controller(readiness: ContextReadiness) -> Controller:

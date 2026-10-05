@@ -20,7 +20,6 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTextEdit,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -46,6 +45,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import cfg_resources, configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 _DATA = ArtifactKey(ArtifactKind.DATA)
 _FIT = ArtifactKey(ArtifactKind.ANALYSIS, "fit")

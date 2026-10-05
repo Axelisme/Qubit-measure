@@ -18,9 +18,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.experiment.v2_gui.autofluxdep._support.result import QubitFreqResult
-from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.events.run import (
     PointDonePayload,
     RunContinuedPayload,
@@ -34,6 +32,7 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+from zcu_tools.gui.app.autofluxdep.results import FrequencySweepResult
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
 from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_journal_events,
@@ -43,6 +42,9 @@ from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.cfg import ScalarSpec
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
+
+from tests.gui.app.autofluxdep._helpers import build_test_core as build_core
+from zcu_lab.v2._support.autofluxdep.result import QubitFreqResult
 
 from ._helpers import (
     ensure_test_project,
@@ -160,7 +162,7 @@ def _artifact_snapshot(run_dir: Path) -> dict[str, Any]:
     data_root = Path(manifest["paths"]["data_root"])
     node_file = data_root / manifest["files"]["nodes"][0]["path"]
     result = load_node_result(node_file, "qubit_freq")
-    assert isinstance(result, QubitFreqResult)
+    assert isinstance(result, FrequencySweepResult)
     export_flux, export_signal = _load_fluxdep_export(manifest)
     return {
         "manifest": manifest,

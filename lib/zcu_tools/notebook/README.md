@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-02, Options namespace
+**Last updated:** 2026-10-05，caller-owned 實驗 helpers
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -34,9 +34,9 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 - [mist](analysis/mist/tool.py)：提供能量摺疊、不連續處理與碰撞遮罩的計算工具。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。
 一般 T1 使用 `nb_adapter(T1Exp())` 與核心的 typed config／options，不另提供扁平參數 wrapper。T1Result 只有資料；RunRecord 是保存與分析的 explicit 來源。Canonical load 可保留 cfg=None 的有效資料，T1 可離線分析，預設 saver 則拒絕缺 cfg 的來源。
-- GE 的 run／FIT／save／load 使用 `nb_adapter(GE_Exp())` 與核心 typed cfg／options。[`experiments/ge.py`](experiments/ge.py) 的 `GEPostAnalyzer` 是獨立 post 工具，明確接收 `GEPrimaryRecord` 與 post options。Primary 是共用 AnalysisRecord；post record 從 primary 取得同一來源，保留其 calibration、options 與純圖。工具不讀 Adapter 的 current run／FIT，不重新 fitting。成功收尾後才發布 post record 與 presentation handle；失敗保留舊成果，舊原生圖仍可保存。
-- [`experiments/flux_dep.py`](experiments/flux_dep.py)：`FluxDepAnalyzer.start(source, options)` 明確接收 OneTone 或 TwoTone 通量光譜的 RunRecord，建立選線 widgets 與可拖曳的預覽。泛型保留 cfg／result 的來源型別，預設為 OneTone；TwoTone caller 明確指定 `FluxDepAnalyzer[FreqFluxCfg, FreqFluxResult]`。工具不綁定 core 或 Adapter 的目前來源。Done 保存捕捉的 source、實際終態 FluxPickState、數值與純具名 `pick` Figure。工具另持有 Plots presentation handle。Cancel 或失敗保留舊成果；Adapter 的 run／load 不清除此工具的分析。預覽與成果圖分開。
-- [`utils.py`](utils.py)：提供 sweep、圖檔保存與設備資訊等 Notebook 輔助函式。`dump_device_info` 與 `reconnect_devices` 接收 caller 的 DeviceManager，不查全域 registry。
+- GE 的 run／FIT／save／load 使用 `nb_adapter(GE_Exp())` 與核心 typed cfg／options。Caller-owned `GEPostAnalyzer` 是獨立 post 工具，明確接收 `GEPrimaryRecord` 與 post options。Primary 是共用 AnalysisRecord；post record 從 primary 取得同一來源，保留其 calibration、options 與純圖。工具不讀 Adapter 的 current run／FIT，不重新 fitting。成功收尾後才發布 post record 與 presentation handle；失敗保留舊成果，舊原生圖仍可保存。
+- Caller-owned `FluxDepAnalyzer.start(source, options)` 明確接收 OneTone 或 TwoTone 通量光譜的 RunRecord，建立選線 widgets 與可拖曳的預覽。泛型保留 cfg／result 的來源型別，預設為 OneTone；TwoTone caller 明確指定 `FluxDepAnalyzer[FreqFluxCfg, FreqFluxResult]`。工具不綁定 core 或 Adapter 的目前來源。Done 保存捕捉的 source、實際終態 FluxPickState、數值與純具名 `pick` Figure。工具另持有 Plots presentation handle。Cancel 或失敗保留舊成果；Adapter 的 run／load 不清除此工具的分析。預覽與成果圖分開。
+- [`utils.py`](utils.py)：提供圖檔保存與設備資訊等 Notebook 輔助函式。Sweep 建構使用 `experiment.utils.make_sweep`，與核心實驗共用框架入口。`dump_device_info` 與 `reconnect_devices` 接收 caller 的 DeviceManager，不查全域 registry。
 - [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。
 
 ## 共用責任與目前邊界

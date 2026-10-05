@@ -21,15 +21,18 @@ def hw_fixture(qapp, tmp_path):
     """Real Controller + MainWindow via shipped composition, no hardware."""
     from unittest.mock import MagicMock
 
-    from zcu_tools.experiment.v2_gui.measure.registry import register_all
-    from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
-    from zcu_tools.gui.app.measure.app import _build_window, _make_empty_ctx
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
+    from zcu_tools.gui.app.measure.app import _build_window
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.session.services.io_manager import IOManager
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    state = State(_make_empty_ctx())  # soc=None, no hardware
+    from zcu_lab.definitions import register_all
+    from zcu_lab.roles import register_all_roles
+
+    state = State(SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))
     registry = Registry()
     register_all(registry)
     role_catalog = RoleCatalog()
@@ -40,27 +43,16 @@ def hw_fixture(qapp, tmp_path):
     )
     # Attach a no-op caretaker so MainWindow close does not assert (production
     # attaches it in MeasureGuiBehavior.before_show, which we do not run here).
-    ctrl._caretaker = MagicMock()  # type: ignore[attr-defined]
-    ctrl._caretaker.flush = MagicMock()  # type: ignore[attr-defined]
+    ctrl.attach_caretaker(MagicMock())
     window.show()
     QApplication.processEvents()
     QApplication.processEvents()
     yield ctrl, window
-    # Teardown: close window and quiesce background
-    try:
-        # Avoid triggering persist path that expects a real caretaker; just delete.
-        window.deleteLater()
-        QApplication.processEvents()
-        QApplication.processEvents()
-    except Exception:
-        pass
-    try:
-        ctrl._background_svc.quiesce()  # type: ignore[attr-defined]
-    except Exception:
-        try:
-            ctrl._app_services.background.quiesce()  # type: ignore[attr-defined]
-        except Exception:
-            pass
+    # Join workers and drain queued delivery before releasing Qt resources.
+    ctrl._background_svc.quiesce()
+    window.deleteLater()
+    QApplication.processEvents()
+    QApplication.processEvents()
 
 
 def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
@@ -68,7 +60,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     ctrl, window = hw_fixture
 
     # Verify fake/freq is available and hardware-free
-    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
+    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
     caps = FakeFreqAdapter.capabilities
     assert caps.requires_soc is False

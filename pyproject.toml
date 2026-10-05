@@ -60,7 +60,7 @@ design = [
   "ipywidgets",
   "ipympl"
 ]
-gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
+gui = ["zcu-tools[client]", "qtpy", "PyQt6", "jsonschema>=4"]
 all = ["zcu-tools[client,gdrive,design,gui]"]
 development = ["zcu-tools[all]"]
 
@@ -83,8 +83,12 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools]
-package-dir = { "" = "lib", "recipes" = "recipes" }
-packages = ["zcu_tools", "recipes"]
+package-dir = { "" = "lib", "zcu_lab" = "zcu_lab" }
+
+[tool.setuptools.packages.find]
+where = ["lib", "."]
+include = ["zcu_tools", "zcu_tools.*", "zcu_lab", "zcu_lab.*"]
+namespaces = true
 
 [tool.ruff.lint]
 # E402 is checked incrementally like other existing debt. Entry points with
@@ -148,12 +152,12 @@ max-args = 6
 "tests/**" = ["PLR0913", "ARG001", "ARG002", "FBT001", "FBT002", "B011"]
 
 [tool.pyright]
-include = ["lib", "tests", "scripts", "tools", "recipes"]
+include = ["lib", "zcu_lab", "tests", "scripts", "tools"]
 executionEnvironments = [
-  { root = "recipes", extraPaths = ["lib", "."] },
+  { root = "zcu_lab", extraPaths = ["lib", "."] },
   { root = "lib", extraPaths = ["lib", "."] },
   { root = "tests", extraPaths = ["lib", "tools", "."] },
-  { root = "scripts", extraPaths = ["lib"] },
+  { root = "scripts", extraPaths = ["lib", "."] },
   { root = "tools", extraPaths = ["lib", "tools"] },
 ]
 # strict, minus the rules whose diagnostics are produced by untyped third-party
