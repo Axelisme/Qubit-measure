@@ -14,12 +14,7 @@ from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.time_domain.t1.core import (
-    T1AnalyzeOptions,
-    T1Cfg,
-    T1Exp,
-    T1Result,
-)
+from tests.notebook._adapter_fakes import Cfg, Options, RecordingCore
 
 
 def widget_ids() -> set[str]:
@@ -241,14 +236,10 @@ def test_notebook_adapter_uses_default_widget_host_and_retains_success(
 ) -> None:
     displayed: list[object] = []
     monkeypatch.setattr(IPython.display, "display", displayed.append)
-    times = np.linspace(0.0, 80.0, 81)
-    source = RunRecord[T1Cfg, T1Result](
-        cfg=None,
-        result=T1Result(times, np.exp(-times / 20.0).astype(np.complex128)),
-    )
-    adapter = NotebookAdapter()(T1Exp())
+    source = RunRecord[Cfg, float](cfg=None, result=2.0)
+    adapter = NotebookAdapter()(RecordingCore())
     try:
-        successful = adapter.analyze(T1AnalyzeOptions(), source=source)
+        successful = adapter.analyze(Options(weights=[1.0]), source=source)
         figure = successful.figures["fit"]
         assert displayed == [figure.canvas]
         assert figure.canvas.manager is not None
@@ -259,7 +250,7 @@ def test_notebook_adapter_uses_default_widget_host_and_retains_success(
 
         monkeypatch.setattr(IPython.display, "display", fail_display)
         with pytest.raises(RuntimeError, match="publisher failed"):
-            adapter.analyze(T1AnalyzeOptions(skip=1), source=source)
+            adapter.analyze(Options(weights=[2.0]), source=source)
         assert adapter.analysis is successful
         assert widget_ids() == live_widgets
     finally:

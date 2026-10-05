@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 import pytest
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AdapterCfgDefinition,
     AnalysisMode,
     ExpAdapterProtocol,
     NoAnalysisResult,
@@ -16,10 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
+from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 class _MinimalNoAnalysisAdapter(
@@ -31,8 +29,8 @@ class _MinimalNoAnalysisAdapter(
     exp_cls: ClassVar[type[object]] = object
 
     @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return MeasureCfgBuilder().build()
+    def cfg_definition(cls) -> AdapterCfgDefinition:
+        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: Any) -> str:
         del ctx
@@ -90,8 +88,8 @@ def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
             exp_cls: ClassVar[type[object]] = object
 
             @classmethod
-            def cfg_definition(cls) -> MeasureCfgDefinition:
-                return MeasureCfgBuilder().build()
+            def cfg_definition(cls) -> AdapterCfgDefinition:
+                return StaticCfgDefinition()
 
             def make_filename_stem(self, ctx: Any) -> str:
                 del ctx
@@ -112,8 +110,8 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
         exp_cls: ClassVar[type[object]] = object
 
         @classmethod
-        def cfg_definition(cls) -> MeasureCfgDefinition:
-            return MeasureCfgBuilder().build()
+        def cfg_definition(cls) -> AdapterCfgDefinition:
+            return StaticCfgDefinition()
 
         def make_filename_stem(self, ctx: Any) -> str:
             del ctx
@@ -292,13 +290,6 @@ def test_intermediate_base_forbidden_implementation_is_detected() -> None:
             )
 
 
-def test_registered_adapters_import_with_capability_validation() -> None:
-    from zcu_lab.definitions import ADAPTERS
-
-    assert "singleshot/t1_tone_sweep_gain" in ADAPTERS
-    assert "singleshot/t1_tone_sweep_freq" in ADAPTERS
-
-
 def test_run_preflight_protocol_and_base_signatures_match() -> None:
     assert signature(ExpAdapterProtocol.validate_run_request) == signature(
         BaseAdapter.validate_run_request
@@ -311,14 +302,3 @@ def test_base_run_preflight_default_is_noop() -> None:
 
     assert _MinimalNoAnalysisAdapter().validate_run_request(req, raw_cfg) is None
     assert set(raw_cfg) == {"sentinel"}
-
-
-def test_registered_adapters_satisfy_framework_protocol() -> None:
-    from zcu_lab.definitions import ADAPTERS
-
-    for name, adapter_cls in ADAPTERS.items():
-        adapter = adapter_cls()
-        assert isinstance(adapter, ExpAdapterProtocol), (
-            f"registered adapter {name!r} ({adapter_cls.__name__}) does not satisfy "
-            "ExpAdapterProtocol"
-        )

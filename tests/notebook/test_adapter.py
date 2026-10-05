@@ -1,90 +1,22 @@
 """Behavior of the common Notebook record and operation ownership seam."""
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, NoReturn, assert_type
+from typing import NoReturn, assert_type
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.device import DeviceManager, FakeDevice
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-
-class _Cfg(ExpCfgModel):
-    scale: float = 1.0
-
-
-@dataclass
-class _Options:
-    weights: list[float]
-
-
-class _Core:
-    def __init__(self) -> None:
-        self.fail_analysis = False
-        self.fail_run = False
-        self.signal_outcome: Literal["stopped", "failed", "interrupted"] | None = None
-        self.contexts: list[RunContext] = []
-        self.saved: list[tuple[RunRecord[_Cfg, float], Path]] = []
-        self.metadata: tuple[str | None, str | None] | None = None
-
-    def run(self, config: _Cfg, *, context: RunContext) -> float:
-        self.contexts.append(context)
-        result = config.scale
-        _, axes = context.plots.subplots("raw")
-        axes.plot([0.0], [result])
-        config.scale = 99.0
-        if self.fail_run:
-            raise ValueError("Run failed after creating a diagnostic figure")
-        if self.signal_outcome == "stopped":
-            context.cancel_signal.set()
-        elif self.signal_outcome is not None:
-            context.cancel_signal.set_error(
-                self.signal_outcome, "Acquisition failed", OSError("Device unavailable")
-            )
-        return result
-
-    def analyze(
-        self,
-        source: RunRecord[_Cfg, float],
-        options: _Options,
-        *,
-        plots: Plots,
-    ) -> float:
-        analysis = source.result * options.weights[0]
-        if source.cfg is not None:
-            source.cfg.scale = 42.0
-        options.weights[0] = 99.0
-        _, axes = plots.subplots("fit")
-        axes.plot([0.0], [analysis])
-        if self.fail_analysis:
-            raise ValueError("Analysis failed after creating a diagnostic figure")
-        return analysis
-
-    def save(
-        self,
-        source: RunRecord[_Cfg, float],
-        destination: Path,
-        *,
-        comment: str | None = None,
-        tag: str | None = None,
-    ) -> None:
-        with destination.open("x", encoding="utf-8") as file:
-            file.write(str(source.result))
-        self.saved.append((source, destination))
-        self.metadata = (comment, tag)
-
-    def load(self, source: Path) -> RunRecord[_Cfg, float]:
-        if source.name == "missing":
-            raise FileNotFoundError(source)
-        return RunRecord(cfg=_Cfg(scale=5.0), result=5.0)
+from tests.notebook._adapter_fakes import Cfg as _Cfg
+from tests.notebook._adapter_fakes import Options as _Options
+from tests.notebook._adapter_fakes import RecordingCore as _Core
 
 
 class _Host(NonPresentingHost):
@@ -123,6 +55,35 @@ def test_analysis_returns_explicit_source_and_isolates_working_options() -> None
     np.testing.assert_array_equal(
         record.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
     )
+
+
+def test_nullable_analysis_options_are_delegated_and_retained() -> None:
+    received: list[_Options | None] = []
+
+    class NullableCore(_Core):
+        def analyze(
+            self,
+            source: RunRecord[_Cfg, float],
+            options: _Options | None,
+            *,
+            plots: Plots,
+        ) -> float:
+            received.append(options)
+            if options is None:
+                return source.result
+            return super().analyze(source, options, plots=plots)
+
+    source = RunRecord[_Cfg, float](cfg=None, result=3.0)
+    adapter = NotebookAdapter(host=NonPresentingHost())(NullableCore())
+
+    record = adapter.analyze(None, source=source)
+
+    assert received == [None]
+    assert record.options is None
+    assert record.source is source
+    assert record.result == source.result
+    assert adapter.analysis is record
+    assert adapter.last_run is None
 
 
 def test_successful_load_clears_analysis_but_old_source_stays_explicit() -> None:

@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-05，實驗核心與前端附件同址
+**Last updated:** 2026-10-05，通用契約與共用 helper 測試
 
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 是可選的 measure-gui adapter。`autofluxdep.py` 是可選的 Autofluxdep Builder／Node 附件。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
@@ -34,4 +34,4 @@ zcu_lab/
 - [Measure support](_support/measure/README.md) 與 [Autofluxdep support](_support/autofluxdep/README.md) 各自提供共享 domain mechanics。
 - [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire、stop 與 executor lifecycle。
 
-測試位於 `tests/zcu_lab/v2/`，對應此套件的模組目錄。Core-only caller 明確 import `core`；GUI callers 明確選擇其附件。
+測試位於 `tests/zcu_lab/`。套件層的通用契約由 registry 選出每個 adapter；`tests/zcu_lab/v2/` 保留共用 helper、role defaults 與使用者要求的 AllXY、ZigZag、ZigZagScan 特例，不逐實驗測 cfg、fit 或 writeback 政策。Core-only caller 明確 import `core`；GUI callers 明確選擇其附件。

@@ -214,6 +214,15 @@ ignore_imports =
     # Debt: logging setup is not part of the remote contract (backlog).
     zcu_tools.mcp.measure.server -> zcu_tools.gui.logging_setup
 
+# D72: concrete definitions are supplied by the external composition root.
+[importlinter:contract:framework-no-user]
+name = C16: the framework does not import the user experiment package
+type = forbidden
+source_modules =
+    zcu_tools
+forbidden_modules =
+    zcu_lab
+
 # D75: experiment cores remain independent of all GUI attachments and helpers.
 [importlinter:contract:user-core-no-gui]
 name = C15: user experiment cores do not depend on the GUI

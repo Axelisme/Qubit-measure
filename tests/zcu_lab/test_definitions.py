@@ -14,4 +14,5 @@ def test_registration_produces_valid_catalog(startup: bool) -> None:
 
     register_all(registry, roles=roles)
 
+    assert registry.list_names()
     registry.validate()

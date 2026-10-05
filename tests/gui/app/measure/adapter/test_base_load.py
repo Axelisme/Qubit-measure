@@ -5,13 +5,12 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
-from zcu_tools.datafile import save_labber_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AdapterCfgDefinition,
     AnalysisMode,
     LoadDataRequest,
     NoAnalysisResult,
@@ -21,11 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
+from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
 class _Cfg(ExpCfgModel):
@@ -52,8 +47,8 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeP
     exp_cls = _LoadExp
 
     @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return MeasureCfgBuilder().build()
+    def cfg_definition(cls) -> AdapterCfgDefinition:
+        return StaticCfgDefinition()
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "load"
@@ -114,18 +109,18 @@ def test_base_adapter_load_preserves_canonical_validation_error() -> None:
         _InvalidCanonicalAdapter().load(_request("/tmp/invalid.hdf5"))
 
 
-def test_flux_dep_adapter_reports_canonical_axis_error(tmp_path: Path) -> None:
-    path = save_labber_data(
-        str(tmp_path / "invalid_flux"),
-        z=("Signal", "a.u.", np.ones((2, 2), dtype=np.complex128)),
-        axes=[
-            ("Frequency", "Hz", [4.3e9, 4.4e9]),
-            ("Wrong flux axis", "a.u.", [0.0, 1.0]),
-        ],
-    )
+def test_base_adapter_reports_canonical_axis_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = ValueError("canonical axis 1 label")
 
-    with pytest.raises(ValueError, match="canonical axis 1 label"):
-        FluxDepAdapter().load(_request(path))
+    def reject_axis(self: _LoadExp, filepath: Path) -> _LoadedRecord:
+        raise error
+
+    monkeypatch.setattr(_LoadExp, "load", reject_axis)
+    with pytest.raises(ValueError, match="canonical axis 1 label") as caught:
+        _LoadAdapter().load(_request())
+    assert caught.value is error
 
 
 @pytest.mark.parametrize("adapter_cls", [_NeedsArgsAdapter, _NoLoadAdapter])

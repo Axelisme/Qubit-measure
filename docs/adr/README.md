@@ -61,7 +61,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [模組定位與依賴邊界](draft/module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、`cfg_model` 共享核心與債務清單。分層與無循環規則已由 `.importlinter` C8–C13 生效；債務尚未清除。
+- [模組定位與依賴邊界](draft/module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、`cfg_model` 共享核心與債務清單。分層與無循環規則由 `.importlinter` C8–C13 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；其餘債務尚未清除。
 - [實驗核心、前端包裝與具名圖形產物](draft/experiment-interface-redesign.md)：全實驗與 caller 已在 task 分支遷移，舊自訂 pyplot routing backend 已退場。修正候選已完成軟體驗證及雙軸審查；正式接受以 task 的逐列證據與裁決紀錄為準，landing 另需使用者授權。草案不代表持久分支已採用。包含 records、具名原生圖、RunContext／CfgEnv、instance DeviceManager 與模擬環境 coordinator 的分工。
 
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。

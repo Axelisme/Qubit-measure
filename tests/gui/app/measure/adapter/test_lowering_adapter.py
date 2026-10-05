@@ -26,9 +26,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
-from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
-from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
+from tests.gui.app.measure.adapter._cfg_fakes import CalibrationAdapter, CalibrationCfg
 
 _PULSE = {
     "type": "pulse",
@@ -96,17 +94,41 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
     assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
 
 
-@pytest.mark.parametrize("adapter_type", [OneToneFluxDepAdapter, FluxDepAdapter])
-def test_flux_run_assembles_lowered_cfg_with_frozen_device_snapshot(
-    adapter_type: type[OneToneFluxDepAdapter] | type[FluxDepAdapter],
+@pytest.mark.parametrize("device_name", ["sensor", "probe"])
+def test_run_cfg_assembly_uses_only_the_frozen_device_snapshot(
+    device_name: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = adapter_type()
+    adapter = CalibrationAdapter()
     ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-    schema = adapter.make_default_cfg(ctx)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "dev": CfgSectionSpec(
+                    fields={
+                        device_name: CfgSectionSpec(
+                            fields={"label": ScalarSpec("Label", str)}
+                        ),
+                    }
+                )
+            }
+        ),
+        value=CfgSectionValue(
+            fields={
+                "dev": CfgSectionValue(
+                    fields={
+                        device_name: CfgSectionValue(
+                            fields={"label": DirectValue("frozen_label")}
+                        ),
+                    }
+                )
+            }
+        ),
+    )
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     device = FakeDeviceInfo(address="frozen", value=0.125)
-    request = RunRequest(soc=None, soccfg=None, device_snapshot={"flux_yoko": device})
+    request = RunRequest(soc=None, soccfg=None, device_snapshot={device_name: device})
+    device.value = 99.0
 
     def unexpected_device_read(_manager):
         pytest.fail("Frozen Run must not read live devices")
@@ -114,97 +136,92 @@ def test_flux_run_assembles_lowered_cfg_with_frozen_device_snapshot(
     monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
     cfg = adapter.build_exp_cfg(raw, request)
 
-    assert cfg.dev["flux_yoko"].label == "flux_dev"
-    assert isinstance(cfg.dev["flux_yoko"], FakeDeviceInfo)
-    assert cfg.dev["flux_yoko"].value == 0.125
-    assert cfg.dev["flux_yoko"].address == "frozen"
-    assert device.label != "flux_dev"
-    assert raw["dev"] == {"flux_dev": "flux_yoko"}
-    assert cfg.sweep.flux.expts > 0
-    assert cfg.sweep.freq.expts > 0
+    assert cfg.dev is not None
+    observed = cfg.dev[device_name]
+    assert isinstance(observed, FakeDeviceInfo)
+    assert observed.label == "frozen_label"
+    assert observed.value == 0.125
+    assert observed.address == "frozen"
+    assert observed is not device
+    assert device.label != "frozen_label"
+    assert raw["dev"] == {device_name: {"label": "frozen_label"}}
 
 
-def _frequency_schema(mode: str) -> tuple[OneToneFreqAdapter, SessionEnv, CfgSchema]:
-    adapter = OneToneFreqAdapter()
+def _calibration_schema(mode: str) -> tuple[CalibrationAdapter, SessionEnv, CfgSchema]:
+    adapter = CalibrationAdapter()
     ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     schema = adapter.make_default_cfg(ctx)
-    schema.value.fields["sampling_mode"] = DirectValue(mode)
+    schema.value.fields["mode"] = DirectValue(mode)
     return adapter, ctx, schema
 
 
-@pytest.mark.parametrize("mode", ["linear", "homophasal"])
+@pytest.mark.parametrize("mode", ["plain", "calibrated"])
 def test_optional_calibration_parse_error_is_not_ignored_by_mode(mode: str) -> None:
-    _, ctx, schema = _frequency_schema(mode)
-    calibration = schema.value.fields["homophasal"]
+    _, ctx, schema = _calibration_schema(mode)
+    calibration = schema.value.fields["calibration"]
     assert isinstance(calibration, CfgSectionValue)
-    calibration.fields["r_f"] = EvalValue("missing_calibration")
+    calibration.fields["frequency"] = EvalValue("missing_calibration")
 
-    with pytest.raises(RuntimeError, match="homophasal.r_f|missing_calibration"):
+    with pytest.raises(RuntimeError, match="calibration.frequency|missing_calibration"):
         schema_to_raw_dict(schema, ctx.md, ctx.ml)
 
 
-@pytest.mark.parametrize("mode", ["linear", "homophasal"])
-def test_resolved_calibration_is_assembled_from_cfg_not_metadict(
-    mode: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    adapter, ctx, schema = _frequency_schema(mode)
-    calibration = schema.value.fields["homophasal"]
+@pytest.mark.parametrize("mode", ["plain", "calibrated"])
+def test_resolved_calibration_is_assembled_from_cfg_not_metadict(mode: str) -> None:
+    adapter, ctx, schema = _calibration_schema(mode)
+    calibration = schema.value.fields["calibration"]
     assert isinstance(calibration, CfgSectionValue)
-    for key, value in {"r_f": 6000.0, "rf_w": 10.0, "theta0": 0.1}.items():
+    for key, value in {"frequency": 6000.0, "width": 10.0, "phase": 0.1}.items():
         calibration.fields[key] = DirectValue(value)
-    ctx.md.r_f = 7000.0
-    ctx.md.rf_w = 20.0
-    ctx.md.theta0 = 0.2
+    ctx.md.frequency = 7000.0
+    ctx.md.width = 20.0
+    ctx.md.phase = 0.2
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     cfg = adapter.build_exp_cfg(
         raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
     )
 
-    if mode == "linear":
-        assert cfg.homophasal is None
-    else:
-        assert cfg.homophasal is not None
-        assert cfg.homophasal.model_dump() == {
-            "r_f": 6000.0,
-            "rf_w": 10.0,
-            "theta0": 0.1,
-        }
+    assert cfg.mode == mode
+    assert cfg.calibration.model_dump() == {
+        "frequency": 6000.0,
+        "width": 10.0,
+        "phase": 0.1,
+    }
 
 
-def test_empty_optional_calibration_allows_linear_assembly(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    adapter, ctx, schema = _frequency_schema("linear")
+def test_empty_optional_calibration_uses_model_defaults() -> None:
+    adapter, ctx, schema = _calibration_schema("plain")
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     cfg = adapter.build_exp_cfg(
         raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
     )
-    assert cfg.sampling_mode == "linear"
-    assert cfg.homophasal is None
+    assert cfg.mode == "plain"
+    assert cfg.calibration == CalibrationCfg()
 
 
 @pytest.mark.parametrize(
     "field, value",
     [
-        ("r_f", None),
-        ("rf_w", None),
-        ("theta0", None),
-        ("r_f", 0.0),
-        ("r_f", -1.0),
-        ("rf_w", 0.0),
-        ("rf_w", -1.0),
+        ("frequency", None),
+        ("width", None),
+        ("phase", None),
+        ("frequency", 0.0),
+        ("frequency", -1.0),
+        ("width", 0.0),
+        ("width", -1.0),
     ],
 )
 def test_adapter_run_rejects_invalid_calibration_before_device_io(
     field: str, value: float | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    adapter, ctx, schema = _frequency_schema("homophasal")
-    calibration = schema.value.fields["homophasal"]
-    assert isinstance(calibration, CfgSectionValue)
-    calibration.fields["r_f"] = DirectValue(6000.0)
-    calibration.fields["rf_w"] = DirectValue(10.0)
-    calibration.fields["theta0"] = DirectValue(0.1)
-    calibration.fields[field] = DirectValue(value)
+    adapter, ctx, schema = _calibration_schema("calibrated")
+    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    raw["calibration"] = {
+        "frequency": 6000.0,
+        "width": 10.0,
+        "phase": 0.1,
+        field: value,
+    }
 
     def unexpected_device_read(_manager):
         pytest.fail("Invalid calibration reached device I/O")
@@ -213,7 +230,7 @@ def test_adapter_run_rejects_invalid_calibration_before_device_io(
     with pytest.raises(ValueError, match=field):
         adapter.run(
             RunRequest(soc=None, soccfg=None, device_snapshot={}),
-            schema_to_raw_dict(schema, ctx.md, ctx.ml),
+            raw,
             context=RunContext(
                 None,
                 None,

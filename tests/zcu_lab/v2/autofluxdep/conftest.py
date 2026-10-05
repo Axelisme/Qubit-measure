@@ -1,14 +1,10 @@
-"""Shared fixtures for autofluxdep-gui tests (ui and non-ui).
+"""Optional headless Qt fixtures for this Autofluxdep test owner.
 
-The session core is async and Qt-backed: a controller composes the shared session
-services (ConnectionService / DeviceService / BackgroundRunner — all QObjects)
-at construction, and establishing a mock SoC goes through ConnectionService's
-``QTimer.singleShot`` settle. So a ``QApplication`` must exist *before* any
-``build_core()`` (a QObject created with no app gets its C++ side torn down) and
-to pump the connect loop. The ``qapp`` fixture is therefore ``autouse`` — it is
-created once at session start, ahead of every test. This is the same ``qapp`` +
-``QEventLoop`` pattern measure-gui's tests use (``tests/gui/conftest.py`` /
-``tests/gui/session/services/test_connection.py``).
+Qt-backed controller cases opt in with explicit ``usefixtures("qapp",
+"drain_qt_events")``. ``qapp`` has session scope; neither fixture is autouse.
+The remaining pure InfoTracker cases do not request either fixture and do not
+create a QApplication. Shared plotter cases have their own explicit fixtures
+under ``tests/zcu_lab/v2/_support/autofluxdep``.
 """
 
 from __future__ import annotations
@@ -25,8 +21,7 @@ os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
 
 @pytest.fixture(scope="session", autouse=False)
 def qapp():
-    """A single offscreen QApplication for the test session (created before any
-    test body, so controller QObjects are constructed against a live app)."""
+    """Create one offscreen QApplication before an explicitly opted-in case."""
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
@@ -35,7 +30,7 @@ def qapp():
 
 @pytest.fixture(autouse=False)
 def drain_qt_events(qapp):
-    """Drain pending Qt events before and after every test (xdist segfault prevention).
+    """Drain pending Qt events before and after an explicitly opted-in case.
 
     See tests/gui/conftest.py for the full rationale.
     """

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    ExpAdapterProtocol,
+    SessionEnv,
+)
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.program.v2 import ModuleCfgFactory
@@ -80,6 +84,14 @@ def _ctx(*, rich: bool) -> SessionEnv:
 
 
 @pytest.mark.parametrize("name", _registry().list_names())
+def test_registered_adapter_conforms_to_framework(name: str) -> None:
+    adapter = _registry().create(name)
+
+    assert isinstance(adapter, ExpAdapterProtocol)
+    assert isinstance(adapter.capabilities, AdapterCapabilities)
+
+
+@pytest.mark.parametrize("name", _registry().list_names())
 def test_registered_adapter_definition_has_context_free_shape(name: str) -> None:
     adapter = _registry().create(name)
     assert isinstance(adapter, BaseAdapter)
@@ -101,4 +113,21 @@ def test_registered_adapter_definition_is_reusable(name: str) -> None:
     definition = type(adapter).cfg_definition()
     ctx = _ctx(rich=True)
 
-    assert definition.instantiate(ctx) == definition.instantiate(ctx)
+    first = definition.instantiate(ctx)
+    second = definition.instantiate(ctx)
+    expected = definition.instantiate(ctx)
+
+    assert first == second == expected
+    assert first.spec is not second.spec
+    assert first.spec.fields is not second.spec.fields
+    assert first.value is not second.value
+    assert first.value.fields is not second.value.fields
+
+    first.spec.fields.clear()
+    first.value.fields.clear()
+    assert second == expected
+    assert definition.instantiate(ctx) == expected
+
+    exposed_spec = definition.spec
+    exposed_spec.fields.clear()
+    assert definition.spec == expected.spec

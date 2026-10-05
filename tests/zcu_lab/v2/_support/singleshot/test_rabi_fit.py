@@ -4,59 +4,12 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.records import RunRecord
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from zcu_lab.v2._support.singleshot.rabi_fit import (
-    RabiJointFitResult,
     RabiPhysicalParams,
     fit_rabi_joint,
     rabi_excited_population,
 )
-from zcu_lab.v2.singleshot.len_rabi.core import (
-    LenRabiAnalyzeOptions,
-    LenRabiExp,
-    LenRabiResult,
-)
-
-
-@pytest.mark.parametrize("initial_state", ["ground", "excited"])
-@pytest.mark.parametrize("decay", [False, True])
-@pytest.mark.parametrize("fit_phase", [False, True])
-def test_len_experiment_forwards_decay_to_joint_fit(
-    monkeypatch: pytest.MonkeyPatch,
-    decay: bool,
-    fit_phase: bool,
-    initial_state: Literal["ground", "excited"],
-) -> None:
-    called: list[tuple[bool, bool, str]] = []
-
-    def fake_fit(
-        *args: Any, decay: bool, fit_phase: bool, initial_state: str, **kwargs: Any
-    ) -> RabiJointFitResult:
-        called.append((decay, fit_phase, initial_state))
-        raise RuntimeError("fit called")
-
-    monkeypatch.setattr("zcu_lab.v2.singleshot.len_rabi.core.fit_rabi_joint", fake_fit)
-    result = LenRabiResult(
-        lengths=np.array([0.0]),
-        shot_indices=np.array([0]),
-        signals=np.array([[0.0j]]),
-    )
-    plots = Plots(NonPresentingHost())
-    try:
-        with pytest.raises(RuntimeError, match="fit called"):
-            LenRabiExp().analyze(
-                RunRecord(cfg=None, result=result),
-                LenRabiAnalyzeOptions(
-                    decay=decay, fit_phase=fit_phase, initial_state=initial_state
-                ),
-                plots=plots,
-            )
-    finally:
-        plots.finish(present=False)
-        plots.release()
-    assert called == [(decay, fit_phase, initial_state)]
 
 
 def test_nondecay_rabi_population_has_constant_envelope() -> None:
