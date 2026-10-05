@@ -23,7 +23,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgDefinition,
     scaled_md,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -32,6 +31,7 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     SessionEnv,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
 
 AllXYRunResult: TypeAlias = RunRecord[AllXYCfg, AllXY_Result]

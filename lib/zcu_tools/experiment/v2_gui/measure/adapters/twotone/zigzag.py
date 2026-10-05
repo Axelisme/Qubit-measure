@@ -33,7 +33,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.ctx_helpers import (
     md_get_float,
     md_has_key,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -44,6 +43,7 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     SessionEnv,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
