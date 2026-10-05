@@ -142,9 +142,27 @@ def test_primary_and_post_done_return_recipe_continuation_then_question(tmp_path
         primary = client.call("sample", {"post": True})
         key = primary.data["execution"]
         assert primary.data["status"] == "interactive"
+        assert primary.data["interaction"]["state"] == {"stage": "primary"}
         post = client.call("tab_interact", {"tab": "t", "payload": {"command": "done"}})
         assert post.data["execution"] == key and post.data["status"] == "interactive"
         assert post.data["analysis"]["stage"] == "post"
+        calls = len(client.transport.calls)
+        status = client.call("status", {"execution": key})
+        waited = client.call("wait", {"execution": key, "timeout": 0})
+        full = client.call("status", {"execution": key, "detail": "full"})
+        assert len(client.transport.calls) == calls
+        for summary in (post.data, status, waited.data):
+            assert summary["interaction"]["state"] == {"stage": "post"}
+            assert summary["interaction"]["commands"] == [
+                {"name": "select-post"}, {"name": "done"}
+            ]
+            assert summary["interaction"]["info"] == {"label": "post-picker"}
+        assert full["analysis"]["interaction"]["state"] == {"stage": "primary"}
+        assert full["analysis"]["interaction"]["commands"] == [
+            {"name": "select-primary"}, {"name": "done"}
+        ]
+        assert full["analysis"]["interaction"]["info"] == {"label": "primary-picker"}
+        assert full["post_analysis"]["interaction"]["state"] == {"stage": "post"}
         question = client.call(
             "tab_interact", {"tab": "t", "payload": {"command": "done"}}
         )

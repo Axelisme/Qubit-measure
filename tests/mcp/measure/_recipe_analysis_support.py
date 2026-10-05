@@ -95,8 +95,8 @@ class AnalysisRecipeGui(LookbackGui):
                 "operation_id": 93 if stage == "primary" else 104,
                 "plugin": "generic-test",
                 "state": {"stage": stage},
-                "info": {"label": "picker"},
-                "commands": [{"name": "done"}],
+                "info": {"label": f"{stage}-picker"},
+                "commands": [{"name": f"select-{stage}"}, {"name": "done"}],
                 "preview_active": True,
                 "figure": {"png_b64": base64.b64encode(PNG).decode()}
                 if params.get("include_figure", True)
