@@ -182,6 +182,34 @@ def test_point_shapes_nonfinite_values_and_bounds_fail_fast() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    ("stroke", "width"),
+    [
+        ([BrushPoint(0, 0), BrushPoint(0.5, 0.5), BrushPoint(1e308, 1e308)], 0.1),
+        ([BrushPoint(0, 0), BrushPoint(1, 1)], 1e-8),
+        ([BrushPoint(0.5, 0.5)], 1e308),
+    ],
+)
+def test_numeric_or_sampling_limit_fails_before_any_mask_mutation(
+    stroke: list[BrushPoint],
+    width: float,
+) -> None:
+    xs = np.linspace(0, 1, 5)
+    mask = np.zeros((5, 5), dtype=bool)
+    with pytest.raises(ValueError, match="width|stroke|sample|finite"):
+        apply_mask_stroke(xs, xs, mask, stroke, width, select=True)
+    assert not mask.any()
+    with pytest.raises(ValueError, match="width|stroke|sample|finite"):
+        points_in_normalized_stroke(
+            xs,
+            xs,
+            stroke=stroke,
+            width=width,
+            x_bound=(0, 1),
+            y_bound=(0, 1),
+        )
+
+
 def test_empty_point_cloud_returns_empty_membership_for_valid_request() -> None:
     xs = np.array([], dtype=np.float64)
     result = points_in_normalized_stroke(
