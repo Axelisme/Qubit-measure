@@ -34,6 +34,8 @@ from zcu_tools.program.v2 import WaveformCfgFactory
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from zcu_lab.recipes import RECIPES
+
 from ._helpers import call as _raw_call
 from ._helpers import make_png, observe_run_inputs
 from ._helpers import mcp_client as _mcp_client
@@ -507,7 +509,9 @@ def test_recipe_optional_modules_reach_missing_calibration_on_real_gui(
     fx, tmp_path, request, recipe, adapter, disabled_slots, reuse
 ):
     _prepare_guarded_context(fx)
-    bridge, call = _mcp_client(fx.service.port, tmp_path, request=request)
+    bridge, call = _mcp_client(
+        fx.service.port, tmp_path, request=request, recipes=RECIPES
+    )
     try:
         call("connect", {"port": fx.service.port})
         arguments = {}
@@ -544,7 +548,9 @@ def test_lookback_numbers_prepare_real_cfg_without_connected_soc(
 ):
     _prepare_guarded_context(fx)
     fx.state.set_context(replace(fx.state.session_env, soc=None))
-    bridge, call = _mcp_client(fx.service.port, tmp_path, request=request)
+    bridge, call = _mcp_client(
+        fx.service.port, tmp_path, request=request, recipes=RECIPES
+    )
     try:
         call("connect", {"port": fx.service.port})
         result = call(

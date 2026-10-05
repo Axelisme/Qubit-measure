@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import socket
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from io import BytesIO
@@ -47,6 +47,7 @@ from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
+from zcu_tools.mcp.measure.recipe import RecipeDefinition
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -413,8 +414,19 @@ def call_mcp_with_qt(
 
 
 def mcp_client(
-    port: int, tmp_path: Path, *, request: pytest.FixtureRequest | None = None
+    port: int,
+    tmp_path: Path,
+    *,
+    request: pytest.FixtureRequest | None = None,
+    recipes: Sequence[RecipeDefinition] = (),
 ) -> tuple[McpBridge, Callable[[str, dict[str, Any]], dict[str, Any]]]:
+    """Build a fixed-session MCP caller for the test-owned loopback GUI.
+
+    port is the fixture service port. tmp_path owns unused launch paths; no GUI
+    process is launched. request registers session.close for teardown when given.
+    recipes is the exact injected tool set; empty exposes only generic tools.
+    Return the bridge and a Qt-pumping caller that propagates tool failures.
+    """
     config = MCPBridgeConfig(
         tool_prefix="",
         server_display_name="measure-test",
@@ -432,14 +444,18 @@ def mcp_client(
         return config.default_port if requested is None else requested
 
     session = MeasureMcpSession(
-        config, recipes=(), resolve_connect_port=resolver, port_is_open=lambda _: True
+        config,
+        recipes=recipes,
+        resolve_connect_port=resolver,
+        port_is_open=lambda _: True,
     )
     bridge = McpBridge(config)
     session.attach_bridge(bridge)
     if request is not None:
         request.addfinalizer(session.close)
     tools = build_measure_tools(
-        MeasureToolContext(config, session, resolve_connect_port=resolver), recipes=()
+        MeasureToolContext(config, session, resolve_connect_port=resolver),
+        recipes=recipes,
     )
     return bridge, partial(call_mcp_with_qt, tools)
 
