@@ -75,6 +75,34 @@ def test_apply_publishes_exact_snapshot_once_retaining_input_and_undo(cross_cont
         unsubscribe()
 
 
+def test_apply_result_mutation_cannot_change_published_or_committed_mask(cross_controller):
+    ctrl = cross_controller
+    context = ctrl.interactive.begin_cross_selection()
+    notifications = []
+    subscription = ctrl.bus.subscribe(
+        SelectionChangedPayload, lambda event: notifications.append(event)
+    )
+    try:
+        context.plugin.stroke.execute(
+            context.session, BrushStroke((BrushPoint(0.5, 4.5),), 0.0, "erase")
+        )
+        before_version = ctrl.state.version.get(SELECTION_VERSION_KEY)
+        result = ctrl.interactive.apply_cross_selection()
+        result.selected[:] = False
+        np.testing.assert_array_equal(
+            ctrl.state.selection.selected, [True, False, True, False]
+        )
+        np.testing.assert_array_equal(
+            context.session.snapshot().selected, [True, False, True, False]
+        )
+        assert ctrl.state.version.get(SELECTION_VERSION_KEY) == before_version + 1
+        assert len(notifications) == 1
+        assert ctrl.interactive.current_cross_selection() is context
+        assert context.session.can_undo()
+    finally:
+        subscription.unsubscribe()
+
+
 @pytest.mark.parametrize(
     "change",
     [
