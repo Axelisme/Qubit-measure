@@ -86,11 +86,12 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
     }
 
-    # inner-first: times (fastest-varying, int64) then values; both a.u. -> IDENTITY
+    # inner-first: signals are (times, values), so values is inner and times
+    # (int64) outer; both a.u. -> IDENTITY
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("times", "Times", "a.u.", IDENTITY, np.int64),
             Axis("values", "Sweep value", "a.u."),
+            Axis("times", "Times", "a.u.", IDENTITY, np.int64),
         ),
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=ZigZagScanResult,
