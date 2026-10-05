@@ -36,7 +36,7 @@ def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
 
 
 class TimeRabiGui(LookbackGui):
-    """Rabi wire collaborator using the configured publication as reset defaults."""
+    """Drive wire with shared Primary handoffs and configured reset defaults."""
 
     def __init__(self, md=None, *, interactive=False):
         super().__init__()
@@ -47,6 +47,11 @@ class TimeRabiGui(LookbackGui):
         self.adapter_name = "twotone/rabi/len_rabi"
         self.target_name = "pi_len"
         self.fit_summary = {"pi_len": 0.21, "pi_len_err": 0.01, "pi2_len": 0.11}
+        self.library_modules = {
+            "drive": {"type": "pulse"},
+            "calibrated": {"type": "readout/pulse"},
+            "reset": {"type": "reset"},
+        }
         tree = self.publication["tree"]["children"]
         tree["reps"] = scalar(19)
         tree["sweep"] = section(
@@ -92,7 +97,7 @@ class TimeRabiGui(LookbackGui):
         for edit in ordinary:
             if edit["path"][0] == "modules" and len(edit["path"]) == 2:
                 name = edit["value"]["__ref"]
-                if name is not None and name not in ("drive", "calibrated", "reset"):
+                if name is not None and name not in self.library_modules:
                     modules[edit["path"][1]].update(
                         valid=False, error="unknown library"
                     )
@@ -168,11 +173,109 @@ class TimeRabiGui(LookbackGui):
         if method == "tab.snapshot":
             result["tabs"][0]["adapter_name"] = self.adapter_name
         if method == "context.snapshot":
-            result["ml"]["modules"] = {
-                "drive": {"type": "pulse"},
-                "calibrated": {"type": "readout/pulse"},
-                "reset": {"type": "reset"},
-            }
+            result["ml"]["modules"] = deepcopy(self.library_modules)
+        return result
+
+
+class DriveGui(TimeRabiGui):
+    """Spectrum wire using the shared Primary handoff and writeback collaborator."""
+
+    def __init__(self, md=None, *, interactive=False):
+        super().__init__(md, interactive=interactive)
+        self.adapter_name = "twotone/freq"
+        self.target_name = "q_f"
+        self.fit_summary = {
+            "freq": 6100.0,
+            "freq_err": 0.1,
+            "fwhm": 4.0,
+            "fwhm_err": 0.2,
+        }
+        self.library_modules["direct"] = {"type": "readout/direct"}
+        self.publication["tree"]["children"]["modules"]["children"]["readout"][
+            "ref"
+        ] = "<Custom:Pulse Readout>"
+        self.publication["tree"]["children"].update(
+            reps=scalar(17),
+            sweep=section(
+                freq={
+                    "kind": "sweep",
+                    "valid": True,
+                    "inputs": {
+                        key: scalar(value)["input"]
+                        for key, value in {
+                            "start": 4500.0,
+                            "stop": 5500.0,
+                            "expts": 41,
+                        }.items()
+                    },
+                }
+            ),
+        )
+        self.publication["tree"]["children"]["modules"]["children"]["qub_pulse"] = {
+            "kind": "reference",
+            "valid": True,
+            "ref": None,
+            "error": None,
+            "children": {
+                "freq": scalar(0.0),
+                "gain": scalar(0.12),
+                "waveform": section(length=scalar(2.0)),
+            },
+        }
+
+        if "qf_w" in self.md:
+            inputs = self.publication["tree"]["children"]["sweep"]["children"]["freq"][
+                "inputs"
+            ]
+            for key, sign in (("start", "-"), ("stop", "+")):
+                expression = f"q_f {sign} 2.5 * qf_w"
+                inputs[key] = {
+                    **scalar(
+                        simple_eval(expression, names=self.md)
+                        if "q_f" in self.md
+                        else None
+                    )["input"],
+                    "mode": "expression",
+                    "raw": expression,
+                }
+
+    def _edit(self, params):
+        ordinary = []
+        for edit in params["edits"]:
+            if edit["path"] == ["sweep", "freq"]:
+                inputs = self.publication["tree"]["children"]["sweep"]["children"][
+                    "freq"
+                ]["inputs"]
+                for key, value in edit["value"].items():
+                    if isinstance(value, dict):
+                        expression = value["__expr"]
+                        inputs[key] = {
+                            **scalar(simple_eval(expression, names=self.md))["input"],
+                            "mode": "expression",
+                            "raw": expression,
+                        }
+                    else:
+                        inputs[key] = scalar(value)["input"]
+            else:
+                ordinary.append(edit)
+        super()._edit({**params, "edits": ordinary})
+        for edit in ordinary:
+            if edit["path"] == ["modules", "readout"] and edit["value"] == {
+                "__ref": "direct"
+            }:
+                readout = self.publication["tree"]["children"]["modules"]["children"][
+                    "readout"
+                ]
+                readout["children"] = {"ro_freq": scalar(7100.0)}
+
+    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "tab.new":
+            assert params == {"adapter_name": "twotone/freq"}
+            return {"tab_id": "t"}
+        result = super().__call__(method, params)
+        if method == "tab.snapshot":
+            result = deepcopy(result)
+            result["tabs"][0]["adapter_name"] = "twotone/freq"
         return result
 
 
@@ -593,14 +696,15 @@ def test_rabi_stale_edit_stops_without_retry_or_run(tmp_path, recipe, gui_type):
     [
         ("amplitude_rabi", AmplitudeRabiGui, "pi_gain"),
         ("time_rabi", TimeRabiGui, "pi_len"),
+        ("twotone_spectrum", DriveGui, "q_f"),
     ],
 )
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize("decision", ["accepted", "skipped"])
-def test_rabi_primary_handoff_waits_for_question_before_actual_write(
+def test_drive_primary_handoff_waits_for_question_before_actual_write(
     tmp_path, recipe, gui_type, target, interactive, decision
 ):
-    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0}, interactive=interactive)
+    gui = gui_type({"q_f": 6300.0, "qf_w": 4.0, "r_f": 7200.0}, interactive=interactive)
     with recipe_client(tmp_path, gui) as client:
         reply = client.call(recipe, {})
         execution = reply.data["execution"]
@@ -645,10 +749,14 @@ def test_rabi_primary_handoff_waits_for_question_before_actual_write(
 
 @pytest.mark.parametrize(
     "recipe,gui_type",
-    [("amplitude_rabi", AmplitudeRabiGui), ("time_rabi", TimeRabiGui)],
+    [
+        ("amplitude_rabi", AmplitudeRabiGui),
+        ("time_rabi", TimeRabiGui),
+        ("twotone_spectrum", DriveGui),
+    ],
 )
-def test_rabi_cancelled_run_stops_before_raw_save(tmp_path, recipe, gui_type):
-    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+def test_drive_cancelled_run_stops_before_raw_save(tmp_path, recipe, gui_type):
+    gui = gui_type({"q_f": 6300.0, "qf_w": 4.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies["operation.await"] = {
             "ok": True,
@@ -667,12 +775,16 @@ def test_rabi_cancelled_run_stops_before_raw_save(tmp_path, recipe, gui_type):
 
 @pytest.mark.parametrize(
     "recipe,gui_type",
-    [("amplitude_rabi", AmplitudeRabiGui), ("time_rabi", TimeRabiGui)],
+    [
+        ("amplitude_rabi", AmplitudeRabiGui),
+        ("time_rabi", TimeRabiGui),
+        ("twotone_spectrum", DriveGui),
+    ],
 )
-def test_rabi_cancelled_question_retains_preview_without_writing(
+def test_drive_cancelled_question_retains_preview_without_writing(
     tmp_path, recipe, gui_type
 ):
-    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+    gui = gui_type({"q_f": 6300.0, "qf_w": 4.0, "r_f": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         question = client.call(recipe, {})
         assert question.data["status"] == "awaiting_answer", question.data
@@ -735,105 +847,6 @@ def test_rabi_invalid_arguments_fail_before_gui_binding(
         assert client.transport.sent == before
 
 
-class DriveGui(LookbackGui):
-    def __init__(self, md=None):
-        super().__init__()
-        self.md = md or {}
-        self.publication["tree"]["children"]["modules"]["children"]["readout"][
-            "ref"
-        ] = "<Custom:Pulse Readout>"
-        self.publication["tree"]["children"].update(
-            reps=scalar(17),
-            sweep=section(
-                freq={
-                    "kind": "sweep",
-                    "valid": True,
-                    "inputs": {
-                        key: scalar(value)["input"]
-                        for key, value in {
-                            "start": 4500.0,
-                            "stop": 5500.0,
-                            "expts": 41,
-                        }.items()
-                    },
-                }
-            ),
-        )
-        self.publication["tree"]["children"]["modules"]["children"]["qub_pulse"] = {
-            "kind": "reference",
-            "valid": True,
-            "ref": None,
-            "error": None,
-            "children": {
-                "freq": scalar(0.0),
-                "gain": scalar(0.12),
-                "waveform": section(length=scalar(2.0)),
-            },
-        }
-
-        if "qf_w" in self.md:
-            inputs = self.publication["tree"]["children"]["sweep"]["children"]["freq"][
-                "inputs"
-            ]
-            for key, sign in (("start", "-"), ("stop", "+")):
-                expression = f"q_f {sign} 2.5 * qf_w"
-                inputs[key] = {
-                    **scalar(
-                        simple_eval(expression, names=self.md)
-                        if "q_f" in self.md
-                        else None
-                    )["input"],
-                    "mode": "expression",
-                    "raw": expression,
-                }
-
-    def _edit(self, params):
-        ordinary = []
-        for edit in params["edits"]:
-            if edit["path"] == ["sweep", "freq"]:
-                inputs = self.publication["tree"]["children"]["sweep"]["children"][
-                    "freq"
-                ]["inputs"]
-                for key, value in edit["value"].items():
-                    if isinstance(value, dict):
-                        expression = value["__expr"]
-                        inputs[key] = {
-                            **scalar(simple_eval(expression, names=self.md))["input"],
-                            "mode": "expression",
-                            "raw": expression,
-                        }
-                    else:
-                        inputs[key] = scalar(value)["input"]
-            else:
-                ordinary.append(edit)
-        super()._edit({**params, "edits": ordinary})
-        for edit in ordinary:
-            if edit["path"] == ["modules", "readout"] and edit["value"] == {
-                "__ref": "direct"
-            }:
-                readout = self.publication["tree"]["children"]["modules"]["children"][
-                    "readout"
-                ]
-                readout["children"] = {"ro_freq": scalar(7100.0)}
-
-    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if method == "tab.new":
-            assert params == {"adapter_name": "twotone/freq"}
-            return {"tab_id": "t"}
-        result = super().__call__(method, params)
-        if method == "context.snapshot":
-            result["ml"]["modules"] = {
-                "calibrated": {"type": "readout/pulse"},
-                "direct": {"type": "readout/direct"},
-                "drive": {"type": "pulse"},
-                "reset": {"type": "reset/pulse"},
-            }
-        if method == "tab.snapshot":
-            result = deepcopy(result)
-            result["tabs"][0]["adapter_name"] = "twotone/freq"
-        return result
-
-
 @pytest.mark.parametrize("readout_ref", [None, "calibrated", "direct"])
 def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readout_ref):
     gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
@@ -841,16 +854,19 @@ def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readou
     try:
         reply = full_execution_reply(
             client,
-            client.call(
-                "twotone_spectrum",
-                {
-                    "readout_ref": readout_ref,
-                    "gain": 0.18,
-                    "pulse_length_us": 3.0,
-                    "points": 31,
-                    "reps": 23,
-                    "rounds": 7,
-                },
+            skip_writeback(
+                client,
+                client.call(
+                    "twotone_spectrum",
+                    {
+                        "readout_ref": readout_ref,
+                        "gain": 0.18,
+                        "pulse_length_us": 3.0,
+                        "points": 31,
+                        "reps": 23,
+                        "rounds": 7,
+                    },
+                ),
             ),
         )
         data = reply.data
@@ -965,8 +981,11 @@ def test_twotone_explicit_center_removes_missing_calibration_dependency(
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
-            client.call(
-                "twotone_spectrum", {"center_mhz": 6300.0, "span_mhz": span_mhz}
+            skip_writeback(
+                client,
+                client.call(
+                    "twotone_spectrum", {"center_mhz": 6300.0, "span_mhz": span_mhz}
+                ),
             ),
         )
         assert reply.data["status"] == "finished", reply.data
@@ -981,7 +1000,9 @@ def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
     readout["ref"] = "calibrated"
     readout["children"]["ro_cfg"]["children"]["ro_freq"] = scalar(None)
     with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(client, client.call("twotone_spectrum", {}))
+        reply = full_execution_reply(
+            client, skip_writeback(client, client.call("twotone_spectrum", {}))
+        )
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
         assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
@@ -1012,7 +1033,16 @@ def test_twotone_invalid_reference_stops_without_fallback(tmp_path, parameter):
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["reason"] == "invalid_cfg"
         assert not gui.ran
-        assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == 1
+        attempted_references = [
+            edit["value"]["__ref"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if isinstance(edit["value"], dict) and "__ref" in edit["value"]
+        ]
+        assert attempted_references.count("unknown") == 1
+        assert attempted_references[-1] == "unknown"
+        assert not gui.raw_saved
 
 
 def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
@@ -1020,19 +1050,76 @@ def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
-            client.call(
-                "twotone_spectrum",
-                {"reuse_tab_id": "t", "drive_ref": "drive", "use_reset": "reset"},
+            skip_writeback(
+                client,
+                client.call(
+                    "twotone_spectrum",
+                    {"reuse_tab_id": "t", "drive_ref": "drive", "use_reset": "reset"},
+                ),
             ),
         )
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
         assert fields["modules.qub_pulse"] == {"value": "drive", "source": "explicit"}
         assert fields["modules.reset"] == {"value": "reset", "source": "explicit"}
+        for field, value in (
+            ("modules.qub_pulse.gain", 0.12),
+            ("modules.qub_pulse.waveform.length", 2.0),
+            ("reps", 17),
+            ("rounds", 3),
+        ):
+            assert fields[field]["value"] == value
+            assert fields[field]["source"] == "gui_default"
+        assert fields["sweep.freq"]["value"]["expts"] == 41
         methods = [method for method, _ in client.transport.sent]
         assert "tab.new" not in methods
         assert methods.count("tab.reset_cfg") == 1
         assert methods.count("tab.run_start") == 1
+
+
+@pytest.mark.parametrize("number", [int, float])
+def test_twotone_number_inputs_preserve_mhz_us_and_source_labels(tmp_path, number):
+    gui = DriveGui({"r_f": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client,
+            skip_writeback(
+                client,
+                client.call(
+                    "twotone_spectrum",
+                    {
+                        "center_mhz": number(6100),
+                        "span_mhz": number(20),
+                        "gain": number(1),
+                        "pulse_length_us": number(2),
+                        "points": 31,
+                        "reps": 23,
+                        "rounds": 7,
+                    },
+                ),
+            ),
+        )
+        fields = reply.data["actual"]["fields"]
+        for field, value, source in (
+            ("center_mhz", 6100.0, "explicit"),
+            ("span_mhz", 20.0, "explicit"),
+            ("modules.qub_pulse.gain", 1.0, "gain"),
+            ("modules.qub_pulse.waveform.length", 2.0, "pulse_length_us"),
+        ):
+            assert fields[field]["value"] == value
+            assert isinstance(fields[field]["value"], float)
+            assert fields[field]["source"] == source
+        assert fields["sweep.freq"]["value"] == {
+            "start": 6090.0,
+            "stop": 6110.0,
+            "expts": 31,
+        }
+        for field, value in (("reps", 23), ("rounds", 7)):
+            assert fields[field]["value"] == value
+            assert isinstance(fields[field]["value"], int)
+            assert fields[field]["source"] == field
+        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["analysis"]["result"]["summary"] == gui.fit_summary
 
 
 @pytest.mark.parametrize("failure", ["stale", "missing", "busy", "wrong_adapter"])

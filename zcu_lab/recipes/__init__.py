@@ -12,6 +12,7 @@ from .t1 import DEFINITION as T1
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
+from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM
 
 RECIPES: tuple[RecipeDefinition, ...] = (
     LOOKBACK,
@@ -24,4 +25,5 @@ RECIPES: tuple[RecipeDefinition, ...] = (
     T1,
     AMPLITUDE_RABI,
     TIME_RABI,
+    TWOTONE_SPECTRUM,
 )
