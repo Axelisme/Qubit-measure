@@ -21,12 +21,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import FluxPickState
-from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.flux_pick_plugin import FluxPickPlugin

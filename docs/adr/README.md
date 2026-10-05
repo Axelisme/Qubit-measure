@@ -15,7 +15,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## GUI Service Architecture
 
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與 explicit plotting 責任。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、interactive 與單層 undo、owner、capability、domain fact、前端反應與 explicit plotting 責任。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、rendering 初始化與 remote 的責任分界。
 
 ## Cfg / Value Model
