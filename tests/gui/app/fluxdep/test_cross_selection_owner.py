@@ -75,7 +75,9 @@ def test_apply_publishes_exact_snapshot_once_retaining_input_and_undo(cross_cont
         unsubscribe()
 
 
-def test_apply_result_mutation_cannot_change_published_or_committed_mask(cross_controller):
+def test_apply_result_mutation_cannot_change_published_or_committed_mask(
+    cross_controller,
+):
     ctrl = cross_controller
     context = ctrl.interactive.begin_cross_selection()
     notifications = []

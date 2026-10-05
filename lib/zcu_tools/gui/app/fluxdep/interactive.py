@@ -586,7 +586,8 @@ class FluxDepInteractiveOwner:
         )
         self._publishing_selection = True
         try:
-            self._publish_selection(result.selected, result.min_distance)
+            # Publication and the detached caller result own independent masks.
+            self._publish_selection(result.selected.copy(), result.min_distance)
         finally:
             # A publisher may commit and then fail; preserve its actual version, not a rollback.
             context.selection_version = self._state.version.get(SELECTION_VERSION_KEY)

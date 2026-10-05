@@ -300,12 +300,8 @@ class SelectorWidget(InteractiveMplWidget):
         state = self._context.session.snapshot()
         changed = not _same_analysis(state, self._observed)
         if changed:
-            change = state.last_change
-            # Forward Actions carry their before-image; Undo restores an older one.
-            forward = change is not None and (
-                np.array_equal(change.selected, self._observed.selected)
-                and change.min_distance == self._observed.min_distance
-            )
+            # Analysis Actions create Undo; Undo consumes it before notifying.
+            forward = self._context.session.can_undo()
             self._previous = None if forward else self._observed
         self._observed = state
         self._reproject_controls()

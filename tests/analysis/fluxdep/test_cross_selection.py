@@ -136,6 +136,37 @@ def test_full_mask_downsampling_preserves_order_and_duplicate_identity(inputs):
     assert seed.selected.all()
 
 
+def test_downsampling_normalizes_different_nonunit_joint_spans():
+    captured = CrossSelectionInputs(
+        np.array([10.0, 10.16, 12.0, 14.0]),
+        np.array([20.0, 20.3, 25.0, 30.0]),
+        (),
+        (10.0, 14.0),
+        (20.0, 30.0),
+    )
+    state = set_cross_selection_distance(
+        captured, make_cross_selection_state(captured), 0.1
+    )
+    result = analyze_cross_selection(captured, state)
+    np.testing.assert_array_equal(result.selected, [True, False, True, True])
+
+
+def test_brush_normalizes_each_different_nonunit_joint_span():
+    captured = CrossSelectionInputs(
+        np.array([12.0, 12.16, 12.24, 12.0, 12.0]),
+        np.array([25.0, 25.0, 25.0, 25.4, 25.6]),
+        (),
+        (10.0, 14.0),
+        (20.0, 30.0),
+    )
+    state = stroke_cross_selection_state(
+        captured,
+        make_cross_selection_state(captured),
+        BrushStroke((BrushPoint(12.0, 25.0),), 0.05, "erase"),
+    )
+    np.testing.assert_array_equal(state.selected, [False, False, True, False, True])
+
+
 def test_stroke_clear_fill_distance_and_inverse_project(inputs):
     seed = make_cross_selection_state(inputs)
     gesture = BrushStroke((BrushPoint(0.5, 4.5),), 0.0, "erase")
