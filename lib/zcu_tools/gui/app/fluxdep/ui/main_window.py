@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
 
     def _on_spectrum_changed(self, payload: SpectrumChangedPayload) -> None:
         self._refresh_list()
-        # A stage change (aligned / points_selected) on the active spectrum must
+        # A stage change (aligned / points_completed) on the active spectrum must
         # advance its editing widget (line-picker → point-selector → done).
         if payload.name == self._ctrl.state.active_spectrum:
             self._rebuild_editor()
@@ -197,7 +197,7 @@ class MainWindow(QMainWindow):
             entry = self._ctrl.state.spectrums[name]
             stage = (
                 "✓pts"
-                if entry.points_selected
+                if entry.aligned and entry.points_completed
                 else "✓align"
                 if entry.aligned
                 else "new"
@@ -255,7 +255,7 @@ class MainWindow(QMainWindow):
 
         if not entry.aligned:
             self._mount_line_picker(entry)
-        elif not entry.points_selected:
+        elif not entry.points_completed:
             self._mount_point_selector(entry)
         else:
             # finished — read-only view with the re-do buttons alongside it
@@ -301,8 +301,7 @@ class MainWindow(QMainWindow):
         name = self._ctrl.state.active_spectrum
         if name is None:
             return
-        self._clear_editor()
-        self._mount_line_picker(self._ctrl.state.spectrums[name])
+        self._ctrl.reset_alignment(name)
 
     def _on_reselect_points(self) -> None:
         """Re-open the point selector for the active spectrum (redo selection).
@@ -319,8 +318,7 @@ class MainWindow(QMainWindow):
                 "Not aligned", "Pick the flux lines first (Re-pick lines)."
             )
             return
-        self._clear_editor()
-        self._mount_point_selector(entry)
+        self._ctrl.reset_points(name)
 
     def _on_analyze_clicked(self) -> None:
         """Show the analysis panel (Filter / Search / Show tabs) — a singleton.
@@ -331,7 +329,7 @@ class MainWindow(QMainWindow):
         """
         from .analyze_panel import AnalyzePanelWidget
 
-        if not any(e.points_selected for e in self._ctrl.state.spectrums.values()):
+        if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
             self._show_error("No points", "Select points on a spectrum first.")
             return
         # Drop the stage-driven editor (transient) but DON'T touch the analyze

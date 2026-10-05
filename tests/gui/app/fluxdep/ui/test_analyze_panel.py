@@ -123,6 +123,37 @@ def test_freq_fields_are_blank_by_default(panel):
     assert w._sample_f.text() == ""
 
 
+@pytest.mark.parametrize("usable", [False, True])
+def test_filter_skips_completed_empty_spectra(qapp, spectrum_hdf5, usable):
+    import numpy as np
+    from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
+
+    filepath, *_ = spectrum_hdf5
+    ctrl = Controller(FluxDepState())
+    name = ctrl.load_spectrum(filepath, "OneTone")
+    ctrl.set_alignment(name, 0.0, 1.0)
+    ctrl.set_points(name, np.empty(0), np.empty(0))
+    if usable:
+        from dataclasses import replace
+
+        ctrl.state.put_spectrum(replace(ctrl.state.spectrums[name], name="signal"))
+        other = "signal"
+        ctrl.set_alignment(other, 0.0, 1.0)
+        ctrl.set_points(other, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    w = AnalyzePanelWidget(ctrl)
+    try:
+        selectors = w.findChildren(SelectorWidget)
+        assert len(selectors) == (1 if usable else 0)
+        if usable:
+            _, freqs, selected = selectors[0].get_result()
+            np.testing.assert_array_equal(freqs, [5.0, 5.1])
+            assert selected.all() and selected.size == 2
+    finally:
+        w.quiesce()
+        w.deleteLater()
+        qapp.processEvents()
+
+
 def test_filter_selector_built_eagerly_when_points_exist(qapp):
     import numpy as np
     from zcu_tools.analysis.fluxdep.models import PointsData
@@ -146,7 +177,7 @@ def test_filter_selector_built_eagerly_when_points_exist(qapp):
             raw=raw,
             points=pts,
             aligned=True,
-            points_selected=True,
+            points_completed=True,
         )
     )
     w = AnalyzePanelWidget(Controller(st))

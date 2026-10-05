@@ -187,7 +187,7 @@ class AnalyzePanelWidget(QWidget):
                 points=e.points,
             )
             for n, e in self._ctrl.state.spectrums.items()
-            if e.points_selected
+            if e.point_count > 0
         }
         if not spectrums:
             self._filter_placeholder.setVisible(True)

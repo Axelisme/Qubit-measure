@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -28,6 +28,7 @@ from zcu_tools.gui.remote.readonly_handlers import (
     h_resources_versions,
 )
 
+from ..state import SpecType
 from .method_specs import METHOD_SPECS
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,23 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 # ---------------------------------------------------------------------------
 
 
+class SpectrumListItem(TypedDict):
+    """One spectrum's workflow and availability projection.
+
+    name: Loaded spectrum identifier.
+    spec_type: Picking tool kind, OneTone or TwoTone.
+    aligned: Whether alignment is currently committed.
+    points_completed: Whether picking completed, even with zero points.
+    point_count: Non-negative number of annotated points, not a stage gate.
+    """
+
+    name: str
+    spec_type: SpecType
+    aligned: bool
+    points_completed: bool
+    point_count: int
+
+
 def _h_spectrum_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -55,12 +73,13 @@ def _h_spectrum_list(
     spectrums = adapter.ctrl.state.spectrums
     return {
         "spectrums": [
-            {
-                "name": entry.name,
-                "spec_type": entry.spec_type,
-                "aligned": bool(entry.aligned),
-                "points_selected": bool(entry.points_selected),
-            }
+            SpectrumListItem(
+                name=entry.name,
+                spec_type=entry.spec_type,
+                aligned=entry.aligned,
+                points_completed=entry.points_completed,
+                point_count=entry.point_count,
+            )
             for entry in spectrums.values()
         ]
     }

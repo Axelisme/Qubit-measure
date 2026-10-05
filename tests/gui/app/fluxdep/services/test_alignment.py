@@ -47,4 +47,4 @@ def test_set_points_sorts_and_derives_fluxs(spectrum_hdf5):
     # fluxs derived from alignment (period=2, half=0)
     expected = value2flux(np.array([-1.0, 2.0, 3.0]), 0.0, 2.0)
     np.testing.assert_allclose(pts["fluxs"], expected)
-    assert st.spectrums[name].points_selected is True
+    assert st.spectrums[name].points_completed is True

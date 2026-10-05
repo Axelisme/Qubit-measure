@@ -74,7 +74,8 @@ Read tools (all pure queries):
   - fluxdep_state_check → {has_project, spectrum_count, has_active}.
   - fluxdep_project_info → {chip_name, qub_name, result_dir, database_path}.
   - fluxdep_spectrum_list → each loaded spectrum's {name, spec_type, aligned,
-    points_selected} (i.e. how far the user has taken each spectrum).
+    points_completed, point_count}. Completion includes zero points; use
+    point_count for available data, not the completion flag.
   - fluxdep_selection_pointcloud → the joint {fluxs, freqs} cloud assembled from
     every spectrum's selected points (freqs in GHz).
   - fluxdep_fit_result → {has_result, params:{EJ,EC,EL} or null, database_path,

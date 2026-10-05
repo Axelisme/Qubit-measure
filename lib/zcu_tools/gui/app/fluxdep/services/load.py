@@ -138,10 +138,10 @@ class LoadService:
     def load_processed_spectrums(self, filepath: str) -> list[str]:
         """Restore a processed ``spectrums.hdf5`` (alignment + selected points).
 
-        Each restored spectrum lands fully advanced — aligned and points-selected
-        — so it shows in the result-preview stage. Returns the loaded names. NOTE:
-        ``dump_spectrums`` does not persist ``spec_type``; a missing type defaults
-        to ``"TwoTone"`` (the user can re-select points to change tooling).
+        Each restored spectrum is aligned and picking-completed, including zero
+        points, so it shows in ResultPreview. Return loaded names. Read the
+        persisted spectrum type; legacy missing type defaults to "TwoTone".
+        No workflow metadata is required beyond the processed spectrum payload.
         """
         spectrums = load_spectrums(filepath)
         names: list[str] = []
@@ -158,7 +158,7 @@ class LoadService:
                 flux_int=result["flux_int"],
                 flux_period=result["flux_period"],
                 aligned=True,
-                points_selected=result["points"]["freqs"].size > 0,
+                points_completed=True,
                 alignment_seeded=True,
             )
             self._state.put_spectrum(entry)

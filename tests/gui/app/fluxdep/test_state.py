@@ -123,7 +123,12 @@ def test_set_alignment_marks_aligned_and_bumps():
     v0 = st.version.get(spectrum_version_key("a"))
     new_fluxs = st.spectrums["a"].raw["dev_values"].copy()
     st.set_alignment(
-        "a", flux_half=1.0, flux_int=2.0, flux_period=2.0, new_fluxs=new_fluxs
+        "a",
+        flux_half=1.0,
+        flux_int=2.0,
+        flux_period=2.0,
+        new_fluxs=new_fluxs,
+        new_point_fluxs=np.empty(0, dtype=np.float64),
     )
     entry = st.spectrums["a"]
     assert entry.aligned is True
@@ -141,13 +146,11 @@ def test_set_points_marks_selected_and_bumps():
         freqs=np.array([5.0]),
     )
     st.set_points("a", pts)
-    assert st.spectrums["a"].points_selected is True
+    assert st.spectrums["a"].points_completed is True
     assert st.version.get(spectrum_version_key("a")) == v0 + 1
 
 
-def test_set_points_empty_does_not_mark_selected():
-    # an empty point set (user deselected everything) is recorded but must not be
-    # flagged points_selected — downstream readers would crash on an empty cloud.
+def test_set_points_empty_completes_stage_without_available_points():
     st = FluxDepState()
     st.put_spectrum(_make_entry("a"))
     v0 = st.version.get(spectrum_version_key("a"))
@@ -157,8 +160,34 @@ def test_set_points_empty_does_not_mark_selected():
         freqs=np.array([], dtype=np.float64),
     )
     st.set_points("a", empty)
-    assert st.spectrums["a"].points_selected is False
+    assert st.spectrums["a"].points_completed is True
+    assert st.spectrums["a"].point_count == 0
     assert st.version.get(spectrum_version_key("a")) == v0 + 1
+
+
+@pytest.mark.parametrize(
+    "invalid", [np.array([1.0]), np.array([[1.0, 2.0]]), np.array([np.nan, 2.0])]
+)
+def test_alignment_rejects_invalid_point_mapping_without_mutation(invalid):
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.set_points(
+        "a",
+        PointsData(
+            dev_values=np.array([0.0, 1.0]),
+            fluxs=np.array([0.5, 1.0]),
+            freqs=np.array([5.0, 5.1]),
+        ),
+    )
+    entry = st.spectrums["a"]
+    version = st.version.get(spectrum_version_key("a"))
+    raw_fluxs = entry.raw["fluxs"].copy()
+    with pytest.raises(ValueError, match="new_point_fluxs|finite"):
+        st.set_alignment("a", 0.0, 1.0, 2.0, np.array([0.5, 0.75, 1.0]), invalid)
+    assert st.spectrums["a"] is entry
+    np.testing.assert_array_equal(entry.raw["fluxs"], raw_fluxs)
+    np.testing.assert_array_equal(entry.points["fluxs"], [0.5, 1.0])
+    assert st.version.get(spectrum_version_key("a")) == version
 
 
 def test_set_selection_bumps_selection():

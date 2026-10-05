@@ -386,7 +386,8 @@ def test_finish_pending_preview_publishes_committed_selection(presented) -> None
         widget.finished.connect(ctrl.interactive.finish_twotone_pick)
         button(widget, "Finish").click()
         entry = ctrl.state.spectrums["two"]
-        assert not entry.points_selected
+        assert entry.points_completed
+        assert entry.point_count == 0
         assert entry.points["dev_values"].size == 0
         assert entry.points["freqs"].size == 0
         assert entry.points["fluxs"].size == 0

@@ -65,7 +65,9 @@ def _with_points(st: FluxDepState, name: str, devs, freqs) -> None:
 def test_derive_pointcloud_concatenates_in_order():
     st = FluxDepState()
     _with_points(st, "a", [0.0, 1.0], [5.0, 5.1])
+    _with_points(st, "noise", [], [])
     _with_points(st, "b", [2.0], [5.2])
+    assert st.spectrums["noise"].points_completed
     sel = SelectionService(st)
     fluxs, freqs = sel.derive_pointcloud()
     assert fluxs.shape == (3,)
@@ -74,6 +76,7 @@ def test_derive_pointcloud_concatenates_in_order():
 
 def test_derive_pointcloud_empty():
     st = FluxDepState()
+    _with_points(st, "noise", [], [])
     fluxs, freqs = SelectionService(st).derive_pointcloud()
     assert fluxs.size == 0 and freqs.size == 0
 

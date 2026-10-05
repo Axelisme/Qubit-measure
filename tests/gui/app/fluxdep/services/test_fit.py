@@ -86,7 +86,7 @@ def _aligned_entry_with_points(name: str, fluxs, freqs) -> SpectrumEntry:
         flux_int=0.5,
         flux_period=1.0,
         aligned=True,
-        points_selected=True,
+        points_completed=True,
     )
 
 
@@ -106,6 +106,15 @@ def test_selected_pointcloud_no_mask_returns_all():
     fluxs, freqs = FitService(st).selected_pointcloud()
     assert fluxs.shape == (4,)
     np.testing.assert_allclose(freqs, [5.0, 5.05, 5.1, 5.15])
+
+
+def test_selected_pointcloud_skips_empty_completed_spectra():
+    st = _state_with_points()
+    st.put_spectrum(_aligned_entry_with_points("noise", [], []))
+    svc = FitService(st)
+    fluxs, freqs = svc.selected_pointcloud()
+    assert fluxs.size == 4
+    np.testing.assert_array_equal(freqs, [5.0, 5.05, 5.1, 5.15])
 
 
 def test_selected_pointcloud_applies_mask():
@@ -185,7 +194,9 @@ def test_compute_search_fast_fails_without_database():
 
 def test_compute_search_fast_fails_without_points(tiny_database):
     db_path = tiny_database[0]
-    st = FluxDepState()  # no spectra
+    st = FluxDepState()
+    st.put_spectrum(_aligned_entry_with_points("noise", [], []))
+    assert st.spectrums["noise"].points_completed
     svc = FitService(st)
     svc.set_params(db_path, *_WIDE, TransitionDict({}), 0.0, 0.0)
     with pytest.raises(ValueError, match="selected points"):

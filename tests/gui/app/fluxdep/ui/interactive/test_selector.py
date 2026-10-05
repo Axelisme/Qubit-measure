@@ -46,6 +46,32 @@ def widget(qapp):
     qapp.processEvents()
 
 
+@pytest.mark.parametrize("spectrums", [{}, {"noise": _spectrum_result(0)}])
+def test_empty_cloud_is_rejected_at_constructor(qapp, spectrums):
+    with pytest.raises(ValueError, match="points"):
+        SelectorWidget(spectrums)
+
+
+def test_mixed_cloud_skips_empty_spectra(qapp):
+    usable = _spectrum_result(5)
+    w = SelectorWidget(
+        {
+            "noise-first": _spectrum_result(0),
+            "signal": usable,
+            "noise-last": _spectrum_result(0),
+        }
+    )
+    try:
+        fluxs, freqs, selected = w.get_result()
+        np.testing.assert_array_equal(fluxs, usable["points"]["fluxs"])
+        np.testing.assert_array_equal(freqs, usable["points"]["freqs"])
+        assert selected.all() and selected.size == 5
+    finally:
+        w.quiesce()
+        w.deleteLater()
+        qapp.processEvents()
+
+
 def test_widget_builds_all_selected_by_default(widget):
     fluxs, freqs, selected = widget.get_result()
     # default: everything selected (10 points across two spectra)

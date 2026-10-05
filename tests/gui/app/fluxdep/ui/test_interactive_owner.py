@@ -66,7 +66,7 @@ def test_production_twotone_preview_and_finish_advance_stage(
         item for item in widget.findChildren(QPushButton) if item.text() == "Finish"
     )
     finish.click()
-    assert ctrl.state.spectrums[name].points_selected
+    assert ctrl.state.spectrums[name].points_completed
     assert ctrl.interactive.current_twotone_pick() is None
     assert window.findChild(ResultPreviewWidget) is not None
 

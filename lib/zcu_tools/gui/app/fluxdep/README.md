@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Shared line/OneTone/TwoTone picking and app-owned session lifetime
+**Last updated:** 2026-10-06. Empty picking completion and native-point preservation on realignment
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -53,7 +53,7 @@ view 只暴露查詢，不暴露 mutation。
   `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Database path"`），並可從
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。
   `SpectrumEntry` 持 raw(SpectrumData)/points(PointsData)/per-spectrum flux 對齊/
-  aligned/points_selected/alignment_seeded。raw/points 直接複用
+  aligned/points_completed/alignment_seeded。raw/points 直接複用
   `analysis.spectrum` 與 `analysis.fluxdep.models` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
 - **`services/`** — 薄包裝純運算，mutate State：`load`(LoadService)、
   `alignment`(Alignment/Points)、`store`(SpectrumStore/Selection)、`export`。
@@ -121,9 +121,13 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
 
 ### 編輯區階段驅動
 MainWindow 編輯區依 active 譜的 pipeline 階段 swap widget：未定線→LinePicker；
-已定線未選點→OneTone/FindPoints(by spec_type)；已選點→ResultPreview(唯讀結果圖)。
+已定線未完成選點→OneTone/FindPoints(by spec_type)；已完成→ResultPreview(唯讀結果圖)。
+空 Finish 也完成選點，清單顯示完成，ResultPreview 顯示零點。
+`points_completed` 表示階段完成；`point_count` 表示可用點數。Analyze／Selector 只使用非空資料。
 widget 的 `finished` → Controller 寫回 → 階段前進 → 重 swap。
-ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一階段重做。
+ResultPreview 的 Re-select points 透過 Controller 清空 points／completion 並重開 selector。
+Re-pick lines 重開 alignment，保留 native points／completion；接受新定線時一次重算 raw 與 point fluxs。
+Processed restore 包含零點的完成結果，不新增持久化欄位。
 
 ### 背景計算 + 即時中斷（generation 戳記）
 慢計算經共用 `BackgroundRunner.submit`（per-panel，`enter=None`）off-main，避免拖動卡 UI。
@@ -183,6 +187,7 @@ MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `Remote
   `selection_pointcloud`/`fit_result`/`state_check`；`resources.versions` 不曝露）+ 3 個
   生命週期手寫工具（`fluxdep_launch`/`connect`/`disconnect`）。**無 `fluxdep_stop`**——
   agent 不關 user 的 GUI。
+- `spectrum.list` 回 name、spec_type、aligned、points_completed、point_count。空完成的 point_count 是 0，完成旗標不代表有點可用。
 - 因 method 全無參數，`method_specs` 的 `params` 為空。
 - **省略**（measure-only policy，fluxdep 不需）：version guard / async operation handle /
   diagnostic fan-out / CfgEditor session / render-view——這些都留在 measure 端的

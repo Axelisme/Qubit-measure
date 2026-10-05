@@ -168,7 +168,7 @@ def test_twotone_reuse_kind_switch_and_terminal_publication(twotone_controller):
         subscription.unsubscribe()
     np.testing.assert_array_equal(result.dev_values, expected.dev_values)
     entry = ctrl.state.spectrums["two"]
-    assert entry.points_selected
+    assert entry.points_completed
     np.testing.assert_array_equal(entry.points["dev_values"], expected.dev_values)
     np.testing.assert_array_equal(entry.points["freqs"], expected.freqs)
     np.testing.assert_allclose(
@@ -192,7 +192,7 @@ def test_invalid_twotone_finish_keeps_context_editable(twotone_controller):
     with pytest.raises(ValueError, match="mask"):
         owner.finish_twotone_pick()
     assert owner.current_twotone_pick() is context
-    assert not twotone_controller.state.spectrums["two"].points_selected
+    assert not twotone_controller.state.spectrums["two"].points_completed
     context.session.undo()
     context.plugin.clear.execute(context.session, None)
     assert owner.finish_twotone_pick().dev_values.size == 0
@@ -258,7 +258,7 @@ def test_twotone_invalidation_closes_input_without_points(twotone_controller, ch
     with pytest.raises(FailedPreconditionError):
         context.plugin.clear.execute(context.session, None)
     if "two" in ctrl.state.spectrums:
-        assert not ctrl.state.spectrums["two"].points_selected
+        assert not ctrl.state.spectrums["two"].points_completed
 
 
 def test_twotone_publication_failure_does_not_reopen_input(twotone_controller):
@@ -317,7 +317,7 @@ def test_onetone_reuse_kind_switch_and_terminal_publication(onetone_controller):
     np.testing.assert_array_equal(result.dev_values, expected.dev_values)
     np.testing.assert_array_equal(result.freqs, expected.freqs)
     entry = ctrl.state.spectrums["one"]
-    assert entry.points_selected
+    assert entry.points_completed
     np.testing.assert_array_equal(
         entry.points["dev_values"], np.sort(expected.dev_values)
     )
@@ -350,7 +350,7 @@ def test_invalid_onetone_finish_keeps_context_editable(onetone_controller):
     ):
         owner.finish_onetone_pick()
     assert owner.current_onetone_pick() is context
-    assert not onetone_controller.state.spectrums["one"].points_selected
+    assert not onetone_controller.state.spectrums["one"].points_completed
     context.plugin.set_threshold.execute(context.session, 0.1)
     assert owner.finish_onetone_pick().dev_values.size == 2
 
@@ -363,7 +363,7 @@ def test_line_begin_closes_previous_onetone_input(onetone_controller):
     assert owner.current_onetone_pick() is None
     with pytest.raises(FailedPreconditionError):
         old.plugin.set_threshold.execute(old.session, 1.0)
-    assert not onetone_controller.state.spectrums["one"].points_selected
+    assert not onetone_controller.state.spectrums["one"].points_completed
 
 
 @pytest.mark.parametrize(
@@ -416,7 +416,7 @@ def test_onetone_invalidation_closes_input_without_points(onetone_controller, ch
     with pytest.raises(FailedPreconditionError):
         context.plugin.set_threshold.execute(context.session, 1.0)
     if "one" in ctrl.state.spectrums:
-        assert not ctrl.state.spectrums["one"].points_selected
+        assert not ctrl.state.spectrums["one"].points_completed
 
 
 def test_onetone_publication_failure_does_not_reopen_input(onetone_controller):
@@ -445,6 +445,6 @@ def test_onetone_publication_failure_does_not_reopen_input(onetone_controller):
         assert owner.current_onetone_pick() is None
         with pytest.raises(FailedPreconditionError):
             context.plugin.set_threshold.execute(context.session, 1.0)
-        assert not ctrl.state.spectrums["one"].points_selected
+        assert not ctrl.state.spectrums["one"].points_completed
     finally:
         owner.dispose()

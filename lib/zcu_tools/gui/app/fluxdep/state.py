@@ -108,8 +108,14 @@ class SpectrumEntry:
 
     ``flux_half`` / ``flux_int`` / ``flux_period`` are per-spectrum: each spectrum
     is aligned on its own (the values may be *inherited* as an initial guess from
-    an already-loaded spectrum, then fine-tuned). ``aligned`` / ``points_selected``
-    gate the pipeline stage shown for this spectrum.
+    an already-loaded spectrum, then fine-tuned). ``aligned`` / ``points_completed``
+    gate the pipeline stage shown for this spectrum; completion includes zero
+    points. name is the collection identifier; spec_type selects OneTone or
+    TwoTone tooling. raw holds native device values, normalized flux, GHz
+    frequency and complex signals; points holds annotated coordinates in the
+    same units. flux_half/flux_int are native device positions of half/integer
+    flux; flux_period is the device span of one flux quantum. aligned means
+    alignment is committed; alignment_seeded means the scalars can seed a picker.
     """
 
     name: str
@@ -120,11 +126,16 @@ class SpectrumEntry:
     flux_int: float = 0.0
     flux_period: float = 1.0
     aligned: bool = False
-    points_selected: bool = False
+    points_completed: bool = False  # A result was committed, including zero points.
     # True when flux_half/int are a meaningful initial guess (inherited from
     # another spectrum or already aligned), so the line-picker should seed from
     # them rather than its centre/edge defaults.
     alignment_seeded: bool = False
+
+    @property
+    def point_count(self) -> int:
+        """Number of available annotated points, independent of stage completion."""
+        return int(self.points["freqs"].size)
 
 
 @dataclass
@@ -227,18 +238,30 @@ class FluxDepState:
         flux_int: float,
         flux_period: float,
         new_fluxs: NDArray[np.float64],
+        new_point_fluxs: NDArray[np.float64],
     ) -> None:
-        """Record a spectrum's flux alignment and re-mapped flux axis.
+        """Commit alignment scalars and both mapped axes under one version bump.
 
-        ``new_fluxs`` is the re-derived raw flux axis (computed by the caller,
-        which owns the ``value2flux`` mapping). It is written in place on the
-        entry's raw TypedDict here so every mutation of this spectrum — the
-        alignment scalars and the flux axis — happens at this single State
-        boundary under one version bump.
+        On the owner thread, replace raw fluxs with the finite 1-D
+        ``new_fluxs`` matching raw dev_values, and point fluxs with the finite
+        1-D ``new_point_fluxs`` matching native point dev_values. Preserve native
+        points and completion. Unknown name raises KeyError; invalid mapped
+        arrays raise ValueError before any mutation.
         """
         self._assert_owner()
         entry = self.spectrums[name]
-        entry.raw["fluxs"] = np.asarray(new_fluxs, dtype=np.float64)
+        raw_fluxs = np.asarray(new_fluxs, dtype=np.float64)
+        point_fluxs = np.asarray(new_point_fluxs, dtype=np.float64)
+        if raw_fluxs.ndim != 1 or raw_fluxs.shape != entry.raw["dev_values"].shape:
+            raise ValueError("new_fluxs must match raw dev_values shape")
+        if (
+            point_fluxs.ndim != 1
+            or point_fluxs.shape != entry.points["dev_values"].shape
+        ):
+            raise ValueError("new_point_fluxs must match point dev_values shape")
+        if not np.all(np.isfinite(raw_fluxs)) or not np.all(np.isfinite(point_fluxs)):
+            raise ValueError("mapped fluxs must be finite")
+        entry.raw["fluxs"] = raw_fluxs
         self.spectrums[name] = replace(
             entry,
             flux_half=flux_half,
@@ -246,24 +269,58 @@ class FluxDepState:
             flux_period=flux_period,
             aligned=True,
             alignment_seeded=True,
+            points=PointsData(
+                dev_values=entry.points["dev_values"],
+                fluxs=point_fluxs,
+                freqs=entry.points["freqs"],
+            ),
         )
         self.version.bump(spectrum_version_key(name))
 
     def set_points(self, name: str, points: PointsData) -> None:
-        """Record a spectrum's selected points; mark selected iff non-empty.
+        """Commit native/mapped points and complete picking, including zero points.
 
-        An empty point set is a legal outcome (the user deselected everything),
-        but it must not be flagged ``points_selected`` — downstream readers
-        (e.g. the cross-spectrum SelectorWidget) treat that flag as "has points
-        to work with" and would crash on an empty cloud. Same ``freqs.size > 0``
-        rule the load path uses (see ``LoadService``).
+        Owner-thread command. Bump the named spectrum once; unknown name raises
+        KeyError. Availability is point_count, not the completion flag.
         """
         self._assert_owner()
         self.spectrums[name] = replace(
             self.spectrums[name],
             points=points,
-            points_selected=points["freqs"].size > 0,
+            points_completed=True,
         )
+        self.version.bump(spectrum_version_key(name))
+
+    def reset_points(self, name: str) -> None:
+        """Clear points and completion on an aligned spectrum; bump once.
+
+        Keep alignment and its seed. Unknown name raises KeyError; an unaligned
+        spectrum raises ValueError. Both failures leave data/version unchanged.
+        Must run on the owner thread.
+        """
+        self._assert_owner()
+        entry = self.spectrums[name]
+        if not entry.aligned:
+            raise ValueError("spectrum must be aligned before resetting points")
+        self.spectrums[name] = replace(
+            entry,
+            points=PointsData(
+                dev_values=np.empty(0, dtype=np.float64),
+                fluxs=np.empty(0, dtype=np.float64),
+                freqs=np.empty(0, dtype=np.float64),
+            ),
+            points_completed=False,
+        )
+        self.version.bump(spectrum_version_key(name))
+
+    def reset_alignment(self, name: str) -> None:
+        """Reopen alignment, preserving native points, completion and last mapping.
+
+        Set aligned=False and bump once. Unknown name raises KeyError without
+        mutation. Must run on the owner thread.
+        """
+        self._assert_owner()
+        self.spectrums[name] = replace(self.spectrums[name], aligned=False)
         self.version.bump(spectrum_version_key(name))
 
     def set_selection(

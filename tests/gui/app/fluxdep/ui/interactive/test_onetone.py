@@ -89,7 +89,7 @@ def test_main_window_finish_publishes_and_advances_to_preview(qapp, onetone_cont
         finish = next(b for b in view.findChildren(QPushButton) if b.text() == "Finish")
         finish.click()
         entry = onetone_controller.state.spectrums["one"]
-        assert entry.points_selected
+        assert entry.points_completed
         np.testing.assert_array_equal(entry.points["dev_values"], np.sort(expected[0]))
         assert window.findChildren(ResultPreviewWidget)
         assert onetone_controller.interactive.current_onetone_pick() is None

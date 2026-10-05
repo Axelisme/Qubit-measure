@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
@@ -75,8 +76,61 @@ def test_set_points_emits_changed(spectrum_hdf5):
     ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     seen = _record(ctrl, SpectrumChangedPayload)
     ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
-    assert ctrl.state.spectrums[name].points_selected is True
+    assert ctrl.state.spectrums[name].points_completed is True
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_reset_and_realignment_preserve_native_points_and_publish_once(
+    spectrum_hdf5, empty
+):
+    from zcu_tools.gui.app.fluxdep.state import spectrum_version_key
+
+    filepath, *_ = spectrum_hdf5
+    ctrl = _ctrl()
+    name = ctrl.load_spectrum(filepath, "OneTone")
+    ctrl.set_alignment(name, 0.0, 1.0)
+    devs = np.array([], dtype=np.float64) if empty else np.array([1.0, 0.0])
+    freqs = np.array([], dtype=np.float64) if empty else np.array([5.1, 5.0])
+    ctrl.set_points(name, devs, freqs)
+    seen = _record(ctrl, SpectrumChangedPayload)
+    before = ctrl.state.version.get(spectrum_version_key(name))
+    ctrl.reset_alignment(name)
+    entry = ctrl.state.spectrums[name]
+    assert not entry.aligned and entry.points_completed and entry.alignment_seeded
+    assert entry.point_count == devs.size
+    assert ctrl.state.version.get(spectrum_version_key(name)) == before + 1
+    assert len(seen) == 1
+
+    with pytest.raises(ValueError, match="aligned"):
+        ctrl.reset_points(name)
+    with pytest.raises(KeyError):
+        ctrl.reset_points("absent")
+    with pytest.raises(KeyError):
+        ctrl.reset_alignment("absent")
+    assert ctrl.state.spectrums[name] is entry
+    assert len(seen) == 1
+    assert ctrl.state.version.get(spectrum_version_key(name)) == before + 1
+
+    ctrl.set_alignment(name, 0.25, 0.75)
+    entry = ctrl.state.spectrums[name]
+    assert entry.aligned and entry.points_completed
+    np.testing.assert_array_equal(entry.points["dev_values"], np.sort(devs))
+    np.testing.assert_array_equal(entry.points["freqs"], np.sort(freqs))
+    np.testing.assert_allclose(entry.points["fluxs"], np.sort(devs) + 0.25)
+    np.testing.assert_allclose(entry.raw["fluxs"], entry.raw["dev_values"] + 0.25)
+    assert len(seen) == 2
+    assert ctrl.state.version.get(spectrum_version_key(name)) == before + 2
+
+    ctrl.reset_points(name)
+    entry = ctrl.state.spectrums[name]
+    assert entry.aligned and entry.alignment_seeded and not entry.points_completed
+    assert entry.point_count == 0
+    assert len(seen) == 3
+    assert ctrl.state.version.get(spectrum_version_key(name)) == before + 3
+    ctrl.set_points(name, np.empty(0), np.empty(0))
+    assert ctrl.state.spectrums[name].points_completed
+    assert len(seen) == 4
 
 
 def test_set_active_emits(spectrum_hdf5):
@@ -176,7 +230,7 @@ def _seed_aligned_points(ctrl: Controller) -> None:
             flux_int=0.5,
             flux_period=1.0,
             aligned=True,
-            points_selected=True,
+            points_completed=True,
         )
     )
 

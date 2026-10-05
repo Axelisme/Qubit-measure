@@ -30,9 +30,10 @@ class AlignmentService:
         """Record half/integer flux positions; derive period and re-map fluxs.
 
         ``flux_period = 2 * |flux_int - flux_half|`` (the device-value span of one
-        flux quantum). The spectrum's raw ``fluxs`` axis is re-derived from its
-        device values under the new alignment, so downstream point selection and
-        export see flux coordinates consistent with the chosen lines.
+        flux quantum). Re-map both raw and selected-point fluxs from native
+        device values in one State commit, preserving points and completion.
+        Unknown name raises KeyError; a zero period or nonfinite mapped arrays
+        raise ValueError without mutation. Must run on the State owner thread.
         """
         entry = self._state.spectrums[name]
         flux_period = 2.0 * abs(flux_int - flux_half)
@@ -46,7 +47,13 @@ class AlignmentService:
             value2flux(entry.raw["dev_values"], flux_half, flux_period),
             dtype=np.float64,
         )
-        self._state.set_alignment(name, flux_half, flux_int, flux_period, new_fluxs)
+        new_point_fluxs = np.asarray(
+            value2flux(entry.points["dev_values"], flux_half, flux_period),
+            dtype=np.float64,
+        )
+        self._state.set_alignment(
+            name, flux_half, flux_int, flux_period, new_fluxs, new_point_fluxs
+        )
         logger.debug(
             "set_alignment: %r half=%g int=%g period=%g",
             name,
@@ -55,6 +62,10 @@ class AlignmentService:
             flux_period,
         )
 
+    def reset_alignment(self, name: str) -> None:
+        """Reopen named spectrum's alignment, keeping points/completion; KeyError if absent."""
+        self._state.reset_alignment(name)
+
 
 class PointsService:
     """Writes a spectrum's selected points (from the point-selection widget)."""
@@ -62,13 +73,17 @@ class PointsService:
     def __init__(self, state: FluxDepState) -> None:
         self._state = state
 
+    def reset_points(self, name: str) -> None:
+        """Clear named spectrum's points/completion; KeyError if absent, ValueError if unaligned."""
+        self._state.reset_points(name)
+
     def set_points(
         self, name: str, dev_values: NDArray[np.float64], freqs: NDArray[np.float64]
     ) -> None:
         """Record selected (dev_value, freq) points, sorted by device value.
 
-        The points' flux coordinates are derived from the spectrum's current
-        alignment (so they share the spectrum's flux mapping).
+        Complete picking even for zero points. Derive flux coordinates from the
+        spectrum's current alignment, so points share its flux mapping.
         """
         entry = self._state.spectrums[name]
         order = np.argsort(dev_values)

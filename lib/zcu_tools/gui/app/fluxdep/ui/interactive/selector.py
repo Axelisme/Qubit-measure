@@ -46,7 +46,14 @@ _SCALE = 1000
 
 
 class SelectorWidget(InteractiveMplWidget):
-    """Brush selection over the joint point cloud of several spectra."""
+    """Brush selection over the joint point cloud of several spectra.
+
+    spectrums maps names to native SpectrumResult data. Skip zero-point spectra;
+    raise ValueError if none have points, before building workers or bounds.
+    min_distance seeds downsampling in normalized coordinates; brush_width seeds
+    the normalized brush diameter. parent owns the Qt widget. Call quiesce before
+    disposal. get_result returns flux/frequency arrays and their selection mask.
+    """
 
     def __init__(
         self,
@@ -58,6 +65,13 @@ class SelectorWidget(InteractiveMplWidget):
         # Controls on the LEFT to match the Search / Show tabs (the cross-spectrum
         # filter lives in the same Analyze panel).
         super().__init__(parent, controls_side="left")
+        spectrums = {
+            name: result
+            for name, result in spectrums.items()
+            if result["points"]["freqs"].size > 0
+        }
+        if not spectrums:
+            raise ValueError("at least one spectrum must have points")
         self._spectrums = spectrums
         self._s_fluxs = np.concatenate(
             [s["points"]["fluxs"] for s in spectrums.values()]

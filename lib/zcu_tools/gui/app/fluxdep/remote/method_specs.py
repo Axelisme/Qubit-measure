@@ -35,7 +35,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Spectrum collection
     "spectrum.list": MethodSpec(
         5.0,
-        "List the loaded spectra: each {name, spec_type, aligned, points_selected}.",
+        "List spectra: each {name, spec_type, aligned, points_completed, point_count}. "
+        "Completion includes zero points; point_count reports available data.",
     ),
     # Cross-spectrum selection
     "selection.pointcloud": MethodSpec(
