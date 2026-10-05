@@ -546,6 +546,9 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         assert data["analysis"] is None
         assert data["writeback"] is None
         assert data["actual"]["fields"]["sweep.gain"]["value"] == expected_gain
+        scalar_gain = data["actual"]["fields"]["modules.readout.pulse_cfg.gain"]
+        assert scalar_gain["value"] == 0.21
+        assert scalar_gain["source"] == "gui_default"
         assert data["raw_save"]["path"] == "/actual/raw.h5"
         assert data["preview"]["kind"] == "run_preview"
         assert Path(data["preview"]["path"]).read_bytes() == PNG
@@ -560,6 +563,13 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         }
         assert (
             initial.data["previews"] == waited.data["previews"] == summary["previews"]
+        )
+        assert summary["actual"]["parameters"]["gain"] == {
+            "value": 0.21,
+            "source": "gui_default",
+        }
+        assert waited.data["actual"]["parameters"]["gain"] == (
+            summary["actual"]["parameters"]["gain"]
         )
         assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
             {"path": "/actual/raw.h5", "status": "saved"}

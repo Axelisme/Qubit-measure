@@ -762,8 +762,10 @@ class RecipeTab:
     ) -> None:
         """Select name for a module field; None retains its current GUI value.
 
-        required names the missing tool parameter if no usable reference exists.
-        Unknown or invalid explicit library references fail rather than fall back.
+        required requires membership in the captured library even for explicit
+        names. It names the missing tool parameter when no usable GUI reference
+        exists and name is None. Invalid or non-library explicit required names
+        raise GuiRpcError (invalid_cfg), rather than falling back.
         """
         node = self._reference(field)
         if name is not None:
@@ -771,7 +773,12 @@ class RecipeTab:
                 raise ValueError("library name must be non-empty")
             self._edit([{"path": _field_path(field), "value": {"__ref": name}}])
             node = self._reference(field)
-            if node.get("error") or not node.get("valid") or node.get("ref") != name:
+            if (
+                node.get("error")
+                or not node.get("valid")
+                or node.get("ref") != name
+                or (required is not None and name not in self._binding.libraries)
+            ):
                 raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
         elif required is not None and (
             not isinstance(node.get("ref"), str)
