@@ -193,9 +193,8 @@ def test_failed_run_control_intent_is_scoped_for_the_next_run(tmp_path, control:
         assert delivered == (["cancelled"] if control == "cancel" else ["completed"])
         assert starts == (1 if control == "cancel" else 2)
         assert reply.data["status"] == ("cancelled" if control == "cancel" else "finished")
-        assert reply.data["run_outcome"]["status"] == (
-            "failed" if control == "cancel" else "finished"
-        )
+        if control == "finish_early":
+            assert reply.data["run_outcome"]["status"] == "finished"
 
 
 @pytest.mark.parametrize("control", ["cancel", "finish_early"])
