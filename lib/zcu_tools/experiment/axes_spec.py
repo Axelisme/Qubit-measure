@@ -13,6 +13,7 @@ Axes are declared **inner-first** to match ``labber_io``'s native convention
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
@@ -21,10 +22,12 @@ from typing import Any, Generic, Literal, TypeVar
 import numpy as np
 
 from zcu_tools.datafile import (
+    AxisSchema,
     DataVariable,
     GroupedLabberData,
     LabberMetadata,
     LabberPayload,
+    VariableSchema,
     load_grouped_labber_data,
     save_grouped_labber_data,
 )
@@ -68,25 +71,48 @@ class Axis:
 
 @dataclass(frozen=True)
 class ZSpec:
-    """The log (z) channel of an experiment Result."""
+    """Result channel: field_name selects the array; label/unit describe disk.
+
+    dtype is the reconstructed memory dtype. scale maps memory values to SI
+    disk values (disk = memory * scale), and must be finite and nonzero.
+    """
 
     field_name: str
     label: str
     unit: str
     dtype: type = np.complex128
+    scale: float = IDENTITY
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.scale) or self.scale == 0.0:
+            raise ValueError("ZSpec scale must be finite and non-zero")
 
 
 @dataclass(frozen=True)
 class AxesSpec(Generic[T_Result, T_Config]):
-    """The full per-experiment persistence declaration (see module docstring)."""
+    """Map a Result dataclass and cfg model to one stable variable identity.
+
+    axes are inner-first memory-field/label/unit/scale declarations; z selects
+    the signal field and its memory dtype/unit conversion. result_type rebuilds
+    Result; cfg_type validates cfg. tag is the persisted experiment identity.
+    data_variable is the explicit native group key, defaulting to data, never
+    inferred from a label. cfg_schema_version is declaration-owned major.minor,
+    defaulting to 1.0. Invalid Result fields fail at declaration time. Existing
+    save/load remain Labber; native save_run/load_run consume this same spec.
+    """
 
     axes: tuple[Axis, ...]  # inner-first
     z: ZSpec
     result_type: type[T_Result]
     cfg_type: type[T_Config]
     tag: str  # on-disk hierarchical tag, e.g. 'twotone/freq'
+    data_variable: DataVariable = DataVariable(
+        "data"
+    )  # stable single-variable identity
+    cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
 
     def __post_init__(self) -> None:
+        _validate_cfg_schema_version(self.cfg_schema_version)
         # Fast-Fail at declaration time: the spec must reference real Result fields.
         if not is_dataclass(self.result_type):
             raise TypeError(f"result_type {self.result_type!r} must be a dataclass")
@@ -239,6 +265,32 @@ class VariableSpec:
                 f"{sorted(missing)} not on {result_type_name} "
                 f"(has {sorted(result_fields)})"
             )
+
+    def native_schema(self) -> VariableSchema:
+        """Return this mapping's SI disk labels, units and numeric dtypes.
+
+        NumPy scalar multiplication determines disk dtype after memory casting.
+        Generated arange axes keep their declared integer dtype without scaling.
+        This declaration does not inspect Result values or modify arrays.
+        """
+        return VariableSchema(
+            variable=self.data_variable,
+            axes=tuple(
+                AxisSchema(
+                    name=axis.label,
+                    unit=axis.unit,
+                    dtype=(
+                        np.dtype(axis.dtype)
+                        if axis.generated == "arange"
+                        else (np.empty(0, dtype=axis.dtype) * axis.scale).dtype
+                    ),
+                )
+                for axis in self.axes
+            ),
+            signal_name=self.z.label,
+            signal_unit=self.z.unit,
+            signal_dtype=(np.empty(0, dtype=self.z.dtype) * self.z.scale).dtype,
+        )
 
     def payload_from_result(self, result: object, *, context: str) -> LabberPayload:
         """Map declared Result arrays into disk units; context labels validation errors.
@@ -400,7 +452,9 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     tag is the default file tag. result_builder rebuilds result_type from loaded
     memory-unit arrays; result_validator, when supplied, checks results on save
     and load. Invalid declarations raise ValueError; non-dataclass types or wrong
-    builder return types raise TypeError. Variables require a common grid on save.
+    builder return types raise TypeError. cfg_schema_version is the declaration's
+    major.minor cfg version, defaulting to 1.0. Existing Labber save/load require
+    a common grid; native persistence permits different grids for each variable.
     """
 
     variables: tuple[VariableSpec, ...]
@@ -409,8 +463,10 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     tag: str
     result_builder: Callable[[GroupedLoadData[T_Config]], T_Result]
     result_validator: Callable[[T_Result], None] | None = None
+    cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
 
     def __post_init__(self) -> None:
+        _validate_cfg_schema_version(self.cfg_schema_version)
         if not self.variables:
             raise ValueError("GroupedAxesSpec requires at least one variable")
         if not is_dataclass(self.result_type):
@@ -543,6 +599,11 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
             cfg_dict,
             source=source or "<grouped>",
         )
+
+
+def _validate_cfg_schema_version(version: str) -> None:
+    if re.fullmatch(r"[0-9]+\.[0-9]+", version) is None:
+        raise ValueError(f"cfg_schema_version must be major.minor, got {version!r}")
 
 
 def _cast_memory_values(values: Any, dtype: type, *, context: str) -> np.ndarray:

@@ -431,21 +431,3 @@ class CPMG_Exp:
 
         fig.tight_layout()
         return CPMGAnalysis(ns=times, t2s=t2s, t2errs=t2errs)
-
-    def save(
-        self,
-        source: RunRecord[CPMG_Cfg, CPMG_Result],
-        destination: Path,
-        *,
-        comment: str | None = None,
-        tag: str = "twotone/ge/cpmg",
-    ) -> None:
-        CPMG_GROUPED_AXES_SPEC.save(
-            source,
-            destination,
-            comment=comment,
-            tag=tag,
-        )
-
-    def load(self, source: Path) -> RunRecord[CPMG_Cfg, CPMG_Result]:
-        return load_cpmg_grouped_result(source)

@@ -1,10 +1,22 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-05，Data Variable 命名
+**Last updated:** 2026-10-06，Native experiment data
 
 
-`zcu_tools.datafile` 是 Labber-style experiment data file 的 public
+`zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
 facade。caller 優先從 package root import model 與 function。
+
+- `save_run_data`／`load_run_data` 處理版本化 `zcu.experiment-data` HDF5。
+  `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
+  不同 variables 可以使用不同網格。`VariableSchema` 與
+  `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
+- `RunMetadata`、`RunSnapshot`、`CfgSnapshot` 是 caller 傳入的歷史資料，writer
+  不擷取 live context。Native saving 使用 caller 的 exact path，先寫同目錄 temp，
+  關檔後發布；`replace=True` 原子替換，失敗清理 temp 並保留原 destination。
+- Native loading 預設只投影已知內容。明示 `preserve_unknown=True` 才取得
+  `NativeExtensions` detached HDF5 image。Generic caller 把 image 傳回 writer，
+  保留同 major minor 的未知 JSON／HDF5 內容與不改形 rewrite 的 references。
+  Typed experiment tuple 不是 lossless rewrite envelope，也沒有 legacy fallback。
 
 - `Axis`、`LabberPayload`、`LabberMetadata`、`LabberData` 描述單一
   inner-first axes 的 Labber dataset。

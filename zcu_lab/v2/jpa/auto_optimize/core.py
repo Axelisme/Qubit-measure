@@ -437,16 +437,3 @@ class AutoOptimizeExp:
         ax.set_xlabel("Flux value")
         ax.set_ylabel("Freq (MHz)")
         ax.set_zlabel("Power (dBm)")
-
-    def save(
-        self,
-        source: RunRecord[JPAOptCfg, JPAOptimizeResult],
-        destination: Path,
-        *,
-        comment: str | None = None,
-        tag: str = "jpa/auto_optimize",
-    ) -> None:
-        JPA_AUTO_GROUPED_AXES_SPEC.save(source, destination, comment=comment, tag=tag)
-
-    def load(self, source: Path) -> RunRecord[JPAOptCfg, JPAOptimizeResult]:
-        return load_jpa_auto_grouped_result(source)

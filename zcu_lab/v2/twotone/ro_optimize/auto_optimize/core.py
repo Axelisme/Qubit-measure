@@ -428,16 +428,3 @@ class AutoOptExp:
         return AutoOptAnalysis(
             float(best_params[0]), float(best_params[1]), float(best_params[2])
         )
-
-    def save(
-        self,
-        source: RunRecord[AutoOptCfg, AutoOptResult],
-        destination: Path,
-        *,
-        comment: str | None = None,
-        tag: str = "twotone/ge/ro_optimize/auto",
-    ) -> None:
-        RO_AUTO_GROUPED_AXES_SPEC.save(source, destination, comment=comment, tag=tag)
-
-    def load(self, source: Path) -> RunRecord[AutoOptCfg, AutoOptResult]:
-        return load_auto_opt_grouped_result(source)
