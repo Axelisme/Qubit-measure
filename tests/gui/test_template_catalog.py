@@ -1,47 +1,53 @@
-"""Unit tests for the gui-side RoleCatalog (role template registry)."""
+"""Unit tests for the gui-side TemplateCatalog (role template registry)."""
 
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
-from zcu_tools.gui.cfg import CfgSectionSpec, LiteralSpec
+from zcu_tools.gui.app.measure.template_catalog import (
+    TemplateCatalog,
+    TemplateEntry,
+    TemplateItemKind,
+)
+from zcu_tools.gui.cfg import CfgNodeSpec, CfgSectionSpec, LiteralSpec
 
 
-def _entry(role_id: str, kind: str) -> RoleEntry:
-    shape = PROGRAM_SHAPES.get(kind, "pulse" if kind == "module" else "const")  # type: ignore[arg-type]
-    return RoleEntry(
-        role_id,
-        role_id.title(),
-        kind,  # type: ignore[arg-type]
+def _entry(template_id: str, kind: TemplateItemKind) -> TemplateEntry:
+    shape = PROGRAM_SHAPES.get(kind, "pulse" if kind == "module" else "const")
+    return TemplateEntry(
+        template_id,
+        template_id.title(),
+        kind,
         lambda: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
-        lambda ctx: ctx,  # type: ignore[arg-type]
+        MagicMock(),
     )
 
 
 def test_register_and_get():
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
     e = _entry("res_probe", "module")
     cat.register(e)
     assert cat.has("res_probe")
     assert cat.get("res_probe") is e
 
 
-def test_role_entry_is_immutable_after_validation() -> None:
+def test_template_entry_is_immutable_after_validation() -> None:
     entry = _entry("res_probe", "module")
-    RoleCatalog().register(entry)
+    TemplateCatalog().register(entry)
 
     with pytest.raises(FrozenInstanceError):
-        entry.shape = lambda: PROGRAM_SHAPES.module("pulse").make_spec(  # type: ignore[misc]
-            MAIN_PROGRAM_SPEC_POLICY
+        entry.__setattr__(
+            "shape",
+            lambda: PROGRAM_SHAPES.module("pulse").make_spec(MAIN_PROGRAM_SPEC_POLICY),
         )
 
 
-def test_duplicate_role_id_raises():
-    cat = RoleCatalog()
+def test_duplicate_template_id_raises():
+    cat = TemplateCatalog()
     cat.register(_entry("res_probe", "module"))
     shape_calls = 0
 
@@ -52,12 +58,12 @@ def test_duplicate_role_id_raises():
 
     with pytest.raises(ValueError, match="already registered"):
         cat.register(
-            RoleEntry(
+            TemplateEntry(
                 "res_probe",
                 "Duplicate",
                 "module",
                 shape,
-                lambda ctx: ctx,  # type: ignore[arg-type]
+                MagicMock(),
             )
         )
     assert shape_calls == 0
@@ -77,8 +83,10 @@ def test_register_validates_shape_once_without_materializing_value() -> None:
         value_calls += 1
         return ctx
 
-    entry = RoleEntry("pulse", "Pulse", "module", shape, value)  # type: ignore[arg-type]
-    cat = RoleCatalog()
+    entry = TemplateEntry(
+        "pulse", "Pulse", "module", shape, MagicMock(side_effect=value)
+    )
+    cat = TemplateCatalog()
     cat.register(entry)
 
     assert shape_calls == 1
@@ -87,18 +95,18 @@ def test_register_validates_shape_once_without_materializing_value() -> None:
 
 
 def test_register_rejects_shape_kind_mismatch_without_inserting() -> None:
-    entry = RoleEntry(
+    entry = TemplateEntry(
         "wrong",
         "Wrong",
         "module",
         lambda: PROGRAM_SHAPES.waveform("const").make_spec(MAIN_PROGRAM_SPEC_POLICY),
-        lambda ctx: ctx,  # type: ignore[arg-type]
+        MagicMock(),
     )
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
 
     with pytest.raises(
         TypeError,
-        match=r"Role 'wrong' declares kind 'module'.*root kind is 'waveform'",
+        match=r"Template 'wrong' declares kind 'module'.*root kind is 'waveform'",
     ):
         cat.register(entry)
 
@@ -106,14 +114,14 @@ def test_register_rejects_shape_kind_mismatch_without_inserting() -> None:
 
 
 def test_register_rejects_non_section_shape_without_inserting() -> None:
-    entry = RoleEntry(
+    entry = TemplateEntry(
         "wrong",
         "Wrong",
         "module",
-        lambda: object(),  # type: ignore[arg-type,return-value]
-        lambda ctx: ctx,  # type: ignore[arg-type]
+        MagicMock(return_value=object()),
+        MagicMock(),
     )
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
 
     with pytest.raises(TypeError, match="must return CfgSectionSpec"):
         cat.register(entry)
@@ -122,16 +130,16 @@ def test_register_rejects_non_section_shape_without_inserting() -> None:
 
 
 def test_register_rejects_shape_with_two_root_discriminators() -> None:
-    entry = RoleEntry(
+    entry = TemplateEntry(
         "ambiguous",
         "Ambiguous",
         "module",
         lambda: CfgSectionSpec(
             fields={"type": LiteralSpec("pulse"), "style": LiteralSpec("const")}
         ),
-        lambda ctx: ctx,  # type: ignore[arg-type]
+        MagicMock(),
     )
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
 
     with pytest.raises(ValueError, match="exactly one root discriminator"):
         cat.register(entry)
@@ -147,14 +155,14 @@ def test_register_shape_factory_failure_does_not_insert() -> None:
         shape_calls += 1
         raise RuntimeError("shape failed")
 
-    entry = RoleEntry(
+    entry = TemplateEntry(
         "broken",
         "Broken",
         "module",
         shape,
-        lambda ctx: ctx,  # type: ignore[arg-type]
+        MagicMock(),
     )
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
 
     with pytest.raises(RuntimeError, match="shape failed"):
         cat.register(entry)
@@ -173,17 +181,17 @@ def test_register_shape_factory_failure_does_not_insert() -> None:
     ],
 )
 def test_register_rejects_malformed_or_unknown_discriminator(
-    fields: dict[str, object],
+    fields: dict[str, CfgNodeSpec],
     error: str,
 ) -> None:
-    entry = RoleEntry(
+    entry = TemplateEntry(
         "broken",
         "Broken",
         "module",
-        lambda: CfgSectionSpec(fields=fields),  # type: ignore[arg-type]
-        lambda ctx: ctx,  # type: ignore[arg-type]
+        lambda: CfgSectionSpec(fields=fields),
+        MagicMock(),
     )
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
 
     with pytest.raises(ValueError, match=error):
         cat.register(entry)
@@ -205,8 +213,10 @@ def test_catalog_access_never_rebuilds_shape_or_value() -> None:
         value_calls += 1
         return ctx
 
-    entry = RoleEntry("pulse", "Pulse", "module", shape, value)  # type: ignore[arg-type]
-    cat = RoleCatalog()
+    entry = TemplateEntry(
+        "pulse", "Pulse", "module", shape, MagicMock(side_effect=value)
+    )
+    cat = TemplateCatalog()
     cat.register(entry)
 
     assert cat.get("pulse") is entry
@@ -226,22 +236,22 @@ def test_catalog_access_never_rebuilds_shape_or_value() -> None:
 
 def test_get_unknown_raises():
     with pytest.raises(KeyError, match="not found"):
-        RoleCatalog().get("nope")
+        TemplateCatalog().get("nope")
 
 
 def test_entries_for_filters_by_kind_and_preserves_order():
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
     cat.register(_entry("a", "module"))
     cat.register(_entry("w1", "waveform"))
     cat.register(_entry("b", "module"))
     cat.register(_entry("w2", "waveform"))
 
-    assert [e.role_id for e in cat.entries_for("module")] == ["a", "b"]
-    assert [e.role_id for e in cat.entries_for("waveform")] == ["w1", "w2"]
+    assert [e.template_id for e in cat.entries_for("module")] == ["a", "b"]
+    assert [e.template_id for e in cat.entries_for("waveform")] == ["w1", "w2"]
 
 
 def test_list_meta_shape():
-    cat = RoleCatalog()
+    cat = TemplateCatalog()
     cat.register(_entry("res_probe", "module"))
     meta = cat.list_meta()
     assert meta == [

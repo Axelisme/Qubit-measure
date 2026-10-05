@@ -212,7 +212,7 @@ class ContextWritePort(Protocol):
     """The single authority for ml/md content writes (ADR-0067).
 
     Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
-    inspect save, create_from_role) write through this port; ContextService
+    inspect save, create_from_template) write through this port; ContextService
     lowers (app-local ``schema_to_raw_dict`` with the live md, so callers cannot
     forget md)
     + registers, and on success bumps the ``context`` version + emits

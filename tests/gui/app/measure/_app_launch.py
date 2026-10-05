@@ -15,8 +15,8 @@ from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
@@ -65,7 +65,7 @@ def launched_measure_app(
     bridge = None
     try:
         behavior = MeasureGuiBehavior(
-            lambda: (Registry(), RoleCatalog(), Loader()),
+            lambda: (Registry(), TemplateCatalog(), Loader()),
             clean=True,
             project_root=str(tmp_path),
         )

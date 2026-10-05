@@ -3,7 +3,7 @@
 A role has a *blank* factory (md-linked defaults, never a library lookup, never
 ``None``) and optionally a *ref* factory (prefers a named library entry, falls
 back to the blank, and may return ``None`` when ``optional`` and nothing matches).
-Both the GUI ``RoleCatalog`` registration (``registry.py``) and fresh measure cfg
+Both the GUI ``TemplateCatalog`` registration (``registry.py``) and fresh measure cfg
 materialization consume this table, so the role vocabulary lives in exactly one
 place.
 
@@ -14,7 +14,7 @@ The factory pair for each role is generated from the declarative ``ROLE_TABLE``
 The context-free measure builder records a module initialization mode. During fresh
 cfg materialization, ``ModuleInit.SMART`` calls the *ref* factory (library-aware),
 ``ModuleInit.INLINE`` forces the *blank* factory, and ``ModuleInit.DISABLED``
-materializes ``None`` for an optional ref. ``RoleCatalog`` always uses the *blank*
+materializes ``None`` for an optional ref. ``TemplateCatalog`` always uses the *blank*
 factory (creating from a role seeds a fresh entry, it never references an existing
 library entry).
 """
@@ -79,7 +79,7 @@ def _from_role(role: RoleDef) -> RoleFactorySpec:
 
 
 # role_id -> factory pair, generated from ROLE_TABLE. Order is informational only
-# (RoleCatalog defines its own dropdown order in registry.py).
+# (TemplateCatalog defines its own dropdown order in registry.py).
 ROLE_FACTORIES: dict[str, RoleFactorySpec] = {
     role_id: _from_role(role) for role_id, role in ROLE_TABLE.items()
 }

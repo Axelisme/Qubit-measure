@@ -1,7 +1,7 @@
-"""Controller.create_from_role: seed a blank ml entry from a named role,
+"""Controller.create_from_template: seed a blank ml entry from a named role,
 md-linked defaults lowered to the md's current values.
 
-Uses a real SessionEnv (real MetaDict/ModuleLibrary) + a real RoleCatalog so the
+Uses a real SessionEnv (real MetaDict/ModuleLibrary) + a real TemplateCatalog so the
 factory → lowering → ml-register chain is exercised end to end.
 """
 
@@ -13,9 +13,9 @@ import pytest
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
 from zcu_tools.gui.app.measure.specs import make_pulse_spec
 from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog, TemplateEntry
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,
@@ -25,13 +25,13 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from zcu_lab.roles import register_all_roles
+from zcu_lab.templates import register_all_templates
 
 
 def _make_ctrl(
     md_values: dict,
     *,
-    catalog: RoleCatalog | None = None,
+    catalog: TemplateCatalog | None = None,
 ) -> Controller:
     md = MetaDict()
     for k, v in md_values.items():
@@ -44,8 +44,8 @@ def _make_ctrl(
         readiness=ContextReadiness.ACTIVE,
     )
     if catalog is None:
-        catalog = RoleCatalog()
-        register_all_roles(catalog)
+        catalog = TemplateCatalog()
+        register_all_templates(catalog)
     io = IOManager()
     io._em = MagicMock()  # simulate a project being set up
     bus = EventBus()
@@ -55,7 +55,7 @@ def _make_ctrl(
         io_manager=io,
         view=None,
         bus=bus,
-        role_catalog=catalog,
+        template_catalog=catalog,
     )
 
 
@@ -64,7 +64,7 @@ def _instrumented_entry(
     *,
     fail_value: bool = False,
     fail_shape_on_create: bool = False,
-) -> tuple[RoleEntry, list[object], list[object]]:
+) -> tuple[TemplateEntry, list[object], list[object]]:
     made_specs: list[object] = []
     made_values: list[object] = []
     shape_calls = 0
@@ -92,7 +92,7 @@ def _instrumented_entry(
         return ref
 
     return (
-        RoleEntry("instrumented", "Instrumented", "module", shape, make_value),
+        TemplateEntry("instrumented", "Instrumented", "module", shape, make_value),
         made_specs,
         made_values,
     )
@@ -114,7 +114,7 @@ def _pulse_raw() -> dict[str, object]:
 
 def test_create_module_from_role_uses_md_value(qapp):  # noqa: ARG001
     ctrl = _make_ctrl({"r_f": 6123.0, "res_ch": 1, "ro_ch": 2})
-    ctrl.create_from_role("module", "res_probe", "my_ro")
+    ctrl.create_from_template("module", "res_probe", "my_ro")
 
     ml = ctrl.get_current_ml()
     assert "my_ro" in ml.modules
@@ -124,112 +124,123 @@ def test_create_module_from_role_uses_md_value(qapp):  # noqa: ARG001
     assert raw["freq"] == 6123.0
 
 
-def test_create_from_role_uses_value_then_fresh_shape_exactly_once(qapp) -> None:  # noqa: ARG001
+def test_create_from_template_uses_value_then_fresh_shape_exactly_once(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ARG001
     events: list[str] = []
     entry, made_specs, made_values = _instrumented_entry(events)
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
     catalog.register(entry)
     events.clear()
     made_specs.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
     get_context = MagicMock(wraps=ctrl.get_session_env)
-    ctrl.get_session_env = get_context  # type: ignore[method-assign]
-    ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
+    write = MagicMock()
+    monkeypatch.setattr(ctrl, "set_ml_module_from_schema", write)
 
-    ctrl.create_from_role("module", "instrumented", "created")
+    ctrl.create_from_template("module", "instrumented", "created")
 
     assert events == ["value", "shape"]
     assert len(made_specs) == 1
     assert len(made_values) == 1
     assert get_context.call_count == 1
-    schema = ctrl.set_ml_module_from_schema.call_args.args[1]
+    schema = write.call_args.args[1]
     assert schema.spec is made_specs[0]
     assert schema.value is made_values[0]
 
 
-def test_create_from_role_value_failure_does_not_call_shape(qapp) -> None:  # noqa: ARG001
+def test_create_from_template_value_failure_does_not_call_shape(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ARG001
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events, fail_value=True)
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
     catalog.register(entry)
     events.clear()
 
     ctrl = _make_ctrl({}, catalog=catalog)
     get_context = MagicMock(wraps=ctrl.get_session_env)
-    ctrl.get_session_env = get_context  # type: ignore[method-assign]
-    ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
+    write = MagicMock()
+    monkeypatch.setattr(ctrl, "set_ml_module_from_schema", write)
 
     with pytest.raises(RuntimeError, match="value failed"):
-        ctrl.create_from_role("module", "instrumented", "created")
+        ctrl.create_from_template("module", "instrumented", "created")
 
     assert events == ["value"]
     assert get_context.call_count == 1
-    ctrl.set_ml_module_from_schema.assert_not_called()
+    write.assert_not_called()
 
 
-def test_create_from_role_shape_failure_occurs_after_value(qapp) -> None:  # noqa: ARG001
+def test_create_from_template_shape_failure_occurs_after_value(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ARG001
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events, fail_shape_on_create=True)
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
     catalog.register(entry)
     events.clear()
 
     ctrl = _make_ctrl({}, catalog=catalog)
     get_context = MagicMock(wraps=ctrl.get_session_env)
-    ctrl.get_session_env = get_context  # type: ignore[method-assign]
-    ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
+    write = MagicMock()
+    monkeypatch.setattr(ctrl, "set_ml_module_from_schema", write)
 
     with pytest.raises(RuntimeError, match="shape failed"):
-        ctrl.create_from_role("module", "instrumented", "created")
+        ctrl.create_from_template("module", "instrumented", "created")
 
     assert events == ["value", "shape"]
     assert get_context.call_count == 1
-    ctrl.set_ml_module_from_schema.assert_not_called()
+    write.assert_not_called()
 
 
-def test_create_from_role_context_failure_calls_no_factory_or_write(qapp) -> None:  # noqa: ARG001
+def test_create_from_template_context_failure_calls_no_factory_or_write(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ARG001
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events)
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
     catalog.register(entry)
     events.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
-    ctrl.get_session_env = MagicMock(  # type: ignore[method-assign]
-        side_effect=RuntimeError("context failed")
-    )
-    ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
+    get_context = MagicMock(side_effect=RuntimeError("context failed"))
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
+    write = MagicMock()
+    monkeypatch.setattr(ctrl, "set_ml_module_from_schema", write)
 
     with pytest.raises(RuntimeError, match="context failed"):
-        ctrl.create_from_role("module", "instrumented", "created")
+        ctrl.create_from_template("module", "instrumented", "created")
 
     assert events == []
-    assert ctrl.get_session_env.call_count == 1
-    ctrl.set_ml_module_from_schema.assert_not_called()
+    assert get_context.call_count == 1
+    write.assert_not_called()
 
 
-def test_create_from_role_downstream_failure_preserves_factory_counts_and_identity(
+def test_create_from_template_downstream_failure_preserves_factory_counts_and_identity(
     qapp,  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
     entry, made_specs, made_values = _instrumented_entry(events)
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
     catalog.register(entry)
     events.clear()
     made_specs.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
     get_context = MagicMock(wraps=ctrl.get_session_env)
-    ctrl.get_session_env = get_context  # type: ignore[method-assign]
-    ctrl.set_ml_module_from_schema = MagicMock(  # type: ignore[method-assign]
-        side_effect=RuntimeError("write failed")
-    )
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
+    write = MagicMock(side_effect=RuntimeError("write failed"))
+    monkeypatch.setattr(ctrl, "set_ml_module_from_schema", write)
 
     with pytest.raises(RuntimeError, match="write failed"):
-        ctrl.create_from_role("module", "instrumented", "created")
+        ctrl.create_from_template("module", "instrumented", "created")
 
     assert events == ["value", "shape"]
     assert get_context.call_count == 1
-    assert ctrl.set_ml_module_from_schema.call_count == 1
-    schema = ctrl.set_ml_module_from_schema.call_args.args[1]
+    assert write.call_count == 1
+    schema = write.call_args.args[1]
     assert schema.spec is made_specs[0]
     assert schema.value is made_values[0]
 
@@ -241,80 +252,85 @@ def test_create_from_role_downstream_failure_preserves_factory_counts_and_identi
         ("waveform", "created", "not a waveform"),
     ],
 )
-def test_create_from_role_guards_do_not_call_value_or_shape(
+def test_create_from_template_guards_do_not_call_value_or_shape(
     qapp,  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
     item_kind: str,
     name: str,
     error: str,
 ) -> None:
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events)
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
     catalog.register(entry)
     events.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
     get_context = MagicMock(wraps=ctrl.get_session_env)
-    ctrl.get_session_env = get_context  # type: ignore[method-assign]
-    ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
+    write = MagicMock()
+    monkeypatch.setattr(ctrl, "set_ml_module_from_schema", write)
 
     with pytest.raises(RuntimeError, match=error):
-        ctrl.create_from_role(item_kind, "instrumented", name)
+        ctrl.create_from_template(item_kind, "instrumented", name)
 
     assert events == []
     get_context.assert_not_called()
-    ctrl.set_ml_module_from_schema.assert_not_called()
+    write.assert_not_called()
 
 
-def test_create_from_role_name_clash_guard_does_not_call_value_or_shape(qapp) -> None:  # noqa: ARG001
+def test_create_from_template_name_clash_guard_does_not_call_value_or_shape(
+    qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ARG001
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events)
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
     catalog.register(entry)
     events.clear()
     ctrl = _make_ctrl({}, catalog=catalog)
     get_context = MagicMock(wraps=ctrl.get_session_env)
-    ctrl.get_session_env = get_context  # type: ignore[method-assign]
-    ctrl.set_ml_module_from_schema = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
+    write = MagicMock()
+    monkeypatch.setattr(ctrl, "set_ml_module_from_schema", write)
     ctrl.get_current_ml().register_module(existing=_pulse_raw())
 
     with pytest.raises(RuntimeError, match="already exists"):
-        ctrl.create_from_role("module", "instrumented", "existing")
+        ctrl.create_from_template("module", "instrumented", "existing")
 
     assert events == []
     get_context.assert_not_called()
-    ctrl.set_ml_module_from_schema.assert_not_called()
+    write.assert_not_called()
 
 
 def test_create_module_from_role_empty_md_falls_back(qapp):  # noqa: ARG001
     ctrl = _make_ctrl({})
-    ctrl.create_from_role("module", "res_probe", "ro_blank")
+    ctrl.create_from_template("module", "res_probe", "ro_blank")
 
     raw = ctrl.get_current_ml().modules["ro_blank"].to_dict()
     # fallback literal (the factory's default), not a crash.
     assert raw["freq"] == 6000.0
 
 
-def test_create_from_role_name_clash_fails(qapp):  # noqa: ARG001
+def test_create_from_template_name_clash_fails(qapp):  # noqa: ARG001
     """Create is new-entry semantics: a name clash must fail fast, not silently
     overwrite an existing ml entry."""
     ctrl = _make_ctrl({"r_f": 6000.0})
-    ctrl.create_from_role("module", "res_probe", "dup")
+    ctrl.create_from_template("module", "res_probe", "dup")
     with pytest.raises(RuntimeError, match="already exists"):
-        ctrl.create_from_role("module", "qub_probe", "dup")
+        ctrl.create_from_template("module", "qub_probe", "dup")
     # the original entry is untouched (not overwritten by the failed second call)
     assert ctrl.get_current_ml().modules["dup"].to_dict()["type"] == "pulse"
 
 
 def test_create_waveform_from_role(qapp):  # noqa: ARG001
     ctrl = _make_ctrl({})
-    ctrl.create_from_role("waveform", "res_waveform", "ro_wav")
+    ctrl.create_from_template("waveform", "res_waveform", "ro_wav")
     assert "ro_wav" in ctrl.get_current_ml().waveforms
 
 
 def test_create_from_blank_module_role(qapp):  # noqa: ARG001
     """A ':blank' role creates a structural-zero entry of that exact shape."""
     ctrl = _make_ctrl({"r_f": 6000.0})
-    ctrl.create_from_role("module", "reset/bath:blank", "rb")
+    ctrl.create_from_template("module", "reset/bath:blank", "rb")
     raw = ctrl.get_current_ml().modules["rb"].to_dict()
     assert raw["type"] == "reset/bath"
 
@@ -322,7 +338,7 @@ def test_create_from_blank_module_role(qapp):  # noqa: ARG001
 def test_create_from_blank_waveform_role_uncovered_style(qapp):  # noqa: ARG001
     """A waveform style with no md-aware role (drag) is reachable via :blank."""
     ctrl = _make_ctrl({})
-    ctrl.create_from_role("waveform", "drag:blank", "dwav")
+    ctrl.create_from_template("waveform", "drag:blank", "dwav")
     raw = ctrl.get_current_ml().waveforms["dwav"].to_dict()
     assert raw["style"] == "drag"
 
@@ -330,22 +346,22 @@ def test_create_from_blank_waveform_role_uncovered_style(qapp):  # noqa: ARG001
 def test_item_kind_mismatch_raises(qapp):  # noqa: ARG001
     ctrl = _make_ctrl({})
     with pytest.raises(RuntimeError, match="not a waveform"):
-        ctrl.create_from_role("waveform", "res_probe", "x")
+        ctrl.create_from_template("waveform", "res_probe", "x")
 
 
-def test_unknown_role_raises(qapp):  # noqa: ARG001
+def test_unknown_role_raises(qapp, monkeypatch: pytest.MonkeyPatch):  # noqa: ARG001
     ctrl = _make_ctrl({})
     get_context = MagicMock(wraps=ctrl.get_session_env)
-    ctrl.get_session_env = get_context  # type: ignore[method-assign]
+    monkeypatch.setattr(ctrl, "get_session_env", get_context)
     with pytest.raises(KeyError):
-        ctrl.create_from_role("module", "no_such_role", "x")
+        ctrl.create_from_template("module", "no_such_role", "x")
     get_context.assert_not_called()
 
 
 def test_empty_name_raises(qapp):  # noqa: ARG001
     ctrl = _make_ctrl({})
     with pytest.raises(RuntimeError, match="name must not be empty"):
-        ctrl.create_from_role("module", "res_probe", "")
+        ctrl.create_from_template("module", "res_probe", "")
 
 
 def test_no_catalog_wired_raises(qapp):  # noqa: ARG001
@@ -365,5 +381,5 @@ def test_no_catalog_wired_raises(qapp):  # noqa: ARG001
         view=None,
         bus=EventBus(),
     )
-    with pytest.raises(RuntimeError, match="No role catalog"):
-        ctrl.create_from_role("module", "res_probe", "x")
+    with pytest.raises(RuntimeError, match="No template catalog"):
+        ctrl.create_from_template("module", "res_probe", "x")

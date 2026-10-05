@@ -261,7 +261,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_list_roles",
-        "context:h_context_ml_list_roles",
+        "context:h_context_ml_list_templates",
         MethodSpec(
             5.0,
             "List experiment-role templates for context.ml_create_from_role. Returns "
@@ -272,7 +272,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "context.ml_create_from_role",
-        "context:h_context_ml_create_from_role",
+        "context:h_context_ml_create_from_template",
         MethodSpec(
             10.0,
             "Create a blank ModuleLibrary module/waveform from a named role "

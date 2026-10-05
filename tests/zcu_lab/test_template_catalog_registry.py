@@ -1,4 +1,4 @@
-"""The experiment-side role catalog populates the gui RoleCatalog correctly,
+"""The experiment-side role catalog populates the gui TemplateCatalog correctly,
 and every entry's value resolves to a real spec (the spec round-trip used by
 create_from_role)."""
 
@@ -10,7 +10,7 @@ import json
 import pytest
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog, TemplateEntry
 from zcu_tools.gui.cfg import DirectValue, LiteralSpec, make_custom_reference_key
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -20,29 +20,29 @@ from tests.zcu_lab.v2._support.measure._role_characterization import (
 from tests.zcu_lab.v2._support.measure._role_characterization import (
     serialize as _serialize,
 )
-from zcu_lab.roles import ALL_ROLE_ENTRIES, register_all_roles
+from zcu_lab.templates import ALL_TEMPLATE_ENTRIES, register_all_templates
 
 
 def _empty_ctx() -> SessionEnv:
     return SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 
 
-def test_register_all_roles_populates_catalog():
-    cat = RoleCatalog()
-    register_all_roles(cat)
+def test_register_all_templates_populates_catalog():
+    cat = TemplateCatalog()
+    register_all_templates(cat)
     ids = {m["role_id"] for m in cat.list_meta()}
     # md-aware roles + every :blank shape (incl waveform-only blanks)
     assert {"res_probe", "bath_reset", "pi_pulse", "res_waveform"} <= ids
     assert {"pulse:blank", "reset/bath:blank", "drag:blank", "arb:blank"} <= ids
-    assert len(cat.list_meta()) == len(ALL_ROLE_ENTRIES)
+    assert len(cat.list_meta()) == len(ALL_TEMPLATE_ENTRIES)
 
 
 def test_registering_all_roles_validates_shape_26_times_and_value_zero() -> None:
     shape_calls = 0
     value_calls = 0
-    catalog = RoleCatalog()
+    catalog = TemplateCatalog()
 
-    for source in ALL_ROLE_ENTRIES:
+    for source in ALL_TEMPLATE_ENTRIES:
 
         def shape(source=source):
             nonlocal shape_calls
@@ -55,8 +55,8 @@ def test_registering_all_roles_validates_shape_26_times_and_value_zero() -> None
             return source.make_value(ctx)
 
         catalog.register(
-            RoleEntry(
-                source.role_id,
+            TemplateEntry(
+                source.template_id,
                 source.label,
                 source.item_kind,
                 shape,
@@ -71,8 +71,8 @@ def test_registering_all_roles_validates_shape_26_times_and_value_zero() -> None
 
 
 def test_blank_roles_cover_every_discriminator():
-    cat = RoleCatalog()
-    register_all_roles(cat)
+    cat = TemplateCatalog()
+    register_all_templates(cat)
     blanks = {m["role_id"] for m in cat.list_meta() if m["role_id"].endswith(":blank")}
     # 7 module discriminators + 6 waveform styles
     assert len(blanks) == 13
@@ -83,12 +83,12 @@ def test_blank_roles_cover_every_discriminator():
 def test_waveform_blank_roles_preserve_legacy_order_and_values() -> None:
     waveform_blanks = [
         entry
-        for entry in ALL_ROLE_ENTRIES
-        if entry.item_kind == "waveform" and entry.role_id.endswith(":blank")
+        for entry in ALL_TEMPLATE_ENTRIES
+        if entry.item_kind == "waveform" and entry.template_id.endswith(":blank")
     ]
     discriminators = ["const", "cosine", "gauss", "drag", "flat_top", "arb"]
 
-    assert [entry.role_id for entry in waveform_blanks] == [
+    assert [entry.template_id for entry in waveform_blanks] == [
         f"{discriminator}:blank" for discriminator in discriminators
     ]
     for entry, discriminator in zip(waveform_blanks, discriminators, strict=True):
@@ -124,13 +124,13 @@ def test_all_role_metadata_preserves_exact_legacy_order() -> None:
     )
 
     assert [
-        (entry.role_id, entry.label, entry.item_kind, entry.default_name)
-        for entry in ALL_ROLE_ENTRIES
+        (entry.template_id, entry.label, entry.item_kind, entry.default_name)
+        for entry in ALL_TEMPLATE_ENTRIES
     ] == expected
-    assert len(ALL_ROLE_ENTRIES) == 26
+    assert len(ALL_TEMPLATE_ENTRIES) == 26
 
 
-@pytest.mark.parametrize("entry", ALL_ROLE_ENTRIES, ids=lambda e: e.role_id)
+@pytest.mark.parametrize("entry", ALL_TEMPLATE_ENTRIES, ids=lambda e: e.template_id)
 def test_entry_carries_fresh_canonical_shape_matching_legacy_value(entry) -> None:
     first = entry.shape()
     second = entry.shape()
@@ -147,7 +147,8 @@ def test_entry_carries_fresh_canonical_shape_matching_legacy_value(entry) -> Non
 
 def _role_value_payload(entries) -> dict[str, object]:
     return {
-        entry.role_id: _serialize(entry.make_value(_empty_ctx())) for entry in entries
+        entry.template_id: _serialize(entry.make_value(_empty_ctx()))
+        for entry in entries
     }
 
 
@@ -163,11 +164,14 @@ def _ordered_json_oracle(payload: object) -> tuple[int, str]:
 
 def test_named_role_values_match_tracked_golden_and_exact_hash() -> None:
     named_entries = [
-        entry for entry in ALL_ROLE_ENTRIES if not entry.role_id.endswith(":blank")
+        entry
+        for entry in ALL_TEMPLATE_ENTRIES
+        if not entry.template_id.endswith(":blank")
     ]
     tracked = json.loads(_GOLDEN_PATH.read_text())
     expected = {
-        entry.role_id: tracked[entry.role_id]["blank/empty"] for entry in named_entries
+        entry.template_id: tracked[entry.template_id]["blank/empty"]
+        for entry in named_entries
     }
     actual = _role_value_payload(named_entries)
 
@@ -180,7 +184,7 @@ def test_named_role_values_match_tracked_golden_and_exact_hash() -> None:
 
 def test_structural_blank_values_preserve_exact_ordered_hash() -> None:
     blank_entries = [
-        entry for entry in ALL_ROLE_ENTRIES if entry.role_id.endswith(":blank")
+        entry for entry in ALL_TEMPLATE_ENTRIES if entry.template_id.endswith(":blank")
     ]
     payload = _role_value_payload(blank_entries)
 
@@ -193,8 +197,8 @@ def test_structural_blank_values_preserve_exact_ordered_hash() -> None:
 
 def test_all_26_role_pairs_preserve_exact_ordered_hash() -> None:
     payload = [
-        (entry.role_id, _serialize(entry.make_value(_empty_ctx())))
-        for entry in ALL_ROLE_ENTRIES
+        (entry.template_id, _serialize(entry.make_value(_empty_ctx())))
+        for entry in ALL_TEMPLATE_ENTRIES
     ]
 
     assert len(payload) == 26
